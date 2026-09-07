@@ -1,13 +1,18 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText, Users, BarChart3, Landmark, Mail } from 'lucide-react';
-import { FEATURE_REGISTRY, FEATURE_CATEGORIES, getFeaturesByCategory } from '@/lib/featureRegistry';
+import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText, Users, BarChart3, Landmark, Mail, Calculator, UserCheck } from 'lucide-react';
+import { FEATURE_REGISTRY, FEATURE_CATEGORIES } from '@/lib/featureRegistry';
+import { getFeaturesByCategoryForOrg, stripProKlaseOnlyFeatures } from '@/lib/orgIntakeMode';
 import { useTranslation } from '@/lib/i18n';
 import AdminBlogPanel from '@/components/admin/AdminBlogPanel';
 import AdminStatisticsPanel from '@/components/admin/AdminStatisticsPanel';
 import AdminPerlasPayoutsPanel from '@/components/admin/AdminPerlasPayoutsPanel';
 import AdminEnterpriseContactsPanel from '@/components/admin/AdminEnterpriseContactsPanel';
+import AdminBillingPanel from '@/components/admin/AdminBillingPanel';
+import AdminAttendancePanel from '@/components/admin/AdminAttendancePanel';
+import { fmtMoney } from '@/lib/marketMoney';
+import { isPlMarket } from '@/lib/market';
 type Step = 'lock' | 'panel';
 
 interface FormState {
@@ -27,6 +32,7 @@ interface SchoolFormState {
 
 interface OrgAdminStats {
   lessons_occurred: number;
+  active_license_count: number;
   paid_revenue_eur: number;
   platform_fee_2pct_eur: number;
 }
@@ -39,6 +45,7 @@ interface OrgListRow {
   status: string;
   features: Record<string, unknown>;
   tutor_count: number;
+  active_license_count: number;
   student_count: number;
   lessons_occurred: number;
   paid_revenue_eur: number;
@@ -73,7 +80,7 @@ interface AuditRow {
   details: Record<string, unknown>;
 }
 
-type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog' | 'soloTutors' | 'statistics' | 'perlasPayouts' | 'enterpriseContacts';
+type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog' | 'soloTutors' | 'statistics' | 'perlasPayouts' | 'enterpriseContacts' | 'billing' | 'attendance';
 
 interface SoloTutorAdminRow {
   id: string;
@@ -125,6 +132,8 @@ export default function AdminPanel() {
   const [detailAudit, setDetailAudit] = useState<AuditRow[]>([]);
   const [editTutorLicenseCount, setEditTutorLicenseCount] = useState(0);
   const [editStatus, setEditStatus] = useState<'active' | 'suspended'>('active');
+  /** Monthly B2B platform fee in EUR; '' = not invoiced (null). */
+  const [editPlatformMonthlyFee, setEditPlatformMonthlyFee] = useState('');
   const [editFeatures, setEditFeatures] = useState<Record<string, boolean>>({});
   const [editPerlasFinanceEnabled, setEditPerlasFinanceEnabled] = useState(false);
   const [detailName, setDetailName] = useState('');
@@ -137,6 +146,7 @@ export default function AdminPanel() {
   const [editLogoUrl, setEditLogoUrl] = useState('');
   const [editBrandColor, setEditBrandColor] = useState('#6366f1');
   const [editBrandColorSecondary, setEditBrandColorSecondary] = useState('#8b5cf6');
+  const [editLoginDescription, setEditLoginDescription] = useState('');
   const [detailStats, setDetailStats] = useState<OrgAdminStats | null>(null);
   const [soloTutors, setSoloTutors] = useState<SoloTutorAdminRow[]>([]);
   const [soloListLoading, setSoloListLoading] = useState(false);
@@ -189,6 +199,7 @@ export default function AdminPanel() {
           const s = r.data?.stats || {};
           next.set(r.id, {
             tutor_count: Number(s.tutor_count) || 0,
+            active_license_count: Number(s.active_license_count) || 0,
             student_count: Number(s.student_count) || 0,
             lessons_occurred: Number(s.lessons_occurred) || 0,
             paid_revenue_eur: Number(s.paid_revenue_eur) || 0,
@@ -322,6 +333,7 @@ export default function AdminPanel() {
         data.stats && typeof data.stats === 'object'
           ? {
               lessons_occurred: Number(data.stats.lessons_occurred) || 0,
+              active_license_count: Number(data.stats.active_license_count) || 0,
               paid_revenue_eur: Number(data.stats.paid_revenue_eur) || 0,
               platform_fee_2pct_eur: Number(data.stats.platform_fee_2pct_eur) || 0,
             }
@@ -330,6 +342,7 @@ export default function AdminPanel() {
       setDetailName(org.name);
       setEditTutorLicenseCount(Number(org.tutor_license_count) || 0);
       setEditStatus(org.status === 'suspended' ? 'suspended' : 'active');
+      setEditPlatformMonthlyFee(org.platform_monthly_fee_eur != null ? String(org.platform_monthly_fee_eur) : '');
 
       const orgFeatures = org.features && typeof org.features === 'object' ? org.features : {};
       const mergedFeatures: Record<string, boolean> = {};
@@ -351,6 +364,8 @@ export default function AdminPanel() {
       setEditLogoUrl(org.logo_url || '');
       setEditBrandColor(org.brand_color || '#6366f1');
       setEditBrandColorSecondary(org.brand_color_secondary || '#8b5cf6');
+      const loginDesc = (orgFeatures as Record<string, unknown>).login_description;
+      setEditLoginDescription(typeof loginDesc === 'string' ? loginDesc : '');
       setDetailTutors(data.tutors || []);
       setDetailArchivedTutors(data.archived_tutors || []);
       setDetailStudents(data.students || []);
@@ -369,10 +384,11 @@ export default function AdminPanel() {
     setSaveLoading(true);
     setResult(null);
     try {
-      const merged: Record<string, unknown> = {
+      const merged: Record<string, unknown> = stripProKlaseOnlyFeatures(detailId, {
         ...detailFeaturesBase,
         ...editFeatures,
-      };
+        login_description: editLoginDescription.trim(),
+      });
       const trimmedUrl = editManualPaymentUrl.trim();
       if (trimmedUrl) merged.manual_payment_url = trimmedUrl;
       else delete merged.manual_payment_url;
@@ -394,6 +410,7 @@ export default function AdminPanel() {
           status: editStatus,
           features: merged,
           perlas_finance_enabled: perlasOn,
+          platform_monthly_fee_eur: editPlatformMonthlyFee.trim() === '' ? null : Number(editPlatformMonthlyFee),
           slug: editSlug.trim() || null,
           logo_url: editLogoUrl.trim() || null,
           brand_color: editBrandColor.trim() || '#6366f1',
@@ -689,7 +706,7 @@ export default function AdminPanel() {
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'statistics' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
           >
             <BarChart3 className="w-4 h-4" />
-            Statistics
+            Statistika
           </button>
           <button
             type="button"
@@ -701,11 +718,27 @@ export default function AdminPanel() {
           </button>
           <button
             type="button"
+            onClick={() => { setPanelView('billing'); setDetailId(null); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'billing' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            <Calculator className="w-4 h-4" />
+            Buhalterija
+          </button>
+          <button
+            type="button"
             onClick={() => { setPanelView('enterpriseContacts'); setDetailId(null); }}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'enterpriseContacts' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
           >
             <Mail className="w-4 h-4" />
             Enterprise Užklausos
+          </button>
+          <button
+            type="button"
+            onClick={() => { setPanelView('attendance'); setDetailId(null); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'attendance' ? 'bg-amber-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            <UserCheck className="w-4 h-4" />
+            Lankomumas
           </button>
         </div>
 
@@ -838,14 +871,14 @@ export default function AdminPanel() {
                             <p className="font-semibold text-white truncate">{o.name}</p>
                             <p className="text-xs text-slate-400 truncate">{o.email || '—'}</p>
                             <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                              <span className="rounded-lg bg-white/5 border border-white/10 px-2 py-1 text-slate-300">
-                                {t('admin.tutorLicenseCount')}: {o.tutor_license_count ?? 0}
+                              <span className="rounded-lg bg-white/5 border border-white/10 px-2 py-1 text-slate-300" title="Naudojama / iš viso licencijų">
+                                {t('admin.tutorLicenseCount')}: {o.active_license_count ?? 0} / {o.tutor_license_count ?? 0}
                               </span>
                               <span className="rounded-lg bg-white/5 border border-white/10 px-2 py-1 text-slate-300">
                                 {t('admin.students')}: {o.student_count}
                               </span>
                               <span className="rounded-lg bg-white/5 border border-white/10 px-2 py-1 text-slate-300 tabular-nums">
-                                {t('admin.revenue')}: {(o.paid_revenue_eur ?? 0).toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                                {t('admin.revenue')}: {fmtMoney(o.paid_revenue_eur ?? 0)}
                               </span>
                             </div>
                             <p className="text-[11px] text-slate-500 mt-2">
@@ -888,14 +921,14 @@ export default function AdminPanel() {
                         <tr key={o.id} className="border-b border-white/5 hover:bg-white/5">
                           <td className="px-4 py-3 font-medium">{o.name}</td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">{o.tutor_count ?? 0}</td>
-                          <td className="px-4 py-3 text-slate-300 tabular-nums">{o.tutor_license_count ?? 0}</td>
+                          <td className="px-4 py-3 text-slate-300 tabular-nums" title="Naudojama / iš viso licencijų">{o.active_license_count ?? 0} / {o.tutor_license_count ?? 0}</td>
                           <td className="px-4 py-3 text-slate-300">{o.student_count}</td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">{o.lessons_occurred ?? '—'}</td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">
-                            {(o.paid_revenue_eur ?? 0).toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {fmtMoney(o.paid_revenue_eur ?? 0)}
                           </td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">
-                            {(o.platform_fee_2pct_eur ?? 0).toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {fmtMoney(o.platform_fee_2pct_eur ?? 0)}
                           </td>
                           <td className="px-4 py-3 text-slate-300">
                             {enabledFeatures > 0 ? (
@@ -948,13 +981,13 @@ export default function AdminPanel() {
                 <div className="flex items-center justify-between text-slate-200">
                   <span>Pajamos</span>
                   <span className="tabular-nums font-bold">
-                    {totals.revenue.toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                    {fmtMoney(totals.revenue)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-slate-200">
                   <span>Platformos mokestis (2%)</span>
                   <span className="tabular-nums font-bold">
-                    {totals.fee.toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                    {fmtMoney(totals.fee)}
                   </span>
                 </div>
               </div>
@@ -998,14 +1031,14 @@ export default function AdminPanel() {
                       <div className="rounded-xl bg-white/5 border border-white/10 px-3 py-2.5">
                         <p className="text-[10px] uppercase tracking-wide text-slate-500">{t('admin.paidRevenue')}</p>
                         <p className="text-lg font-semibold text-emerald-300 tabular-nums">
-                          {detailStats.paid_revenue_eur.toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                          {fmtMoney(detailStats.paid_revenue_eur)}
                         </p>
                         <p className="text-[10px] text-slate-500 mt-0.5">{t('admin.paidRevenueDesc')}</p>
                       </div>
                       <div className="rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-2.5">
                         <p className="text-[10px] uppercase tracking-wide text-amber-200/90">{t('admin.platformFee')}</p>
                         <p className="text-lg font-semibold text-amber-200 tabular-nums">
-                          {detailStats.platform_fee_2pct_eur.toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                          {fmtMoney(detailStats.platform_fee_2pct_eur)}
                         </p>
                       </div>
                     </div>
@@ -1023,6 +1056,15 @@ export default function AdminPanel() {
                           className="bg-white/10 border-white/20 text-white rounded-xl"
                         />
                         <p className="text-[11px] text-slate-400">{t('admin.tutorLicenseCountHint')}</p>
+                        {detailStats && (
+                          <p className="text-[11px] text-slate-300">
+                            Šiuo metu naudojama (priskirta korepetitoriams):{' '}
+                            <span className="font-semibold tabular-nums text-white">{detailStats.active_license_count}</span>
+                            {editTutorLicenseCount > 0 && (
+                              <span className="text-slate-400"> / {editTutorLicenseCount}</span>
+                            )}
+                          </p>
+                        )}
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-slate-300">{t('admin.status')}</Label>
@@ -1035,13 +1077,26 @@ export default function AdminPanel() {
                           <option value="suspended">{t('admin.suspendedFull')}</option>
                         </select>
                       </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-slate-300">Mėnesio platformos mokestis ({isPlMarket() ? 'zł' : '€'})</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          placeholder="pvz. 49.00"
+                          value={editPlatformMonthlyFee}
+                          onChange={(e) => setEditPlatformMonthlyFee(e.target.value)}
+                          className="bg-white/10 border-white/20 text-white rounded-xl"
+                        />
+                        <p className="text-[11px] text-slate-400">B2B abonementas agentūrai. Palikite tuščią, jei sąskaitos neišrašomos.</p>
+                      </div>
                     </div>
                     <div className="space-y-3">
                       <div>
                         <Label className="text-slate-300 text-base font-semibold">{t('admin.features')}</Label>
                         <p className="text-xs text-slate-400 mt-1">{t('admin.featuresDesc')}</p>
                       </div>
-                      {Object.entries(getFeaturesByCategory()).map(([category, features]) => (
+                      {Object.entries(getFeaturesByCategoryForOrg(detailId)).map(([category, features]) => (
                         <div key={category} className="space-y-2">
                           <div className="flex items-center gap-2">
                             <span className="text-lg">{FEATURE_CATEGORIES[category as keyof typeof FEATURE_CATEGORIES].icon}</span>
@@ -1107,7 +1162,9 @@ export default function AdminPanel() {
                             onChange={(e) => setEditSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
                             className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl"
                           />
-                          <p className="text-[11px] text-slate-500">tutlio.lt/login?org={editSlug || 'slug'}</p>
+                          <p className="text-[11px] text-slate-500">
+                            tutlio.lt/login?org={editSlug || 'slug'}&portal=student|parent|tutor
+                          </p>
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-slate-400 text-xs">Logo</Label>
@@ -1211,6 +1268,16 @@ export default function AdminPanel() {
                           </div>
                           <div className="h-8 rounded-lg" style={{ background: `linear-gradient(135deg, ${editBrandColor} 0%, ${editBrandColorSecondary} 100%)` }} />
                           <p className="text-[11px] text-slate-500">Tutlio originalus: #6366f1 → #8b5cf6</p>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-slate-400 text-xs">Login kairės pusės aprašymas</Label>
+                          <textarea
+                            value={editLoginDescription}
+                            onChange={(e) => setEditLoginDescription(e.target.value)}
+                            rows={3}
+                            placeholder="Trumpas tekstas apie organizaciją (login puslapio kairėje)"
+                            className="w-full bg-white/10 border border-white/20 text-white placeholder:text-slate-500 rounded-xl px-3 py-2 text-sm"
+                          />
                         </div>
                       </div>
                     )}
@@ -1439,6 +1506,14 @@ export default function AdminPanel() {
 
         {panelView === 'enterpriseContacts' && (
           <AdminEnterpriseContactsPanel adminSecret={platformAdminSecret} />
+        )}
+
+        {panelView === 'billing' && (
+          <AdminBillingPanel adminSecret={platformAdminSecret} />
+        )}
+
+        {panelView === 'attendance' && (
+          <AdminAttendancePanel adminSecret={platformAdminSecret} />
         )}
 
         {panelView === 'createSchool' && (

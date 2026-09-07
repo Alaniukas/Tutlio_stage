@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase, setRememberMe } from '@/lib/supabase';
-import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
-import { detectAuthLocaleFromHost } from '@/lib/auth-locale';
+import { getPasswordResetRedirectTo, safeInternalNextPath } from '@/lib/auth-redirects';
+import { resolveAuthEmailLocale } from '@/lib/auth-locale';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
 import {
@@ -10,13 +10,19 @@ import {
   getHomePathForPortals,
   loginErrorKeyForPortalMismatch,
   resolveAccountPortals,
+  setLastRolePortal,
   type LoginPortal,
 } from '@/lib/account-portal';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/PasswordInput';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, ChevronRight, Sparkles, Building2, Users } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { useOrgBranding } from '@/hooks/useOrgBranding';
+import { setLastPortal } from '@/lib/pwaPortal';
+import { loadSavedLoginForm, persistLoginForm, readRememberMePreference } from '@/lib/loginCredentials';
+import { parseOrgLoginPortal } from '@/lib/orgLoginLinks';
+import { ORG_LOGIN_LOGO_IMG_CLASS, ORG_LOGIN_LOGO_WRAP_CLASS, ORG_LOGIN_LOGO_WRAP_CLASS_DARK } from '@/lib/orgLoginLogo';
 
 // ─── SVG Illustrations ────────────────────────────────────────────────────────
 
@@ -122,7 +128,7 @@ function messageForAuthHashError(code: string, detailEnc: string | null): string
 
 export default function Login() {
   const { t, locale } = useTranslation();
-  const { branding: orgBranding } = useOrgBranding();
+  const { branding: orgBranding, loading: brandingLoading, slug: orgSlug } = useOrgBranding();
   const [role, setRole] = useState<Role>(null);
   const [studentMode, setStudentMode] = useState<StudentMode>(null);
   const [tutorMode, setTutorMode] = useState<TutorMode>(null);
@@ -132,7 +138,7 @@ export default function Login() {
   // Tutor / student login form
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMeState] = useState(false);
+  const [rememberMe, setRememberMeState] = useState(() => readRememberMePreference());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -172,6 +178,9 @@ export default function Login() {
 
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const nextPath = safeInternalNextPath(searchParams.get('next'));
+  const loginPortalParam = parseOrgLoginPortal(searchParams.get('portal'));
+  const loginOnly = Boolean(orgSlug);
   const redirectOnceRef = useRef(false);
   const hashHandledRef = useRef(false);
   const redirectInFlightRef = useRef(false);
@@ -239,13 +248,19 @@ export default function Login() {
     });
     if (!portals) return false;
 
+    if (portals.student && !portals.tutor) {
+      setLastRolePortal('student');
+      navigate(nextPath?.startsWith('/student') ? nextPath : '/student');
+      return true;
+    }
+
     const homePath = await getHomePathForPortals(user.id, portals);
     if (homePath && homePath !== '/dashboard') {
-      navigate(homePath);
+      navigate(nextPath || homePath);
       return true;
     }
     if (portals.student && !portals.tutor) {
-      navigate('/student');
+      navigate(nextPath?.startsWith('/student') ? nextPath : '/student');
       return true;
     }
 
@@ -292,7 +307,7 @@ export default function Login() {
     // Tutor: if has org or subscription → dashboard. Otherwise stay on login so user can sign out
     const hasAccess = tutorHasPlatformSubscriptionAccess(profile);
     if (hasAccess) {
-      navigate('/dashboard');
+      navigate(nextPath || '/dashboard');
       return true;
     }
     const { data: { session: authSession } } = await supabase.auth.getSession();
@@ -304,7 +319,7 @@ export default function Login() {
         });
         const data = res.ok ? await res.json().catch(() => null) : null;
         if (hasActiveSubscription(data?.subscription_status) || ['canceled', 'past_due', 'unpaid'].includes(data?.subscription_status || '')) {
-          navigate('/dashboard');
+          navigate(nextPath || '/dashboard');
           return true;
         }
       } catch (_) {}
@@ -315,12 +330,32 @@ export default function Login() {
     }
   };
 
-  // When user opens /login with existing session (e.g. "remember me" + reload) → auto redirect
+  // Remember portal for installed-PWA routing; do not auto-redirect — user must submit login.
   useEffect(() => {
-    if (redirectOnceRef.current) return;
-    redirectOnceRef.current = true;
-    redirectByRole();
-  }, []);
+    setLastPortal('regular');
+    const saved = loadSavedLoginForm();
+    if (saved.email) setEmail(saved.email);
+    if (saved.password) setPassword(saved.password);
+    setRememberMeState(saved.rememberMe);
+    // Deep-link from reminder emails / org website buttons: open the matching portal login form.
+    if (loginPortalParam === 'tutor') {
+      setRole('tutor');
+      setTutorMode('login');
+    } else if (loginPortalParam === 'student') {
+      setRole('student');
+      setStudentMode('login');
+    } else if (loginPortalParam === 'parent') {
+      setRole('parent');
+    } else if (nextPath?.startsWith('/student')) setRole('student');
+    else if (nextPath?.startsWith('/parent')) setRole('parent');
+    else if (
+      nextPath?.startsWith('/calendar')
+      || nextPath === '/dashboard'
+      || nextPath?.startsWith('/dashboard')
+    ) {
+      setRole('tutor');
+    }
+  }, [nextPath, loginPortalParam]);
 
   useEffect(() => {
     const code = searchParams.get('auth_error');
@@ -371,10 +406,11 @@ export default function Login() {
     setError(null);
     try {
       setRememberMe(rememberMe);
+      persistLoginForm(email, password, rememberMe);
       // Clear logout intent when user is actively logging in
       sessionStorage.removeItem('tutlio_logout_intent');
       const { data, error } = await withTimeout(
-        supabase.auth.signInWithPassword({ email, password }),
+        supabase.auth.signInWithPassword({ email: email.trim(), password }),
         30000,
         'Login timeout',
       );
@@ -414,13 +450,14 @@ export default function Login() {
 
         if (role === 'parent') {
           setLoading(false);
-          navigate('/parent');
+          navigate(nextPath?.startsWith('/parent') ? nextPath : '/parent');
           return;
         }
 
         if (role === 'student') {
+          setLastRolePortal('student');
           setLoading(false);
-          navigate('/student');
+          navigate(nextPath?.startsWith('/student') ? nextPath : '/student');
           return;
         }
 
@@ -475,7 +512,7 @@ export default function Login() {
         if (tutorData) {
           setLoading(false);
           await supabase.auth.getSession();
-          navigate('/dashboard');
+          navigate(nextPath || '/dashboard');
           return;
         }
 
@@ -483,7 +520,7 @@ export default function Login() {
         // User is already authenticated; downstream pages remain protected by RLS/API auth.
         console.warn('[Login] tutor profile not resolved after auth - allowing dashboard navigation');
         setLoading(false);
-        navigate('/dashboard');
+        navigate(nextPath || '/dashboard');
         return;
       }
 
@@ -511,13 +548,13 @@ export default function Login() {
     }
     setLoading(true);
     setError(null);
-    const redirectTo = getPasswordResetRedirectTo(import.meta.env.VITE_APP_URL, window.location.origin);
+    const redirectTo = getPasswordResetRedirectTo(import.meta.env.VITE_APP_URL, window.location.origin, resolveAuthEmailLocale(locale));
     const resetRes = await fetch('/api/request-password-reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: email.trim(),
-        locale: detectAuthLocaleFromHost(),
+        locale: resolveAuthEmailLocale(locale),
         redirectTo,
       }),
     });
@@ -613,6 +650,13 @@ export default function Login() {
 
   const brandColor = orgBranding?.brand_color || null;
   const brandColor2 = orgBranding?.brand_color_secondary || brandColor;
+  const brandedHeaderStyle = brandColor
+    ? { background: `linear-gradient(135deg, ${brandColor} 0%, ${brandColor2 || brandColor} 100%)` }
+    : undefined;
+  const brandedPrimaryBtnClass = brandColor
+    ? 'w-full py-2.5 rounded-xl text-white font-semibold hover:opacity-90 disabled:opacity-50 transition-colors'
+    : 'w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors';
+  const brandedPrimaryBtnStyle = brandColor ? { background: brandColor } : undefined;
   const loginBgStyle = brandColor
     ? { background: `linear-gradient(135deg, color-mix(in srgb, ${brandColor} 30%, #0f0f23) 0%, color-mix(in srgb, ${brandColor} 45%, #1a1a2e) 50%, color-mix(in srgb, ${brandColor2} 35%, #16162a) 100%)` }
     : undefined;
@@ -627,7 +671,7 @@ export default function Login() {
         <div className="absolute inset-0 z-0">
           <img
             src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80"
-            alt="Students studying"
+            alt=""
             className="w-full h-full object-cover opacity-50 mix-blend-overlay"
           />
         </div>
@@ -637,20 +681,31 @@ export default function Login() {
         />
 
         <div className="relative z-20 flex flex-col justify-between p-12 h-full text-white">
+          {!loginOnly && (
           <Link to="/" className="flex items-center gap-2 hover:bg-white/20 transition-all w-fit text-sm font-medium bg-white/10 px-5 py-2.5 rounded-full backdrop-blur border border-white/10">
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-4 h-4 rtl:rotate-180" />
             {t('auth.goBackToMain')}
           </Link>
+          )}
+          {loginOnly && <div />}
 
           <div className="max-w-xl space-y-6">
-            <h1 className="text-5xl font-bold leading-tight tracking-tight">{t('login.heroTitle')}</h1>
+            <h1 className="text-5xl font-bold leading-tight tracking-tight">
+              {orgBranding ? orgBranding.name : loginOnly ? '' : t('login.heroTitle')}
+            </h1>
             <p className="text-white/70 text-xl leading-relaxed font-light">
-              {t('login.heroDesc')}
+              {orgBranding
+                ? (orgBranding.login_description || t('login.orgHeroDesc', { name: orgBranding.name }))
+                : loginOnly
+                  ? ''
+                  : t('login.heroDesc')}
             </p>
           </div>
 
           <div className="text-sm text-white/50 font-medium">
-            {t('login.copyright', { year: String(new Date().getFullYear()) })}
+            {loginOnly
+              ? (orgBranding?.name || '')
+              : t('login.copyright', { year: String(new Date().getFullYear()) })}
           </div>
         </div>
       </div>
@@ -666,21 +721,32 @@ export default function Login() {
         <div className="absolute bottom-0 right-0 w-80 h-80 rounded-full blur-3xl pointer-events-none" style={brandColor ? { backgroundColor: `color-mix(in srgb, ${brandColor} 15%, transparent)` } : { backgroundColor: 'rgb(124 58 237 / 0.2)' }} />
 
         {/* Mobile back link – part of normal flow so it's always visible */}
+        {!loginOnly && (
         <div className="w-full max-w-md mb-4 lg:hidden relative z-10">
           <Link to="/" className="flex items-center gap-2 hover:bg-white/20 transition-all w-fit text-sm font-medium bg-white/10 px-4 py-2 rounded-full backdrop-blur border border-white/10 text-white">
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-4 h-4 rtl:rotate-180" />
             {t('common.back')}
           </Link>
         </div>
+        )}
 
         <div className="relative w-full max-w-md z-10">
           {/* Logo */}
           <div className="text-center mb-8">
             {orgBranding?.logo_url ? (
               <div className="inline-flex flex-col items-center">
-                <img src={orgBranding.logo_url} alt={orgBranding.name} className="h-14 max-w-[180px] object-contain" />
-                <span className="text-[10px] text-white/40 mt-1">powered by Tutlio</span>
+                <div className={orgBranding.logo_on_dark ? ORG_LOGIN_LOGO_WRAP_CLASS_DARK : ORG_LOGIN_LOGO_WRAP_CLASS}>
+                  <img src={orgBranding.logo_url} alt={orgBranding.name} className={ORG_LOGIN_LOGO_IMG_CLASS} />
+                </div>
+                {!orgBranding.hide_powered_by && (
+                  <span className="text-[10px] text-white/40 mt-1">powered by Tutlio</span>
+                )}
                 <h1 className="text-2xl font-bold text-white tracking-tight mt-4">{orgBranding.name}</h1>
+              </div>
+            ) : loginOnly ? (
+              <div className="inline-flex flex-col items-center">
+                <div className={`${ORG_LOGIN_LOGO_WRAP_CLASS} h-16 w-16 ${brandingLoading ? 'animate-pulse' : ''}`} />
+                <h1 className="text-2xl font-bold text-white tracking-tight mt-4">{orgBranding?.name || ''}</h1>
               </div>
             ) : (
               <>
@@ -708,7 +774,8 @@ export default function Login() {
                 {t('login.chooseRole')}
               </p>
 
-              {/* Company admin — separate company login page */}
+              {/* Company admin — hidden on org-branded login-only pages */}
+              {!loginOnly && (
               <button
                 type="button"
                 onClick={() => {
@@ -720,7 +787,7 @@ export default function Login() {
                   }
                   navigate(path);
                 }}
-                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-emerald-400/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
+                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-emerald-400/40 rounded-2xl p-5 text-start transition-all duration-200 flex items-center gap-5"
               >
                 <div className="w-24 h-18 flex-shrink-0 flex items-center justify-center opacity-95">
                   <div className="w-[88px] h-[72px] rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center">
@@ -733,12 +800,16 @@ export default function Login() {
                 </div>
                 <ChevronRight className="w-5 h-5 text-white/40 group-hover:text-white/80 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
               </button>
+              )}
 
               {/* Tutor card */}
               <button
                 type="button"
-                onClick={() => setRole('tutor')}
-                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
+                onClick={() => {
+                  setRole('tutor');
+                  if (loginOnly) setTutorMode('login');
+                }}
+                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-start transition-all duration-200 flex items-center gap-5"
               >
                 <div className="w-24 h-18 flex-shrink-0 opacity-90">
                   <TutorIllustration />
@@ -753,24 +824,42 @@ export default function Login() {
               {/* Student card */}
               <button
                 type="button"
-                onClick={() => setRole('student')}
-                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
+                onClick={() => {
+                  setRole('student');
+                  if (loginOnly) setStudentMode('login');
+                }}
+                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-start transition-all duration-200 flex items-center gap-5"
               >
                 <div className="w-24 h-18 flex-shrink-0 opacity-90">
                   <StudentIllustration />
                 </div>
                 <div className="flex-1">
                   <p className="text-white font-semibold text-base">
-                    {locale === 'lt' ? 'Mokiniai / Tėvai' : 'Students / Parents'}
+                    {loginOnly ? t('common.student') : t('login.studentsParents')}
                   </p>
                   <p className="text-indigo-300 text-sm mt-0.5">
-                    {locale === 'lt'
-                      ? 'Prisijunkite kaip mokinys arba kaip tėvai'
-                      : 'Login as a student or as a parent'}
+                    {loginOnly ? t('login.studentLoginOnlyDesc') : t('login.studentsParentsDesc')}
                   </p>
                 </div>
                 <ChevronRight className="w-5 h-5 text-white/40 group-hover:text-white/80 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
               </button>
+
+              {loginOnly && (
+                <button
+                  type="button"
+                  onClick={() => setRole('parent')}
+                  className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-start transition-all duration-200 flex items-center gap-5"
+                >
+                  <div className="w-24 h-18 flex-shrink-0 flex items-center justify-center opacity-95">
+                    <Users className="w-12 h-12 text-fuchsia-200" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-white font-semibold text-base">{t('login.parentRole')}</p>
+                    <p className="text-indigo-300 text-sm mt-0.5">{t('login.parentLoginDesc2')}</p>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-white/40 group-hover:text-white/80 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+                </button>
+              )}
             </div>
           )}
 
@@ -781,7 +870,10 @@ export default function Login() {
               className="bg-white rounded-2xl shadow-2xl overflow-hidden"
             >
               {/* Illustration header */}
-              <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 px-6 pt-6 pb-3 flex items-end gap-4">
+              <div
+                className={brandedHeaderStyle ? 'px-6 pt-6 pb-3 flex items-end gap-4' : 'bg-gradient-to-br from-indigo-500 to-indigo-700 px-6 pt-6 pb-3 flex items-end gap-4'}
+                style={brandedHeaderStyle}
+              >
                 <div className="w-28 h-20 flex-shrink-0 drop-shadow-lg">
                   <TutorIllustration />
                 </div>
@@ -797,7 +889,7 @@ export default function Login() {
                 {/* New Tutor - Subscribe */}
                 <Link
                   to="/register"
-                  className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-indigo-300 hover:bg-indigo-50 transition-all text-left"
+                  className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-indigo-300 hover:bg-indigo-50 transition-all text-start"
                 >
                   <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0">
                     <Sparkles className="w-5 h-5 text-indigo-600" />
@@ -812,7 +904,7 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => setTutorMode('login')}
-                  className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-indigo-300 hover:bg-indigo-50 transition-all text-left"
+                  className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-indigo-300 hover:bg-indigo-50 transition-all text-start"
                 >
                   <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0">
                     <ArrowRight className="w-5 h-5 text-violet-600" />
@@ -830,8 +922,8 @@ export default function Login() {
                     onClick={reset}
                     className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition-colors"
                   >
-                    <ArrowLeft className="w-3.5 h-3.5" />
-                    Atgal
+                    <ArrowLeft className="w-3.5 h-3.5 rtl:rotate-180" />
+                    {t('common.back')}
                   </button>
                 </div>
               </div>
@@ -845,7 +937,10 @@ export default function Login() {
               className="bg-white rounded-2xl shadow-2xl overflow-hidden"
             >
               {/* Illustration header */}
-              <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 px-6 pt-6 pb-3 flex items-end gap-4">
+              <div
+                className={brandedHeaderStyle ? 'px-6 pt-6 pb-3 flex items-end gap-4' : 'bg-gradient-to-br from-indigo-500 to-indigo-700 px-6 pt-6 pb-3 flex items-end gap-4'}
+                style={brandedHeaderStyle}
+              >
                 <div className="w-28 h-20 flex-shrink-0 drop-shadow-lg">
                   <TutorIllustration />
                 </div>
@@ -866,6 +961,7 @@ export default function Login() {
                       <Input
                         id="email"
                         type="email"
+                        autoComplete="username"
                         placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -908,6 +1004,7 @@ export default function Login() {
                       <Input
                         id="email"
                         type="email"
+                        autoComplete="username"
                         placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -926,9 +1023,9 @@ export default function Login() {
                           {t('login.forgotPassword')}
                         </button>
                       </div>
-                      <Input
+                      <PasswordInput
                         id="password"
-                        type="password"
+                        autoComplete="current-password"
                         placeholder="••••••••"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
@@ -994,14 +1091,17 @@ export default function Login() {
                   </form>
                 ) : !tutorOrgCodeMode ? (
                   <div className="flex items-center justify-between mt-5 pt-4 border-t border-gray-100">
+                    {!loginPortalParam && (
                     <button
                       type="button"
                       onClick={resetTutor}
                       className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition-colors"
                     >
-                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <ArrowLeft className="w-3.5 h-3.5 rtl:rotate-180" />
                     {t('common.back')}
                     </button>
+                    )}
+                    {!loginOnly && (
                     <div className="text-right space-y-1">
                       <p className="text-sm text-gray-400">
                         {t('login.haveCompanyCode')}{' '}
@@ -1011,6 +1111,7 @@ export default function Login() {
                         </button>
                       </p>
                     </div>
+                    )}
                   </div>
                 ) : null}
               </div>
@@ -1030,12 +1131,14 @@ export default function Login() {
                 </div>
               </div>
               <div className="p-6 space-y-4">
+                {!loginOnly && (
                 <p className="text-sm text-gray-600">
                   {t('login.parentNoAccount')}{' '}
                   <Link to="/parent-register" className="text-violet-600 font-medium hover:underline">
                     {t('login.parentRegisterLink')}
                   </Link>
                 </p>
+                )}
                 {isForgotPassword ? (
                   <form onSubmit={handleForgotPassword} className="space-y-4">
                     <div className="space-y-2">
@@ -1043,6 +1146,7 @@ export default function Login() {
                       <Input
                         id="p-email"
                         type="email"
+                        autoComplete="username"
                         placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -1063,7 +1167,7 @@ export default function Login() {
                     )}
                     {!resetSent && (
                       <button type="submit" disabled={loading}
-                        className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                        className={brandedPrimaryBtnClass} style={brandedPrimaryBtnStyle}>
                         {loading ? t('common.sending') : t('login.sendResetLink')}
                       </button>
                     )}
@@ -1082,6 +1186,7 @@ export default function Login() {
                       <Input
                         id="p-email2"
                         type="email"
+                        autoComplete="username"
                         placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -1100,9 +1205,9 @@ export default function Login() {
                           {t('login.forgotPassword')}
                         </button>
                       </div>
-                      <Input
+                      <PasswordInput
                         id="p-password"
-                        type="password"
+                        autoComplete="current-password"
                         placeholder="••••••••"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
@@ -1126,23 +1231,27 @@ export default function Login() {
                       </div>
                     )}
                     <button type="submit" disabled={loading}
-                      className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                      className={brandedPrimaryBtnClass} style={brandedPrimaryBtnStyle}>
                       {loading ? t('common.connecting') : t('common.login')}
                     </button>
                   </form>
                 )}
+                {!loginPortalParam && (
                 <button type="button" onClick={reset}
                   className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition-colors mt-2">
-                  <ArrowLeft className="w-3.5 h-3.5" /> {t('common.back')}
+                  <ArrowLeft className="w-3.5 h-3.5 rtl:rotate-180" /> {t('common.back')}
                 </button>
+                )}
 
+                {!loginOnly && (
                 <button
                   type="button"
                   onClick={backToStudentGroup}
                   className="w-full text-sm text-violet-600 font-medium hover:underline"
                 >
-                  {locale === 'lt' ? 'Atgal į Mokiniai / Tėvai' : 'Back to Students / Parents'}
+                  {t('login.backToStudentsParents')}
                 </button>
+                )}
               </div>
             </div>
           )}
@@ -1151,7 +1260,10 @@ export default function Login() {
           {role === 'student' && (
             <div key="student-form" className="bg-white rounded-2xl shadow-2xl overflow-hidden">
               {/* Illustration header */}
-              <div className="bg-gradient-to-br from-violet-500 to-violet-700 px-6 pt-6 pb-3 flex items-end gap-4">
+              <div
+                className={brandedHeaderStyle ? 'px-6 pt-6 pb-3 flex items-end gap-4' : 'bg-gradient-to-br from-violet-500 to-violet-700 px-6 pt-6 pb-3 flex items-end gap-4'}
+                style={brandedHeaderStyle}
+              >
                 <div className="w-28 h-20 flex-shrink-0 drop-shadow-lg">
                   <StudentIllustration />
                 </div>
@@ -1171,7 +1283,7 @@ export default function Login() {
                     <button
                       type="button"
                       onClick={() => setStudentMode('login')}
-                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-violet-300 hover:bg-violet-50 transition-all text-left"
+                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-violet-300 hover:bg-violet-50 transition-all text-start"
                     >
                       <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0">
                         <ArrowRight className="w-5 h-5 text-violet-600" />
@@ -1181,10 +1293,11 @@ export default function Login() {
                         <p className="text-xs text-gray-400">{t('login.alreadyHaveAccount')}</p>
                       </div>
                     </button>
+                    {!loginOnly && (
                     <button
                       type="button"
                       onClick={() => setStudentMode('register')}
-                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-violet-300 hover:bg-violet-50 transition-all text-left"
+                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-violet-300 hover:bg-violet-50 transition-all text-start"
                     >
                       <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0">
                         <BookOpen className="w-5 h-5 text-indigo-600" />
@@ -1194,24 +1307,27 @@ export default function Login() {
                         <p className="text-xs text-gray-400">{t('login.hasInviteCode')}</p>
                       </div>
                     </button>
+                    )}
 
+                    {!loginOnly && (
                     <button
                       type="button"
                       onClick={() => setRole('parent')}
-                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-fuchsia-300 hover:bg-fuchsia-50 transition-all text-left"
+                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-fuchsia-300 hover:bg-fuchsia-50 transition-all text-start"
                     >
                       <div className="w-10 h-10 rounded-xl bg-fuchsia-100 flex items-center justify-center flex-shrink-0">
                         <Users className="w-5 h-5 text-fuchsia-600" />
                       </div>
                       <div>
                         <p className="font-semibold text-gray-900 text-sm">
-                          {locale === 'lt' ? 'Tėvų prisijungimas' : 'Parent login'}
+                          {t('login.parentLoginTitle')}
                         </p>
                         <p className="text-xs text-gray-400">
-                          {locale === 'lt' ? 'Prisijunkite kaip tėvai / globėjai' : 'Login as a parent / guardian'}
+                          {t('login.parentLoginDesc2')}
                         </p>
                       </div>
                     </button>
+                    )}
                   </div>
                 )}
 
@@ -1227,6 +1343,7 @@ export default function Login() {
                         <Input
                           id="s-email"
                           type="email"
+                        autoComplete="username"
                           placeholder={t('register.emailPlaceholder')}
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
@@ -1247,7 +1364,7 @@ export default function Login() {
                       )}
                       {!resetSent && (
                         <button type="submit" disabled={loading}
-                          className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                          className={brandedPrimaryBtnClass} style={brandedPrimaryBtnStyle}>
                           {loading ? t('common.sending') : t('login.sendResetLink')}
                         </button>
                       )}
@@ -1266,6 +1383,7 @@ export default function Login() {
                         <Input
                           id="s-email"
                           type="email"
+                        autoComplete="username"
                           placeholder={t('register.emailPlaceholder')}
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
@@ -1284,9 +1402,9 @@ export default function Login() {
                             {t('login.forgotPassword')}
                           </button>
                         </div>
-                        <Input
+                        <PasswordInput
                           id="s-password"
-                          type="password"
+                          autoComplete="current-password"
                           placeholder="••••••••"
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
@@ -1315,7 +1433,7 @@ export default function Login() {
                         </div>
                       )}
                       <button type="submit" disabled={loading}
-                        className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                        className={brandedPrimaryBtnClass} style={brandedPrimaryBtnStyle}>
                         {loading ? t('common.connecting') : t('common.login')}
                       </button>
                     </form>
@@ -1323,7 +1441,7 @@ export default function Login() {
                 )}
 
                 {/* Student REGISTER with invite code */}
-                {studentMode === 'register' && (
+                {studentMode === 'register' && !loginOnly && (
                   <form onSubmit={handleStudentAccess} className="space-y-4">
                     <div className="space-y-2">
                       <Label className="text-sm font-medium text-gray-700">{t('login.inviteCode')}</Label>
@@ -1344,31 +1462,35 @@ export default function Login() {
                       </div>
                     )}
                     <button type="submit" disabled={inviteLoading || !inviteCode.trim()}
-                      className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
+                      className={`${brandedPrimaryBtnClass} flex items-center justify-center gap-2`} style={brandedPrimaryBtnStyle}>
                       {inviteLoading ? t('login.checking') : (<><BookOpen className="w-4 h-4" /> {t('login.continue')}</>)}
                     </button>
                   </form>
                 )}
 
                 {/* Back + switch link */}
+                {(!loginPortalParam || studentMode === 'register') && (
                 <div className="mt-5 pt-4 border-t border-gray-100 flex items-center justify-between">
+                  {!loginPortalParam && (
                   <button type="button" onClick={studentMode ? resetStudent : reset}
                     className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition-colors">
-                    <ArrowLeft className="w-3.5 h-3.5" /> {t('common.back')}
+                    <ArrowLeft className="w-3.5 h-3.5 rtl:rotate-180" /> {t('common.back')}
                   </button>
+                  )}
                   {studentMode === 'register' && (
                     <button type="button" onClick={() => setStudentMode('login')}
                       className="text-sm text-violet-600 hover:underline font-medium">
                       {t('login.alreadyHaveAccount')}
                     </button>
                   )}
-                  {studentMode === 'login' && (
+                  {studentMode === 'login' && !loginOnly && (
                     <button type="button" onClick={() => setStudentMode('register')}
                       className="text-sm text-violet-600 hover:underline font-medium">
                       {t('login.registerWithCode')}
                     </button>
                   )}
                 </div>
+                )}
               </div>
             </div>
           )}

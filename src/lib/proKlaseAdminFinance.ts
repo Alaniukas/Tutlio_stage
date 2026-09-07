@@ -1,0 +1,110 @@
+import { orgBaseFromPayerChargedTotal, type OrgFeeProfile } from '@/lib/marketMoney';
+import { isComplimentarySession, sessionClientRevenueEur } from '@/lib/sessionComplimentary';
+import {
+  PRO_KLASE_STUDENT_NO_SHOW_PAY_EUR,
+  PRO_KLASE_TRIAL_PAY_EUR,
+  isProKlaseRealizedSession,
+  proKlaseIndividualRatePayEur,
+  proKlaseSessionPayEur,
+  normalizeProKlaseSubject,
+} from '@/lib/proKlaseTutorPay';
+
+export type ProKlaseAdminSession = {
+  status: string;
+  payment_status?: string | null;
+  paid?: boolean | null;
+  price?: number | null;
+  is_complimentary?: boolean | null;
+  lesson_package_id?: string | null;
+  subjects?: { is_trial?: boolean | null } | null;
+};
+
+export type ProKlasePaidPackage = {
+  tutor_id: string;
+  total_price: number | null;
+  price_per_lesson?: number | null;
+  total_lessons?: number | null;
+  paid?: boolean | null;
+  payment_status?: string | null;
+};
+
+function isCancelled(status: string): boolean {
+  return status === 'cancelled';
+}
+
+function isPaidLike(session: ProKlaseAdminSession): boolean {
+  if (session.paid === true) return true;
+  const ps = String(session.payment_status || '');
+  return ps === 'paid' || ps === 'confirmed';
+}
+
+/** Expected tutor cost for a remaining (not cancelled) paid calendar lesson. */
+export function proKlaseAccruedTutorCostEur(
+  session: ProKlaseAdminSession,
+  tutorPayRate: number | null | undefined,
+): number {
+  if (isCancelled(session.status)) return 0;
+  if (isComplimentarySession(session)) return 0;
+  if (!isPaidLike(session)) return 0;
+  if (session.status === 'no_show') return PRO_KLASE_STUDENT_NO_SHOW_PAY_EUR;
+  const subjects = normalizeProKlaseSubject(session.subjects);
+  if (subjects?.is_trial) return PRO_KLASE_TRIAL_PAY_EUR;
+  if (session.status === 'active' || session.status === 'completed') {
+    return proKlaseIndividualRatePayEur(tutorPayRate);
+  }
+  return 0;
+}
+
+export function packageClientPaidEur(
+  pkg: ProKlasePaidPackage,
+  feeProfile?: OrgFeeProfile | null,
+): number {
+  if (pkg.paid === true || pkg.payment_status === 'paid' || pkg.payment_status === 'confirmed') {
+    const lessons = Number(pkg.total_lessons);
+    const perLesson = Number(pkg.price_per_lesson);
+    if (Number.isFinite(lessons) && lessons > 0 && Number.isFinite(perLesson) && perLesson > 0) {
+      return Math.round(lessons * perLesson * 100) / 100;
+    }
+    const n = Number(pkg.total_price);
+    if (!Number.isFinite(n)) return 0;
+    return orgBaseFromPayerChargedTotal(n, feeProfile);
+  }
+  return 0;
+}
+
+export function standaloneSessionClientPaidEur(session: ProKlaseAdminSession): number {
+  if (session.lesson_package_id) return 0;
+  if (isCancelled(session.status)) return 0;
+  if (!isPaidLike(session)) return 0;
+  return sessionClientRevenueEur(session);
+}
+
+/** Realized tutor pay only for completed/no_show sessions that are paid (stats / SF). */
+export function sumProKlaseRealizedPaidTutorPayEur(
+  sessions: ProKlaseAdminSession[],
+  tutorPayRate: number | null | undefined,
+): number {
+  return Math.round(
+    sessions
+      .filter((session) => isProKlaseRealizedSession(String(session.status || '')) && isPaidLike(session))
+      .reduce((sum, session) => sum + proKlaseSessionPayEur(session, tutorPayRate), 0) * 100,
+  ) / 100;
+}
+
+export function proKlaseAdminFinanceSplit(opts: {
+  clientPaidEur: number;
+  sessions: ProKlaseAdminSession[];
+  tutorPayRate: number | null | undefined;
+}): { clientPaidEur: number; accruedTutorCostEur: number; platformShareEur: number } {
+  const accruedTutorCostEur = opts.sessions.reduce(
+    (sum, session) => sum + proKlaseAccruedTutorCostEur(session, opts.tutorPayRate),
+    0,
+  );
+  const clientPaidEur = Math.round(opts.clientPaidEur * 100) / 100;
+  const tutorRounded = Math.round(accruedTutorCostEur * 100) / 100;
+  return {
+    clientPaidEur,
+    accruedTutorCostEur: tutorRounded,
+    platformShareEur: Math.round((clientPaidEur - tutorRounded) * 100) / 100,
+  };
+}

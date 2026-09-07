@@ -7,28 +7,16 @@ import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
+import { marketFromRequest } from './_lib/market.js';
+import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
+import { publicOriginFromRequest } from './_lib/public-origin.js';
 import {
     tutorUsesManualStudentPayments,
     trimManualPaymentBankDetails,
 } from './_lib/soloManualStudentPayments.js';
-
-// Stripe/platform fee helpers (inlined to avoid _lib import issues on Vercel)
-const STRIPE_FEE_PERCENT = 0.015;
-const STRIPE_FEE_FIXED_EUR = 0.25;
-const PLATFORM_FEE_PERCENT = 0.02;
-
-function customerTotalEur(basePriceEur: number): number {
-    const platformFeeEur = basePriceEur * PLATFORM_FEE_PERCENT;
-    return (basePriceEur + platformFeeEur + STRIPE_FEE_FIXED_EUR) / (1 - STRIPE_FEE_PERCENT);
-}
-
-function lessonCheckoutBreakdownCents(basePriceEur: number): { baseCents: number; feesCents: number } {
-    const totalEur = customerTotalEur(basePriceEur);
-    const totalCents = Math.round(totalEur * 100);
-    const baseCents = Math.round(basePriceEur * 100);
-    const feesCents = totalCents - baseCents;
-    return { baseCents, feesCents };
-}
+import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -141,6 +129,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const auth = await verifyRequestAuth(req);
     if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
+    const market = marketFromRequest(req);
+    const currency = chargeCurrency(market);
+    const appOrigin = publicOriginFromRequest(req);
+
     const { tutorId, periodStartDate, periodEndDate, paymentDeadlineDays, sessionIds, includeSalesInvoice } = req.body as {
         tutorId: string;
         periodStartDate: string; // YYYY-MM-DD
@@ -187,11 +179,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(404).json({ error: 'Korepetitorius nerastas', details: tutorErr?.message });
         }
 
+        if (!auth.isInternal) {
+            if (!auth.userId) return res.status(401).json({ error: 'Unauthorized' });
+            const seat = await getOrgAdminSeatByUserId(supabase, auth.userId);
+            if (seat) {
+                if (
+                    seat.status !== 'active'
+                    || !hasOrgAdminPermission(seat.role, seat.permissions, 'finance.edit')
+                    || !tutor.organization_id
+                    || seat.organizationId !== tutor.organization_id
+                ) {
+                    return res.status(403).json({ error: 'Insufficient organization permission' });
+                }
+            } else if (auth.userId !== tutorId) {
+                return res.status(403).json({ error: 'Forbidden' });
+            }
+        }
+
         // 2. Fetch sessions
         const { data: sessions, error: sessionsErr } = await supabase
             .from('sessions')
             .select(`
-                id, price, start_time, tutor_id, student_id, subject_id,
+                id, price, start_time, tutor_id, student_id, subject_id, is_complimentary,
                 students!inner(id, full_name, email, payment_payer, payer_email, payer_name),
                 subjects(name)
             `)
@@ -199,6 +208,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .eq('tutor_id', tutorId)
             .neq('status', 'cancelled')
             .eq('paid', false)
+            .eq('is_complimentary', false)
             .is('payment_batch_id', null)
             .is('lesson_package_id', null)
             .lte('start_time', new Date().toISOString());
@@ -233,6 +243,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let stripeAccountId: string | null = null;
         let ownerName = tutor.full_name || 'Korepetitorius';
         let useSchoolOrgAbsorbedFees = false;
+        let feeProfile: OrgFeeProfile | null = null;
         const usesManualStudentPayments = tutorUsesManualStudentPayments(tutor);
         let tutorManualBankDetails = '';
 
@@ -249,7 +260,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } else if (tutor.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug')
                 .eq('id', tutor.organization_id)
                 .single();
 
@@ -258,7 +269,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
-            useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school';
+            feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
+            // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
+            useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school' && !feeProfile;
         } else {
             if (!(tutor as { stripe_onboarding_complete?: boolean }).stripe_onboarding_complete) {
                 return res.status(400).json({ error: 'Tutor Stripe account is not connected' });
@@ -344,7 +357,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     payerCheckoutTotalEur = totalLessonPrice;
                 } else if (useSchoolOrgAbsorbedFees) {
                     const { chargeCents, transferToSchoolCents } =
-                        schoolInstallmentCheckoutCents(totalLessonPrice);
+                        schoolInstallmentCheckoutCents(totalLessonPrice, market);
                     const applicationFeeCents = chargeCents - transferToSchoolCents;
                     if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
                         throw new Error('Netinkamas mėnesinės sąskaitos sumų skaidymas');
@@ -356,10 +369,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         line_items: [
                             {
                                 price_data: {
-                                    currency: 'eur',
+                                    currency,
                                     product_data: {
                                         name: `Pamokos (${lessonCount}) – ${periodText}`,
-                                        description: `Invoice – ${ownerName}`,
+                                        description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,
                                     },
                                     unit_amount: chargeCents,
                                 },
@@ -382,17 +395,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             tutor_id: tutorId,
                             tutlio_school_org_absorbed: 'true',
                         },
-                        success_url: `${APP_URL}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}`,
-                        cancel_url: `${APP_URL}/student/sessions`,
+                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}`,
+                        cancel_url: `${appOrigin}/student/sessions`,
                     });
                     payerCheckoutTotalEur = totalLessonPrice;
                 } else if (stripeAccountId) {
                     let baseCents = 0;
                     let feesCents = 0;
-                    for (const s of payerSessions) {
-                        const b = lessonCheckoutBreakdownCents(Number(s.price) || 0);
-                        baseCents += b.baseCents;
-                        feesCents += b.feesCents;
+                    if (feeProfile) {
+                        // Custom org deals are tiered on the full transaction (invoice total), not per session.
+                        const b = lessonCheckoutBreakdownCents(totalLessonPrice, market, feeProfile);
+                        baseCents = b.baseCents;
+                        feesCents = b.feesCents;
+                    } else {
+                        for (const s of payerSessions) {
+                            const b = lessonCheckoutBreakdownCents(Number(s.price) || 0, market);
+                            baseCents += b.baseCents;
+                            feesCents += b.feesCents;
+                        }
                     }
                     const transferToConnectedCents = baseCents;
                     checkoutSession = await stripe.checkout.sessions.create({
@@ -402,10 +422,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         line_items: [
                             {
                                 price_data: {
-                                    currency: 'eur',
+                                    currency,
                                     product_data: {
                                         name: `Pamokos (${lessonCount}) – ${periodText}`,
-                                        description: `Invoice – ${ownerName}`,
+                                        description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,
                                     },
                                     unit_amount: baseCents,
                                 },
@@ -413,10 +433,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             },
                             {
                                 price_data: {
-                                    currency: 'eur',
+                                    currency,
                                     product_data: {
                                         name: 'Platformos administravimo mokestis',
-                                        description: 'Platform administration and payment processing fee',
+                                        description: 'Paslaugos teikėjas: MB „Tutlio“',
                                     },
                                     unit_amount: feesCents,
                                 },
@@ -436,9 +456,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         metadata: {
                             tutlio_billing_batch_id: billingBatch.id,
                             tutor_id: tutorId,
+                            ...checkoutBaseMetadata(baseCents / 100, market),
                         },
-                        success_url: `${APP_URL}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}`,
-                        cancel_url: `${APP_URL}/student/sessions`,
+                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}`,
+                        cancel_url: `${appOrigin}/student/sessions`,
                     });
                     payerCheckoutTotalEur = (baseCents + feesCents) / 100;
                 } else {
@@ -489,11 +510,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     .maybeSingle();
                 if (!existingInv) {
                     const fbInvoiceNumber = `BB-${billingBatch.id.slice(0, 8).toUpperCase()}`;
+                    const fallbackSellerTaxExemptionNote = proKlaseVatExemptionNote(
+                        (tutor as any).organization_id,
+                        true,
+                    );
                     const { data: fbInvoice } = await supabase.from('invoices').insert({
                         invoice_number: fbInvoiceNumber,
                         issued_by_user_id: tutorId,
                         organization_id: (tutor as any).organization_id ?? null,
-                        seller_snapshot: { name: ownerName || 'Korepetitorius' },
+                        seller_snapshot: {
+                            name: ownerName || 'Korepetitorius',
+                            ...(fallbackSellerTaxExemptionNote
+                                ? { taxExemptionNote: fallbackSellerTaxExemptionNote }
+                                : {}),
+                        },
                         buyer_snapshot: { name: payerName || 'Mokinys', email: payerEmail || undefined },
                         issue_date: new Date().toISOString().slice(0, 10),
                         period_start: periodStartDate,
@@ -558,7 +588,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             // Send invoice email with optional S.F. PDF attachment.
             // Use /api/pay-invoice redirect URL so the link never expires
             // (a fresh Stripe Checkout Session is created when the payer clicks).
-            const stablePaymentLink = `${APP_URL}/api/pay-invoice?batch=${billingBatch.id}`;
+            const stablePaymentLink = `${appOrigin}/api/pay-invoice?batch=${billingBatch.id}`;
             const monthlyEmailOk = usesManualStudentPayments ? true : Boolean(checkoutSession?.url || checkoutSession?.id);
             if (monthlyEmailOk) {
                 try {

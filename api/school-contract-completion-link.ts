@@ -1,16 +1,18 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
-async function isAuthenticatedUser(req: VercelRequest): Promise<boolean> {
+async function authenticatedUserId(req: VercelRequest): Promise<string | null> {
   const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
-  if (!authHeader.startsWith('Bearer ')) return false;
+  if (!authHeader.startsWith('Bearer ')) return null;
   const token = authHeader.slice(7);
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return false;
+  if (!url || !key) return null;
   const sb = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
-  const { error } = await sb.auth.getUser(token);
-  return !error;
+  const { data, error } = await sb.auth.getUser(token);
+  return error ? null : data.user?.id || null;
 }
 
 function randomToken() {
@@ -19,7 +21,8 @@ function randomToken() {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (!(await isAuthenticatedUser(req))) return res.status(401).json({ error: 'Unauthorized' });
+  const userId = await authenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -28,6 +31,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const contractId = typeof req.body?.contractId === 'string' ? req.body.contractId : '';
   if (!contractId) return res.status(400).json({ error: 'Missing contractId' });
+
+  const { data: contract } = await supabase
+    .from('school_contracts')
+    .select('organization_id')
+    .eq('id', contractId)
+    .maybeSingle();
+  if (!contract?.organization_id) return res.status(404).json({ error: 'Contract not found' });
+  const adminAccess = await getOrgAdminAccessByUserId(supabase, userId);
+  if (
+    adminAccess?.organizationId !== contract.organization_id
+    || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.edit')
+  ) return res.status(403).json({ error: 'Forbidden' });
 
   const token = randomToken();
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString();
@@ -59,4 +74,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const completionUrl = `${appUrl.replace(/\/$/, '')}/school-contract-complete?token=${encodeURIComponent(token)}`;
   return res.status(200).json({ completionUrl });
 }
-

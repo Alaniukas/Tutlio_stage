@@ -1,3 +1,4 @@
+import { SUPPORTED_LOCALES } from '../../src/lib/i18n/locales.js';
 import type { VercelRequest } from '../types.js';
 
 export function headerFirst(req: VercelRequest, name: string): string {
@@ -34,6 +35,75 @@ export function publicOriginFromRequest(req: VercelRequest): string {
   );
 }
 
+const TRUSTED_REDIRECT_HOSTS = ['tutlio.lt', 'tutlio.com', 'tutlio.pl'];
+
+/**
+ * Open-redirect guard for caller-supplied redirect URLs (e.g. password reset).
+ * Accepts only http(s) URLs whose host is a trusted Tutlio domain, the
+ * configured APP_URL origin, the origin serving this request (covers preview
+ * deployments), or localhost for development.
+ */
+export function isAllowedRedirectUrl(redirectTo: string, requestOrigin?: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(redirectTo);
+  } catch {
+    return false;
+  }
+
+  const host = url.hostname.toLowerCase();
+
+  if (url.protocol === 'http:') {
+    // Plain http only for local development.
+    return host === 'localhost' || host === '127.0.0.1';
+  }
+  if (url.protocol !== 'https:') return false;
+
+  if (TRUSTED_REDIRECT_HOSTS.some((t) => host === t || host.endsWith(`.${t}`))) return true;
+
+  const candidates = [process.env.APP_URL, process.env.VITE_APP_URL, requestOrigin];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      if (new URL(candidate).hostname.toLowerCase() === host) return true;
+    } catch {
+      /* ignore malformed env/origin */
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Canonical public origin for an org's preferred_locale (lt → www.tutlio.lt).
+ * Mirrors middleware.ts CANONICAL_ORIGINS; null for unknown locales.
+ */
+export function canonicalOriginForOrgLocale(orgLocale: string | null | undefined): string | null {
+  const locale = (orgLocale || '').trim().toLowerCase();
+  if (locale === 'lt') return 'https://www.tutlio.lt';
+  if (locale === 'pl') return 'https://www.tutlio.pl';
+  if (locale === 'en') return 'https://www.tutlio.com';
+  return null;
+}
+
+/**
+ * Org-aware origin for links in emails: the org's canonical market domain wins
+ * over whatever domain the request happened to arrive on — but only when the
+ * request itself came from a production tutlio.* host, so preview deployments
+ * and localhost keep testable links.
+ */
+export function orgAwareOrigin(orgLocale: string | null | undefined, fallbackOrigin: string): string {
+  const canonical = canonicalOriginForOrgLocale(orgLocale);
+  if (!canonical) return fallbackOrigin;
+  try {
+    const host = new URL(fallbackOrigin).hostname.toLowerCase();
+    const isProdTutlio = TRUSTED_REDIRECT_HOSTS.some((t) => host === t || host === `www.${t}`);
+    return isProdTutlio ? canonical : fallbackOrigin;
+  } catch {
+    return canonical;
+  }
+}
+
 export function defaultLocaleForOrigin(origin: string): string {
   try {
     const host = new URL(origin).hostname.toLowerCase().replace(/^www\./, '');
@@ -45,7 +115,23 @@ export function defaultLocaleForOrigin(origin: string): string {
   return 'lt';
 }
 
-const VALID_LOCALES = new Set(['lt','en','pl','lv','ee','fr','es','de','se','dk','fi','no']);
+export type CheckoutAudience = 'tutor' | 'schools';
+
+/** Platform + locale aware path (e.g. /schools/en/pricing) for checkout redirect URLs. */
+export function buildPublicPath(
+  pathname: string,
+  locale: string | undefined,
+  audience: CheckoutAudience,
+  appOrigin: string,
+): string {
+  const normalized = pathname.startsWith('/') ? pathname : `/${pathname}`;
+  const platformPrefix = audience === 'schools' ? '/schools' : '';
+  const defaultLocale = defaultLocaleForOrigin(appOrigin);
+  const localeSeg = locale && locale !== defaultLocale ? `/${locale}` : '';
+  return `${platformPrefix}${localeSeg}${normalized}`;
+}
+
+const VALID_LOCALES = new Set<string>(SUPPORTED_LOCALES);
 
 /** Resolve the email copy locale from the UI locale + request origin. */
 export function inviteEmailLocale(uiLocale: string | undefined, origin: string): string {

@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { randomBytes } from 'node:crypto';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -42,14 +44,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: authData, error: userErr } = await userSb.auth.getUser(jwt);
   if (userErr || !authData.user) return json(res, 401, { error: 'Invalid token' });
 
-  const { data: adminRow } = await adminSb
-    .from('organization_admins')
-    .select('organization_id')
-    .eq('user_id', authData.user.id)
-    .eq('organization_id', organizationId)
-    .maybeSingle();
-
-  if (!adminRow?.organization_id) {
+  const adminAccess = await getOrgAdminAccessByUserId(adminSb, authData.user.id);
+  if (
+    adminAccess?.organizationId !== organizationId
+    || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.edit')
+  ) {
     return json(res, 403, { error: 'Not authorized for this organization' });
   }
 

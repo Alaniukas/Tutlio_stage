@@ -1,4 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { allocateInvoiceNumber } from './invoiceNumber.js';
+import { proKlaseVatExemptionNote } from './proKlaseInvoice.js';
 
 export type PackageRowForSf = {
   id: string;
@@ -38,6 +40,7 @@ export async function tryIssueSalesInvoiceForStripePackage(
   if (!tutor) return;
 
   let invoiceProfile: Record<string, unknown> | null = null;
+  let usesOrganizationInvoiceProfile = false;
   if (tutor.organization_id) {
     const { data: orgProf } = await supabase
       .from('invoice_profiles')
@@ -45,6 +48,7 @@ export async function tryIssueSalesInvoiceForStripePackage(
       .eq('organization_id', tutor.organization_id)
       .maybeSingle();
     invoiceProfile = orgProf;
+    usesOrganizationInvoiceProfile = Boolean(orgProf);
   }
   if (!invoiceProfile) {
     const { data: userProf } = await supabase.from('invoice_profiles').select('*').eq('user_id', tutor.id).maybeSingle();
@@ -68,6 +72,10 @@ export async function tryIssueSalesInvoiceForStripePackage(
   const sellerName = isCompany
     ? (businessName || '').trim() || fullName || 'Įmonė'
     : fullName || (businessName || '').trim() || 'Korepetitorius';
+  const sellerTaxExemptionNote = proKlaseVatExemptionNote(
+    tutor.organization_id,
+    usesOrganizationInvoiceProfile,
+  );
 
   const sellerSnapshot = {
     name: sellerName || 'Korepetitorius',
@@ -79,25 +87,41 @@ export async function tryIssueSalesInvoiceForStripePackage(
     personalCode: (invoiceProfile.personal_code as string) || undefined,
     contactEmail: (invoiceProfile.contact_email as string) || undefined,
     contactPhone: (invoiceProfile.contact_phone as string) || undefined,
+    ...(sellerTaxExemptionNote ? { taxExemptionNote: sellerTaxExemptionNote } : {}),
   };
 
-  const subject =
-    packageRow.subject || packageRow.subjects || (null as { name?: string } | null);
-  const subjectName = subject?.name || 'Pamoka';
+  // Look up per-subject items so we can emit one invoice line per subject.
+  const { data: itemsRaw } = await supabase
+    .from('lesson_package_items')
+    .select('subject_id, total_lessons, total_price, position, subjects!inner(name)')
+    .eq('package_id', packageRow.id)
+    .order('position', { ascending: true });
+  type InvoiceItem = { subjectName: string; totalLessons: number; totalPrice: number };
+  let invoiceItems: InvoiceItem[] = (itemsRaw || []).map((row: any) => ({
+    subjectName: (row.subjects?.name as string) || 'Pamoka',
+    totalLessons: Number(row.total_lessons) || 0,
+    totalPrice: Number(row.total_price) || 0,
+  }));
+
+  // Legacy fallback: package row without items still gets one line from the
+  // denormalized fields. After backfill this branch should never run.
+  if (invoiceItems.length === 0) {
+    const fallback = packageRow.subject || packageRow.subjects || null;
+    const subjectName = fallback?.name || 'Pamoka';
+    invoiceItems = [{
+      subjectName,
+      totalLessons: Number(packageRow.total_lessons) || 0,
+      totalPrice: Number(packageRow.total_price) || 0,
+    }];
+  }
+
   const totalAmount = Number(packageRow.total_price) || 0;
   if (totalAmount <= 0) return;
 
   const issueDate = new Date().toISOString().slice(0, 10);
   const paidDay = packageRow.paid_at ? packageRow.paid_at.slice(0, 10) : issueDate;
 
-  const series = (invoiceProfile.invoice_series as string) || 'SF';
-  const num = (invoiceProfile.next_invoice_number as number) || 1;
-  const invoiceNumber = `${series}-${String(num).padStart(3, '0')}`;
-
-  await supabase
-    .from('invoice_profiles')
-    .update({ next_invoice_number: num + 1, updated_at: new Date().toISOString() })
-    .eq('id', invoiceProfile.id as string);
+  const invoiceNumber = await allocateInvoiceNumber(supabase, invoiceProfile.id as string);
 
   const { data: invoice, error: invErr } = await supabase
     .from('invoices')
@@ -121,21 +145,18 @@ export async function tryIssueSalesInvoiceForStripePackage(
 
   if (invErr || !invoice) {
     console.error('[issuePackageSalesInvoice] Failed to insert invoice:', invErr);
-    await supabase
-      .from('invoice_profiles')
-      .update({ next_invoice_number: num, updated_at: new Date().toISOString() })
-      .eq('id', invoiceProfile.id as string);
     return;
   }
 
-  await supabase.from('invoice_line_items').insert({
+  const lineRows = invoiceItems.map((it) => ({
     invoice_id: invoice.id,
-    description: `${subjectName} — pamokų paketas (${packageRow.total_lessons} pam.)`,
+    description: `${it.subjectName} — pamokų paketas (${it.totalLessons} pam.)`,
     quantity: 1,
-    unit_price: totalAmount,
-    total_price: totalAmount,
+    unit_price: it.totalPrice,
+    total_price: it.totalPrice,
     session_ids: [],
-  });
+  }));
+  await supabase.from('invoice_line_items').insert(lineRows);
 
   const { error: linkErr } = await supabase
     .from('lesson_packages')

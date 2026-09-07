@@ -6,6 +6,8 @@ import { createClient } from '@supabase/supabase-js';
 import { format } from 'date-fns';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 async function sendEmail(body: object) {
     const baseUrl = process.env.VERCEL_URL
@@ -65,6 +67,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'Session is not marked as no-show' });
     }
 
+    const { data: tutor } = await supabase
+        .from('profiles')
+        .select('full_name, email, organization_id')
+        .eq('id', session.tutor_id)
+        .maybeSingle();
+
+    if (!auth.isInternal) {
+        const userId = auth.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        if (userId !== session.tutor_id) {
+            const access = await getOrgAdminAccessByUserId(supabase, userId);
+            if (
+                !access
+                || access.organizationId !== tutor?.organization_id
+                || !hasOrgAdminPermission(access.role, access.permissions, 'sessions.edit')
+            ) {
+                return res.status(403).json({ error: 'Insufficient organization permission' });
+            }
+        }
+    }
+
     syncSessionToGoogle(sessionId, session.tutor_id).catch((err) => {
         console.error('[notify-session-no-show] Google sync failed:', err);
     });
@@ -80,12 +103,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('students')
         .select('full_name, email, payer_email')
         .eq('id', session.student_id)
-        .maybeSingle();
-
-    const { data: tutor } = await supabase
-        .from('profiles')
-        .select('full_name, email, organization_id')
-        .eq('id', session.tutor_id)
         .maybeSingle();
 
     const payerRaw = (student?.payer_email || '').trim();

@@ -13,7 +13,11 @@ import { lt } from 'date-fns/locale';
 import { deleteSessionFromGoogle, syncSessionToGoogle } from './_lib/google-calendar.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { canStudentSideCancelSession, canTutorSideCancelSession } from './_lib/cancel-session-access.js';
+import { isProKlaseOrg, isWaitlistHiddenForOrg } from './_lib/marketMoney.js';
 import { releaseSessionSlotAsAvailability } from './_lib/release-session-availability.js';
+import { PRO_KLASE_TUTOR_NO_SHOW_PENALTY_EUR } from './_lib/proKlaseTutorPay.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 async function sendEmail(body: object) {
     const baseUrl = process.env.VERCEL_URL
@@ -59,6 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         cancellationFeePercent,
         penaltyPaidViaStripe,
         leaveFreeTime,
+        cancellationReasonCode,
     } = req.body as {
         sessionId: string;
         tutorId: string;
@@ -74,6 +79,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         penaltyPaidViaStripe?: boolean;
         /** Tutor/org cancel only: create one-time availability for other students to book */
         leaveFreeTime?: boolean;
+        /** Pro Klasė: tutor_no_show | admin | ... */
+        cancellationReasonCode?: string;
     };
 
     const normEmail = (e: string | null | undefined) =>
@@ -126,16 +133,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 .maybeSingle();
             const orgId = (tutorRow as { organization_id?: string | null } | null)?.organization_id;
             if (orgId) {
-                const { data: orgAdmin } = await supabase
-                    .from('organization_admins')
-                    .select('id')
-                    .eq('user_id', userId)
-                    .eq('organization_id', orgId)
-                    .maybeSingle();
-                isOrgAdminForTutorOrg = !!orgAdmin;
+                const orgAdmin = await getOrgAdminAccessByUserId(supabase, userId);
+                isOrgAdminForTutorOrg = Boolean(
+                    orgAdmin
+                    && orgAdmin.organizationId === orgId
+                    && hasOrgAdminPermission(orgAdmin.role, orgAdmin.permissions, 'sessions.edit'),
+                );
             }
             if (!canTutorSideCancelSession(userId, tutorId, isOrgAdminForTutorOrg)) {
                 return res.status(403).json({ error: 'Forbidden' });
+            }
+            // Pro Klasė org tutors may not cancel their own lessons (org admin may).
+            if (
+                userId === tutorId &&
+                orgId &&
+                isProKlaseOrg(orgId) &&
+                !isOrgAdminForTutorOrg
+            ) {
+                return res.status(403).json({ error: 'Org tutors cannot cancel lessons for this organization' });
             }
         } else {
             if (!existingSession.student_id) {
@@ -187,12 +202,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
     }
 
+    // Org feature: students/parents may be blocked from cancelling entirely
+    // (disable_student_reschedule_cancel). Tutor/org-admin cancels are unaffected.
+    if (cancelledBy === 'student' && !auth.isInternal) {
+        const { data: tutorOrgRow } = await supabase
+            .from('profiles')
+            .select('organization_id')
+            .eq('id', tutorId)
+            .maybeSingle();
+        const cancelOrgId = (tutorOrgRow as { organization_id?: string | null } | null)?.organization_id;
+        if (cancelOrgId) {
+            const { data: orgFeatRow } = await supabase
+                .from('organizations')
+                .select('features')
+                .eq('id', cancelOrgId)
+                .maybeSingle();
+            const feats = (orgFeatRow as { features?: Record<string, unknown> | null } | null)?.features;
+            if (feats && feats.disable_student_reschedule_cancel === true) {
+                return res.status(403).json({ error: 'student_actions_disabled' });
+            }
+        }
+    }
+
     // 1. Mark session as cancelled
+    const reasonCode = String(cancellationReasonCode || '').trim() || null;
     const { data: session, error: cancelError } = await supabase
         .from('sessions')
         .update({
             status: 'cancelled',
             cancellation_reason: reasonTrimmed,
+            cancellation_reason_code: reasonCode,
             cancelled_by: cancelledBy,  // Track who cancelled (tutor or student)
             cancelled_at: new Date().toISOString()  // Track when cancelled for auto-hide
         })
@@ -203,6 +242,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (cancelError || !session) {
         console.error('Cancel error:', cancelError);
         return res.status(500).json({ error: 'Failed to cancel session', details: cancelError });
+    }
+
+    // Pro Klasė: tutor no-show — auto penalty for tutor (admin cancel only).
+    if (reasonCode === 'tutor_no_show' && cancelledBy === 'tutor' && !auth.isInternal) {
+        const { data: tutorOrgRow } = await supabase
+            .from('profiles')
+            .select('organization_id')
+            .eq('id', tutorId)
+            .maybeSingle();
+        const pkOrgId = (tutorOrgRow as { organization_id?: string | null } | null)?.organization_id;
+        if (pkOrgId && isProKlaseOrg(pkOrgId)) {
+            const adminUserId = auth.userId;
+            if (adminUserId) {
+                await supabase.from('tutor_adjustments').insert({
+                    organization_id: pkOrgId,
+                    tutor_id: tutorId,
+                    session_id: sessionId,
+                    type: 'penalty_tutor_no_show',
+                    amount_eur: PRO_KLASE_TUTOR_NO_SHOW_PENALTY_EUR,
+                    reason: reasonTrimmed,
+                    created_by: adminUserId,
+                });
+            }
+        }
     }
 
     // Check if this is a group lesson (needed for available_spots + waitlist auto-fill)
@@ -377,6 +440,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (packageId) {
         // ── PACKAGE payment model ──
+        // Return the cancelled lesson's credit to its per-subject item (and the
+        // package aggregate). Multi-subject packages can have multiple items;
+        // we use the session's own subject_id to pick the right one.
         const { data: pkg } = await supabase
             .from('lesson_packages')
             .select('available_lessons, reserved_lessons')
@@ -386,6 +452,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (pkg) {
             const penaltyCredits = hasPenaltyFee ? cancellationFeePercentValue / 100 : 0;
             const creditsToReturn = 1 - penaltyCredits;
+
+            const sessionSubjectId = session.subject_id ?? null;
+            if (sessionSubjectId) {
+                const { data: item } = await supabase
+                    .from('lesson_package_items')
+                    .select('id, available_lessons, reserved_lessons')
+                    .eq('package_id', packageId)
+                    .eq('subject_id', sessionSubjectId)
+                    .maybeSingle();
+                if (item) {
+                    await supabase
+                        .from('lesson_package_items')
+                        .update({
+                            available_lessons: Number((item as any).available_lessons || 0) + creditsToReturn,
+                            reserved_lessons: Math.max(0, Number((item as any).reserved_lessons || 0) - 1),
+                        })
+                        .eq('id', (item as any).id);
+                }
+            }
 
             await supabase
                 .from('lesson_packages')
@@ -455,6 +540,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ── Background: waitlist auto-fill ────────────────────────────────────────
     void (async () => {
         try {
+            const { data: tutorProfile } = await supabase
+                .from('profiles')
+                .select('organization_id')
+                .eq('id', tutorId)
+                .maybeSingle();
+            if (isWaitlistHiddenForOrg((tutorProfile as any)?.organization_id)) {
+                console.log('[Waitlist API] Waitlist disabled for org - skipping auto-fill');
+                return;
+            }
+
             // Only skip auto-fill if session is starting in less than 1 hour.
             const oneHourBeforeSession = new Date(new Date(session.start_time).getTime() - 1 * 3600000);
             if (oneHourBeforeSession < new Date()) {

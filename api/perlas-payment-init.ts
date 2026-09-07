@@ -7,7 +7,15 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { signPerlasToken, generateTransactionId, PERLAS_API_URL } from './_lib/perlasFinance.js';
 
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
+const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://www.tutlio.lt';
+
+/**
+ * Global kill-switch for PerlasFinance bank payments (server-side mirror of
+ * `src/lib/perlasFinance.ts`). When `false`, no new bank payment can be
+ * initiated; all other infrastructure (callbacks, payouts, DB) stays intact so
+ * the feature can be re-enabled by flipping this flag back to `true`.
+ */
+const PERLAS_FINANCE_ENABLED = false;
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!;
@@ -17,6 +25,10 @@ function getSupabase() {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (!PERLAS_FINANCE_ENABLED) {
+    return res.status(400).json({ error: 'PerlasFinance payments are currently disabled.' });
+  }
 
   const auth = await verifyRequestAuth(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });

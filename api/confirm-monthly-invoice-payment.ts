@@ -6,6 +6,9 @@ import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
+import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
+import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -43,8 +46,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (ownErr || !ownBatch) {
         return res.status(404).json({ error: 'Billing batch not found' });
       }
-      if (ownBatch.tutor_id !== auth.userId) {
-        return res.status(403).json({ error: 'Forbidden' });
+      if (!auth.isInternal) {
+        if (!auth.userId) return res.status(401).json({ error: 'Unauthorized' });
+        const seat = await getOrgAdminSeatByUserId(supabase, auth.userId);
+        if (seat) {
+          const { data: tutor } = await supabase
+            .from('profiles')
+            .select('organization_id')
+            .eq('id', ownBatch.tutor_id)
+            .maybeSingle();
+          if (
+            seat.status !== 'active'
+            || !hasOrgAdminPermission(seat.role, seat.permissions, 'finance.edit')
+            || !tutor?.organization_id
+            || seat.organizationId !== tutor.organization_id
+          ) {
+            return res.status(403).json({ error: 'Insufficient organization permission' });
+          }
+        } else if (ownBatch.tutor_id !== auth.userId) {
+          return res.status(403).json({ error: 'Forbidden' });
+        }
       }
       billingBatchId = billingBatchIdFromBody;
       if (ownBatch.paid === true) {
@@ -59,11 +80,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         return res.status(200).json({ success: true, alreadyPaid: true });
       }
-    } else if (!checkoutSessionId && !billingBatchIdFromBody) {
-      return res.status(400).json({ error: 'Missing checkoutSessionId or billingBatchId' });
+    } else if (!checkoutSessionId) {
+      return res.status(400).json({ error: 'Missing checkoutSessionId' });
     }
 
     // 1) Optional: validate with Stripe checkout session (extra safety)
+    let stripeCheckout: Stripe.Checkout.Session | null = null;
     if (!manualConfirm && checkoutSessionId) {
       try {
         const checkoutSession = await stripe.checkout.sessions.retrieve(checkoutSessionId);
@@ -78,14 +100,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(200).json({ success: false, reason: `Payment status: ${checkoutSession.payment_status}` });
         }
 
-        billingBatchId = billingBatchId || checkoutSession.metadata?.tutlio_billing_batch_id;
-      } catch (err: any) {
-        // Checkout session not found or expired - this is OK if we have billingBatchId from frontend
-        console.warn('[confirm-monthly-invoice-payment] Could not retrieve checkout session (may be expired or wrong account):', err.message);
-        if (!billingBatchId) {
-          return res.status(400).json({ error: 'Checkout session not found and no billingBatchId provided', details: err.message });
+        const stripeBillingBatchId = checkoutSession.metadata?.tutlio_billing_batch_id;
+        if (!stripeBillingBatchId) {
+          return res.status(400).json({ error: 'Checkout session is missing billing batch metadata' });
         }
-        // Continue with billingBatchId from frontend
+        if (billingBatchIdFromBody && billingBatchIdFromBody !== stripeBillingBatchId) {
+          return res.status(400).json({ error: 'Checkout session does not match billing batch' });
+        }
+
+        stripeCheckout = checkoutSession;
+        billingBatchId = stripeBillingBatchId;
+      } catch (err: any) {
+        console.warn('[confirm-monthly-invoice-payment] Could not validate checkout session:', err.message);
+        return res.status(400).json({ error: 'Checkout session could not be validated', details: err.message });
       }
     }
 
@@ -171,6 +198,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const tutorName = tutorProfile.full_name || 'Korepetitorius';
     const tutorEmail = tutorProfile.email || null;
 
+    let orgName: string | null = null;
+    if (tutorProfile.organization_id) {
+      const { data: orgRow } = await supabase
+        .from('organizations')
+        .select('name')
+        .eq('id', tutorProfile.organization_id)
+        .maybeSingle();
+      orgName = (orgRow as { name?: string | null } | null)?.name || null;
+    }
+    const providerName = orgName || tutorName;
+    const batchGrossEur = stripeCheckout?.amount_total != null ? stripeCheckout.amount_total / 100 : null;
+    const batchBaseEur = metadataBaseEur(stripeCheckout?.metadata) ?? Number(updatedBatch.total_amount || 0);
+
+    if (stripeCheckout) {
+      await recordStripePlatformFee(supabase, {
+        sourceType: 'billing_batch',
+        sourceId: billingBatchId,
+        baseAmountEur: batchBaseEur,
+        grossAmountEur: batchGrossEur,
+        organizationId: tutorProfile.organization_id ?? null,
+        tutorId: updatedBatch.tutor_id ?? null,
+        stripeCheckoutSessionId: stripeCheckout.id,
+      });
+    }
+
     const periodStart = new Date(updatedBatch.period_start_date);
     const periodEnd = new Date(updatedBatch.period_end_date);
     const periodText = `${periodStart.toLocaleDateString('lt-LT')} - ${periodEnd.toLocaleDateString('lt-LT')}`;
@@ -241,8 +293,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             data: {
               recipientName: r.recipientName,
               tutorName,
+              providerName,
               periodText,
               totalAmount,
+              baseTotalEur: batchBaseEur,
+              ...(batchGrossEur != null ? { totalChargedEur: batchGrossEur } : {}),
               sessionsCount,
               ...(tutorProfile.organization_id ? { organizationId: tutorProfile.organization_id } : {}),
             },
@@ -259,4 +314,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: err?.message || 'Internal server error' });
   }
 }
-

@@ -1,21 +1,26 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
-import { supabase } from '@/lib/supabase';
+import { supabase, setRememberMe } from '@/lib/supabase';
 import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
-import { detectAuthLocaleFromHost } from '@/lib/auth-locale';
+import { resolveAuthEmailLocale } from '@/lib/auth-locale';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/PasswordInput';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { AlertCircle, ArrowLeft, Building2 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { buildPlatformPath, detectPlatformFromPathname } from '@/lib/platform';
 import { usePlatform } from '@/contexts/PlatformContext';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
+import { setLastPortal } from '@/lib/pwaPortal';
+import { loadSavedLoginForm, persistLoginForm, readRememberMePreference } from '@/lib/loginCredentials';
 
 export default function CompanyLogin() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const { platform } = usePlatform();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMeState] = useState(() => readRememberMePreference());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
@@ -34,24 +39,14 @@ export default function CompanyLogin() {
   const cardBadge = isSchoolLogin ? t('school.loginCardBadge') : t('companyLogin.loginTitle');
   const cardTitle = isSchoolLogin ? t('school.loginCardTitle') : t('companyLogin.loginSubtitle');
 
+  // Remember the portal so a logged-out installed PWA opens the right login.
   useEffect(() => {
-    (async () => {
-      // If user just clicked "logout", don't auto-redirect back into the org portal
-      // even if a stale session is still present for a moment.
-      if (sessionStorage.getItem('tutlio_logout_intent') === '1') return;
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return;
-      const { data: adminRow } = await supabase
-        .from('organization_admins')
-        .select('id')
-        .eq('user_id', session.user.id)
-        .maybeSingle();
-      if (adminRow) {
-        const path = await getOrgAdminDashboardPath(supabase, session.user.id);
-        navigate(path, { replace: true });
-      }
-    })();
-  }, [navigate]);
+    setLastPortal(isSchoolLogin ? 'school' : 'company');
+    const saved = loadSavedLoginForm();
+    if (saved.email) setEmail(saved.email);
+    if (saved.password) setPassword(saved.password);
+    setRememberMeState(saved.rememberMe);
+  }, [isSchoolLogin]);
 
   const handleGoToMainLogin = async () => {
     sessionStorage.setItem('tutlio_logout_intent', '1');
@@ -68,28 +63,54 @@ export default function CompanyLogin() {
     setLoading(true);
     setError(null);
 
-    const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
-    if (authError || !data.user) {
-      setError(t('auth.invalidCredentials'));
+    setRememberMe(rememberMe);
+    persistLoginForm(email, password, rememberMe);
+
+    try {
+      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+      if (authError || !data.user) {
+        setError(t('auth.invalidCredentials'));
+        return;
+      }
+
+      const primaryAdmin = await supabase
+        .from('organization_admins')
+        .select('id, status')
+        .eq('user_id', data.user.id)
+        .maybeSingle();
+      const statusColumnsMissing = primaryAdmin.error && (
+        primaryAdmin.error.code === '42703'
+        || primaryAdmin.error.code === 'PGRST204'
+        || primaryAdmin.error.message?.includes('does not exist')
+      );
+      const legacyAdmin = statusColumnsMissing
+        ? await supabase
+          .from('organization_admins')
+          .select('id')
+          .eq('user_id', data.user.id)
+          .maybeSingle()
+        : null;
+      const adminRow = primaryAdmin.data || legacyAdmin?.data;
+
+      if (!adminRow) {
+        await supabase.auth.signOut();
+        setError(isSchoolLogin ? t('school.notSchoolAdmin') : t('companyLogin.noAdminAccount'));
+        return;
+      }
+      if ('status' in adminRow && adminRow.status !== 'active') {
+        await supabase.auth.signOut();
+        setError(t('orgTeam.suspended'));
+        return;
+      }
+
+      const path = await getOrgAdminDashboardPath(supabase, data.user.id);
+      navigate(path);
+    } catch (err) {
+      console.warn('[CompanyLogin] login failed:', err);
+      setError(t('login.timeout'));
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('id')
-      .eq('user_id', data.user.id)
-      .maybeSingle();
-
-    if (!adminRow) {
-      await supabase.auth.signOut();
-      setError(isSchoolLogin ? t('school.notSchoolAdmin') : t('companyLogin.noAdminAccount'));
-      setLoading(false);
-      return;
-    }
-
-    const path = await getOrgAdminDashboardPath(supabase, data.user.id);
-    navigate(path);
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {
@@ -100,13 +121,13 @@ export default function CompanyLogin() {
     }
     setLoading(true);
     setError(null);
-    const redirectTo = getPasswordResetRedirectTo(import.meta.env.VITE_APP_URL, window.location.origin);
+    const redirectTo = getPasswordResetRedirectTo(import.meta.env.VITE_APP_URL, window.location.origin, resolveAuthEmailLocale(locale));
     const resetRes = await fetch('/api/request-password-reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: email.trim(),
-        locale: detectAuthLocaleFromHost(),
+        locale: resolveAuthEmailLocale(locale),
         redirectTo,
       }),
     });
@@ -212,7 +233,7 @@ export default function CompanyLogin() {
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="email" className="text-sm font-medium text-gray-700">{t('common.email')}</Label>
-                    <Input id="email" type="email" placeholder={t('companyLogin.emailPlaceholder')} value={email} onChange={(e) => setEmail(e.target.value)} required className="rounded-xl border-gray-200" />
+                    <Input id="email" type="email" autoComplete="username" placeholder={t('companyLogin.emailPlaceholder')} value={email} onChange={(e) => setEmail(e.target.value)} required className="rounded-xl border-gray-200" />
                   </div>
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -225,8 +246,16 @@ export default function CompanyLogin() {
                         {t('login.forgotPassword')}
                       </button>
                     </div>
-                    <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required className="rounded-xl border-gray-200" />
+                    <PasswordInput id="password" autoComplete="current-password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required className="rounded-xl border-gray-200" />
                   </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMeState(e.target.checked)}
+                    />
+                    <span className="text-sm text-gray-600">{t('login.rememberMe')}</span>
+                  </label>
 
                   {error && (
                     <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-xl px-3 py-2">

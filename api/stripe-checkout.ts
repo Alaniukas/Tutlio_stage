@@ -7,24 +7,18 @@ import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
-
-// Stripe/platform fee helpers inlined (same as create-package-checkout) — ./_lib imports have caused Vercel bundle/runtime failures.
-const STRIPE_FEE_PERCENT = 0.015;
-const STRIPE_FEE_FIXED_EUR = 0.25;
-const PLATFORM_FEE_PERCENT = 0.02;
-
-function customerTotalEur(lessonPriceEur: number): number {
-    const platformFeeEur = lessonPriceEur * PLATFORM_FEE_PERCENT;
-    return (lessonPriceEur + platformFeeEur + STRIPE_FEE_FIXED_EUR) / (1 - STRIPE_FEE_PERCENT);
-}
-
-function lessonCheckoutBreakdownCents(lessonPriceEur: number): { baseCents: number; feesCents: number } {
-    const totalEur = customerTotalEur(lessonPriceEur);
-    const totalCents = Math.round(totalEur * 100);
-    const baseCents = Math.round(lessonPriceEur * 100);
-    const feesCents = totalCents - baseCents;
-    return { baseCents, feesCents };
-}
+import { marketFromRequest } from './_lib/market.js';
+import {
+  chargeCurrency,
+  lessonCheckoutBreakdownCents,
+  checkoutBaseMetadata,
+  creditNote,
+  orgFeeProfile,
+  type OrgFeeProfile,
+} from './_lib/marketMoney.js';
+import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
+import { hasAnyOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -33,6 +27,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const auth = await verifyRequestAuth(req);
     if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+
+    const market = marketFromRequest(req);
+    const currency = chargeCurrency(market);
+    const appOrigin = publicOriginFromRequest(req);
 
     try {
         const body = (req.body || {}) as { sessionId?: string; payerEmail?: string; penaltyAmount?: number };
@@ -77,6 +75,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const tutor = session.profiles as any;
         const student = session.students as any;
+
+        if (!auth.isInternal && auth.userId) {
+            const seat = await getOrgAdminSeatByUserId(supabase, auth.userId);
+            if (seat && (
+                seat.status !== 'active'
+                || seat.organizationId !== tutor?.organization_id
+                || !hasAnyOrgAdminPermission(seat.role, seat.permissions, ['sessions.edit', 'finance.edit'])
+            )) {
+                return res.status(403).json({ error: 'Insufficient organization permission' });
+            }
+        }
+
         const isPenaltyPayment = typeof penaltyAmountOverride === 'number' && penaltyAmountOverride > 0;
         const studentPaymentModelRaw = String(student?.payment_model || '').trim();
         const allowsPerLessonPayment =
@@ -106,11 +116,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let useSchoolOrgAbsorbedFees = false;
         let stripeAccountId: string | null = null;
         let ownerName = tutor?.full_name || 'Korepetitorius';
+        let feeProfile: OrgFeeProfile | null = null;
 
         if (tutor?.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug')
                 .eq('id', tutor.organization_id)
                 .single();
 
@@ -119,7 +130,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
-            useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school';
+            feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
+            // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
+            useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school' && !feeProfile;
         } else {
             if (!tutor?.stripe_onboarding_complete) {
                 return res.status(400).json({ error: 'Tutor Stripe account is not connected.' });
@@ -170,15 +183,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const itemName = isPenaltyPayment
             ? 'Vėlyvo atšaukimo bauda'
             : (session.topic || 'Pamoka');
-        const creditNote = creditToApply > 0 ? ` (kreditas -€${creditToApply.toFixed(2)})` : '';
+        const creditNoteStr = creditToApply > 0 ? creditNote(creditToApply, market) : '';
         const itemDesc = isPenaltyPayment
-            ? `Vėlyvo atšaukimo bauda – ${ownerName}`
-            : `Pamoka – ${ownerName}${creditNote}`;
+            ? `Vėlyvo atšaukimo bauda. Paslaugos teikėjas: ${ownerName}`
+            : `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}${creditNoteStr}`;
 
         // 5. Checkout — school org Connect: single line item + application_fee; else legacy two-line payer gross-up.
         let checkoutSession;
         if (useSchoolOrgAbsorbedFees) {
-            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur);
+            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
             const applicationFeeCents = chargeCents - transferToSchoolCents;
             if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
                 return res.status(400).json({
@@ -192,7 +205,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 line_items: [
                     {
                         price_data: {
-                            currency: 'eur',
+                            currency,
                             product_data: {
                                 name: itemName,
                                 description: itemDesc,
@@ -218,11 +231,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
                     tutlio_school_org_absorbed: 'true',
                 },
-                success_url: `${APP_URL}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${APP_URL}/student/sessions`,
+                success_url: `${appOrigin}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${appOrigin}/student/sessions`,
             });
         } else {
-            const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur);
+            const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
             const transferToConnectedCents = baseCents;
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
@@ -231,7 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 line_items: [
                     {
                         price_data: {
-                            currency: 'eur',
+                            currency,
                             product_data: {
                                 name: itemName,
                                 description: itemDesc,
@@ -242,10 +255,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     },
                     {
                         price_data: {
-                            currency: 'eur',
+                            currency,
                             product_data: {
                                 name: 'Platformos administravimo mokestis',
-                                description: 'Platform administration and payment processing fee',
+                                description: 'Paslaugos teikėjas: MB „Tutlio“',
                             },
                             unit_amount: feesCents,
                         },
@@ -265,9 +278,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 metadata: {
                     tutlio_session_id: sessionId,
                     is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
+                    ...checkoutBaseMetadata(basePriceEur, market),
                 },
-                success_url: `${APP_URL}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${APP_URL}/student/sessions`,
+                success_url: `${appOrigin}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${appOrigin}/student/sessions`,
             });
         }
 

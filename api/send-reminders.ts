@@ -7,6 +7,13 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
+import { requireCronAuth } from './_lib/cronAuth.js';
+import { dedupeReminderRecipients, type ReminderRecipient } from './_lib/reminderRecipients.js';
+import { loadReminderOptOuts } from './_lib/reminderOptOut.js';
+import { parseEmailOptOutList, isEmailOptedOut } from './_lib/emailNotificationOptOut.js';
+import { isMissingPostgrestRpc } from './_lib/postgrestRpc.js';
+import { moksloVaisiaiRoutesLessonCommsToPayer } from './_lib/moksloVaisiaiLessonComms.js';
+import { buildSchoolHomeworkUrl, publicAppOrigin } from './_lib/publicLinkToken.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -17,43 +24,85 @@ const API_URL = process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
   : (process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt');
 
+export const SESSION_REMINDER_BATCH_SIZE = 250;
+export const SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT = 100;
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
-    if (auth !== `Bearer ${cronSecret}`) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-  }
+  if (!requireCronAuth(req, res)) return;
 
-  const results: { session?: number; deadline?: any; afterLesson?: any; schoolInstallments?: any } = {};
+  const results: { session?: number; deadline?: any; afterLesson?: any; schoolInstallments?: any; lessonStatusConfirmations?: any } = {};
   let totalSent = 0;
+  let emailAttempts = 0;
+
+  // Cache org features across the session loop (req 7: flexible_invitations gates
+  // expanded parent reminder recipients, so other orgs' email volume is unchanged).
+  const orgRowCache = new Map<string, { features: Record<string, unknown> | null; entityType: string | null }>();
+  const getOrgRow = async (orgId: string | null) => {
+    if (!orgId) return null;
+    const cached = orgRowCache.get(orgId);
+    if (cached) return cached;
+    const { data } = await supabase.from('organizations').select('features, entity_type').eq('id', orgId).maybeSingle();
+    const row = {
+      features: ((data as { features?: Record<string, unknown> | null } | null)?.features as Record<string, unknown> | null) ?? null,
+      entityType: ((data as { entity_type?: string | null } | null)?.entity_type as string | null) ?? null,
+    };
+    orgRowCache.set(orgId, row);
+    return row;
+  };
+  const getOrgFeatures = async (orgId: string | null): Promise<Record<string, unknown> | null> =>
+    (await getOrgRow(orgId))?.features ?? null;
+  /** School parents get the lesson reminder with the join link even without a Tutlio account. */
+  const isSchoolOrg = async (orgId: string | null): Promise<boolean> =>
+    String((await getOrgRow(orgId))?.entityType || '').toLowerCase() === 'school';
 
   try {
     const now = new Date();
-    const maxFuture = new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString();
-
-    const { data: sessions, error } = await supabase
-      .from('sessions')
-      .select(`
-        id, start_time, end_time, topic, price, meeting_link, whiteboard_room_id,
-        reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
-        student:students(id, full_name, email, payment_payer, payer_email, payer_name),
-        tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id)
-      `)
-      .eq('status', 'active')
-      .gte('start_time', now.toISOString())
-      .lt('start_time', maxFuture)
-      .limit(500);
+    const sessionSelect = `
+          id, start_time, end_time, topic, price, meeting_link,
+          reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
+          student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name, organization_id, linked_user_id),
+          tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id, email_notification_opt_out)
+        `;
+    const { data: dueSessionRows, error: dueSessionError } = await supabase.rpc(
+      'get_due_session_reminder_ids',
+      { p_limit: SESSION_REMINDER_BATCH_SIZE },
+    );
+    const dueSessionIds = (dueSessionRows || [])
+      .map((row: { id?: string }) => row.id)
+      .filter((id: string | undefined): id is string => Boolean(id));
+    const sessionResult = isMissingPostgrestRpc(dueSessionError)
+      ? await (async () => {
+          console.warn('[send-reminders] get_due_session_reminder_ids missing; scanning sessions directly');
+          const maxFuture = new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString();
+          return supabase
+            .from('sessions')
+            .select(sessionSelect)
+            .eq('status', 'active')
+            .gte('start_time', now.toISOString())
+            .lt('start_time', maxFuture)
+            .order('start_time', { ascending: true })
+            .order('id', { ascending: true })
+            .limit(SESSION_REMINDER_BATCH_SIZE);
+        })()
+      : dueSessionError || dueSessionIds.length === 0
+        ? { data: [], error: dueSessionError }
+        : await supabase
+          .from('sessions')
+          .select(sessionSelect)
+          .in('id', dueSessionIds)
+          .order('start_time', { ascending: true })
+          .order('id', { ascending: true });
+    const { data: sessions, error } = sessionResult;
 
     if (error) {
       console.error('[send-reminders] Session query error:', error);
     } else if (sessions?.length) {
       for (const session of sessions) {
+        if (emailAttempts >= SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) break;
         const startTime = new Date(session.start_time);
         if (startTime <= now) continue; // Only future sessions – never remind for past
         const diffHours = (startTime.getTime() - now.getTime()) / (1000 * 60 * 60);
@@ -67,14 +116,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const tz = 'Europe/Vilnius';
         const dateStr = startTime.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz });
         const timeStr = startTime.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit', timeZone: tz });
-        const whiteboardLink = (session as any).whiteboard_room_id
-          ? `${API_URL}/whiteboard/${(session as any).whiteboard_room_id}`
-          : null;
         const orgId = (tutor as any)?.organization_id || null;
-        const baseData = { date: dateStr, time: timeStr, topic: session.topic, duration: durationMinutes, price: session.price, meetingLink: session.meeting_link, whiteboardLink, ...(orgId ? { organizationId: orgId } : {}) };
+        // sessionId lets /api/send-email swap the link for a tracked /api/join-session URL (attendance).
+        // Whiteboard link intentionally omitted: it pointed at the deployment domain and
+        // recipients (parents/students) often lack board access — it lives in-app only.
+        const baseData = {
+          sessionId: session.id,
+          studentId: student?.id || undefined,
+          date: dateStr,
+          time: timeStr,
+          topic: session.topic,
+          duration: durationMinutes,
+          price: session.price,
+          meetingLink: session.meeting_link,
+          ...(orgId ? { organizationId: orgId } : {}),
+        };
 
         if (reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
           try {
+            emailAttempts += 1;
             const resp = await fetch(`${API_URL}/api/send-email`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
@@ -93,53 +153,132 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
 
-// Payer (parent): same time window as student; skip if payer_email === student.email
-        const payerEmail = (student as any)?.payer_email?.trim();
-        const isPayerParent = (student as any)?.payment_payer === 'parent';
-        const payerName = (student as any)?.payer_name || null;
-        const payerIsDifferentFromStudent = payerEmail && payerEmail !== (student?.email || '').trim();
+        // Parent/payer reminders: same time window as student.
+        // Default: only the paying parent (payment_payer==='parent').
+        // With flexible_invitations on: remind ALL parent contacts (payer +
+        // secondary + registered parents), decoupled from who pays.
+        if (reminderStudentHours > 0 && !session.reminder_payer_sent && diffHours <= reminderStudentHours && diffHours >= 0) {
+          const studentEmailNorm = (student?.email || '').trim().toLowerCase();
+          const payerEmail = (student as any)?.payer_email?.trim() || '';
+          const payerName = (student as any)?.payer_name || null;
+          const isPayerParent = (student as any)?.payment_payer === 'parent';
+          const mvPayerInbox = moksloVaisiaiRoutesLessonCommsToPayer({
+            organizationId: (student as any)?.organization_id ?? orgId,
+            tutorOrganizationId: orgId,
+            studentEmail: student?.email,
+            linkedUserId: (student as any)?.linked_user_id,
+          });
+          const flexibleInvites = (await getOrgFeatures(orgId))?.flexible_invitations === true;
+          // School org: the payer email on the student row is the parent contact,
+          // whether or not that parent ever registered (schools run on emails only).
+          const studentOrgId = ((student as any)?.organization_id as string | null) ?? orgId;
+          const schoolFlow = await isSchoolOrg(studentOrgId);
 
-        let parentOptedOut = false;
-        if (isPayerParent && payerEmail) {
-          const { data: pp } = await supabase
-            .from('parent_profiles')
-            .select('disable_lesson_reminders')
-            .eq('email', payerEmail)
-            .limit(1)
-            .single();
-          if (pp?.disable_lesson_reminders) parentOptedOut = true;
-        }
+          const candidates: ReminderRecipient[] = [];
 
-        if (reminderStudentHours > 0 && !session.reminder_payer_sent && isPayerParent && payerIsDifferentFromStudent && !parentOptedOut && diffHours <= reminderStudentHours && diffHours >= 0) {
-          try {
-            const resp = await fetch(`${API_URL}/api/send-email`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-              body: JSON.stringify({
-                type: 'session_reminder_payer',
-                to: payerEmail,
-                data: {
-                  ...baseData,
-                  recipientName: payerName || undefined,
-                  studentName: student?.full_name || 'Mokinys',
-                  tutorName: tutor?.full_name || 'Korepetitorius',
-                  tutorEmail: tutor?.email || undefined,
-                  tutorPhone: tutor?.phone || undefined,
-                },
-              }),
-            });
-            if (resp.ok) {
-              await supabase.from('sessions').update({ reminder_payer_sent: true }).eq('id', session.id);
-              totalSent++;
+          if (schoolFlow && !flexibleInvites) {
+            if (payerEmail) candidates.push({ email: payerEmail, name: payerName });
+            const secEmail = (student as any)?.parent_secondary_email?.trim() || '';
+            if (secEmail) candidates.push({ email: secEmail, name: (student as any)?.parent_secondary_name || null });
+          } else if (flexibleInvites) {
+            if (payerEmail) candidates.push({ email: payerEmail, name: payerName });
+            const secEmail = (student as any)?.parent_secondary_email?.trim() || '';
+            if (secEmail) candidates.push({ email: secEmail, name: (student as any)?.parent_secondary_name || null });
+            // Registered parents linked to this student.
+            const { data: links } = await supabase
+              .from('parent_students')
+              .select('parent_id')
+              .eq('student_id', (student as any)?.id);
+            const parentIds = (links || []).map((l: any) => l.parent_id).filter(Boolean);
+            if (parentIds.length > 0) {
+              const { data: profs } = await supabase
+                .from('parent_profiles')
+                .select('email, full_name, disable_lesson_reminders')
+                .in('id', parentIds);
+              for (const p of profs || []) {
+                if (p?.disable_lesson_reminders) continue;
+                if (p?.email) candidates.push({ email: String(p.email), name: p.full_name || null });
+              }
             }
-          } catch (e) {
-            console.error('[send-reminders] payer reminder error:', e);
+          } else if ((isPayerParent || mvPayerInbox) && payerEmail) {
+            candidates.push({ email: payerEmail, name: payerName });
+          }
+
+          // Resolve opt-outs for raw payer/secondary emails (registered parents
+          // were already filtered above by their profile flag). parent_profiles
+          // stores emails lowercased, so match on the lowercased candidates.
+          const optedOut = new Set<string>();
+          if (candidates.length > 0) {
+            const lookupEmails = [...new Set(candidates.map((c) => c.email.trim().toLowerCase()))];
+            const { data: optRows } = await supabase
+              .from('parent_profiles')
+              .select('email, disable_lesson_reminders')
+              .in('email', lookupEmails);
+            for (const r of optRows || []) {
+              if (r?.disable_lesson_reminders && r?.email) optedOut.add(String(r.email).toLowerCase());
+            }
+            const tableOptOuts = await loadReminderOptOuts(supabase, lookupEmails);
+            for (const e of tableOptOuts) optedOut.add(e);
+          }
+
+          // Dedup, drop the student's own email and opt-outs.
+          const recipients = dedupeReminderRecipients(candidates, {
+            studentEmail: studentEmailNorm,
+            optedOutEmails: optedOut,
+          });
+
+          let anyParentSent = false;
+          for (const r of recipients) {
+            if (emailAttempts >= SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) break;
+            try {
+              emailAttempts += 1;
+              const resp = await fetch(`${API_URL}/api/send-email`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                body: JSON.stringify({
+                  type: 'session_reminder_payer',
+                  to: r.email,
+                  data: {
+                    ...baseData,
+                    ...(schoolFlow && studentOrgId
+                      ? {
+                        organizationId: studentOrgId,
+                        schoolFlow: true,
+                        // Homework / materials page — the only "portal" a parent without an account has.
+                        homeworkUrl: student?.id ? buildSchoolHomeworkUrl(publicAppOrigin(), String(student.id)) : undefined,
+                      }
+                      : {}),
+                    recipientName: r.name || undefined,
+                    studentName: student?.full_name || 'Mokinys',
+                    tutorName: tutor?.full_name || 'Korepetitorius',
+                    tutorEmail: tutor?.email || undefined,
+                    tutorPhone: tutor?.phone || undefined,
+                  },
+                }),
+              });
+              if (resp.ok) {
+                anyParentSent = true;
+                totalSent++;
+              }
+            } catch (e) {
+              console.error('[send-reminders] parent reminder error:', e);
+            }
+          }
+          if (anyParentSent) {
+            await supabase.from('sessions').update({ reminder_payer_sent: true }).eq('id', session.id);
           }
         }
 
-        if (reminderTutorHours > 0 && !session.reminder_tutor_sent && diffHours <= reminderTutorHours && diffHours >= 0 && tutor?.email) {
+        if (reminderTutorHours > 0 && !session.reminder_tutor_sent && diffHours <= reminderTutorHours && diffHours >= 0 && tutor?.email && emailAttempts < SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) {
+          const tutorOptOut = parseEmailOptOutList(tutor?.email_notification_opt_out);
+          if (isEmailOptedOut(tutorOptOut, 'lesson_reminder_tutor')) {
+            await supabase.from('sessions').update({ reminder_tutor_sent: true }).eq('id', session.id);
+          } else {
           try {
+            emailAttempts += 1;
             const tutorReminderCore = {
+              sessionId: session.id,
+              studentId: student?.id || undefined,
               date: dateStr,
               time: timeStr,
               topic: session.topic,
@@ -170,11 +309,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           } catch (e) {
             console.error('[send-reminders] tutor email error:', e);
           }
+          }
         }
       }
       results.session = totalSent;
     }
 
+    const cronSecret = process.env.CRON_SECRET;
     const cronHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
     if (cronSecret) cronHeaders['Authorization'] = `Bearer ${cronSecret}`;
 
@@ -196,10 +337,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (e) {
       console.error('[send-reminders] school-installment-reminders error:', e);
     }
+    try {
+      const statusRes = await fetch(`${API_URL}/api/lesson-status-confirmation-reminders`, { method: 'GET', headers: cronHeaders });
+      results.lessonStatusConfirmations = statusRes.ok ? await statusRes.json().catch(() => ({})) : null;
+    } catch (e) {
+      console.error('[send-reminders] lesson-status-confirmation-reminders error:', e);
+    }
 
     return res.status(200).json({
       message: 'Reminders run complete',
       sent: totalSent,
+      emailAttempts,
+      emailAttemptLimit: SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT,
+      sessionBatchSize: SESSION_REMINDER_BATCH_SIZE,
       sessionReminders: results.session,
       paymentDeadlineWarnings: results.deadline,
       paymentAfterLessonReminders: results.afterLesson,

@@ -61,6 +61,8 @@ export function trackPageview(pathname: string) {
   const locale = document.documentElement.lang || navigator.language?.slice(0, 2) || '';
 
   void (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500);
     try {
       const { error } = await supabase.from('analytics_events').insert({
         session_id: getSessionId(),
@@ -72,12 +74,14 @@ export function trackPageview(pathname: string) {
         utm_campaign: utm.utm_campaign || null,
         locale: locale || null,
         user_agent: navigator.userAgent?.slice(0, 512) || null,
-      });
+      }).abortSignal(controller.signal);
       if (error && !String(error.message || '').includes('relation') && error.code !== '42P01') {
         console.warn('[analytics] insert error:', error.message);
       }
     } catch {
-      /* Missing table, CORS, offline — never block app flows */
+      /* Missing table, CORS, offline, abort — never block app flows */
+    } finally {
+      clearTimeout(timer);
     }
   })();
 }

@@ -5,7 +5,7 @@
 process.env.NODE_TLS_REJECT_UNAUTHORIZED ??= '0';
 import http from 'node:http';
 import { Readable } from 'node:stream';
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -15,6 +15,36 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, '..');
 const apiDir = join(projectRoot, 'api');
 const PORT = Number(process.env.DEV_API_PORT || 3002);
+
+const DOTENV_FORCE_KEYS = new Set([
+  'SUPABASE_URL',
+  'VITE_SUPABASE_URL',
+  'SUPABASE_SERVICE_ROLE_KEY',
+  'VITE_SUPABASE_ANON_KEY',
+]);
+
+const STRIPE_PARENT_OVERRIDE_KEYS = new Set([
+  'STRIPE_SECRET_KEY',
+  'STRIPE_PUBLISHABLE_KEY',
+  'STRIPE_WEBHOOK_SECRET',
+  'STRIPE_CONNECT_WEBHOOK_SECRET',
+  'STRIPE_MONTHLY_PRODUCT_ID',
+  'STRIPE_MONTHLY_PRICE_ID',
+  'STRIPE_YEARLY_PRODUCT_ID',
+  'STRIPE_YEARLY_PRICE_ID',
+  'STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID',
+  'STRIPE_SUBSCRIPTION_ONLY_PRICE_ID',
+  'STRIPE_SUBSCRIPTION_ONLY_YEARLY_PRICE_ID',
+  'STRIPE_MONTHLY_PRODUCT_ID_PLN',
+  'STRIPE_MONTHLY_PRICE_ID_PLN',
+  'STRIPE_YEARLY_PRODUCT_ID_PLN',
+  'STRIPE_YEARLY_PRICE_ID_PLN',
+  'STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID_PLN',
+  'STRIPE_SUBSCRIPTION_ONLY_PRICE_ID_PLN',
+  'STRIPE_SUBSCRIPTION_ONLY_YEARLY_PRICE_ID_PLN',
+  'STRIPE_ENTERPRISE_PRICE_ID',
+  'STRIPE_ENTERPRISE_PRICE_ID_PLN',
+]);
 
 function loadEnvFile(name: string) {
   const p = join(projectRoot, name);
@@ -39,8 +69,14 @@ function loadEnvFile(name: string) {
       (key === 'SUPABASE_URL' ||
         key === 'SUPABASE_SERVICE_ROLE_KEY' ||
         key === 'VITE_SUPABASE_URL' ||
-        key === 'VITE_SUPABASE_ANON_KEY');
+        key === 'VITE_SUPABASE_ANON_KEY' ||
+        STRIPE_PARENT_OVERRIDE_KEYS.has(key));
     if (preserveFromParent && process.env[key] !== undefined) continue;
+    // Windows often has stale Supabase vars in user env — project .env must win.
+    if (name === '.env' && DOTENV_FORCE_KEYS.has(key)) {
+      process.env[key] = value;
+      continue;
+    }
     if (process.env[key] === undefined || name === '.env.local') process.env[key] = value;
   }
 }
@@ -49,6 +85,16 @@ loadEnvFile('.env');
 loadEnvFile('.env.local');
 /** Let API handlers infer browser origin on localhost even if VERCEL=1 leaked into .env */
 process.env.TUTLIO_DEV_API_LOCAL = '1';
+
+/** Known-dead Supabase projects — drop so VITE_* / fresh .env can win. */
+const STALE_SUPABASE_HOST = 'xklzjhfztjxltrdkplog';
+for (const key of ['SUPABASE_URL', 'VITE_SUPABASE_URL'] as const) {
+  const v = process.env[key];
+  if (v?.includes(STALE_SUPABASE_HOST)) {
+    console.warn(`[dev-api-local] Dropping stale ${key} (${STALE_SUPABASE_HOST})`);
+    delete process.env[key];
+  }
+}
 
 // Many .env.local files only define VITE_* — API auth must use the same project URL.
 if (!process.env.SUPABASE_URL && process.env.VITE_SUPABASE_URL) {
@@ -59,6 +105,28 @@ if (process.env.STRIPE_YEARLY_PRICE_ID) {
   console.log('[dev-api-local] STRIPE_YEARLY_PRICE_ID loaded');
 } else {
   console.warn('[dev-api-local] STRIPE_YEARLY_PRICE_ID missing — restart after editing .env.local');
+}
+
+const stripeSecretMode = process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_')
+  ? 'test'
+  : process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_')
+    ? 'live'
+    : 'missing';
+const stripePublishableMode = process.env.STRIPE_PUBLISHABLE_KEY?.startsWith('pk_test_')
+  ? 'test'
+  : process.env.STRIPE_PUBLISHABLE_KEY?.startsWith('pk_live_')
+    ? 'live'
+    : 'missing';
+if (stripePublishableMode === 'missing') {
+  console.warn(
+    '[dev-api-local] STRIPE_PUBLISHABLE_KEY missing — Embedded Checkout cannot load. For dev:test, add TEST_STRIPE_PUBLISHABLE_KEY to .env.local.',
+  );
+} else if (stripeSecretMode !== stripePublishableMode) {
+  console.warn(
+    `[dev-api-local] Stripe key mode mismatch: secret=${stripeSecretMode}, publishable=${stripePublishableMode}. Use keys from the same Stripe mode/account.`,
+  );
+} else {
+  console.log(`[dev-api-local] Stripe Checkout keys: ${stripeSecretMode} mode`);
 }
 
 const apiSupabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
@@ -167,10 +235,28 @@ const handlerCache = new Map<
   }
 >();
 
+function apiLibMtimeMs(): number {
+  let max = 0;
+  const bump = (dir: string) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      try {
+        max = Math.max(max, statSync(p).mtimeMs);
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+  bump(join(apiDir, '_lib'));
+  bump(join(projectRoot, 'src', 'lib'));
+  return max;
+}
+
 async function getHandler(route: string) {
   const filePath = join(apiDir, `${route}.ts`);
   if (!existsSync(filePath)) return null;
-  const mtimeMs = statSync(filePath).mtimeMs;
+  const mtimeMs = Math.max(statSync(filePath).mtimeMs, apiLibMtimeMs());
   const hit = handlerCache.get(route);
   if (hit && hit.mtimeMs === mtimeMs) return hit.mod;
   const href = `${pathToFileURL(filePath).href}?t=${mtimeMs}`;
@@ -271,8 +357,9 @@ const server = http.createServer(async (req, res) => {
 
 async function startListening(): Promise<void> {
   const killPort = (await import('kill-port')).default as (port: number) => Promise<unknown>;
+  const maxAttempts = 6;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       await new Promise<void>((resolve, reject) => {
         const onErr = (err: NodeJS.ErrnoException) => {
@@ -292,18 +379,22 @@ async function startListening(): Promise<void> {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code !== 'EADDRINUSE') throw err;
-      if (attempt >= 1) {
+      if (attempt >= maxAttempts - 1) {
         console.error(
           `[dev-api-local] Port ${PORT} is still busy. Run: npm run free:3002 — or set DEV_API_PORT`,
         );
         process.exit(1);
       }
-      console.warn(`[dev-api-local] Port ${PORT} busy (leftover server). Clearing it once…`);
-      try {
-        await killPort(PORT);
-      } catch {
-        /* nothing listening or kill-package message — retry listen anyway */
+      if (attempt === 0) {
+        console.warn(`[dev-api-local] Port ${PORT} busy (leftover server). Clearing it once…`);
+        try {
+          await killPort(PORT);
+        } catch {
+          /* nothing listening or kill-package message — retry listen anyway */
+        }
       }
+      // kill-port SIGKILLs asynchronously — give the OS time to release the socket before retrying.
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
   }
 }

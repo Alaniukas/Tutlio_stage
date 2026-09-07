@@ -1,6 +1,9 @@
 // ─── Vercel Serverless: Create Lesson Package Checkout ────────────────────────
 // POST /api/create-package-checkout
-// Body: { tutorId, studentId, subjectId, totalLessons, pricePerLesson? }
+// Body (multi-subject):
+//   { tutorId, studentId, items: [{ subjectId, totalLessons, pricePerLesson? }], expiresAt?, attachSalesInvoice? }
+// Body (legacy single-subject, still accepted):
+//   { tutorId, studentId, subjectId, totalLessons, pricePerLesson?, expiresAt?, attachSalesInvoice? }
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
@@ -8,24 +11,26 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
-
-// Stripe/platform fee helpers (inlined to avoid _lib import issues on Vercel)
-const STRIPE_FEE_PERCENT = 0.015;
-const STRIPE_FEE_FIXED_EUR = 0.25;
-const PLATFORM_FEE_PERCENT = 0.02;
-
-function customerTotalEur(basePriceEur: number): number {
-    const platformFeeEur = basePriceEur * PLATFORM_FEE_PERCENT;
-    return (basePriceEur + platformFeeEur + STRIPE_FEE_FIXED_EUR) / (1 - STRIPE_FEE_PERCENT);
-}
-
-function lessonCheckoutBreakdownCents(basePriceEur: number): { baseCents: number; feesCents: number } {
-    const totalEur = customerTotalEur(basePriceEur);
-    const totalCents = Math.round(totalEur * 100);
-    const baseCents = Math.round(basePriceEur * 100);
-    const feesCents = totalCents - baseCents;
-    return { baseCents, feesCents };
-}
+import { marketFromRequest } from './_lib/market.js';
+import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
+import { customerTotalEur } from './_lib/stripeLessonPricing.js';
+import { publicOriginFromRequest } from './_lib/public-origin.js';
+import {
+  normalizePackageItemsInput,
+  resolvePackageItems,
+  aggregatePackageTotals,
+  itemsForEmailPayload,
+} from './_lib/packageItems.js';
+import {
+  isPackageReservationFlowEnabled,
+  getPackagePaymentDeadlineHours,
+} from './_lib/trialReservation.js';
+import { reservePackageSlots, type PackageSlotInput } from './_lib/packageSlots.js';
+import {
+    resolveRecurringPackagePlan,
+    recurringPlanPackageFields,
+    type MonthlyPlanInput,
+} from './_lib/recurringPackagePlan.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -35,6 +40,11 @@ function json(res: VercelResponse, status: number, body: unknown) {
 function getEnv(name: string): string | null {
     const v = process.env[name];
     return v && String(v).trim().length > 0 ? String(v) : null;
+}
+
+function packageExpiryIso(value: string): string {
+    const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T23:59:59.999Z` : value;
+    return new Date(normalized).toISOString();
 }
 
 async function postInternalJson(url: string, payload: unknown, timeoutMs = 7000) {
@@ -71,26 +81,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
 
     const auth = await verifyRequestAuth(req);
-    if (!auth?.userId) return json(res, 401, { error: 'Unauthorized' });
+    const internalRecurringPlanId = typeof (req.body as any)?.recurringPlanId === 'string'
+        ? String((req.body as any).recurringPlanId)
+        : '';
+    if (!auth || (!auth.userId && !(auth.isInternal && internalRecurringPlanId))) {
+        return json(res, 401, { error: 'Unauthorized' });
+    }
 
-    const { tutorId, studentId, subjectId, totalLessons, pricePerLesson: requestedPriceRaw, expiresAt, attachSalesInvoice } = req.body as {
-        tutorId: string;
-        studentId: string;
-        subjectId: string;
-        totalLessons: number;
+    const market = marketFromRequest(req);
+    const currency = chargeCurrency(market);
+    const appOrigin = publicOriginFromRequest(req);
+
+    const body = req.body as {
+        tutorId?: string;
+        studentId?: string;
+        // Legacy single-subject fields (still accepted for backward compatibility):
+        subjectId?: string;
+        totalLessons?: number;
         pricePerLesson?: number;
+        // New multi-subject payload:
+        items?: Array<{ subjectId: string; totalLessons: number; pricePerLesson?: number }>;
         expiresAt?: string;
         /** Default true: generate S.F. and attach to payment email when invoice profile exists */
         attachSalesInvoice?: boolean;
+        /** Reservation flow (req 3): pre-book lesson times held until paid by the deadline. */
+        slots?: PackageSlotInput[];
+        monthlyPlan?: MonthlyPlanInput;
+        recurringPlanId?: string;
+        billingPeriodStart?: string;
+        billingPeriodEnd?: string;
     };
-    const shouldAttachSf = attachSalesInvoice !== false;
+    const tutorId = body.tutorId;
+    const studentId = body.studentId;
+    const expiresAt = body.expiresAt;
+    const shouldAttachSf = body.attachSalesInvoice !== false;
 
-    if (!tutorId || !studentId || !subjectId || !totalLessons) {
+    if (!tutorId || !studentId) {
         return json(res, 400, { error: 'Missing required fields' });
     }
 
-    if (totalLessons <= 0 || totalLessons > 100) {
-        return json(res, 400, { error: 'Lesson count must be between 1 and 100' });
+    const { items: normalizedItems, error: normalizeErr } = normalizePackageItemsInput(body);
+    if (normalizeErr) {
+        return json(res, 400, { error: normalizeErr });
     }
 
     try {
@@ -141,44 +173,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 404, { error: 'Mokinys nerastas', details: studentErr?.message });
         }
 
-        const { data: subject, error: subjectErr } = await supabase
-            .from('subjects')
-            .select('id, name, price, duration_minutes')
-            .eq('id', subjectId)
-            .single();
-
-        if (subjectErr || !subject) {
-            return json(res, 404, { error: 'Dalykas nerastas', details: subjectErr?.message });
+        // 2. Resolve every package item (subject ownership + per-student pricing fallback)
+        const { items: resolvedItems, error: itemsErr } = await resolvePackageItems(supabase, {
+            tutorId,
+            studentId,
+            items: normalizedItems,
+        });
+        if (itemsErr) {
+            return json(res, 400, { error: itemsErr });
         }
-
-        // 2. Check for individual pricing override
-        const { data: individualPricing } = await supabase
-            .from('student_individual_pricing')
-            .select('price')
-            .eq('student_id', studentId)
-            .eq('subject_id', subjectId)
-            .single();
-
-        const requestedPrice =
-            typeof requestedPriceRaw === 'number' && Number.isFinite(requestedPriceRaw)
-                ? requestedPriceRaw
-                : null;
-
-        if (requestedPrice !== null && requestedPrice < 0) {
-            return json(res, 400, { error: 'Price per lesson cannot be negative' });
+        const { totalLessons, totalPriceEur: basePriceEur } = aggregatePackageTotals(resolvedItems);
+        // Auto (schedule-derived) plans are multi-subject by design.
+        let recurringPlanIsAuto = false;
+        if (body.recurringPlanId) {
+            const { data: planMeta } = await supabase
+                .from('recurring_monthly_package_plans')
+                .select('auto_from_schedule')
+                .eq('id', body.recurringPlanId)
+                .maybeSingle();
+            recurringPlanIsAuto = (planMeta as { auto_from_schedule?: boolean } | null)?.auto_from_schedule === true;
         }
-
-        const pricePerLesson = requestedPrice ?? individualPricing?.price ?? subject.price ?? 25;
+        if ((body.monthlyPlan || (body.recurringPlanId && !recurringPlanIsAuto)) && resolvedItems.length !== 1) {
+            return json(res, 400, { error: 'A recurring monthly package must contain exactly one subject.' });
+        }
 
         // 3. Determine which Stripe account to use (org or tutor)
         let stripeAccountId: string | null = null;
         let ownerName = tutor.full_name || 'Korepetitorius';
         let useSchoolOrgAbsorbedFees = false;
+        let feeProfile: OrgFeeProfile | null = null;
+        let orgFeatures: Record<string, unknown> | null = null;
+        let orgEntityType: string | null = null;
 
         if (tutor.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug, features')
                 .eq('id', tutor.organization_id)
                 .single();
 
@@ -187,7 +217,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
-            useSchoolOrgAbsorbedFees = org.entity_type === 'school';
+            orgFeatures = (org as { features?: Record<string, unknown> | null }).features ?? null;
+            orgEntityType = org.entity_type ?? null;
+            feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
+            // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
+            useSchoolOrgAbsorbedFees = org.entity_type === 'school' && !feeProfile;
         } else {
             if (!tutor.stripe_onboarding_complete) {
                 return json(res, 400, { error: 'Tutor Stripe account is not connected' });
@@ -200,8 +234,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         // 4. Totals — school org Connect: payer pays package list price only; fees absorbed via application_fee
-        const basePriceEur = pricePerLesson * totalLessons;
-        const payerChargedTotalEur = useSchoolOrgAbsorbedFees ? basePriceEur : customerTotalEur(basePriceEur);
+        const payerChargedTotalEur = useSchoolOrgAbsorbedFees ? basePriceEur : customerTotalEur(basePriceEur, feeProfile);
+        // Single-subject packages keep `subject_id` populated for legacy reads;
+        // multi-subject packages leave it NULL (items table is the source of truth).
+        const primarySubjectId = resolvedItems.length === 1 ? resolvedItems[0]!.subjectId : null;
+        const primaryPricePerLesson = resolvedItems.length === 1 ? resolvedItems[0]!.pricePerLesson : null;
+        const { data: recurringPlan, error: recurringPlanError } = await resolveRecurringPackagePlan({
+            supabase,
+            organizationId: tutor.organization_id || null,
+            createdBy: auth.userId,
+            tutorId,
+            studentId,
+            subjectId: primarySubjectId,
+            paymentMethod: 'stripe',
+            attachSalesInvoice: shouldAttachSf,
+            monthlyPlan: body.monthlyPlan,
+            recurringPlanId: body.recurringPlanId,
+            billingPeriodStart: body.billingPeriodStart,
+            billingPeriodEnd: body.billingPeriodEnd,
+        });
+        if (recurringPlanError || !recurringPlan) {
+            return json(res, 400, { error: recurringPlanError || 'Failed to resolve monthly package plan.' });
+        }
+        const effectiveExpiresAt = expiresAt || recurringPlan.billingPeriodEnd;
 
         // 5. Always create a NEW package record (will be activated after payment)
         // Multiple packages can exist for same student/subject - they'll be used in order
@@ -210,18 +265,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .insert({
                 tutor_id: tutorId,
                 student_id: studentId,
-                subject_id: subjectId,
+                subject_id: primarySubjectId,
                 total_lessons: totalLessons,
                 available_lessons: totalLessons, // Initially all available
                 reserved_lessons: 0,
                 completed_lessons: 0,
-                price_per_lesson: pricePerLesson,
+                price_per_lesson: primaryPricePerLesson,
                 total_price: basePriceEur,
                 paid: false,
                 payment_status: 'pending',
                 active: false,
                 payment_method: 'stripe',
-                ...(expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {}),
+                ...recurringPlanPackageFields(recurringPlan),
+                ...(effectiveExpiresAt ? { expires_at: packageExpiryIso(effectiveExpiresAt) } : {}),
             })
             .select()
             .single();
@@ -237,13 +293,78 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 500, { error: 'Nepavyko sukurti paketo', details: packageErr?.message });
         }
 
+        // 5b. Insert package items (one row per subject)
+        const itemRows = resolvedItems.map((it, idx) => ({
+            package_id: lessonPackage.id,
+            subject_id: it.subjectId,
+            total_lessons: it.totalLessons,
+            available_lessons: it.totalLessons,
+            reserved_lessons: 0,
+            completed_lessons: 0,
+            price_per_lesson: it.pricePerLesson,
+            total_price: it.itemTotalPrice,
+            position: idx,
+        }));
+        const { error: itemsInsertErr } = await supabase
+            .from('lesson_package_items')
+            .insert(itemRows);
+        if (itemsInsertErr) {
+            console.error('Error creating package items:', itemsInsertErr);
+            await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
+            return json(res, 500, { error: 'Nepavyko sukurti paketo punktų', details: itemsInsertErr.message });
+        }
+
+        // 5c. Reservation flow (req 3+5): when the org has it on and the admin
+        // pre-booked times, hold the slots now (reserved) and move credits
+        // available->reserved. Unpaid holds auto-release via the cron.
+        if (isPackageReservationFlowEnabled(orgFeatures, tutor.organization_id, orgEntityType) && Array.isArray(body.slots) && body.slots.length > 0) {
+            const reserveResult = await reservePackageSlots(supabase, {
+                tutorId,
+                studentId,
+                packageId: lessonPackage.id,
+                slots: body.slots,
+                items: resolvedItems.map((it) => ({
+                    subjectId: it.subjectId,
+                    subjectName: it.subjectName,
+                    pricePerLesson: it.pricePerLesson,
+                    totalLessons: it.totalLessons,
+                })),
+                deadlineHours: getPackagePaymentDeadlineHours(orgFeatures),
+            });
+            if (reserveResult.error) {
+                await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
+                return json(res, reserveResult.status || 500, { error: reserveResult.error });
+            }
+        }
+
         // 6. Determine customer email (payer or student)
         const customerEmail = student.payer_email || student.email || undefined;
 
-        // 7. Create Stripe Checkout session
+        // 7. Create Stripe Checkout session — one line per subject (multi-subject support)
+        const itemLineItems = resolvedItems.map((it) => ({
+            price_data: {
+                currency,
+                product_data: {
+                    name: `${it.totalLessons} × ${it.subjectName}`,
+                    description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,
+                },
+                unit_amount: Math.round(it.pricePerLesson * 100),
+            },
+            quantity: it.totalLessons,
+        }));
+
+        const metadataBase = {
+            tutlio_package_id: lessonPackage.id,
+            tutor_id: tutorId,
+            student_id: studentId,
+            // Keep subject_id in metadata only when the package is single-subject;
+            // multi-subject packages don't have one primary subject.
+            ...(primarySubjectId ? { subject_id: primarySubjectId } : {}),
+        };
+
         let checkoutSession: Stripe.Response<Stripe.Checkout.Session>;
         if (useSchoolOrgAbsorbedFees) {
-            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur);
+            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
             const applicationFeeCents = chargeCents - transferToSchoolCents;
             if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
                 await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
@@ -255,67 +376,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 mode: 'payment',
                 customer_email: customerEmail,
                 payment_method_types: ['card'],
-                line_items: [
-                    {
-                        price_data: {
-                            currency: 'eur',
-                            product_data: {
-                                name: `${totalLessons} lessons – ${subject.name}`,
-                                description: `Package – ${ownerName}`,
-                            },
-                            unit_amount: chargeCents,
-                        },
-                        quantity: 1,
-                    },
-                ],
+                line_items: itemLineItems,
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
                     transfer_data: {
                         destination: stripeAccountId,
                     },
-                    metadata: {
-                        tutlio_package_id: lessonPackage.id,
-                        tutor_id: tutorId,
-                        student_id: studentId,
-                        subject_id: subjectId,
-                        tutlio_school_org_absorbed: 'true',
-                    },
+                    metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
                 },
-                metadata: {
-                    tutlio_package_id: lessonPackage.id,
-                    tutor_id: tutorId,
-                    student_id: studentId,
-                    subject_id: subjectId,
-                    tutlio_school_org_absorbed: 'true',
-                },
+                metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
                 success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${APP_URL}/package-cancelled`,
             });
         } else {
-            const { baseCents, feesCents: feeCents } = lessonCheckoutBreakdownCents(basePriceEur);
+            const { baseCents, feesCents: feeCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
             const tutorTransferCents = baseCents;
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
                 payment_method_types: ['card'],
                 line_items: [
+                    ...itemLineItems,
                     {
                         price_data: {
-                            currency: 'eur',
-                            product_data: {
-                                name: `${totalLessons} lessons – ${subject.name}`,
-                                description: `Package – ${ownerName}`,
-                            },
-                            unit_amount: baseCents,
-                        },
-                        quantity: 1,
-                    },
-                    {
-                        price_data: {
-                            currency: 'eur',
+                            currency,
                             product_data: {
                                 name: 'Platformos administravimo mokestis',
-                                description: 'Tutlio platform fee and payment processing',
+                                description: 'Paslaugos teikėjas: MB „Tutlio“',
                             },
                             unit_amount: feeCents,
                         },
@@ -327,19 +414,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         destination: stripeAccountId,
                         amount: tutorTransferCents,
                     },
-                    metadata: {
-                        tutlio_package_id: lessonPackage.id,
-                        tutor_id: tutorId,
-                        student_id: studentId,
-                        subject_id: subjectId,
-                    },
+                    metadata: metadataBase,
                 },
-                metadata: {
-                    tutlio_package_id: lessonPackage.id,
-                    tutor_id: tutorId,
-                    student_id: studentId,
-                    subject_id: subjectId,
-                },
+                metadata: { ...metadataBase, ...checkoutBaseMetadata(basePriceEur, market) },
                 success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${APP_URL}/package-cancelled`,
             });
@@ -356,7 +433,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let invoiceNumber: string | null = null;
         if (shouldAttachSf) {
             try {
-                const issuedByUserId = auth.userId!;
+                const issuedByUserId = recurringPlan.planCreatedBy || auth.userId!;
                 const invRes = await postInternalJson(
                     resolveApiUrl(req, '/api/generate-invoice'),
                     {
@@ -401,6 +478,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const toEmail = (customerEmail || '').trim();
         if (toEmail && (checkoutSession.url || checkoutSession.id)) {
             try {
+                const firstItem = resolvedItems[0]!;
                 const emailPayload: Record<string, unknown> = {
                     type: 'prepaid_package_request',
                     to: toEmail,
@@ -408,9 +486,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         recipientName: student.payer_name || student.full_name,
                         studentName: student.full_name,
                         tutorName: ownerName,
-                        subjectName: subject.name,
+                        // Multi-subject payload: rendered as an items list inside the email body.
+                        items: itemsForEmailPayload(resolvedItems),
+                        // Back-compat keys (first item) so older renderers still work:
+                        subjectName: firstItem.subjectName,
+                        pricePerLesson: firstItem.pricePerLesson.toFixed(2),
                         totalLessons,
-                        pricePerLesson: pricePerLesson.toFixed(2),
                         totalPrice: payerChargedTotalEur.toFixed(2),
                         paymentLink: stablePackagePaymentLink,
                         ...((tutor as any).organization_id ? { organizationId: (tutor as any).organization_id } : {}),
@@ -439,6 +520,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             packageId: lessonPackage.id,
             checkoutUrl: checkoutSession.url,
             emailSent,
+            recurringPlanId: recurringPlan.planId,
         });
     } catch (err: any) {
         console.error('create-package-checkout error:', err);

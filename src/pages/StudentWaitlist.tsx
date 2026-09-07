@@ -9,6 +9,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/lib/i18n';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { fetchSelfBookingDisabledMap } from '@/lib/studentBookingPolicy';
+import { isWaitlistHiddenForOrg } from '@/lib/marketMoney';
+import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
 
 interface ParsedNotes {
     start_time?: string;
@@ -33,9 +37,11 @@ function parseNotes(notes: string | null): ParsedNotes | null {
 }
 
 export default function StudentWaitlist() {
-    const { t, dateFnsLocale } = useTranslation();
+  const { t, dateFnsLocale } = useTranslation();
+  const { fmt } = useMarketMoney();
     const { user: ctxUser } = useUser();
     const navigate = useNavigate();
+    const { organizationId, bookingDisabled, waitlistHidden } = useStudentPolicy();
     const parentWaitlistStudentId = useMatch('/parent/child/:studentId/waitlist')?.params.studentId ?? '';
     const parentSessionsPath = parentWaitlistStudentId ? `/parent/child/${parentWaitlistStudentId}` : '/student';
     const [entries, setEntries] = useState<WaitlistEntry[]>([]);
@@ -53,10 +59,14 @@ export default function StudentWaitlist() {
     };
 
     useEffect(() => {
+        if (bookingDisabled || waitlistHidden || isWaitlistHiddenForOrg(organizationId)) {
+            navigate(parentWaitlistStudentId ? '/parent' : '/student', { replace: true });
+            return;
+        }
         if (!ctxUser) return;
         void fetchData();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [ctxUser?.id, parentWaitlistStudentId]);
+    }, [ctxUser?.id, parentWaitlistStudentId, bookingDisabled, waitlistHidden, organizationId]);
 
     const fetchData = async () => {
         if (!ctxUser) return;
@@ -101,6 +111,16 @@ export default function StudentWaitlist() {
             }
             if (!st) { setLoading(false); return; }
             studentIdForWaitlists = st.id;
+        }
+
+        // Org feature disable_student_booking: the waitlist is part of self-booking —
+        // the nav item is hidden, and direct URLs bounce back into the app.
+        if (studentIdForWaitlists) {
+            const disabledMap = await fetchSelfBookingDisabledMap([studentIdForWaitlists]);
+            if (disabledMap[studentIdForWaitlists]) {
+                navigate(parentWaitlistStudentId ? '/parent' : '/student', { replace: true });
+                return;
+            }
         }
 
         if (!studentIdForWaitlists) {
@@ -273,7 +293,7 @@ export default function StudentWaitlist() {
                                             </div>
                                             <div className="flex justify-between">
                                                 <span>{t('studentWait.priceLabel')}</span>
-                                                <span className="font-medium text-gray-900">€{ds.price || '–'}</span>
+                                                <span className="font-medium text-gray-900">{fmt(ds.price) || '–'}</span>
                                             </div>
                                             {queuePos && (
                                                 <div className="flex justify-between">

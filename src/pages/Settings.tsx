@@ -2,14 +2,20 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
+import { fetchOrganizationRow } from '@/lib/orgLookup';
 import { useUser } from '@/contexts/UserContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { User, Mail, Phone, Save, Lock, Building2, Eye, EyeOff, CreditCard, Calendar, CheckCircle2, XCircle, Sparkles, Shield } from 'lucide-react';
-import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
+import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone } from '@/lib/utils';
 import { hasActiveSubscription } from '@/lib/subscription';
 import { useTranslation } from '@/lib/i18n';
+import { LOCALE_FORMAT_TAGS } from '@/lib/i18n/locales';
+import { TUTOR_PLANS, eur } from '@/lib/pricing';
+import { isPlMarket } from '@/lib/market';
+import { formatPln } from '@/lib/formatPln';
+import { tutorPlanPriceLabels } from '@/lib/pricingDisplay';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
 import OrgTutorPolicyModal from '@/components/OrgTutorPolicyModal';
 
@@ -28,7 +34,7 @@ interface TutorProfile {
 }
 
 export default function SettingsPage() {
-  const { t, dateFnsLocale } = useTranslation();
+  const { t, locale, dateFnsLocale } = useTranslation();
   const { user: ctxUser } = useUser();
   const [orgName, setOrgName] = useState<string | null>(null);
   const [profile, setProfile] = useState<TutorProfile>({
@@ -81,21 +87,20 @@ export default function SettingsPage() {
     if (!ctxUser) return;
     setLoading(true);
     setSubscriptionError(null);
+    try {
     const user = ctxUser;
-    if (!user) {
-      setLoading(false);
-      return;
-    }
+    if (!user) return;
 
     const { data: tutorData } = await supabase
       .from('profiles')
-      .select('full_name, phone, organization_id, organizations(name), stripe_customer_id, subscription_status, subscription_plan, subscription_current_period_end')
+      .select('full_name, phone, organization_id, stripe_customer_id, subscription_status, subscription_plan, subscription_current_period_end')
       .eq('id', user.id)
       .single();
 
     const base = tutorData;
     if (base?.organization_id) {
-      setOrgName((base.organizations as any)?.name || null);
+      const org = await fetchOrganizationRow<{ name?: string }>(supabase as any, base.organization_id, 'name');
+      setOrgName(org?.name || null);
     }
     setProfile({
       full_name: base?.full_name || '',
@@ -110,7 +115,6 @@ export default function SettingsPage() {
       subscription_price_currency: null,
       subscription_price_interval: null,
     });
-    setLoading(false);
 
     if (base?.organization_id || skipRefresh) return;
     try {
@@ -139,6 +143,9 @@ export default function SettingsPage() {
     finally {
       setRefreshingSubscription(false);
     }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSaveProfile = async () => {
@@ -146,7 +153,7 @@ export default function SettingsPage() {
     setSaving(true);
     const user = ctxUser;
 
-    if (profile.phone && !validateLithuanianPhone(profile.phone)) {
+    if (profile.phone && !validateLocalizedPhone(profile.phone, locale)) {
       setProfileError(t('settings.phoneFormat'));
       setSaving(false);
       return;
@@ -289,8 +296,9 @@ export default function SettingsPage() {
 
   const formatPrice = (amount: number | null | undefined, currency: string | null | undefined) => {
     if (typeof amount !== 'number') return null;
+    if (isPlMarket()) return formatPln(amount);
     try {
-      return new Intl.NumberFormat('lt-LT', {
+      return new Intl.NumberFormat(LOCALE_FORMAT_TAGS[locale], {
         style: 'currency',
         currency: (currency || 'EUR').toUpperCase(),
         minimumFractionDigits: 2,
@@ -314,15 +322,17 @@ export default function SettingsPage() {
           ? t('subscribe.subscriptionOnlyTitle')
           : t('settings.monthlyPlan');
     if (price) return `${title} (${price}${suffix})`;
-    if (profile.subscription_plan === 'yearly') return `${t('settings.yearlyPlan')} (€14.99${t('subscribe.perMonth')})`;
-    if (profile.subscription_plan === 'subscription_only') return `${t('subscribe.subscriptionOnlyTitle')} (€35${t('subscribe.perMonth')})`;
-    return `${t('settings.monthlyPlan')} (€19.99${t('subscribe.perMonth')})`;
+    if (profile.subscription_plan === 'yearly') return `${t('settings.yearlyPlan')} (${tutorPlanPriceLabels.yearlyPerMonth()}${t('subscribe.perMonth')})`;
+    if (profile.subscription_plan === 'subscription_only') return `${t('subscribe.subscriptionOnlyTitle')} (${tutorPlanPriceLabels.subscriptionOnly()}${t('subscribe.perMonth')})`;
+    return `${t('settings.monthlyPlan')} (${tutorPlanPriceLabels.monthly()}${t('subscribe.perMonth')})`;
   };
 
   const getTrialChargeText = () => {
     const price = formatPrice(profile.subscription_price_amount, profile.subscription_price_currency);
     if (price) return price;
-    return profile.subscription_plan === 'yearly' ? '€179.88' : '€19.99';
+    return profile.subscription_plan === 'yearly'
+      ? tutorPlanPriceLabels.yearlyTotal()
+      : tutorPlanPriceLabels.monthly();
   };
 
   return (
@@ -401,8 +411,8 @@ export default function SettingsPage() {
                 </Label>
                 <Input
                   value={profile.phone}
-                  onChange={(e) => setProfile({ ...profile, phone: formatLithuanianPhone(e.target.value) })}
-                  placeholder="+370 600 00000"
+                  onChange={(e) => setProfile({ ...profile, phone: formatLocalizedPhone(e.target.value, locale) })}
+                  placeholder={getLocalizedPhonePlaceholder(locale)}
                   className="rounded-xl border-gray-200"
                 />
                 {profileError && <p className="text-sm text-red-500">{profileError}</p>}
@@ -461,7 +471,7 @@ export default function SettingsPage() {
                   <p className="text-sm text-amber-700">
                     {t('settings.trialRemaining', {
                       days: Math.max(0, Math.ceil((new Date(profile.subscription_current_period_end).getTime() - Date.now()) / (1000 * 60 * 60 * 24))),
-                      date: new Date(profile.subscription_current_period_end).toLocaleDateString('lt-LT', { month: 'long', day: 'numeric' }),
+                      date: new Date(profile.subscription_current_period_end).toLocaleDateString(LOCALE_FORMAT_TAGS[locale], { month: 'long', day: 'numeric' }),
                       amount: getTrialChargeText(),
                     })}
                   </p>
@@ -478,7 +488,7 @@ export default function SettingsPage() {
                   <p className="text-sm font-semibold text-slate-900 mb-1">{t('settings.subCancelled')}</p>
                   <p className="text-sm text-slate-600">
                     {profile.subscription_current_period_end ? (
-                      t('settings.subValidUntil', { date: new Date(profile.subscription_current_period_end).toLocaleDateString('lt-LT', { year: 'numeric', month: 'long', day: 'numeric' }) })
+                      t('settings.subValidUntil', { date: new Date(profile.subscription_current_period_end).toLocaleDateString(LOCALE_FORMAT_TAGS[locale], { year: 'numeric', month: 'long', day: 'numeric' }) })
                     ) : (
                       t('settings.canResubscribe')
                     )}
@@ -533,7 +543,7 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-gray-400" />
                     <span className="text-sm font-medium text-gray-900">
-                      {new Date(profile.subscription_current_period_end).toLocaleDateString('lt-LT', {
+                      {new Date(profile.subscription_current_period_end).toLocaleDateString(LOCALE_FORMAT_TAGS[locale], {
                         year: 'numeric',
                         month: 'long',
                         day: 'numeric',

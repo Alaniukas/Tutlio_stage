@@ -28,6 +28,7 @@ interface AvailabilitySlot {
   specific_date: string | null;
   end_date: string | null;
   subject_ids: string[];
+  public_bookable?: boolean;
 }
 
 function timeToMinutes(time: string) {
@@ -56,7 +57,17 @@ function isAvailabilityStillValid(endDate: string | null) {
   return d.getTime() >= today.getTime();
 }
 
-export default function AvailabilityManager() {
+export interface AvailabilityManagerPrefill {
+  specificDate?: string;
+  specificStart?: string;
+  specificEnd?: string;
+}
+
+interface AvailabilityManagerProps {
+  prefill?: AvailabilityManagerPrefill | null;
+}
+
+export default function AvailabilityManager({ prefill = null }: AvailabilityManagerProps) {
   const { t } = useTranslation();
 
   const DAYS = useMemo(() => [
@@ -70,14 +81,11 @@ export default function AvailabilityManager() {
   ], [t]);
 
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
-  const [subjects, setSubjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [stripeConnected, setStripeConnected] = useState(false);
   const [isOrgTutor, setIsOrgTutor] = useState(false);
-
-  const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
 
   const [dayOfWeek, setDayOfWeek] = useState<string>('1');
   const [recurringStart, setRecurringStart] = useState('09:00');
@@ -87,11 +95,14 @@ export default function AvailabilityManager() {
   const [specificDate, setSpecificDate] = useState('');
   const [specificStart, setSpecificStart] = useState('09:00');
   const [specificEnd, setSpecificEnd] = useState('17:00');
+  const [activeTab, setActiveTab] = useState<'recurring' | 'specific'>('recurring');
+  const [createPublicBookable, setCreatePublicBookable] = useState(false);
 
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [editStart, setEditStart] = useState('');
   const [editEnd, setEditEnd] = useState('');
   const [editEndDate, setEditEndDate] = useState('');
+  const [editPublicBookable, setEditPublicBookable] = useState(false);
 
   const syncAvailabilityToGoogle = async (userId: string) => {
     try {
@@ -114,10 +125,18 @@ export default function AvailabilityManager() {
   };
 
   useEffect(() => {
-    fetchAvailabilityAndSubjects();
+    fetchAvailability();
   }, []);
 
-  const fetchAvailabilityAndSubjects = async () => {
+  useEffect(() => {
+    if (!prefill) return;
+    if (prefill.specificDate) setSpecificDate(prefill.specificDate);
+    if (prefill.specificStart) setSpecificStart(prefill.specificStart);
+    if (prefill.specificEnd) setSpecificEnd(prefill.specificEnd);
+    if (prefill.specificDate) setActiveTab('specific');
+  }, [prefill]);
+
+  const fetchAvailability = async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -133,9 +152,6 @@ export default function AvailabilityManager() {
     setStripeConnected(!!profileData?.stripe_account_id || manualOk);
     setIsOrgTutor(!!profileData?.organization_id);
 
-    const { data: subs } = await supabase.from('subjects').select('id, name, grade_min, grade_max, is_group, max_students').eq('tutor_id', user.id);
-    setSubjects(subs || []);
-
     const { data, error } = await supabase
       .from('availability')
       .select('*')
@@ -145,12 +161,6 @@ export default function AvailabilityManager() {
     if (error) console.error('Error fetching availability:', error);
     else setSlots(data as AvailabilitySlot[] || []);
     setLoading(false);
-  };
-
-  const seatLabel = (count: number) => {
-    if (count === 1) return t('avail.seat');
-    if (count < 10) return t('avail.seats');
-    return t('avail.seatsMany');
   };
 
   const addRecurringSlot = async () => {
@@ -198,7 +208,8 @@ export default function AvailabilityManager() {
         end_time: recurringEnd,
         is_recurring: true,
         end_date: recurringEndDate || null,
-        subject_ids: selectedSubjects,
+        subject_ids: [],
+        public_bookable: createPublicBookable,
       },
     ]);
 
@@ -207,8 +218,7 @@ export default function AvailabilityManager() {
       setToastMessage({ message: t('avail.addFailed'), type: 'error' });
     } else {
       await syncAvailabilityToGoogle(user.id);
-      await fetchAvailabilityAndSubjects();
-      setSelectedSubjects([]);
+      await fetchAvailability();
       setToastMessage({ message: t('avail.addSuccess'), type: 'success' });
     }
     setSaving(false);
@@ -257,7 +267,8 @@ export default function AvailabilityManager() {
         start_time: specificStart,
         end_time: specificEnd,
         is_recurring: false,
-        subject_ids: selectedSubjects,
+        subject_ids: [],
+        public_bookable: createPublicBookable,
       },
     ]);
 
@@ -266,8 +277,7 @@ export default function AvailabilityManager() {
       setToastMessage({ message: t('avail.addFailed'), type: 'error' });
     } else {
       await syncAvailabilityToGoogle(user.id);
-      await fetchAvailabilityAndSubjects();
-      setSelectedSubjects([]);
+      await fetchAvailability();
       setToastMessage({ message: t('avail.addSuccess'), type: 'success' });
     }
     setSaving(false);
@@ -327,7 +337,7 @@ export default function AvailabilityManager() {
       setToastMessage({ message: t('avail.deleteFailed'), type: 'error' });
     } else {
       await syncAvailabilityToGoogle(user.id);
-      await fetchAvailabilityAndSubjects();
+      await fetchAvailability();
       setToastMessage({ message: t('avail.deleteSuccess'), type: 'success' });
     }
   };
@@ -337,6 +347,7 @@ export default function AvailabilityManager() {
     setEditStart(slot.start_time.slice(0, 5));
     setEditEnd(slot.end_time.slice(0, 5));
     setEditEndDate(slot.end_date || '');
+    setEditPublicBookable(Boolean(slot.public_bookable));
   };
 
   const cancelEditing = () => setEditingSlotId(null);
@@ -403,6 +414,7 @@ export default function AvailabilityManager() {
       start_time: editStart,
       end_time: editEnd,
       end_date: editEndDate || null,
+      public_bookable: editPublicBookable,
     }).eq('id', slotId);
     if (error) {
       console.error('Error updating slot:', error);
@@ -410,27 +422,11 @@ export default function AvailabilityManager() {
     } else {
       await syncAvailabilityToGoogle(user.id);
       setEditingSlotId(null);
-      await fetchAvailabilityAndSubjects();
+      await fetchAvailability();
       setToastMessage({ message: t('avail.updateSuccess'), type: 'success' });
     }
     setSaving(false);
   };
-
-  const subjectBadge = (s: any) => (
-    <span>
-      {s.name}
-      {s.is_group && s.max_students && (
-        <span className="text-xs text-violet-600 font-semibold ml-1">
-          ({t('avail.groupLabel')} - {s.max_students} {seatLabel(s.max_students)})
-        </span>
-      )}
-      {s.grade_min && s.grade_max && (
-        <span className="text-xs text-emerald-600 ml-1">
-          ({s.grade_min}-{s.grade_max === 13 ? 'Studentas' : `${s.grade_max} kl`})
-        </span>
-      )}
-    </span>
-  );
 
   return (
     <div className="space-y-6 pt-2">
@@ -441,7 +437,11 @@ export default function AvailabilityManager() {
           onClose={() => setToastMessage(null)}
         />
       )}
-      <Tabs defaultValue="recurring" className="w-full">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as 'recurring' | 'specific')}
+        className="w-full"
+      >
         <TabsList className="grid w-full grid-cols-2 rounded-xl">
           <TabsTrigger value="recurring" className="rounded-xl">{t('avail.recurringTab')}</TabsTrigger>
           <TabsTrigger value="specific" className="rounded-xl">{t('avail.specificTab')}</TabsTrigger>
@@ -494,28 +494,18 @@ export default function AvailabilityManager() {
                 <p className="text-xs text-gray-400">{t('avail.leaveEmptyForever')}</p>
               </div>
 
-              {subjects.length > 0 && (
-                <div className="space-y-2 pt-2 border-t border-gray-100">
-                  <Label>{t('avail.whichSubjects')}</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {subjects.map(s => (
-                      <label key={s.id} className="flex items-center gap-2 text-sm border p-2 rounded-xl cursor-pointer hover:bg-gray-50">
-                        <input
-                          type="checkbox"
-                          checked={selectedSubjects.includes(s.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) setSelectedSubjects([...selectedSubjects, s.id]);
-                            else setSelectedSubjects(selectedSubjects.filter(id => id !== s.id));
-                          }}
-                          className="rounded text-indigo-600 focus:ring-indigo-500"
-                        />
-                        {subjectBadge(s)}
-                      </label>
-                    ))}
-                  </div>
-                  <p className="text-xs text-gray-400">{t('avail.noSubjectMeansAll')}</p>
-                </div>
-              )}
+              <label className="flex items-start gap-3 rounded-xl border border-gray-100 bg-gray-50/80 p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                  checked={createPublicBookable}
+                  onChange={(e) => setCreatePublicBookable(e.target.checked)}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-gray-800">{t('avail.publicBookable')}</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">{t('avail.publicBookableHint')}</span>
+                </span>
+              </label>
 
               <button
                 type="button"
@@ -569,6 +559,18 @@ export default function AvailabilityManager() {
                               className="w-full rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
                             />
                           </div>
+                          <label className="flex items-start gap-2.5 rounded-lg border border-gray-100 bg-gray-50/80 p-2.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                              checked={editPublicBookable}
+                              onChange={(e) => setEditPublicBookable(e.target.checked)}
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-xs font-medium text-gray-800">{t('avail.publicBookable')}</span>
+                              <span className="block text-[11px] text-gray-500 mt-0.5">{t('avail.publicBookableHint')}</span>
+                            </span>
+                          </label>
                           <div className="flex gap-2">
                             <button
                               type="button"
@@ -597,14 +599,14 @@ export default function AvailabilityManager() {
                               <span className="text-xs text-gray-500 bg-gray-50 px-2 py-0.5 rounded-lg">
                                 {slot.start_time.slice(0, 5)} – {slot.end_time.slice(0, 5)}
                               </span>
+                              {slot.public_bookable && (
+                                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg">
+                                  {t('avail.publicBookableBadge')}
+                                </span>
+                              )}
                               {slot.end_date && (
                                 <span className="text-xs text-amber-600 font-medium">
                                   {t('avail.until')} {slot.end_date}
-                                </span>
-                              )}
-                              {slot.subject_ids && slot.subject_ids.length > 0 && (
-                                <span className="text-[10px] text-gray-400">
-                                  {slot.subject_ids.length} {t('avail.subjects')}
                                 </span>
                               )}
                             </div>
@@ -665,28 +667,18 @@ export default function AvailabilityManager() {
                 </div>
               </div>
 
-              {subjects.length > 0 && (
-                <div className="space-y-2 pt-2 border-t border-gray-100">
-                  <Label>{t('avail.whichSubjects')}</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {subjects.map(s => (
-                      <label key={s.id} className="flex items-center gap-2 text-sm border p-2 rounded-xl cursor-pointer hover:bg-gray-50">
-                        <input
-                          type="checkbox"
-                          checked={selectedSubjects.includes(s.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) setSelectedSubjects([...selectedSubjects, s.id]);
-                            else setSelectedSubjects(selectedSubjects.filter(id => id !== s.id));
-                          }}
-                          className="rounded text-indigo-600 focus:ring-indigo-500"
-                        />
-                        {subjectBadge(s)}
-                      </label>
-                    ))}
-                  </div>
-                  <p className="text-xs text-gray-400">{t('avail.noSubjectMeansAll')}</p>
-                </div>
-              )}
+              <label className="flex items-start gap-3 rounded-xl border border-gray-100 bg-gray-50/80 p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                  checked={createPublicBookable}
+                  onChange={(e) => setCreatePublicBookable(e.target.checked)}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-gray-800">{t('avail.publicBookable')}</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">{t('avail.publicBookableHint')}</span>
+                </span>
+              </label>
 
               <button
                 type="button"
@@ -728,6 +720,18 @@ export default function AvailabilityManager() {
                               <TimeSpinner value={editEnd} onChange={setEditEnd} minuteStep={1} />
                             </div>
                           </div>
+                          <label className="flex items-start gap-2.5 rounded-lg border border-gray-100 bg-gray-50/80 p-2.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                              checked={editPublicBookable}
+                              onChange={(e) => setEditPublicBookable(e.target.checked)}
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-xs font-medium text-gray-800">{t('avail.publicBookable')}</span>
+                              <span className="block text-[11px] text-gray-500 mt-0.5">{t('avail.publicBookableHint')}</span>
+                            </span>
+                          </label>
                           <div className="flex gap-2">
                             <button
                               type="button"
@@ -754,9 +758,9 @@ export default function AvailabilityManager() {
                               <span className="text-xs text-gray-500 bg-gray-50 px-2 py-0.5 rounded-lg">
                                 {slot.start_time.slice(0, 5)} – {slot.end_time.slice(0, 5)}
                               </span>
-                              {slot.subject_ids && slot.subject_ids.length > 0 && (
-                                <span className="text-[10px] text-gray-400">
-                                  {slot.subject_ids.length} {t('avail.subjects')}
+                              {slot.public_bookable && (
+                                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg">
+                                  {t('avail.publicBookableBadge')}
                                 </span>
                               )}
                             </div>

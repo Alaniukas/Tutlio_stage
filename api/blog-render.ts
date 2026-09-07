@@ -1,15 +1,29 @@
+import { BLOG_SCHEMA_LOCALES, hasBlogSchema, isSeoPublished, seoLocalesForPath } from '../src/lib/i18n/localeRelease.js';
+import { LOCALE_NAMES, LOCALE_FORMAT_TAGS, localeDirection, withEnglishLocaleFallback } from '../src/lib/i18n/locales.js';
 import type { VercelRequest, VercelResponse } from './types';
 import { isSsrMethod, rejectSsrMethod, sendSsrHtml } from './_lib/ssr-http.js';
 import { createClient } from '@supabase/supabase-js';
 import {
   type Locale,
   type DomainKey,
-  LOCALES,
   detectDomain,
+  detectLocale,
   buildPath,
   buildCanonicalUrl,
   hreflangTags,
+  hreflangCode,
+  esc as seoEsc,
 } from './_lib/seo-routing.js';
+import {
+  fetchRelatedBlogPosts,
+  relatedPostsForLocale,
+  renderAboutTutlioHtml,
+  renderRelatedPostsHtml,
+} from './_lib/blogRelatedLinks.js';
+import { extractBlogFaqs, blogFaqJsonLd } from './_lib/blogFaq.js';
+import { BLOG_AUTHOR_NAME, blogAuthorJsonLd } from '../src/lib/blogAuthor.js';
+
+const LOCALES = seoLocalesForPath('/blog');
 
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -26,7 +40,7 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function mdToHtml(md: string): string {
+export function mdToHtml(md: string): string {
   if (!md) return '';
   let html = '';
   const lines = md.split('\n');
@@ -44,7 +58,15 @@ function mdToHtml(md: string): string {
     if (line.trim() === '') { i++; continue; }
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(line.trim())) { html += '<hr />\n'; i++; continue; }
     const hm = line.match(/^(#{1,6})\s+(.+)$/);
-    if (hm) { html += `<h${hm[1].length}>${inl(hm[2])}</h${hm[1].length}>\n`; i++; continue; }
+    if (hm) {
+      // The article shell already owns the single page-level H1. Normalize an
+      // accidental Markdown H1 to H2 so imported/legacy posts keep a valid
+      // document outline without losing their heading text.
+      const level = Math.max(2, hm[1].length);
+      html += `<h${level}>${inl(hm[2])}</h${level}>\n`;
+      i++;
+      continue;
+    }
     if (line.startsWith('>')) {
       const ql: string[] = [];
       while (i < lines.length && lines[i].startsWith('>')) { ql.push(lines[i].replace(/^>\s?/, '')); i++; }
@@ -68,10 +90,21 @@ function mdToHtml(md: string): string {
   return html;
 }
 
+/** Allow only safe URL schemes; blocks javascript:, data:, etc. */
+function safeUrl(url: string): string {
+  const trimmed = url.trim();
+  if (/^(https?:\/\/|mailto:|tel:|\/|#|\.{1,2}\/)/i.test(trimmed)) return trimmed;
+  return '#';
+}
+
 function inl(t: string): string {
-  return t
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy" style="max-width:100%;border-radius:8px;margin:1em 0" />')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" rel="noopener">$1</a>')
+  // Escape first so raw HTML in post content is rendered inert; markdown tags
+  // are added afterwards. URLs are then validated against safe schemes.
+  return esc(t)
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, url: string) =>
+      `<img src="${safeUrl(url)}" alt="${alt}" loading="lazy" style="max-width:100%;border-radius:8px;margin:1em 0" />`)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, url: string) =>
+      `<a href="${safeUrl(url)}" rel="noopener">${label}</a>`)
     .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
@@ -80,21 +113,84 @@ function inl(t: string): string {
 
 function fmtDate(d: string | null, locale: Locale): string {
   if (!d) return '';
-  const map: Record<Locale, string> = {
-    lt: 'lt-LT', en: 'en-GB', pl: 'pl-PL', lv: 'lv-LV', ee: 'et-EE',
-    fr: 'fr-FR', es: 'es-ES', de: 'de-DE', se: 'sv-SE', dk: 'da-DK', fi: 'fi-FI', no: 'nb-NO',
-  };
+  const map = LOCALE_FORMAT_TAGS;
   return new Date(d).toLocaleDateString(map[locale] || 'en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-function detectLocaleFromQuery(req: VercelRequest): Locale {
-  const q = typeof req.query.locale === 'string' ? req.query.locale : '';
-  if (LOCALES.includes(q as Locale)) return q as Locale;
-  const domain = detectDomain(req);
-  return domain === 'com' ? 'en' : 'lt';
+function postSlug(post: Record<string, unknown>, locale: Locale): string {
+  return (post[`slug_${hasBlogSchema(locale) ? locale : 'en'}`] as string) || (post.slug as string);
 }
 
-const LABELS: Record<Locale, { blog: string; back: string; home: string; read: string }> = {
+function postTranslatedLocales(post: Record<string, unknown>): Locale[] {
+  return LOCALES.filter((l) => !!post[`title_${l}`]);
+}
+
+function blogPostHreflangTags(post: Record<string, unknown>): string {
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  for (const l of postTranslatedLocales(post)) {
+    const slug = postSlug(post, l);
+    const href = buildCanonicalUrl(`/blog/${slug}`, l);
+    const key = `${hreflangCode(l)}:${href}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tags.push(`<link rel="alternate" hreflang="${hreflangCode(l)}" href="${seoEsc(href)}" />`);
+  }
+  // x-default only when a real English translation exists — never point it
+  // at a fallback-rendered (noindex) URL.
+  if (post.title_en) {
+    const xDefault = buildCanonicalUrl(`/blog/${postSlug(post, 'en')}`, 'en');
+    tags.push(`<link rel="alternate" hreflang="x-default" href="${seoEsc(xDefault)}" />`);
+  }
+  return tags.join('\n');
+}
+
+function localeClusterHreflangTags(locales: Locale[], urlFor: (locale: Locale) => string): string {
+  const tags = locales.map(
+    (locale) => `<link rel="alternate" hreflang="${hreflangCode(locale)}" href="${seoEsc(urlFor(locale))}" />`,
+  );
+  if (locales.includes('en')) {
+    tags.push(`<link rel="alternate" hreflang="x-default" href="${seoEsc(urlFor('en'))}" />`);
+  }
+  return tags.join('\n');
+}
+
+function jsonLd(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
+}
+
+const TAG_TRANSLATIONS: Record<string, Partial<Record<Locale, string>>> = {
+  verslas: { en: 'Business', pl: 'Biznes', lv: 'Bizness', ee: 'Äri', fr: 'Entreprise', es: 'Negocio', de: 'Business', se: 'Företag', dk: 'Forretning', fi: 'Liiketoiminta', no: 'Virksomhet', nl: 'Ondernemen' },
+  'įrankiai': { en: 'Tools', pl: 'Narzędzia', lv: 'Rīki', ee: 'Tööriistad', fr: 'Outils', es: 'Herramientas', de: 'Tools', se: 'Verktyg', dk: 'Værktøjer', fi: 'Työkalut', no: 'Verktøy', nl: 'Tools' },
+  patarimai: { en: 'Tips', pl: 'Porady', lv: 'Padomi', ee: 'Nõuanded', fr: 'Conseils', es: 'Consejos', de: 'Tipps', se: 'Tips', dk: 'Tips', fi: 'Vinkit', no: 'Tips', nl: 'Tips' },
+  naujienos: { en: 'News', pl: 'Aktualności', lv: 'Jaunumi', ee: 'Uudised', fr: 'Actualités', es: 'Novedades', de: 'Neuigkeiten', se: 'Nyheter', dk: 'Nyheder', fi: 'Uutiset', no: 'Nyheter', nl: 'Nieuws' },
+};
+
+function localizedTag(tag: unknown, locale: Locale): string {
+  if (typeof tag !== 'string') return '';
+  const value = tag.trim();
+  if (!value || locale === 'lt') return value;
+  return TAG_TRANSLATIONS[value.toLocaleLowerCase('lt-LT')]?.[locale] || value;
+}
+
+/** Crawlable cross-locale links for the footer (mirrors ssr-shell.ts). */
+const LOCALE_NATIVE_NAMES = LOCALE_NAMES;
+
+function localeLinksHtml(locales: Locale[], urlFor: (l: Locale) => string, current: Locale): string {
+  if (locales.length < 2) return '';
+  const links = locales.map((l) =>
+    l === current
+      ? `<span lang="${hreflangCode(l)}" style="color:#1a1a1a;font-weight:600">${LOCALE_NATIVE_NAMES[l]}</span>`
+      : `<a href="${seoEsc(urlFor(l))}" hreflang="${hreflangCode(l)}" lang="${hreflangCode(l)}" style="color:#666">${LOCALE_NATIVE_NAMES[l]}</a>`,
+  );
+  return `<nav aria-label="Languages" style="display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-bottom:12px;font-size:.8rem">${links.join('\n')}</nav>`;
+}
+
+const LABELS: Record<Locale, { blog: string; back: string; home: string; read: string }> = withEnglishLocaleFallback({
+  uk: { blog: 'Блог', back: 'Усі статті', home: 'Головна', read: 'Читати далі' },
+  he: { blog: 'בלוג', back: 'כל המאמרים', home: 'בית', read: 'להמשך קריאה' },
+  tr: { blog: 'Blog', back: 'Tüm yazılar', home: 'Ana sayfa', read: 'Devamını oku' },
+  id: { blog: 'Blog', back: 'Semua artikel', home: 'Beranda', read: 'Baca selengkapnya' },
   lt: { blog: 'Tinklaraštis', back: 'Visi straipsniai', home: 'Pagrindinis', read: 'Skaityti daugiau' },
   en: { blog: 'Blog', back: 'All articles', home: 'Home', read: 'Read more' },
   pl: { blog: 'Blog', back: 'Wszystkie artykuły', home: 'Strona główna', read: 'Czytaj więcej' },
@@ -107,7 +203,8 @@ const LABELS: Record<Locale, { blog: string; back: string; home: string; read: s
   dk: { blog: 'Blog', back: 'Alle artikler', home: 'Forside', read: 'Læs mere' },
   fi: { blog: 'Blogi', back: 'Kaikki artikkelit', home: 'Etusivu', read: 'Lue lisää' },
   no: { blog: 'Blogg', back: 'Alle artikler', home: 'Forside', read: 'Les mer' },
-};
+  nl: { blog: 'Blog', back: 'Alle artikelen', home: 'Home', read: 'Lees meer' },
+});
 
 interface BlogShellOpts {
   locale: Locale;
@@ -123,9 +220,12 @@ interface BlogShellOpts {
   modifiedTime?: string;
   tag?: string;
   noindex?: boolean;
+  hreflangHtml?: string;
+  localeLinks?: string;
+  ogType?: 'article' | 'website';
 }
 
-const DEFAULT_OG = 'https://www.tutlio.com/og-image.png';
+const DEFAULT_OG = 'https://www.tutlio.com/og-image.jpg';
 
 function shell(opts: BlogShellOpts): string {
   const { locale, domain, blogPath, title, description, url, body, jsonLd, publishedTime, modifiedTime, tag, noindex } = opts;
@@ -138,13 +238,13 @@ function shell(opts: BlogShellOpts): string {
     ? [
         `<meta property="article:published_time" content="${esc(publishedTime)}" />`,
         modifiedTime ? `<meta property="article:modified_time" content="${esc(modifiedTime)}" />` : '',
-        `<meta property="article:author" content="Tutlio" />`,
+        `<meta property="article:author" content="${esc(BLOG_AUTHOR_NAME)}" />`,
         tag ? `<meta property="article:section" content="${esc(tag)}" />` : '',
       ].filter(Boolean).join('\n')
     : '';
 
   return `<!DOCTYPE html>
-<html lang="${locale}">
+<html lang="${hreflangCode(locale)}" dir="${localeDirection(locale)}">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -152,15 +252,16 @@ function shell(opts: BlogShellOpts): string {
 <meta name="description" content="${esc(description)}" />
 <meta name="robots" content="${noindex ? 'noindex, follow' : 'index, follow, max-image-preview:large'}" />
 <link rel="canonical" href="${esc(url)}" />
-${hreflangTags(blogPath)}
-<meta property="og:type" content="article" />
+<link rel="alternate" type="application/rss+xml" title="Tutlio Blog" href="${esc(buildCanonicalUrl('/blog/rss.xml', locale))}" />
+${opts.hreflangHtml ?? hreflangTags(blogPath)}
+<meta property="og:type" content="${opts.ogType || (publishedTime ? 'article' : 'website')}" />
 <meta property="og:title" content="${esc(title)}" />
 <meta property="og:description" content="${esc(description)}" />
 <meta property="og:url" content="${esc(url)}" />
 <meta property="og:site_name" content="Tutlio" />
 <meta property="og:image" content="${esc(image)}" />
 <meta property="og:image:width" content="1200" />
-<meta property="og:image:height" content="630" />
+<meta property="og:image:height" content="800" />
 ${articleMeta}
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${esc(title)}" />
@@ -215,7 +316,7 @@ a:hover{text-decoration:underline}
   </div>
 </nav>
 ${body}
-<footer class="footer">&copy; ${new Date().getFullYear()} Tutlio</footer>
+<footer class="footer">${opts.localeLinks || ''}&copy; ${new Date().getFullYear()} Tutlio</footer>
 </body>
 </html>`;
 }
@@ -224,92 +325,150 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!isSsrMethod(req.method)) return rejectSsrMethod(res);
 
   const supabase = getSupabase();
-  if (!supabase) return res.status(503).send('Database not configured');
+  if (!supabase) {
+    res.setHeader('X-Robots-Tag', 'noindex');
+    return res.status(503).send('Database not configured');
+  }
 
   const domain = detectDomain(req);
-  const locale = detectLocaleFromQuery(req);
+  const locale = detectLocale(req);
   const slug = typeof req.query.slug === 'string' ? req.query.slug : '';
   const blogListPath = buildPath('/blog', locale, domain);
   const l = LABELS[locale];
 
   if (slug) {
-    const { data: post } = await supabase
-      .from('blog_posts').select('*').eq('slug', slug).eq('status', 'published').single();
-    if (!post) return res.status(404).send('Not found');
+    // Try locale-specific slug first, then fall back to universal slug
+    let { data: post } = await supabase
+      .from('blog_posts').select('*').eq(`slug_${hasBlogSchema(locale) ? locale : 'en'}`, slug).eq('status', 'published').single();
+    let matchedViaFallback = false;
+    if (!post) {
+      const { data: fbPost } = await supabase
+        .from('blog_posts').select('*').eq('slug', slug).eq('status', 'published').single();
+      post = fbPost;
+      matchedViaFallback = true;
+    }
+    if (!post) {
+      res.setHeader('X-Robots-Tag', 'noindex');
+      return res.status(404).send('Not found');
+    }
 
-    const hasNativeTitle = !!post[`title_${locale}`];
+    // 301 redirect when the URL used the universal slug but a locale-specific one exists
+    const localeSlug = postSlug(post, locale);
+    if (matchedViaFallback && localeSlug !== slug) {
+      const redirectPath = buildPath(`/blog/${localeSlug}`, locale, domain);
+      res.writeHead(301, { Location: redirectPath });
+      res.end();
+      return;
+    }
+
+    const hasNativeTitle = isSeoPublished(locale, '/blog') && !!post[`title_${locale}`];
     const title = resolve(post, 'title', locale);
     const excerpt = resolve(post, 'excerpt', locale);
     const content = resolve(post, 'content', locale);
     const date = fmtDate(post.published_at as string, locale);
-    const blogPath = `/blog/${post.slug}`;
+    const blogPath = `/blog/${localeSlug}`;
     const url = buildCanonicalUrl(blogPath, locale);
     const image = (post.cover_image as string) || '';
+    const tag = localizedTag(post.tag, locale);
 
-    const LANG_MAP: Record<Locale, string> = {
-      lt: 'lt', en: 'en', pl: 'pl', lv: 'lv', ee: 'et',
-      fr: 'fr', es: 'es', de: 'de', se: 'sv', dk: 'da', fi: 'fi', no: 'nb',
-    };
-    const jsonLd = JSON.stringify({
-      '@context': 'https://schema.org',
+    const LANG_MAP = Object.fromEntries(
+      Object.keys(LOCALE_FORMAT_TAGS).map((key) => [key, hreflangCode(key as Locale)]),
+    ) as Record<Locale, string>;
+    const articleDoc = {
       '@type': 'BlogPosting',
       headline: title,
       description: excerpt,
       image: image || undefined,
       datePublished: post.published_at,
+      dateModified: post.updated_at || post.published_at,
       inLanguage: LANG_MAP[locale],
-      author: { '@type': 'Organization', name: 'Tutlio' },
-      publisher: { '@type': 'Organization', name: 'Tutlio', url: 'https://www.tutlio.com', logo: { '@type': 'ImageObject', url: 'https://www.tutlio.com/pwa-512x512.png' } },
+      author: blogAuthorJsonLd(locale),
+      publisher: { '@type': 'Organization', '@id': 'https://www.tutlio.com/#organization', name: 'Tutlio', url: new URL(url).origin, logo: { '@type': 'ImageObject', '@id': 'https://www.tutlio.com/#logo', url: 'https://www.tutlio.com/pwa-512x512.png' } },
       url,
+      articleSection: tag || undefined,
+      isAccessibleForFree: true,
+      wordCount: content.trim() ? content.trim().split(/\s+/).length : undefined,
       mainEntityOfPage: { '@type': 'WebPage', '@id': url },
+    };
+    const faqDoc = blogFaqJsonLd(extractBlogFaqs(content));
+    const articleJsonLd = jsonLd(
+      faqDoc
+        ? { '@context': 'https://schema.org', '@graph': [articleDoc, { '@type': faqDoc['@type'], mainEntity: faqDoc.mainEntity }] }
+        : { '@context': 'https://schema.org', ...articleDoc },
+    );
+
+    const relatedRows = await fetchRelatedBlogPosts(supabase, {
+      tag: (post.tag as string) || undefined,
+      excludeId: String(post.id),
+      limit: 3,
     });
+    const related = relatedPostsForLocale(relatedRows, locale);
+    const pricingUrl = buildCanonicalUrl('/pricing', locale);
+    const blogListCanonical = buildCanonicalUrl('/blog', locale);
+    const hasAboutInContent = /## (Apie Tutlio|About Tutlio|O Tutlio|Par Tutlio|Tutlio kohta|À propos de Tutlio|Sobre Tutlio|Über Tutlio|Om Tutlio|Tietoa Tutliosta|Over Tutlio)/i.test(content);
+    const footerExtras = [
+      !hasAboutInContent ? renderAboutTutlioHtml(locale, pricingUrl, blogListCanonical) : '',
+      renderRelatedPostsHtml(related, locale),
+    ].filter(Boolean).join('\n');
 
     const body = `
 <div class="hero">
-  ${image ? `<img class="cover" src="${esc(image)}" alt="${esc(title)}" />` : ''}
+  ${image ? `<img class="cover" src="${esc(safeUrl(image))}" alt="${esc(title)}" />` : ''}
   <h1>${esc(title)}</h1>
-  <div class="meta">${post.tag ? `<span class="tag">${esc(post.tag as string)}</span>` : ''}${date}</div>
+  <div class="meta">${tag ? `<span class="tag">${esc(tag)}</span>` : ''}${esc(BLOG_AUTHOR_NAME)}${date ? ` · ${date}` : ''}</div>
 </div>
 <article class="content">
   ${mdToHtml(content)}
+  ${footerExtras}
   <p style="margin-top:2em"><a href="${blogListPath}">&larr; ${l.back}</a></p>
 </article>`;
 
     sendSsrHtml(req, res, shell({
-      locale, domain, blogPath, title: `${title} | Tutlio`, description: excerpt, url, image, body, jsonLd,
+      locale, domain, blogPath, title: `${title} | Tutlio`, description: excerpt, url, image, body, jsonLd: articleJsonLd,
       publishedTime: post.published_at as string,
       modifiedTime: (post.updated_at as string) || undefined,
-      tag: (post.tag as string) || undefined,
+      tag: tag || undefined,
       noindex: !hasNativeTitle,
+      hreflangHtml: blogPostHreflangTags(post),
+      localeLinks: localeLinksHtml(
+        postTranslatedLocales(post),
+        (l) => buildCanonicalUrl(`/blog/${postSlug(post, l)}`, l),
+        locale,
+      ),
     }), {
       'Content-Type': 'text/html; charset=utf-8',
-      'Content-Language': locale,
+      'Content-Language': hreflangCode(locale),
       'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
     });
     return;
   }
 
   // Blog listing
+  const SLUG_COLS = BLOG_SCHEMA_LOCALES.map(l2 => `slug_${l2}`).join(', ');
   const { data: posts } = await supabase
     .from('blog_posts')
-    .select('slug, cover_image, tag, published_at, title_lt, title_en, title_pl, title_lv, title_ee, title_fr, title_es, title_de, title_se, title_dk, title_fi, title_no, excerpt_lt, excerpt_en, excerpt_pl, excerpt_lv, excerpt_ee, excerpt_fr, excerpt_es, excerpt_de, excerpt_se, excerpt_dk, excerpt_fi, excerpt_no')
+    .select(`slug, ${SLUG_COLS}, cover_image, tag, published_at, title_lt, title_en, title_pl, title_lv, title_ee, title_fr, title_es, title_de, title_se, title_dk, title_fi, title_no, title_nl, excerpt_lt, excerpt_en, excerpt_pl, excerpt_lv, excerpt_ee, excerpt_fr, excerpt_es, excerpt_de, excerpt_se, excerpt_dk, excerpt_fi, excerpt_no, excerpt_nl`)
     .eq('status', 'published')
     .order('published_at', { ascending: false });
 
   const items = posts || [];
+  const contentLocale = hasBlogSchema(locale) ? locale : 'en';
+  const nativeItems = items.filter((p: Record<string, unknown>) => !!p[`title_${contentLocale}`]);
   const blogPath = '/blog';
   const url = buildCanonicalUrl(blogPath, locale);
-  const hasAnyTranslation = items.some((p: Record<string, unknown>) => !!p[`title_${locale}`]);
+  const hasAnyTranslation = isSeoPublished(locale, '/blog') && nativeItems.length > 0;
 
-  const cards = items.map((p: Record<string, unknown>) => {
+  const cards = nativeItems.map((p: Record<string, unknown>) => {
     const t = resolve(p, 'title', locale);
     const e = resolve(p, 'excerpt', locale);
     const img = (p.cover_image as string) || '';
-    const href = `${buildPath(`/blog/${p.slug}`, locale, domain)}`;
+    const pSlug = postSlug(p, locale);
+    const href = `${buildPath(`/blog/${pSlug}`, locale, domain)}`;
+    const cardTag = localizedTag(p.tag, locale);
     return `<a href="${href}" class="card" style="text-decoration:none;color:inherit">
-  ${img ? `<img src="${esc(img)}" alt="${esc(t)}" loading="lazy" />` : ''}
+  ${img ? `<img src="${esc(safeUrl(img))}" alt="${esc(t)}" loading="lazy" />` : ''}
   <div class="card-body">
-    ${p.tag ? `<span class="tag">${esc(p.tag as string)}</span>` : ''}
+    ${cardTag ? `<span class="tag">${esc(cardTag)}</span>` : ''}
     <h2>${esc(t)}</h2>
     <p>${esc(e)}</p>
     <span style="color:#4f46e5;font-size:.9rem;font-weight:500">${l.read} &rarr;</span>
@@ -322,10 +481,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   <h1>${l.blog}</h1>
 </div>
 <div class="cards">
-  ${cards || `<p style="padding:24px;color:#888">No posts yet.</p>`}
+  ${cards || `<p style="padding:24px;color:#888">${withEnglishLocaleFallback({ lt: 'Straipsnių dar nėra.', en: 'No posts yet.', tr: 'Henüz yazı yok.', pl: 'Nie ma jeszcze artykułów.', lv: 'Rakstu vēl nav.', ee: 'Artikleid veel pole.', fr: 'Aucun article pour le moment.', es: 'Todavía no hay artículos.', de: 'Noch keine Artikel.', se: 'Inga artiklar ännu.', dk: 'Ingen artikler endnu.', fi: 'Ei vielä artikkeleita.', no: 'Ingen artikler ennå.', nl: 'Nog geen artikelen.' })[locale]}</p>`}
 </div>`;
 
-  const BLOG_DESC: Record<Locale, string> = {
+  const BLOG_DESC: Record<Locale, string> = withEnglishLocaleFallback({
+    tr: 'Tutlio blogu: öğretmenler için ipuçları, ders yönetimi stratejileri ve ürün güncellemeleri.',
     lt: 'Tutlio tinklaraštis – patarimai korepetitoriams, pamokų valdymo strategijos ir produkto naujienos.',
     en: 'Tutlio blog – tips for tutors, lesson management strategies, and product updates.',
     pl: 'Blog Tutlio – porady dla korepetytorów, strategie zarządzania lekcjami i aktualności.',
@@ -338,24 +498,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     dk: 'Tutlio blog – tips til undervisere, strategier til lektionsstyring og produktnyheder.',
     fi: 'Tutlio blogi – vinkkejä opettajille, tuntien hallinnan strategioita ja tuoteuutisia.',
     no: 'Tutlio blogg – tips for tutorer, strategier for timeadministrasjon og produktnyheter.',
-  };
+    nl: 'Tutlio-blog – tips voor docenten, strategieën voor lesbeheer en productnieuws.',
+  });
   const blogDesc = BLOG_DESC[locale];
 
-  const blogListJsonLd = JSON.stringify({
+  const blogListJsonLd = jsonLd({
     '@context': 'https://schema.org',
     '@type': 'Blog',
     name: `${l.blog} | Tutlio`,
     description: blogDesc,
     url,
-    publisher: { '@type': 'Organization', name: 'Tutlio', url: 'https://www.tutlio.com' },
+    inLanguage: hreflangCode(locale),
+    publisher: { '@type': 'Organization', '@id': 'https://www.tutlio.com/#organization', name: 'Tutlio', url: new URL(url).origin },
   });
+
+  const listTranslatedLocales = LOCALES.filter(
+    (l2) => items.some((p: Record<string, unknown>) => !!p[`title_${l2}`]),
+  );
 
   sendSsrHtml(req, res, shell({
     locale, domain, blogPath, title: `${l.blog} | Tutlio`, description: blogDesc, url, image: '', body, jsonLd: blogListJsonLd,
     noindex: !hasAnyTranslation,
+    ogType: 'website',
+    hreflangHtml: localeClusterHreflangTags(listTranslatedLocales, (l2) => buildCanonicalUrl('/blog', l2)),
+    localeLinks: localeLinksHtml(
+      listTranslatedLocales,
+      (l2) => buildCanonicalUrl('/blog', l2),
+      locale,
+    ),
   }), {
     'Content-Type': 'text/html; charset=utf-8',
-    'Content-Language': locale,
+    'Content-Language': hreflangCode(locale),
     'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
   });
 }

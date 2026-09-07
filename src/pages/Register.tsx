@@ -8,9 +8,18 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Eye, EyeOff, Building2, AlertCircle } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { getStoredUtm } from '@/lib/analytics';
-import { detectAuthLocaleFromHost, getAuthEmailOrigin } from '@/lib/auth-locale';
+import { resolveAuthEmailLocale, getAuthEmailOrigin } from '@/lib/auth-locale';
 
 const COUNTRY_DIAL_CODES = [
+  { code: 'CZ', label: 'Czechia', dial: '+420' },
+  { code: 'SI', label: 'Slovenia', dial: '+386' },
+  { code: 'GR', label: 'Greece', dial: '+30' },
+  { code: 'SK', label: 'Slovakia', dial: '+421' },
+  { code: 'HU', label: 'Hungary', dial: '+36' },
+  { code: 'HR', label: 'Croatia', dial: '+385' },
+  { code: 'TH', label: 'Thailand', dial: '+66' },
+  { code: 'UA', label: 'Ukraine', dial: '+380' },
+  { code: 'KR', label: 'South Korea', dial: '+82' },
   { code: 'LT', label: 'Lithuania', dial: '+370' },
   { code: 'LV', label: 'Latvia', dial: '+371' },
   { code: 'EE', label: 'Estonia', dial: '+372' },
@@ -27,19 +36,34 @@ const COUNTRY_DIAL_CODES = [
   { code: 'FR', label: 'France', dial: '+33' },
   { code: 'ES', label: 'Spain', dial: '+34' },
   { code: 'IT', label: 'Italy', dial: '+39' },
+  { code: 'RO', label: 'Romania', dial: '+40' },
+  { code: 'BG', label: 'Bulgaria', dial: '+359' },
   { code: 'PT', label: 'Portugal', dial: '+351' },
   { code: 'US', label: 'United States', dial: '+1' },
   { code: 'CA', label: 'Canada', dial: '+1' },
   { code: 'AU', label: 'Australia', dial: '+61' },
   { code: 'NZ', label: 'New Zealand', dial: '+64' },
   { code: 'IN', label: 'India', dial: '+91' },
+  { code: 'IL', label: 'Israel', dial: '+972' },
+  { code: 'HK', label: 'Hong Kong', dial: '+852' },
+  { code: 'PH', label: 'Philippines', dial: '+63' },
   { code: 'BR', label: 'Brazil', dial: '+55' },
   { code: 'MX', label: 'Mexico', dial: '+52' },
-  { code: 'UA', label: 'Ukraine', dial: '+380' },
   { code: 'TR', label: 'Turkey', dial: '+90' },
 ];
 
 const PHONE_EXAMPLES_BY_DIAL: Record<string, string> = {
+  '+420': '601123456',
+  '+386': '40123456',
+  '+30': '6912345678',
+  '+36': '301234567',
+  '+421': '905123456',
+  '+385': '911234567',
+  '+359': '881234567',
+  '+66': '812345678',
+  '+852': '61234567',
+  '+972': '501234567',
+  '+82': '1012345678',
   '+370': '61234567',
   '+371': '20123456',
   '+372': '51234567',
@@ -56,14 +80,16 @@ const PHONE_EXAMPLES_BY_DIAL: Record<string, string> = {
   '+33': '612345678',
   '+34': '612345678',
   '+39': '3123456789',
+  '+40': '712345678',
   '+351': '912345678',
   '+1': '6175551234',
   '+61': '412345678',
   '+64': '211234567',
   '+91': '9123456789',
+  '+63': '9171234567',
+  '+380': '671234567',
   '+55': '11912345678',
   '+52': '5512345678',
-  '+380': '501234567',
   '+90': '5321234567',
 };
 
@@ -79,7 +105,7 @@ function isValidInternationalPhone(dialCode: string, localNumber: string): boole
 }
 
 export default function Register() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [searchParams] = useSearchParams();
   const orgToken = searchParams.get('org_token');
   const normalizedOrgToken = orgToken?.trim().toUpperCase() || null;
@@ -89,7 +115,7 @@ export default function Register() {
 
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [phoneDialCode, setPhoneDialCode] = useState('+370');
+  const [phoneDialCode, setPhoneDialCode] = useState(() => locale === 'cs' ? '+420' : locale === 'sl' ? '+386' : locale === 'el' ? '+30' : locale === 'hu' ? '+36' : locale === 'sk' ? '+421' : locale === 'hr' ? '+385' : locale === 'bg' ? '+359' : locale === 'th' ? '+66' : locale === 'tr' ? '+90' : locale === 'ro' ? '+40' : locale === 'zh-hk' ? '+852' : locale === 'uk' ? '+380' : locale === 'pt' ? '+351' : locale === 'he' ? '+972' : locale === 'fil' ? '+63' : locale === 'ko' ? '+82' : locale === 'pt-br' ? '+55' : locale === 'es-mx' ? '+52' : '+370');
   const [phoneLocal, setPhoneLocal] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
@@ -180,7 +206,7 @@ export default function Register() {
     const stripeCheckoutSessionId = sessionStorage.getItem('stripe_checkout_session_id');
 
     const appOrigin = getAuthEmailOrigin(import.meta.env.VITE_APP_URL, window.location.origin);
-    const authLocale = detectAuthLocaleFromHost();
+    const authLocale = resolveAuthEmailLocale(locale);
     let authData: any = null;
 
     if (normalizedOrgToken) {
@@ -213,7 +239,7 @@ export default function Register() {
     } else {
       // Email confirmation must land on a route that can consume the auth hash.
       // Then we continue to subscription flow via ?next=...
-      const emailRedirectTo = `${appOrigin}/auth/callback?next=${encodeURIComponent('/dashboard')}`;
+      const emailRedirectTo = `${appOrigin}/auth/callback?next=${encodeURIComponent('/dashboard')}&lang=${authLocale}`;
       const signUpResult = await supabase.auth.signUp({
         email,
         password,
@@ -367,7 +393,8 @@ export default function Register() {
               <Label htmlFor="phone">{t('register.phone')}</Label>
               <div className="grid grid-cols-[150px_1fr] gap-2">
                 <select
-                  aria-label="Country code"
+                  dir="ltr"
+                  aria-label={locale === 'cs' ? 'Telefonní předvolba země' : locale === 'sl' ? 'Klicna številka države' : locale === 'el' ? 'Τηλεφωνικός κωδικός χώρας' : locale === 'bg' ? 'Телефонен код на държавата' : locale === 'sk' ? 'Predvoľba krajiny' : locale === 'hr' ? 'Pozivni broj države' : locale === 'hu' ? 'Országhívó' : locale === 'he' ? 'קידומת מדינה' : locale === 'ro' ? 'Prefix telefonic' : locale === 'tr' ? 'Ülke kodu' : 'Country code'}
                   value={phoneDialCode}
                   onChange={(e) => setPhoneDialCode(e.target.value)}
                   className="h-10 rounded-md border border-input bg-background px-2 text-sm"
@@ -389,12 +416,12 @@ export default function Register() {
               </div>
               <p className="text-xs text-gray-500">{t('register.phonePlaceholderIntl', { example: phoneExampleLocal })}</p>
               <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
-                {t('register.phoneHintIntl', { example: phoneExampleFull })}
+                {t('register.phoneHintIntl', { example: locale === 'he' ? `\u2066${phoneExampleFull}\u2069` : phoneExampleFull })}
               </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="email">{t('common.email')}</Label>
-              <Input id="email" type="email" placeholder={t('register.emailPlaceholder')} value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <Input id="email" type="email" dir="ltr" placeholder={t('register.emailPlaceholder')} value={email} onChange={(e) => setEmail(e.target.value)} required />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">{t('common.password')}</Label>

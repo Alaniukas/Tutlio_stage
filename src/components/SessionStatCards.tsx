@@ -94,7 +94,7 @@ export function SessionStatCards({
                 {cancelledByTutor}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                {t('stats.outOfCancelled', { total: totalCancelled })}
+                {t('stats.outOfCancelled', { count: totalCancelled })}
               </p>
             </CardContent>
           </Card>
@@ -111,7 +111,7 @@ export function SessionStatCards({
                 {cancelledByStudent}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                {t('stats.outOfCancelled', { total: totalCancelled })}
+                {t('stats.outOfCancelled', { count: totalCancelled })}
               </p>
             </CardContent>
           </Card>

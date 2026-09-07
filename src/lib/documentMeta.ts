@@ -2,6 +2,35 @@ import type { Locale } from '@/lib/i18n/core';
 import { t } from '@/lib/i18n/core';
 import type { Platform } from '@/lib/platform';
 import { DEFAULT_PLATFORM } from '@/lib/platform';
+import { getSeoMeta } from '@/lib/seoMeta';
+import { isSeoPublished } from '@/lib/i18n/localeRelease';
+
+/** Temporarily suppress draft surfaces in the SPA too, preserving other robots rules. */
+export function applyLocalePublicationMeta(locale: Locale, pathname: string): () => void {
+  if (isSeoPublished(locale, pathname)) return () => {};
+  let el = document.head.querySelector<HTMLMetaElement>('meta[name="robots"]');
+  const previous = el?.getAttribute('content');
+  const created = !el;
+  const directives = (previous ?? '').split(',').map((part) => part.trim()).filter(Boolean);
+  // These directives already suppress indexing; leave page-owned rules intact.
+  if (directives.some((part) => /^(noindex|none)$/i.test(part))) return () => {};
+  const restrictions = directives.filter((part) => !/^(index|all)$/i.test(part));
+  const content = ['noindex', ...(restrictions.length ? restrictions : ['follow'])].join(', ');
+  if (!el) {
+    el = document.createElement('meta');
+    el.name = 'robots';
+    document.head.appendChild(el);
+  }
+  el.content = content;
+  const meta = el;
+  return () => {
+    // A page may have replaced the tag or changed its policy since this effect.
+    if (!meta.isConnected || meta.content !== content) return;
+    if (created) meta.remove();
+    else if (previous === null) meta.removeAttribute('content');
+    else meta.content = previous ?? '';
+  };
+}
 
 function escapeCssIdent(key: string): string {
   if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
@@ -28,12 +57,35 @@ function setMeta(attr: 'name' | 'property', key: string, content: string) {
 
 /** Default SEO title + meta tags for the current UI locale (SPA shell). */
 export function applyDefaultDocumentMeta(locale: Locale, platform: Platform = DEFAULT_PLATFORM): void {
+  if (platform === DEFAULT_PLATFORM) {
+    const meta = getSeoMeta(locale, 'landing');
+    applyPageDocumentMeta(meta.title, meta.description);
+    return;
+  }
   const tagline = t(locale, 'landing.heroBadge', undefined, platform);
-  const fullTitle = `Tutlio - ${tagline}`;
-  document.title = fullTitle;
-  setMeta('name', 'description', tagline);
-  setMeta('property', 'og:title', fullTitle);
-  setMeta('property', 'og:description', tagline);
-  setMeta('name', 'twitter:title', fullTitle);
-  setMeta('name', 'twitter:description', tagline);
+  applyPageDocumentMeta(`Tutlio - ${tagline}`, tagline);
+}
+
+/** Page-specific title + meta tags for public marketing pages (SPA navigation). */
+export function applyPageDocumentMeta(title: string, description: string): void {
+  document.title = title;
+  setMeta('name', 'description', description);
+  setMeta('property', 'og:title', title);
+  setMeta('property', 'og:description', description);
+  setMeta('name', 'twitter:title', title);
+  setMeta('name', 'twitter:description', description);
+}
+
+/** Keep client-side navigations aligned with the canonical URL emitted by the
+ * crawler renderer. This is primarily for browser tools and share extensions;
+ * search crawlers receive the same value in server HTML. */
+export function applyCanonicalDocumentMeta(canonicalUrl: string): void {
+  let canonical = document.head.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+  if (!canonical) {
+    canonical = document.createElement('link');
+    canonical.rel = 'canonical';
+    document.head.appendChild(canonical);
+  }
+  canonical.href = canonicalUrl;
+  setMeta('property', 'og:url', canonicalUrl);
 }

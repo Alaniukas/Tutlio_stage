@@ -1,7 +1,22 @@
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
-import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
+import { resolveAuthUser } from '@/lib/authSession';
+import { companyStatsCacheKey, getCached, setCache, dedupeAsync } from '@/lib/dataCache';
 import { startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays, subMonths, addMonths } from 'date-fns';
+import { isProKlaseOrg, orgFeeProfile } from '@/lib/marketMoney';
+import { sumOrgTutorLessonsPayEur } from '@/lib/orgTutorLessonPay';
+import { countProKlaseRealizedSessions } from '@/lib/proKlaseTutorPay';
+import {
+  countConductedOrgSessions,
+  filterConductedOrgSessions,
+} from '@/lib/orgTutorConductedSessions';
+import { countCancellationAttribution } from '@/lib/session-stats';
+import { defaultStatsDateRange, normalizeStatsDateRange } from '@/lib/statsDateRange';
+import {
+  packageClientPaidEur,
+  standaloneSessionClientPaidEur,
+  sumProKlaseRealizedPaidTutorPayEur,
+} from '@/lib/proKlaseAdminFinance';
 
 /** Columns the tutor Dashboard needs (avoid `*` + share one deduped round-trip with Layout preload). */
 const TUTOR_DASH_SESSIONS_SELECT =
@@ -25,13 +40,10 @@ export function tutorDashboardSessionsDeduped(tutorUserId: string) {
 }
 
 function getAuthUser() {
-  return dedupeAsync('auth_user', async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    return user;
-  });
+  return resolveAuthUser();
 }
 
-/** One in-flight `getUser` per wave (StrictMode, UserContext + page both calling auth). */
+/** One in-flight session read per wave (StrictMode, UserContext + page both calling auth). */
 export function dedupeAuthGetUser(): Promise<User | null> {
   return getAuthUser();
 }
@@ -39,7 +51,7 @@ export function dedupeAuthGetUser(): Promise<User | null> {
 /** Parallel `OrgSuspendedBanner` / StrictMode bursts → one round-trip per org id. */
 export function orgSuspensionRowDeduped(organizationId: string) {
   return dedupeAsync(`org_sf:${organizationId}`, () =>
-    supabase.from('organizations').select('status, features, perlas_finance_enabled').eq('id', organizationId).maybeSingle(),
+    supabase.from('organizations').select('status, features, perlas_finance_enabled, entity_type').eq('id', organizationId).maybeSingle(),
   );
 }
 
@@ -146,7 +158,7 @@ export function tutorRecentPaidPackagesDeduped(tutorId: string) {
   return dedupeAsync(`tutor_recent_pkgs:${tutorId}`, () =>
     supabase
       .from('lesson_packages')
-      .select('id, paid_at, total_price, total_lessons, students!student_id(full_name), subjects!subject_id(name)')
+      .select('id, paid_at, total_price, total_lessons, students!student_id(full_name), subjects!subject_id(name), lesson_package_items(subject_id, total_lessons, position, subjects!inner(name))')
       .eq('tutor_id', tutorId)
       .eq('paid', true)
       .not('paid_at', 'is', null)
@@ -190,6 +202,7 @@ export function tutorStudentsRowsDeduped(tutorId: string) {
       .from('students')
       .select('*, linked_user_id')
       .eq('tutor_id', tutorId)
+      .is('detached_at', null)
       .order('created_at', { ascending: false }),
   );
 }
@@ -265,7 +278,7 @@ export function orgAdminRowByUserDeduped(userId: string) {
     try {
       const { data, error } = await supabase
         .from('organization_admins')
-        .select('organization_id, organizations(name, tutor_license_count, entity_type)')
+        .select('organization_id')
         .eq('user_id', userId)
         .abortSignal(controller.signal)
         .maybeSingle();
@@ -273,7 +286,17 @@ export function orgAdminRowByUserDeduped(userId: string) {
         console.warn('[preload] orgAdminRowByUserDeduped failed:', error.message);
         return null;
       }
-      return data;
+      if (!data?.organization_id) return null;
+      const org = await supabase
+        .from('organizations')
+        .select('name, tutor_license_count, entity_type')
+        .eq('id', data.organization_id)
+        .abortSignal(controller.signal)
+        .maybeSingle();
+      return {
+        ...data,
+        organizations: org.data || null,
+      };
     } catch (err) {
       if (controller.signal.aborted) {
         console.warn('[preload] orgAdminRowByUserDeduped aborted by timeout');
@@ -312,7 +335,7 @@ export async function preloadOrgAdminData() {
     const [{ data: tutorData }, { data: inviteData }] = await Promise.all([
       supabase
         .from('profiles')
-        .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, has_active_license')
+        .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, has_active_license')
         .eq('organization_id', orgId),
       supabase
         .from('tutor_invites')
@@ -325,7 +348,7 @@ export async function preloadOrgAdminData() {
     const visibleTutors = await getOrgVisibleTutors(
       supabase,
       orgId,
-      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, has_active_license',
+      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, personal_meeting_link, teaching_notes, has_active_license',
     );
     const tutorIds = visibleTutors.map((t: any) => t.id);
 
@@ -406,16 +429,11 @@ export async function preloadOrgAdminData() {
     }
 
     if (!getCached('company_dashboard')) {
-      const { data: adminUsers } = await supabase
-        .from('organization_admins')
-        .select('user_id')
-        .eq('organization_id', orgId);
-      const adminIds = new Set((adminUsers || []).map((a: { user_id: string }) => a.user_id));
-      preloadDashboard(org, orgId, adminIds, tutorIds, visibleTutors, sessionsRes.data || []);
+      preloadDashboard(org, orgId, tutorIds, visibleTutors, sessionsRes.data || []);
     }
 
-    if (!getCached('company_stats')) {
-      preloadStats(visibleTutors, tutorIds);
+    if (orgId && !getCached(companyStatsCacheKey(orgId))) {
+      preloadStats(visibleTutors, tutorIds, orgId);
     }
   } finally {
     orgPreloadRunning = false;
@@ -423,7 +441,7 @@ export async function preloadOrgAdminData() {
 }
 
 async function preloadDashboard(
-  org: any, orgId: string, adminIds: Set<string>,
+  org: any, orgId: string,
   tutorIds: string[], tutorProfiles: any[], rawSessions: any[]
 ) {
   try {
@@ -463,6 +481,7 @@ async function preloadDashboard(
 
     const licensedApprox = (tutorProfiles || []).filter((p: any) => p.has_active_license !== false).length;
     setCache('company_dashboard', {
+      organizationId: orgId,
       orgName: org?.name || '', entityType: org?.entity_type || 'company',
       tutorLicenseCap: Number(org?.tutor_license_count) || 0,
       licensedTutors: licensedApprox,
@@ -477,44 +496,103 @@ async function preloadDashboard(
   }
 }
 
-async function preloadStats(tutorProfiles: any[], tutorIds: string[]) {
+async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: string) {
   try {
+    const defaultRange = defaultStatsDateRange();
+    const { startIso, endIso } = normalizeStatsDateRange(defaultRange.start, defaultRange.end);
     const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('tutor_id, status, payment_status, price, cancelled_by')
-      .in('tutor_id', tutorIds);
+      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subject_id, subjects(is_trial)')
+      .in('tutor_id', tutorIds)
+      .gte('start_time', startIso)
+      .lte('start_time', endIso);
+
+    const proKlaseOrgKey = orgId || tutorProfiles[0]?.organization_id;
+    const proKlase = isProKlaseOrg(proKlaseOrgKey);
+    const proKlaseFeeProfile = proKlase ? orgFeeProfile(proKlaseOrgKey) : null;
+    let packagesByTutor = new Map<string, number>();
+    if (proKlase) {
+      const { data: packages } = await supabase
+        .from('lesson_packages')
+        .select('tutor_id, total_price, price_per_lesson, total_lessons, paid, payment_status')
+        .in('tutor_id', tutorIds)
+        .eq('paid', true)
+        .gte('paid_at', startIso)
+        .lte('paid_at', endIso);
+      for (const pkg of packages || []) {
+        const tutorId = String((pkg as { tutor_id?: string }).tutor_id || '');
+        packagesByTutor.set(
+          tutorId,
+          (packagesByTutor.get(tutorId) || 0) + packageClientPaidEur(pkg as any, proKlaseFeeProfile),
+        );
+      }
+    }
 
     const stats = tutorProfiles.map((tutor: any) => {
       const tutorSessions = (sessionsData || []).filter((s: any) => s.tutor_id === tutor.id);
-      const paid = tutorSessions.filter((s: any) =>
-        s.status === 'completed' || ['paid', 'confirmed'].includes(s.payment_status)
-      );
-      const cancelledByTutor = tutorSessions.filter((s: any) => s.status === 'cancelled' && s.cancelled_by === 'tutor');
-      const cancelledByStudent = tutorSessions.filter((s: any) => s.status === 'cancelled' && s.cancelled_by === 'student');
-      const totalCancelledCount = tutorSessions.filter((s: any) => s.status === 'cancelled').length;
-      const earnings = paid.reduce((sum: number, s: any) => sum + (s.price || 0), 0);
-      const commPct = (tutor.company_commission_percent ?? 0) / 100;
+      const cancellation = countCancellationAttribution(tutorSessions);
+      const tutorPayPerSession = tutor.company_commission_percent ?? 0;
 
+      if (proKlase) {
+        const mapped = tutorSessions.map((s: any) => ({
+          status: s.status,
+          payment_status: s.payment_status,
+          paid: s.paid,
+          price: s.price,
+          is_complimentary: s.is_complimentary,
+          lesson_package_id: s.lesson_package_id,
+          subjects: Array.isArray(s.subjects) ? s.subjects[0] : s.subjects,
+        }));
+        const clientPaidEur =
+          (packagesByTutor.get(tutor.id) || 0) +
+          mapped.reduce((sum: number, session: any) => sum + standaloneSessionClientPaidEur(session), 0);
+        const netEarnings = sumProKlaseRealizedPaidTutorPayEur(mapped, tutorPayPerSession);
+        const completedSessions = countProKlaseRealizedSessions(mapped);
+        return {
+          id: tutor.id, full_name: tutor.full_name,
+          completedSessions,
+          cancelledByTutor: cancellation.cancelledByTutor,
+          cancelledByStudent: cancellation.cancelledByStudent,
+          cancelledByAdmin: cancellation.cancelledByAdmin,
+          totalCancelled: cancellation.totalCancelled,
+          earnings: clientPaidEur,
+          companyCommission: Math.round((clientPaidEur - netEarnings) * 100) / 100,
+          netEarnings,
+        };
+      }
+
+      const conducted = filterConductedOrgSessions(tutorSessions);
+      const earnings = conducted.reduce((sum: number, s: any) => sum + (Number(s.price) || 0), 0);
+      const netEarnings = sumOrgTutorLessonsPayEur(
+        conducted,
+        tutorPayPerSession,
+        tutor.company_commission_by_subject,
+        orgId,
+      );
       return {
         id: tutor.id, full_name: tutor.full_name,
-        completedSessions: paid.length,
-        cancelledByTutor: cancelledByTutor.length,
-        cancelledByStudent: cancelledByStudent.length,
-        totalCancelled: totalCancelledCount,
-        earnings, companyCommission: earnings * commPct,
-        netEarnings: earnings * (1 - commPct),
+        completedSessions: countConductedOrgSessions(conducted),
+        cancelledByTutor: cancellation.cancelledByTutor,
+        cancelledByStudent: cancellation.cancelledByStudent,
+        cancelledByAdmin: cancellation.cancelledByAdmin,
+        totalCancelled: cancellation.totalCancelled,
+        earnings,
+        companyCommission: earnings - netEarnings,
+        netEarnings,
       };
     });
 
     const sorted = stats.sort((a: any, b: any) => b.earnings - a.earnings);
-    setCache('company_stats', {
-      tutorStats: sorted,
-      totalEarnings: stats.reduce((s: number, t: any) => s + t.earnings, 0),
-      totalCompanyCommission: stats.reduce((s: number, t: any) => s + t.companyCommission, 0),
-      totalNetEarnings: stats.reduce((s: number, t: any) => s + t.netEarnings, 0),
-      totalSessions: stats.reduce((s: number, t: any) => s + t.completedSessions, 0),
-      totalCancelled: stats.reduce((s: number, t: any) => s + t.totalCancelled, 0),
-    });
+    if (proKlaseOrgKey) {
+      setCache(companyStatsCacheKey(proKlaseOrgKey), {
+        tutorStats: sorted,
+        totalEarnings: stats.reduce((s: number, t: any) => s + t.earnings, 0),
+        totalCompanyCommission: stats.reduce((s: number, t: any) => s + t.companyCommission, 0),
+        totalNetEarnings: stats.reduce((s: number, t: any) => s + t.netEarnings, 0),
+        totalSessions: stats.reduce((s: number, t: any) => s + t.completedSessions, 0),
+        totalCancelled: stats.reduce((s: number, t: any) => s + t.totalCancelled, 0),
+      });
+    }
   } catch {
     // Non-critical
   }
@@ -535,7 +613,8 @@ export async function preloadTutorData() {
       tutorDashboardSessionsDeduped(user.id),
       supabase.from('students')
         .select('id', { count: 'exact', head: true })
-        .eq('tutor_id', user.id),
+        .eq('tutor_id', user.id)
+        .is('detached_at', null),
     ]);
 
     if (!getCached('tutor_dashboard')) {
@@ -657,7 +736,7 @@ export function parentStudentLinksDeduped(userId: string) {
     supabase
       .from('parent_students')
       .select(
-        'student_id, students(id, full_name, tutor_id, linked_user_id, profiles:tutor_id(full_name))',
+        'student_id, students(id, full_name, tutor_id, linked_user_id, organization_id, profiles:tutor_id(full_name))',
       ),
   );
 }

@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import JoinLessonButton from '@/components/JoinLessonButton';
 import StudentLayout from '@/components/StudentLayout';
 import ParentLayout from '@/components/ParentLayout';
+import ParentChildSwitcher from '@/components/parent/ParentChildSwitcher';
 import StatusBadge from '@/components/StatusBadge';
 import { supabase } from '@/lib/supabase';
+import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
+import { startPerlasPayment } from '@/lib/perlasPay';
 import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -19,12 +23,23 @@ import { Label } from '@/components/ui/label';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
-import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { isWaitlistHiddenForOrg, orgFeeProfile, type OrgFeeProfile } from '@/lib/marketMoney';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 import { useUser } from '@/contexts/UserContext';
+import { pickParentChildId, setParentActiveChildId } from '@/lib/parentActiveChild';
 import { fetchStudentActiveLessonPackagesDeduped, fetchSubjectNamesByIds } from '@/lib/studentLessonPackagesLight';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
-import { hasStudentPaymentModel } from '@/lib/studentPaymentModel';
+import {
+  viewerCanPayLessons,
+  viewerSeesLessonPaymentAmounts,
+} from '@/lib/lessonPayerView';
+import {
+    isMonthlyBillingOnlyStudent,
+    shouldShowPerLessonPaymentUi,
+} from '@/lib/studentPaymentModel';
+import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
+import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
 
 interface Session {
     id: string;
@@ -34,16 +49,18 @@ interface Session {
     paid: boolean;
     price: number | null;
     topic: string | null;
+    class_group_id?: string | null;
     meeting_link?: string | null;
     payment_status?: string;
     tutor_comment?: string | null;
     show_comment_to_student?: boolean;
     subject_id?: string | null;
-    subjects?: { is_group?: boolean; max_students?: number; name?: string } | null;
+    subjects?: { is_group?: boolean; max_students?: number; name?: string; is_trial?: boolean } | null;
     lesson_package_id?: string | null;
     is_late_cancelled?: boolean;
     cancellation_penalty_amount?: number | null;
     penalty_resolution?: string | null;
+    reschedule_reason?: string | null;
 }
 
 
@@ -52,12 +69,19 @@ interface WaitlistEntry {
     notes: string | null;
     session?: { start_time: string; end_time: string; topic: string | null; price: number | null } | null;
 }
+interface PackageItemSummary {
+    subject_id: string;
+    subject_name?: string;
+    total_lessons: number;
+    available_lessons: number;
+}
 interface PackageSummary {
     id: string;
     available_lessons: number;
     total_lessons: number;
     expires_at?: string | null;
     subjects?: { name: string } | null;
+    items: PackageItemSummary[];
 }
 
 function parseWaitlistNotes(notes: string | null) {
@@ -75,7 +99,8 @@ const STATUS_CONFIG = {
 type ModalStep = 'cancel-confirm' | 'cancel-reason' | 'penalty-choice' | 'picking' | 'confirming' | 'success' | 'cancel-success';
 
 export default function StudentSessions() {
-    const { t, dateFnsLocale } = useTranslation();
+    const { t, tHtml, dateFnsLocale } = useTranslation();
+    const { fmt, formatLessonCharge, isPl } = useMarketMoney();
     const { user: ctxUser } = useUser();
     const location = useLocation();
     const navigate = useNavigate();
@@ -140,9 +165,26 @@ export default function StudentSessions() {
         { kind: 'stripe' } | { kind: 'manual'; contact: 'tutor' | 'org_admin' } | null
     >(null);
     const [studentPaymentModel, setStudentPaymentModel] = useState<string | null>(null);
+    const [studentPaymentOverrideActive, setStudentPaymentOverrideActive] = useState(false);
+    const [tutorPaymentFlags, setTutorPaymentFlags] = useState({
+        enable_per_lesson: true,
+        enable_monthly_billing: false,
+    });
     const [manualPaymentsOnly, setManualPaymentsOnly] = useState(false);
     const [creditBalance, setCreditBalance] = useState(0);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
+    /** Org feature `disable_student_reschedule_cancel`: students/parents cannot move or cancel lessons.
+     * Seeded from the pre-mount StudentPolicyProvider (no flash); fetch reconciles. */
+    const portalPolicy = useStudentPolicy();
+    const [studentActionsDisabled, setStudentActionsDisabled] = useState(portalPolicy.actionsDisabled);
+    useEffect(() => {
+        if (portalPolicy.resolved && portalPolicy.actionsDisabled) setStudentActionsDisabled(true);
+    }, [portalPolicy.resolved, portalPolicy.actionsDisabled]);
+    // Whether the org reschedule/cancel policy has been resolved for the current fetch.
+    // Guards the nav-state flow so a warm session cache can't open the reschedule
+    // picker before we know the org forbids it (the RPC would reject it anyway).
+    const [studentActionsResolved, setStudentActionsResolved] = useState(false);
+    const [tutorOrgFeeProfile, setTutorOrgFeeProfile] = useState<OrgFeeProfile | null>(null);
     const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
     const [perlasLoading, setPerlasLoading] = useState(false);
     const [activePackages, setActivePackages] = useState<PackageSummary[]>([]);
@@ -163,8 +205,18 @@ export default function StudentSessions() {
     const sessionsSecondaryGenRef = useRef(0);
     /** Clears packages/waitlist when the resolved student differs from last successful Pamokų load. */
     const sessionsLoadedStudentIdRef = useRef<string | null>(null);
+    const [trackedStudentId, setTrackedStudentId] = useState<string | null>(null);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const now = new Date();
+    const viewerEmail = ctxUser?.email ?? null;
+    const seesPaymentAmounts = useMemo(
+        () => viewerSeesLessonPaymentAmounts(paymentPayer, viewerEmail, studentEmail, payerEmail),
+        [paymentPayer, viewerEmail, studentEmail, payerEmail],
+    );
+    const canPayLessons = useMemo(
+        () => viewerCanPayLessons(paymentPayer, viewerEmail, studentEmail, payerEmail),
+        [paymentPayer, viewerEmail, studentEmail, payerEmail],
+    );
 
     /** Parent: only re-fetch when path or ?studentId= changes (avoids extra runs from irrelevant search noise). */
     const parentLessonsFetchKey = isParentLessonsRoute ? (urlParentStudentId ?? '') : '';
@@ -174,6 +226,29 @@ export default function StudentSessions() {
         void fetchSessions();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [ctxUser?.id, location.pathname, parentLessonsFetchKey, studentSessionsSearchKey]);
+
+    useEffect(() => {
+        if (!trackedStudentId) return;
+        const channel = supabase
+            .channel(`student-sessions:${trackedStudentId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'sessions',
+                    filter: `student_id=eq.${trackedStudentId}`,
+                },
+                () => {
+                    void fetchSessions();
+                },
+            )
+            .subscribe();
+        return () => {
+            supabase.removeChannel(channel);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [trackedStudentId]);
     useEffect(() => { setShowAllSessions(false); }, [filter, lessonsSubjectFilter, lessonsDateFrom, lessonsDateTo]);
 
     const lessonSubjectOptions = useMemo(() => {
@@ -361,7 +436,7 @@ export default function StudentSessions() {
 
     const handleStripePayment = async (session: Session, penaltyAmount?: number) => {
         if (manualPaymentsOnly) {
-            alert('Šiam korepetitoriui taikomi rankiniai mokėjimai. Dėl apmokėjimo susisiekite tiesiogiai.');
+            alert(t('stuSess.manualPaymentContactTutor'));
             return;
         }
         setStripeLoading(true);
@@ -415,11 +490,7 @@ export default function StudentSessions() {
             });
             const json = await res.json().catch(() => ({ error: t('stuSess.paymentConnectFailed') }));
             if (json.url && json.token) {
-                if ((window as any).PerlasPay) {
-                    (window as any).PerlasPay.init(json.url, json.token);
-                } else {
-                    window.location.href = `${json.url}pay/${json.token}`;
-                }
+                await startPerlasPayment(json.url, json.token);
                 setPerlasLoading(false);
                 return;
             }
@@ -435,6 +506,10 @@ export default function StudentSessions() {
         if (navStateConsumed.current) return;
         const state = location.state as { sessionId?: string; flow?: 'cancel' | 'reschedule' | 'cancel_after_payment'; returnTo?: string } | null;
         if (!state?.sessionId || sessions.length === 0) return;
+        // Wait for the org policy before consuming action intents (cached sessions
+        // arrive earlier than the policy fetch; acting on them opened a doomed flow).
+        const isActionFlow = state.flow === 'reschedule' || state.flow === 'cancel' || state.flow === 'cancel_after_payment';
+        if (isActionFlow && !studentActionsResolved) return;
         const session = sessions.find(s => s.id === state.sessionId);
         if (!session) return;
         navStateConsumed.current = true;
@@ -442,7 +517,11 @@ export default function StudentSessions() {
             returnToRef.current = state.returnTo;
         }
         setSelectedSession(session);
-        if (state.flow === 'reschedule') {
+        if (studentActionsDisabled && (state.flow === 'reschedule' || state.flow === 'cancel' || state.flow === 'cancel_after_payment')) {
+            // Org blocks student reschedule/cancel: show plain lesson details instead.
+            setIsModalOpen(true);
+            navigate(location.pathname, { replace: true, state: null });
+        } else if (state.flow === 'reschedule') {
             setIsModalOpen(false);
             setSelectedNewSlot(null);
             setRescheduleLoading(true);
@@ -467,7 +546,22 @@ export default function StudentSessions() {
             setIsCancelModalOpen(true);
             navigate(location.pathname, { replace: true, state: null });
         }
-    }, [sessions]);
+    }, [sessions, studentActionsDisabled, studentActionsResolved]);
+
+    // Open lesson modal from email CTA (?sessionId=)
+    const sessionIdFromUrlHandledRef = useRef(false);
+    useEffect(() => {
+        if (isParentLessonsRoute) return;
+        const sid = searchParams.get('sessionId');
+        if (!sid || sessions.length === 0) return;
+        if (sessionIdFromUrlHandledRef.current) return;
+        const session = sessions.find((s) => s.id === sid);
+        if (!session) return;
+        sessionIdFromUrlHandledRef.current = true;
+        setSelectedSession(session);
+        setIsModalOpen(true);
+        navigate(location.pathname, { replace: true });
+    }, [sessions, searchParams, isParentLessonsRoute, location.pathname, navigate]);
 
     const fetchSessions = async () => {
         if (isParentLessonsRoute && skipNextParentDuplicateFetchRef.current) {
@@ -494,6 +588,9 @@ export default function StudentSessions() {
 
         await dedupeAsync(dedupeKey, async () => {
         setTutorOrgIsSchool(false);
+        setTutorOrgFeeProfile(null);
+        setStudentActionsDisabled(false);
+        setStudentActionsResolved(false);
         setSessionsFetchError(null);
         /** When fixing URL (?studentId=) we still fetch using this id in-flight; defer navigation until success. */
         let parentUrlSyncStudentId: string | null = null;
@@ -547,10 +644,11 @@ export default function StudentSessions() {
 
             setParentChildOptions(pairs);
 
-            const picked =
-                urlParentStudentId && pairs.some((p) => p.id === urlParentStudentId)
-                    ? urlParentStudentId
-                    : pairs[0].id;
+            const picked = pickParentChildId(
+                pairs.map((p) => p.id),
+                urlParentStudentId,
+            ) ?? pairs[0].id;
+            setParentActiveChildId(picked);
 
             if (!urlParentStudentId || urlParentStudentId !== picked) {
                 parentUrlSyncStudentId = picked;
@@ -589,6 +687,7 @@ export default function StudentSessions() {
 
         if (!st) {
             setTutorOrgIsSchool(false);
+            setTutorOrgFeeProfile(null);
             setLoading(false);
             return;
         }
@@ -621,8 +720,10 @@ export default function StudentSessions() {
             setTutorEmail(null);
         }
         setStudentPaymentModel(st.payment_model || null);
+        setStudentPaymentOverrideActive(!!(st as { payment_override_active?: boolean }).payment_override_active);
         setCreditBalance(Number(st.credit_balance || 0));
         setTutorOrgIsSchool(String((st as { tutor_organization_entity_type?: string }).tutor_organization_entity_type ?? '').trim() === 'school');
+        setTutorOrgFeeProfile(orgFeeProfile((st as { tutor_organization_slug?: string | null }).tutor_organization_slug));
         // OPTIMIZED: Limit sessions to recent past + future (6 months range)
         const sixMonthsAgo = new Date();
         sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
@@ -631,14 +732,14 @@ export default function StudentSessions() {
             st.tutor_id
                 ? supabase
                       .from('profiles')
-                      .select('organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, perlas_finance_enabled')
+                      .select('organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, perlas_finance_enabled, enable_per_lesson, enable_monthly_billing')
                       .eq('id', st.tutor_id)
                       .maybeSingle()
                 : Promise.resolve({ data: null });
 
         /** Narrow columns + no nested embed — `*, subjects(...)` pegged Postgres/RLS (statement timeouts). */
         const SESSION_LIST_COLUMNS =
-            'id,start_time,end_time,status,paid,price,topic,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,lesson_package_id,is_late_cancelled,cancellation_penalty_amount,penalty_resolution,cancelled_by,no_show_when';
+            'id,start_time,end_time,status,paid,price,topic,class_group_id,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,lesson_package_id,is_late_cancelled,cancellation_penalty_amount,penalty_resolution,cancelled_by,no_show_when,reschedule_reason';
 
         const secondaryGen = ++sessionsSecondaryGenRef.current;
 
@@ -659,10 +760,33 @@ export default function StudentSessions() {
                   manual_subscription_exempt?: boolean | null;
                   enable_manual_student_payments?: boolean | null;
                   perlas_finance_enabled?: boolean | null;
+                  enable_per_lesson?: boolean | null;
+                  enable_monthly_billing?: boolean | null;
               }
             | null
             | undefined;
         setManualPaymentsOnly(tutorUsesManualStudentPayments(tutorSub));
+
+        let enablePerLesson = tutorSub?.enable_per_lesson ?? true;
+        let enableMonthlyBilling = !!tutorSub?.enable_monthly_billing;
+        if (tutorSub?.organization_id) {
+            const { data: orgPay } = await supabase
+                .from('organizations')
+                .select('enable_per_lesson, enable_monthly_billing, features')
+                .eq('id', tutorSub.organization_id)
+                .maybeSingle();
+            if (orgPay) {
+                enablePerLesson = (orgPay as { enable_per_lesson?: boolean }).enable_per_lesson ?? enablePerLesson;
+                enableMonthlyBilling = !!(orgPay as { enable_monthly_billing?: boolean }).enable_monthly_billing;
+                const orgFeatures = (orgPay as { features?: Record<string, unknown> | null }).features;
+                setStudentActionsDisabled(orgFeatures?.disable_student_reschedule_cancel === true);
+            }
+        }
+        setStudentActionsResolved(true);
+        setTutorPaymentFlags({
+            enable_per_lesson: enablePerLesson,
+            enable_monthly_billing: enableMonthlyBilling,
+        });
 
         let perlasFlag = !!tutorSub?.perlas_finance_enabled;
         if (!perlasFlag && tutorSub?.organization_id) {
@@ -673,7 +797,7 @@ export default function StudentSessions() {
                 .maybeSingle();
             perlasFlag = !!(orgP as any)?.perlas_finance_enabled;
         }
-        setTutorPerlasEnabled(perlasFlag);
+        setTutorPerlasEnabled(PERLAS_FINANCE_ENABLED && perlasFlag);
 
         if (sessionsRes.error) {
             console.warn('[StudentSessions] sessions load:', sessionsRes.error.code, sessionsRes.error.message);
@@ -698,22 +822,23 @@ export default function StudentSessions() {
         }
         const sessionRows = (sessionsRes.data || []) as Record<string, unknown>[];
         const subjectIdsForSessions = [...new Set(sessionRows.map((r) => r.subject_id).filter(Boolean) as string[])];
-        let subjectMeta: Record<string, { name: string; is_group?: boolean; max_students?: number | null }> =
+        let subjectMeta: Record<string, { name: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean }> =
             {};
         if (subjectIdsForSessions.length > 0) {
             const { data: subs, error: subErr } = await supabase
                 .from('subjects')
-                .select('id,name,is_group,max_students')
+                .select('id,name,is_group,max_students,is_trial')
                 .in('id', subjectIdsForSessions);
             if (subErr) {
                 console.warn('[StudentSessions] subjects load:', subErr.code, subErr.message);
             } else {
                 for (const s of subs ?? []) {
-                    const row = s as { id: string; name: string; is_group?: boolean; max_students?: number | null };
+                    const row = s as { id: string; name: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean };
                     subjectMeta[row.id] = {
                         name: row.name,
                         is_group: row.is_group ?? undefined,
                         max_students: row.max_students,
+                        is_trial: row.is_trial ?? undefined,
                     };
                 }
             }
@@ -724,17 +849,21 @@ export default function StudentSessions() {
             return {
                 ...(row as unknown as Session),
                 subjects: sm
-                    ? { name: sm.name, is_group: sm.is_group, max_students: sm.max_students ?? undefined }
+                    ? { name: sm.name, is_group: sm.is_group, max_students: sm.max_students ?? undefined, is_trial: sm.is_trial }
                     : null,
             };
         });
         const currentStudentIdForFetch = st.id;
         setSessions(fetchedSessions);
+        // A school class-group member has lessons under the group teacher even
+        // without a personal tutor — only warn when there is truly nothing to show.
+        if (!st.tutor_id) setNoTutorAssigned(fetchedSessions.length === 0);
         if (sessionsLoadedStudentIdRef.current !== currentStudentIdForFetch) {
             setWaitlistEntries([]);
             setActivePackages([]);
         }
         sessionsLoadedStudentIdRef.current = currentStudentIdForFetch;
+        setTrackedStudentId(currentStudentIdForFetch);
 
         const storeCacheKey = isParentLessonsRoute ? `parent_lessons_${st.id}` : 'student_sessions';
         setCache(storeCacheKey, { sessions: fetchedSessions, waitlist: [] });
@@ -784,13 +913,22 @@ export default function StudentSessions() {
                         total_lessons: Number(pkg.total_lessons ?? 0),
                         expires_at: pkg.expires_at,
                         subjects: null,
+                        items: (pkg.items || []).map((it) => ({
+                            subject_id: it.subject_id,
+                            total_lessons: Number(it.total_lessons || 0),
+                            available_lessons: Number(it.available_lessons || 0),
+                        })),
                     }));
                 setActivePackages(quickPackages);
 
-                const subjectIdsForPkgs = [
-                    ...new Set(lightPkgs.map((p) => p.subject_id).filter(Boolean) as string[]),
-                ];
-                const subjectNameMap = await fetchSubjectNamesByIds(supabase, subjectIdsForPkgs);
+                const allSubjectIds = new Set<string>();
+                for (const p of lightPkgs) {
+                    if (p.subject_id) allSubjectIds.add(p.subject_id);
+                    for (const it of p.items || []) {
+                        if (it.subject_id) allSubjectIds.add(it.subject_id);
+                    }
+                }
+                const subjectNameMap = await fetchSubjectNamesByIds(supabase, [...allSubjectIds]);
                 if (sessionsSecondaryGenRef.current !== secondaryGen) return;
                 const visiblePackages: PackageSummary[] = lightPkgs
                     .filter((pkg) => {
@@ -807,6 +945,12 @@ export default function StudentSessions() {
                             pkg.subject_id && subjectNameMap[pkg.subject_id]
                                 ? { name: subjectNameMap[pkg.subject_id] }
                                 : null,
+                        items: (pkg.items || []).map((it) => ({
+                            subject_id: it.subject_id,
+                            subject_name: subjectNameMap[it.subject_id],
+                            total_lessons: Number(it.total_lessons || 0),
+                            available_lessons: Number(it.available_lessons || 0),
+                        })),
                     }));
                 setActivePackages(visiblePackages);
             } catch (e) {
@@ -828,6 +972,7 @@ export default function StudentSessions() {
 
     // ── Open cancel flow ──────────────────────────────────────────────────────
     const openCancelFlow = () => {
+        if (studentActionsDisabled) return;
         setIsModalOpen(false);
         setCancellationReason('');
         setSelectedNewSlot(null);
@@ -837,6 +982,7 @@ export default function StudentSessions() {
 
     // ── Open reschedule flow ──────────────────────────────────────────────────
     const openRescheduleFlow = () => {
+        if (studentActionsDisabled) return;
         setIsModalOpen(false);
         setSelectedNewSlot(null);
         setRescheduleLoading(true);
@@ -973,7 +1119,7 @@ export default function StudentSessions() {
                 }
                 return true;
             } else {
-                alert(json.error || t('stuSess.cancelFailed'));
+                alert(json.error === 'student_actions_disabled' ? t('stuSess.actionsDisabledByOrg') : (json.error || t('stuSess.cancelFailed')));
                 return false;
             }
         } catch (e) {
@@ -1051,19 +1197,29 @@ export default function StudentSessions() {
                 setTimeout(() => navigate(returnTo), 1200);
             }
         } else {
-            const errorMsg = data?.error || error?.message || t('stuSess.unknownError');
+            const rawErr = data?.error || error?.message || t('stuSess.unknownError');
+            const errorMsg = rawErr === 'different_month'
+                ? t('cal.rescheduleSameMonthOnly')
+                : rawErr === 'student_actions_disabled'
+                    ? t('stuSess.actionsDisabledByOrg')
+                    : rawErr;
             alert('Nepavyko perkelti: ' + errorMsg);
         }
         setSaving(false);
     };
 
-    const isMonthlyBilling = hasStudentPaymentModel(studentPaymentModel, 'monthly_billing');
-    const isPerLesson = hasStudentPaymentModel(studentPaymentModel, 'per_lesson');
-    const showPerLessonStripeButton = !isMonthlyBilling || isPerLesson;
+    const showPerLessonStripeButton = shouldShowPerLessonPaymentUi(
+        studentPaymentModel,
+        studentPaymentOverrideActive,
+        tutorPaymentFlags,
+    );
+    const perLessonPayAllowedForSession = (session: Session) =>
+        showPerLessonStripeButton && !tutorOrgIsSchool && !isSchoolBilledSession(session);
+    const isMonthlyBillingOnly = isMonthlyBillingOnlyStudent(studentPaymentModel);
 
     const getSessionPaymentType = (session: Session): 'package' | 'monthly' | 'per_lesson' => {
         if (session.lesson_package_id) return 'package';
-        if (isMonthlyBilling && !isPerLesson) return 'monthly';
+        if (isMonthlyBillingOnly) return 'monthly';
         return 'per_lesson';
     };
 
@@ -1115,7 +1271,10 @@ export default function StudentSessions() {
             if (filter === 'upcoming') return isAfter(new Date(s.end_time), now) && s.status === 'active';
             if (filter === 'past') return !isAfter(new Date(s.end_time), now) && s.status !== 'cancelled';
             if (filter === 'paid') return s.paid === true && s.status === 'active';
-            if (filter === 'unpaid') return s.paid === false && s.status === 'active';
+            if (filter === 'unpaid') {
+                if (!perLessonPayAllowedForSession(s)) return false;
+                return s.paid === false && s.status === 'active';
+            }
             if (filter === 'cancelled') return s.status === 'cancelled';
             return true;
         });
@@ -1163,27 +1322,20 @@ export default function StudentSessions() {
             </Dialog>
             <div className={`px-4 pt-6${isParentLessonsRoute ? ' pb-28' : ''}`}>
                 <h1 className="text-2xl font-black text-gray-900 mb-1">
-                    {isParentLessonsRoute ? (t('parent.sessionsTitle') || 'Pamokos') : 'Pamokos'}
+                    {isParentLessonsRoute ? t('parent.sessionsTitle') : t('stuSess.tabLessons')}
                 </h1>
                 <p className="text-gray-400 text-sm mb-3">{t('stuSess.allSessions')}</p>
 
-                {isParentLessonsRoute && parentChildOptions.length > 1 && (
-                    <div className="mb-5">
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                            {t('parent.children')}
-                        </p>
-                        <select
-                            value={urlParentStudentId ?? parentChildOptions[0]?.id ?? ''}
-                            onChange={(e) => navigate(`/parent/lessons?studentId=${e.target.value}`)}
-                            className="w-full h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-800"
-                        >
-                            {parentChildOptions.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                    {c.fullName || c.id}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+                {isParentLessonsRoute && (
+                    <ParentChildSwitcher
+                        className="mb-5"
+                        options={parentChildOptions}
+                        value={urlParentStudentId ?? parentChildOptions[0]?.id ?? ''}
+                        onChange={(id) => {
+                            setParentActiveChildId(id);
+                            navigate(`/parent/lessons?studentId=${encodeURIComponent(id)}`);
+                        }}
+                    />
                 )}
 
                 {noTutorAssigned && (
@@ -1400,13 +1552,15 @@ export default function StudentSessions() {
                     const totalAvailable = activePackages.reduce((sum, p) => sum + Number(p.available_lessons), 0);
                     const totalLessons = activePackages.reduce((sum, p) => sum + p.total_lessons, 0);
                     const availableDisplay = Number.isInteger(totalAvailable) ? String(totalAvailable) : totalAvailable.toFixed(1);
+                    const onlyPkg = activePackages.length === 1 ? activePackages[0] : null;
+                    const onlyPkgMulti = onlyPkg && onlyPkg.items.length > 1;
                     return (
                         <div className="mb-4 bg-violet-50 border border-violet-200 rounded-2xl p-4">
                             <div className="flex items-center gap-2 mb-1">
                                 <Package className="w-4 h-4 text-violet-700" />
                                 <p className="text-sm font-semibold text-violet-800">
-                                    {activePackages.length === 1 && activePackages[0].subjects?.name
-                                        ? activePackages[0].subjects.name
+                                    {onlyPkg && !onlyPkgMulti && onlyPkg.subjects?.name
+                                        ? onlyPkg.subjects.name
                                         : t('stuSess.activePackage')}
                                 </p>
                             </div>
@@ -1415,19 +1569,33 @@ export default function StudentSessions() {
                                     {t('stuSess.packageCount', { available: availableDisplay, total: String(totalLessons) })}
                                 </strong>
                             </p>
-                            {activePackages.length === 1 && activePackages[0].expires_at && (
+                            {onlyPkg && onlyPkg.expires_at && (
                                 <p className="text-xs text-violet-700 mt-1">
                                     {t('package.expiresAt', {
-                                        date: format(new Date(activePackages[0].expires_at), "yyyy 'm.' MMMM d 'd.'", { locale: dateFnsLocale }),
+                                        date: format(new Date(onlyPkg.expires_at), "yyyy 'm.' MMMM d 'd.'", { locale: dateFnsLocale }),
                                     })}
                                 </p>
+                            )}
+                            {onlyPkgMulti && (
+                                <div className="space-y-1 mt-2 pt-2 border-t border-violet-200">
+                                    {onlyPkg!.items.map((it) => (
+                                        <div key={it.subject_id} className="flex items-center justify-between text-xs">
+                                            <span className="text-violet-600 truncate">{it.subject_name || '—'}</span>
+                                            <span className="font-semibold text-violet-800 tabular-nums">{it.available_lessons}/{it.total_lessons}</span>
+                                        </div>
+                                    ))}
+                                </div>
                             )}
                         </div>
                     );
                 })()}
 
                 {/* Waitlist entries */}
-                {!loading && waitlistEntries.length > 0 && (
+                {!loading &&
+                  !portalPolicy.bookingDisabled &&
+                  !portalPolicy.waitlistHidden &&
+                  !isWaitlistHiddenForOrg(portalPolicy.organizationId) &&
+                  waitlistEntries.length > 0 && (
                     <div className="mb-6">
                         <div className="flex items-center gap-2 mb-3">
                             <ListOrdered className="w-4 h-4 text-amber-500" />
@@ -1454,7 +1622,7 @@ export default function StudentSessions() {
                                             )}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <p className="font-bold text-gray-900 text-sm truncate">{ds?.topic || 'Pamoka'}</p>
+                                            <p className="font-bold text-gray-900 text-sm truncate">{ds?.topic || t('common.lesson')}</p>
                                             {ds?.start_time ? (
                                                 <p className="text-xs text-gray-500 mt-0.5">
                                                     {format(new Date(ds.start_time), 'EEEE, MMMM d', { locale: dateFnsLocale })} · {format(new Date(ds.start_time), 'HH:mm')}
@@ -1492,7 +1660,7 @@ export default function StudentSessions() {
                             const statusCfg = STATUS_CONFIG[s.status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.active;
                             const isPast = !isAfter(new Date(s.end_time), now);
                             return (
-                                <div key={s.id} onClick={() => { setSelectedSession(s); setIsModalOpen(true); }} className={cn("bg-white rounded-[2rem] p-5 shadow-sm border border-gray-100 flex items-center gap-5 transition-all cursor-pointer", isPast ? "opacity-75" : "hover:shadow-md")}>
+                                <div key={s.id} onClick={() => { setSelectedSession(s); setIsModalOpen(true); }} className={cn("bg-white rounded-[2rem] p-4 sm:p-5 shadow-sm border border-gray-100 flex items-center gap-3 sm:gap-5 min-w-0 transition-all cursor-pointer", isPast ? "opacity-75" : "hover:shadow-md")}>
                                     {/* Date block */}
                                     <div className={cn("w-16 h-16 rounded-2xl flex flex-col items-center justify-center flex-shrink-0 border", isPast ? 'bg-gray-50 border-gray-100 text-gray-400' : 'bg-violet-50 border-violet-100 text-violet-600')}>
                                         <span className="text-xs font-bold uppercase tracking-widest">
@@ -1505,32 +1673,44 @@ export default function StudentSessions() {
 
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-1">
-                                            <p className="text-lg font-black text-gray-900 truncate">{s.topic || t('stuSess.selfStudy')}</p>
+                                            <p className="text-base sm:text-lg font-black text-gray-900 truncate">{s.topic || t('stuSess.selfStudy')}</p>
                                             {s.subjects?.is_group && (
                                                 <span className="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs font-bold flex items-center gap-1 flex-shrink-0">
                                                     <Users className="w-3 h-3" />
                                                     {t('stuSess.group')}
                                                 </span>
                                             )}
+                                            {s.subjects?.is_trial && (
+                                                <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide flex-shrink-0">
+                                                    {t('status.trialLesson')}
+                                                </span>
+                                            )}
                                         </div>
-                                        <div className="flex items-center gap-2 mt-0.5 text-gray-500">
+                                        <div className="flex flex-wrap items-center gap-2 mt-0.5 text-gray-500">
                                             <Clock className="w-4 h-4" />
                                             <span className="text-sm font-semibold">
                                                 {format(new Date(s.start_time), 'HH:mm')} – {format(new Date(s.end_time), 'HH:mm')}
                                             </span>
                                             {s.meeting_link && !isPast && (
-                                                <a href={normalizeUrl(s.meeting_link) || undefined} target="_blank" rel="noreferrer" className="ml-2 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors">
+                                                <JoinLessonButton
+                                                    session={s as any}
+                                                    showHint
+                                                    stopPropagation
+                                                    inactiveClassName="ml-2 bg-gray-100 text-gray-400 px-2.5 py-1 rounded-lg text-xs font-bold cursor-not-allowed border border-gray-200"
+                                                    hintClassName="ml-2 text-[10px] text-gray-400"
+                                                    className="ml-2 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors"
+                                                >
                                                     {t('stuSess.joinLesson')}
-                                                </a>
+                                                </JoinLessonButton>
                                             )}
                                         </div>
                                     </div>
 
-                                    <div className="text-right flex-shrink-0 flex flex-col items-end justify-center gap-1.5 min-w-[6.5rem]">
+                                    <div className="text-right flex-shrink-0 flex flex-col items-end justify-center gap-1.5 min-w-0 sm:min-w-[6.5rem]">
                                         <span className={cn("text-xs font-bold px-3 py-1 rounded-full border whitespace-nowrap", statusCfg.color)}>
                                             {t(statusCfg.labelKey)}
                                         </span>
-                                        {paymentPayer !== 'parent' && s.status !== 'cancelled' && (
+                                        {seesPaymentAmounts && s.status !== 'cancelled' && (
                                             <div>
                                                 {s.paid ? (
                                                     <div className="flex items-center gap-1">
@@ -1538,10 +1718,10 @@ export default function StudentSessions() {
                                                         <span className="text-sm text-green-600 font-bold whitespace-nowrap">{t('stuSess.paid')}</span>
                                                     </div>
                                                 ) : s.price ? (
-                                                    isMonthlyBilling && !showPerLessonStripeButton ? (
-                                                        <span className="text-sm font-black text-blue-600">€{s.price} <span className="text-xs text-blue-500/80 font-semibold">{t('stuSess.invoiceShort')}</span></span>
+                                                    isMonthlyBillingOnly ? (
+                                                        <span className="text-sm font-black text-blue-600">{fmt(s.price)} <span className="text-xs text-blue-500/80 font-semibold">{t('stuSess.invoiceShort')}</span></span>
                                                     ) : (
-                                                        <span className="text-sm font-black text-amber-600 whitespace-nowrap">€{s.price} <span className="text-xs text-amber-500/80 font-semibold">({t('stuSess.paymentPendingShort')})</span></span>
+                                                        <span className="text-sm font-black text-amber-600 whitespace-nowrap">{fmt(s.price)} <span className="text-xs text-amber-500/80 font-semibold">({t('stuSess.paymentPendingShort')})</span></span>
                                                     )
                                                 ) : null}
                                             </div>
@@ -1555,7 +1735,7 @@ export default function StudentSessions() {
                                 onClick={() => setShowAllSessions((v) => !v)}
                                 className="w-full text-center text-sm text-indigo-600 font-semibold py-2 hover:bg-gray-50 rounded-xl transition-colors"
                             >
-                                {showAllSessions ? t('stuSess.showLess') : t('stuSess.showMore', { count: String(filtered.length) })}
+                                {showAllSessions ? t('stuSess.showLess') : t('stuSess.showMore')}
                             </button>
                         )}
                     </div>
@@ -1596,29 +1776,47 @@ export default function StudentSessions() {
                             </div>
                         </div>
 
-                        {paymentPayer !== 'parent' && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                            {seesPaymentAmounts && (
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                     <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('stuSess.price')}</p>
-                                    <p className="font-bold text-gray-900">€{selectedSession?.price ?? '–'}</p>
-                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && showPerLessonStripeButton && (
+                                    <p className="font-bold text-gray-900">{fmt(selectedSession?.price)}</p>
+                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && perLessonPayAllowedForSession(selectedSession) && !manualPaymentsOnly && (
                                         <p className="text-[11px] text-gray-500 mt-1 leading-snug">
-                                            {t('stuSess.stripeChargeNote', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}
+                                            {t('stuSess.stripeChargeNote', { amount: formatLessonCharge(selectedSession.price, tutorOrgIsSchool, tutorOrgFeeProfile) })}
                                         </p>
                                     )}
                                 </div>
-                                <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center">
-                                    <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">{t('stuSess.status')}</p>
-                                    <StatusBadge status={selectedSession?.status || ''} paymentStatus={selectedSession?.payment_status} paid={selectedSession?.paid} endTime={selectedSession?.end_time} />
-                                </div>
+                            )}
+                            <div className={`bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center ${seesPaymentAmounts ? '' : 'sm:col-span-2'}`}>
+                                <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">{t('stuSess.status')}</p>
+                                <StatusBadge
+                                    status={selectedSession?.status || ''}
+                                    paymentStatus={selectedSession?.payment_status}
+                                    paid={selectedSession?.paid}
+                                    isTrial={selectedSession?.subjects?.is_trial === true}
+                                    endTime={selectedSession?.end_time}
+                                    treatUnpaidAsReserved={selectedSession ? !perLessonPayAllowedForSession(selectedSession) : !showPerLessonStripeButton}
+                                />
                             </div>
-                        )}
+                            {!seesPaymentAmounts && paymentPayer === 'parent' && (
+                                <p className="text-xs text-gray-500 sm:col-span-2 text-center">{t('stuSess.payerPaysElsewhere')}</p>
+                            )}
+                        </div>
 
                         {/* Tutor comment (visible only if marked "show to student") */}
                         {selectedSession?.show_comment_to_student && selectedSession?.tutor_comment && (
                             <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
                                 <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider mb-1">{t('stuSess.tutorComment')}</p>
                                 <div className="text-sm text-indigo-900 whitespace-pre-wrap">{selectedSession.tutor_comment}</div>
+                            </div>
+                        )}
+
+                        {/* Why the lesson was moved (tutor / org admin reschedule) */}
+                        {selectedSession?.reschedule_reason && selectedSession.status !== 'cancelled' && (
+                            <div className="p-3 rounded-xl bg-blue-50 border border-blue-100">
+                                <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-1">{t('common.rescheduleReason')}</p>
+                                <div className="text-sm text-blue-900 whitespace-pre-wrap">{selectedSession.reschedule_reason}</div>
                             </div>
                         )}
 
@@ -1643,18 +1841,16 @@ export default function StudentSessions() {
                         {/* Meeting link */}
                         {selectedSession?.status !== 'cancelled' && (
                             selectedSession?.meeting_link ? (
-                                <a
-                                    href={normalizeUrl(selectedSession.meeting_link) || undefined}
-                                    target="_blank"
-                                    rel="noreferrer"
+                                <JoinLessonButton
+                                    session={selectedSession as any}
                                     className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100"
                                 >
                                     <Video className="w-4 h-4" /> {t('studentDash.joinMeeting')}
-                                </a>
+                                </JoinLessonButton>
                             ) : (
-                                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100 text-gray-400 text-sm">
-                                    <Video className="w-4 h-4" />
-                                    <span>Susitikimo nuoroda nenurodyta</span>
+                                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100 text-gray-500 text-sm">
+                                    <Video className="w-4 h-4 shrink-0" />
+                                    <span>{t('stuSess.meetingLinkPending')}</span>
                                 </div>
                             )
                         )}
@@ -1666,35 +1862,40 @@ export default function StudentSessions() {
                         />
 
                         {/* Monthly billing info note */}
-                        {selectedSession?.status === 'active' && !selectedSession.paid && isMonthlyBilling && !showPerLessonStripeButton && (
+                        {selectedSession?.status === 'active' && !selectedSession.paid && isMonthlyBillingOnly && (
                             <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100 text-sm text-blue-700">
                                 <CalendarDays className="w-4 h-4 flex-shrink-0" />
                                 <span>{t('stuSess.monthlyBillingNote')}</span>
                             </div>
                         )}
 
-                        {/* Credit balance + Stripe payment button for unpaid sessions (only for self-payers, not monthly billing) */}
-                        {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && !manualPaymentsOnly && showPerLessonStripeButton && (
+                        {/* Credit balance + payment buttons for unpaid sessions (only for self-payers, not monthly billing).
+                            Stripe checkout is unavailable for manual-payment tutors (server rejects it), but Perlas bank payments stay available. */}
+                        {selectedSession?.status === 'active' && !selectedSession.paid && canPayLessons && perLessonPayAllowedForSession(selectedSession) && (!manualPaymentsOnly || tutorPerlasEnabled) && (
                             <div className="space-y-2">
-                                {creditBalance > 0 && (
-                                    <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-green-50 border border-green-200 text-sm">
-                                        <span className="text-green-700 font-medium">{t('stuSess.creditAvailable')}</span>
-                                        <span className="text-green-800 font-bold">€{creditBalance.toFixed(2)}</span>
-                                    </div>
+                                {!manualPaymentsOnly && (
+                                    <>
+                                        {creditBalance > 0 && (
+                                            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-green-50 border border-green-200 text-sm">
+                                                <span className="text-green-700 font-medium">{t('stuSess.creditAvailable')}</span>
+                                                <span className="text-green-800 font-bold">{fmt(creditBalance)}</span>
+                                            </div>
+                                        )}
+                                        <button
+                                            onClick={() => handleStripePayment(selectedSession)}
+                                            disabled={stripeLoading}
+                                            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
+                                        >
+                                            {stripeLoading
+                                                ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
+                                                : creditBalance >= (selectedSession.price || 0) && (selectedSession.price || 0) > 0
+                                                    ? <><CreditCard className="w-4 h-4" /> {t('stuSess.payWithCredit')}</>
+                                                    : <><CreditCard className="w-4 h-4" /> {t('stuSess.payStripe', { amount: formatLessonCharge(Math.max(0, (selectedSession.price || 0) - creditBalance), tutorOrgIsSchool, tutorOrgFeeProfile) })}</>
+                                            }
+                                        </button>
+                                    </>
                                 )}
-                                <button
-                                    onClick={() => handleStripePayment(selectedSession)}
-                                    disabled={stripeLoading}
-                                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
-                                >
-                                    {stripeLoading
-                                        ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
-                                        : creditBalance >= (selectedSession.price || 0) && (selectedSession.price || 0) > 0
-                                            ? <><CreditCard className="w-4 h-4" /> {t('stuSess.payWithCredit')}</>
-                                            : <><CreditCard className="w-4 h-4" /> {t('stuSess.payStripe', { amount: formatLessonStripeChargeEur(Math.max(0, (selectedSession.price || 0) - creditBalance), tutorOrgIsSchool) })}</>
-                                    }
-                                </button>
-                                {tutorPerlasEnabled && (() => {
+                                {tutorPerlasEnabled && !isPl && (() => {
                                     const sp = Number(selectedSession.price || 0);
                                     const pf = Math.round(sp * 2) / 100;
                                     const bf = 0.18;
@@ -1708,7 +1909,7 @@ export default function StudentSessions() {
                                             >
                                                 {perlasLoading
                                                     ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
-                                                    : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: tot.toFixed(2) })}</>
+                                                    : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: fmt(tot) })}</>
                                                 }
                                             </button>
                                         </>
@@ -1722,8 +1923,13 @@ export default function StudentSessions() {
                         )}
                     </div>
 
-                    {/* Two-button footer: Reschedule + Cancel */}
+                    {/* Two-button footer: Reschedule + Cancel (hidden when the org disables student self-service) */}
                     {selectedSession?.status === 'active' && isAfter(new Date(selectedSession.end_time), new Date()) && (
+                        studentActionsDisabled ? (
+                            <p className="mt-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                                {t('stuSess.actionsDisabledByOrg')}
+                            </p>
+                        ) : (
                         <DialogFooter className="mt-2 flex gap-2 sm:flex-row">
                             <Button
                                 variant="outline"
@@ -1732,7 +1938,7 @@ export default function StudentSessions() {
                                 className="flex-1 rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300"
                             >
                                 <RefreshCw className={cn("w-4 h-4 mr-2", rescheduleLoading && "animate-spin")} />
-                                Perkelti
+                                {t('studentDash.reschedule')}
                             </Button>
                             <Button
                                 variant="destructive"
@@ -1743,6 +1949,7 @@ export default function StudentSessions() {
                                 {t('stuSess.cancelBtn')}
                             </Button>
                         </DialogFooter>
+                        )
                     )}
                 </DialogContent>
             </Dialog>
@@ -1787,7 +1994,7 @@ export default function StudentSessions() {
                         return (
                             <div className="space-y-4 py-3">
                                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                                    <p className="text-sm font-semibold text-amber-800 mb-1">Ar tikrai nenorite perkelti pamokos?</p>
+                                    <p className="text-sm font-semibold text-amber-800 mb-1">{t('stuSess.rescheduleConfirm')}</p>
                                     <p className="text-sm text-amber-700">
                                         {t('stuSess.rescheduleNote')}
                                     </p>
@@ -1798,8 +2005,8 @@ export default function StudentSessions() {
                                         <div>
                                             <p className="text-sm font-semibold text-red-800 mb-1">{t('stuSess.lateCancelWarning')}</p>
                                             <p className="text-sm text-red-700">
-                                                <span dangerouslySetInnerHTML={{ __html: t('stuSess.lateCancelDesc', { hours: String(cancellationHours), percent: String(cancellationFeePercent) }) }} />
-                                                <span className="block text-lg font-bold mt-1">€{penalty.toFixed(2)}</span>
+                                                <span dangerouslySetInnerHTML={{ __html: tHtml('stuSess.lateCancelDesc', { hours: String(cancellationHours), percent: String(cancellationFeePercent) }) }} />
+                                                <span className="block text-lg font-bold mt-1">{fmt(penalty)}</span>
                                             </p>
                                         </div>
                                         {paymentType === 'package' && (
@@ -1809,17 +2016,17 @@ export default function StudentSessions() {
                                         )}
                                         {paymentType === 'monthly' && (
                                             <p className="text-xs font-medium text-red-800 bg-red-100/80 border border-red-200 rounded-lg px-3 py-2">
-                                                {t('stuSess.penaltyInvoiceNote', { amount: penalty.toFixed(2) })}
+                                                {t('stuSess.penaltyInvoiceNote', { amount: fmt(penalty) })}
                                             </p>
                                         )}
                                         {paymentType === 'per_lesson' && !selectedSession.paid && (
                                             <p className="text-xs font-medium text-red-800 bg-red-100/80 border border-red-200 rounded-lg px-3 py-2">
-                                                {t('stuSess.penaltyPayNote', { amount: penalty.toFixed(2) })}
+                                                {t('stuSess.penaltyPayNote', { amount: fmt(penalty) })}
                                             </p>
                                         )}
                                         {paymentType === 'per_lesson' && selectedSession.paid && (
                                             <p className="text-xs font-medium text-red-800 bg-red-100/80 border border-red-200 rounded-lg px-3 py-2">
-                                                {t('stuSess.penaltyPaidNote', { penalty: penalty.toFixed(2), refundable: ((selectedSession.price || 0) - penalty).toFixed(2) })}
+                                                {t('stuSess.penaltyPaidNote', { penalty: fmt(penalty), refundable: fmt((selectedSession.price || 0) - penalty) })}
                                             </p>
                                         )}
                                     </div>
@@ -1828,12 +2035,13 @@ export default function StudentSessions() {
                                 {!isLate && (
                                     <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
                                         <p className="text-xs text-gray-500">
-                                            <span dangerouslySetInnerHTML={{ __html: t('stuSess.freeCancelNote', { hours: String(cancellationHours) }) }} />
+                                            <span dangerouslySetInnerHTML={{ __html: tHtml('stuSess.freeCancelNote', { hours: String(cancellationHours) }) }} />
                                         </p>
                                     </div>
                                 )}
 
                                 <div className="flex gap-3">
+                                    {!studentActionsDisabled && (
                                     <Button
                                         variant="outline"
                                         onClick={openRescheduleFlow}
@@ -1841,8 +2049,9 @@ export default function StudentSessions() {
                                         className="flex-1 rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300"
                                     >
                                         <RefreshCw className={cn("w-4 h-4 mr-2", rescheduleLoading && "animate-spin")} />
-                                        Perkelti
+                                        {t('studentDash.reschedule')}
                                     </Button>
+                                    )}
                                     {hasPenalty && paymentType === 'per_lesson' && !selectedSession.paid && !manualPaymentsOnly ? (
                                         <Button
                                             variant="destructive"
@@ -1854,11 +2063,11 @@ export default function StudentSessions() {
                                             disabled={stripeLoading}
                                         >
                                             {stripeLoading ? (
-                                                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Jungiama...</>
+                                                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> {t('stuSess.processing')}</>
                                             ) : (
                                                 <>
                                                     <CreditCard className="w-4 h-4 mr-2" />
-                                                    {t('stuSess.payFine')} €{penalty.toFixed(2)}
+                                                    {t('stuSess.payFine')} {fmt(penalty)}
                                                 </>
                                             )}
                                         </Button>
@@ -1889,8 +2098,8 @@ export default function StudentSessions() {
                                         <div>
                                             <p className="text-sm font-semibold text-red-800 mb-1">{t('stuSess.lateCancelTitle')}</p>
                                             <p className="text-sm text-red-700">
-                                                <span dangerouslySetInnerHTML={{ __html: t('stuSess.lateCancelPaidDesc', { hours: String(cancellationHours), percent: String(cancellationFeePercent) }) }} />
-                                                <span className="block text-lg font-bold mt-1">€{penalty.toFixed(2)}</span>
+                                                <span dangerouslySetInnerHTML={{ __html: tHtml('stuSess.lateCancelPaidDesc', { hours: String(cancellationHours), percent: String(cancellationFeePercent) }) }} />
+                                                <span className="block text-lg font-bold mt-1">{fmt(penalty)}</span>
                                             </p>
                                         </div>
                                     </div>
@@ -1909,7 +2118,7 @@ export default function StudentSessions() {
                                         rows={3}
                                     />
                                     {cancellationReason.length > 0 && cancellationReason.trim().length < 5 && (
-                                        <p className="text-xs text-red-500">Bent 5 simboliai ({cancellationReason.trim().length}/5)</p>
+                                        <p className="text-xs text-red-500">{t('cal.cancellationMin5')} ({cancellationReason.trim().length}/5)</p>
                                     )}
                                 </div>
                                 <div className="flex gap-3">
@@ -1934,8 +2143,8 @@ export default function StudentSessions() {
                                     <p className="text-sm font-semibold text-amber-800 mb-1">{noPenalty ? t('stuSess.penaltyChoiceTitleEarly') : t('stuSess.penaltyChoiceTitle')}</p>
                                     <p className="text-sm text-amber-700">
                                         {noPenalty
-                                            ? t('stuSess.penaltyChoiceDescEarly', { refundable: refundable.toFixed(2) })
-                                            : t('stuSess.penaltyChoiceDesc', { penalty: penalty.toFixed(2), refundable: refundable.toFixed(2) })}
+                                            ? t('stuSess.penaltyChoiceDescEarly', { refundable: fmt(refundable) })
+                                            : t('stuSess.penaltyChoiceDesc', { penalty: fmt(penalty), refundable: fmt(refundable) })}
                                     </p>
                                 </div>
                                 <div className="space-y-3">
@@ -1946,7 +2155,7 @@ export default function StudentSessions() {
                                     >
                                         <p className="font-bold text-gray-900 text-sm">{t('stuSess.penaltyChoiceCredit')}</p>
                                         <p className="text-xs text-gray-500 mt-1">
-                                            {t('stuSess.penaltyChoiceCreditDesc', { amount: refundable.toFixed(2) })}
+                                            {t('stuSess.penaltyChoiceCreditDesc', { amount: fmt(refundable) })}
                                         </p>
                                     </button>
                                     <button
@@ -1956,7 +2165,7 @@ export default function StudentSessions() {
                                     >
                                         <p className="font-bold text-gray-900 text-sm">{t('stuSess.penaltyChoiceRefund')}</p>
                                         <p className="text-xs text-gray-500 mt-1">
-                                            {t('stuSess.penaltyChoiceRefundDesc', { amount: refundable.toFixed(2) })}
+                                            {t('stuSess.penaltyChoiceRefundDesc', { amount: fmt(refundable) })}
                                         </p>
                                     </button>
                                 </div>
@@ -2051,7 +2260,7 @@ export default function StudentSessions() {
                                 </div>
                                 <div className="flex justify-center text-gray-400 text-lg font-bold">↓</div>
                                 <div className="bg-green-50 border border-green-100 rounded-xl p-3">
-                                    <p className="text-xs text-green-500 font-bold uppercase tracking-wider mb-1">Naujas laikas</p>
+                                    <p className="text-xs text-green-500 font-bold uppercase tracking-wider mb-1">{t('stuSess.chooseNewTime')}</p>
                                     <p className="font-bold text-gray-900 text-sm capitalize">
                                         {format(selectedNewSlot.start, 'EEEE, d MMMM', { locale: dateFnsLocale })}
                                     </p>
@@ -2061,9 +2270,9 @@ export default function StudentSessions() {
                                 </div>
                             </div>
                             <div className="flex gap-3">
-                                <Button variant="outline" onClick={() => setModalStep('picking')} className="flex-1 rounded-xl">Keisti</Button>
+                                <Button variant="outline" onClick={() => setModalStep('picking')} className="flex-1 rounded-xl">{t('common.edit')}</Button>
                                 <Button onClick={handleConfirmReschedule} disabled={saving} className="flex-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white">
-                                    {saving ? 'Perkeliama...' : 'Taip, perkelti'}
+                                    {saving ? t('stuSess.processing') : t('studentDash.reschedule')}
                                 </Button>
                             </div>
                         </div>
@@ -2080,29 +2289,29 @@ export default function StudentSessions() {
                                 <p className="text-sm text-gray-500 mt-1">{t('stuSess.cancelledSuccessDesc')}</p>
                                 {lastPenaltyChoice === 'credit' && (
                                     <p className="text-sm text-green-700 font-medium mt-3 px-3 py-2 bg-green-50 border border-green-200 rounded-xl">
-                                        {t('stuSess.creditAppliedSuccess', { amount: ((selectedSession?.price || 0) - getPenaltyAmount(selectedSession!)).toFixed(2) })}
+                                        {t('stuSess.creditAppliedSuccess', { amount: fmt((selectedSession?.price || 0) - getPenaltyAmount(selectedSession!)) })}
                                     </p>
                                 )}
                                 {lastPenaltyChoice === 'refund' && refundFollowUp?.kind === 'stripe' && (
                                     <div
                                         className="text-sm text-emerald-800 font-medium mt-3 px-3 py-3 bg-emerald-50 border border-emerald-200 rounded-xl text-left space-y-2"
-                                        dangerouslySetInnerHTML={{ __html: t('stuSess.refundSuccessStripeNote') }}
+                                        dangerouslySetInnerHTML={{ __html: tHtml('stuSess.refundSuccessStripeNote') }}
                                     />
                                 )}
                                 {lastPenaltyChoice === 'refund' && refundFollowUp?.kind === 'manual' && refundFollowUp.contact === 'tutor' && (
                                     <div
                                         className="text-sm text-amber-800 font-medium mt-3 px-3 py-3 bg-amber-50 border border-amber-200 rounded-xl text-left"
-                                        dangerouslySetInnerHTML={{ __html: t('stuSess.refundSuccessManualTutor', { tutor: tutorName || t('stuSess.refundTutorFallback') }) }}
+                                        dangerouslySetInnerHTML={{ __html: tHtml('stuSess.refundSuccessManualTutor', { tutor: tutorName || t('stuSess.refundTutorFallback') }) }}
                                     />
                                 )}
                                 {lastPenaltyChoice === 'refund' && refundFollowUp?.kind === 'manual' && refundFollowUp.contact === 'org_admin' && (
                                     <div
                                         className="text-sm text-amber-800 font-medium mt-3 px-3 py-3 bg-amber-50 border border-amber-200 rounded-xl text-left"
-                                        dangerouslySetInnerHTML={{ __html: t('stuSess.refundSuccessManualOrg') }}
+                                        dangerouslySetInnerHTML={{ __html: tHtml('stuSess.refundSuccessManualOrg') }}
                                     />
                                 )}
                                 {lastPenaltyChoice === 'refund' && !refundFollowUp && (
-                                    <p className="text-sm text-amber-700 font-medium mt-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl" dangerouslySetInnerHTML={{ __html: t('stuSess.refundContactNote') }} />
+                                    <p className="text-sm text-amber-700 font-medium mt-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl" dangerouslySetInnerHTML={{ __html: tHtml('stuSess.refundContactNote') }} />
                                 )}
                             </div>
                             <Button
@@ -2125,7 +2334,7 @@ export default function StudentSessions() {
                                 <p className="text-sm text-gray-500 mt-1">{t('stuSess.rescheduledSuccessDesc')}</p>
                             </div>
                             <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-left">
-                                <p className="text-xs text-green-500 font-bold uppercase tracking-wider mb-2">Naujas laikas</p>
+                                <p className="text-xs text-green-500 font-bold uppercase tracking-wider mb-2">{t('stuSess.chooseNewTime')}</p>
                                 <p className="font-bold text-gray-900 capitalize">
                                     {format(selectedNewSlot.start, 'EEEE, d MMMM', { locale: dateFnsLocale })}
                                 </p>
@@ -2137,7 +2346,7 @@ export default function StudentSessions() {
                                 onClick={() => { setIsCancelModalOpen(false); setIsModalOpen(false); }}
                                 className="w-full rounded-xl bg-green-600 hover:bg-green-700 text-white"
                             >
-                                Gerai
+                                {t('stuSess.okBtn')}
                             </Button>
                         </div>
                     )}

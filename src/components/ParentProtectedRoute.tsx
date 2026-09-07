@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { resolveAccountPortals } from '@/lib/account-portal';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
+import { loginHrefWithNext } from '@/lib/auth-redirects';
 
 const PARENT_PROFILE_CACHE_PREFIX = 'tutlio_parent_profile_id_for_';
 const RETRY_DELAYS_MS = [400, 1200, 3000];
@@ -31,6 +32,7 @@ export default function ParentProtectedRoute() {
     const { user: ctxUser, loading: ctxLoading } = useUser();
     const [status, setStatus] = useState<'loading' | 'parent' | 'tutor' | 'student' | 'none'>('loading');
     const cancelledRef = useRef(false);
+    const location = useLocation();
 
     useEffect(() => {
         cancelledRef.current = false;
@@ -140,5 +142,5 @@ export default function ParentProtectedRoute() {
     if (status === 'parent') return <Outlet />;
     if (status === 'tutor') return <Navigate to="/dashboard" replace />;
     if (status === 'student') return <Navigate to="/student" replace />;
-    return <Navigate to="/login" replace />;
+    return <Navigate to={loginHrefWithNext(`${location.pathname}${location.search}`)} replace />;
 }

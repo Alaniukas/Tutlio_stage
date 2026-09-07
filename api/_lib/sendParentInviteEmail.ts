@@ -6,6 +6,11 @@ import { Resend } from 'resend';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { t, localizedFromEmail, type Locale } from './i18n.js';
 import { headerInlineStyle } from './outlookEmail.js';
+import {
+  applyOrgBrandingToHtml,
+  resolveEmailOrgBranding,
+  type OrgRowForEmailBranding,
+} from './emailOrgBranding.js';
 
 const baseStyles = `
   <style>
@@ -37,8 +42,11 @@ function wrap(content: string, locale: Locale): string {
 </body></html>`;
 }
 
-function footerFor(locale: Locale): string {
-  return `<div class="footer"><p>${t(locale, 'em.teamSignature')}</p><p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${t(locale, 'em.unsubscribe')}</p></div>`;
+function footerFor(locale: Locale, branded?: boolean): string {
+  const unsub = branded
+    ? ''
+    : `<p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${t(locale, 'em.unsubscribe')}</p>`;
+  return `<div class="footer"><p>${t(locale, 'em.teamSignature')}</p>${unsub}</div>`;
 }
 
 export type ParentInviteEmailData = {
@@ -49,6 +57,12 @@ export type ParentInviteEmailData = {
   locale?: string;
   /** Shown in manual fallback copy (e.g. tutlio.com vs tutlio.lt). */
   publicHost?: string;
+  /** School-context invite uses the school-specific body copy (school-only scope). */
+  isSchool?: boolean;
+  /** Organization name shown in the school-context body copy. */
+  orgName?: string | null;
+  organizationId?: string | null;
+  org?: OrgRowForEmailBranding | null;
 };
 
 export async function sendParentInviteEmail(
@@ -75,9 +89,12 @@ export async function sendParentInviteEmail(
   }
   if (!hostLabel) hostLabel = 'tutlio.lt';
 
+  const resolved = resolveEmailOrgBranding(data.organizationId, data.org || { name: data.orgName });
+  const orgLabel = resolved.publicName || data.orgName || resolved.branding?.name || '';
+
   const subject = t(locale, 'em.parentInviteSub');
 
-  const html = wrap(
+  let html = wrap(
     `
       <div class="header" style="${headerInlineStyle('#7c3aed', '#6d28d9')}">
         <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${t(locale, 'em.parentInviteHeader')}</h1>
@@ -85,7 +102,7 @@ export async function sendParentInviteEmail(
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiNameNoEmoji', { name: parentName || studentName })}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          ${t(locale, 'em.parentInviteBody', { student: studentName })}
+          ${t(locale, data.isSchool ? 'em.parentInviteBodySchool' : 'em.parentInviteBody', { student: studentName, org: orgLabel })}
         </p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           ${t(locale, 'em.parentInviteBenefits')}
@@ -102,13 +119,21 @@ export async function sendParentInviteEmail(
         </p>`
             : ''
         }
-      </div>${footerFor(locale)}`,
+      </div>${footerFor(locale, !!(resolved.emailContactEmail || resolved.emailFooterPoweredBy))}`,
     locale,
   );
+  html = applyOrgBrandingToHtml(html, {
+    branding: resolved.branding,
+    emailTeamSignature: resolved.emailTeamSignature,
+    locale,
+    emailContactPhone: resolved.emailContactPhone,
+    emailContactEmail: resolved.emailContactEmail,
+    emailFooterPoweredBy: resolved.emailFooterPoweredBy === true,
+  });
 
   const resend = new Resend(apiKey);
   const { error } = await resend.emails.send({
-    from: localizedFromEmail(locale),
+    from: localizedFromEmail(locale, { senderName: resolved.emailSenderName }),
     to: [to.trim().toLowerCase()],
     subject,
     html,
@@ -119,7 +144,6 @@ export async function sendParentInviteEmail(
       error && typeof error === 'object' && 'message' in error
         ? String((error as { message: string }).message)
         : 'Failed to send email';
-    console.error('[sendParentInviteEmail]', { to, msg });
     return { ok: false, error: msg };
   }
   return { ok: true };

@@ -1,41 +1,40 @@
-# Supabase Auth — el. laiškai (.lt / .pl / .com)
+# Supabase Auth email templates
 
-Vienas Supabase projektas, **3 kalbos** pagal domeną:
+Production project: `cuhciqwmqfuajeeqjjbm`. The confirmation and recovery pairs below were installed and verified in the dashboard on 2026-08-31. This does not publish new website locales or deploy the prepared app/API changes.
 
-| Domenas | Kalba | `user_metadata.locale` |
-|---------|-------|-------------------------|
-| `tutlio.lt` | LT | `lt` (numatyta) |
-| `tutlio.pl` | PL | `pl` |
-| `tutlio.com` | EN | `en` |
+| Template | Subject | Body |
+| --- | --- | --- |
+| Confirm signup | `confirm-signup.multilocale.subject.txt` | `confirm-signup.multilocale.html` |
+| Reset password | `reset-password.multilocale.subject.txt` | `reset-password.multilocale.html` |
 
-## Kaip veikia
+## Language and safety
 
-1. Registracijoje app į `signUp` perduoda `options.data.locale` pagal `window.location.hostname` (`src/lib/auth-locale.ts`).
-2. Supabase šablonuose naudojama Go sintaksė: `{{ if eq .Data.locale "pl" }}` …
-3. Slaptažodžio atkūrimas: app kreipiasi į `/api/request-password-reset`, kuris **prieš laišką** atnaujina `user_metadata.locale` pagal domeną (`.com` → `en`, `.pl` → `pl`, `.lt` → `lt`).
+- Body copy, button/title, HTML language and direction cover all 36 registered locales. Arabic/Hebrew use RTL. Missing `user_metadata.locale` retains Lithuanian; unknown values fall back to English.
+- Hosted subject source has a **255-character limit**, including Go expressions. Subjects use Lithuanian for `lt`/missing metadata, Polish for `pl`, and English otherwise. Full native subjects for every locale require a separate email-sending implementation. Never interpolate an arbitrary user-supplied subject.
+- The HTML source limit is **50,000 characters**. One shared layout keeps the generated bodies below 19 KB. Generation also checks the same UTF-8 byte budgets.
+- The only action URL is Supabase's `{{ .ConfirmationURL }}`. No name, arbitrary HTML or other user metadata is interpolated into the body.
 
-**Svarbu:** seni vartotojai be `locale` gauna **lietuvišką** šabloną tik jei reset eina tiesiogiai per Supabase (be API).
+## Generation
 
-## URL Configuration
+Edit `src/lib/i18n/authEmailCopy.ts` and, for layout/branch changes, `api/_lib/authEmailTemplates.ts`. Do not hand-edit generated files.
 
-| Laukas | Rekomendacija |
-|--------|----------------|
-| **Site URL** | pagrindinis domenas, pvz. `https://www.tutlio.lt` arba `.pl` |
-| **Redirect URLs** | [`redirect-urls.txt`](./redirect-urls.txt) — **visi** .lt, .pl, .com |
+```sh
+npm run locales:auth-templates
+npm run locales:auth-templates -- --check
+```
 
-## Šablonai Dashboard'e (3 kalbos)
+The legacy single-language PL files are not the installed multi-locale templates.
 
-| Supabase šablonas | Subject | Body |
-|-------------------|---------|------|
-| **Confirm signup** | [`confirm-signup.multilocale.subject.txt`](./confirm-signup.multilocale.subject.txt) | [`confirm-signup.multilocale.html`](./confirm-signup.multilocale.html) |
-| **Reset password** | [`reset-password.multilocale.subject.txt`](./reset-password.multilocale.subject.txt) | [`reset-password.multilocale.html`](./reset-password.multilocale.html) |
+## Application integration
 
-Vienkalbiai PL failai (`confirm-signup.html` ir kt.) — tik jei naudojate **tik** tutlio.pl.
+The prepared signup code supplies the selected, validated locale through `options.data.locale`. Password recovery uses `/api/request-password-reset`, which updates locale metadata before sending and stops on update failure. Callback URLs carry `lang`; the callback preserves it on a fresh device. The `.pl` market remains Polish-only. These app/API changes still need an approved deployment.
 
-## Deploy
+## Hosted configuration and verification
 
-Po pakeitimo `Register.tsx` — **deploy** į Vercel (visi 3 domenai į tą patį projektą).
+The inspected production Site URL is `https://tutlio.lt`. The existing redirect allowlist has `/login` and `/**` entries for apex and `www` on `.lt`, `.pl` and `.com`. Custom SMTP is enabled. Neither URL settings nor SMTP settings were changed. No localhost or preview origin is currently allowlisted. `redirect-urls.txt` is an old reference list, not permission to overwrite the hosted configuration.
 
-## Google OAuth (jei naudojate)
+Before another installation, back up the actual hosted subject/body pairs and URL configuration. The verified pre-installation copies from this pass are in git-ignored `tmp/locale-production-backup-20260831/`; restore both subject and body together if needed. Do not push `supabase/config.toml` to production: its localhost/default settings are for local development.
 
-**Google Cloud Console → Credentials → OAuth client** — Authorized redirect URIs turi atitikti domenus, kuriuose veikia app (žr. `redirect-urls.txt` + Google Calendar callback iš `.env.example`).
+Reopen each saved template and compare the complete HTML and subject. The dashboard preview does not execute Go conditionals; seeing branches in that preview is not a delivery test. Real signup/recovery emails, clean-browser callbacks, expired/reused links, mobile email clients and native language review still need controlled QA with explicit sending authorization.
+
+See [production readiness](../../docs/LOCALE_PRODUCTION_READINESS.md), [Supabase email templates](https://supabase.com/docs/guides/auth/auth-email-templates), and [redirect URL configuration](https://supabase.com/docs/guides/auth/redirect-urls).

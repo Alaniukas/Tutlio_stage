@@ -8,7 +8,7 @@
  * - org_admin_calendar_full_control: Full control (create/edit/delete availability + sessions)
  */
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Calendar as BigCalendar, dateFnsLocalizer, Views } from 'react-big-calendar';
 import type { View } from 'react-big-calendar';
 import {
@@ -36,10 +36,42 @@ import { getCached, setCache } from '@/lib/dataCache';
 import { supabase } from '@/lib/supabase';
 import { sendEmail } from '@/lib/email';
 import { assertTutorSlotsFree, runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
+import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { authHeaders } from '@/lib/apiHelpers';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
+import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { isSchoolOrg, proKlaseOrgAdminContext, proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import {
+  parseOrgTrialPolicy,
+  shouldAutoMarkNextLessonTrial,
+  countTrialsFromHistory,
+} from '@/lib/orgTrialPolicy';
+import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
+import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/lib/orgUi';
+import { calendarSessionTitlePrefix, getCalendarSessionEventStyle } from '@/lib/calendarSessionEventStyle';
+import {
+  classGroupLessonPrefill,
+  resolveTutorSubjectForClassGroup,
+  scheduleLabelFromGroupSlots,
+  type SchoolClassGroupRecord,
+} from '@/lib/schoolClassGroups';
+import {
+  buildClassGroupMetaMap,
+  calendarTitleForSession,
+  classGroupParticipantsForModal,
+  isMergedClassGroupSession,
+  mergeSchoolClassGroupSessions,
+  orgScheduleSessionTitle,
+  type MergedClassGroupSession,
+} from '@/lib/schoolClassGroupSessions';
+import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
+import { formatStudentPickerLabel, pickStudentsForOrgTutorPicker } from '@/lib/orgStudentIdentity';
+import { displayStudentGrade } from '@/lib/studentGrade';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -62,6 +94,7 @@ import { DateInput } from '@/components/ui/date-input';
 import { Checkbox } from '@/components/ui/checkbox';
 import TimeSpinner, { DateTimeSpinner } from '@/components/TimeSpinner';
 import { cn } from '@/lib/utils';
+import AssignStudentFreeSlotDialog from '@/components/AssignStudentFreeSlotDialog';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import {
@@ -85,11 +118,23 @@ import {
   Ban,
   Pencil,
   Trash2,
+  Gift,
+  Repeat,
 } from 'lucide-react';
 import StatusBadge from '@/components/StatusBadge';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import FindTutorModal from '@/components/FindTutorModal';
+import RecurrenceFields from '@/components/RecurrenceFields';
 import { buildNoShowSessionPatch, noShowWhenLabelLt, type NoShowWhen } from '@/lib/noShowWhen';
+import {
+  contractedLessonsPerWeek,
+  resolveOrganizationLessonPrice,
+  type OrganizationDynamicPricingRule,
+} from '@/lib/organizationDynamicPricing';
+import {
+  resolveOrgMeetingLink,
+  resolveOrgSessionSubjectDefaults,
+} from '@/lib/orgSessionSubjectDefaults';
 
 const locales = { lt, en: enUS };
 const localizer = dateFnsLocalizer({
@@ -127,7 +172,7 @@ async function emailOrgTutorAvailabilityNotice(
 /** Same shape as fetchData sessions query — reused when refreshing one row for the lesson modal. */
 const TVARKARASTIS_SESSION_SELECT = `
   *,
-  student:students(full_name, email, admin_comment, admin_comment_visible_to_tutor),
+  student:students(full_name, email, admin_comment, admin_comment_visible_to_tutor, grade),
   tutor:profiles!sessions_tutor_id_fkey(full_name)
 `;
 
@@ -148,6 +193,7 @@ interface Session {
   end_time: Date;
   status: 'active' | 'cancelled' | 'completed' | 'no_show';
   paid: boolean;
+  is_complimentary?: boolean;
   topic?: string;
   price?: number;
   meeting_link?: string;
@@ -156,14 +202,23 @@ interface Session {
   recurring_session_id?: string | null;
   no_show_when?: string | null;
   cancelled_by?: 'tutor' | 'student' | null;
+  cancellation_reason_code?: string | null;
+  is_makeup?: boolean;
   tutor_comment?: string | null;
   show_comment_to_student?: boolean;
   payment_status?: string | null;
+  class_group_id?: string | null;
+  _isClassGroup?: boolean;
+  _classGroupId?: string;
+  _classGroupName?: string;
+  _classGroupSessions?: Session[];
+  _classGroupMembers?: Array<{ student_id: string; full_name: string; grade?: string | null }>;
   student?: {
     full_name: string;
     email?: string;
     admin_comment?: string | null;
     admin_comment_visible_to_tutor?: boolean | null;
+    grade?: string | null;
   };
   tutor?: {
     full_name: string;
@@ -251,6 +306,7 @@ interface Subject {
   color: string;
   tutor_id: string;
   is_group?: boolean | null;
+  is_trial?: boolean | null;
   max_students?: number | null;
   meeting_link?: string | null;
   grade_min?: number | null;
@@ -260,33 +316,46 @@ interface Subject {
 interface Student {
   id: string;
   full_name: string;
-  tutor_id: string;
+  tutor_id: string | null;
   email?: string;
   personal_meeting_link?: string | null;
-}
-
-/** Kaip Calendar: mokinys → korepetitorius → dalykas */
-function resolveOrgMeetingLink(
-  subjectLink: string | undefined | null,
-  studentId: string | undefined,
-  tutorPersonalLink: string | undefined | null,
-  allStudents: Student[],
-): string {
-  const st = studentId ? allStudents.find(s => s.id === studentId) : undefined;
-  const sl = st?.personal_meeting_link;
-  if (sl && String(sl).trim()) return String(sl).trim();
-  const tp = tutorPersonalLink && String(tutorPersonalLink).trim();
-  if (tp) return tp;
-  return (subjectLink && String(subjectLink).trim()) || '';
+  grade?: string | null;
+  pricing_lessons_per_week?: number | null;
+  linked_user_id?: string | null;
+  organization_id?: string | null;
 }
 
 export default function CompanyTvarkarastis() {
   const { t, locale, dateFnsLocale } = useTranslation();
+  const rtlLocalizer = useMemo(() => dateFnsLocalizer({
+    format, parse, startOfWeek, getDay, locales: { [locale]: dateFnsLocale },
+  }), [locale, dateFnsLocale]);
+  const { fmt } = useMarketMoney();
   const { loading: featuresLoading, hasFeature, organizationId } = useOrgFeatures();
+  const { isOwner, loading: accessLoading } = useOrgAdminAccess();
+  const orgEntityType = useOrgEntityType();
+  const isSchoolOrgView = isSchoolOrg(orgEntityType);
+  const isProKlase = isProKlaseOrg(organizationId);
+  const isMvOrg = isMoksloVaisiaiOrg(organizationId);
+  const proKlaseAdminUi = proKlaseOrgAdminContext(organizationId, isSchoolOrgView ? 'school' : 'company', featuresLoading);
+  const pkFeat = (flagId: string) =>
+    proKlaseFeatureEnabled(organizationId, isSchoolOrgView ? 'school' : 'company', hasFeature, flagId, featuresLoading);
 
   // Feature flags
-  const canView = hasFeature('org_admin_calendar_view') || hasFeature('org_admin_calendar_full_control');
-  const canFullControl = hasFeature('org_admin_calendar_full_control');
+  // Super-admins (owners) always have the calendar. Other seats still need the org flags.
+  const canView = isOwner || hasFeature('org_admin_calendar_view') || hasFeature('org_admin_calendar_full_control');
+  const canFullControl = isOwner || hasFeature('org_admin_calendar_full_control');
+  const canManageAvailability = isSchoolOrgView ? canFullControl : canView;
+  /** Pamokų paieška — visoms įmonėms su kalendoriaus prieiga; Pro Klasė frequency tik su flag'u. */
+  const showFindLesson = canView;
+  const showTrialToggleInCreate =
+    !isSchoolOrgView &&
+    !featuresLoading &&
+    (isMvOrg ||
+      (proKlaseAdminUi &&
+        (hasFeature('trial_reservation_flow') || hasFeature('auto_trial_first_lesson'))));
+  const hideAdminPrices = pkFeat('hide_admin_lesson_prices');
+  const showClassGroupPicker = isSchoolOrgView && !featuresLoading && hasFeature('school_class_groups');
 
   const assertTutorLicensed = async (tutorId: string) => {
     const { data: tutorProf } = await supabase
@@ -315,6 +384,7 @@ export default function CompanyTvarkarastis() {
     subjects: Subject[];
     students: Student[];
     individualPricing: Array<{ student_id: string; subject_id: string; price: number }>;
+    dynamicPricingRules?: OrganizationDynamicPricingRule[];
     orgUsesLicenses?: boolean;
   }>('company_tvarkarastis');
 
@@ -326,6 +396,9 @@ export default function CompanyTvarkarastis() {
   const [availability, setAvailability] = useState<Availability[]>(tc?.availability ?? []);
   const [subjects, setSubjects] = useState<Subject[]>(tc?.subjects ?? []);
   const [students, setStudents] = useState<Student[]>(tc?.students ?? []);
+  const [dynamicPricingRules, setDynamicPricingRules] = useState<OrganizationDynamicPricingRule[]>(
+    tc?.dynamicPricingRules ?? [],
+  );
 
   // Filter state
   const [selectedTutorIds, setSelectedTutorIds] = useState<string[]>(
@@ -344,6 +417,12 @@ export default function CompanyTvarkarastis() {
   const [isCreateSessionOpen, setIsCreateSessionOpen] = useState(false);
   const [isEventDetailOpen, setIsEventDetailOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Session | null>(null);
+  const [isGroupSession, setIsGroupSession] = useState(false);
+  const [isClassGroupSession, setIsClassGroupSession] = useState(false);
+  const [selectedGroupSessions, setSelectedGroupSessions] = useState<Session[]>([]);
+  const [classGroupParticipants, setClassGroupParticipants] = useState<
+    Array<{ student_id: string; full_name: string; grade?: string | null; session: Session | null }>
+  >([]);
   const [selectedSlot, setSelectedSlot] = useState<{ start: Date; end: Date } | null>(null);
 
   // Edit session state
@@ -362,8 +441,12 @@ export default function CompanyTvarkarastis() {
   const [editStatus, setEditStatus] = useState<'active' | 'completed' | 'cancelled' | 'no_show'>('active');
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
+  const [cancelReasonCode, setCancelReasonCode] = useState<'admin' | 'tutor_no_show'>('admin');
   const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
   const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
+  const [rescheduleReason, setRescheduleReason] = useState('');
+  /** "Kieno prašymu perkelta?" — required whenever the start time moves. */
+  const [rescheduleRequestedBy, setRescheduleRequestedBy] = useState<'' | 'student' | 'tutor'>('');
   const [isDeleteRecurringDialogOpen, setIsDeleteRecurringDialogOpen] = useState(false);
 
   // Availability edit state
@@ -374,6 +457,7 @@ export default function CompanyTvarkarastis() {
   const [availEditDayOfWeek, setAvailEditDayOfWeek] = useState('1');
   const [availEditSpecificDate, setAvailEditSpecificDate] = useState('');
   const [availEditEndDate, setAvailEditEndDate] = useState('');
+  // The selector is no longer shown, but preserve legacy restrictions when editing old rows.
   const [availEditSubjectIds, setAvailEditSubjectIds] = useState<string[]>([]);
   const [availEditSaving, setAvailEditSaving] = useState(false);
 
@@ -386,7 +470,6 @@ export default function CompanyTvarkarastis() {
   const [createAvailEndDate, setCreateAvailEndDate] = useState('');
   const [createAvailStart, setCreateAvailStart] = useState('09:00');
   const [createAvailEnd, setCreateAvailEnd] = useState('11:00');
-  const [createAvailSubjectIds, setCreateAvailSubjectIds] = useState<string[]>([]);
   const [createAvailSaving, setCreateAvailSaving] = useState(false);
 
   // Create session from availability slot
@@ -401,6 +484,8 @@ export default function CompanyTvarkarastis() {
   const [createFromAvailIsPaid, setCreateFromAvailIsPaid] = useState(false);
   const [createFromAvailMeetingLink, setCreateFromAvailMeetingLink] = useState('');
   const [createFromAvailTutorMeetingLink, setCreateFromAvailTutorMeetingLink] = useState('');
+  const [createFromAvailCreatedIntervals, setCreateFromAvailCreatedIntervals] = useState<Array<{ start: number; end: number }>>([]);
+  const [createFromAvailSuccess, setCreateFromAvailSuccess] = useState(false);
 
   // Create session form
   const [createTutorId, setCreateTutorId] = useState('');
@@ -414,11 +499,29 @@ export default function CompanyTvarkarastis() {
   const [createTopic, setCreateTopic] = useState('');
   const [createMeetingLink, setCreateMeetingLink] = useState('');
   const [createStudentIds, setCreateStudentIds] = useState<string[]>([]);
+  const [createClassGroupId, setCreateClassGroupId] = useState('');
+  const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [createIsRecurring, setCreateIsRecurring] = useState(false);
   const [createRecurringEndDate, setCreateRecurringEndDate] = useState('');
   const [createRecurringFrequency, setCreateRecurringFrequency] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
   const [createRecurringWeekdays, setCreateRecurringWeekdays] = useState<number[]>([]);
   const [createIsPaid, setCreateIsPaid] = useState(false);
+  const [createIsTrial, setCreateIsTrial] = useState(false);
+  const [createIsMakeup, setCreateIsMakeup] = useState(false);
+  const [createFirstLessonIsTrial, setCreateFirstLessonIsTrial] = useState(false);
+  /** Set when the create modal was opened from an availability block (keeps the marked time). */
+  const [createFromAvailabilityBlock, setCreateFromAvailabilityBlock] = useState<{ availabilityId: string; tutorId: string } | null>(null);
+  /** One click can fire both onSelectSlot and onSelectEvent for the same block. */
+  const availabilityClickGuardRef = useRef<{ id: string; at: number } | null>(null);
+  /** Org trial-lesson defaults (topic/duration/price) for the trial toggle and auto-trial. */
+  const [trialDefaults, setTrialDefaults] = useState<{ topic: string; durationMinutes: number; priceEur: number }>({
+    topic: '',
+    durationMinutes: 60,
+    priceEur: 0,
+  });
+  const [trialPolicy, setTrialPolicy] = useState(() => parseOrgTrialPolicy({}));
+  /** Student whose empty history auto-enabled the trial toggle (org feature auto_trial_first_lesson). */
+  const [autoTrialStudentId, setAutoTrialStudentId] = useState<string | null>(null);
   const [createPrice, setCreatePrice] = useState(0);
   const [createTutorComment, setCreateTutorComment] = useState('');
   const [createShowCommentToStudent, setCreateShowCommentToStudent] = useState(false);
@@ -449,12 +552,104 @@ export default function CompanyTvarkarastis() {
   const [findLessonBookIsPaid, setFindLessonBookIsPaid] = useState(false);
   const [findLessonBookMeetingLink, setFindLessonBookMeetingLink] = useState('');
   const [findLessonBookTutorMeetingLink, setFindLessonBookTutorMeetingLink] = useState('');
+  const [findLessonBookTrialSending, setFindLessonBookTrialSending] = useState(false);
+  const [findLessonBookCreatedIntervals, setFindLessonBookCreatedIntervals] = useState<Array<{ start: number; end: number }>>([]);
+  const [findLessonBookSuccess, setFindLessonBookSuccess] = useState(false);
 
   useEffect(() => {
-    if (!featuresLoading && organizationId) {
-      fetchData();
+    if (featuresLoading) return;
+    if (!organizationId) {
+      setLoading(false);
+      return;
     }
+    fetchData();
   }, [featuresLoading, organizationId]);
+
+  // Org trial defaults (same source as CompanyStudents / create-trial-package).
+  useEffect(() => {
+    if (!organizationId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('organizations')
+        .select('features')
+        .eq('id', organizationId)
+        .maybeSingle();
+      if (cancelled) return;
+      const feat = (data as any)?.features;
+      const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
+      setTrialPolicy(parseOrgTrialPolicy(featObj));
+      setTrialDefaults({
+        topic: typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
+          ? featObj.trial_lesson_topic.trim()
+          : '',
+        durationMinutes: typeof featObj.trial_lesson_duration_minutes === 'number' && Number.isFinite(featObj.trial_lesson_duration_minutes)
+          ? Math.max(15, Math.round(featObj.trial_lesson_duration_minutes))
+          : 60,
+        priceEur: typeof featObj.trial_lesson_price_eur === 'number' && Number.isFinite(featObj.trial_lesson_price_eur)
+          ? Math.max(0, featObj.trial_lesson_price_eur)
+          : 0,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId]);
+
+  useEffect(() => {
+    if (!showClassGroupPicker) {
+      setClassGroups([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const headers = await authHeaders();
+      const res = await fetch('/api/school-class-groups', { headers });
+      const data = await res.json().catch(() => ({}));
+      if (!cancelled && res.ok) setClassGroups((data.groups || []) as SchoolClassGroupRecord[]);
+    })();
+    return () => { cancelled = true; };
+  }, [showClassGroupPicker]);
+
+  // Org feature auto_trial_first_lesson (feedback item 10): a student's first
+  // lesson defaults to a trial with the org trial topic/duration/price — all
+  // still editable in the dialog before saving.
+  useEffect(() => {
+    if (featuresLoading || isMvOrg || !pkFeat('auto_trial_first_lesson')) return;
+    if (!createStudentId) return;
+    let cancelled = false;
+    (async () => {
+      const { data: historyRows, error } = await supabase
+        .from('sessions')
+        .select('id, status, subjects(is_trial)')
+        .eq('student_id', createStudentId);
+      if (cancelled || error) return;
+      const { trialCount, regularCount } = countTrialsFromHistory(historyRows || []);
+      if (shouldAutoMarkNextLessonTrial({ trialCount, regularCount, policy: trialPolicy, enabled: !isMvOrg })) {
+        setAutoTrialStudentId(createStudentId);
+        setCreateIsTrial(true);
+        setCreateIsRecurring(false);
+        setCreateRecurringEndDate('');
+        setCreateRecurringWeekdays([]);
+        setCreatePrice(trialDefaults.priceEur);
+        setCreateTopic((prev) => (prev.trim() ? prev : trialDefaults.topic));
+        setCreateEndTime((prevEnd) => {
+          if (!createStartTime) return prevEnd;
+          const start = new Date(createStartTime);
+          if (Number.isNaN(start.getTime())) return prevEnd;
+          return format(new Date(start.getTime() + trialDefaults.durationMinutes * 60000), "yyyy-MM-dd'T'HH:mm");
+        });
+      } else {
+        setAutoTrialStudentId(null);
+        // Only undo trial that this feature turned on; a manual toggle stays.
+        setCreateIsTrial((prev) => (prev && autoTrialStudentId ? false : prev));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createStudentId, featuresLoading, trialDefaults, trialPolicy]);
 
   const fetchData = async () => {
     if (!organizationId) return;
@@ -469,17 +664,28 @@ export default function CompanyTvarkarastis() {
       const tutorIds = filteredTutors.map((t: any) => t.id);
       setOrgTutors(filteredTutors as OrgTutor[]);
 
-      // Select all tutors by default
-      if (filteredTutors.length > 0 && selectedTutorIds.length === 0) {
-        setSelectedTutorIds(tutorIds);
-      }
+      // Keep "all teachers" selected when a newly invited teacher first appears.
+      // A cached calendar otherwise keeps only the old IDs and silently filters out
+      // lessons created by the new teacher until the whole app cache is cleared.
+      setSelectedTutorIds((previous) => {
+        const previousTutorIds = orgTutors.map((tutor) => tutor.id);
+        const hadAllPreviousTutors = previousTutorIds.length === 0
+          || previousTutorIds.every((id) => previous.includes(id));
+        if (hadAllPreviousTutors) return tutorIds;
+        const currentTutorIds = new Set(tutorIds);
+        return previous.filter((id) => currentTutorIds.has(id));
+      });
 
       // Fetch sessions for org tutors
+      const schedulePast = addDays(new Date(), -90).toISOString();
+      const scheduleFuture = addDays(new Date(), 180).toISOString();
       const { data: sessionsData } = await supabase
         .from('sessions')
         .select(TVARKARASTIS_SESSION_SELECT)
         .in('tutor_id', tutorIds)
         .not('hidden_from_calendar', 'eq', true)
+        .gte('start_time', schedulePast)
+        .lte('start_time', scheduleFuture)
         .limit(1000);
 
       const parsedSessions = (sessionsData || []).map((session: any) => ({
@@ -490,15 +696,17 @@ export default function CompanyTvarkarastis() {
       setSessions(parsedSessions);
 
       // Fetch availability for org tutors
+      const tutorNameById = new Map(filteredTutors.map((t: any) => [t.id, t.full_name || '']));
       const { data: availabilityData } = await supabase
         .from('availability')
-        .select(`
-          *,
-          tutor:profiles!availability_tutor_id_fkey(full_name)
-        `)
+        .select('*')
         .in('tutor_id', tutorIds);
 
-      setAvailability(availabilityData || []);
+      const mappedAvailability = (availabilityData || []).map((row: any) => ({
+        ...row,
+        tutor: { full_name: tutorNameById.get(row.tutor_id) || '' },
+      }));
+      setAvailability(mappedAvailability);
 
       // Fetch subjects for org tutors
       const { data: subjectsData } = await supabase
@@ -508,18 +716,47 @@ export default function CompanyTvarkarastis() {
 
       setSubjects(subjectsData || []);
 
-      // Visi org mokiniai (kad admin galėtų užimti laiką pas bet kurį korepetitorių)
-      let studentsQuery = supabase
-        .from('students')
-        .select('id, full_name, tutor_id, email, personal_meeting_link');
-      if (organizationId) {
-        studentsQuery = studentsQuery.eq('organization_id', organizationId);
+      // Visi org mokiniai (legacy rows may lack organization_id but have tutor_id in org)
+      const studentSelect =
+        'id, full_name, tutor_id, email, personal_meeting_link, grade, pricing_lessons_per_week, linked_user_id, organization_id';
+      let studentsData: Student[] = [];
+      if (organizationId && tutorIds.length > 0) {
+        const [byTutorRes, byOrgRes] = await Promise.all([
+          supabase
+            .from('students')
+            .select(studentSelect)
+            .in('tutor_id', tutorIds)
+            .is('detached_at', null),
+          supabase
+            .from('students')
+            .select(studentSelect)
+            .eq('organization_id', organizationId)
+            .is('detached_at', null),
+        ]);
+        const merged = [...(byTutorRes.data || []), ...(byOrgRes.data || [])] as Student[];
+        const seen = new Set<string>();
+        studentsData = merged.filter((s) => {
+          if (seen.has(s.id)) return false;
+          seen.add(s.id);
+          return true;
+        });
+      } else if (organizationId) {
+        const { data } = await supabase
+          .from('students')
+          .select(studentSelect)
+          .eq('organization_id', organizationId)
+          .is('detached_at', null);
+        studentsData = (data || []) as Student[];
       } else {
-        studentsQuery = studentsQuery.in('tutor_id', tutorIds);
+        const { data } = await supabase
+          .from('students')
+          .select(studentSelect)
+          .in('tutor_id', tutorIds)
+          .is('detached_at', null);
+        studentsData = (data || []) as Student[];
       }
-      const { data: studentsData } = await studentsQuery;
 
-      setStudents(studentsData || []);
+      setStudents(studentsData);
 
       const { data: pricingData } = await supabase
         .from('student_individual_pricing')
@@ -534,6 +771,7 @@ export default function CompanyTvarkarastis() {
       setTutorSubjectPrices(tspData || []);
 
       let nextOrgUsesLicenses = false;
+      let nextDynamicPricingRules: OrganizationDynamicPricingRule[] = [];
       if (organizationId) {
         const { data: orgRow } = await supabase
           .from('organizations')
@@ -547,15 +785,31 @@ export default function CompanyTvarkarastis() {
         if (Array.isArray(tpl)) {
           setOrgSubjectTemplates(tpl.filter((t: any) => t?.id && t?.name).map((t: any) => ({ id: t.id, name: String(t.name).trim() })));
         }
+
+        const { data: dynamicRows } = proKlaseAdminUi
+          ? await supabase
+              .from('organization_dynamic_pricing')
+              .select('id, organization_id, grade_min, grade_max, lessons_per_week, price')
+              .eq('organization_id', organizationId)
+          : { data: [] as OrganizationDynamicPricingRule[] };
+        nextDynamicPricingRules = (dynamicRows ?? []).map((row) => ({
+          ...row,
+          grade_min: Number(row.grade_min),
+          grade_max: Number(row.grade_max),
+          lessons_per_week: Number(row.lessons_per_week),
+          price: Number(row.price),
+        }));
+        setDynamicPricingRules(nextDynamicPricingRules);
       }
 
       setCache('company_tvarkarastis', {
         orgTutors: filteredTutors,
         sessions: parsedSessions,
-        availability: availabilityData || [],
+        availability: mappedAvailability,
         subjects: subjectsData || [],
         students: studentsData || [],
         individualPricing: pricingData || [],
+        dynamicPricingRules: nextDynamicPricingRules,
         orgUsesLicenses: nextOrgUsesLicenses,
       });
     } catch (error) {
@@ -564,6 +818,24 @@ export default function CompanyTvarkarastis() {
       setLoading(false);
     }
   };
+
+  // The teacher and administrator commonly keep their calendars open in separate
+  // tabs. Refresh as soon as the administrator returns to this tab so a lesson
+  // created in the teacher account becomes visible without a manual page reload.
+  useEffect(() => {
+    if (featuresLoading || !organizationId) return;
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void fetchData();
+    };
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+    // `fetchData` intentionally uses the latest filter state from the render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [featuresLoading, organizationId]);
 
   // Filter data based on selected filters
   const filteredSessions = useMemo(() => {
@@ -577,6 +849,12 @@ export default function CompanyTvarkarastis() {
 
     return filtered;
   }, [sessions, selectedTutorIds, selectedSubjectIds]);
+
+  const classGroupMeta = useMemo(() => buildClassGroupMetaMap(classGroups), [classGroups]);
+
+  const mergedCalendarSessions = useMemo(() => {
+    return mergeSchoolClassGroupSessions(filteredSessions, classGroupMeta) as Session[];
+  }, [filteredSessions, classGroupMeta]);
 
   const filteredAvailability = useMemo(() => {
     let filtered = availability;
@@ -644,6 +922,12 @@ export default function CompanyTvarkarastis() {
     return blocks;
   }, [filteredAvailability, currentDate, showOnlySessions]);
 
+  /** Trial (bandomoji) lessons get a distinct highlight in the calendar. */
+  const trialSubjectIds = useMemo(
+    () => new Set(subjects.filter((s: any) => s.is_trial === true).map((s: any) => s.id as string)),
+    [subjects],
+  );
+
   // Calendar events
   const calendarEvents = useMemo(() => {
     const events: any[] = [];
@@ -658,9 +942,17 @@ export default function CompanyTvarkarastis() {
 
     // Add sessions (colored by status)
     if (!showOnlyAvailability) {
-      events.push(...filteredSessions.map(session => ({
+      events.push(...mergedCalendarSessions.map(session => ({
         id: session.id,
-        title: `${session.student?.full_name || 'Mokinys'} - ${session.tutor?.full_name || 'Tutorius'}`,
+        title: `${calendarSessionTitlePrefix({
+          isTrial: !!session.subject_id && trialSubjectIds.has(session.subject_id),
+          isMakeup: isProKlase && session.is_makeup === true,
+          cancellationReasonCode: isProKlase ? session.cancellation_reason_code : undefined,
+          status: session.status,
+        })}${orgScheduleSessionTitle(session, t('cal.unknown'), {
+          isSchoolOrg: isSchoolOrgView,
+          tutorFallback: 'Tutorius',
+        })}${!session.meeting_link && session.status !== 'cancelled' ? ` · ${t('compSch.noMeetingLink')}` : ''}`,
         start: session.start_time,
         end: session.end_time,
         resource: {
@@ -671,7 +963,7 @@ export default function CompanyTvarkarastis() {
     }
 
     return events;
-  }, [filteredSessions, availabilityBlocks, showOnlySessions, showOnlyAvailability]);
+  }, [mergedCalendarSessions, availabilityBlocks, showOnlySessions, showOnlyAvailability, trialSubjectIds, isProKlase, t]);
 
   const filteredOrgTutorsForList = useMemo(() => {
     const q = tutorSearchQuery.trim().toLowerCase();
@@ -708,8 +1000,8 @@ export default function CompanyTvarkarastis() {
       rangeStart = startOfDay(currentDate);
       rangeEnd = endOfDay(currentDate);
     } else {
-      rangeStart = startOfWeek(currentDate, { weekStartsOn: 1 });
-      rangeEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
+      rangeStart = startOfWeek(currentDate, { weekStartsOn: locale === 'he' ? 0 : 1 });
+      rangeEnd = endOfWeek(currentDate, { weekStartsOn: locale === 'he' ? 0 : 1 });
     }
 
     const relevant = calendarEvents.filter(ev => {
@@ -740,19 +1032,19 @@ export default function CompanyTvarkarastis() {
     const scrollToTime = new Date(1970, 0, 1, Math.max(floorH, Math.min(minH, 7)), 0, 0);
 
     return { min, max, scrollToTime };
-  }, [calendarEvents, currentDate, currentView]);
+  }, [calendarEvents, currentDate, currentView, locale]);
 
   const calendarToolbarLabel = useMemo(() => {
     if (currentView === Views.DAY) {
       return format(currentDate, 'yyyy MMMM d', { locale: dateFnsLocale });
     }
     if (currentView === Views.WEEK) {
-      const ws = startOfWeek(currentDate, { weekStartsOn: 1 });
-      const we = endOfWeek(currentDate, { weekStartsOn: 1 });
+      const ws = startOfWeek(currentDate, { weekStartsOn: locale === 'he' ? 0 : 1 });
+      const we = endOfWeek(currentDate, { weekStartsOn: locale === 'he' ? 0 : 1 });
       return `${format(ws, 'd MMM', { locale: dateFnsLocale })} – ${format(we, 'd MMM yyyy', { locale: dateFnsLocale })}`;
     }
     return format(currentDate, 'yyyy MMMM', { locale: dateFnsLocale });
-  }, [currentDate, currentView, dateFnsLocale]);
+  }, [currentDate, currentView, dateFnsLocale, locale]);
 
   const createFromAvailSlots = useMemo(() => {
     if (!editingAvailability || !createFromAvailBaseDate) return [] as Array<{ label: string; startIso: string; endIso: string }>;
@@ -784,8 +1076,12 @@ export default function CompanyTvarkarastis() {
       });
     }
 
-    return slots;
-  }, [editingAvailability, createFromAvailBaseDate, availEditStart, availEditEnd, createFromAvailSubjectId, subjects]);
+    return slots.filter((slot) => {
+      const startMs = new Date(slot.startIso).getTime();
+      const endMs = new Date(slot.endIso).getTime();
+      return createFromAvailCreatedIntervals.every((created) => endMs <= created.start || startMs >= created.end);
+    });
+  }, [editingAvailability, createFromAvailBaseDate, availEditStart, availEditEnd, createFromAvailSubjectId, subjects, createFromAvailCreatedIntervals]);
 
   /** „Rasti pamoką“: 60 min pamoka 09–11 lange → keli galimi startai (kaip createFromAvailSlots) */
   const findLessonBookSlots = useMemo(() => {
@@ -811,8 +1107,12 @@ export default function CompanyTvarkarastis() {
         endIso: slotEnd.toISOString(),
       });
     }
-    return slots;
-  }, [findLessonBook, subjects]);
+    return slots.filter((slot) => {
+      const start = new Date(slot.startIso).getTime();
+      const end = new Date(slot.endIso).getTime();
+      return findLessonBookCreatedIntervals.every((created) => end <= created.start || start >= created.end);
+    });
+  }, [findLessonBook, subjects, findLessonBookCreatedIntervals]);
 
   useEffect(() => {
     if (!findLessonBook) {
@@ -853,6 +1153,8 @@ export default function CompanyTvarkarastis() {
   useEffect(() => {
     if (!createFromAvailOpen || !editingAvailability) {
       setCreateFromAvailTutorMeetingLink('');
+      setCreateFromAvailCreatedIntervals([]);
+      setCreateFromAvailSuccess(false);
       return;
     }
     let cancelled = false;
@@ -1000,51 +1302,183 @@ export default function CompanyTvarkarastis() {
       .sort((a, b) => a.start.getTime() - b.start.getTime());
   }, [sessions, createTutorId, createModalDayWindows.datePart]);
 
-  const createSelectionOverlapsBusy = useMemo(() => {
-    if (!createStartTime || !createEndTime) return false;
+  /** Busy sessions that overlap the currently selected time range */
+  const createConflictingSessions = useMemo(() => {
+    if (!createStartTime || !createEndTime) return [];
     const selStart = new Date(createStartTime);
     const selEnd = new Date(createEndTime);
-    if (Number.isNaN(selStart.getTime()) || Number.isNaN(selEnd.getTime())) return false;
-    return createModalDayBusySessions.some(
+    if (Number.isNaN(selStart.getTime()) || Number.isNaN(selEnd.getTime())) return [];
+    return createModalDayBusySessions.filter(
       b => selStart.getTime() < b.end.getTime() && selEnd.getTime() > b.start.getTime(),
     );
   }, [createStartTime, createEndTime, createModalDayBusySessions]);
+
+  const createSelectionOverlapsBusy = createConflictingSessions.length > 0;
 
   const applyCreateSubjectDefaults = (subjectId: string) => {
     const subj = subjects.find(s => s.id === subjectId);
     if (!subj) return;
 
-    const matchedTpl = orgSubjectTemplates.find(t => t.name.toLowerCase() === (subj.name || '').toLowerCase());
-    const tsp = matchedTpl && createTutorId
-      ? tutorSubjectPrices.find(p => p.tutor_id === createTutorId && p.org_subject_template_id === matchedTpl.id)
-      : undefined;
-
-    let price = tsp?.price ?? subj.price ?? 0;
-    if (createStudentId) {
-      const pricing = individualPricing.find(
-        p => p.student_id === createStudentId && p.subject_id === subjectId,
-      );
-      if (pricing && typeof pricing.price === 'number') {
-        price = pricing.price;
-      }
-    }
-
-    setCreatePrice(price);
     const tutorRow = createTutorId ? orgTutors.find((t) => t.id === createTutorId) : undefined;
-    setCreateMeetingLink(
-      resolveOrgMeetingLink(subj.meeting_link, createStudentId, tutorRow?.personal_meeting_link, students),
+    const student = createStudentId ? students.find((row) => row.id === createStudentId) : undefined;
+    const frequency = contractedLessonsPerWeek(
+      createIsRecurring,
+      createRecurringWeekdays,
+      student?.pricing_lessons_per_week,
     );
-    setCreateTopic(subj.name || '');
+    const defaults = resolveOrgSessionSubjectDefaults({
+      subject: subj,
+      studentId: createStudentId,
+      tutorId: createTutorId,
+      students,
+      individualPricing,
+      dynamicPricingRules: createIsTrial || subj.is_group || subj.is_trial ? [] : dynamicPricingRules,
+      orgSubjectTemplates,
+      tutorSubjectPrices,
+      tutorPersonalMeetingLink: tutorRow?.personal_meeting_link,
+      trialDefaults,
+      forceTrialPricing: createIsTrial,
+      lessonsPerWeek: frequency,
+    });
 
-    const durationMinutes = tsp?.duration_minutes ?? subj.duration_minutes ?? 60;
+    setCreatePrice(defaults.price);
+    setCreateMeetingLink(defaults.meetingLink);
+    setCreateTopic(defaults.topic);
+
     if (createStartTime && createStartTime.includes('T')) {
       const newStart = new Date(createStartTime);
       if (!Number.isNaN(newStart.getTime())) {
-        const newEnd = new Date(newStart.getTime() + durationMinutes * 60 * 1000);
+        const newEnd = new Date(newStart.getTime() + defaults.durationMinutes * 60 * 1000);
         setCreateEndTime(format(newEnd, "yyyy-MM-dd'T'HH:mm"));
       }
     }
   };
+
+  const applyEditSubjectDefaults = (subjectId: string) => {
+    const subj = subjects.find((s) => s.id === subjectId);
+    if (!subj) return;
+
+    const tutorRow = editTutorId ? orgTutors.find((t) => t.id === editTutorId) : undefined;
+    const defaults = resolveOrgSessionSubjectDefaults({
+      subject: subj,
+      studentId: editStudentId,
+      tutorId: editTutorId,
+      students,
+      individualPricing,
+      dynamicPricingRules: subj.is_group || subj.is_trial ? [] : dynamicPricingRules,
+      orgSubjectTemplates,
+      tutorSubjectPrices,
+      tutorPersonalMeetingLink: tutorRow?.personal_meeting_link,
+      trialDefaults,
+    });
+
+    setEditTopic(defaults.topic);
+    setEditPrice(defaults.price);
+    setEditDurationMinutes(defaults.durationMinutes);
+    setEditMeetingLink(defaults.meetingLink);
+  };
+
+  const applyClassGroupToCreateForm = (groupId: string) => {
+    if (!groupId) {
+      setCreateClassGroupId('');
+      return;
+    }
+    const group = classGroups.find((row) => row.id === groupId);
+    if (!group) return;
+    const prefer = createStartTime ? new Date(createStartTime) : undefined;
+    const prefill = classGroupLessonPrefill(group, {
+      from: new Date(),
+      preferDate: prefer && !Number.isNaN(prefer.getTime()) ? prefer : undefined,
+    });
+    setCreateClassGroupId(group.id);
+    setCreateTutorId(prefill.tutorId);
+    setCreateStudentIds(prefill.studentIds);
+    setCreateStudentId(prefill.studentIds.length === 1 ? prefill.studentIds[0] : '');
+    setCreateTopic(prefill.topic);
+    setCreateMeetingLink(prefill.meetingLink);
+    if (prefill.start && prefill.end) {
+      setCreateStartTime(format(prefill.start, "yyyy-MM-dd'T'HH:mm"));
+      setCreateEndTime(format(prefill.end, "yyyy-MM-dd'T'HH:mm"));
+    }
+    setCreateRecurringWeekdays(prefill.weekdays);
+    if (prefill.recurringEndDate) setCreateRecurringEndDate(prefill.recurringEndDate);
+    const subjectId = resolveTutorSubjectForClassGroup(
+      group,
+      subjects.filter((row) => row.tutor_id === prefill.tutorId),
+    );
+    setCreateSubjectId(subjectId);
+    if (subjectId) {
+      const subj = subjects.find((row) => row.id === subjectId);
+      const matchedTpl = subj
+        ? orgSubjectTemplates.find((tpl) => tpl.name.toLowerCase() === (subj.name || '').toLowerCase())
+        : undefined;
+      const tsp = matchedTpl
+        ? tutorSubjectPrices.find(
+            (p) => p.tutor_id === prefill.tutorId && p.org_subject_template_id === matchedTpl.id,
+          )
+        : undefined;
+      setCreatePrice(tsp?.price ?? subj?.price ?? 0);
+    }
+  };
+
+  useEffect(() => {
+    if (!createSubjectId || !createStudentId) return;
+    if (createIsTrial) {
+      setCreatePrice(trialDefaults.priceEur);
+      const subject = subjects.find((row) => row.id === createSubjectId);
+      if (subject && createStartTime && createStartTime.includes('T')) {
+        const newStart = new Date(createStartTime);
+        if (!Number.isNaN(newStart.getTime())) {
+          const newEnd = new Date(newStart.getTime() + trialDefaults.durationMinutes * 60 * 1000);
+          setCreateEndTime(format(newEnd, "yyyy-MM-dd'T'HH:mm"));
+        }
+      }
+      return;
+    }
+    const subject = subjects.find((row) => row.id === createSubjectId);
+    if (!subject) return;
+    const matchedTemplate = orgSubjectTemplates.find(
+      (row) => row.name.toLowerCase() === (subject.name || '').toLowerCase(),
+    );
+    const tutorPrice = matchedTemplate
+      ? tutorSubjectPrices.find(
+          (row) =>
+            row.tutor_id === createTutorId &&
+            row.org_subject_template_id === matchedTemplate.id,
+        )
+      : undefined;
+    const individualPrice = individualPricing.find(
+      (row) => row.student_id === createStudentId && row.subject_id === createSubjectId,
+    )?.price;
+    const student = students.find((row) => row.id === createStudentId);
+    const frequency = contractedLessonsPerWeek(
+      createIsRecurring,
+      createRecurringWeekdays,
+      student?.pricing_lessons_per_week,
+    );
+    setCreatePrice(
+      resolveOrganizationLessonPrice({
+        rules: createIsTrial || subject.is_group || subject.is_trial ? [] : dynamicPricingRules,
+        student,
+        lessonsPerWeek: frequency,
+        individualPrice,
+        fallbackPrice: tutorPrice?.price ?? subject.price ?? 0,
+      }),
+    );
+  }, [
+    createIsRecurring,
+    createRecurringWeekdays,
+    createStudentId,
+    createSubjectId,
+    createTutorId,
+    createIsTrial,
+    dynamicPricingRules,
+    individualPricing,
+    orgSubjectTemplates,
+    students,
+    subjects,
+    tutorSubjectPrices,
+  ]);
 
   const handleCreateStartTimeChange = (newVal: string) => {
     setCreateStartTime(newVal);
@@ -1073,47 +1507,27 @@ export default function CompanyTvarkarastis() {
     const session = event.resource?.session;
     if (!session) return {};
 
-    if (session.status === 'cancelled') {
-      return {
-        style: {
-          backgroundColor: '#ef4444',
-          borderColor: '#ef4444',
-          opacity: 0.5,
-          color: '#fff',
-        },
-      };
-    }
-    if (session.status === 'no_show') {
-      return {
-        style: {
-          backgroundColor: '#fda4af',
-          borderColor: '#fda4af',
-          color: '#fff',
-        },
-      };
-    }
-
     const endAt = session.end_time instanceof Date ? session.end_time : new Date(session.end_time);
-    const hasEnded = endAt.getTime() <= Date.now();
-    const isPaid = session.paid === true || session.payment_status === 'paid' || session.payment_status === 'confirmed';
+    const isTrialLesson = !!session.subject_id && trialSubjectIds.has(session.subject_id);
+    const isMovedLesson =
+      pkFeat('monthly_packages') && !!session.original_start_time && !!session.lesson_package_id;
 
-    const unpaidOccurred =
-      (session.status === 'completed' && !isPaid) ||
-      (session.status === 'active' && hasEnded && !isPaid) ||
-      (hasEnded && session.payment_status === 'paid_by_student');
-
-    let bgColor = '#3b82f6'; // blue - active
-    if (unpaidOccurred) {
-      bgColor = '#ca8a04'; // amber - completed unpaid
-    } else if (isPaid || session.status === 'completed') {
-      bgColor = '#10b981'; // green - completed paid
-    }
+    const eventStyle = getCalendarSessionEventStyle({
+      status: session.status,
+      paid: session.paid,
+      payment_status: session.payment_status,
+      endAt,
+      isTrial: isTrialLesson,
+      isMakeup: isProKlase && session.is_makeup === true,
+      cancellationReasonCode: isProKlase ? session.cancellation_reason_code : undefined,
+      isMovedLesson,
+      isOrgTutor: isSchoolOrgView || isSchoolBilledSession(session),
+    });
 
     return {
       style: {
-        backgroundColor: bgColor,
-        borderColor: bgColor,
-        color: '#fff',
+        ...eventStyle,
+        borderColor: eventStyle.borderColor ?? eventStyle.backgroundColor,
       },
     };
   };
@@ -1121,9 +1535,11 @@ export default function CompanyTvarkarastis() {
   const handleSelectSlot = (slotInfo: { start: Date; end: Date }) => {
     if (!canView) return;
 
-    // If user clicked an availability block and calendar triggers onSelectSlot too,
-    // prefer opening availability edit (org_admin full control) instead of "create session".
-    if (canFullControl && !showOnlySessions) {
+    // Marking a range that exactly matches an availability block used to divert
+    // to the availability editor and lose the marked time. Now the create-lesson
+    // modal opens prefilled with that time (+ the block's tutor); availability
+    // editing stays one click away via the link inside the modal.
+    if (canManageAvailability && !showOnlySessions) {
       const match = availabilityBlocks.find((b: any) => (
         b.start?.getTime?.() === slotInfo.start.getTime() &&
         b.end?.getTime?.() === slotInfo.end.getTime() &&
@@ -1131,13 +1547,14 @@ export default function CompanyTvarkarastis() {
       ));
 
       if (match) {
-        const fakeEvent = {
-          resource: { type: 'availability' },
-          availabilityId: match.availabilityId,
-          tutorId: match.tutorId,
-        };
-        // Reuse the same handler used by onSelectEvent
-        handleSelectEvent(fakeEvent);
+        availabilityClickGuardRef.current = { id: match.availabilityId, at: Date.now() };
+        resetCreateForm();
+        setSelectedSlot(slotInfo);
+        setCreateTutorId(match.tutorId || '');
+        setCreateFromAvailabilityBlock({ availabilityId: match.availabilityId, tutorId: match.tutorId || '' });
+        setCreateStartTime(format(slotInfo.start, "yyyy-MM-dd'T'HH:mm"));
+        setCreateEndTime(format(slotInfo.end, "yyyy-MM-dd'T'HH:mm"));
+        setIsCreateSessionOpen(true);
         return;
       }
     }
@@ -1154,7 +1571,12 @@ export default function CompanyTvarkarastis() {
 
   const handleSelectEvent = (event: any) => {
     if (event.resource?.type === 'availability') {
-      if (!canFullControl) return;
+      if (!canManageAvailability) return;
+      // One physical click can fire both onSelectSlot (→ prefilled create
+      // modal) and onSelectEvent for the same block — don't stack the editor
+      // on top of the just-opened create modal.
+      const guard = availabilityClickGuardRef.current;
+      if (guard && guard.id === event.availabilityId && Date.now() - guard.at < 500) return;
       const avail = availability.find(a => a.id === event.availabilityId);
       if (avail) {
         setEditingAvailability(avail);
@@ -1183,9 +1605,27 @@ export default function CompanyTvarkarastis() {
     }
     if (event.resource?.type === 'session') {
       const base = event.resource.session as Session;
-      setSelectedEvent(base);
+      if (isMergedClassGroupSession(base) && base._classGroupSessions) {
+        setIsGroupSession(true);
+        setIsClassGroupSession(true);
+        setSelectedGroupSessions(base._classGroupSessions);
+        setClassGroupParticipants(classGroupParticipantsForModal(base as MergedClassGroupSession<Session>));
+        setSelectedEvent({
+          ...base._classGroupSessions[0],
+          topic: base._classGroupName || base._classGroupSessions[0].topic,
+          tutor: base.tutor,
+        });
+      } else {
+        setIsGroupSession(false);
+        setIsClassGroupSession(false);
+        setSelectedGroupSessions([]);
+        setClassGroupParticipants([]);
+        setSelectedEvent(base);
+      }
       setIsEditingSession(false);
       setIsEventDetailOpen(true);
+
+      if (isMergedClassGroupSession(base)) return;
 
       const sid = base.id;
       void (async () => {
@@ -1231,7 +1671,35 @@ export default function CompanyTvarkarastis() {
         throw new Error(t('compSch.invalidEndDuration'));
       }
 
-      const payload = {
+      const oldStartForMove = new Date(selectedEvent.start_time);
+      const oldEndForMove = new Date(selectedEvent.end_time);
+      const truncMin = (d: Date) => Math.floor(d.getTime() / 60000);
+      const timeChangedForMove =
+        truncMin(oldStartForMove) !== truncMin(newStart) || truncMin(oldEndForMove) !== truncMin(newEnd);
+      const isSingleEdit = !(groupEditChoice === 'all_future' && selectedEvent.recurring_session_id);
+
+      // Reschedule reason is mandatory when the lesson start moves (duration-only
+      // edits are not a reschedule).
+      const startChangedForReason = truncMin(oldStartForMove) !== truncMin(newStart);
+      if (startChangedForReason && rescheduleReason.trim().length < 5) {
+        throw new Error(t('cal.rescheduleReasonRequired'));
+      }
+      if (startChangedForReason && !rescheduleRequestedBy) {
+        throw new Error(t('cal.rescheduleRequestedByRequired'));
+      }
+
+      // Monthly packages (req 6): a package lesson can only be moved within the
+      // same calendar month (anchored on its original start). One-off / trial
+      // lessons (no package) are unconstrained.
+      if (timeChangedForMove && isSingleEdit && pkFeat('monthly_packages') && !!(selectedEvent as any).lesson_package_id) {
+        const anchor = rescheduleAnchorDate((selectedEvent as any).original_start_time, oldStartForMove);
+        if (!isSameCalendarMonth(newStart, anchor)) {
+          throw new Error(t('cal.rescheduleSameMonthOnly'));
+        }
+      }
+
+      const paidChanged = editPaid !== selectedEvent.paid;
+      const payload: Record<string, any> = {
         start_time: newStart.toISOString(),
         end_time: newEnd.toISOString(),
         topic: editTopic || null,
@@ -1241,7 +1709,7 @@ export default function CompanyTvarkarastis() {
         student_id: editStudentId || selectedEvent.student_id,
         tutor_id: editTutorId || selectedEvent.tutor_id,
         paid: editPaid,
-        payment_status: editPaid ? 'paid' : 'pending',
+        ...(paidChanged ? { payment_status: editPaid ? 'paid' : 'pending' } : {}),
         status: editStatus,
       };
 
@@ -1259,6 +1727,18 @@ export default function CompanyTvarkarastis() {
           .select('id');
         if (error) throw new Error(error.message);
         if (!data?.length) throw new Error(t('compSch.saveFailedPermissionsOrRecords'));
+        if (startChangedForReason) {
+          await supabase
+            .from('sessions')
+            .update({
+              reschedule_reason: rescheduleReason.trim(),
+              reschedule_requested_by: rescheduleRequestedBy || null,
+            })
+            .in('id', data.map((row: { id: string }) => row.id))
+            .then(({ error: reschedErr }) => {
+              if (reschedErr) console.warn('[OrgSchedule] reschedule tracking columns not available:', reschedErr.message);
+            });
+        }
       } else {
         const { data, error } = await supabase
           .from('sessions')
@@ -1269,10 +1749,29 @@ export default function CompanyTvarkarastis() {
         if (!data?.length) throw new Error(t('compSch.saveFailedPermissions'));
       }
 
+      if (timeChangedForMove && isSingleEdit) {
+        await supabase
+          .from('sessions')
+          .update({
+            original_start_time: (selectedEvent as any).original_start_time ?? oldStartForMove.toISOString(),
+            rescheduled_at: new Date().toISOString(),
+            ...(startChangedForReason
+              ? {
+                  reschedule_reason: rescheduleReason.trim(),
+                  reschedule_requested_by: rescheduleRequestedBy || null,
+                }
+              : {}),
+          })
+          .eq('id', selectedEvent.id)
+          .then(({ error: reschedErr }) => {
+            if (reschedErr) console.warn('[OrgSchedule] reschedule tracking columns not available:', reschedErr.message);
+          });
+      }
+
       const oldStart = new Date(selectedEvent.start_time);
       const oldEnd = new Date(selectedEvent.end_time);
       const timeChanged =
-        oldStart.getTime() !== newStart.getTime() || oldEnd.getTime() !== newEnd.getTime();
+        truncMin(oldStart) !== truncMin(newStart) || truncMin(oldEnd) !== truncMin(newEnd);
 
       if (timeChanged && leaveFreeTimeOnReschedule) {
         await releaseSessionSlotViaApi({
@@ -1309,6 +1808,7 @@ export default function CompanyTvarkarastis() {
           newDate: format(newStart, 'yyyy-MM-dd'),
           newTime: `${format(newStart, 'HH:mm')}–${format(newEnd, 'HH:mm')}`,
           rescheduledBy: 'org_admin' as const,
+          reason: rescheduleReason.trim(),
           ...((tutorRow as any)?.organization_id ? { organizationId: (tutorRow as any).organization_id } : {}),
         };
 
@@ -1344,6 +1844,7 @@ export default function CompanyTvarkarastis() {
       setIsEventDetailOpen(false);
       fetchData();
     } catch (err: any) {
+      console.error('[OrgSchedule] save session error', err);
       alert(t('compSch.errorSaving', { msg: err.message }));
     }
     setSaving(false);
@@ -1369,6 +1870,7 @@ export default function CompanyTvarkarastis() {
         studentEmail: null,
         tutorEmail: null,
         leaveFreeTime: leaveFreeTimeOnCancel,
+        cancellationReasonCode: isProKlaseOrg(organizationId) ? cancelReasonCode : undefined,
       });
 
       if (success) {
@@ -1433,17 +1935,71 @@ export default function CompanyTvarkarastis() {
         .update({
           paid: nextPaid,
           payment_status: nextPaid ? 'paid' : 'pending',
+          ...(nextPaid ? {} : { is_complimentary: false }),
         })
         .eq('id', selectedEvent.id);
 
       if (error) {
         alert(t('compSch.errorPayment', { msg: error.message }));
       } else {
-        setSelectedEvent((prev) => (prev ? { ...prev, paid: nextPaid } : prev));
+        setSelectedEvent((prev) => (prev ? { ...prev, paid: nextPaid, is_complimentary: nextPaid ? prev.is_complimentary : false } : prev));
         fetchData();
       }
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
+    }
+    setSaving(false);
+  };
+
+  const handleMarkComplimentary = async () => {
+    if (!selectedEvent) return;
+    setSaving(true);
+    try {
+      const next = !selectedEvent.is_complimentary;
+      const result = await setSessionComplimentary(selectedEvent.id, next);
+      if (result.ok === false) {
+        alert(t('compSch.errorPayment', { msg: result.error }));
+      } else {
+        setSelectedEvent((prev) =>
+          prev
+            ? {
+                ...prev,
+                is_complimentary: next,
+                paid: next,
+                payment_status: next ? 'paid' : 'pending',
+                lesson_package_id: next ? null : (prev as any).lesson_package_id,
+              }
+            : prev,
+        );
+        fetchData();
+      }
+    } catch (err: any) {
+      alert(t('compSch.errorGeneric', { msg: err.message }));
+    }
+    setSaving(false);
+  };
+
+  const handleContinueLearning = async () => {
+    if (!selectedEvent) return;
+    setSaving(true);
+    try {
+      const resp = await fetch('/api/continue-trial-learning', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ sessionId: selectedEvent.id }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (resp.status === 409 || json?.error === 'already_exists') {
+        alert(t('cal.continueLearningAlready'));
+      } else if (!resp.ok || !json?.success) {
+        alert(t('cal.continueLearningFailed', { msg: json?.error || '' }));
+      } else {
+        alert(t('cal.continueLearningSuccess'));
+        setIsEventDetailOpen(false);
+        fetchData();
+      }
+    } catch (err: any) {
+      alert(t('cal.continueLearningFailed', { msg: err.message || '' }));
     }
     setSaving(false);
   };
@@ -1547,7 +2103,7 @@ export default function CompanyTvarkarastis() {
         tutor_id: createAvailTutorId,
         start_time: createAvailStart,
         end_time: createAvailEnd,
-        subject_ids: createAvailSubjectIds,
+        subject_ids: [],
         is_recurring: createAvailIsRecurring,
         created_by_role: 'org_admin',
       };
@@ -1569,7 +2125,6 @@ export default function CompanyTvarkarastis() {
       void emailOrgTutorAvailabilityNotice(createAvailTutorId, 'created', schedHtmlCr);
       setIsCreateAvailabilityOpen(false);
       setCreateAvailTutorId('');
-      setCreateAvailSubjectIds([]);
       setCreateAvailStart('09:00');
       setCreateAvailEnd('11:00');
       fetchData();
@@ -1607,7 +2162,13 @@ export default function CompanyTvarkarastis() {
         const pricing = individualPricing.find(
           p => p.student_id === studentId && p.subject_id === createFromAvailSubjectId,
         );
-        const studentPrice = pricing?.price ?? availTsp?.price ?? subj?.price ?? null;
+        const student = students.find((row) => row.id === studentId);
+        const studentPrice = resolveOrganizationLessonPrice({
+          rules: subj?.is_group || subj?.is_trial ? [] : dynamicPricingRules,
+          student,
+          individualPrice: pricing?.price,
+          fallbackPrice: availTsp?.price ?? subj?.price ?? 0,
+        });
 
         return {
           tutor_id: editingAvailability.tutor_id,
@@ -1633,15 +2194,11 @@ export default function CompanyTvarkarastis() {
       const { error } = await supabase.from('sessions').insert(sessionRows);
       if (error) throw new Error(error.message);
 
-      setCreateFromAvailOpen(false);
-      setCreateFromAvailStudentId('');
-      setCreateFromAvailStudentIds([]);
-      setCreateFromAvailSubjectId('');
-      setCreateFromAvailTopic('');
-      setCreateFromAvailSelectedSlot('');
-      setCreateFromAvailIsPaid(false);
-      setCreateFromAvailMeetingLink('');
-      setIsAvailabilityEditOpen(false);
+      setCreateFromAvailCreatedIntervals((current) => [
+        ...current,
+        { start: new Date(selectedSlot.startIso).getTime(), end: new Date(selectedSlot.endIso).getTime() },
+      ]);
+      setCreateFromAvailSuccess(true);
       fetchData();
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
@@ -1677,7 +2234,7 @@ export default function CompanyTvarkarastis() {
       }
 
       const matchedTpl = subj
-        ? orgSubjectTemplates.find(t => t.name.toLowerCase() === (subj.name || '').toLowerCase())
+        ? orgSubjectTemplates.find(tp => tp.name.toLowerCase() === (subj.name || '').toLowerCase())
         : undefined;
       const bookTsp = matchedTpl
         ? tutorSubjectPrices.find(
@@ -1685,38 +2242,90 @@ export default function CompanyTvarkarastis() {
           )
         : undefined;
 
-      const meetingLinkVal = findLessonBookMeetingLink.trim() || null;
-
-      const sessionRows = studentIds.map((studentId, index) => {
-        const pricing = individualPricing.find(
-          p => p.student_id === studentId && p.subject_id === findLessonBook.subjectId,
-        );
-        const studentPrice = pricing?.price ?? bookTsp?.price ?? subj?.price ?? null;
-
-        return {
-          tutor_id: findLessonBook.tutorId,
-          student_id: studentId,
-          subject_id: findLessonBook.subjectId || null,
-          start_time: selectedSlot.startIso,
-          end_time: selectedSlot.endIso,
-          topic: findLessonBookTopic || subj?.name || null,
-          meeting_link: meetingLinkVal,
-          price: studentPrice,
-          status: 'active',
-          paid: findLessonBookIsPaid,
-          payment_status: findLessonBookIsPaid ? 'paid' : 'pending',
-          created_by_role: 'org_admin',
-          available_spots: isGroup ? Math.max(0, (subj?.max_students ?? 5) - (index + 1)) : null,
-        };
+      // Route through the shared create path so the tutor is always notified
+      // (booking_notification) and package credits / payment status are handled
+      // consistently with the main "Create session" dialog.
+      const priceStudentId = isGroup ? studentIds[0] : findLessonBookStudentId;
+      const bookPricing = individualPricing.find(
+        p => p.student_id === priceStudentId && p.subject_id === findLessonBook.subjectId,
+      );
+      const bookStudent = students.find((row) => row.id === priceStudentId);
+      const bookPrice = resolveOrganizationLessonPrice({
+        rules: subj?.is_group || subj?.is_trial ? [] : dynamicPricingRules,
+        student: bookStudent,
+        individualPrice: bookPricing?.price,
+        fallbackPrice: bookTsp?.price ?? subj?.price ?? 0,
       });
 
-      await assertTutorSlotsFree(supabase, findLessonBook.tutorId, [
-        { start: new Date(selectedSlot.startIso), end: new Date(selectedSlot.endIso) },
+      await runOrgAdminCreateSession({
+        supabase,
+        createTutorId: findLessonBook.tutorId,
+        createSubjectId: findLessonBook.subjectId,
+        createStudentId: isGroup ? '' : findLessonBookStudentId,
+        createStudentIds: studentIds,
+        createStartTime: selectedSlot.startIso,
+        createEndTime: selectedSlot.endIso,
+        createTopic: findLessonBookTopic,
+        createMeetingLink: findLessonBookMeetingLink.trim(),
+        createIsRecurring: false,
+        createRecurringEndDate: '',
+        createIsPaid: findLessonBookIsPaid,
+        createPrice: bookPrice,
+        createTutorComment: '',
+        createShowCommentToStudent: false,
+        subjects,
+        individualPricing,
+        tutorSubjectPrices,
+        orgSubjectTemplateId: matchedTpl?.id,
+        dynamicPricingRules,
+        suppressSuccessAlert: true,
+      });
+
+      setFindLessonBookCreatedIntervals((current) => [
+        ...current,
+        { start: new Date(selectedSlot.startIso).getTime(), end: new Date(selectedSlot.endIso).getTime() },
       ]);
+      setFindLessonBookSuccess(true);
+      fetchData();
+    } catch (err: any) {
+      alert(t('compSch.errorGeneric', { msg: err.message }));
+    }
+    setFindLessonBookSaving(false);
+  };
 
-      const { error } = await supabase.from('sessions').insert(sessionRows);
-      if (error) throw new Error(error.message);
-
+  // Reservation flow (req 2): hold the selected slot as a trial and send the
+  // payment link. The slot is confirmed only after payment; unpaid holds
+  // auto-release after the org deadline.
+  const handleFindLessonBookReserveTrial = async () => {
+    if (!findLessonBook) return;
+    if (!findLessonBookStudentId) {
+      alert(t('compSch.selectStudentAlert'));
+      return;
+    }
+    const selectedSlot =
+      findLessonBookSlots.find((s) => s.startIso === findLessonBookSelectedSlot) || findLessonBookSlots[0];
+    if (!selectedSlot) {
+      alert(t('findLesson.noSubSlots'));
+      return;
+    }
+    setFindLessonBookTrialSending(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const resp = await fetch('/api/create-trial-package', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({
+          studentId: findLessonBookStudentId,
+          tutorId: findLessonBook.tutorId,
+          startIso: selectedSlot.startIso,
+          endIso: selectedSlot.endIso,
+        }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error((json as any).error || t('findLesson.trialReserveFailed'));
       setFindLessonBook(null);
       setFindLessonBookStudentId('');
       setFindLessonBookStudentIds([]);
@@ -1725,11 +2334,12 @@ export default function CompanyTvarkarastis() {
       setFindLessonBookIsPaid(false);
       setFindLessonBookMeetingLink('');
       setFindLessonBookTutorMeetingLink('');
+      alert(t('findLesson.trialReserveSent'));
       fetchData();
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
     }
-    setFindLessonBookSaving(false);
+    setFindLessonBookTrialSending(false);
   };
 
   const handleCreateSession = async () => {
@@ -1761,7 +2371,7 @@ export default function CompanyTvarkarastis() {
         ? orgSubjectTemplates.find(t => t.name.toLowerCase() === (selectedSubj.name || '').toLowerCase())
         : undefined;
 
-      await runOrgAdminCreateSession({
+      const createResult = await runOrgAdminCreateSession({
         supabase,
         createTutorId,
         createSubjectId,
@@ -1777,13 +2387,60 @@ export default function CompanyTvarkarastis() {
         createRecurringWeekdays,
         createIsPaid,
         createPrice,
+        createIsTrial,
+        createFirstLessonIsTrial: createIsRecurring && createFirstLessonIsTrial,
         createTutorComment,
         createShowCommentToStudent,
+        createIsMakeup: isProKlaseOrg(organizationId) && createIsMakeup,
         subjects,
         individualPricing,
         tutorSubjectPrices,
         orgSubjectTemplateId: matchedTemplate?.id,
+        dynamicPricingRules,
+        classGroupId: createClassGroupId || null,
       });
+
+      // Trial payment email on creation: attach a 1-lesson package to the new
+      // trial lesson and email the payer a one-time pay link.
+      if (
+        (createIsTrial || (createIsRecurring && createFirstLessonIsTrial)) &&
+        !createIsPaid &&
+        createPrice > 0 &&
+        pkFeat('trial_creation_payment_email') &&
+        createResult.createdSessionIds.length > 0
+      ) {
+        const trialDurationMin = createIsTrial
+          ? (() => {
+              const start = new Date(createStartTime);
+              const end = new Date(createEndTime);
+              if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return trialDefaults.durationMinutes;
+              return Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000));
+            })()
+          : trialDefaults.durationMinutes;
+        try {
+          const resp = await fetch('/api/create-trial-package', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({
+              studentId: createStudentId,
+              tutorId: createTutorId,
+              sessionId: createResult.createdSessionIds[0],
+              topic: createTopic || trialDefaults.topic || undefined,
+              durationMinutes: trialDurationMin,
+              priceEur: createPrice,
+            }),
+          });
+          if (!resp.ok) {
+            const txt = await resp.text().catch(() => '');
+            console.error('[CompanyTvarkarastis] trial payment email failed:', resp.status, txt);
+            alert(t('compSch.trialPaymentEmailFailed'));
+          }
+        } catch (trialErr) {
+          console.error('[CompanyTvarkarastis] trial payment email failed:', trialErr);
+          alert(t('compSch.trialPaymentEmailFailed'));
+        }
+      }
+
       setIsCreateSessionOpen(false);
       resetCreateForm();
       fetchData();
@@ -1799,6 +2456,7 @@ export default function CompanyTvarkarastis() {
     setCreateTutorId('');
     setCreateStudentId('');
     setCreateStudentIds([]);
+    setCreateClassGroupId('');
     setCreateSubjectId('');
     setCreateTopic('');
     setCreateMeetingLink('');
@@ -1809,10 +2467,14 @@ export default function CompanyTvarkarastis() {
     setCreateRecurringFrequency('weekly');
     setCreateRecurringWeekdays([]);
     setCreateIsPaid(false);
+    setCreateIsTrial(false);
+    setCreateFirstLessonIsTrial(false);
+    setAutoTrialStudentId(null);
     setCreatePrice(0);
     setCreateTutorComment('');
     setCreateShowCommentToStudent(false);
     setCreateSelectedFreeSlot('');
+    setCreateFromAvailabilityBlock(null);
   };
 
   const toggleTutorFilter = (tutorId: string) => {
@@ -1852,7 +2514,7 @@ export default function CompanyTvarkarastis() {
   };
 
   // Check if feature is enabled
-  if (featuresLoading) {
+  if (featuresLoading || accessLoading) {
     return (
       <>
         <div className="flex items-center justify-center h-64">
@@ -1900,11 +2562,13 @@ export default function CompanyTvarkarastis() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2 w-full sm:w-auto sm:justify-end sm:flex-shrink-0">
+            {showFindLesson && (
             <Button variant="outline" onClick={() => setFindLessonOpen(true)} className="flex-1 min-w-[min(100%,10rem)] sm:flex-initial touch-manipulation gap-2">
               <Search className="w-4 h-4 shrink-0" />
               <span className="truncate text-xs sm:text-sm">{t('compSch.findLesson')}</span>
             </Button>
-            {canFullControl && (
+            )}
+            {canManageAvailability && (
               <Button variant="outline" onClick={() => setIsCreateAvailabilityOpen(true)} className="flex-1 min-w-[min(100%,10rem)] sm:flex-initial touch-manipulation gap-2">
                 <Plus className="w-4 h-4 shrink-0" />
                 <span className="truncate text-xs sm:text-sm">{t('compSch.freeTime')}</span>
@@ -1953,7 +2617,7 @@ export default function CompanyTvarkarastis() {
                     {t('compSch.clear')}
                   </Button>
                 </div>
-                <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                <div className={cn(ORG_TUTOR_FILTER_SCROLL_CLASS, 'space-y-1 pr-1')}>
                   {filteredOrgTutorsForList.length === 0 ? (
                     <p className="text-xs text-gray-500 py-2">{t('compSch.searchNotFound')}</p>
                   ) : (
@@ -2106,8 +2770,9 @@ export default function CompanyTvarkarastis() {
               </div>
               <div style={{ height: '700px' }}>
                 <BigCalendar
+                  rtl={locale === 'ar' || locale === 'he'}
                   key={`${format(currentDate, 'yyyy-MM-dd')}-${currentView}-${timeRangeBounds.min.getTime()}-${timeRangeBounds.max.getTime()}`}
-                  localizer={localizer}
+                  localizer={locale === 'ar' || locale === 'he' ? rtlLocalizer : localizer}
                   events={calendarEvents}
                   startAccessor="start"
                   endAccessor="end"
@@ -2119,6 +2784,7 @@ export default function CompanyTvarkarastis() {
                   onSelectSlot={handleSelectSlot}
                   onSelectEvent={handleSelectEvent}
                   selectable={canView}
+                  toolbar={false}
                   eventPropGetter={eventStyleGetter}
                   culture={locale}
                   {...(currentView !== Views.MONTH
@@ -2176,6 +2842,22 @@ export default function CompanyTvarkarastis() {
             <div className="w-4 h-4 rounded" style={{ backgroundColor: '#ef4444', opacity: 0.5 }}></div>
             <span>{t('compSch.cancelledLesson')}</span>
           </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#a855f7', border: '2px solid #7e22ce' }}></div>
+            <span>{t('compSch.trialLegend')}</span>
+          </div>
+          {isProKlase && (
+            <>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded" style={{ backgroundColor: '#8b5cf6', border: '2px solid #6d28d9' }}></div>
+                <span>{t('compSch.makeupLegend')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded opacity-55" style={{ backgroundColor: '#ef4444', border: '2px dashed #991b1b' }}></div>
+                <span>{t('compSch.tutorNoShowLegend')}</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -2194,6 +2876,25 @@ export default function CompanyTvarkarastis() {
               {t('compSch.createNewLesson')}
             </DialogTitle>
             <DialogDescription className="text-center">{t('compSch.fillInfoAdmin')}</DialogDescription>
+            {createFromAvailabilityBlock && canManageAvailability && (
+              <button
+                type="button"
+                className="mx-auto text-xs text-indigo-600 hover:text-indigo-800 underline underline-offset-2"
+                onClick={() => {
+                  const block = createFromAvailabilityBlock;
+                  setIsCreateSessionOpen(false);
+                  resetCreateForm();
+                  availabilityClickGuardRef.current = null;
+                  handleSelectEvent({
+                    resource: { type: 'availability' },
+                    availabilityId: block?.availabilityId,
+                    tutorId: block?.tutorId,
+                  });
+                }}
+              >
+                {t('compSch.editThisFreeTime')}
+              </button>
+            )}
           </DialogHeader>
 
           {(() => {
@@ -2213,6 +2914,33 @@ export default function CompanyTvarkarastis() {
                 !showDaySummaryAside && 'lg:px-4 xl:px-8',
               )}
             >
+            {showClassGroupPicker && classGroups.length > 0 && (
+              <div className="space-y-2 min-w-0">
+                <Label>{t('school.groups.createLessonLabel')}</Label>
+                <Select
+                  value={createClassGroupId || '__none__'}
+                  onValueChange={(id) => {
+                    if (id === '__none__') applyClassGroupToCreateForm('');
+                    else applyClassGroupToCreateForm(id);
+                  }}
+                >
+                  <SelectTrigger className="rounded-xl">
+                    <SelectValue placeholder={t('school.groups.createLessonNone')} />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72 overflow-y-auto">
+                    <SelectItem value="__none__">{t('school.groups.createLessonNone')}</SelectItem>
+                    {classGroups.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        {group.name}
+                        {group.slots?.length ? ` · ${scheduleLabelFromGroupSlots(group.slots)}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500">{t('school.groups.createLessonHint')}</p>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-2 min-w-0">
                 <Label>{t('compSch.tutorRequired')}</Label>
@@ -2223,12 +2951,16 @@ export default function CompanyTvarkarastis() {
                     setCreateStudentId('');
                     setCreateStudentIds([]);
                     setCreateSubjectId('');
+                    if (createClassGroupId) {
+                      const group = classGroups.find((row) => row.id === createClassGroupId);
+                      if (!group || group.tutor_id !== id) setCreateClassGroupId('');
+                    }
                   }}
                 >
                   <SelectTrigger className="rounded-xl">
                     <SelectValue placeholder={t('compSch.selectTutorPlaceholder')} />
                   </SelectTrigger>
-                  <SelectContent className="max-h-72 overflow-y-auto">
+                  <SelectContent className={ORG_TUTOR_SELECT_SCROLL_CLASS}>
                     <div className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100">
                       <Input
                         value={createTutorSearch}
@@ -2236,13 +2968,10 @@ export default function CompanyTvarkarastis() {
                         placeholder={t('common.search')}
                         className="h-9 rounded-xl"
                       />
-                      {!createTutorSearch && orgTutors.length > 5 && (
-                        <p className="mt-1 text-[11px] text-gray-500">{t('common.searchToSeeMore')}</p>
-                      )}
                     </div>
                     {(createTutorSearch
                       ? orgTutors.filter((tu) => (tu.full_name || '').toLowerCase().includes(createTutorSearch.trim().toLowerCase()))
-                      : orgTutors.slice(0, 5)
+                      : orgTutors
                     ).map(tutor => {
                       const licBlocked = isTutorLicenseBlockedForOrgBooking(tutor.id);
                       return (
@@ -2285,13 +3014,10 @@ export default function CompanyTvarkarastis() {
                           placeholder={t('common.search')}
                           className="h-9 rounded-xl"
                         />
-                        {!createSubjectSearch && subjects.length > 5 && (
-                          <p className="mt-1 text-[11px] text-gray-500">{t('common.searchToSeeMore')}</p>
-                        )}
                       </div>
                       {(createSubjectSearch
                         ? subjects.filter((s) => (s.name || '').toLowerCase().includes(createSubjectSearch.trim().toLowerCase()))
-                        : subjects.slice(0, 5)
+                        : subjects
                       )
                         .filter(s => !createTutorId || s.tutor_id === createTutorId)
                         .map(subj => (
@@ -2304,7 +3030,7 @@ export default function CompanyTvarkarastis() {
                                   {t('compSch.groupMax', { max: String(subj.max_students) })}
                                 </span>
                               )}
-                              · {subj.duration_minutes} min · €{subj.price}
+                              · {subj.duration_minutes} min{!hideAdminPrices && <> · {fmt(subj.price)}</>}
                             </div>
                           </SelectItem>
                         ))}
@@ -2316,9 +3042,15 @@ export default function CompanyTvarkarastis() {
 
             {(() => {
               const selSubj = subjects.find(s => s.id === createSubjectId);
-              const isGrp = Boolean(selSubj?.is_group);
-              const maxSt = selSubj?.max_students || 1;
-              const list = sortStudentsByFullName(students.filter(s => !createTutorId || s.tutor_id === createTutorId));
+              const isGrp = Boolean(selSubj?.is_group) || Boolean(createClassGroupId);
+              const maxSt = createClassGroupId
+                ? Math.max(selSubj?.max_students || 1, createStudentIds.length, 1)
+                : (selSubj?.max_students || 1);
+              const list = sortStudentsByFullName(
+                createClassGroupId
+                  ? students.filter((s) => createStudentIds.includes(s.id))
+                  : pickStudentsForOrgTutorPicker(students, createTutorId),
+              );
               if (isGrp) {
                 return (
                   <div className="space-y-2">
@@ -2344,7 +3076,7 @@ export default function CompanyTvarkarastis() {
                               disabled={!createStudentIds.includes(student.id) && createStudentIds.length >= maxSt}
                               className="rounded border-gray-300 text-indigo-600"
                             />
-                            <span className="text-sm">{student.full_name}</span>
+                            <span className="text-sm">{formatStudentPickerLabel(student.full_name, student.grade)}</span>
                           </label>
                         ))
                       )}
@@ -2365,19 +3097,28 @@ export default function CompanyTvarkarastis() {
                         <Input
                           value={createStudentSearch}
                           onChange={(e) => setCreateStudentSearch(e.target.value)}
+                          onKeyDown={(e) => e.stopPropagation()}
                           placeholder={t('common.search')}
                           className="h-9 rounded-xl"
                         />
-                        {!createStudentSearch && list.length > 5 && (
-                          <p className="mt-1 text-[11px] text-gray-500">{t('common.searchToSeeMore')}</p>
-                        )}
                       </div>
-                      {(createStudentSearch
-                        ? list.filter((s) => (s.full_name || '').toLowerCase().includes(createStudentSearch.trim().toLowerCase()))
-                        : list.slice(0, 5)
-                      ).map(student => (
-                        <SelectItem key={student.id} value={student.id}>{student.full_name}</SelectItem>
-                      ))}
+                      {(() => {
+                        const visible = createStudentSearch
+                          ? list.filter((s) =>
+                              (s.full_name || '').toLowerCase().includes(createStudentSearch.trim().toLowerCase()),
+                            )
+                          : list;
+                        if (visible.length === 0) {
+                          return (
+                            <p className="px-3 py-2 text-sm text-gray-400">{t('compSch.noStudents')}</p>
+                          );
+                        }
+                        return visible.map((student) => (
+                          <SelectItem key={student.id} value={student.id}>
+                            {formatStudentPickerLabel(student.full_name, student.grade)}
+                          </SelectItem>
+                        ));
+                      })()}
                     </SelectContent>
                   </Select>
                 </div>
@@ -2422,7 +3163,31 @@ export default function CompanyTvarkarastis() {
             </div>
 
             {createSelectionOverlapsBusy && (
-              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900" dangerouslySetInnerHTML={{ __html: t('compSch.overlapWarning') }} />
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 sm:p-4">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-red-900">{t('compSch.overlapWarning')}</p>
+                    <p className="text-xs text-red-800/80 mt-0.5">{t('compSch.overlapHint')}</p>
+                    <ul className="mt-2.5 space-y-1.5">
+                      {createConflictingSessions.map(b => (
+                        <li
+                          key={b.id}
+                          className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-lg border border-red-200/80 bg-white px-2.5 py-1.5 text-xs"
+                        >
+                          <span className="font-semibold tabular-nums text-red-900">
+                            {format(b.start, 'HH:mm')}–{format(b.end, 'HH:mm')}
+                          </span>
+                          <span className="min-w-0 truncate text-red-900/75">
+                            {b.studentName}
+                            {b.topic ? ` · ${b.topic}` : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
@@ -2436,11 +3201,15 @@ export default function CompanyTvarkarastis() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 items-stretch">
-              <div className="space-y-2">
-                <Label>{t('compSch.price')}</Label>
-                <Input type="number" value={createPrice} onChange={(e) => setCreatePrice(Number(e.target.value))} className="rounded-xl" />
-              </div>
+            <div className={cn('grid grid-cols-1 gap-3 sm:gap-4 items-stretch', !hideAdminPrices && 'sm:grid-cols-2')}>
+              {/* hide_admin_lesson_prices: the price stays auto-resolved (dynamic pricing) but is not shown. */}
+              {!hideAdminPrices && (
+                <div className="space-y-2">
+                  <Label>{t('compSch.price')}</Label>
+                  <Input type="number" value={createPrice} onChange={(e) => setCreatePrice(Number(e.target.value))} className="rounded-xl" />
+                  {createIsTrial && <p className="text-xs text-amber-700">{t('compSch.trialPriceNote')}</p>}
+                </div>
+              )}
               <div className="border border-green-100 rounded-xl p-3 sm:p-4 bg-green-50/50 flex flex-col justify-center min-h-[4.5rem]">
                 <button type="button" onClick={() => setCreateIsPaid(!createIsPaid)} className="flex items-center justify-between gap-3 w-full text-left">
                   <div>
@@ -2453,6 +3222,50 @@ export default function CompanyTvarkarastis() {
                 </button>
               </div>
             </div>
+
+            {!subjects.find(s => s.id === createSubjectId)?.is_group && !createIsRecurring && showTrialToggleInCreate && (
+              <div className="border border-amber-100 rounded-xl p-3 sm:p-4 bg-amber-50/50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !createIsTrial;
+                    setCreateIsTrial(next);
+                    if (next) {
+                      setCreateIsRecurring(false);
+                      setCreateFirstLessonIsTrial(false);
+                      setCreateRecurringEndDate('');
+                      setCreateRecurringWeekdays([]);
+                      setCreatePrice(trialDefaults.priceEur);
+                      setCreateTopic((prev) => (prev.trim() ? prev : trialDefaults.topic));
+                    } else {
+                      setAutoTrialStudentId(null);
+                    }
+                  }}
+                  className="flex items-center justify-between gap-3 w-full text-left"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-amber-900">{t('compSch.trialLesson')}</p>
+                    <p className="text-xs text-amber-800/80 hidden sm:block">{t('compSch.trialLessonDesc')}</p>
+                  </div>
+                  <div className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${createIsTrial ? 'bg-amber-500' : 'bg-gray-300'}`}>
+                    <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${createIsTrial ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </div>
+                </button>
+                {createIsTrial && !isMvOrg && autoTrialStudentId === createStudentId && (
+                  <p className="mt-2 text-xs text-amber-800">{t('compSch.autoTrialHint')}</p>
+                )}
+              </div>
+            )}
+
+            {isProKlase && (
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox
+                  checked={createIsMakeup}
+                  onChange={(e) => setCreateIsMakeup(e.target.checked)}
+                />
+                {t('compSch.makeupLegend')} ({t('landing.v2.demo.free')})
+              </label>
+            )}
 
             <div className="space-y-2">
               <Label>{t('compSch.commentOptional')}</Label>
@@ -2473,114 +3286,47 @@ export default function CompanyTvarkarastis() {
               </label>
             </div>
 
-            <div className="border border-gray-100 rounded-xl p-3 sm:p-4 space-y-3 bg-gray-50">
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !createIsRecurring;
-                  setCreateIsRecurring(next);
-                  setCreateRecurringEndDate('');
-                  setCreateRecurringFrequency('weekly');
-                  if (next && createStartTime) {
-                    try {
-                      const d = new Date(createStartTime);
-                      if (!Number.isNaN(d.getTime())) setCreateRecurringWeekdays([d.getDay()]);
-                      else setCreateRecurringWeekdays([]);
-                    } catch {
-                      setCreateRecurringWeekdays([]);
+            <RecurrenceFields
+              enabled={createIsRecurring}
+              onEnabledChange={(enabled) => {
+                setCreateIsRecurring(enabled);
+                if (enabled) {
+                  setCreateIsTrial(false);
+                  setAutoTrialStudentId(null);
+                }
+              }}
+              frequency={createRecurringFrequency}
+              onFrequencyChange={setCreateRecurringFrequency}
+              weekdays={createRecurringWeekdays}
+              onWeekdaysChange={setCreateRecurringWeekdays}
+              endDate={createRecurringEndDate}
+              onEndDateChange={setCreateRecurringEndDate}
+              startTime={createStartTime}
+            />
+
+            {createIsRecurring && !subjects.find(s => s.id === createSubjectId)?.is_group && (
+              <div className="border border-amber-100 rounded-xl p-3 sm:p-4 bg-amber-50/50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !createFirstLessonIsTrial;
+                    setCreateFirstLessonIsTrial(next);
+                    if (next) {
+                      setCreateTopic((prev) => (prev.trim() ? prev : trialDefaults.topic));
                     }
-                  } else {
-                    setCreateRecurringWeekdays([]);
-                  }
-                }}
-                className="flex items-center justify-between w-full"
-              >
-                <div className="text-left">
-                  <p className="text-sm font-medium text-gray-900">{t('compSch.recurringLesson')}</p>
-                  <p className="text-xs text-gray-500">{t('compSch.recurringDesc')}</p>
-                </div>
-                <div className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${createIsRecurring ? 'bg-indigo-500' : 'bg-gray-300'}`}>
-                  <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${createIsRecurring ? 'translate-x-6' : 'translate-x-1'}`} />
-                </div>
-              </button>
-              {createIsRecurring && (
-                <div className="space-y-3 pt-1 border-t border-gray-200">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">{t('cal.recurringFrequencyLabel')}</Label>
-                    <select
-                      value={createRecurringFrequency}
-                      onChange={(e) =>
-                        setCreateRecurringFrequency(e.target.value as 'weekly' | 'biweekly' | 'monthly')
-                      }
-                      className="w-full rounded-xl text-sm border border-gray-300 px-3 py-2 bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                      <option value="weekly">{t('cal.freqWeekly')}</option>
-                      <option value="biweekly">{t('cal.freqBiweekly')}</option>
-                      <option value="monthly">{t('cal.freqMonthly')}</option>
-                    </select>
+                  }}
+                  className="flex items-center justify-between gap-3 w-full text-left"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-amber-900">{t('compSch.firstLessonTrial')}</p>
+                    <p className="text-xs text-amber-800/80 hidden sm:block">{t('compSch.firstLessonTrialDesc')}</p>
                   </div>
-                  {createRecurringFrequency !== 'monthly' && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">{t('cal.weekdaysLabel')}</Label>
-                      <div className="flex gap-1.5 flex-wrap">
-                        {[1, 2, 3, 4, 5, 6, 0].map((day) => {
-                          const labels = [
-                            t('cal.wdSun'),
-                            t('cal.wdMon'),
-                            t('cal.wdTue'),
-                            t('cal.wdWed'),
-                            t('cal.wdThu'),
-                            t('cal.wdFri'),
-                            t('cal.wdSat'),
-                          ];
-                          const isSelected = createRecurringWeekdays.includes(day);
-                          return (
-                            <button
-                              key={day}
-                              type="button"
-                              onClick={() => {
-                                setCreateRecurringWeekdays((prev) =>
-                                  isSelected ? prev.filter((d) => d !== day) : [...prev, day],
-                                );
-                              }}
-                              className={cn(
-                                'px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border',
-                                isSelected
-                                  ? 'bg-indigo-500 text-white border-indigo-500'
-                                  : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300',
-                              )}
-                            >
-                              {labels[day]}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {createRecurringWeekdays.length === 0 && (
-                        <p className="text-xs text-amber-600">{t('cal.selectAtLeastOneDay')}</p>
-                      )}
-                    </div>
-                  )}
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Kartotis iki (neprivaloma)</Label>
-                    <DateInput
-                      value={createRecurringEndDate}
-                      onChange={(e) => setCreateRecurringEndDate(e.target.value)}
-                      min={
-                        createStartTime
-                          ? format(addWeeks(new Date(createStartTime), 1), 'yyyy-MM-dd')
-                          : undefined
-                      }
-                      className="rounded-xl text-sm"
-                    />
-                    {!createRecurringEndDate && (
-                      <p className="text-xs text-gray-500">
-                        Tuščia = pamokos kartojasi nuolat (sugeneruojamos į priekį ~2 metus).
-                      </p>
-                    )}
+                  <div className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${createFirstLessonIsTrial ? 'bg-amber-500' : 'bg-gray-300'}`}>
+                    <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${createFirstLessonIsTrial ? 'translate-x-6' : 'translate-x-1'}`} />
                   </div>
-                </div>
-              )}
-            </div>
+                </button>
+              </div>
+            )}
             </div>
 
             {showDaySummaryAside && (
@@ -2611,29 +3357,36 @@ export default function CompanyTvarkarastis() {
                   <p className="font-medium text-slate-900">{t('compSch.busyTimes')}</p>
                   {createModalDayBusySessions.length > 0 ? (
                     <ul className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                      {createModalDayBusySessions.map(b => (
-                        <li
-                          key={b.id}
-                          className={cn(
-                            'rounded-lg border px-2.5 py-2 text-xs leading-snug',
-                            createSelectionOverlapsBusy &&
-                              createStartTime &&
-                              createEndTime &&
-                              new Date(createStartTime).getTime() < b.end.getTime() &&
-                              new Date(createEndTime).getTime() > b.start.getTime()
-                              ? 'border-amber-400 bg-amber-50 text-amber-950'
-                              : 'border-slate-200 bg-white text-slate-800',
-                          )}
-                        >
-                          <span className="font-semibold tabular-nums">
-                            {format(b.start, 'HH:mm')}–{format(b.end, 'HH:mm')}
-                          </span>
-                          <span className="block text-slate-600 mt-0.5">
-                            {b.studentName}
-                            {b.topic ? ` · ${b.topic}` : ''}
-                          </span>
-                        </li>
-                      ))}
+                      {createModalDayBusySessions.map(b => {
+                        const isConflict = createConflictingSessions.some(c => c.id === b.id);
+                        return (
+                          <li
+                            key={b.id}
+                            className={cn(
+                              'rounded-lg border px-2.5 py-2 text-xs leading-snug',
+                              isConflict
+                                ? 'border-red-300 bg-red-50 text-red-950'
+                                : 'border-slate-200 bg-white text-slate-800',
+                            )}
+                          >
+                            <span className="flex items-center justify-between gap-2">
+                              <span className="font-semibold tabular-nums">
+                                {format(b.start, 'HH:mm')}–{format(b.end, 'HH:mm')}
+                              </span>
+                              {isConflict && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700">
+                                  <AlertCircle className="w-3 h-3" />
+                                  {t('compSch.overlapBadge')}
+                                </span>
+                              )}
+                            </span>
+                            <span className={cn('block mt-0.5', isConflict ? 'text-red-800/80' : 'text-slate-600')}>
+                              {b.studentName}
+                              {b.topic ? ` · ${b.topic}` : ''}
+                            </span>
+                          </li>
+                        );
+                      })}
                     </ul>
                   ) : (
                     <p className="text-xs text-slate-600">{t('compSch.noActiveSessionsDay')}</p>
@@ -2660,7 +3413,7 @@ export default function CompanyTvarkarastis() {
               onClick={handleCreateSession}
               disabled={saving || createSelectionOverlapsBusy || (() => {
                 const selectedSubject = subjects.find(s => s.id === createSubjectId);
-                const isGroupLesson = selectedSubject?.is_group;
+                const isGroupLesson = selectedSubject?.is_group || Boolean(createClassGroupId);
                 const hasStudents = isGroupLesson ? createStudentIds.length > 0 : !!createStudentId;
                 const weekdayMissing =
                   createIsRecurring &&
@@ -2688,6 +3441,10 @@ export default function CompanyTvarkarastis() {
         setIsEventDetailOpen(open);
         if (!open) {
           setIsEditingSession(false);
+          setIsGroupSession(false);
+          setIsClassGroupSession(false);
+          setSelectedGroupSessions([]);
+          setClassGroupParticipants([]);
           setCancelConfirmOpen(false);
           setCancellationReason('');
           setIsDeleteRecurringDialogOpen(false);
@@ -2707,15 +3464,66 @@ export default function CompanyTvarkarastis() {
           {/* VIEW MODE — layout aligned with Pamokos (CompanySessions) */}
           {selectedEvent && !isEditingSession && (
             <div className="space-y-3">
+              {isGroupSession ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between bg-violet-50 rounded-xl px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Users className="w-5 h-5 text-violet-600" />
+                      <div>
+                        <p className="font-bold text-gray-900">
+                          {isClassGroupSession
+                            ? (selectedEvent.topic || t('school.groups.title'))
+                            : t('cal.groupLessonTitle')}
+                        </p>
+                        <p className="text-xs text-violet-600">
+                          {isClassGroupSession
+                            ? `${t('school.groups.members')}: ${classGroupParticipants.length}`
+                            : t('cal.studentsCount', { count: String(selectedGroupSessions.length) })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {(isClassGroupSession ? classGroupParticipants : selectedGroupSessions.map((session) => ({
+                      student_id: session.student_id,
+                      full_name: session.student?.full_name || '—',
+                      grade: session.student?.grade ?? null,
+                      session,
+                    }))).map((participant) => (
+                      <div key={participant.student_id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                        <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                          {participant.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900">{participant.full_name}</p>
+                          {participant.grade && (
+                            <p className="text-xs text-emerald-600 font-medium">{displayStudentGrade(participant.grade)}</p>
+                          )}
+                          {participant.session?.status && (
+                            <p className="text-xs text-gray-500">{participant.session.status}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="text-xs text-gray-500">{t('compSess.labelTutor')}</Label>
                   <p className="font-medium text-sm mt-1">{selectedEvent.tutor?.full_name || '–'}</p>
                 </div>
+                {!isGroupSession && (
                 <div>
                   <Label className="text-xs text-gray-500">{t('compSess.labelStudent')}</Label>
                   <p className="font-medium text-sm mt-1">{selectedEvent.student?.full_name || '–'}</p>
+                  {selectedEvent.student?.grade && (
+                    <p className="text-xs text-emerald-600 font-medium mt-0.5">
+                      {displayStudentGrade(selectedEvent.student.grade)}
+                    </p>
+                  )}
                 </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -2741,33 +3549,57 @@ export default function CompanyTvarkarastis() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="text-xs text-gray-500">{t('compSess.labelStatus')}</Label>
-                  <div className="mt-1">
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
                     <StatusBadge
                       status={selectedEvent.status}
                       paymentStatus={selectedEvent.payment_status ?? undefined}
                       paid={selectedEvent.paid}
+                      isComplimentary={selectedEvent.is_complimentary === true}
                       endTime={selectedEvent.end_time}
+                      pendingConfirmation={
+                        hasFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(organizationId)
+                      }
+                      moved={pkFeat('monthly_packages') && !!(selectedEvent as any).original_start_time && !!(selectedEvent as any).lesson_package_id}
                     />
+                    {!!selectedEvent.subject_id && trialSubjectIds.has(selectedEvent.subject_id) && (
+                      <span className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">
+                        ★ {t('compSch.trialLesson')}
+                      </span>
+                    )}
+                    {isProKlase && selectedEvent.is_makeup && (
+                      <span className="inline-flex items-center rounded-md border border-violet-300 bg-violet-50 px-1.5 py-0.5 text-[11px] font-semibold text-violet-800">
+                        {t('compSch.makeupLegend')}
+                      </span>
+                    )}
+                    {isProKlase && selectedEvent.cancellation_reason_code === 'tutor_no_show' && (
+                      <span className="inline-flex items-center rounded-md border border-red-300 bg-red-50 px-1.5 py-0.5 text-[11px] font-semibold text-red-800">
+                        {t('compSch.tutorNoShowLegend')}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div>
                   <Label className="text-xs text-gray-500">{t('compSess.labelPrice')}</Label>
                   <p className="font-semibold text-sm mt-1">
-                    {selectedEvent.price != null ? `${Number(selectedEvent.price).toFixed(2)} €` : '–'}
+                    {selectedEvent.is_complimentary
+                      ? t('status.complimentary')
+                      : selectedEvent.price != null ? fmt(Number(selectedEvent.price)) : '–'}
                   </p>
                 </div>
               </div>
 
               <div>
                 <Label className="text-xs text-gray-500">{t('compSess.labelPayment')}</Label>
-                <p className={`text-sm mt-1 font-medium ${selectedEvent.paid ? 'text-green-600' : 'text-amber-600'}`}>
-                  {selectedEvent.paid || selectedEvent.payment_status === 'paid' || selectedEvent.payment_status === 'confirmed'
+                <p className={`text-sm mt-1 font-medium ${selectedEvent.is_complimentary ? 'text-sky-700' : selectedEvent.paid ? 'text-green-600' : 'text-amber-600'}`}>
+                  {selectedEvent.is_complimentary
+                    ? t('status.complimentary')
+                    : selectedEvent.paid || selectedEvent.payment_status === 'paid' || selectedEvent.payment_status === 'confirmed'
                     ? t('compSess.paid')
                     : t('compSess.paymentPending')}
                 </p>
               </div>
 
-              {(selectedEvent as any).meeting_link && (
+              {(selectedEvent as any).meeting_link ? (
                 <div>
                   <Label className="text-xs text-gray-500">{t('compSch.meetingLinkLabel')}</Label>
                   <a
@@ -2779,7 +3611,12 @@ export default function CompanyTvarkarastis() {
                     {(selectedEvent as any).meeting_link}
                   </a>
                 </div>
-              )}
+              ) : selectedEvent.status !== 'cancelled' ? (
+                <div>
+                  <Label className="text-xs text-gray-500">{t('compSch.meetingLinkLabel')}</Label>
+                  <p className="text-sm mt-1 text-gray-500">{t('compSch.noMeetingLink')}</p>
+                </div>
+              ) : null}
 
               {selectedEvent.status === 'cancelled' && (selectedEvent as any).cancellation_reason && (
                 <div>
@@ -2836,7 +3673,7 @@ export default function CompanyTvarkarastis() {
                     </span>
                     {(selectedEvent as any).cancellation_penalty_amount != null && Number((selectedEvent as any).cancellation_penalty_amount) > 0 && (
                       <span className="text-xs font-semibold text-red-600">
-                        €{Number((selectedEvent as any).cancellation_penalty_amount).toFixed(2)}
+                        {fmt(Number((selectedEvent as any).cancellation_penalty_amount))}
                       </span>
                     )}
                     {(selectedEvent as any).penalty_resolution && (
@@ -2862,6 +3699,15 @@ export default function CompanyTvarkarastis() {
                     placeholder={t('compSch.specifyReasonPlaceholder')}
                     className="rounded-lg border-red-200"
                   />
+                  {isProKlaseOrg(organizationId) && (
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <Checkbox
+                        checked={cancelReasonCode === 'tutor_no_show'}
+                        onChange={(e) => setCancelReasonCode(e.target.checked ? 'tutor_no_show' : 'admin')}
+                      />
+                      Korepetitorius neatvyko (klientas nemoka, −30 € korep.)
+                    </label>
+                  )}
                   <label className="flex items-start gap-2 cursor-pointer">
                     <Checkbox
                       checked={leaveFreeTimeOnCancel}
@@ -2881,7 +3727,7 @@ export default function CompanyTvarkarastis() {
                 </div>
               )}
 
-              {canFullControl && selectedEvent.status !== 'cancelled' && !cancelConfirmOpen && (
+              {canView && selectedEvent.status !== 'cancelled' && !cancelConfirmOpen && !isSchoolOrgView && !isSchoolBilledSession(selectedEvent) && (
                 <div className="space-y-2 pt-1">
                   <Button
                     variant="outline"
@@ -2892,6 +3738,35 @@ export default function CompanyTvarkarastis() {
                     {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : selectedEvent.paid ? <XCircle className="w-4 h-4 mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
                     {selectedEvent.paid ? t('compSess.markUnpaid') : t('compSess.markPaid')}
                   </Button>
+                  {isProKlaseOrg(organizationId) && (
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        'w-full rounded-xl',
+                        selectedEvent.is_complimentary
+                          ? 'border-sky-200 text-sky-800 hover:bg-sky-50'
+                          : 'border-sky-200 text-sky-700 hover:bg-sky-50',
+                      )}
+                      disabled={saving}
+                      onClick={() => void handleMarkComplimentary()}
+                    >
+                      {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Gift className="w-4 h-4 mr-2" />}
+                      {selectedEvent.is_complimentary ? t('compSess.unmarkComplimentary') : t('compSess.markComplimentary')}
+                    </Button>
+                  )}
+                  {isProKlaseOrg(organizationId) &&
+                    !!selectedEvent.subject_id &&
+                    trialSubjectIds.has(selectedEvent.subject_id) && (
+                    <Button
+                      variant="outline"
+                      className="w-full rounded-xl border-violet-200 text-violet-800 hover:bg-violet-50"
+                      disabled={saving}
+                      onClick={() => void handleContinueLearning()}
+                    >
+                      {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Repeat className="w-4 h-4 mr-2" />}
+                      {t('cal.continueLearning')}
+                    </Button>
+                  )}
 
                   {selectedEvent.status === 'active' && selectedEvent.start_time > new Date() && (
                     <>
@@ -2912,6 +3787,8 @@ export default function CompanyTvarkarastis() {
                           setEditPaid((selectedEvent as any).paid || false);
                           setEditStatus(selectedEvent.status);
                           setGroupEditChoice('single');
+                          setRescheduleReason('');
+                          setRescheduleRequestedBy('');
                           setIsEditingSession(true);
                         }}
                       >
@@ -3000,6 +3877,40 @@ export default function CompanyTvarkarastis() {
                     <DateTimeSpinner value={editStartTime} onChange={setEditStartTime} />
                   </div>
                 </div>
+                {editStartTime && selectedEvent &&
+                  Math.floor(new Date(editStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) && (
+                  <div className="space-y-2">
+                    <Label>{t('cal.rescheduleReasonLabel')}</Label>
+                    <textarea
+                      value={rescheduleReason}
+                      onChange={(e) => setRescheduleReason(e.target.value)}
+                      placeholder={t('cal.rescheduleReasonPlaceholder')}
+                      className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
+                      rows={2}
+                    />
+                    <p className="text-xs text-gray-500">{t('cal.rescheduleReasonHelper')}</p>
+                    {rescheduleReason.length > 0 && rescheduleReason.trim().length < 5 && (
+                      <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(rescheduleReason.trim().length) })}</p>
+                    )}
+                    <Label className="text-xs">{t('cal.rescheduleRequestedByLabel')}</Label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setRescheduleRequestedBy('student')}
+                        className={`flex-1 text-xs py-1.5 px-3 rounded-lg border font-medium transition-colors ${rescheduleRequestedBy === 'student' ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                      >
+                        {t('cal.requestedByStudent')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRescheduleRequestedBy('tutor')}
+                        className={`flex-1 text-xs py-1.5 px-3 rounded-lg border font-medium transition-colors ${rescheduleRequestedBy === 'tutor' ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                      >
+                        {t('cal.requestedByTutor')}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <label className="flex items-start gap-2 cursor-pointer">
                   <Checkbox
                     checked={leaveFreeTimeOnReschedule}
@@ -3028,7 +3939,7 @@ export default function CompanyTvarkarastis() {
                     <SelectTrigger className="rounded-xl">
                       <SelectValue placeholder={t('compSch.selectPlaceholder')} />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className={ORG_TUTOR_SELECT_SCROLL_CLASS}>
                       {orgTutors.map(tut => {
                         const licBlocked = isTutorLicenseBlockedForOrgBooking(tut.id);
                         const keepSelectable = tut.id === (editTutorId || selectedEvent.tutor_id);
@@ -3054,9 +3965,11 @@ export default function CompanyTvarkarastis() {
                       <SelectValue placeholder={t('compSch.selectPlaceholder')} />
                     </SelectTrigger>
                     <SelectContent>
-                      {sortStudentsByFullName(students.filter(s => !editTutorId || s.tutor_id === editTutorId)).map(
+                      {sortStudentsByFullName(pickStudentsForOrgTutorPicker(students, editTutorId)).map(
                         (s) => (
-                          <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                          <SelectItem key={s.id} value={s.id}>
+                            {formatStudentPickerLabel(s.full_name, s.grade)}
+                          </SelectItem>
                         ),
                       )}
                     </SelectContent>
@@ -3070,8 +3983,7 @@ export default function CompanyTvarkarastis() {
                 <Select value={editSubjectId || 'none'} onValueChange={(v) => {
                   const val = v === 'none' ? '' : v;
                   setEditSubjectId(val);
-                  const subj = subjects.find(s => s.id === val);
-                  if (subj) { setEditTopic(subj.name); setEditPrice(subj.price); }
+                  if (val) applyEditSubjectDefaults(val);
                 }}>
                   <SelectTrigger className="rounded-xl">
                     <SelectValue placeholder={t('compSch.selectSubjectPlaceholderDots')} />
@@ -3142,7 +4054,15 @@ export default function CompanyTvarkarastis() {
             ) : (
               <>
                 <Button variant="outline" className="rounded-xl" onClick={() => setIsEditingSession(false)}>{t('compSch.back')}</Button>
-                <Button className="rounded-xl" onClick={handleSaveSession} disabled={saving}>
+                <Button
+                  className="rounded-xl"
+                  onClick={handleSaveSession}
+                  disabled={saving || (
+                    !!editStartTime && !!selectedEvent &&
+                    Math.floor(new Date(editStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) &&
+                    (rescheduleReason.trim().length < 5 || !rescheduleRequestedBy)
+                  )}
+                >
                   {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('compSch.saving')}</> : t('compSch.save')}
                 </Button>
               </>
@@ -3234,31 +4154,6 @@ export default function CompanyTvarkarastis() {
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label>{t('compSch.subjectsOptional')}</Label>
-              <div className="border rounded-xl p-3 max-h-32 overflow-y-auto space-y-2">
-                {subjects
-                  .filter(s => s.tutor_id === editingAvailability?.tutor_id)
-                  .map(s => (
-                    <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                      <Checkbox
-                        checked={availEditSubjectIds.includes(s.id)}
-                        onChange={(e) => {
-                          const next = e.target.checked
-                            ? Array.from(new Set([...availEditSubjectIds, s.id]))
-                            : availEditSubjectIds.filter(id => id !== s.id);
-                          setAvailEditSubjectIds(next);
-                        }}
-                      />
-                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
-                      <span>{s.name}</span>
-                    </label>
-                  ))}
-                {subjects.filter(s => s.tutor_id === editingAvailability?.tutor_id).length === 0 && (
-                  <p className="text-xs text-gray-400">{t('compSch.tutorNoSubjects')}</p>
-                )}
-              </div>
-            </div>
           </div>
             {/* Create session from this slot */}
             <div className="border-t border-gray-100 pt-4">
@@ -3280,6 +4175,12 @@ export default function CompanyTvarkarastis() {
               </div>
               {createFromAvailOpen && (
                 <div className="space-y-3 p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
+                  {createFromAvailSuccess && (
+                    <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                      <CheckCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>{t('findLesson.lessonCreatedKeepOpen')}</span>
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     <Label className="text-xs">{t('compSch.subject')}</Label>
                     <Select value={createFromAvailSubjectId || 'none'} onValueChange={(v) => setCreateFromAvailSubjectId(v === 'none' ? '' : v)}>
@@ -3299,7 +4200,7 @@ export default function CompanyTvarkarastis() {
 
                   <div className="space-y-1.5">
                     <Label className="text-xs">{t('compSch.time')}</Label>
-                    <Select value={createFromAvailSelectedSlot || ''} onValueChange={setCreateFromAvailSelectedSlot}>
+                    <Select value={createFromAvailSelectedSlot || undefined} onValueChange={setCreateFromAvailSelectedSlot}>
                       <SelectTrigger className="rounded-xl h-9 text-sm">
                         <SelectValue placeholder={t('compSch.selectTimePlaceholder')} />
                       </SelectTrigger>
@@ -3321,7 +4222,7 @@ export default function CompanyTvarkarastis() {
                         <Label className="text-xs">{t('compSch.studentsGroup')}</Label>
                         <div className="border border-indigo-200 rounded-lg bg-white p-2 max-h-36 overflow-y-auto space-y-1.5">
                           {sortStudentsByFullName(
-                            students.filter(s => s.tutor_id === editingAvailability?.tutor_id),
+                            pickStudentsForOrgTutorPicker(students, editingAvailability?.tutor_id),
                           ).map(s => (
                               <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer">
                                 <Checkbox
@@ -3332,7 +4233,7 @@ export default function CompanyTvarkarastis() {
                                     else setCreateFromAvailStudentIds(prev => prev.filter(id => id !== s.id));
                                   }}
                                 />
-                                <span>{s.full_name}</span>
+                                <span>{formatStudentPickerLabel(s.full_name, s.grade)}</span>
                               </label>
                             ))}
                         </div>
@@ -3346,9 +4247,11 @@ export default function CompanyTvarkarastis() {
                           </SelectTrigger>
                           <SelectContent>
                             {sortStudentsByFullName(
-                              students.filter(s => s.tutor_id === editingAvailability?.tutor_id),
+                              pickStudentsForOrgTutorPicker(students, editingAvailability?.tutor_id),
                             ).map(s => (
-                                <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                                <SelectItem key={s.id} value={s.id}>
+                                  {formatStudentPickerLabel(s.full_name, s.grade)}
+                                </SelectItem>
                               ))}
                           </SelectContent>
                         </Select>
@@ -3400,7 +4303,11 @@ export default function CompanyTvarkarastis() {
                     onClick={handleCreateSessionFromAvailability}
                     disabled={createFromAvailSaving || createFromAvailSlots.length === 0}
                   >
-                    {createFromAvailSaving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('compSch.creating')}</> : t('compSch.createLesson')}
+                    {createFromAvailSaving
+                      ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('compSch.creating')}</>
+                      : createFromAvailCreatedIntervals.length > 0
+                        ? t('findLesson.createAnotherLesson')
+                        : t('compSch.createLesson')}
                   </Button>
                 </div>
               )}
@@ -3429,7 +4336,7 @@ export default function CompanyTvarkarastis() {
                 <SelectTrigger className="rounded-xl mt-1">
                   <SelectValue placeholder={t('compSch.selectPlaceholder')} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={ORG_TUTOR_SELECT_SCROLL_CLASS}>
                   {orgTutors.map(t => (
                     <SelectItem key={t.id} value={t.id}>{t.full_name}</SelectItem>
                   ))}
@@ -3504,32 +4411,6 @@ export default function CompanyTvarkarastis() {
               </div>
             </div>
 
-            {createAvailTutorId && (
-              <div className="space-y-1.5">
-                <Label>{t('compSch.subjectsOptional')}</Label>
-                <div className="border rounded-xl p-3 max-h-32 overflow-y-auto space-y-2">
-                  {subjects.filter(s => s.tutor_id === createAvailTutorId).map(s => (
-                    <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={createAvailSubjectIds.includes(s.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) setCreateAvailSubjectIds(prev => [...prev, s.id]);
-                          else setCreateAvailSubjectIds(prev => prev.filter(id => id !== s.id));
-                        }}
-                        className="w-4 h-4 rounded border-gray-300 text-indigo-600"
-                      />
-                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
-                      <span className="flex-1">{s.name}</span>
-                      <span className="text-gray-400 text-xs ml-auto">{t('compSch.classAbbr', { price: String(s.price) })}{s.grade_min ? ` · ${s.grade_min}–${s.grade_max ?? s.grade_min} kl.` : ''}</span>
-                    </label>
-                  ))}
-                  {subjects.filter(s => s.tutor_id === createAvailTutorId).length === 0 && (
-                    <p className="text-xs text-gray-400">{t('compSch.tutorNoSubjects')}</p>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCreateAvailabilityOpen(false)}>{t('compSch.cancel')}</Button>
@@ -3591,7 +4472,7 @@ export default function CompanyTvarkarastis() {
         </DialogContent>
       </Dialog>
 
-      <Dialog
+      <AssignStudentFreeSlotDialog
         open={findLessonBook !== null}
         onOpenChange={(open) => {
           if (!open) {
@@ -3603,180 +4484,61 @@ export default function CompanyTvarkarastis() {
             setFindLessonBookIsPaid(false);
             setFindLessonBookMeetingLink('');
             setFindLessonBookTutorMeetingLink('');
+            setFindLessonBookCreatedIntervals([]);
+            setFindLessonBookSuccess(false);
           }
         }}
-      >
-        <DialogContent className="w-[95vw] sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{t('findLesson.bookDialogTitle')}</DialogTitle>
-            <DialogDescription className="text-left space-y-2">
-              {findLessonBook && (
-                <>
-                  <p>
-                    <span className="font-semibold text-gray-900">{findLessonBook.tutorName}</span>
-                    {' · '}
-                    <span>{findLessonBook.subjectName}</span>
-                  </p>
-                  <p className="text-sm text-gray-600 tabular-nums">
-                    {t('findLesson.freeWindowSummary')}: {format(parseISO(findLessonBook.startIso), 'yyyy-MM-dd HH:mm')} –{' '}
-                    {format(parseISO(findLessonBook.endIso), 'HH:mm')}
-                  </p>
-                  <p className="text-xs text-gray-500">{t('findLesson.bookDialogIntro')}</p>
-                </>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          {findLessonBook && (
-            <div className="space-y-3">
-              {findLessonBookCrossTutor && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                  {t('findLesson.crossTutorHint')}
-                </div>
-              )}
-              {findLessonBookSlots.length === 0 ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                  {t('findLesson.noSubSlots')}
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <Label className="text-xs">{t('compSch.time')}</Label>
-                  <Select value={findLessonBookSelectedSlot || ''} onValueChange={setFindLessonBookSelectedSlot}>
-                    <SelectTrigger className="rounded-xl h-9 text-sm">
-                      <SelectValue placeholder={t('compSch.selectTimePlaceholder')} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {findLessonBookSlots.map((slot) => (
-                        <SelectItem key={slot.startIso} value={slot.startIso}>
-                          {slot.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {(() => {
-                const selectedSubject = subjects.find(s => s.id === findLessonBook.subjectId);
-                const isGroup = Boolean(selectedSubject?.is_group);
-                return isGroup ? (
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">{t('compSch.studentsGroup')}</Label>
-                    <div className="border border-indigo-200 rounded-lg bg-indigo-50/50 p-2 max-h-36 overflow-y-auto space-y-1.5">
-                      {sortStudentsByFullName(students).map(s => (
-                        <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                          <Checkbox
-                            checked={findLessonBookStudentIds.includes(s.id)}
-                            onChange={(e) => {
-                              const checked = (e.target as HTMLInputElement).checked;
-                              if (checked) {
-                                setFindLessonBookStudentIds(prev => Array.from(new Set([...prev, s.id])));
-                              } else {
-                                setFindLessonBookStudentIds(prev => prev.filter(id => id !== s.id));
-                              }
-                            }}
-                          />
-                          <span>{s.full_name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">{t('compSch.studentRequired')}</Label>
-                    <Select value={findLessonBookStudentId} onValueChange={setFindLessonBookStudentId}>
-                      <SelectTrigger className="rounded-xl h-9 text-sm">
-                        <SelectValue placeholder={t('compSch.selectStudentPlaceholderDots')} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {sortStudentsByFullName(students).map(s => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.full_name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                );
-              })()}
-              <div className="space-y-1.5">
-                <Label className="text-xs">{t('compSch.topicOptional')}</Label>
-                <Input
-                  value={findLessonBookTopic}
-                  onChange={e => setFindLessonBookTopic(e.target.value)}
-                  placeholder={t('compSch.lessonTopicPlaceholder')}
-                  className="rounded-xl h-9 text-sm"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">{t('compSch.meetingLink')}</Label>
-                <Input
-                  value={findLessonBookMeetingLink}
-                  onChange={e => setFindLessonBookMeetingLink(e.target.value)}
-                  placeholder="https://..."
-                  className="rounded-xl h-9 text-sm"
-                />
-                <p className="text-[11px] text-gray-500">{t('findLesson.meetingLinkHint')}</p>
-              </div>
-              <div className="border border-green-100 rounded-xl p-3 sm:p-4 bg-green-50/50 flex flex-col justify-center min-h-[4.5rem]">
-                <button
-                  type="button"
-                  onClick={() => setFindLessonBookIsPaid(!findLessonBookIsPaid)}
-                  className="flex items-center justify-between gap-3 w-full text-left"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-green-900">{t('compSch.alreadyPaid')}</p>
-                    <p className="text-xs text-green-800/80 hidden sm:block">{t('compSch.ifStudentPaid')}</p>
-                  </div>
-                  <div
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${findLessonBookIsPaid ? 'bg-green-500' : 'bg-gray-300'}`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${findLessonBookIsPaid ? 'translate-x-6' : 'translate-x-1'}`}
-                    />
-                  </div>
-                </button>
-              </div>
-            </div>
-          )}
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => {
-                setFindLessonBook(null);
-                setFindLessonBookStudentId('');
-                setFindLessonBookStudentIds([]);
-                setFindLessonBookTopic('');
-                setFindLessonBookSelectedSlot('');
-                setFindLessonBookIsPaid(false);
-                setFindLessonBookMeetingLink('');
-                setFindLessonBookTutorMeetingLink('');
-              }}
-            >
-              {t('compSch.cancel')}
-            </Button>
-            <Button
-              className="rounded-xl bg-indigo-600 hover:bg-indigo-700"
-              onClick={() => void handleFindLessonBookCreate()}
-              disabled={findLessonBookSaving || findLessonBookSlots.length === 0}
-            >
-              {findLessonBookSaving ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  {t('compSch.creating')}
-                </>
-              ) : (
-                t('compSch.createLesson')
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        tutorName={findLessonBook?.tutorName ?? ''}
+        subjectName={findLessonBook?.subjectName ?? ''}
+        startIso={findLessonBook?.startIso ?? new Date().toISOString()}
+        endIso={findLessonBook?.endIso ?? new Date().toISOString()}
+        slots={findLessonBookSlots}
+        selectedSlot={findLessonBookSelectedSlot}
+        onSelectedSlotChange={setFindLessonBookSelectedSlot}
+        students={sortStudentsByFullName(students).map((s) => ({ id: s.id, full_name: s.full_name }))}
+        studentId={findLessonBookStudentId}
+        onStudentIdChange={setFindLessonBookStudentId}
+        studentIds={findLessonBookStudentIds}
+        onStudentIdsChange={setFindLessonBookStudentIds}
+        isGroup={Boolean(subjects.find((s) => s.id === findLessonBook?.subjectId)?.is_group)}
+        topic={findLessonBookTopic}
+        onTopicChange={setFindLessonBookTopic}
+        meetingLink={findLessonBookMeetingLink}
+        onMeetingLinkChange={setFindLessonBookMeetingLink}
+        isPaid={findLessonBookIsPaid}
+        onIsPaidChange={setFindLessonBookIsPaid}
+        showSuccess={findLessonBookSuccess}
+        showCrossTutorHint={findLessonBookCrossTutor}
+        showTrialButton={proKlaseAdminUi && hasFeature('trial_reservation_flow')}
+        saving={findLessonBookSaving}
+        trialSending={findLessonBookTrialSending}
+        createdCount={findLessonBookCreatedIntervals.length}
+        onCancel={() => {
+          setFindLessonBook(null);
+          setFindLessonBookStudentId('');
+          setFindLessonBookStudentIds([]);
+          setFindLessonBookTopic('');
+          setFindLessonBookSelectedSlot('');
+          setFindLessonBookIsPaid(false);
+          setFindLessonBookMeetingLink('');
+          setFindLessonBookTutorMeetingLink('');
+          setFindLessonBookCreatedIntervals([]);
+          setFindLessonBookSuccess(false);
+        }}
+        onCreate={() => void handleFindLessonBookCreate()}
+        onReserveTrial={() => void handleFindLessonBookReserveTrial()}
+      />
 
       <FindTutorModal
         isOpen={findLessonOpen}
         onClose={() => setFindLessonOpen(false)}
         orgId={organizationId}
-        onPickSlot={(slot) => {
+        orgAdminMode={!proKlaseAdminUi}
+        students={!proKlaseAdminUi ? students.map((s) => ({ id: s.id, full_name: s.full_name })) : undefined}
+        frequencyEnabled={proKlaseAdminUi && hasFeature('tutor_frequency_search')}
+        hidePrices={hideAdminPrices}
+        onPickSlot={(slot, context) => {
+          setFindLessonOpen(false);
           setFindLessonBook({
             tutorId: slot.tutorId,
             subjectId: slot.subjectId,
@@ -3785,13 +4547,15 @@ export default function CompanyTvarkarastis() {
             tutorName: slot.tutorName,
             subjectName: slot.subjectName,
           });
-          setFindLessonBookStudentId('');
+          setFindLessonBookStudentId(context?.studentId || '');
           setFindLessonBookStudentIds([]);
           setFindLessonBookTopic(slot.subjectName);
           setFindLessonBookSelectedSlot('');
           setFindLessonBookIsPaid(false);
           setFindLessonBookMeetingLink('');
           setFindLessonBookTutorMeetingLink('');
+          setFindLessonBookCreatedIntervals([]);
+          setFindLessonBookSuccess(false);
         }}
       />
     </>

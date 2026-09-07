@@ -3,25 +3,36 @@
     "outputDirectory": "dist",
     "framework": "vite",
     "devCommand": null,
-    "redirects": [
-        {
-            "source": "/:path(.*)",
-            "has": [{ "type": "host", "value": "tutlio.com" }],
-            "destination": "https://www.tutlio.com/:path",
-            "permanent": true
-        },
-        {
-            "source": "/:path(.*)",
-            "has": [{ "type": "host", "value": "tutlio.lt" }],
-            "destination": "https://www.tutlio.lt/:path",
-            "permanent": true
-        }
-    ],
+    "trailingSlash": false,
     "functions": {
+        "api/generate-invoice.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
+        "api/invoice-pdf.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
+        "api/platform-invoice-pdf.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
+        "api/admin-b2c-invoices.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
+        "api/admin-b2b-invoices.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
         "api/page-render.ts": {
             "maxDuration": 30
         },
         "api/feature-render.ts": {
+            "maxDuration": 30
+        },
+        "api/features-index-render.ts": {
+            "maxDuration": 30
+        },
+        "api/compare-render.ts": {
+            "maxDuration": 30
+        },
+        "api/schools-render.ts": {
             "maxDuration": 30
         },
         "api/blog-render.ts": {
@@ -30,17 +41,129 @@
         "api/legal-render.ts": {
             "maxDuration": 30
         },
+        "api/public-page-render.ts": {
+            "maxDuration": 30
+        },
         "api/sitemap.ts": {
             "maxDuration": 30
+        },
+        "api/blog-feed.ts": {
+            "maxDuration": 30
+        },
+        "api/blog-auto-generate.ts": {
+            "maxDuration": 300
+        },
+        "api/admin-blog-auto.ts": {
+            "maxDuration": 300
+        },
+        "api/send-reminders.ts": {
+            "maxDuration": 300
+        },
+        "api/school-installment-reminders.ts": {
+            "maxDuration": 300
+        },
+        "api/materialize-recurring-sessions.ts": {
+            "maxDuration": 300,
+            "includeFiles": "src/lib/**"
+        },
+        "api/auto-complete-sessions.ts": {
+            "includeFiles": "src/lib/**"
+        },
+        "api/school-join-no-show.ts": {
+            "includeFiles": "src/lib/**"
+        },
+        "api/school-class-groups.ts": {
+            "includeFiles": "src/lib/**"
+        },
+        "api/school-contract-sign-reconcile.ts": {
+            "maxDuration": 60
+        },
+        "api/school-contract-sign-init.ts": {
+            "maxDuration": 90
+        },
+        "api/school-contract-parent-sign-init.ts": {
+            "maxDuration": 90
+        },
+        "api/school-contract-sign-callback.ts": {
+            "maxDuration": 90
+        },
+        "api/school-contract-parent-upload.ts": {
+            "maxDuration": 60
+        },
+        "api/school-contract-complete.ts": {
+            "maxDuration": 60
+        },
+        "api/school-contract-render-docx-pdf.ts": {
+            "maxDuration": 60
+        },
+        "api/extra-lessons-contract-offer.ts": {
+            "maxDuration": 60,
+            "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
+        },
+        "api/extra-lessons-contract-accept.ts": {
+            "maxDuration": 60,
+            "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
+        },
+        "api/extra-lessons-contract-withdraw.ts": {
+            "includeFiles": "src/lib/**"
+        },
+        "api/bill-school-extra-lessons.ts": {
+            "includeFiles": "src/lib/**"
         }
     },
     "headers": [
         {
-            "source": "/(.*)",
+            "source": "/embed/(.*)",
+            "headers": [
+                {
+                    "key": "Content-Security-Policy",
+                    "value": "default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' https: wss: ws:; frame-src 'self' https:; worker-src 'self' blob:; base-uri 'self'; form-action 'self' https:; frame-ancestors *; object-src 'none'; upgrade-insecure-requests"
+                },
+                {
+                    "key": "Strict-Transport-Security",
+                    "value": "max-age=63072000; includeSubDomains"
+                },
+                {
+                    "key": "X-Content-Type-Options",
+                    "value": "nosniff"
+                },
+                {
+                    "key": "Referrer-Policy",
+                    "value": "strict-origin-when-cross-origin"
+                }
+            ]
+        },
+        {
+            "source": "/:locale(lt|en|pl|lv|ee|fr|es|de|se|dk|fi|no|nl)/embed/(.*)",
+            "headers": [
+                {
+                    "key": "Content-Security-Policy",
+                    "value": "default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' https: wss: ws:; frame-src 'self' https:; worker-src 'self' blob:; base-uri 'self'; form-action 'self' https:; frame-ancestors *; object-src 'none'; upgrade-insecure-requests"
+                },
+                {
+                    "key": "Strict-Transport-Security",
+                    "value": "max-age=63072000; includeSubDomains"
+                },
+                {
+                    "key": "X-Content-Type-Options",
+                    "value": "nosniff"
+                },
+                {
+                    "key": "Referrer-Policy",
+                    "value": "strict-origin-when-cross-origin"
+                }
+            ]
+        },
+        {
+            "source": "/((?!(?:(?:lt|en|pl|lv|ee|fr|es|de|se|dk|fi|no|nl)/)?embed(?:/|$)).*)",
             "headers": [
                 {
                     "key": "Content-Security-Policy",
                     "value": "default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' https: wss: ws:; frame-src 'self' https:; worker-src 'self' blob:; base-uri 'self'; form-action 'self' https:; frame-ancestors 'self'; object-src 'none'; upgrade-insecure-requests"
+                },
+                {
+                    "key": "Strict-Transport-Security",
+                    "value": "max-age=63072000; includeSubDomains"
                 },
                 {
                     "key": "X-Content-Type-Options",
@@ -75,6 +198,14 @@
             "destination": "/api/llms-txt"
         },
         {
+            "source": "/blog/rss.xml",
+            "destination": "/api/blog-feed"
+        },
+        {
+            "source": "/:locale/blog/rss.xml",
+            "destination": "/api/blog-feed?locale=:locale"
+        },
+        {
             "source": "/((?!api/|@|src/|assets/|node_modules/|\\.vite/|favicon\\.ico|favicon\\.svg|robots\\.txt|sitemap\\.xml|manifest\\.webmanifest|llms\\.txt|llms-full\\.txt).*)",
             "destination": "/index.html"
         }
@@ -93,8 +224,52 @@
             "schedule": "0 */6 * * *"
         },
         {
+            "path": "/api/expire-trial-reservations",
+            "schedule": "*/15 * * * *"
+        },
+        {
+            "path": "/api/proklase-lesson-comment-reminders",
+            "schedule": "0 8 * * *"
+        },
+        {
+            "path": "/api/school-contract-sign-reconcile",
+            "schedule": "* * * * *"
+        },
+        {
+            "path": "/api/materialize-recurring-sessions",
+            "schedule": "15 * * * *"
+        },
+        {
+            "path": "/api/generate-monthly-packages",
+            "schedule": "30 0 * * *"
+        },
+        {
+            "path": "/api/send-post-trial-packages",
+            "schedule": "40 0 * * *"
+        },
+        {
+            "path": "/api/bill-extra-lessons",
+            "schedule": "0 3 1 * *"
+        },
+        {
+            "path": "/api/school-join-no-show",
+            "schedule": "*/5 * * * *"
+        },
+        {
+            "path": "/api/bill-school-extra-lessons",
+            "schedule": "0 4 1 * *"
+        },
+        {
             "path": "/api/cleanup-whiteboard-data",
             "schedule": "20 * * * *"
+        },
+        {
+            "path": "/api/indexnow-ping",
+            "schedule": "40 */6 * * *"
+        },
+        {
+            "path": "/api/blog-auto-generate",
+            "schedule": "0 5 * * *"
         }
     ]
 }

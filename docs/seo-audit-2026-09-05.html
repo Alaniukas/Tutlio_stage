@@ -1,0 +1,462 @@
+<title>Tutlio Organic Reach Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #F6F7FB;
+    --surface: #FFFFFF;
+    --surface-2: #EEF0F7;
+    --ink: #151A2D;
+    --muted: #5D6579;
+    --line: #DFE3EE;
+    --accent: #4F46E5;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #EBEBFD;
+    --crit: #B42318;
+    --crit-soft: #FDE7E4;
+    --warn: #A15C07;
+    --warn-soft: #FBEFC8;
+    --ok: #067647;
+    --ok-soft: #DCF5E6;
+    --shadow: 0 1px 2px rgba(21, 26, 45, .06), 0 8px 24px rgba(21, 26, 45, .06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0F1222;
+      --surface: #171B2F;
+      --surface-2: #1F2440;
+      --ink: #E8EAF3;
+      --muted: #9AA3B8;
+      --line: #2B3149;
+      --accent: #8F89F7;
+      --accent-ink: #0F1222;
+      --accent-soft: #272B5C;
+      --crit: #F97066;
+      --crit-soft: #3B1512;
+      --warn: #F5B547;
+      --warn-soft: #3B2A0A;
+      --ok: #4FD18C;
+      --ok-soft: #0C3322;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0F1222;
+    --surface: #171B2F;
+    --surface-2: #1F2440;
+    --ink: #E8EAF3;
+    --muted: #9AA3B8;
+    --line: #2B3149;
+    --accent: #8F89F7;
+    --accent-ink: #0F1222;
+    --accent-soft: #272B5C;
+    --crit: #F97066;
+    --crit-soft: #3B1512;
+    --warn: #F5B547;
+    --warn-soft: #3B2A0A;
+    --ok: #4FD18C;
+    --ok-soft: #0C3322;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: 'IBM Plex Sans', 'Segoe UI', Roboto, system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 {
+    font-family: 'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
+    font-weight: 700;
+    line-height: 1.15;
+    text-wrap: balance;
+    margin: 0;
+    color: var(--ink);
+  }
+  h1 { font-size: clamp(2rem, 4.5vw, 3.1rem); letter-spacing: -0.02em; }
+  h2 { font-size: 1.6rem; letter-spacing: -0.015em; }
+  h3 { font-size: 1.1rem; font-weight: 600; }
+  p { margin: 0; max-width: 68ch; }
+  a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  code, .mono {
+    font-family: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: .9em;
+  }
+  code { background: var(--surface-2); padding: .1em .35em; border-radius: 4px; }
+  pre {
+    margin: 0;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-family: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+    font-size: .88rem;
+    line-height: 1.55;
+  }
+  pre code { background: transparent; padding: 0; }
+
+  .page { max-width: 960px; margin: 0 auto; padding: 48px 24px 96px; display: flex; flex-direction: column; gap: 64px; }
+  .eyebrow {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: .74rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .masthead { display: flex; flex-direction: column; gap: 18px; }
+  .lede { font-size: 1.15rem; color: var(--muted); max-width: 62ch; }
+
+  .status {
+    display: grid;
+    grid-template-columns: 6px 1fr;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .status .stripe { background: var(--crit); }
+  .status .inner { padding: 20px 24px; display: flex; flex-direction: column; gap: 10px; }
+  .status strong { font-family: 'Bricolage Grotesque', system-ui, sans-serif; font-size: 1.15rem; font-weight: 700; }
+
+  section { display: flex; flex-direction: column; gap: 20px; }
+  .section-head { display: flex; flex-direction: column; gap: 8px; }
+  .section-head p { color: var(--muted); }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .93rem; }
+  th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 500; background: var(--surface-2); }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td .mono { color: var(--muted); font-size: .82rem; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 9px; border-radius: 999px;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .74rem; letter-spacing: .04em;
+    white-space: nowrap;
+  }
+  .chip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .chip.crit { background: var(--crit-soft); color: var(--crit); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+  .chip.ok { background: var(--ok-soft); color: var(--ok); }
+  .chip.info { background: var(--accent-soft); color: var(--accent); }
+
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+  .panel h3 { font-size: 1rem; }
+  .panel ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+  .panel li { font-size: .95rem; }
+
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .metric { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+  .metric .value { font-family: 'Bricolage Grotesque', system-ui, sans-serif; font-size: 1.9rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .metric .label { font-size: .82rem; color: var(--muted); }
+
+  .locales { display: flex; flex-direction: column; gap: 14px; }
+  .locale-row { display: grid; grid-template-columns: 200px 1fr; gap: 14px; align-items: start; }
+  .locale-row .name { font-weight: 600; font-size: .95rem; }
+  .locale-row .name small { display: block; font-weight: 400; color: var(--muted); font-size: .82rem; }
+  .codes { display: flex; flex-wrap: wrap; gap: 6px; }
+  .code {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .78rem;
+    padding: 3px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface);
+  }
+  .code.ok { border-color: var(--ok); color: var(--ok); }
+  .code.warn { border-color: var(--warn); color: var(--warn); }
+  .code.off { color: var(--muted); border-style: dashed; }
+
+  ol.plan { margin: 0; padding: 0; list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 14px; }
+  ol.plan > li {
+    counter-increment: step;
+    display: grid; grid-template-columns: 44px 1fr; gap: 14px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px 18px 16px;
+  }
+  ol.plan > li::before {
+    content: counter(step);
+    font-family: 'Bricolage Grotesque', system-ui, sans-serif; font-weight: 700; font-size: 1.5rem;
+    color: var(--accent); line-height: 1; padding-top: 2px;
+  }
+  ol.plan .body { display: flex; flex-direction: column; gap: 8px; }
+  ol.plan .body h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  ol.plan .body p { max-width: 72ch; }
+  ol.plan ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; font-size: .95rem; }
+
+  ol.checklist { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  ol.checklist li { display: grid; grid-template-columns: 22px 1fr; gap: 12px; align-items: start; }
+  ol.checklist li::before { content: ''; width: 16px; height: 16px; margin-top: 4px; border: 2px solid var(--muted); border-radius: 4px; }
+  ol.checklist li.done::before { border-color: var(--ok); background: var(--ok); box-shadow: inset 0 0 0 3px var(--surface); }
+  ol.checklist li > div { display: flex; flex-direction: column; gap: 3px; }
+  ol.checklist small { color: var(--muted); font-size: .85rem; }
+
+  .files { columns: 2; column-gap: 24px; margin: 0; padding-left: 18px; font-size: .9rem; }
+  .files li { break-inside: avoid; margin-bottom: 4px; }
+  .note { font-size: .88rem; color: var(--muted); }
+  footer { border-top: 1px solid var(--line); padding-top: 20px; font-size: .85rem; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
+
+  @media (max-width: 640px) {
+    .locale-row { grid-template-columns: 1fr; }
+    .files { columns: 1; }
+    .page { padding: 32px 18px 72px; gap: 48px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .status { animation: rise .5s ease-out both; }
+    @keyframes rise { from { transform: translateY(6px); opacity: .6; } to { transform: none; opacity: 1; } }
+  }
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <div class="eyebrow">Audit · 5 September 2026 · tutlio.lt · tutlio.pl · tutlio.com · 36 locales</div>
+    <h1>Tutlio Organic Reach Audit</h1>
+    <p class="lede">What search engines and AI assistants actually received from the three Tutlio domains this week, what was repaired in code today, where organic traffic stands, and the order of work that will earn more of it for the 13 legacy and 23 new locales.</p>
+    <div class="status" role="status">
+      <div class="stripe"></div>
+      <div class="inner">
+        <strong>Production was returning HTTP 500 to crawlers on every money page. The fix is in the working tree and waits for a deploy.</strong>
+        <p>Since roughly 1 September the crawler render of the home, pricing, about, contact, blog and tutor pages, plus all three sitemaps, failed on all domains. The same defect silently stopped the lesson-reminder cron, post-trial package emails, invoice generation and the auto-blog. Ten source files are corrected, a guard test now blocks a repeat, and 168 SEO tests plus both type checks pass.</p>
+      </div>
+    </div>
+  </header>
+
+  <section id="outage">
+    <div class="section-head">
+      <div class="eyebrow">01 · What crawlers got on 5 September</div>
+      <h2>The outage, endpoint by endpoint</h2>
+      <p>Live checks with a Googlebot user agent against all three domains. Every 500 carried Vercel's <code>FUNCTION_INVOCATION_FAILED</code> marker, which means the function crashed while loading, before any request handling.</p>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Surface</th><th>Live on 5 Sep</th><th>Broken by</th><th>After this pass</th></tr></thead>
+        <tbody>
+          <tr><td>Home, pricing, about, contacts, every locale</td><td><span class="chip crit">500</span></td><td><span class="mono">src/lib/seoMeta.ts</span></td><td><span class="chip ok">fixed, deploy pending</span></td></tr>
+          <tr><td>Blog listing and every blog post</td><td><span class="chip crit">500</span></td><td><span class="mono">src/lib/blogAuthor.ts</span></td><td><span class="chip ok">fixed, deploy pending</span></td></tr>
+          <tr><td>Public tutor pages</td><td><span class="chip crit">500</span></td><td><span class="mono">src/lib/publicPage.ts</span></td><td><span class="chip ok">fixed, deploy pending</span></td></tr>
+          <tr><td>sitemap.xml on .lt, .pl and .com</td><td><span class="chip crit">500</span></td><td><span class="mono">src/lib/publicPage.ts</span></td><td><span class="chip ok">fixed, deploy pending</span></td></tr>
+          <tr><td>Auto-blog cron, quick publish, admin auto-blog</td><td><span class="chip crit">500</span></td><td><span class="mono">src/lib/blogAuthor.ts</span></td><td><span class="chip ok">fixed, deploy pending</span></td></tr>
+          <tr><td>Lesson and payment reminder cron, every 5 minutes</td><td><span class="chip crit">500</span></td><td><span class="mono">moksloVaisiaiLessonComms → marketMoney</span></td><td><span class="chip ok">fixed, deploy pending</span></td></tr>
+          <tr><td>Post-trial package emails, daily</td><td><span class="chip crit">500</span></td><td><span class="mono">orgIntakeMode → featureRegistry, marketMoney</span></td><td><span class="chip ok">fixed, deploy pending</span></td></tr>
+          <tr><td>Invoice generation</td><td><span class="chip crit">500</span></td><td><span class="mono">orgTutorLessonPay → marketMoney</span></td><td><span class="chip ok">fixed, deploy pending</span></td></tr>
+          <tr><td>Feature pages, features hub, schools pages, legal pages</td><td><span class="chip ok">200</span></td><td>—</td><td><span class="chip ok">unchanged</span></td></tr>
+          <tr><td>robots.txt, RSS feeds, llms.txt, IndexNow key, 308 canonicals, hard 404s</td><td><span class="chip ok">OK</span></td><td>—</td><td><span class="chip ok">unchanged</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <h3>Why it broke</h3>
+        <p>Vercel runs each API file as a Node ES module and compiles the traced source files one by one, without bundling. Node then refuses a relative import that has no <code>.js</code> extension and cannot resolve the Vite <code>@/</code> alias. Three modules added on 31 August and 1 September carried such imports, and an older alias chain through <code>marketMoney.ts</code> had the same flaw. One bad import anywhere in a function's import graph kills the whole function at cold start.</p>
+      </div>
+      <div class="panel">
+        <h3>Why nothing caught it</h3>
+        <p>Vitest, Vite and both <code>tsc</code> configurations resolve extension-less and alias imports, so every local check stayed green while production failed. The new test <code>tests/api/esm-import-extensions.test.ts</code> walks the runtime import graph of all 159 API functions and fails on the first offending specifier. It found the reminder and invoice chains that the SEO checks alone would have missed.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="deploy">
+    <div class="section-head">
+      <div class="eyebrow">02 · Deploy checklist</div>
+      <h2>What has to happen next, in order</h2>
+      <p>Everything below the first two items needs a person with production, Search Console or Supabase access. The Vercel CLI in this environment is not signed in, and the working tree also holds unrelated in-progress work, so the deploy was deliberately left to you.</p>
+    </div>
+    <ol class="checklist">
+      <li class="done"><div><span>Fix the ten import chains and add the guard test</span><small>Done. <code>npm run lint</code>, <code>npm run lint:api</code> and the SEO suites pass: 168 tests.</small></div></li>
+      <li class="done"><div><span>Give crawlers the same landing page humans see</span><small>Done. The bot render grew from about 370 to 650 words, 7 sections and 31 internal links per locale, with no leaked keys in EN, LT, PL, DE, IT and HE.</small></div></li>
+      <li><div><span>Commit the listed files and deploy to production</span><small>Run <code>npm test -- tests/api/esm-import-extensions.test.ts</code> right before deploying; it must stay green.</small></div></li>
+      <li><div><span>Verify the live site</span><small><code>npm run seo:smoke</code> for all three domains, then <code>curl -A Googlebot https://www.tutlio.com/</code> expecting 200, and <code>curl https://www.tutlio.com/api/send-reminders</code> expecting 401, not 500.</small></div></li>
+      <li><div><span>Search Console: resubmit the three sitemaps and request indexing</span><small>Home, pricing, schools and features on each domain, plus every .com locale home. Validate the "server error 5xx" group once it appears.</small></div></li>
+      <li><div><span>Apply the analytics migration</span><small><code>npm run supabase:push</code> installs <code>20260905090000_traffic_sources_google_apps_and_ai_utm.sql</code>, which stops counting Gmail clicks as Google organic and folds ChatGPT's utm tags into the AI channel.</small></div></li>
+      <li><div><span>Confirm the auto-blog resumes on the next Tuesday or Friday run</span><small>No article has been generated since 31 August. Expect the draft email and an IndexNow ping after the first successful run.</small></div></li>
+    </ol>
+  </section>
+
+  <section id="traffic">
+    <div class="section-head">
+      <div class="eyebrow">03 · Where organic traffic stands</div>
+      <h2>Ninety days of real sessions</h2>
+      <p>Aggregated from the site's own pageview table, 6 June to 5 September 2026, first pageview per session. Only real search-engine referrers count as search; Gmail and other Google apps were excluded, which the admin panel currently does not do.</p>
+    </div>
+    <div class="metrics">
+      <div class="metric"><span class="value">3,662</span><span class="label">sessions in 90 days</span></div>
+      <div class="metric"><span class="value">265</span><span class="label">arrived from a search engine</span></div>
+      <div class="metric"><span class="value">243</span><span class="label">of those from Google</span></div>
+      <div class="metric"><span class="value">18</span><span class="label">arrived from ChatGPT</span></div>
+      <div class="metric"><span class="value">1</span><span class="label">published tutor page</span></div>
+    </div>
+    <div class="grid2">
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Search sessions by interface language</th><th class="num">Sessions</th></tr></thead>
+          <tbody>
+            <tr><td>Lithuanian</td><td class="num">170</td></tr>
+            <tr><td>English</td><td class="num">74</td></tr>
+            <tr><td>Dutch</td><td class="num">9</td></tr>
+            <tr><td>Polish</td><td class="num">5</td></tr>
+            <tr><td>German, Latvian</td><td class="num">2 each</td></tr>
+            <tr><td>Estonian, Danish, Swedish</td><td class="num">1 each</td></tr>
+            <tr><td>Every other locale</td><td class="num">0</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Search sessions by landing page</th><th class="num">Sessions</th></tr></thead>
+          <tbody>
+            <tr><td>Homepage</td><td class="num">184</td></tr>
+            <tr><td>Blog posts</td><td class="num">28</td></tr>
+            <tr><td>Pricing</td><td class="num">7</td></tr>
+            <tr><td>Feature pages</td><td class="num">6</td></tr>
+            <tr><td>Contacts, about, blog index, login</td><td class="num">4 to 5 each</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Search sessions by month</th><th class="num">Sessions</th></tr></thead>
+          <tbody>
+            <tr><td>June, from the 6th</td><td class="num">47</td></tr>
+            <tr><td>July</td><td class="num">58</td></tr>
+            <tr><td>August</td><td class="num">110</td></tr>
+            <tr><td>September, first four days</td><td class="num">50</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Content that can rank</th><th>LT · EN · PL</th><th>LV · EE</th><th>8 other legacy</th><th>23 new</th></tr></thead>
+          <tbody>
+            <tr><td>Blog posts</td><td class="num">45</td><td class="num">5</td><td class="num">0</td><td class="num">0</td></tr>
+            <tr><td>Marketing and feature pages</td><td>translated</td><td>translated</td><td>translated</td><td>translated, noindex</td></tr>
+            <tr><td>Blog database columns</td><td>yes</td><td>yes</td><td>yes</td><td>none</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <p class="note">September's uptick tracks the school-year start rather than any change on the site. Google keeps serving indexed pages for a while after they start failing, so the outage has not yet shown up in these numbers; another one or two weeks of 500s would have started removing pages from the index.</p>
+  </section>
+
+  <section id="locales">
+    <div class="section-head">
+      <div class="eyebrow">04 · Locale status</div>
+      <h2>Thirty-six locales, three very different situations</h2>
+      <p>Indexing is gated per surface in <code>src/lib/i18n/localeRelease.ts</code>. Adding a locale to the marketing list switches on its sitemap entries, hreflang cluster and index directive at once.</p>
+    </div>
+    <div class="locales">
+      <div class="locale-row">
+        <div class="name">Indexable with native content<small>own domain or .com, 45 blog posts each</small></div>
+        <div class="codes"><span class="code ok">lt · tutlio.lt</span><span class="code ok">pl · tutlio.pl</span><span class="code ok">en · tutlio.com</span></div>
+      </div>
+      <div class="locale-row">
+        <div class="name">Indexable but thin<small>translated pages, 5 or 0 blog posts, no market-specific pages</small></div>
+        <div class="codes"><span class="code warn">lv · 5 posts</span><span class="code warn">ee · 5 posts</span><span class="code warn">fr</span><span class="code warn">de</span><span class="code warn">es</span><span class="code warn">nl</span><span class="code warn">se</span><span class="code warn">dk</span><span class="code warn">fi</span><span class="code warn">no</span></div>
+      </div>
+      <div class="locale-row">
+        <div class="name">Interface only, noindex by design<small>translation drafts awaiting native review; no sitemap, hreflang or blog columns</small></div>
+        <div class="codes"><span class="code off">it</span><span class="code off">pt</span><span class="code off">pt-br</span><span class="code off">es-mx</span><span class="code off">ro</span><span class="code off">cs</span><span class="code off">sk</span><span class="code off">hu</span><span class="code off">el</span><span class="code off">bg</span><span class="code off">hr</span><span class="code off">sl</span><span class="code off">tr</span><span class="code off">uk</span><span class="code off">he</span><span class="code off">ar</span><span class="code off">hi</span><span class="code off">id</span><span class="code off">fil</span><span class="code off">th</span><span class="code off">ja</span><span class="code off">ko</span><span class="code off">zh-hk</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="plan">
+    <div class="section-head">
+      <div class="eyebrow">05 · The plan</div>
+      <h2>Six moves, in the order they pay back</h2>
+      <p>The sequence matters: nothing below the first item is visible to a search engine until the deploy lands, and items three and four only convert into traffic once the crawler sees a full page.</p>
+    </div>
+    <ol class="plan">
+      <li><div class="body">
+        <h3>Restore crawlability and keep it restored <span class="chip ok">code done</span><span class="chip warn">deploy needed</span></h3>
+        <p>Deploy the import fixes, run the smoke script, resubmit the sitemaps and request indexing for the money pages. The guard test and the note in AGENTS.md stop the same class of bug from shipping again.</p>
+      </div></li>
+      <li><div class="body">
+        <h3>Show crawlers the real landing page <span class="chip ok">code done</span></h3>
+        <p>The bot render of the homepage now mirrors the human page: hero, old-way versus Tutlio comparison, calendar and portal sections, four pillars, seven linked feature cards, the four-step lesson-to-invoice walkthrough, the FAQ with links, and the closing offer with its trial chips. All 36 dictionaries already carried this copy, so every locale benefits at once.</p>
+        <ul>
+          <li>Left out on purpose: the logo wall, case study and testimonials. The logo wall lists Wyzant, iTutor, HeyTutor, Learner and Fullmind under "trusted by". Unless those are real customers, remove it before AI engines repeat it; if they are, name them in the crawler page too.</li>
+          <li>Longer term, move the marketing routes to prerendered HTML so both audiences receive one document. The ops doc already flags dynamic rendering as a stopgap.</li>
+        </ul>
+      </div></li>
+      <li><div class="body">
+        <h3>Give the legacy locales something to rank <span class="chip warn">content work</span></h3>
+        <ul>
+          <li>Turn the all-locale blog pipeline back on once the cron works. It already writes market-native briefs for all 13 locales; the eight locales with zero posts have never had a single run.</li>
+          <li>Expand the feature pages from 7 to the 12 hub features. Invoices, parent portal, messaging, whiteboard, white-label and statistics already have translated hub copy; each becomes a keyword page in 13 languages.</li>
+          <li>Native review of the two search strings per locale in <code>src/lib/seoMeta.ts</code> and of the hero, then per-market pages: comparisons against TutorBird, TutorCruncher, Teachworks and Oases, plus small tools such as an invoice template and a cancellation-policy template.</li>
+        </ul>
+      </div></li>
+      <li><div class="body">
+        <h3>Open the 23 new locales surface by surface <span class="chip info">decision needed</span></h3>
+        <ul>
+          <li>Marketing, pricing and feature pages already have translations and search titles for all 23. After native review, add a locale to <code>SEO_LOCALES_BY_SURFACE.marketing</code>; sitemap, hreflang and indexing follow automatically. Keep legal pages noindex until translated.</li>
+          <li>The blog needs a per-locale translations table; four more columns per language does not scale from 13 to 36.</li>
+          <li>Suggested first wave where the app is fully usable and tutoring demand is high: Italian, Brazilian Portuguese, Mexican Spanish, Turkish, Romanian and Czech.</li>
+        </ul>
+      </div></li>
+      <li><div class="body">
+        <h3>Generative engine optimisation <span class="chip ok">partly done</span></h3>
+        <ul>
+          <li>Done: a Polish <code>llms.txt</code> and <code>llms-full.txt</code> for tutlio.pl, which used to serve the English text. Have a native speaker read it once.</li>
+          <li>Add <code>sameAs</code> links to the Organization schema once official LinkedIn, Facebook and directory profiles exist; none are recorded in the codebase today.</li>
+          <li>Get listed on G2, Capterra, GetApp, AlternativeTo and Product Hunt; answer engines cite those when asked for "tutoring management software".</li>
+          <li>Replace placeholder social proof with attributable customers and give the blog byline a real author page. Both feed E-E-A-T and AI citations.</li>
+        </ul>
+      </div></li>
+      <li><div class="body">
+        <h3>Measure the right thing <span class="chip ok">partly done</span></h3>
+        <ul>
+          <li>Done in code: the traffic-sources query no longer counts Gmail and other Google apps as organic and folds ChatGPT's utm tags into the AI channel. It ships with the migration above.</li>
+          <li>Still open: Search Console and Bing Webmaster properties per domain, and storing the host next to the path in the pageview table so .lt, .pl and .com can be separated without guessing from the language.</li>
+        </ul>
+      </div></li>
+    </ol>
+  </section>
+
+  <section id="changes">
+    <div class="section-head">
+      <div class="eyebrow">06 · Changed in this pass</div>
+      <h2>Files touched, nothing committed</h2>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <h3>Import fixes</h3>
+        <ul class="files" style="columns:1">
+          <li><span class="mono">src/lib/seoMeta.ts</span></li>
+          <li><span class="mono">src/lib/blogAuthor.ts</span></li>
+          <li><span class="mono">src/lib/publicPage.ts</span></li>
+          <li><span class="mono">src/lib/marketMoney.ts</span></li>
+          <li><span class="mono">src/lib/orgIntakeMode.ts</span></li>
+          <li><span class="mono">src/lib/orgTutorLessonPay.ts</span></li>
+          <li><span class="mono">src/lib/moksloVaisiaiLessonComms.ts</span></li>
+          <li><span class="mono">src/lib/i18n/platformOverrides.ts</span></li>
+          <li><span class="mono">src/lib/i18n/terminologyStore.ts</span></li>
+          <li><span class="mono">src/lib/i18n/supportTranslations.ts</span></li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>New and updated</h3>
+        <ul class="files" style="columns:1">
+          <li><span class="mono">tests/api/esm-import-extensions.test.ts</span> guard test</li>
+          <li><span class="mono">api/page-render.ts</span>, <span class="mono">api/_lib/ssr-shell.ts</span> landing parity</li>
+          <li><span class="mono">api/llms-txt.ts</span> Polish llms.txt</li>
+          <li><span class="mono">supabase/migrations/20260905090000_…sql</span> analytics buckets</li>
+          <li><span class="mono">tests/api/seo-render.test.ts</span> new hero assertion</li>
+          <li><span class="mono">AGENTS.md</span>, <span class="mono">docs/seo-post-deploy-ops.md</span> the rule, written down</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Sources: live HTTP checks with a Googlebot user agent on 5 September 2026; the <span class="mono">analytics_events</span> table for 6 June to 5 September; published rows in <span class="mono">blog_posts</span> and <span class="mono">public_pages</span>; the repository at commit 9147b16 plus the working tree.</span>
+    <span>Numbers are sessions, not pageviews, and count the first page of each session.</span>
+  </footer>
+</div>

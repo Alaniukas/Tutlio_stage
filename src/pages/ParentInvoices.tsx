@@ -8,8 +8,10 @@ import { Download, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import ParentLayout from '@/components/ParentLayout';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { authHeaders } from '@/lib/apiHelpers';
 import { computeInvoiceDisplayForChild } from '@/lib/billingBatchStudentSlice';
+import { fetchInvoiceIdsForSessionIds } from '@/lib/invoiceLineItemsForSessions';
 
 interface Invoice {
   id: string;
@@ -27,9 +29,18 @@ interface Invoice {
 export default function ParentInvoices() {
   const { user } = useUser();
   const { t } = useTranslation();
+  const { fmt } = useMarketMoney();
   const [searchParams] = useSearchParams();
   const filterStudentId = searchParams.get('studentId')?.trim() || null;
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [pendingPackages, setPendingPackages] = useState<Array<{
+    id: string;
+    totalLessons: number;
+    totalPrice: number | null;
+    paymentMethod: string | null;
+    studentName: string;
+    subjects: string;
+  }>>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -72,6 +83,29 @@ export default function ParentInvoices() {
         return;
       }
 
+      // "Laukia apmokėjimo": unpaid packages of the linked children (pay via the stable link).
+      const { data: pendingRows } = await supabase
+        .from('lesson_packages')
+        .select('id, total_lessons, total_price, payment_status, payment_method, paid, students!inner(full_name), lesson_package_items(subjects(name))')
+        .in('student_id', studentIds)
+        .eq('paid', false)
+        .eq('payment_status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(20);
+      setPendingPackages(
+        ((pendingRows ?? []) as any[]).map((row) => ({
+          id: row.id as string,
+          totalLessons: Number(row.total_lessons) || 0,
+          totalPrice: row.total_price == null ? null : Number(row.total_price),
+          paymentMethod: (row.payment_method as string | null) ?? null,
+          studentName: (Array.isArray(row.students) ? row.students[0]?.full_name : row.students?.full_name) || '',
+          subjects: (Array.isArray(row.lesson_package_items) ? row.lesson_package_items : [])
+            .map((it: any) => (Array.isArray(it.subjects) ? it.subjects[0]?.name : it.subjects?.name))
+            .filter(Boolean)
+            .join(', '),
+        })),
+      );
+
       /**
        * Jei filtro nėra — skaitome sąskaitas tiesiai (RLS `invoices_parent_select` meta tik susijusias).
        * Filtrą ?studentId=… — paliekame konkrečių vaikų S.F.: paketai pagal manual_sales_invoice_id + eilutės su session_ids (overlap).
@@ -109,19 +143,11 @@ export default function ParentInvoices() {
       const { data: sessRows } = await supabase.from('sessions').select('id').in('student_id', studentIds);
       const sessionIds = [...new Set((sessRows ?? []).map((s) => s.id))];
       const childSessionIdSet = new Set(sessionIds);
-      const chunkSize = 80;
-      for (let i = 0; i < sessionIds.length; i += chunkSize) {
-        const chunk = sessionIds.slice(i, i + chunkSize);
-        if (!chunk.length) continue;
-        const { data: liRows, error: liErr } = await supabase
-          .from('invoice_line_items')
-          .select('invoice_id')
-          .overlaps('session_ids', chunk as unknown as string[]);
-        if (liErr) {
-          console.warn('[ParentInvoices] line_items overlaps:', liErr);
-          continue;
-        }
-        for (const row of liRows ?? []) invoiceIdSet.add(row.invoice_id as string);
+      try {
+        const fromSessions = await fetchInvoiceIdsForSessionIds(supabase, sessionIds);
+        for (const invId of fromSessions) invoiceIdSet.add(invId);
+      } catch (liErr) {
+        console.warn('[ParentInvoices] line_items session lookup:', liErr);
       }
 
       const invoiceIds = [...invoiceIdSet];
@@ -244,6 +270,37 @@ export default function ParentInvoices() {
             {t('parent.invoicesLoadError', { message: loadError })}
           </div>
         ) : null}
+        {pendingPackages.length > 0 && (
+          <div className="mb-5 space-y-2">
+            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">{t('parentInv.pendingTitle')}</h2>
+            {pendingPackages.map((pkg) => (
+              <div key={pkg.id} className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">
+                    {pkg.subjects || t('parentInv.packageFallback')}
+                    {pkg.studentName && <span className="text-gray-500 font-normal"> · {pkg.studentName}</span>}
+                  </p>
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    {t('parentInv.lessonsCount', { count: String(pkg.totalLessons) })}
+                    {pkg.totalPrice != null && <> · <span className="font-semibold">€{pkg.totalPrice.toFixed(2)}</span></>}
+                  </p>
+                </div>
+                {pkg.paymentMethod === 'manual' ? (
+                  <span className="text-xs text-gray-600 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 shrink-0">
+                    {t('parentInv.manualTransfer')}
+                  </span>
+                ) : (
+                  <a
+                    href={`/api/pay-package?package=${pkg.id}`}
+                    className="inline-flex items-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 shrink-0"
+                  >
+                    {t('parentInv.payNow')}
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
         <div className="space-y-3">
           {invoices.length === 0 ? (
             <p className="text-gray-500 text-center py-12">{t('parent.noInvoices')}</p>
@@ -274,7 +331,7 @@ export default function ParentInvoices() {
                   )}
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
-                  <span className="font-medium text-gray-800">{amount.toFixed(2)} €</span>
+                  <span className="font-medium text-gray-800">{fmt(amount)}</span>
                   <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', statusColor[inv.status] || statusColor.issued)}>
                     {invoiceStatusLabel(inv.status)}
                   </span>

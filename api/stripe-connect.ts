@@ -6,6 +6,10 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { summarizeStripeOnboarding } from './_lib/stripeAccountOnboarding.js';
+import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { isAllowedRedirectUrl, publicOriginFromRequest } from './_lib/public-origin.js';
 
 function getStripe() {
     return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-02-25.clover' as any });
@@ -26,19 +30,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
     const { action, entity, entityId, returnUrl } = req.body as {
-        action: 'onboard' | 'verify';
+        action: 'onboard' | 'verify' | 'manage';
         entity: 'tutor' | 'org';
         entityId: string;
         returnUrl?: string;
     };
 
-    if (!entity || !entityId) return res.status(400).json({ error: 'entity and entityId are required' });
+    if (!['onboard', 'verify', 'manage'].includes(action) || !['tutor', 'org'].includes(entity) || !entityId) {
+        return res.status(400).json({ error: 'Valid action, entity and entityId are required' });
+    }
 
     const table = entity === 'tutor' ? 'profiles' : 'organizations';
     const stripe = getStripe();
     const supabase = getSupabase();
 
     try {
+        if (!auth.isInternal) {
+            if (!auth.userId) return res.status(401).json({ error: 'Unauthorized' });
+            const seat = await getOrgAdminSeatByUserId(supabase, auth.userId);
+            if (seat) {
+                const requiredPermission = action === 'verify' ? 'finance.view' : 'finance.edit';
+                const allowed = seat.status === 'active'
+                    && hasOrgAdminPermission(seat.role, seat.permissions, requiredPermission)
+                    && (entity === 'org'
+                        ? seat.organizationId === entityId
+                        : Boolean((await supabase.from('profiles').select('organization_id').eq('id', entityId).maybeSingle()).data?.organization_id === seat.organizationId));
+                if (!allowed) return res.status(403).json({ error: 'Insufficient organization permission' });
+            } else if (entity !== 'tutor' || entityId !== auth.userId) {
+                return res.status(403).json({ error: 'Forbidden' });
+            }
+        }
+
         if (action === 'onboard') {
             const { data: row } = await supabase.from(table).select('stripe_account_id').eq('id', entityId).single();
 
@@ -70,7 +92,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             // Create account onboarding link
-            const origin = returnUrl || 'https://tutlio.lt';
+            const requestOrigin = publicOriginFromRequest(req as any);
+            const origin = returnUrl && isAllowedRedirectUrl(returnUrl, requestOrigin)
+                ? returnUrl
+                : `${requestOrigin}${entity === 'org' ? '/company/finance' : '/finance'}`;
             const successUrl = `${origin}?stripe=success`;
             const refreshUrl = `${origin}?stripe=refresh`;
 
@@ -92,28 +117,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             const account = await stripe.accounts.retrieve(row.stripe_account_id);
-            const currentlyDue = account.requirements?.currently_due ?? [];
-            const pastDue = account.requirements?.past_due ?? [];
-            const requirementsClear = currentlyDue.length === 0 && pastDue.length === 0;
-            const transfersCap = account.capabilities?.transfers;
-
-            // Express: details_submitted alone is not enough — need charges/payouts or active transfers (destination charge).
-            let complete =
-                account.details_submitted === true &&
-                requirementsClear &&
-                account.charges_enabled === true &&
-                account.payouts_enabled === true;
-
-            // Sometimes payouts_enabled is still false while Stripe finishes review; if transfers are active and nothing is due — consider ready.
-            if (
-                !complete &&
-                account.details_submitted === true &&
-                requirementsClear &&
-                account.charges_enabled === true &&
-                transfersCap === 'active'
-            ) {
-                complete = true;
-            }
+            const summary = summarizeStripeOnboarding(account);
+            const complete = summary.complete;
 
             if (complete) {
                 const { error: flagErr } = await supabase
@@ -125,14 +130,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             return res.status(200).json({
                 complete,
+                pendingVerification: summary.pendingVerification,
                 accountId: row.stripe_account_id,
                 stripe: {
-                    details_submitted: account.details_submitted,
-                    charges_enabled: account.charges_enabled,
-                    payouts_enabled: account.payouts_enabled,
-                    currently_due: currentlyDue,
-                    past_due: pastDue,
-                    transfers: transfersCap ?? null,
+                    details_submitted: summary.detailsSubmitted,
+                    charges_enabled: summary.chargesEnabled,
+                    payouts_enabled: summary.payoutsEnabled,
+                    currently_due: summary.currentlyDue,
+                    past_due: summary.pastDue,
+                    transfers: summary.transfers,
+                    pending_verification: summary.pendingVerification,
                 },
             });
         }

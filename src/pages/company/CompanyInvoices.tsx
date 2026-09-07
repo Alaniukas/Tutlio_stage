@@ -6,6 +6,15 @@ import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import InvoiceSettingsForm from '@/components/InvoiceSettingsForm';
 import CreateInvoiceModal from '@/components/CreateInvoiceModal';
 import {
@@ -20,11 +29,13 @@ import {
   ArrowUpDown,
   RefreshCw,
   CheckCircle2,
+  Mail,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
-import { orgTutorLessonPayEur } from '@/lib/orgTutorLessonPay';
+import { orgTutorSessionPayEur } from '@/lib/orgTutorLessonPay';
+import { ORG_TUTOR_CARD_LIST_SCROLL_CLASS } from '@/lib/orgUi';
 
 interface Invoice {
   id: string;
@@ -37,6 +48,7 @@ interface Invoice {
   created_at: string;
   billing_batch_id?: string | null;
   billing_batches?: { paid: boolean } | null;
+  origin?: 'generated' | 'external';
 }
 
 export default function CompanyInvoices() {
@@ -50,6 +62,14 @@ export default function CompanyInvoices() {
   const [invoices, setInvoices] = useState<Invoice[]>(ic?.invoices ?? []);
   const [loading, setLoading] = useState(!ic);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [reserveOpen, setReserveOpen] = useState(false);
+  const [reserveCount, setReserveCount] = useState(1);
+  const [reserveBuyer, setReserveBuyer] = useState('');
+  const [reserveAmount, setReserveAmount] = useState('');
+  const [reserveNote, setReserveNote] = useState('');
+  const [reserveDate, setReserveDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [reserving, setReserving] = useState(false);
+  const [reserveError, setReserveError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   /** yyyy-MM or '' = visi mėnesiai */
@@ -86,6 +106,7 @@ export default function CompanyInvoices() {
     invoiceIssuerMode === 'company' || invoiceIssuerMode === 'both';
   const [sortAsc, setSortAsc] = useState(true);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [remindingId, setRemindingId] = useState<string | null>(null);
 
   const tutorEffectiveRange = useMemo(() => {
     if (tutorPeriodMode === 'month' && tutorMonth && /^\d{4}-\d{2}$/.test(tutorMonth)) {
@@ -196,17 +217,24 @@ export default function CompanyInvoices() {
     const [{ data: sessions }, { data: tutorProfiles }] = await Promise.all([
       supabase
         .from('sessions')
-        .select('tutor_id, price, status, paid, payment_status')
+        .select('tutor_id, price, status, paid, payment_status, subject_id')
         .in('tutor_id', tutorIds)
         .gte('start_time', tutorEffectiveRange.start)
         .lte('start_time', tutorEffectiveRange.end + 'T23:59:59')
         .neq('status', 'cancelled'),
-      supabase.from('profiles').select('id, company_commission_percent').in('id', tutorIds),
+      supabase.from('profiles').select('id, company_commission_percent, company_commission_by_subject').in('id', tutorIds),
     ]);
-    const payRateByTutor = new Map(
-      (tutorProfiles || []).map((p: { id: string; company_commission_percent?: number | null }) => [
+    const payByTutor = new Map(
+      (tutorProfiles || []).map((p: {
+        id: string;
+        company_commission_percent?: number | null;
+        company_commission_by_subject?: unknown;
+      }) => [
         p.id,
-        p.company_commission_percent,
+        {
+          defaultRate: p.company_commission_percent,
+          bySubject: p.company_commission_by_subject,
+        },
       ]),
     );
     const map: Record<string, { count: number; total: number }> = {};
@@ -215,7 +243,14 @@ export default function CompanyInvoices() {
       if (!isCountedAsPaid) continue;
       if (!map[s.tutor_id]) map[s.tutor_id] = { count: 0, total: 0 };
       map[s.tutor_id].count++;
-      map[s.tutor_id].total += orgTutorLessonPayEur(payRateByTutor.get(s.tutor_id), s.price);
+      const pay = payByTutor.get(s.tutor_id);
+      map[s.tutor_id].total += orgTutorSessionPayEur({
+        organizationId: orgId,
+        defaultRate: pay?.defaultRate,
+        bySubject: pay?.bySubject,
+        subjectId: (s as { subject_id?: string | null }).subject_id,
+        sessionPrice: s.price,
+      });
     }
     setTutorSessions(map);
     setLoadingTutorSessions(false);
@@ -319,12 +354,43 @@ export default function CompanyInvoices() {
     sortAsc,
   ]);
 
+  const handleReserveExternal = async () => {
+    setReserving(true);
+    setReserveError(null);
+    try {
+      const res = await fetch('/api/reserve-invoice-number', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          count: reserveCount,
+          issueDate: reserveDate,
+          buyerName: reserveBuyer.trim() || undefined,
+          amount: reserveAmount.trim() ? Number(reserveAmount) : undefined,
+          note: reserveNote.trim() || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || t('invoices.reserveFailed'));
+      setReserveOpen(false);
+      setReserveCount(1);
+      setReserveBuyer('');
+      setReserveAmount('');
+      setReserveNote('');
+      await loadData();
+    } catch (err: any) {
+      setReserveError(err.message || t('invoices.reserveFailed'));
+    } finally {
+      setReserving(false);
+    }
+  };
+
   const handleDownloadAllVisible = async () => {
     if (filteredInvoices.length === 0) return;
     setDownloadingAllList(true);
     try {
       const headers = await authHeaders();
       for (const inv of filteredInvoices) {
+        if (inv.origin === 'external') continue;
         const res = await fetch(`/api/invoice-pdf?id=${inv.id}`, { headers });
         if (!res.ok) continue;
         const blob = await res.blob();
@@ -360,6 +426,31 @@ export default function CompanyInvoices() {
       console.error('[CompanyInvoices] download error:', err);
     } finally {
       setDownloadingId(null);
+    }
+  };
+
+  const handleRemind = async (invoiceId: string) => {
+    const target = invoices.find(inv => inv.id === invoiceId);
+    if (!target?.billing_batch_id) return;
+    if (target.billing_batches?.paid) return;
+    setRemindingId(invoiceId);
+    try {
+      const res = await fetch('/api/resend-monthly-invoice', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ billingBatchId: target.billing_batch_id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        window.alert(body.error || t('invoices.remindFailed'));
+        return;
+      }
+      window.alert(t('invoices.remindSuccess'));
+    } catch (e) {
+      console.error('[CompanyInvoices] remind error:', e);
+      window.alert(t('invoices.remindFailed'));
+    } finally {
+      setRemindingId(null);
     }
   };
 
@@ -447,6 +538,13 @@ export default function CompanyInvoices() {
             >
               <Settings className="w-4 h-4 shrink-0" />
               {showSettings ? <ChevronUp className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => { setReserveOpen(true); setReserveError(null); }}
+              className="rounded-xl gap-2 touch-manipulation flex-1 min-w-0 sm:flex-initial"
+            >
+              <span className="truncate">{t('invoices.reserveExternal')}</span>
             </Button>
             <Button
               onClick={() => setIsCreateOpen(true)}
@@ -590,7 +688,7 @@ export default function CompanyInvoices() {
             ) : tutors.length === 0 ? (
               <p className="text-gray-500 text-center py-8">{t('invoices.noTutors')}</p>
             ) : (
-              <div className="space-y-2">
+              <div className={cn('space-y-2', ORG_TUTOR_CARD_LIST_SCROLL_CLASS)}>
                 <label className="flex items-center gap-2 text-xs font-medium text-gray-500 mb-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -979,14 +1077,20 @@ export default function CompanyInvoices() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold text-gray-900 text-sm">{inv.invoice_number}</span>
                           {statusBadge(inv.status)}
-                          <span
-                            className={cn(
-                              'px-2 py-0.5 rounded-full text-[10px] font-medium',
-                              isOrgBuyer ? 'bg-slate-100 text-slate-700' : 'bg-emerald-50 text-emerald-800',
-                            )}
-                          >
-                            {isOrgBuyer ? t('invoices.badgeOrgInvoice') : t('invoices.badgePayerInvoice')}
-                          </span>
+                          {inv.origin === 'external' ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-800">
+                              {t('invoices.badgeExternal')}
+                            </span>
+                          ) : (
+                            <span
+                              className={cn(
+                                'px-2 py-0.5 rounded-full text-[10px] font-medium',
+                                isOrgBuyer ? 'bg-slate-100 text-slate-700' : 'bg-emerald-50 text-emerald-800',
+                              )}
+                            >
+                              {isOrgBuyer ? t('invoices.badgeOrgInvoice') : t('invoices.badgePayerInvoice')}
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-gray-500 truncate">
                           {(inv.buyer_snapshot as { name?: string })?.name || '-'}
@@ -1002,6 +1106,9 @@ export default function CompanyInvoices() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1">
+                      {inv.origin === 'external' ? (
+                        <span className="text-[11px] text-gray-400 px-2">{t('invoices.externalNoPdf')}</span>
+                      ) : (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -1015,23 +1122,40 @@ export default function CompanyInvoices() {
                           <Download className="w-4 h-4" />
                         )}
                       </Button>
+                      )}
                       {inv.status === 'issued' && (
                         <>
                           {inv.billing_batch_id && (!inv.billing_batches || !inv.billing_batches.paid) && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleRegenerate(inv.id)}
-                              disabled={regeneratingId === inv.id}
-                              className="rounded-lg text-amber-600 hover:text-amber-700 hover:bg-amber-50"
-                              title={t('invoices.regenerate')}
-                            >
-                              {regeneratingId === inv.id ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <RefreshCw className="w-4 h-4" />
-                              )}
-                            </Button>
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRemind(inv.id)}
+                                disabled={remindingId === inv.id}
+                                className="rounded-lg text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                                title={t('invoices.remindPayer')}
+                              >
+                                {remindingId === inv.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Mail className="w-4 h-4" />
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRegenerate(inv.id)}
+                                disabled={regeneratingId === inv.id}
+                                className="rounded-lg text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                                title={t('invoices.regenerate')}
+                              >
+                                {regeneratingId === inv.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="w-4 h-4" />
+                                )}
+                              </Button>
+                            </>
                           )}
                           <Button
                             variant="ghost"
@@ -1075,6 +1199,53 @@ export default function CompanyInvoices() {
         billingTutorId={tutorInvoiceTarget?.id}
         orgTutors={tutors}
       />
+
+      <Dialog open={reserveOpen} onOpenChange={setReserveOpen}>
+        <DialogContent className="rounded-2xl max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('invoices.reserveExternalTitle')}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">{t('invoices.reserveExternalHint')}</p>
+          <div className="space-y-3">
+            <div>
+              <Label>{t('invoices.reserveCount')}</Label>
+              <Input
+                type="number"
+                min={1}
+                max={50}
+                value={reserveCount}
+                onChange={(e) => setReserveCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                className="rounded-xl mt-1"
+              />
+            </div>
+            <div>
+              <Label>{t('invoices.periodFrom')}</Label>
+              <DateInput value={reserveDate} onChange={(e) => setReserveDate(e.target.value)} className="rounded-xl mt-1" />
+            </div>
+            <div>
+              <Label>{t('invoices.reserveBuyer')}</Label>
+              <Input value={reserveBuyer} onChange={(e) => setReserveBuyer(e.target.value)} className="rounded-xl mt-1" />
+            </div>
+            <div>
+              <Label>{t('invoices.reserveAmount')}</Label>
+              <Input value={reserveAmount} onChange={(e) => setReserveAmount(e.target.value)} className="rounded-xl mt-1" />
+            </div>
+            <div>
+              <Label>{t('invoices.reserveNote')}</Label>
+              <Input value={reserveNote} onChange={(e) => setReserveNote(e.target.value)} className="rounded-xl mt-1" />
+            </div>
+            {reserveError && <p className="text-sm text-red-600">{reserveError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReserveOpen(false)} className="rounded-xl">
+              {t('common.cancel')}
+            </Button>
+            <Button onClick={() => void handleReserveExternal()} disabled={reserving} className="rounded-xl">
+              {reserving ? <Loader2 className="w-4 h-4 animate-spin" /> : t('invoices.reserveSubmit')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

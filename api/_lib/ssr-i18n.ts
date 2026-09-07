@@ -1,4 +1,6 @@
+import { interpolateTranslation } from '../../src/lib/i18n/interpolate.js';
 import type { Locale } from './seo-routing.js';
+import { loadExtraLocaleDict, preloadExtraLocaleDict } from './loadExtraLocaleDict.js';
 import { lt } from '../../src/lib/i18n/lt.js';
 import { en } from '../../src/lib/i18n/en.js';
 import { pl } from '../../src/lib/i18n/pl.js';
@@ -11,39 +13,37 @@ import { se } from '../../src/lib/i18n/se.js';
 import { dk } from '../../src/lib/i18n/dk.js';
 import { fi } from '../../src/lib/i18n/fi.js';
 import { no } from '../../src/lib/i18n/no.js';
+import { nl } from '../../src/lib/i18n/nl.js';
 
-const translations: Record<Locale, Record<string, string>> = {
-  lt,
-  en,
-  pl,
-  lv,
-  ee,
-  fr,
-  es,
-  de,
-  se,
-  dk,
-  fi,
-  no,
+const translations: Partial<Record<Locale, Record<string, string>>> = {
+  lt, en, pl, lv, ee, fr, es, de, se, dk, fi, no, nl,
 };
 
-/** Static locale bundle (Vercel-safe). Kept async for call-site compatibility. */
-export async function preloadSsrLocales(..._locales: Locale[]): Promise<void> {
-  /* translations loaded at module init */
+function dictFor(locale: Locale): Record<string, string> | undefined {
+  return translations[locale] ?? loadExtraLocaleDict(locale);
+}
+
+/**
+ * Every renderer awaits this before its first t(). Legacy dictionaries are
+ * static imports; the newer ones are loaded here with a real dynamic import so
+ * the same code path works on Vercel, under tsx and under vitest.
+ */
+export async function preloadSsrLocales(...locales: Locale[]): Promise<void> {
+  await Promise.all(
+    locales.map(async (locale) => {
+      if (translations[locale]) return;
+      await preloadExtraLocaleDict(locale);
+    }),
+  );
 }
 
 export function t(locale: Locale, key: string, params?: Record<string, string | number>): string {
-  let text =
-    translations[locale]?.[key] ?? translations.en[key] ?? translations.lt[key] ?? key;
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      text = text.replaceAll(`{${k}}`, String(v));
-    }
-  }
-  return text;
+  const text =
+    dictFor(locale)?.[key] ?? dictFor('en')?.[key] ?? dictFor('lt')?.[key] ?? key;
+  return interpolateTranslation(text, params);
 }
 
 export function translationKeys(locale: Locale, prefix: string): string[] {
-  const dict = translations[locale] ?? translations.en;
+  const dict = dictFor(locale) ?? dictFor('en') ?? {};
   return Object.keys(dict).filter((k) => k.startsWith(`${prefix}.`)).sort();
 }

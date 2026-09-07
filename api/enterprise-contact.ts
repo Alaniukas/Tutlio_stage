@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
-import { getResendApiKey } from './_lib/resendConfig.js';
-const FROM_EMAIL = process.env.FROM_EMAIL || 'Tutlio <onboarding@tutlio.lt>';
-const NOTIFY_EMAILS = ['simas0423@gmail.com', 'alaniukasa@gmail.com'];
+import { getFromEmail, getResendApiKey, INTERNAL_NOTIFY_EMAILS } from './_lib/resendConfig.js';
+const FROM_EMAIL = getFromEmail();
+const NOTIFY_EMAILS = INTERNAL_NOTIFY_EMAILS;
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;

@@ -6,6 +6,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'crypto';
+import { insertInitialOrgOwner } from './_lib/orgAdminAccess.js';
 
 function getPlatformAdminSecret(): string {
   const s = process.env.ADMIN_SECRET || process.env.VITE_ADMIN_SECRET;
@@ -101,9 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       // 4. Link user as org admin
-      const { error: adminError } = await supabase
-        .from('organization_admins')
-        .insert({ user_id: userId, organization_id: org.id });
+      const { error: adminError } = await insertInitialOrgOwner(supabase, userId, org.id);
 
       if (adminError) {
         await supabase.auth.admin.deleteUser(userId);
@@ -134,4 +133,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Internal server error', message: err?.message });
   }
 }
-

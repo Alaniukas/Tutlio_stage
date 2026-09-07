@@ -17,6 +17,7 @@ import {
   HelpCircle,
   MessageSquare,
   FileText,
+  Globe,
   Menu,
   X,
   ChevronsLeft,
@@ -29,6 +30,10 @@ import { useTranslation } from '@/lib/i18n';
 import { useUser } from '@/contexts/UserContext';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
+import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/marketMoney';
+import { useHideWaitlist } from '@/hooks/useHideWaitlist';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { useSchoolTerminology } from '@/hooks/useSchoolTerminology';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -40,6 +45,15 @@ export default function Layout({ children }: LayoutProps) {
   const { profile, user: ctxUser, loading: userLoading } = useUser();
   const [profileOrgId, setProfileOrgId] = useState<string | null>(profile?.organization_id ?? null);
   const isOrgTutor = !!(profile?.organization_id || profileOrgId);
+  const { hideWaitlist: hideWaitlistFromFeatures } = useHideWaitlist({
+    failClosedWhileLoading: isOrgTutor,
+  });
+  const { hasFeature, entityType: orgEntityType, loading: orgFeaturesLoading } = useOrgFeatures();
+  // Teachers of a school see "mokytojas" / "užsiėmimas" wording, same as the school admin.
+  useSchoolTerminology(orgFeaturesLoading ? null : {
+    staff: orgEntityType === 'school' || hasFeature('school_teacher_labels'),
+    activity: orgEntityType === 'school' && hasFeature('school_activity_labels'),
+  });
   const chatUnreadTotal = useTotalChatUnread();
   usePushSubscription();
   const [tutorName, setTutorName] = useState('');
@@ -53,21 +67,35 @@ export default function Layout({ children }: LayoutProps) {
   const mainRef = useRef<HTMLElement>(null);
 
   const navItems = useMemo(() => {
+    const orgId = profile?.organization_id || profileOrgId;
+    const hideWaitlist =
+      hideWaitlistFromFeatures ||
+      isWaitlistHiddenForOrg(orgId);
+    const hideInstructions = isInstructionsHiddenForOrg(orgId);
     const items = [
       { href: '/dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
       { href: '/calendar', label: t('nav.calendar'), icon: Calendar },
+      { href: '/groups', label: t('companyNav.groups'), icon: Users, feature: 'school_class_groups' as const },
       { href: '/students', label: t('nav.students'), icon: Users },
       { href: '/waitlist', label: t('nav.waitlist'), icon: ListOrdered, highlight: true },
       { href: '/messages', label: t('nav.messages'), icon: MessageSquare },
       { href: '/finance', label: t('nav.finance'), icon: DollarSign },
       { href: '/invoices', label: t('nav.invoices'), icon: FileText },
       { href: '/lesson-settings', label: t('nav.lessonSettings'), icon: BookOpen },
+      { href: '/landing-editor', label: t('nav.publicPage'), icon: Globe },
       { href: '/instructions', label: t('nav.instructions'), icon: HelpCircle },
     ];
-    // Org tutors don't have personal invoices page, but they can see instructions.
-    if (isOrgTutor) return items.filter(item => item.href !== '/invoices');
-    return items;
-  }, [isOrgTutor, t]);
+    // Org tutors have neither a personal invoices page nor their own public
+    // page — the school owns both — but they can still see instructions
+    // (except Pro Klasė, where instructions are fully removed).
+    return items.filter((item) => {
+      if (isOrgTutor && (item.href === '/invoices' || item.href === '/landing-editor')) return false;
+      if (hideWaitlist && item.href === '/waitlist') return false;
+      if (hideInstructions && item.href === '/instructions') return false;
+      if ('feature' in item && item.feature && !hasFeature(item.feature)) return false;
+      return true;
+    });
+  }, [isOrgTutor, t, profile?.organization_id, profileOrgId, hideWaitlistFromFeatures, hasFeature]);
 
   useEffect(() => {
     void preloadTutorData();
@@ -125,10 +153,11 @@ export default function Layout({ children }: LayoutProps) {
 
   const initials = tutorName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?';
   const isCalendarRoute = location.pathname === '/calendar';
+  const hideInstructions = isInstructionsHiddenForOrg(profile?.organization_id || profileOrgId);
   return (
     <div className="h-dvh max-h-dvh bg-white flex overflow-hidden relative">
       <OrgSuspendedBanner />
-      <PwaInstallPrompt settingsPath="/instructions" />
+      <PwaInstallPrompt settingsPath={hideInstructions ? '/lesson-settings' : '/instructions'} />
       <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full blur-[80px] pointer-events-none z-0 bg-[color-mix(in_srgb,var(--org-brand)_12%,#ffffff)]" />
       <div className="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] bg-slate-50/40 rounded-full blur-[100px] pointer-events-none z-0" />
 
@@ -142,7 +171,8 @@ export default function Layout({ children }: LayoutProps) {
           'flex border-b border-gray-100',
           sidebarExpanded ? 'items-center justify-between p-4' : 'flex-col items-center gap-2 py-3 px-2'
         )}>
-          <Link to="/" className="flex items-center gap-2 min-w-0">
+          {/* Logged-in logo click stays in the app (first sidebar tab), not the marketing landing. */}
+          <Link to="/dashboard" className="flex items-center gap-2 min-w-0">
             <BrandedLogo size="md" showName={sidebarExpanded} />
           </Link>
           <button
@@ -256,7 +286,7 @@ export default function Layout({ children }: LayoutProps) {
           <div className="fixed inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
           <aside className="relative z-50 flex h-full w-72 max-w-[85vw] flex-col border-r border-gray-100 bg-white">
             <div className="flex items-center justify-between border-b border-gray-100 p-4">
-              <Link to="/" className="flex items-center gap-2" onClick={() => setMobileOpen(false)}>
+              <Link to="/dashboard" className="flex items-center gap-2" onClick={() => setMobileOpen(false)}>
                 <BrandedLogo size="md" />
               </Link>
               <button

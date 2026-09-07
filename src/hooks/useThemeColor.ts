@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 
 function getThemeColor(pathname: string): string {
   // Auth – dark indigo (with optional /:locale/ prefix, e.g. /lt/login)
-  if (/^\/(?:[a-z]{2}\/)?login$/i.test(pathname)) return '#1e1b4b';
+  if (/^\/(?:[a-z]{2,3}(?:-[a-z]{2})?\/)?login$/i.test(pathname)) return '#1e1b4b';
   if (/^\/auth\/callback/.test(pathname)) return '#1e1b4b';
   if (/^\/(registration\/subscription|tutor-subscribe)$/.test(pathname)) return '#1e1b4b';
   if (/^\/book\//.test(pathname)) return '#1e1b4b';
@@ -33,8 +33,9 @@ function getThemeColor(pathname: string): string {
   if (/\/(stripe-success|package-success|school-payment-success|school-contract-complete)$/.test(pathname)) return '#ffffff';
   if (/\/package-cancelled$/.test(pathname)) return '#f9fafb';
 
-  // Everything else: landing, marketing, blog, about, contact, pricing
-  return '#f5f5f3';
+  // Everything else: landing, marketing, blog, about, contact, pricing.
+  // Matches the white navbar these pages sit under.
+  return '#ffffff';
 }
 
 export default function ThemeColorManager() {

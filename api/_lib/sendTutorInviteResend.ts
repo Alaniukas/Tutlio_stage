@@ -1,13 +1,20 @@
 /**
  * Tutor invitation email via Resend (directly from invite-tutor).
  * Not via HTTP to /api/send-email — Vercel serverless terminates fire-and-forget fetch after response.
- * Matches send-email.ts `tutor_invite` (LT only, Outlook-safe layout).
+ * Matches send-email.ts `tutor_invite` (Outlook-safe layout) + org white-label branding.
  */
 import { Resend } from 'resend';
+import { localeDirection } from '../../src/lib/i18n/locales.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { t, isValidLocale, localizedFromEmail, type Locale } from './i18n.js';
 import { buildTutorRegisterInviteUrl } from './public-origin.js';
 import { outlookEmailButton, headerInlineStyle } from './outlookEmail.js';
+import {
+  applyOrgBrandingToHtml,
+  resolveEmailOrgBranding,
+  type EmailBranding,
+  type OrgRowForEmailBranding,
+} from './emailOrgBranding.js';
 
 const baseStyles = `
   <style>
@@ -24,9 +31,9 @@ const baseStyles = `
 
 function wrap(content: string, locale: Locale): string {
   return `<!DOCTYPE html>
-<html lang="${locale}">
+<html lang="${locale}" dir="${localeDirection(locale)}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">${baseStyles}</head>
-<body style="margin:0;padding:0;background-color:#f3f4f6;">
+<body dir="${localeDirection(locale)}" style="margin:0;padding:0;background-color:#f3f4f6;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;background-color:#f3f4f6;">
 <tr><td align="center" style="padding:20px 12px;background-color:#f3f4f6;">
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;max-width:560px;width:100%;background-color:#ffffff;">
@@ -40,8 +47,11 @@ function wrap(content: string, locale: Locale): string {
 </body></html>`;
 }
 
-function footerFor(locale: Locale): string {
-  return `<div class="footer"><p>${t(locale, 'em.teamSignature')}</p><p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${t(locale, 'em.unsubscribe')}</p></div>`;
+function footerFor(locale: Locale, branded?: boolean): string {
+  const unsub = branded
+    ? ''
+    : `<p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${t(locale, 'em.unsubscribe')}</p>`;
+  return `<div class="footer"><p>${t(locale, 'em.teamSignature')}</p>${unsub}</div>`;
 }
 
 export type TutorInviteEmailData = {
@@ -55,6 +65,9 @@ export type TutorInviteEmailData = {
   emailLocale?: string;
   /** UI locale for URL path prefix (lt, en, pl, …). */
   uiLocale?: string;
+  organizationId?: string | null;
+  /** Org row for white-label (logo / colors / Pro Klasė from). */
+  org?: OrgRowForEmailBranding | null;
 };
 
 export async function sendTutorInviteEmail(
@@ -71,10 +84,12 @@ export async function sendTutorInviteEmail(
     uiLocale: data.uiLocale,
   });
   const greetingName = data.inviteeName || data.inviteeEmail || t(locale, 'em.tutorInviteDefault');
-  const orgLabel = data.orgName || 'Tutlio';
+  const resolved = resolveEmailOrgBranding(data.organizationId, data.org || { name: data.orgName });
+  const orgLabel = resolved.publicName || data.orgName || resolved.branding?.name || 'Tutlio';
+  const branding: EmailBranding | null = resolved.branding;
 
   const subject = t(locale, 'em.tutorInviteSub', { org: orgLabel });
-  const html = wrap(
+  let html = wrap(
     `
       <div class="header" style="${headerInlineStyle('#6366f1', '#8b5cf6')}"><h1>${t(locale, 'em.tutorInviteHeader')}</h1><p>${t(locale, 'em.tutorInviteHeaderSub')}</p></div>
       <div class="body">
@@ -84,13 +99,21 @@ export async function sendTutorInviteEmail(
           ${outlookEmailButton(inviteLink, t(locale, 'em.btnCompleteReg'), '#4f46e5', { fontWeight: '600', fontSize: '15px', padding: '14px 28px' })}
         </div>
         <p style="color:#9ca3af; font-size:12px;">${t(locale, 'em.linkNotWorking')} ${inviteLink}</p>
-      </div>${footerFor(locale)}`,
+      </div>${footerFor(locale, !!(resolved.emailContactEmail || resolved.emailFooterPoweredBy))}`,
     locale
   );
+  html = applyOrgBrandingToHtml(html, {
+    branding,
+    emailTeamSignature: resolved.emailTeamSignature,
+    locale,
+    emailContactPhone: resolved.emailContactPhone,
+    emailContactEmail: resolved.emailContactEmail,
+    emailFooterPoweredBy: resolved.emailFooterPoweredBy === true,
+  });
 
   const resend = new Resend(apiKey);
   const { error } = await resend.emails.send({
-    from: localizedFromEmail(locale),
+    from: localizedFromEmail(locale, { senderName: resolved.emailSenderName }),
     to: [to],
     subject,
     html,

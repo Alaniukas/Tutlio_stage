@@ -8,6 +8,23 @@ const REMEMBER_ME_KEY = 'tutlio_remember_me';
 // Cache the storage backend choice to prevent switching mid-session
 let cachedStorage: Storage | null = null;
 
+function listAuthKeys(store: Storage): string[] {
+  const keys: string[] = [];
+  for (let i = 0; i < store.length; i++) {
+    const k = store.key(i);
+    if (k && k.startsWith('sb-')) keys.push(k);
+  }
+  return keys;
+}
+
+function moveAuthKeys(from: Storage, to: Storage) {
+  for (const k of listAuthKeys(from)) {
+    const v = from.getItem(k);
+    if (v !== null) to.setItem(k, v);
+    from.removeItem(k);
+  }
+}
+
 function getStorage(): Storage {
   if (typeof window === 'undefined') {
     return typeof localStorage !== 'undefined' ? localStorage : ({} as Storage);
@@ -18,7 +35,15 @@ function getStorage(): Storage {
 
   try {
     const rememberMe = localStorage.getItem(REMEMBER_ME_KEY);
-    cachedStorage = rememberMe === 'false' ? sessionStorage : localStorage;
+    const chosen = rememberMe === 'false' ? sessionStorage : localStorage;
+    const other = chosen === localStorage ? sessionStorage : localStorage;
+    // A remember-me flip before the last sign-in could have left the live
+    // session in the other backend; adopt it so a refresh never appears
+    // logged-out (this also heals sessions stranded by the old behavior).
+    if (listAuthKeys(chosen).length === 0 && listAuthKeys(other).length > 0) {
+      moveAuthKeys(other, chosen);
+    }
+    cachedStorage = chosen;
     return cachedStorage;
   } catch {
     cachedStorage = localStorage;
@@ -145,18 +170,25 @@ if (typeof window !== 'undefined') {
   });
 }
 
-/** Call before login: when user checks "Prisiminti mane", pass true so session is stored in localStorage; otherwise sessionStorage. */
+/**
+ * Call before login: true stores the session in localStorage (survives browser
+ * restarts); false uses sessionStorage (cleared when the tab closes).
+ * Switches the live backend immediately and migrates any existing auth token,
+ * so the session the sign-in writes is the one the next page load reads.
+ */
 export function setRememberMe(value: boolean) {
-  if (typeof window !== 'undefined') {
+  if (typeof window === 'undefined') return;
+  try {
     localStorage.setItem(REMEMBER_ME_KEY, value ? 'true' : 'false');
-    // Do not flip storage backend mid-flight. Apply on next app boot.
-    console.log(
-      '[Supabase Client] Remember me set to:',
-      value,
-      '- will use',
-      value ? 'localStorage' : 'sessionStorage',
-      'after reload/sign-in cycle',
-    );
+    const target = value ? localStorage : sessionStorage;
+    const current = getStorage();
+    if (current !== target) {
+      moveAuthKeys(current, target);
+      cachedStorage = target;
+    }
+    console.log('[Supabase Client] Remember me set to:', value);
+  } catch (err) {
+    console.error('[Supabase Client] setRememberMe failed:', err);
   }
 }
 

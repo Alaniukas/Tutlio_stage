@@ -3,12 +3,13 @@ import StudentLayout from '@/components/StudentLayout';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
 import { Eye, EyeOff, Trash2, AlertTriangle, Check, LogOut, Mail } from 'lucide-react';
-import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
+import { formatLocalizedPhone, validateLocalizedPhone } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useTranslation } from '@/lib/i18n';
 import { buildPlatformPath } from '@/lib/platform';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
 import { authHeaders } from '@/lib/apiHelpers';
+import { isMoksloVaisiaiOrg } from '@/lib/marketMoney';
 
 export default function StudentSettings() {
     const { t, locale } = useTranslation();
@@ -30,6 +31,7 @@ export default function StudentSettings() {
     const [successPass, setSuccessPass] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState(false);
+    const [archiveOrg, setArchiveOrg] = useState(false);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
 
     const [payerEmailDisp, setPayerEmailDisp] = useState('');
@@ -91,6 +93,10 @@ export default function StudentSettings() {
             setPhone(data.phone || '');
             setAge(data.age?.toString() || '');
             setGrade(data.grade || '');
+            const orgId = String((data as { organization_id?: string | null }).organization_id || '');
+            const tutorSlug = String((data as { tutor_organization_slug?: string | null }).tutor_organization_slug || '');
+            const isMv = isMoksloVaisiaiOrg(orgId) || isMoksloVaisiaiOrg(tutorSlug);
+            setArchiveOrg(isMv);
             const pe = String((data as { payer_email?: string | null }).payer_email ?? '').trim();
             const pn = String((data as { payer_name?: string | null }).payer_name ?? '').trim();
             setPayerEmailDisp(pe);
@@ -236,7 +242,7 @@ export default function StudentSettings() {
     const saveProfile = async () => {
         setSaving(true);
         setError(null);
-        if (phone && !validateLithuanianPhone(phone)) {
+        if (phone && !validateLocalizedPhone(phone, locale)) {
             setError(t('studentSettings.phoneFormatError'));
             setSaving(false);
             return;
@@ -302,7 +308,7 @@ export default function StudentSettings() {
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('common.phone')}</label>
-                            <input type="tel" value={phone} onChange={(e) => setPhone(formatLithuanianPhone(e.target.value))} className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-transparent" />
+                            <input type="tel" value={phone} onChange={(e) => setPhone(formatLocalizedPhone(e.target.value, locale))} className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-transparent" />
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                             <div>
@@ -318,10 +324,10 @@ export default function StudentSettings() {
                                     <SelectContent>
                                         {Array.from({ length: 12 }, (_, i) => (
                                             <SelectItem key={i} value={`${i + 1} klasė`}>
-                                                {locale === 'en' ? `Grade ${i + 1}` : `${i + 1} klasė`}
+                                                {t('onboard.gradeN', { n: i + 1 })}
                                             </SelectItem>
                                         ))}
-                                        <SelectItem value="Studentas">{locale === 'en' ? 'University' : 'Studentas'}</SelectItem>
+                                        <SelectItem value="Studentas">{t('lessonSet.gradeUniversity')}</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
@@ -526,6 +532,10 @@ export default function StudentSettings() {
 
                 <div className="bg-white rounded-3xl p-5 shadow-sm border border-red-50">
                     <h2 className="font-bold text-gray-900 mb-1">{t('studentSettings.dangerZone')}</h2>
+                    {archiveOrg ? (
+                        <p className="text-sm text-gray-600">{t('studentSettings.archiveParentOnlyDesc')}</p>
+                    ) : (
+                        <>
                     <p className="text-xs text-gray-400 mb-4">{t('studentSettings.actionsIrreversible')}</p>
                     {!deleteConfirm ? (
                         <button onClick={() => setDeleteConfirm(true)} className="w-full py-3 rounded-2xl border border-red-200 text-red-600 font-bold text-sm hover:bg-red-50 transition-colors flex items-center justify-center gap-2">
@@ -546,6 +556,8 @@ export default function StudentSettings() {
                                 </button>
                             </div>
                         </div>
+                    )}
+                        </>
                     )}
                 </div>
 

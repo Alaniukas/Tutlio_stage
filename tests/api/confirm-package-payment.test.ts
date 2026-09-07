@@ -25,12 +25,12 @@ function mockReq(body: unknown) {
 }
 
 // ---- Stripe mock ----
-const stripeRetrieve = vi.fn();
+const { stripeRetrieve } = vi.hoisted(() => ({ stripeRetrieve: vi.fn() }));
 vi.mock('stripe', () => {
   class StripeMock {
     checkout = {
       sessions: {
-        retrieve: stripeRetrieve,
+        retrieve: (...args: unknown[]) => stripeRetrieve(...args),
       },
     };
     constructor(_key: string, _opts: any) {}
@@ -58,22 +58,49 @@ const updateChain: any = {
   single: vi.fn(),
 };
 
-const from = vi.fn((table: string) => {
-  if (table === 'lesson_packages') {
-    // handler uses .select(...).eq(...).single() and later .update(...).eq(...).select(...).single()
-    const obj: any = {
+const from = vi.fn((_table: string) => {
+  const resolving: any = {
+    select: vi.fn(() => resolving),
+    eq: vi.fn(() => resolving),
+    in: vi.fn(() => resolving),
+    contains: vi.fn(() => resolving),
+    upsert: vi.fn(() => resolving),
+    single: chain.single,
+    update: vi.fn(() => resolving),
+    then(resolve: (v: any) => unknown, reject?: (r: unknown) => unknown) {
+      return Promise.resolve({ data: null, error: null }).then(resolve, reject);
+    },
+  };
+  if (_table === 'lesson_packages') {
+    return {
       select: chain.select,
       eq: chain.eq,
       single: chain.single,
+      maybeSingle: vi.fn(async () => ({ data: null, error: null })),
       update: updateChain.update,
     };
-    return obj;
   }
-  return {} as any;
+  return resolving;
 });
 
 const createClient = vi.fn(() => ({ from }));
 vi.mock('@supabase/supabase-js', () => ({ createClient }));
+vi.mock('../../api/_lib/google-calendar.js', () => ({
+  syncSessionToGoogle: vi.fn(() => Promise.resolve()),
+}));
+vi.mock('../../api/_lib/trialReservation.js', () => ({
+  sendTrialReservationConfirmedNotifications: vi.fn(async () => {}),
+}));
+vi.mock('../../api/_lib/packageMonth.js', () => ({
+  applyMonthlyPackageExpiry: vi.fn(async () => {}),
+}));
+vi.mock('../../api/_lib/markPackageInvoicePaid.js', () => ({
+  markInvoicesPaidForPackage: vi.fn(async () => {}),
+}));
+vi.mock('../../api/_lib/platformFeeLedger.js', () => ({
+  recordStripePlatformFee: vi.fn(async () => {}),
+  metadataBaseEur: () => null,
+}));
 
 describe('POST /api/confirm-package-payment', () => {
   const originalEnv = process.env;

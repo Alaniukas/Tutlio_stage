@@ -50,103 +50,6 @@ function publicAppOriginForRedirect(req: VercelRequest): string {
   return `${proto}://${hostRaw}`.replace(/\/$/, '');
 }
 
-const BUCKET = 'school-contracts';
-const PUBLIC_MARKER = `/object/public/${BUCKET}/`;
-
-function extractStoragePath(urlOrPath: string): string {
-  const idx = urlOrPath.indexOf(PUBLIC_MARKER);
-  if (idx !== -1) return decodeURIComponent(urlOrPath.slice(idx + PUBLIC_MARKER.length));
-  return urlOrPath;
-}
-
-function fillPlaceholders(template: string, data: Record<string, string>) {
-  let result = template || '';
-  for (const [key, value] of Object.entries(data)) {
-    result = result.replace(new RegExp(key.replace(/[{}]/g, '\\$&'), 'g'), value || '');
-  }
-  result = result
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n');
-  return result;
-}
-
-function templateSafe(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  const str = String(value).trim();
-  if (!str) return '';
-  const lower = str.toLowerCase();
-  if (lower === 'undefined' || lower === 'null') return '';
-  return str;
-}
-
-async function createSimpleContractPdf(params: {
-  contractNumber: string;
-  studentName: string;
-  parentName: string;
-  parentEmail: string;
-  parentPhone: string;
-  parentPersonalCode: string;
-  childBirthDate: string;
-  address: string;
-  annualFee: number | string;
-  body: string;
-}) {
-  const safePdfText = (value: string) =>
-    String(value || '')
-      .replace(/ą/g, 'a').replace(/Ą/g, 'A')
-      .replace(/č/g, 'c').replace(/Č/g, 'C')
-      .replace(/ę/g, 'e').replace(/Ę/g, 'E')
-      .replace(/ė/g, 'e').replace(/Ė/g, 'E')
-      .replace(/į/g, 'i').replace(/Į/g, 'I')
-      .replace(/š/g, 's').replace(/Š/g, 'S')
-      .replace(/ų/g, 'u').replace(/Ų/g, 'U')
-      .replace(/ū/g, 'u').replace(/Ū/g, 'U')
-      .replace(/ž/g, 'z').replace(/Ž/g, 'Z');
-
-  const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([595, 842]);
-  const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
-  const bold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
-  const left = 44;
-  let y = 804;
-
-  page.drawText(safePdfText('Metinio mokesčio sutartis'), { x: left, y, size: 18, font: bold, color: rgb(0.1, 0.1, 0.1) });
-  y -= 28;
-  const rows = [
-    `Sutarties Nr.: ${params.contractNumber || ''}`,
-    `Mokinys: ${params.studentName || ''}`,
-    `Tevai: ${params.parentName || ''}`,
-    `Tevu el. pastas: ${params.parentEmail || ''}`,
-    `Tevu tel.: ${params.parentPhone || ''}`,
-    `Tevu asm. kodas: ${params.parentPersonalCode || ''}`,
-    `Vaiko gimimo data: ${params.childBirthDate || ''}`,
-    `Adresas: ${params.address || ''}`,
-    `Metinis mokestis: EUR ${Number(params.annualFee || 0).toFixed(2)}`,
-    `Data: ${new Date().toLocaleDateString('lt-LT')}`,
-  ];
-  for (const row of rows) {
-    page.drawText(safePdfText(row), { x: left, y, size: 12, font, color: rgb(0.2, 0.2, 0.2) });
-    y -= 18;
-  }
-  y -= 8;
-  page.drawText(safePdfText('Sutarties tekstas:'), { x: left, y, size: 12, font: bold, color: rgb(0.12, 0.12, 0.12) });
-  y -= 18;
-  for (const line of String(params.body || '').split(/\r?\n/)) {
-    if (y < 56) break;
-    page.drawText(safePdfText(line), { x: left, y, size: 11, font, color: rgb(0.23, 0.23, 0.23) });
-    y -= 15;
-  }
-  return pdfDoc.save();
-}
-
-async function createDocxTemplatePdf(params: {
-  fetchUrl: string;
-  payload: Record<string, string>;
-}): Promise<Uint8Array> {
-  const pdfBuffer = await renderDocxTemplateUrlToPdfBuffer({ templateUrl: params.fetchUrl, payload: params.payload });
-  return new Uint8Array(pdfBuffer);
-}
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -156,11 +59,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token =
     (typeof req.query?.token === 'string' ? req.query.token : '') ||
     (typeof req.body?.token === 'string' ? req.body.token : '');
-  const contractIdDirect =
-    (typeof req.query?.contractId === 'string' ? req.query.contractId : '') ||
-    (typeof req.body?.contractId === 'string' ? req.body.contractId : '');
 
-  let tokenRow: { id: string; contract_id: string; used_at: string | null; expires_at: string } | null = null;
+  let tokenRow: { id: string; contract_id: string; expires_at: string } | null = null;
   let resolvedContractId = '';
   if (token) {
     const { data, error: tokenErr } = await fetchSchoolContractCompletionToken(supabase, token);
@@ -178,8 +78,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       expires_at: data.expires_at,
     };
     resolvedContractId = data.contract_id;
-  } else if (contractIdDirect) {
-    resolvedContractId = contractIdDirect;
   } else {
     return res.status(400).send(pageHtml('<h2>Nenurodytas token.</h2>'));
   }
@@ -221,11 +119,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const isAddressMissing = !String(st.student_address || '').trim() && !String(st.student_city || '').trim();
   const isBirthDateMissing = !String(st.child_birth_date || '').trim();
   const isParentCodeMissing = !String(st.payer_personal_code || '').trim();
+  const isParentPhoneMissing = !String(st.payer_phone || '').trim();
   const isMediaConsentMissing = isSchoolOrg && !existingConsent;
 
   if (req.method === 'GET') {
     const wantsJson = String(req.query?.format ?? '') === 'json';
     if (wantsJson) {
+      let pdfUrl: string | null = null;
+      const storedPdf = String((contract as any).pdf_url || '').trim();
+      if (storedPdf) {
+        const { data: signed } = await supabase.storage
+          .from(SCHOOL_CONTRACTS_BUCKET)
+          .createSignedUrl(extractSchoolContractStoragePath(storedPdf), 60 * 60);
+        pdfUrl = signed?.signedUrl || null;
+      }
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.statusCode = 200;
       return res.end(
@@ -233,10 +140,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ok: true,
           token: token || null,
           contractId: resolvedContractId,
+          contractNumber: String((contract as any).contract_number || ''),
+          studentName: String(st.full_name || ''),
+          schoolName: String((contract as any).organizations?.name || ''),
+          pdfUrl,
           missing: {
             address: isAddressMissing,
             birthDate: isBirthDateMissing,
             parentCode: isParentCodeMissing,
+            parentPhone: isParentPhoneMissing,
             mediaPublicity: isMediaConsentMissing,
           },
         }),
@@ -245,10 +157,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const appBase = publicAppOriginForRedirect(req);
     if (appBase) {
-      const cid = contractIdDirect || resolvedContractId;
-      const dest = token
-        ? `${appBase}/school-contract-complete?token=${encodeURIComponent(token)}`
-        : `${appBase}/school-contract-complete?contractId=${encodeURIComponent(cid)}`;
+      const dest = `${appBase}/school-contract-complete?token=${encodeURIComponent(token)}`;
       res.statusCode = 302;
       res.setHeader('Location', dest);
       return res.end();
@@ -256,6 +165,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const fieldSummary = [
       isAddressMissing ? '<li>Gyvenamoji vieta</li>' : '',
       isParentCodeMissing ? '<li>Tėvų asmens kodas</li>' : '',
+      isParentPhoneMissing ? '<li>Tėvų tel. nr.</li>' : '',
       isBirthDateMissing ? '<li>Vaiko gimimo data</li>' : '',
       isMediaConsentMissing ? '<li>Vaiko atvaizdo naudojimo sutikimas</li>' : '',
     ].filter(Boolean).join('');
@@ -263,6 +173,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const fieldsHtml = [
       isParentCodeMissing
         ? '<input id="parent_personal_code" placeholder="Tėvų asmens kodas" style="padding:12px 14px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;" />'
+        : '',
+      isParentPhoneMissing
+        ? '<input id="parent_phone" placeholder="Tėvų tel. nr." style="padding:12px 14px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;" />'
         : '',
       isAddressMissing
         ? '<input id="student_address" placeholder="Adresas" style="padding:12px 14px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;" />'
@@ -293,7 +206,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         <div style="display:inline-block;font-size:30px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio 🎓</div>
       </div>
       <h2 style="margin:0 0 8px;font-size:26px;color:#111827;">Papildykite sutarties duomenis</h2>
-      <p style="color:#4b5563;margin:0 0 14px;font-size:14px;">Po pateikimo mokykla gaus atnaujintus duomenis ir persiųs atnaujintą PDF sutartį.</p>
+      <p style="color:#4b5563;margin:0 0 14px;font-size:14px;">Peržiūrėkite sutartį, papildykite trūkstamus duomenis ir patvirtinkite jų teisingumą. Mokykla sutartį pasirašys pirmoji.</p>
       <div style="color:#7c2d12;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:12px 14px;margin-bottom:14px;">
         <p style="margin:0 0 8px;font-weight:700;">Prašome papildyti trūkstamus duomenis:</p>
         <ul style="margin:0 0 8px 18px;padding:0;line-height:1.5;">${fieldSummary || '<li>Trūkstamų laukų nerasta.</li>'}</ul>
@@ -317,7 +230,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             <input id="parent2_address" placeholder="Antro tėvo adresas" style="padding:12px 14px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;" />
           </div>
         </div>
-        <button id="submitBtn" type="submit" style="padding:12px 16px;border:0;background:#2563eb;color:#fff;border-radius:10px;font-weight:700;cursor:pointer;">Išsaugoti duomenis</button>
+        <label style="display:flex;gap:10px;align-items:flex-start;border:1px solid #c7d2fe;background:#eef2ff;border-radius:12px;padding:12px 14px;color:#312e81;font-size:14px;">
+          <input id="review_confirmed" type="checkbox" required style="margin-top:2px;" />
+          <span>Patvirtinu, kad peržiūrėjau sutartį ir pateikti duomenys yra teisingi.</span>
+        </label>
+        <button id="submitBtn" type="submit" style="padding:12px 16px;border:0;background:#2563eb;color:#fff;border-radius:10px;font-weight:700;cursor:pointer;">Patvirtinti ir perduoti mokyklai</button>
       </form>
       <script>
         const form = document.getElementById('f');
@@ -331,8 +248,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           };
           const payload = {
             token: "${token}",
-            contractId: "${resolvedContractId}",
+            review_confirmed: Boolean(document.getElementById('review_confirmed')?.checked),
             parent_personal_code: get('parent_personal_code'),
+            parent_phone: get('parent_phone'),
             student_address: get('student_address'),
             student_city: get('student_city'),
             child_birth_date: get('child_birth_date'),
@@ -361,7 +279,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).send('Method not allowed');
 
   const body = req.body || {};
+  if (body.review_confirmed !== true && body.review_confirmed !== 'true') {
+    return res.status(400).send(pageHtml('<h2>Patvirtinkite, kad sutartį peržiūrėjote ir duomenys yra teisingi.</h2>'));
+  }
   const submittedParentPersonalCode = String(body.parent_personal_code || '').trim();
+  const submittedParentPhone = String(body.parent_phone || '').trim();
   const studentAddress = String(body.student_address || '').trim();
   const studentCity = String(body.student_city || '').trim();
   const childBirthDate = String(body.child_birth_date || '').trim();
@@ -374,12 +296,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const consentValue = submittedConsent === 'agree' || submittedConsent === 'disagree' ? submittedConsent : '';
 
   if (isParentCodeMissing && !submittedParentPersonalCode) return res.status(400).send(pageHtml('<h2>Įveskite tėvų asmens kodą.</h2>'));
+  if (isParentPhoneMissing && !submittedParentPhone) return res.status(400).send(pageHtml('<h2>Įveskite tėvų tel. nr.</h2>'));
   if (isAddressMissing && !studentAddress && !studentCity) return res.status(400).send(pageHtml('<h2>Įveskite adresą arba miestą.</h2>'));
   if (isBirthDateMissing && !childBirthDate) return res.status(400).send(pageHtml('<h2>Įveskite vaiko gimimo datą.</h2>'));
   if (isMediaConsentMissing && !consentValue) return res.status(400).send(pageHtml('<h2>Pasirinkite: sutinku arba nesutinku dėl vaiko atvaizdo naudojimo.</h2>'));
 
   const studentUpdatePayload = {
     payer_personal_code: isParentCodeMissing ? (submittedParentPersonalCode || null) : st.payer_personal_code || null,
+    payer_phone: isParentPhoneMissing ? (submittedParentPhone || null) : st.payer_phone || null,
     student_address: isAddressMissing ? (studentAddress || null) : st.student_address || null,
     student_city: isAddressMissing ? (studentCity || null) : st.student_city || null,
     child_birth_date: isBirthDateMissing ? (childBirthDate || null) : st.child_birth_date || null,
@@ -391,143 +315,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ...(isMediaConsentMissing ? { media_publicity_consent: consentValue } : {}),
   };
 
-  const [studentResult, draftContractResult] = await Promise.all([
+  const mergedStudent = { ...st, ...studentUpdatePayload };
+  const contractForPdf = {
+    ...(contract as any),
+    student: mergedStudent,
+    ...(isMediaConsentMissing ? { media_publicity_consent: consentValue } : {}),
+  };
+
+  const [studentResult, contractConsentResult] = await Promise.all([
     supabase.from('students').update(studentUpdatePayload).eq('id', (contract as any).student_id),
-    supabase
-      .from('school_contracts')
-      .update({
-        pdf_url: null,
-        signing_status: 'draft',
-        sent_at: null,
-        ...(isMediaConsentMissing ? { media_publicity_consent: consentValue } : {}),
-      })
-      .eq('id', (contract as any).id),
+    isMediaConsentMissing
+      ? supabase
+          .from('school_contracts')
+          .update({ media_publicity_consent: consentValue })
+          .eq('id', (contract as any).id)
+      : Promise.resolve({ error: null }),
   ]);
 
   const studentErr = studentResult.error;
   if (studentErr) return res.status(500).send(pageHtml(`<h2>Nepavyko išsaugoti: ${studentErr.message}</h2>`));
-  if (draftContractResult.error) {
-    console.error('[school-contract-complete] nepavyko anuliuoti PDF:', draftContractResult.error.message);
+  if (contractConsentResult.error) {
+    console.error('[school-contract-complete] nepavyko išsaugoti sutikimo:', contractConsentResult.error.message);
   }
 
-  const fullAddress = [isAddressMissing ? studentAddress : st.student_address || '', isAddressMissing ? studentCity : st.student_city || '']
-    .filter(Boolean)
-    .join(', ');
-  const parentName = String((st.payer_name || '')).trim();
-  const parentEmail = String((st.payer_email || '')).trim();
-  const parentPhone = String((st.payer_phone || '')).trim();
-  const parentPersonalCode = String(isParentCodeMissing ? submittedParentPersonalCode : st.payer_personal_code || '').trim();
-  const childBirthDateResolved = String(isBirthDateMissing ? childBirthDate : st.child_birth_date || '').trim();
-  const parent2Name = submittedParent2Name || String(st.parent_secondary_name || '').trim();
-  const parent2Email = submittedParent2Email || String(st.parent_secondary_email || '').trim();
-  const parent2Phone = submittedParent2Phone || String(st.parent_secondary_phone || '').trim();
-  const parent2PersonalCode = submittedParent2PersonalCode || String(st.parent_secondary_personal_code || '').trim();
-  const parent2Address = submittedParent2Address || String(st.parent_secondary_address || '').trim();
-  const hasParent2 = [parent2Name, parent2Email, parent2Phone, parent2PersonalCode, parent2Address].some((v) => Boolean(String(v || '').trim()));
-  const parent2Inline = hasParent2
-    ? `${parent2Name}; asm. k.: ${parent2PersonalCode}; tel. nr.: ${parent2Phone}; el. paštas: ${parent2Email}; ${parent2Address};`
-    : '';
-  const parent2Block = hasParent2
-    ? `${parent2Name}\nasm. k.: ${parent2PersonalCode}\ntel. nr.: ${parent2Phone}\nel. paštas: ${parent2Email}\n${parent2Address}`
-    : '';
-
-  const renderedBody = fillPlaceholders(String((contract as any).filled_body || ''), {
-    '{{contract_number}}': String((contract as any).contract_number || ''),
-    '{{student_name}}': String(st.full_name || ''),
-    '{{student_email}}': String(st.email || ''),
-    '{{student_phone}}': String(st.phone || ''),
-    '{{parent_name}}': parentName,
-    '{{parent_email}}': parentEmail,
-    '{{parent_phone}}': parentPhone,
-    '{{parent_personal_code}}': parentPersonalCode,
-    '{{parent_address}}': fullAddress,
-    '{{parent2_name}}': parent2Name,
-    '{{parent2_email}}': parent2Email,
-    '{{parent2_phone}}': parent2Phone,
-    '{{parent2_personal_code}}': parent2PersonalCode,
-    '{{parent2_address}}': parent2Address,
-    '{{parent2_adress}}': parent2Address,
-    '{{parent2_block}}': parent2Block,
-    '{{parent2_inline}}': parent2Inline,
-    '{{child_birth_date}}': childBirthDateResolved,
-    '{{address}}': fullAddress,
-    '{{annual_fee}}': String((contract as any).annual_fee || ''),
-    '{{date}}': new Date().toLocaleDateString('lt-LT'),
-    '{{school_name}}': String((contract as any).organizations?.name || ''),
-  });
-
-  const resolvedConsent = (isMediaConsentMissing ? consentValue : existingConsent) || '';
-  const consentPending = !resolvedConsent;
-  const consentAgreeSelected = resolvedConsent === 'agree';
-  const consentDisagreeSelected = resolvedConsent === 'disagree';
-
-  const templatePayload: Record<string, string | boolean | null> = {
-    contract_number: templateSafe((contract as any).contract_number),
-    student_name: templateSafe(st.full_name),
-    student_email: templateSafe(st.email),
-    student_phone: templateSafe(st.phone),
-    parent_name: templateSafe(parentName),
-    parent_email: templateSafe(parentEmail),
-    parent_phone: templateSafe(parentPhone),
-    parent_personal_code: templateSafe(parentPersonalCode),
-    parent_address: templateSafe(fullAddress),
-    parent2_name: templateSafe(parent2Name),
-    parent2_email: templateSafe(parent2Email),
-    parent2_phone: templateSafe(parent2Phone),
-    parent2_personal_code: templateSafe(parent2PersonalCode),
-    parent2_address: templateSafe(parent2Address),
-    parent2_adress: templateSafe(parent2Address),
-    parent2_block: templateSafe(parent2Block),
-    parent2_inline: templateSafe(parent2Inline),
-    child_birth_date: templateSafe(childBirthDateResolved),
-    address: templateSafe(fullAddress),
-    annual_fee: templateSafe((contract as any).annual_fee),
-    date: new Date().toLocaleDateString('lt-LT'),
-    school_name: templateSafe((contract as any).organizations?.name),
-
-    // Docxtemplater boolean sections for the DOCX template
-    consent_pending: consentPending,
-    consent_agree_selected: consentAgreeSelected,
-    consent_disagree_selected: consentDisagreeSelected,
-  };
-
-  let pdfBytes: Uint8Array;
-  const templatePathOrUrl = String((contract as any).template?.pdf_url || '').trim();
-  const templatePath = templatePathOrUrl ? extractStoragePath(templatePathOrUrl) : '';
-  if (templatePath.toLowerCase().endsWith('.docx')) {
-    try {
-      const { data: signedData } = await supabase.storage
-        .from(BUCKET)
-        .createSignedUrl(templatePath, 300);
-      if (!signedData?.signedUrl) throw new Error('Failed to sign template URL');
-      pdfBytes = await createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload: templatePayload as any });
-    } catch {
-      pdfBytes = await createSimpleContractPdf({
-        contractNumber: String((contract as any).contract_number || ''),
-        studentName: String(st.full_name || ''),
-        parentName,
-        parentEmail,
-        parentPhone,
-        parentPersonalCode,
-        childBirthDate: childBirthDateResolved,
-        address: fullAddress,
-        annualFee: (contract as any).annual_fee || 0,
-        body: renderedBody,
-      });
-    }
-  } else {
-    pdfBytes = await createSimpleContractPdf({
-      contractNumber: String((contract as any).contract_number || ''),
-      studentName: String(st.full_name || ''),
-      parentName,
-      parentEmail,
-      parentPhone,
-      parentPersonalCode,
-      childBirthDate: childBirthDateResolved,
-      address: fullAddress,
-      annualFee: (contract as any).annual_fee || 0,
-      body: renderedBody,
+  let uploadedPath = '';
+  let renderedBody = '';
+  try {
+    const result = await renderAndStoreSchoolContractPdf(supabase, contractForPdf, {
+      // Match admin contract creation unless the parent is submitting a new consent choice.
+      includeMediaConsentFlags: isMediaConsentMissing,
     });
+    uploadedPath = result.uploadedPath || '';
+    renderedBody = result.renderedBody;
+  } catch (e: any) {
+    const detail = String(e?.message || e || '').trim();
+    console.error('[school-contract-complete] PDF generation failed:', detail);
+    return res.status(500).send(
+      pageHtml(
+        '<h2>Nepavyko paruošti atnaujintos sutarties.</h2>' +
+          '<p>Duomenys išsaugoti, bet PDF generavimas nepavyko. Bandykite dar kartą vėliau arba kreipkitės į mokyklą.</p>',
+      ),
+    );
   }
   const path = schoolContractPdfStoragePath({
     organizationId: String((contract as any).organization_id),
@@ -545,15 +373,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).send(pageHtml('<h2>Nepavyko sugeneruoti sutarties PDF. Bandykite dar kartą arba susisiekite su mokykla.</h2>'));
   }
 
-  await supabase
+  if (!uploadedPath) {
+    return res.status(500).send(
+      pageHtml(
+        '<h2>Nepavyko paruošti atnaujintos sutarties.</h2><p>Duomenys išsaugoti. Bandykite dar kartą vėliau.</p>',
+      ),
+    );
+  }
+
+  const emailContract = { ...(contract as any), student: mergedStudent };
+  const esignEnabled =
+    Boolean((emailContract as any)?.organizations?.features?.school_contract_esign) && isGoSignConfigured();
+  const completionSubmittedAt = new Date().toISOString();
+  const { error: updateErr } = await supabase
     .from('school_contracts')
     .update({
       pdf_url: uploadedPath,
       filled_body: renderedBody,
-      signing_status: uploadedPath ? 'sent' : 'draft',
-      sent_at: uploadedPath ? new Date().toISOString() : null,
+      completion_submitted_at: completionSubmittedAt,
+      signing_status: esignEnabled ? 'awaiting_school_signature' : 'sent',
     })
     .eq('id', (contract as any).id);
+  if (updateErr) {
+    console.error('[school-contract-complete] nepavyko atnaujinti sutarties:', updateErr.message);
+    return res.status(500).send(pageHtml('<h2>Nepavyko išsaugoti sutarties būsenos.</h2>'));
+  }
 
   if (parentEmail && uploadedPath) {
     const appBase = (process.env.APP_URL || process.env.VITE_APP_URL || 'https://www.tutlio.lt').replace(/\/$/, '');
@@ -583,6 +427,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await markSchoolContractCompletionTokenUsed(supabase, tokenRow.id);
   }
 
-  return res.status(200).send(pageHtml('<h2>Ačiū! Duomenys išsaugoti.</h2><p><strong>Atnaujinta PDF sutartis išsiųsta jūsų el. paštu.</strong></p><p>Sutartį pasirašykite gavę atnaujintą versiją.</p>'));
+  return res.status(200).send(
+    pageHtml(
+      '<h2>Ačiū! Duomenys patvirtinti.</h2><p>Mokykla peržiūrės sutartį ir ją pasirašys. Pasirašymo nuorodą gausite el. paštu vėliau.</p>' +
+        (adminEmailSent ? '' : '<p>Mokyklos administratorius informaciją taip pat matys Tutlio Sutarčių skiltyje.</p>'),
+    ),
+  );
 }
-

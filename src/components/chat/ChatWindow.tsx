@@ -23,9 +23,10 @@ interface ChatWindowProps {
   onMessageSent?: () => void;
   participantNames?: Map<string, string>;
   participantRoles?: Map<string, string>;
+  readOnly?: boolean;
 }
 
-export default function ChatWindow({ conversation, onBack, onMessageSent, participantNames, participantRoles }: ChatWindowProps) {
+export default function ChatWindow({ conversation, onBack, onMessageSent, participantNames, participantRoles, readOnly = false }: ChatWindowProps) {
   const { t } = useTranslation();
   const { user } = useUser();
   const orgPolicy = useOrgTutorPolicy();
@@ -39,8 +40,16 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
   const [thirdPartySenders, setThirdPartySenders] = useState<Map<string, string>>(new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const preservingOlderScrollRef = useRef(false);
 
-  const { messages, loading, appendMessage } = useChatMessages(conversation?.conversation_id ?? null);
+  const {
+    messages,
+    loading,
+    loadingOlder,
+    hasMore,
+    loadOlder,
+    appendMessage,
+  } = useChatMessages(conversation?.conversation_id ?? null);
 
   useEffect(() => {
     if (!conversation?.conversation_id || !user?.id) return;
@@ -82,7 +91,7 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
   }, [emailPrefsOpen]);
 
   const persistEmailNotify = async (enabled: boolean, hours: number) => {
-    if (!conversation?.conversation_id || !user?.id) return;
+    if (readOnly || !conversation?.conversation_id || !user?.id) return;
     setEmailNotifyLoading(true);
     const ok = await updateChatEmailNotifyPrefs(conversation.conversation_id, {
       email_notify_enabled: enabled,
@@ -143,6 +152,7 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
   }, [conversation?.conversation_id, messages.length]);
 
   useEffect(() => {
+    if (preservingOlderScrollRef.current) return;
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages.length]);
@@ -211,6 +221,21 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
       } else window.alert(t('chat.failedToSend'));
     }
     setUploading(false);
+  };
+
+  const handleLoadOlder = async () => {
+    const el = scrollRef.current;
+    const previousHeight = el?.scrollHeight ?? 0;
+    const previousTop = el?.scrollTop ?? 0;
+    preservingOlderScrollRef.current = true;
+    try {
+      await loadOlder();
+    } finally {
+      requestAnimationFrame(() => {
+        if (el) el.scrollTop = el.scrollHeight - previousHeight + previousTop;
+        preservingOlderScrollRef.current = false;
+      });
+    }
   };
 
   const getDateLabel = (dateStr: string) => {
@@ -347,7 +372,7 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
                   type="checkbox"
                   className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4"
                   checked={emailNotifyEnabled}
-                  disabled={emailNotifyLoading}
+                  disabled={readOnly || emailNotifyLoading}
                   onChange={(e) => {
                     const v = e.target.checked;
                     setEmailNotifyEnabled(v);
@@ -362,7 +387,7 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
                 <select
                   className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50/80 text-gray-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none disabled:opacity-50"
                   value={emailNotifyDelayHours}
-                  disabled={emailNotifyLoading || !emailNotifyEnabled}
+                  disabled={readOnly || emailNotifyLoading || !emailNotifyEnabled}
                   onChange={(e) => {
                     const h = Number(e.target.value);
                     setEmailNotifyDelayHours(h);
@@ -395,34 +420,48 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
             <p className="text-xs text-gray-300 mt-1">{t('chat.emptyMessagesDesc')}</p>
           </div>
         ) : (
-          messages.map((msg) => {
-            const dateLabel = getDateLabel(msg.created_at);
-            const showDateSep = dateLabel !== lastDateLabel;
-            lastDateLabel = dateLabel;
-
-            const isOwn = msg.sender_id === user?.id;
-
-            return (
-              <div key={msg.id}>
-                {showDateSep && (
-                  <div className="flex items-center gap-3 my-4">
-                    <div className="flex-1 h-px bg-gray-200" />
-                    <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">
-                      {dateLabel}
-                    </span>
-                    <div className="flex-1 h-px bg-gray-200" />
-                  </div>
-                )}
-                <MessageBubble
-                  message={msg}
-                  isOwn={isOwn}
-                  currentUserId={user?.id}
-                  senderName={getDisplayName(msg.sender_id)}
-                  senderRole={!isOwn ? getSenderRole(msg.sender_id) : undefined}
-                />
+          <>
+            {hasMore && (
+              <div className="flex justify-center pb-2">
+                <button
+                  type="button"
+                  onClick={() => void handleLoadOlder()}
+                  disabled={loadingOlder}
+                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {loadingOlder ? t('common.loading') : t('chat.loadOlder')}
+                </button>
               </div>
-            );
-          })
+            )}
+            {messages.map((msg) => {
+              const dateLabel = getDateLabel(msg.created_at);
+              const showDateSep = dateLabel !== lastDateLabel;
+              lastDateLabel = dateLabel;
+
+              const isOwn = msg.sender_id === user?.id;
+
+              return (
+                <div key={msg.id}>
+                  {showDateSep && (
+                    <div className="flex items-center gap-3 my-4">
+                      <div className="flex-1 h-px bg-gray-200" />
+                      <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">
+                        {dateLabel}
+                      </span>
+                      <div className="flex-1 h-px bg-gray-200" />
+                    </div>
+                  )}
+                  <MessageBubble
+                    message={msg}
+                    isOwn={isOwn}
+                    currentUserId={user?.id}
+                    senderName={getDisplayName(msg.sender_id)}
+                    senderRole={!isOwn ? getSenderRole(msg.sender_id) : undefined}
+                  />
+                </div>
+              );
+            })}
+          </>
         )}
       </div>
 
@@ -434,6 +473,9 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
             <p className="text-xs text-amber-800 mt-0.5">{t('cal.licenseFrozenDesc')}</p>
           </div>
         )}
+        {readOnly ? (
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">{t('orgTeam.readOnlyDescription')}</p>
+        ) : (
         <div className="flex items-end gap-2">
           <ChatFileUpload onFileSelect={handleFileSelect} uploading={uploading} />
           <textarea
@@ -464,6 +506,7 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
             <Send className="w-[18px] h-[18px]" />
           </button>
         </div>
+        )}
       </div>
     </div>
   );

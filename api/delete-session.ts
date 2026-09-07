@@ -7,6 +7,9 @@
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -86,23 +89,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Permission: own session OR org admin for tutor's org
     let allowed = tutorId === user.id;
     if (!allowed) {
-      const { data: adminRows } = await supabase
-        .from('organization_admins')
-        .select('organization_id')
-        .eq('user_id', user.id);
-
-      for (const row of adminRows || []) {
-        const orgId = (row as any).organization_id as string | null;
-        if (!orgId) continue;
-        const ok = await isTutorInOrg(supabase, tutorId, orgId);
-        if (ok) {
-          allowed = true;
-          break;
-        }
+      const adminAccess = await getOrgAdminAccessByUserId(supabase, user.id);
+      if (
+        adminAccess
+        && hasOrgAdminPermission(adminAccess.role, adminAccess.permissions, 'sessions.edit')
+      ) {
+        allowed = await isTutorInOrg(supabase, tutorId, adminAccess.organizationId);
       }
     }
 
     if (!allowed) return json(res, 403, { error: 'Forbidden' });
+
+    // Pro Klasė org tutors cannot hard-delete sessions (admin only).
+    if (tutorId === user.id) {
+      const { data: tutorProfile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .maybeSingle();
+      const orgId = (tutorProfile as any)?.organization_id as string | null;
+      if (orgId && isProKlaseOrg(orgId)) {
+        const adminRow = await getOrgAdminAccessByUserId(supabase, user.id);
+        if (
+          !adminRow
+          || adminRow.organizationId !== orgId
+          || !hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'sessions.edit')
+        ) {
+          return json(res, 403, { error: 'Org tutors cannot delete lessons for this organization' });
+        }
+      }
+    }
 
     const recurringId = (session as any).recurring_session_id as string | null;
     const startTime = (session as any).start_time as string;
@@ -149,11 +165,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // If paid via package -> return credits first (avoid leaving credit stuck).
+    // Track credits per (package, subject) so multi-subject packages return to
+    // the right item.
     const creditsByPackage = new Map<string, number>();
+    const creditsByItem = new Map<string, number>(); // key: `${packageId}::${subjectId}`
     for (const s of sessionsToDelete) {
       if (s.lesson_package_id) {
         creditsByPackage.set(s.lesson_package_id, (creditsByPackage.get(s.lesson_package_id) || 0) + 1);
+        if (s.subject_id) {
+          const k = `${s.lesson_package_id}::${s.subject_id}`;
+          creditsByItem.set(k, (creditsByItem.get(k) || 0) + 1);
+        }
       }
+    }
+    for (const [key, countToReturn] of creditsByItem.entries()) {
+      const [packageId, subjectId] = key.split('::');
+      if (!packageId || !subjectId) continue;
+      const { data: item } = await supabase
+        .from('lesson_package_items')
+        .select('id, available_lessons, reserved_lessons')
+        .eq('package_id', packageId)
+        .eq('subject_id', subjectId)
+        .maybeSingle();
+      if (!item) continue;
+      const available = Number((item as any).available_lessons || 0);
+      const reserved = Number((item as any).reserved_lessons || 0);
+      const { error: itemUpdErr } = await supabase
+        .from('lesson_package_items')
+        .update({
+          available_lessons: available + countToReturn,
+          reserved_lessons: Math.max(0, reserved - countToReturn),
+        })
+        .eq('id', (item as any).id);
+      if (itemUpdErr) return json(res, 500, { error: 'Failed to return package item credit' });
     }
     for (const [packageId, countToReturn] of creditsByPackage.entries()) {
       const { data: pkg, error: pkgErr } = await supabase
@@ -178,7 +222,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Best-effort: delete from Google Calendar BEFORE DB delete
     try {
-      const { deleteSessionFromGoogle } = await import('./_lib/google-calendar');
+      const { deleteSessionFromGoogle } = await import('./_lib/google-calendar.js');
       for (const s of sessionsToDelete.slice(0, 60)) {
         try {
           await deleteSessionFromGoogle(s.id, tutorId);

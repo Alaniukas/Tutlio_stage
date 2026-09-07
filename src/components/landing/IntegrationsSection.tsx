@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
+import { buildLocalizedPath, localizedPagePath, useTranslation } from '@/lib/i18n';
 import { CheckCircle2, Loader2 } from 'lucide-react';
 import Reveal from './Reveal';
 import type { LandingVariant } from './HeroSection';
@@ -16,7 +16,7 @@ const INTEGRATIONS = [
 export default function IntegrationsSection({ variant = 'tutor' }: { variant?: LandingVariant }) {
   const { t, locale } = useTranslation();
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
-  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : undefined;
+  const ctaLink = variant === 'schools' ? buildLocalizedPath(localizedPagePath('contacts', locale), locale) : undefined;
   const [leadEmail, setLeadEmail] = useState('');
   const [leadLoading, setLeadLoading] = useState(false);
   const [leadSubmitted, setLeadSubmitted] = useState(false);

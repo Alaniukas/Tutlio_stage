@@ -9,6 +9,8 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { syncAllEventsToGoogle, syncSessionToGoogle } from './_lib/google-calendar.js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL!,
@@ -44,6 +46,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    if (!auth.isInternal) {
+      if (!auth.userId) return res.status(401).json({ error: 'Unauthorized' });
+      const seat = await getOrgAdminSeatByUserId(supabase, auth.userId);
+      if (seat) {
+        if (
+          seat.status !== 'active'
+          || !hasOrgAdminPermission(seat.role, seat.permissions, 'sessions.edit')
+          || !profile.organization_id
+          || seat.organizationId !== profile.organization_id
+        ) {
+          return res.status(403).json({ error: 'Insufficient organization permission' });
+        }
+      } else if (auth.userId !== userId) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+
     if (!profile.google_calendar_connected || !profile.google_calendar_sync_enabled) {
       return res.status(400).json({ error: 'Google Calendar not connected or sync disabled' });
     }
@@ -54,6 +73,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // If sessionId provided, sync only that session (no lock needed)
     if (sessionId) {
+      const { data: session } = await supabase
+        .from('sessions')
+        .select('tutor_id')
+        .eq('id', sessionId)
+        .maybeSingle();
+      if (!session) return res.status(404).json({ error: 'Session not found' });
+      if (session.tutor_id !== userId) return res.status(403).json({ error: 'Session does not belong to this tutor' });
       const syncResult = await syncSessionToGoogle(sessionId, userId);
       if (!syncResult.success) {
         return res.status(400).json({ success: false, error: syncResult.error });

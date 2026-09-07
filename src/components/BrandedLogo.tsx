@@ -22,7 +22,7 @@ export default function BrandedLogo({ size = 'md', showName = true, nameClassNam
   if (enabled && logo_url) {
     return (
       <>
-        <img src={logo_url} alt={name} className={`${SIZES[size]} object-contain flex-shrink-0`} />
+        <img src={logo_url} alt={name} className={`${SIZES[size]} object-contain flex-shrink-0 rounded-2xl`} />
         {showName && <span className={`font-bold text-gray-900 text-base tracking-tight truncate ${nameClassName}`}>{name}</span>}
       </>
     );

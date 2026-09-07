@@ -1,21 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
+import JoinLessonButton from '@/components/JoinLessonButton';
 import { supabase } from '@/lib/supabase';
+import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { getCached, setCache } from '@/lib/dataCache';
 import { parentFullNameForUserDeduped, parentStudentLinksDeduped } from '@/lib/preload';
+import { fetchSelfBookingDisabledMap } from '@/lib/studentBookingPolicy';
 import { useUser } from '@/contexts/UserContext';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
+import { schoolContractAllowsInstallmentPayment } from '@/lib/schoolContractPaymentGate';
 import {
   Users,
   CalendarDays,
   Clock,
   MessageSquare,
   BookOpen,
-  FileText,
   Zap,
   Play,
   ChevronRight,
   AlertTriangle,
+  CreditCard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,9 +28,18 @@ import {
 } from '@/components/parent/ParentLessonDetailModal';
 import StatusBadge from '@/components/StatusBadge';
 import ParentLayout from '@/components/ParentLayout';
+import ParentChildSwitcher from '@/components/parent/ParentChildSwitcher';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { isMoksloVaisiaiOrg, orgFeeProfile } from '@/lib/marketMoney';
+import {
+  getParentActiveChildId,
+  hideParentAddChildPrompt,
+  isParentAddChildPromptHidden,
+  pickParentChildId,
+  setParentActiveChildId,
+} from '@/lib/parentActiveChild';
 import { format, isAfter } from 'date-fns';
-import { cn, normalizeUrl } from '@/lib/utils';
-
+import { cn } from '@/lib/utils';
 type ChildTutorPolicy = ParentTutorContactPolicy;
 
 interface ChildSession {
@@ -47,6 +60,16 @@ interface ChildSession {
   show_comment_to_student?: boolean;
 }
 
+interface InstallmentPayment {
+  id: string;
+  installment_number: number;
+  amount: number;
+  due_date: string;
+  payment_status: 'pending' | 'paid' | 'overdue' | 'failed';
+  paid_at: string | null;
+  contract_signing_status: string;
+}
+
 interface ChildInfo {
   studentId: string;
   linkedUserId: string | null;
@@ -62,6 +85,7 @@ interface ChildInfo {
   nextSession: ChildSession | null;
   otherUpcoming: ChildSession[];
   tutorPolicy?: ChildTutorPolicy | null;
+  installments: InstallmentPayment[];
 }
 
 export default function ParentDashboard() {
@@ -78,6 +102,11 @@ export default function ParentDashboard() {
   const [selectedTutorPolicy, setSelectedTutorPolicy] =
     useState<ChildTutorPolicy | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  /** Org feature disable_student_booking, per child. */
+  const [bookingDisabledMap, setBookingDisabledMap] = useState<Record<string, boolean>>({});
+  const [isMvParent, setIsMvParent] = useState(false);
+  const [activeChildId, setActiveChildId] = useState(() => getParentActiveChildId() ?? '');
+  const [hideAddPrompt, setHideAddPrompt] = useState(() => isParentAddChildPromptHidden());
   const now = useMemo(() => new Date(), []);
 
   useEffect(() => {
@@ -100,6 +129,7 @@ export default function ParentDashboard() {
         console.warn('[ParentDashboard] parent_students load failed:', linksErr);
         if (!cancelled) {
           setChildren([]);
+          setIsMvParent(false);
           setLoading(false);
           setCache('parent_dashboard', {
             parentName: resolvedParentName || null,
@@ -114,9 +144,13 @@ export default function ParentDashboard() {
         .filter((s: any) => s?.id);
 
       const studentIds: string[] = [...new Set(studentsRaw.map((s: any) => s.id))];
+      void fetchSelfBookingDisabledMap(studentIds).then((m) => {
+        if (!cancelled) setBookingDisabledMap(m);
+      });
       if (studentIds.length === 0) {
         if (!cancelled) {
           setChildren([]);
+          setIsMvParent(false);
           setLoading(false);
           setCache('parent_dashboard', {
             parentName: resolvedParentName || null,
@@ -139,7 +173,7 @@ export default function ParentDashboard() {
         ),
       ];
 
-      const [sessionsRes, tutorProfilesRes] = await Promise.all([
+      const [sessionsRes, tutorProfilesRes, installmentsRes] = await Promise.all([
         supabase
           .from('sessions')
           .select(
@@ -158,6 +192,13 @@ export default function ParentDashboard() {
               )
               .in('id', tutorIds)
           : Promise.resolve({ data: [], error: null } as any),
+        supabase
+          .from('school_payment_installments')
+          .select(
+            'id, installment_number, amount, due_date, payment_status, paid_at, contract:school_contracts!inner(student_id, signing_status)',
+          )
+          .in('contract.student_id', studentIds)
+          .order('due_date', { ascending: true }),
       ]);
 
       const { data: sessions, error: sessErr } = sessionsRes;
@@ -182,23 +223,32 @@ export default function ParentDashboard() {
             | 'before_lesson'
             | 'after_lesson',
           paymentDeadlineHours: tp.payment_deadline_hours ?? 24,
-          perlasEnabled: !!tp.perlas_finance_enabled,
+          perlasEnabled: PERLAS_FINANCE_ENABLED && !!tp.perlas_finance_enabled,
         });
-        if (!tp.perlas_finance_enabled && tp.organization_id) {
+        if (tp.organization_id) {
           orgIdsToCheck.push(tp.organization_id);
         }
       }
       if (orgIdsToCheck.length > 0) {
         const { data: orgs } = await supabase
           .from('organizations')
-          .select('id, perlas_finance_enabled')
+          .select('id, perlas_finance_enabled, entity_type, name, slug, features')
           .in('id', [...new Set(orgIdsToCheck)]);
-        const orgPerlas = new Map((orgs ?? []).map((o: any) => [o.id, !!o.perlas_finance_enabled]));
+        const orgById = new Map((orgs ?? []).map((o: any) => [o.id, o]));
         for (const tp of tutorProfilesList) {
-          if (!tp.perlas_finance_enabled && tp.organization_id && orgPerlas.get(tp.organization_id)) {
-            const existing = tutorById.get(tp.id);
-            if (existing) existing.perlasEnabled = true;
+          if (!tp.organization_id) continue;
+          const org = orgById.get(tp.organization_id);
+          if (!org) continue;
+          const existing = tutorById.get(tp.id);
+          if (!existing) continue;
+          if (PERLAS_FINANCE_ENABLED && !tp.perlas_finance_enabled && org.perlas_finance_enabled) {
+            existing.perlasEnabled = true;
           }
+          existing.orgIsSchool = org.entity_type === 'school';
+          existing.orgFeeProfile = orgFeeProfile(org.slug) ?? orgFeeProfile(tp.organization_id);
+          existing.studentActionsDisabled = (org.features as Record<string, unknown> | null)?.disable_student_reschedule_cancel === true;
+          // Stripe Checkout charges in the org's name — show the same provider here.
+          if (org.name) existing.providerName = org.name;
         }
       }
 
@@ -223,6 +273,23 @@ export default function ParentDashboard() {
           show_comment_to_student: !!(s as any).show_comment_to_student,
         });
         byStudent.set((s as any).student_id, arr);
+      }
+
+      const byStudentInstallments = new Map<string, InstallmentPayment[]>();
+      for (const row of ((installmentsRes as any).data ?? []) as any[]) {
+        const sid = row.contract?.student_id;
+        if (!sid) continue;
+        const arr = byStudentInstallments.get(sid) ?? [];
+        arr.push({
+          id: row.id,
+          installment_number: row.installment_number,
+          amount: Number(row.amount || 0),
+          due_date: row.due_date,
+          payment_status: row.payment_status,
+          paid_at: row.paid_at,
+          contract_signing_status: String(row.contract?.signing_status || ''),
+        });
+        byStudentInstallments.set(sid, arr);
       }
 
       const kids: ChildInfo[] = studentsRaw.map((s: any) => {
@@ -256,6 +323,7 @@ export default function ParentDashboard() {
           nextSession: upcoming[0] ?? null,
           otherUpcoming: upcoming.slice(1, 4),
           tutorPolicy: s.tutor_id ? tutorById.get(s.tutor_id) ?? null : null,
+          installments: byStudentInstallments.get(s.id) ?? [],
         };
       });
 
@@ -272,7 +340,13 @@ export default function ParentDashboard() {
 
       if (!cancelled) {
         setParentName((prev) => resolvedParentName || prev);
+        setIsMvParent(studentsRaw.some((s: any) => isMoksloVaisiaiOrg(s.organization_id)));
         setChildren(kids);
+        const picked = pickParentChildId(kids.map((k) => k.studentId));
+        if (picked) {
+          setParentActiveChildId(picked);
+          setActiveChildId(picked);
+        }
         setLoading(false);
         setCache('parent_dashboard', {
           parentName: resolvedParentName || null,
@@ -348,8 +422,11 @@ export default function ParentDashboard() {
     );
   }
 
-  const totalUpcoming = children.reduce((sum, c) => sum + c.upcoming.length, 0);
-  const totalUnpaid = children.reduce((sum, c) => sum + c.unpaidPastCount, 0);
+  const selectedChild =
+    children.find((c) => c.studentId === activeChildId) ?? children[0] ?? null;
+  const totalUpcoming = selectedChild ? selectedChild.upcoming.length : 0;
+  const totalUnpaid = selectedChild ? selectedChild.unpaidPastCount : 0;
+  const childOptions = children.map((c) => ({ id: c.studentId, fullName: c.fullName }));
 
   return (
     <ParentLayout>
@@ -360,19 +437,35 @@ export default function ParentDashboard() {
             <h1 className="text-3xl font-black text-gray-900 leading-tight">
               {greetingName} 👋
             </h1>
-            {children.length > 0 && (
-              <p className="text-xs text-gray-500 font-semibold mt-1">
-                {t('parent.children')}:{' '}
-                <span className="text-gray-700">{children.length}</span>
-              </p>
-            )}
           </div>
-          {children.length > 0 && (
+          {selectedChild && (
             <div className="bg-violet-100/80 text-violet-700 px-3 py-1.5 rounded-2xl text-xs font-black shadow-sm border border-violet-200/50">
               {totalUpcoming} {t('parent.upcoming')}
             </div>
           )}
         </div>
+
+        {isMvParent && children.length > 0 && !hideAddPrompt && (
+          <div className="rounded-3xl border border-violet-100 bg-violet-50/80 px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <button
+              type="button"
+              onClick={() => navigate('/parent/settings')}
+              className="text-left text-sm text-violet-900 hover:underline"
+            >
+              {t('parent.dashboardAddSecondChild')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                hideParentAddChildPrompt();
+                setHideAddPrompt(true);
+              }}
+              className="text-xs font-semibold text-violet-700 hover:text-violet-900 shrink-0 self-start sm:self-auto"
+            >
+              {t('parent.hideAddChildPrompt')}
+            </button>
+          </div>
+        )}
 
         {totalUnpaid > 0 && (
           <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -410,63 +503,38 @@ export default function ParentDashboard() {
             <p className="text-gray-500 text-sm font-medium">
               {t('parent.noChildrenHint')}
             </p>
+            {isMvParent && (
+              <button
+                type="button"
+                onClick={() => navigate('/parent/settings')}
+                className="mt-4 px-4 py-2.5 rounded-2xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700"
+              >
+                {t('parent.noChildrenAddCta')}
+              </button>
+            )}
           </div>
-        ) : (
+        ) : selectedChild ? (
           <>
-            {/* Top-level quick actions (visible when more than one child too) */}
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-              <button
-                type="button"
-                onClick={() => navigate('/parent/calendar')}
-                className="bg-white hover:bg-violet-50 hover:border-violet-200 transition-all rounded-3xl py-5 px-4 min-h-[5.75rem] flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm group"
-              >
-                <div className="w-12 h-12 rounded-full bg-violet-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <CalendarDays className="w-5 h-5 text-violet-600" />
-                </div>
-                <span className="text-xs font-bold text-gray-700">
-                  {t('nav.calendar')}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/parent/messages')}
-                className="bg-white hover:bg-blue-50 hover:border-blue-200 transition-all rounded-3xl py-5 px-4 min-h-[5.75rem] flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm group"
-              >
-                <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <MessageSquare className="w-5 h-5 text-blue-600" />
-                </div>
-                <span className="text-xs font-bold text-gray-700">
-                  {t('parent.messages')}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/parent/invoices')}
-                className="bg-white hover:bg-emerald-50 hover:border-emerald-200 transition-all rounded-3xl py-5 px-4 min-h-[5.75rem] flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm group sm:aspect-auto col-span-2 sm:col-span-1"
-              >
-                <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <FileText className="w-5 h-5 text-emerald-600" />
-                </div>
-                <span className="text-xs font-bold text-gray-700">
-                  {t('parent.invoices')}
-                </span>
-              </button>
-            </div>
-
-            {children.map((child) => (
-              <ChildBlock
-                key={child.studentId}
-                child={child}
-                t={t}
-                dateFnsLocale={dateFnsLocale}
-                onOpenSession={openSessionModal}
-                navigate={navigate}
-                formatCountdown={formatCountdown}
-              />
-            ))}
-
+            <ParentChildSwitcher
+              options={childOptions}
+              value={selectedChild.studentId}
+              onChange={(id) => {
+                setParentActiveChildId(id);
+                setActiveChildId(id);
+              }}
+            />
+            <ChildBlock
+              key={selectedChild.studentId}
+              child={selectedChild}
+              t={t}
+              dateFnsLocale={dateFnsLocale}
+              onOpenSession={openSessionModal}
+              navigate={navigate}
+              formatCountdown={formatCountdown}
+              bookingDisabled={bookingDisabledMap[selectedChild.studentId] === true}
+            />
           </>
-        )}
+        ) : null}
       </div>
 
       <ParentLessonDetailModal
@@ -493,6 +561,7 @@ function ChildBlock({
   onOpenSession,
   navigate,
   formatCountdown,
+  bookingDisabled,
 }: {
   child: ChildInfo;
   t: (key: string, params?: Record<string, string | number>) => string;
@@ -505,8 +574,12 @@ function ChildBlock({
   ) => void;
   navigate: ReturnType<typeof useNavigate>;
   formatCountdown: (dateStr: string) => string;
+  /** Org feature disable_student_booking: hide booking wording; calendar stays viewable. */
+  bookingDisabled: boolean;
 }) {
+  const { fmt } = useMarketMoney();
   const next = child.nextSession;
+  const installments = child.installments ?? [];
   const schedulePath = `/parent/calendar?studentId=${child.studentId}`;
   const lessonsPath = `/parent/lessons?studentId=${child.studentId}`;
   const messagesPath = `/parent/messages?studentId=${child.studentId}`;
@@ -544,7 +617,7 @@ function ChildBlock({
             <CalendarDays className="w-5 h-5 text-violet-600" />
           </div>
           <span className="text-xs font-bold text-gray-700">
-            {t('studentDash.book')}
+            {bookingDisabled ? t('nav.calendar') : t('studentDash.book')}
           </span>
         </button>
         <button
@@ -640,15 +713,14 @@ function ChildBlock({
                     </div>
                   </div>
                   {next.meeting_link && (
-                    <a
-                      href={normalizeUrl(next.meeting_link) || undefined}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
+                    <JoinLessonButton
+                      session={next as any}
+                      showHint={false}
+                      stopPropagation
                       className="w-10 h-10 rounded-full bg-white text-violet-600 flex items-center justify-center hover:scale-105 transition-transform shadow-lg"
                     >
                       <Play className="w-4 h-4 ml-0.5 fill-current" />
-                    </a>
+                    </JoinLessonButton>
                   )}
                 </div>
               </div>
@@ -657,8 +729,8 @@ function ChildBlock({
         </div>
       ) : (
         <div
-          onClick={() => navigate(schedulePath)}
-          className="rounded-[2rem] p-8 bg-white border-2 border-dashed border-gray-200 text-center cursor-pointer hover:border-violet-300 hover:bg-violet-50/50 transition-all flex flex-col items-center justify-center group"
+          onClick={bookingDisabled ? undefined : () => navigate(schedulePath)}
+          className={`rounded-[2rem] p-8 bg-white border-2 border-dashed border-gray-200 text-center transition-all flex flex-col items-center justify-center group ${bookingDisabled ? '' : 'cursor-pointer hover:border-violet-300 hover:bg-violet-50/50'}`}
         >
           <div className="w-16 h-16 rounded-full bg-gray-50 group-hover:bg-violet-100 flex items-center justify-center mb-4 transition-colors">
             <CalendarDays className="w-7 h-7 text-gray-400 group-hover:text-violet-600 transition-colors" />
@@ -666,9 +738,11 @@ function ChildBlock({
           <h3 className="text-lg font-bold text-gray-900 mb-1 tracking-tight">
             {t('parent.noUpcomingFor', { name: child.fullName })}
           </h3>
-          <p className="text-gray-500 text-sm font-medium">
-            {t('parent.tapToBook')}
-          </p>
+          {!bookingDisabled && (
+            <p className="text-gray-500 text-sm font-medium">
+              {t('parent.tapToBook')}
+            </p>
+          )}
         </div>
       )}
 
@@ -719,6 +793,74 @@ function ChildBlock({
                     paid={s.paid}
                     endTime={s.end_time}
                   />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {installments.length > 0 && (
+        <div className="bg-white rounded-3xl p-4 border border-gray-100 shadow-sm">
+          <div className="flex items-center gap-2 mb-3 px-1">
+            <CreditCard className="w-4 h-4 text-violet-600" />
+            <h3 className="text-sm font-black text-gray-700 tracking-tight uppercase">
+              {t('school.paymentsTitle')}
+            </h3>
+          </div>
+          <div className="space-y-2">
+            {installments.map((i) => (
+              <div
+                key={i.id}
+                className="rounded-xl border border-gray-100 p-3 flex items-center justify-between gap-3"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900">
+                    #{i.installment_number} · {fmt(i.amount)}
+                  </p>
+                  <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                    <Clock className="w-3 h-3" />
+                    {format(new Date(i.due_date), 'd MMM yyyy', { locale: dateFnsLocale })}
+                    {i.paid_at
+                      ? ` · ${format(new Date(i.paid_at), 'd MMM yyyy', { locale: dateFnsLocale })}`
+                      : ''}
+                  </p>
+                </div>
+                <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                  <span
+                    className={cn(
+                      'text-xs px-2 py-1 rounded-full font-semibold',
+                      i.payment_status === 'paid'
+                        ? 'bg-green-50 text-green-700'
+                        : i.payment_status === 'overdue' || i.payment_status === 'failed'
+                          ? 'bg-red-50 text-red-700'
+                          : 'bg-gray-100 text-gray-600',
+                    )}
+                  >
+                    {i.payment_status === 'paid'
+                      ? t('school.payStatusPaid')
+                      : i.payment_status === 'overdue'
+                        ? t('school.payStatusOverdue')
+                        : i.payment_status === 'failed'
+                          ? t('school.payStatusFailed')
+                          : t('school.payStatusPending')}
+                  </span>
+                  {i.payment_status !== 'paid' && schoolContractAllowsInstallmentPayment(i.contract_signing_status) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.location.href = `/api/pay-school-installment?installment=${i.id}`;
+                      }}
+                      className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-violet-600 text-white hover:bg-violet-700 transition-colors"
+                    >
+                      <CreditCard className="w-3.5 h-3.5" /> {t('school.payNowBtn')}
+                    </button>
+                  )}
+                  {i.payment_status !== 'paid' && !schoolContractAllowsInstallmentPayment(i.contract_signing_status) && (
+                    <span className="text-[11px] text-gray-500 text-right max-w-[9rem] leading-tight">
+                      {t('school.payAwaitingContract')}
+                    </span>
+                  )}
                 </div>
               </div>
             ))}

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildPublicAppUrl } from './public-origin.js';
 import { sendParentInviteEmail } from './sendParentInviteEmail.js';
+import { parentRegistrationAlreadyActive } from './registrationInviteGate.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -17,6 +18,7 @@ export type ParentInviteSource = 'student_self' | 'school_admin';
 
 export type ParentInviteResult =
   | { token: string; code: string; emailSent: boolean; emailError?: string }
+  | { skipped: true; reason: 'already_registered' }
   | { error: string };
 
 export async function insertParentInviteAndSendEmail(opts: {
@@ -32,6 +34,11 @@ export async function insertParentInviteAndSendEmail(opts: {
   locale?: string;
   /** UI locale for URL path prefix (lt, en, pl, …). Falls back to `locale`. */
   uiLocale?: string;
+  /** Organization name for school-context invites. */
+  orgName?: string | null;
+  /** Org id + row for white-label branding (Pro Klasė logo / from). */
+  organizationId?: string | null;
+  org?: import('./emailOrgBranding.js').OrgRowForEmailBranding | null;
 }): Promise<ParentInviteResult> {
   const {
     supabase,
@@ -44,6 +51,9 @@ export async function insertParentInviteAndSendEmail(opts: {
     invitedByUserId,
     locale,
     uiLocale,
+    orgName,
+    organizationId,
+    org,
   } = opts;
 
   const trimmedEmail = parentEmail.trim().toLowerCase();
@@ -51,7 +61,31 @@ export async function insertParentInviteAndSendEmail(opts: {
     return { error: 'Invalid parent email' };
   }
 
+  if (await parentRegistrationAlreadyActive(supabase, trimmedEmail)) {
+    return { skipped: true, reason: 'already_registered' };
+  }
+
   const origin = (appUrl || 'https://tutlio.lt').replace(/\/$/, '');
+
+  let orgRow = org ?? null;
+  let orgId = organizationId ?? null;
+  if (!orgId && studentId) {
+    const { data: st } = await supabase
+      .from('students')
+      .select('organization_id')
+      .eq('id', studentId)
+      .maybeSingle();
+    orgId = (st?.organization_id as string | null) || null;
+  }
+  if (orgId && !orgRow) {
+    const { data: fetched } = await supabase
+      .from('organizations')
+      .select('name, logo_url, brand_color, brand_color_secondary, features')
+      .eq('id', orgId)
+      .maybeSingle();
+    orgRow = fetched;
+  }
+  const resolvedOrgName = orgName ?? (orgRow?.name as string | null) ?? null;
 
   let token = '';
   let code = '';
@@ -120,6 +154,10 @@ export async function insertParentInviteAndSendEmail(opts: {
     code,
     locale,
     publicHost: origin,
+    isSchool: source === 'school_admin',
+    orgName: resolvedOrgName,
+    organizationId: orgId,
+    org: orgRow,
   });
 
   if (emailResult.ok === false) {

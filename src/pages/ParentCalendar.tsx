@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import ParentLayout from '@/components/ParentLayout';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 import {
   Dialog,
   DialogContent,
@@ -148,7 +149,8 @@ function parseStudentGrade(grade: string | number | null | undefined): number {
 const CHILD_STORAGE_KEY = 'tutlio_parent_calendar_child_id';
 
 export default function ParentCalendar() {
-  const { t, locale, dateFnsLocale } = useTranslation();
+  const { t, tHtml, locale, dateFnsLocale } = useTranslation();
+  const { fmt } = useMarketMoney();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -1057,7 +1059,7 @@ export default function ParentCalendar() {
                           bookingSubjectId === s.id ? 'text-violet-700' : 'text-gray-900',
                         )}
                       >
-                        {s.price != null ? `${Number(s.price).toFixed(2)} €` : ''}
+                        {s.price != null ? fmt(s.price) : ''}
                       </span>
                     </button>
                   ))}
@@ -1100,7 +1102,7 @@ export default function ParentCalendar() {
               <div className="mb-4 rounded-2xl bg-gray-50 p-3 flex items-center justify-between">
                 <span className="text-xs text-gray-600">{t('parent.bookingPrice')}</span>
                 <span className="text-sm font-bold text-gray-900">
-                  {Number(selectedSubject.price).toFixed(2)} €
+                  {fmt(selectedSubject.price)}
                 </span>
               </div>
             )}
@@ -1112,9 +1114,9 @@ export default function ParentCalendar() {
                 <div className="text-sm text-amber-700">
                   <p className="font-semibold text-amber-800 mb-0.5">{t('stuSched.cancelRules')}</p>
                   <p>
-                    <span dangerouslySetInnerHTML={{ __html: t('stuSched.cancelFreeNote', { hours: String(cancellationHours) }) }} />
+                    <span dangerouslySetInnerHTML={{ __html: tHtml('stuSched.cancelFreeNote', { hours: String(cancellationHours) }) }} />
                     {cancellationFeePercent > 0 ? (
-                      <span dangerouslySetInnerHTML={{ __html: t('stuSched.cancelFeeNote', { percent: String(cancellationFeePercent) }) }} />
+                      <span dangerouslySetInnerHTML={{ __html: tHtml('stuSched.cancelFeeNote', { percent: String(cancellationFeePercent) }) }} />
                     ) : (
                       <span>{` ${t('stuSched.noPenalty')}`}</span>
                     )}

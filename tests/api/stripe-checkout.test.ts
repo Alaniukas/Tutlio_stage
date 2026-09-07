@@ -24,9 +24,8 @@ function mockReq(method: string, body?: unknown) {
   };
 }
 
-vi.mock('../../api/_lib/auth', () => ({
-  verifyRequestAuth: vi.fn().mockResolvedValue({ userId: 'test-user', isInternal: false }),
-}));
+const verifyRequestAuth = vi.fn();
+vi.mock('../../api/_lib/auth', () => ({ verifyRequestAuth }));
 
 const stripeCreate = vi.fn();
 vi.mock('stripe', () => {
@@ -46,6 +45,7 @@ const sessionsSingle = vi.fn();
 const organizationsSingle = vi.fn();
 const sessionsUpdateEq = vi.fn();
 const studentsUpdateEq = vi.fn();
+const orgAdminMaybeSingle = vi.fn();
 
 const from = vi.fn((table: string) => {
   if (table === 'sessions') {
@@ -79,6 +79,14 @@ const from = vi.fn((table: string) => {
     };
   }
 
+  if (table === 'organization_admins') {
+    return {
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({ maybeSingle: orgAdminMaybeSingle })),
+      })),
+    };
+  }
+
   return {};
 });
 
@@ -96,6 +104,8 @@ describe('POST /api/stripe-checkout', () => {
     process.env.SUPABASE_URL = 'https://test.supabase.co';
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role_key';
 
+    verifyRequestAuth.mockResolvedValue({ userId: 'test-user', isInternal: false });
+    orgAdminMaybeSingle.mockResolvedValue({ data: null, error: null });
     sessionsUpdateEq.mockResolvedValue({ data: null, error: null });
     studentsUpdateEq.mockResolvedValue({ data: null, error: null });
   });
@@ -207,6 +217,39 @@ describe('POST /api/stripe-checkout', () => {
     const result = (res as any).getResult();
     expect(result.statusCode).toBe(400);
     expect(result.body?.error).toContain('Stripe');
+  });
+
+  it('rejects a suspended organization seat before creating checkout', async () => {
+    orgAdminMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'seat-1',
+        user_id: 'test-user',
+        organization_id: 'org-1',
+        role: 'admin',
+        status: 'suspended',
+        permissions: { 'finance.edit': true },
+        accepted_at: '2026-08-01T00:00:00.000Z',
+      },
+      error: null,
+    });
+    sessionsSingle.mockResolvedValue({
+      data: {
+        id: 'sess-suspended',
+        price: 25,
+        tutor_id: 'tutor-1',
+        student_id: 'student-1',
+        students: { id: 'student-1', full_name: 'Mokinys', payer_email: 'payer@example.com', credit_balance: 0 },
+        profiles: { organization_id: 'org-1', full_name: 'Tutor' },
+      },
+      error: null,
+    });
+
+    const handler = (await import('../../api/stripe-checkout')).default;
+    const res = mockRes();
+    await handler(mockReq('POST', { sessionId: 'sess-suspended' }) as any, res as any);
+
+    expect((res as any).getResult().statusCode).toBe(403);
+    expect(stripeCreate).not.toHaveBeenCalled();
   });
 
   it('fully covers lesson with credit balance (no Stripe charge)', async () => {

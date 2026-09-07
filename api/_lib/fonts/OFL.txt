@@ -1,0 +1,7 @@
+﻿Copyright 2015-2023 Google Inc. All Rights Reserved.
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is available with a FAQ at: https://openfontlicense.org
+
+Noto Sans files in this directory are from the Google Noto fonts project:
+https://github.com/googlefonts/noto-fonts

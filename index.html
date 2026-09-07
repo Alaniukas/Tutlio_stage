@@ -9,22 +9,49 @@
   <meta property="og:type" content="website" />
   <meta property="og:title" content="Tutlio — Tutoring Management Platform for Private Tutors & Schools" />
   <meta property="og:description" content="Smart calendar, student waitlist, automated reminders, Stripe payments, invoicing, and lesson scheduling — all in one platform for tutors." />
-  <meta property="og:image" content="https://www.tutlio.com/og-image.png" />
+  <meta property="og:image" content="https://www.tutlio.com/og-image.jpg" />
   <meta property="og:url" content="https://www.tutlio.com" />
   <meta property="og:site_name" content="Tutlio" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Tutlio — Tutoring Management Platform for Private Tutors & Schools" />
   <meta name="twitter:description" content="Smart calendar, student waitlist, automated reminders, Stripe payments, invoicing, and lesson scheduling — all in one platform for tutors." />
-  <meta name="twitter:image" content="https://www.tutlio.com/og-image.png" />
+  <meta name="twitter:image" content="https://www.tutlio.com/og-image.jpg" />
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <title>Tutlio — Tutoring Management Platform for Private Tutors & Schools</title>
-  <script type="text/javascript" src="https://mip-pay.dataop.lt/pay.js"></script>
 </head>
 <body>
   <div id="root"></div>
+  <!-- If a stale service worker serves an old shell whose /assets/main-*.js 404s,
+       main.tsx never boots. Clear SW/caches once and reload. -->
+  <script>
+    (function () {
+      var KEY = 'tutlio_sw_shell_recovery';
+      try {
+        if (sessionStorage.getItem(KEY) === '1') return;
+      } catch (e) {}
+      setTimeout(function () {
+        var root = document.getElementById('root');
+        if (!root || root.childElementCount > 0) return;
+        try { sessionStorage.setItem(KEY, '1'); } catch (e) {}
+        var done = function () { location.reload(); };
+        var tasks = [];
+        if ('caches' in window) {
+          tasks.push(caches.keys().then(function (keys) {
+            return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+          }));
+        }
+        if ('serviceWorker' in navigator) {
+          tasks.push(navigator.serviceWorker.getRegistrations().then(function (regs) {
+            return Promise.all(regs.map(function (r) { return r.unregister(); }));
+          }));
+        }
+        Promise.all(tasks).then(done).catch(done);
+      }, 6000);
+    })();
+  </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

@@ -6,6 +6,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
+import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { sendTrialReservationConfirmedNotifications } from './_lib/trialReservation.js';
+import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
 
 const supabase = createClient(
     process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -48,7 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const { data: pkg, error: fetchErr } = await supabase
             .from('lesson_packages')
-            .select('*, students(full_name, email, payer_email, payer_name), subjects(name)')
+            .select('*, students(full_name, email, payer_email, payer_name), subjects(name), lesson_package_items(subject_id, total_lessons, price_per_lesson, position, subjects!inner(name))')
             .eq('id', packageId)
             .single();
 
@@ -91,7 +94,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             })
             .eq('id', packageId)
             .eq('paid', false)
-            .select('*, students(full_name, email, payer_email, payer_name), subjects(name)')
+            .select('*, students(full_name, email, payer_email, payer_name), subjects(name), lesson_package_items(subject_id, total_lessons, price_per_lesson, position, subjects!inner(name))')
             .maybeSingle();
 
         if (updateErr) {
@@ -102,20 +105,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(200).json({ success: true, packageId, availableLessons: current?.available_lessons, totalLessons: current?.total_lessons, alreadyConfirmed: true });
         }
 
-        // If there are pre-created sessions tied to this package (e.g. trial),
-        // mark them paid so UI stops showing "awaiting payment".
+        // Confirm reserved pre-booked holds first (req 3): atomic flip of rows
+        // still 'reserved' so we capture exactly the holds to notify about, and
+        // clear the expiry so the auto-release cron leaves them alone.
+        const { data: confirmedHolds } = await supabase
+            .from('sessions')
+            .update({ paid: true, payment_status: 'paid', reservation_expires_at: null })
+            .eq('lesson_package_id', packageId)
+            .eq('payment_status', 'reserved')
+            .select('id, tutor_id, student_id, start_time, end_time, topic, meeting_link');
+
+        // Mark any other pre-created sessions (e.g. trial) paid so UI stops
+        // showing "awaiting payment".
         const { data: paidSessions } = await supabase
             .from('sessions')
             .update({ paid: true, payment_status: 'paid' })
             .eq('lesson_package_id', packageId)
             .eq('paid', false)
             .select('id, tutor_id');
-        for (const ps of paidSessions || []) {
+        for (const ps of [...(confirmedHolds || []), ...(paidSessions || [])]) {
             syncSessionToGoogle(ps.id, ps.tutor_id).catch(() => {});
         }
 
+        // Notify the tutor and send the (deferred) student/parent invite for the
+        // confirmed holds, mirroring the Stripe package-payment path.
+        if (confirmedHolds && confirmedHolds.length > 0) {
+            await sendTrialReservationConfirmedNotifications(supabase, {
+                appUrl: publicOriginFromRequest(req),
+                holds: confirmedHolds as unknown as Parameters<typeof sendTrialReservationConfirmedNotifications>[1]['holds'],
+            }).catch((e) => console.error('[confirm-manual-payment] notify error:', e));
+        }
+
+        // Calendar-month packages (req 6): cap validity to the month of the first lesson.
+        await applyMonthlyPackageExpiry(supabase, { packageId, tutorId: (updated as any).tutor_id })
+            .catch((e) => console.error('[confirm-manual-payment] monthly expiry:', e));
+
         const student = (updated as any).students || {};
         const subject = (updated as any).subjects || {};
+        const rawItems = Array.isArray((updated as any).lesson_package_items)
+            ? (updated as any).lesson_package_items
+            : [];
+        const emailItems = rawItems
+            .slice()
+            .sort((a: any, b: any) => Number(a.position || 0) - Number(b.position || 0))
+            .map((it: any) => ({
+                subjectName: it.subjects?.name || '',
+                totalLessons: Number(it.total_lessons || 0),
+                pricePerLesson: Number(it.price_per_lesson || 0),
+            }));
 
         let orgId: string | null = null;
         if ((updated as any).tutor_id) {
@@ -141,10 +178,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 data: {
                     recipientName,
                     studentName: student.full_name,
-                    subjectName: subject.name,
+                    subjectName: subject.name || emailItems[0]?.subjectName || '',
                     availableLessons: updated.available_lessons,
                     totalLessons: updated.total_lessons,
                     totalPrice: Number(updated.total_price || 0).toFixed(2),
+                    items: emailItems,
                     ...(orgId ? { organizationId: orgId } : {}),
                 },
             }).catch((e) => {

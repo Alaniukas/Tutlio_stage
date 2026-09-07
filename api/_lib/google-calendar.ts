@@ -3,6 +3,9 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { format, parseISO } from 'date-fns';
+import { buildTrackedJoinUrl } from './joinLink.js';
+
+const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
 function availabilityRecurringStartDateStr(slot: {
   start_date?: string | null;
@@ -271,7 +274,16 @@ function formatSessionEvent(session: any): GoogleEvent {
   if (session.topic) description += `📖 Tema: ${session.topic}\n`;
   if (session.price) description += `💶 Kaina: €${session.price}\n`;
   description += `💳 Statusas: ${statusLabel}\n`;
-  if (session.meeting_link) description += `\n🔗 Susitikimo nuoroda: ${session.meeting_link}`;
+  if (session.meeting_link) {
+    // The event sits in the TUTOR's calendar — tracked link records tutor attendance.
+    let joinUrl = session.meeting_link;
+    try {
+      joinUrl = buildTrackedJoinUrl(APP_URL, session.id, 'tutor');
+    } catch {
+      // No HMAC secret configured — keep the raw link.
+    }
+    description += `\n🔗 Susitikimo nuoroda: ${joinUrl}`;
+  }
 
   return {
     summary,

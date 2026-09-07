@@ -13,6 +13,7 @@ export type OrgTutorRow = {
   break_between_lessons?: number | null;
   min_booking_hours?: number | null;
   company_commission_percent?: number | null;
+  company_commission_by_subject?: Record<string, number> | null;
   personal_meeting_link?: string | null;
 };
 
@@ -60,16 +61,38 @@ export async function getOrgVisibleTutors(
   orgId: string,
   select: string,
 ): Promise<OrgTutorRow[]> {
-  const [{ data: adminUsers }, { data: linkedStudents }, { data: inviteData }, { data: profileRows }] = await Promise.all([
+  const [
+    { data: adminUsers },
+    { data: teammateAdmins },
+    visibleTutorIds,
+    { data: linkedStudents },
+    { data: inviteData },
+    { data: profileRows },
+  ] = await Promise.all([
     supabase.from('organization_admins').select('user_id').eq('organization_id', orgId),
+    supabase.rpc('get_my_org_admin_user_ids'),
+    supabase.rpc('get_my_org_visible_tutor_ids'),
     supabase.from('students').select('linked_user_id, email, tutor_id').eq('organization_id', orgId),
     supabase.from('tutor_invites').select('used_by_profile_id').eq('organization_id', orgId),
     supabase.from('profiles').select(select).eq('organization_id', orgId),
   ]);
 
-  const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
+  const adminIds = new Set(
+    [...(adminUsers || []), ...(teammateAdmins || [])].map((a: any) => a.user_id),
+  );
 
-  const tutorIdSet = buildOrgTutorIdSet(linkedStudents, inviteData);
+  const relationshipTutorIds = buildOrgTutorIdSet(linkedStudents, inviteData);
+  const rpcTutorIds =
+    !visibleTutorIds.error && (adminUsers || []).length > 0
+      ? (visibleTutorIds.data || []).map((row: any) => row.user_id).filter(Boolean)
+      : null;
+  // If the RPC succeeds but returns no rows (e.g. auth.uid() not ready yet), fall back
+  // to student/invite relationships so the tutor list does not flash empty.
+  const tutorIdSet =
+    rpcTutorIds != null
+      ? rpcTutorIds.length > 0
+        ? new Set<string>(rpcTutorIds)
+        : relationshipTutorIds
+      : relationshipTutorIds;
   return filterConfirmedOrgTutors((profileRows || []) as unknown as OrgTutorRow[], adminIds, tutorIdSet);
 }
-

@@ -1,11 +1,18 @@
 import { createContext, useCallback, useContext } from 'react';
-import { lt as dateFnsLt, pl as dateFnsPl, lv as dateFnsLv, et as dateFnsEe, fr as dateFnsFr, es as dateFnsEs, de as dateFnsDe, sv as dateFnsSe, da as dateFnsDk, fi as dateFnsFi, nb as dateFnsNo } from 'date-fns/locale';
+import { lt as dateFnsLt, pl as dateFnsPl, lv as dateFnsLv, et as dateFnsEe, fr as dateFnsFr, es as dateFnsEs, de as dateFnsDe, sv as dateFnsSe, da as dateFnsDk, fi as dateFnsFi, nb as dateFnsNo, nl as dateFnsNl, it as dateFnsIt, pt as dateFnsPt, ro as dateFnsRo, cs as dateFnsCs, el as dateFnsEl, hu as dateFnsHu, bg as dateFnsBg, hr as dateFnsHr, sl as dateFnsSl, hi as dateFnsHi, ko as dateFnsKo, ja as dateFnsJa, id as dateFnsId, arSA as dateFnsAr, ptBR as dateFnsPtBr, es as dateFnsEsMx } from 'date-fns/locale';
 import type { Locale as DateFnsLocale } from 'date-fns';
+import { filDateFns } from './filDateFns';
+import { skDateFns as dateFnsSk } from './skDateFns';
+import { th as dateFnsTh } from 'date-fns/locale';
+import { tr as dateFnsTr } from 'date-fns/locale';
+import { zhHK as dateFnsZhHk } from 'date-fns/locale';
+import { he as dateFnsHe } from 'date-fns/locale';
+import { uk as dateFnsUk } from 'date-fns/locale';
 
-export { t, detectLocaleFromHost, isValidLocale, SUPPORTED_LOCALES, LOCALE_LABELS, LOCALE_NAMES } from './core';
+export { t, tHtml, detectLocaleFromHost, isValidLocale, SUPPORTED_LOCALES, LOCALE_LABELS, LOCALE_NAMES, loadLocaleDict, isLocaleLoaded } from './core';
 export type { Locale } from './core';
 import type { Locale } from './core';
-import { isValidLocale, t as coreTranslate } from './core';
+import { isValidLocale, t as coreTranslate, tHtml as coreTranslateHtml } from './core';
 import { stripPlatformPrefix } from '@/lib/platform';
 
 const LOCALE_STORAGE_KEY = 'tutlio_locale';
@@ -15,23 +22,43 @@ function getDomainStorageKey(): string {
   const host = window.location.hostname;
   if (host === 'tutlio.com' || host.endsWith('.tutlio.com')) return `${LOCALE_STORAGE_KEY}_com`;
   if (host === 'tutlio.lt' || host.endsWith('.tutlio.lt')) return `${LOCALE_STORAGE_KEY}_lt`;
+  if (host === 'tutlio.pl' || host.endsWith('.tutlio.pl')) return `${LOCALE_STORAGE_KEY}_pl`;
   return LOCALE_STORAGE_KEY;
+}
+
+/** Default UI locale per host — mirrors getDefaultLocale in api/_lib/seo-routing.ts. */
+export function defaultLocaleForHost(host: string): Locale {
+  if (host === 'tutlio.com' || host.endsWith('.tutlio.com')) return 'en';
+  if (host === 'tutlio.pl' || host.endsWith('.tutlio.pl')) return 'pl';
+  return 'lt';
 }
 
 export function getStoredLocale(): Locale | null {
   if (typeof window === 'undefined') return null;
-  const stored = localStorage.getItem(getDomainStorageKey());
-  if (stored && isValidLocale(stored)) return stored;
+  try {
+    const stored = localStorage.getItem(getDomainStorageKey());
+    if (stored && isValidLocale(stored)) return stored;
+  } catch {
+    // Storage may be disabled in embedded or private browsing contexts.
+  }
   return null;
 }
 
 export function storeLocale(locale: Locale): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(getDomainStorageKey(), locale);
+  try {
+    localStorage.setItem(getDomainStorageKey(), locale);
+  } catch {
+    // Keep the current in-memory/URL choice usable without browser persistence.
+  }
 }
 
 export function detectLocale(): Locale {
   if (typeof window === 'undefined') return 'lt';
+
+  const host = window.location.hostname;
+  // tutlio.pl is Polish-only — ignore path, query, and stored prefs.
+  if (host === 'tutlio.pl' || host.endsWith('.tutlio.pl')) return 'pl';
 
   const stripped = stripPlatformPrefix(window.location.pathname);
   const pathLocale = getLocaleFromPathname(stripped);
@@ -41,13 +68,20 @@ export function detectLocale(): Locale {
   const langOverride = params.get('lang');
   if (langOverride && isValidLocale(langOverride)) return langOverride;
 
-  const host = window.location.hostname;
-  // On tutlio.com (and subdomains like www.tutlio.com), default to EN unless URL explicitly sets locale.
-  if (host === 'tutlio.com' || host.endsWith('.tutlio.com')) return 'en';
-
   const stored = getStoredLocale();
   if (stored) return stored;
-  return 'lt';
+
+  return defaultLocaleForHost(host);
+}
+
+/**
+ * Canonical slug for pages with domain-flavored paths — Lithuanian slugs for
+ * the lt locale, English everywhere else. Mirrors localizedPagePath() in
+ * api/_lib/seo-routing.ts (sync enforced by tests/lib/seo-visibility.test.ts).
+ */
+export function localizedPagePath(page: 'about' | 'contacts', locale: Locale): string {
+  if (page === 'about') return locale === 'lt' ? '/apie-mus' : '/about';
+  return locale === 'lt' ? '/kontaktai' : '/contacts';
 }
 
 export function getLocaleFromPathname(pathname: string): Locale | null {
@@ -70,7 +104,7 @@ export function stripLocalePrefix(pathname: string): string {
 export function buildLocalizedPath(pathname: string, locale: Locale, host?: string): string {
   const normalized = stripLocalePrefix(pathname);
   const effectiveHost = host ?? (typeof window !== 'undefined' ? window.location.hostname : 'localhost');
-  const defaultLocale = effectiveHost === 'tutlio.com' || effectiveHost.endsWith('.tutlio.com') ? 'en' : 'lt';
+  const defaultLocale = defaultLocaleForHost(effectiveHost);
 
   if (locale === defaultLocale) {
     return normalized;
@@ -84,6 +118,8 @@ export function buildLocalizedPath(pathname: string, locale: Locale, host?: stri
 }
 
 const dateFnsLocales: Record<Locale, DateFnsLocale | undefined> = {
+  th: dateFnsTh,
+  'zh-hk': dateFnsZhHk,
   lt: dateFnsLt,
   en: undefined,
   pl: dateFnsPl,
@@ -96,6 +132,28 @@ const dateFnsLocales: Record<Locale, DateFnsLocale | undefined> = {
   dk: dateFnsDk,
   fi: dateFnsFi,
   no: dateFnsNo,
+  nl: dateFnsNl,
+  'it': dateFnsIt,
+  'pt': dateFnsPt,
+  'ro': dateFnsRo,
+  'cs': dateFnsCs,
+  'el': dateFnsEl,
+  'hu': dateFnsHu,
+  'bg': dateFnsBg,
+  'hr': dateFnsHr,
+  'sk': dateFnsSk,
+  'sl': dateFnsSl,
+  'hi': dateFnsHi,
+  'ko': dateFnsKo,
+  'ja': dateFnsJa,
+  'id': dateFnsId,
+  'ar': dateFnsAr,
+  'pt-br': dateFnsPtBr,
+  'es-mx': dateFnsEsMx,
+  fil: filDateFns,
+  tr: dateFnsTr,
+  he: dateFnsHe,
+  uk: dateFnsUk,
 };
 
 export function getDateFnsLocale(locale: Locale): DateFnsLocale | undefined {
@@ -104,15 +162,20 @@ export function getDateFnsLocale(locale: Locale): DateFnsLocale | undefined {
 
 interface I18nContextValue {
   locale: Locale;
+  /** Pending choice, while locale remains the last successfully loaded UI. */
+  requestedLocale?: Locale;
   setLocale: (locale: Locale) => void;
   t: (key: string, params?: Record<string, string | number>) => string;
+  /** HTML-escaped interpolation — use for `dangerouslySetInnerHTML` sinks. */
+  tHtml: (key: string, params?: Record<string, string | number>) => string;
   dateFnsLocale: DateFnsLocale | undefined;
 }
 
 export const I18nContext = createContext<I18nContextValue>({
   locale: 'lt',
   setLocale: () => {},
-  t: (key) => key,
+  t: (key, params) => coreTranslate('lt', key, params),
+  tHtml: (key, params) => coreTranslateHtml('lt', key, params),
   dateFnsLocale: dateFnsLt,
 });
 
@@ -128,8 +191,18 @@ export function useTranslation() {
     [ctx.t, ctx.locale],
   );
 
+  const safeTHtml = useCallback(
+    (key: string, params?: Record<string, string | number>) => {
+      const translated = ctx.tHtml(key, params);
+      if (translated !== key) return translated;
+      return coreTranslateHtml(ctx.locale, key, params);
+    },
+    [ctx.tHtml, ctx.locale],
+  );
+
   return {
     ...ctx,
     t: safeT,
+    tHtml: safeTHtml,
   };
 }

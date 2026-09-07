@@ -4,6 +4,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Wallet, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useTranslation } from '@/lib/i18n';
 import {
   resolvePerLessonPaymentRules,
   parseStudentPaymentModels,
@@ -42,6 +43,7 @@ export default function StudentPaymentModelSection({
   disabled,
   onSaved,
 }: Props) {
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const normalizedValue = value === '' ? null : value;
   const selectedModels = parseStudentPaymentModels(normalizedValue);
@@ -118,8 +120,8 @@ export default function StudentPaymentModelSection({
 
   const inheritedLabel =
     inheritedLessonPayment.payment_timing === 'before_lesson'
-      ? `Prieš pamoką · ${inheritedLessonPayment.payment_deadline_hours} val. iki pamokos pradžios`
-      : `Po pamokos · apmokėti per ${inheritedLessonPayment.payment_deadline_hours} val. po pabaigos`;
+      ? t('studentPaymentSection.inheritedBefore', { hours: String(inheritedLessonPayment.payment_deadline_hours) })
+      : t('studentPaymentSection.inheritedAfter', { hours: String(inheritedLessonPayment.payment_deadline_hours) });
 
   const beforeExceedsMin = draftTiming === 'before_lesson' && draftHours > minBookingHours;
 
@@ -165,15 +167,15 @@ export default function StudentPaymentModelSection({
     <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
       <div className="flex items-center gap-2">
         <Wallet className="w-4 h-4 text-amber-600" />
-        <span className="font-semibold text-gray-900 text-sm">Mokėjimo būdas</span>
+        <span className="font-semibold text-gray-900 text-sm">{t('paymentModel.title')}</span>
         {saving && <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400" />}
       </div>
-      <p className="text-xs text-gray-600 leading-relaxed">
-        <strong>Numatytasis</strong> — joks atskiras modelis; taikomos <span className="whitespace-nowrap">„Finansai“</span> taisyklės.
-        Pasirinkus variantą žemiau, jis įrašomas tik šiam mokiniui.
-      </p>
+      <p
+        className="text-xs text-gray-600 leading-relaxed"
+        dangerouslySetInnerHTML={{ __html: t('studentPaymentSection.description') }}
+      />
       <div className="space-y-2">
-        <Label className="text-xs text-gray-600">Mokėjimo modeliai (galima pasirinkti kelis)</Label>
+        <Label className="text-xs text-gray-600">{t('studentPaymentSection.modelsLabel')}</Label>
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -186,7 +188,7 @@ export default function StudentPaymentModelSection({
                 : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',
             )}
           >
-            Bendros finansų taisyklės (numatytasis)
+            {t('paymentModel.default')}
           </button>
           {allowPerLesson && (
             <button
@@ -200,7 +202,7 @@ export default function StudentPaymentModelSection({
                   : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',
               )}
             >
-              Apmokėjimas už pamoką
+              {t('paymentModel.perLesson')}
             </button>
           )}
           <button
@@ -214,7 +216,7 @@ export default function StudentPaymentModelSection({
                 : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',
             )}
           >
-            Mėnesinės sąskaitos
+            {t('paymentModel.monthlyBilling')}
           </button>
           <button
             type="button"
@@ -227,7 +229,7 @@ export default function StudentPaymentModelSection({
                 : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',
             )}
           >
-            Pamokų paketai
+            {t('paymentModel.prepaidPackages')}
           </button>
         </div>
       </div>
@@ -236,19 +238,19 @@ export default function StudentPaymentModelSection({
         <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-3 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-xs text-gray-700">
-              <span className="font-semibold text-gray-900">Bendros taisyklės (Finansai):</span>{' '}
+              <span className="font-semibold text-gray-900">{t('studentPaymentSection.inheritedRules')}</span>{' '}
               <span className="text-gray-800">{inheritedLabel}</span>
             </p>
             {hasStoredOverride && (
               <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full">
-                Yra individualus perrašymas
+                {t('studentPaymentSection.individualOverride')}
               </span>
             )}
           </div>
-          <p className="text-[11px] text-gray-600">
-            Nustatykite, kada ir per kiek valandų mokėjimas taikomas <strong>šiam mokiniui</strong>. Jei paliekate kaip bendrose
-            taisyklėse ir spaudžiate Išsaugoti — naudojamos bendros taisyklės (be atskiro įrašo DB).
-          </p>
+          <p
+            className="text-[11px] text-gray-600"
+            dangerouslySetInnerHTML={{ __html: t('studentPaymentSection.timingExplain') }}
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <button
@@ -262,8 +264,8 @@ export default function StudentPaymentModelSection({
                   : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',
               )}
             >
-              <span className="font-semibold block">Prieš pamoką</span>
-              <span className="text-[11px] text-gray-500">Terminas nuo pamokos pradžios</span>
+              <span className="font-semibold block">{t('studentPaymentSection.beforeLesson')}</span>
+              <span className="text-[11px] text-gray-500">{t('studentPaymentSection.beforeLessonHint')}</span>
             </button>
             <button
               type="button"
@@ -276,13 +278,15 @@ export default function StudentPaymentModelSection({
                   : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',
               )}
             >
-              <span className="font-semibold block">Po pamokos</span>
-              <span className="text-[11px] text-gray-500">Terminas nuo pamokos pabaigos</span>
+              <span className="font-semibold block">{t('studentPaymentSection.afterLesson')}</span>
+              <span className="text-[11px] text-gray-500">{t('studentPaymentSection.afterLessonHint')}</span>
             </button>
           </div>
           <div className="space-y-1">
             <Label className="text-xs text-gray-600">
-              {draftTiming === 'before_lesson' ? 'Valandos iki pamokos pradžios' : 'Valandos po pamokos pabaigos'}
+              {draftTiming === 'before_lesson'
+                ? t('studentPaymentSection.hoursBeforeStart')
+                : t('studentPaymentSection.hoursAfterEnd')}
             </Label>
             <Input
               type="number"
@@ -294,8 +298,7 @@ export default function StudentPaymentModelSection({
             />
             {beforeExceedsMin && (
               <p className="text-[11px] text-amber-800">
-                Negali būti daugiau nei vėliausia registracija ({minBookingHours} val.). Sumažinkite valandas arba pakeiskite
-                „Pamokų nustatymuose“ min. registracijos laiką.
+                {t('studentPaymentSection.hoursExceedsMin', { hours: String(minBookingHours) })}
               </p>
             )}
           </div>
@@ -305,7 +308,9 @@ export default function StudentPaymentModelSection({
             onClick={() => void savePerLessonTiming()}
             className="w-full rounded-lg bg-violet-600 text-white text-xs font-semibold py-2.5 hover:bg-violet-700 disabled:opacity-50"
           >
-            {sameAsInherited ? 'Išsaugoti (naudoti bendras Finansų taisykles)' : 'Išsaugoti šiam mokiniui'}
+            {sameAsInherited
+              ? t('studentPaymentSection.saveUsingDefault')
+              : t('studentPaymentSection.saveForStudent')}
           </button>
         </div>
       )}

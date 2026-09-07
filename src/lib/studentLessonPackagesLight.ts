@@ -9,6 +9,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { dedupeAsync } from '@/lib/dataCache';
 
+export type StudentActivePackageItemRow = {
+  subject_id: string;
+  total_lessons: number;
+  available_lessons: number;
+  reserved_lessons: number;
+  completed_lessons: number;
+};
+
 export type StudentActivePackageRow = {
   id: string;
   subject_id: string | null;
@@ -16,6 +24,8 @@ export type StudentActivePackageRow = {
   available_lessons: number | null;
   reserved_lessons: number | null;
   expires_at: string | null;
+  /** Per-subject breakdown. Multi-subject packages list >1 item; legacy single-subject packages list 1. */
+  items: StudentActivePackageItemRow[];
 };
 
 export async function fetchStudentActiveLessonPackagesDeduped(
@@ -26,7 +36,10 @@ export async function fetchStudentActiveLessonPackagesDeduped(
     const res = await supabase
       .from('lesson_packages')
       .select(
-        'id, subject_id, total_lessons, available_lessons, reserved_lessons, expires_at',
+        `
+        id, subject_id, total_lessons, available_lessons, reserved_lessons, expires_at,
+        lesson_package_items(subject_id, total_lessons, available_lessons, reserved_lessons, completed_lessons)
+        `,
       )
       .eq('student_id', studentId)
       .eq('active', true)
@@ -43,7 +56,25 @@ export async function fetchStudentActiveLessonPackagesDeduped(
       );
       return [];
     }
-    return (res.data ?? []) as StudentActivePackageRow[];
+    return ((res.data ?? []) as any[]).map((row): StudentActivePackageRow => {
+      const itemsRaw = Array.isArray(row.lesson_package_items) ? row.lesson_package_items : [];
+      const items: StudentActivePackageItemRow[] = itemsRaw.map((it: any) => ({
+        subject_id: String(it.subject_id),
+        total_lessons: Number(it.total_lessons || 0),
+        available_lessons: Number(it.available_lessons || 0),
+        reserved_lessons: Number(it.reserved_lessons || 0),
+        completed_lessons: Number(it.completed_lessons || 0),
+      }));
+      return {
+        id: row.id,
+        subject_id: row.subject_id,
+        total_lessons: row.total_lessons,
+        available_lessons: row.available_lessons,
+        reserved_lessons: row.reserved_lessons,
+        expires_at: row.expires_at,
+        items,
+      };
+    });
   });
 }
 

@@ -1,0 +1,5 @@
+{
+  "//": "Mirrors how Vercel's @vercel/node builder typechecks each serverless function so deploy-time TS errors surface locally (the root tsconfig only includes src/). Run via `npm run lint:api`.",
+  "extends": "./tsconfig.json",
+  "include": ["api"]
+}

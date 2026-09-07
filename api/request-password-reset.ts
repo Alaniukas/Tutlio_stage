@@ -1,17 +1,12 @@
 /**
  * POST /api/request-password-reset
- * Atnaujina user_metadata.locale pagal domeną, tada siunčia Supabase recovery el. laišką.
+ * Stores the validated display locale before sending Supabase's recovery email.
  */
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { findAuthUserByEmail } from './_lib/findAuthUserByEmail.js';
-
-type AuthEmailLocale = 'lt' | 'pl' | 'en';
-
-function parseLocale(value: unknown): AuthEmailLocale {
-  if (value === 'pl' || value === 'en' || value === 'lt') return value;
-  return 'lt';
-}
+import { isAllowedRedirectUrl, publicOriginFromRequest } from './_lib/public-origin.js';
+import { resolveAuthEmailLocale } from '../src/lib/auth-locale.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -28,7 +23,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
-    const locale = parseLocale(req.body?.locale);
+    const origin = publicOriginFromRequest(req);
+    const locale = resolveAuthEmailLocale(req.body?.locale, new URL(origin).hostname);
     const redirectTo = typeof req.body?.redirectTo === 'string' ? req.body.redirectTo.trim() : '';
 
     if (!email) {
@@ -36,6 +32,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (!redirectTo) {
       return res.status(400).json({ error: 'redirectTo is required' });
+    }
+    if (!isAllowedRedirectUrl(redirectTo, publicOriginFromRequest(req))) {
+      return res.status(400).json({ error: 'Invalid redirectTo' });
     }
 
     const admin = createClient(supabaseUrl, serviceKey, {
@@ -50,9 +49,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const prior = existing.user_metadata && typeof existing.user_metadata === 'object'
         ? existing.user_metadata
         : {};
-      await admin.auth.admin.updateUserById(existing.id, {
+      const { error: localeError } = await admin.auth.admin.updateUserById(existing.id, {
         user_metadata: { ...prior, locale },
       });
+      if (localeError) {
+        console.error('[request-password-reset] Could not set recovery email locale');
+        return res.status(500).json({ error: 'Unable to send reset email. Please try again.' });
+      }
     }
 
     const { error } = await publicClient.auth.resetPasswordForEmail(email, { redirectTo });

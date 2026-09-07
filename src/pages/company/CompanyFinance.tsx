@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DateInput } from '@/components/ui/date-input';
 import { Label } from '@/components/ui/label';
-import { CreditCard, CheckCircle2, ExternalLink, Loader2, Wallet, Layers, FileText, Package, Info, ChevronDown, ChevronUp } from 'lucide-react';
+import { CreditCard, CheckCircle2, ExternalLink, Loader2, Wallet, Layers, FileText, Package, Info, ChevronDown, ChevronUp, RefreshCw, Clock, AlertCircle } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -15,24 +15,31 @@ import { useTranslation } from '@/lib/i18n';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import PerlasFinanceSection from '@/components/PerlasFinanceSection';
+import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { ORG_TUTOR_FILTER_SCROLL_CLASS } from '@/lib/orgUi';
+import { format } from 'date-fns';
 
 type CompanyFinanceCache = {
   orgId: string;
   stripeComplete: boolean; // true only when stripe_account_id + onboarding complete (same as Checkout API)
+  stripeAccountId: string | null; // account exists but may still be pending verification
   paymentTiming: 'before_lesson' | 'after_lesson';
   paymentDeadlineHours: number;
   enablePerLesson: boolean;
   enableMonthlyBilling: boolean;
   enablePrepaidPackages: boolean;
   restrictBookingOnOverdue: boolean;
+  enablePerStudentPaymentOverride: boolean;
   orgTutors: { id: string; full_name: string }[];
 };
 
 export default function CompanyFinance() {
-  const { t } = useTranslation();
+  const { t, dateFnsLocale } = useTranslation();
+  const { fmt } = useMarketMoney();
   const fc = getCached<CompanyFinanceCache>('company_finance');
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
-  const perlasFeatureOn = hasFeature('perlas_finance');
+  const perlasFeatureOn = PERLAS_FINANCE_ENABLED && hasFeature('perlas_finance');
   const location = useLocation();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
   const [loading, setLoading] = useState(!fc);
@@ -40,6 +47,10 @@ export default function CompanyFinance() {
   const manualPaymentsOn = hasFeature('manual_payments');
 
   const [stripeComplete, setStripeComplete] = useState(fc?.stripeComplete ?? false);
+  const [stripeAccountId, setStripeAccountId] = useState<string | null>(fc?.stripeAccountId ?? null);
+  const [stripeStatus, setStripeStatus] = useState<'pending' | 'incomplete' | null>(null);
+  const [stripeChecking, setStripeChecking] = useState(false);
+  const stripeAutoCheckedRef = useRef(false);
   const [stripeLoading, setStripeLoading] = useState(false);
   const [stripeError, setStripeError] = useState<string | null>(null);
 
@@ -50,8 +61,11 @@ export default function CompanyFinance() {
   const [enableMonthlyBilling, setEnableMonthlyBilling] = useState(fc?.enableMonthlyBilling ?? false);
   const [enablePrepaidPackages, setEnablePrepaidPackages] = useState(fc?.enablePrepaidPackages ?? false);
   const [restrictBookingOnOverdue, setRestrictBookingOnOverdue] = useState(fc?.restrictBookingOnOverdue ?? false);
+  const [enablePerStudentPaymentOverride, setEnablePerStudentPaymentOverride] = useState(
+    fc?.enablePerStudentPaymentOverride ?? false,
+  );
 
-  const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
 
   const [isSendInvoiceOpen, setIsSendInvoiceOpen] = useState(false);
   const [invoiceScope, setInvoiceScope] = useState<'all_tutors' | 'selected_tutors'>('all_tutors');
@@ -84,8 +98,19 @@ export default function CompanyFinance() {
   useEffect(() => {
     if (!orgId || orgFeaturesLoading) return;
     const params = new URLSearchParams(location.search);
-    if (params.get('stripe') === 'success') verifyStripe();
+    if (params.get('stripe') === 'success') void checkStripeStatus();
   }, [orgId, location.search, orgFeaturesLoading]);
+
+  // Account connected but not complete → silently re-check live Stripe status once on load,
+  // so the page reflects "verifying" / "needs info" instead of a stale "not connected".
+  useEffect(() => {
+    if (loading || orgFeaturesLoading || !orgId) return;
+    if (stripeComplete || !stripeAccountId) return;
+    if (stripeAutoCheckedRef.current) return;
+    if (new URLSearchParams(location.search).get('stripe') === 'success') return;
+    stripeAutoCheckedRef.current = true;
+    void checkStripeStatus({ silent: true });
+  }, [loading, orgFeaturesLoading, orgId, stripeComplete, stripeAccountId, location.search]);
 
   const fetchFinanceSettings = async (options?: { background?: boolean }) => {
     const background = options?.background === true;
@@ -109,29 +134,34 @@ export default function CompanyFinance() {
     const { data: orgData, error: orgError } = await supabase
       .from('organizations')
       .select(
-        'stripe_account_id, stripe_onboarding_complete, payment_timing, payment_deadline_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue'
+        'stripe_account_id, stripe_onboarding_complete, payment_timing, payment_deadline_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue, features'
       )
       .eq('id', adminRow.organization_id)
       .single();
 
     let stripeCompleteLocal = false;
+    let stripeAccountIdLocal: string | null = null;
     let paymentTimingLocal: 'before_lesson' | 'after_lesson' = 'before_lesson';
     let paymentDeadlineHoursLocal = 24;
     let enablePerLessonLocal = true;
     let enableMonthlyBillingLocal = false;
     let enablePrepaidPackagesLocal = false;
     let restrictBookingOnOverdueLocal = false;
+    let enablePerStudentPaymentOverrideLocal = false;
 
     if (orgError) {
       setToastMessage({ message: t('companyFinance.fetchFailed', { msg: orgError.message }), type: 'error' });
     } else if (orgData) {
-      stripeCompleteLocal = !!(orgData.stripe_onboarding_complete && orgData.stripe_account_id?.trim());
+      stripeAccountIdLocal = orgData.stripe_account_id?.trim() || null;
+      stripeCompleteLocal = !!(orgData.stripe_onboarding_complete && stripeAccountIdLocal);
       paymentTimingLocal = (orgData.payment_timing as 'before_lesson' | 'after_lesson') || 'before_lesson';
       paymentDeadlineHoursLocal = orgData.payment_deadline_hours || 24;
       enablePerLessonLocal = orgData.enable_per_lesson ?? true;
       enableMonthlyBillingLocal = orgData.enable_monthly_billing ?? false;
       enablePrepaidPackagesLocal = orgData.enable_prepaid_packages ?? false;
       restrictBookingOnOverdueLocal = orgData.restrict_booking_on_overdue ?? false;
+      const featObj = (orgData.features as Record<string, unknown> | null) ?? {};
+      enablePerStudentPaymentOverrideLocal = featObj.per_student_payment_override === true;
     }
 
     const orgTutorsLocal = await getOrgVisibleTutors(
@@ -142,23 +172,28 @@ export default function CompanyFinance() {
 
     setOrgId(organizationId);
     setStripeComplete(stripeCompleteLocal);
+    setStripeAccountId(stripeAccountIdLocal);
+    if (stripeCompleteLocal) setStripeStatus(null);
     setPaymentTiming(paymentTimingLocal);
     setPaymentDeadlineHours(paymentDeadlineHoursLocal);
     setEnablePerLesson(enablePerLessonLocal);
     setEnableMonthlyBilling(enableMonthlyBillingLocal);
     setEnablePrepaidPackages(enablePrepaidPackagesLocal);
     setRestrictBookingOnOverdue(restrictBookingOnOverdueLocal);
+    setEnablePerStudentPaymentOverride(enablePerStudentPaymentOverrideLocal);
     setOrgTutors(orgTutorsLocal);
 
     setCache('company_finance', {
       orgId: organizationId,
       stripeComplete: stripeCompleteLocal,
+      stripeAccountId: stripeAccountIdLocal,
       paymentTiming: paymentTimingLocal,
       paymentDeadlineHours: paymentDeadlineHoursLocal,
       enablePerLesson: enablePerLessonLocal,
       enableMonthlyBilling: enableMonthlyBillingLocal,
       enablePrepaidPackages: enablePrepaidPackagesLocal,
       restrictBookingOnOverdue: restrictBookingOnOverdueLocal,
+      enablePerStudentPaymentOverride: enablePerStudentPaymentOverrideLocal,
       orgTutors: orgTutorsLocal,
     });
 
@@ -167,6 +202,16 @@ export default function CompanyFinance() {
 
   const handleSaveFinance = async () => {
     if (!orgId) return;
+
+    const { data: currentOrg } = await supabase
+      .from('organizations')
+      .select('features')
+      .eq('id', orgId)
+      .maybeSingle();
+    const mergedFeatures = {
+      ...((currentOrg?.features as Record<string, unknown> | null) ?? {}),
+      per_student_payment_override: enablePerStudentPaymentOverride,
+    };
 
     const { error } = await supabase
       .from('organizations')
@@ -177,11 +222,15 @@ export default function CompanyFinance() {
         enable_monthly_billing: enableMonthlyBilling,
         enable_prepaid_packages: enablePrepaidPackages,
         restrict_booking_on_overdue: restrictBookingOnOverdue,
+        features: mergedFeatures,
       })
       .eq('id', orgId);
 
     if (error) setToastMessage({ message: t('companyFinance.saveFailed', { msg: error.message }), type: 'error' });
-    else setToastMessage({ message: t('companyFinance.saveSuccess'), type: 'success' });
+    else {
+      invalidateCache('company_finance');
+      setToastMessage({ message: t('companyFinance.saveSuccess'), type: 'success' });
+    }
   };
 
   const handleInvoicePreview = async () => {
@@ -210,6 +259,7 @@ export default function CompanyFinance() {
         .lte('start_time', invoicePeriodEnd + 'T23:59:59')
         .lte('start_time', new Date().toISOString())
         .eq('paid', false)
+        .eq('is_complimentary', false)
         .is('payment_batch_id', null)
         .is('lesson_package_id', null)
         .order('start_time', { ascending: false });
@@ -294,9 +344,11 @@ export default function CompanyFinance() {
     setStripeLoading(false);
   };
 
-  const verifyStripe = async () => {
+  /** Re-check the live Stripe status. silent=true skips toasts (used for the on-load auto-check). */
+  const checkStripeStatus = async (opts?: { silent?: boolean }) => {
     if (!orgId) return;
-    setStripeLoading(true);
+    const silent = opts?.silent ?? false;
+    setStripeChecking(true);
     try {
       const res = await fetch('/api/stripe-connect', {
         method: 'POST', headers: await authHeaders(),
@@ -304,16 +356,21 @@ export default function CompanyFinance() {
       });
       const json = await res.json();
       if (json.complete) {
+        setStripeStatus(null);
         invalidateCache('company_finance');
         await fetchFinanceSettings({ background: true });
-        setToastMessage({ message: t('companyFinance.stripeConnected'), type: 'success' });
+        if (!silent) setToastMessage({ message: t('companyFinance.stripeConnected'), type: 'success' });
+      } else if (json.pendingVerification) {
+        setStripeStatus('pending');
+        if (!silent) setToastMessage({ message: t('companyFinance.stripePendingVerification'), type: 'warning' });
       } else {
-        setToastMessage({ message: t('companyFinance.stripeIncomplete'), type: 'error' });
+        setStripeStatus('incomplete');
+        if (!silent) setToastMessage({ message: t('companyFinance.stripeIncomplete'), type: 'error' });
       }
     } catch {
-      setToastMessage({ message: 'Nepavyko patikrinti Stripe statuso.', type: 'error' });
+      if (!silent) setToastMessage({ message: t('companyFinance.stripeCheckFailed'), type: 'error' });
     }
-    setStripeLoading(false);
+    setStripeChecking(false);
   };
 
   if (loading || orgFeaturesLoading) {
@@ -390,6 +447,46 @@ export default function CompanyFinance() {
                 {stripeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
                 {t('companyFinance.manageStripe')}
               </Button>
+            </div>
+          ) : stripeAccountId ? (
+            <div className="space-y-3">
+              {stripeStatus === 'pending' ? (
+                <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                  <Clock className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-blue-900">{t('companyFinance.stripePendingTitle')}</p>
+                    <p className="text-xs text-blue-800 mt-1">{t('companyFinance.stripePendingBody')}</p>
+                  </div>
+                </div>
+              ) : stripeChecking && stripeStatus === null ? (
+                <div className="flex items-center gap-3 p-4 bg-gray-50 border border-gray-200 rounded-xl">
+                  <Loader2 className="w-5 h-5 text-gray-500 flex-shrink-0 animate-spin" />
+                  <p className="text-sm text-gray-700">{t('companyFinance.stripeCheckingStatus')}</p>
+                </div>
+              ) : (
+                <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                  <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800">{t('companyFinance.stripeIncompleteTitle')}</p>
+                    <p className="text-xs text-amber-700 mt-1">{t('companyFinance.stripeIncompleteBody')}</p>
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" className="rounded-xl gap-2"
+                  onClick={() => void checkStripeStatus()} disabled={stripeChecking}>
+                  {stripeChecking ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  {t('companyFinance.checkStripeStatus')}
+                </Button>
+                {stripeStatus !== 'pending' && (
+                  <Button size="sm" className="rounded-xl gap-2 bg-violet-600 hover:bg-violet-700"
+                    onClick={() => handleStripeAction('onboard')} disabled={stripeLoading}>
+                    {stripeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
+                    {t('companyFinance.continueStripeSetup')}
+                  </Button>
+                )}
+              </div>
+              {stripeError && <p className="text-sm text-red-600">{stripeError}</p>}
             </div>
           ) : (
             <div className="space-y-3">
@@ -497,6 +594,19 @@ export default function CompanyFinance() {
                 </div>
               )}
             </div>
+
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-1 w-4 h-4 rounded border-gray-300 text-violet-600"
+                checked={enablePerStudentPaymentOverride}
+                onChange={(e) => setEnablePerStudentPaymentOverride(e.target.checked)}
+              />
+              <span className="text-sm text-gray-800">
+                <span className="font-medium">{t('finance.perStudentOverride')}</span>
+                <span className="block text-xs text-gray-500">{t('finance.perStudentOverrideDesc')}</span>
+              </span>
+            </label>
           </div>
           <div className="flex justify-end pt-2 border-t border-gray-100">
             <Button onClick={handleSaveFinance} className="gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700">
@@ -616,7 +726,7 @@ export default function CompanyFinance() {
             {invoiceScope === 'selected_tutors' && (
               <div className="space-y-1.5">
                 <Label>{t('companyFinance.tutorsLabel')}</Label>
-                <div className="border rounded-xl p-3 max-h-36 overflow-y-auto space-y-2">
+                <div className={cn('border rounded-xl p-3 space-y-2', ORG_TUTOR_FILTER_SCROLL_CLASS)}>
                   {orgTutors.map(tu => (
                     <label key={tu.id} className="flex items-center gap-2 text-sm cursor-pointer">
                       <input
@@ -702,7 +812,7 @@ export default function CompanyFinance() {
                               </div>
                             </div>
                             <div className="flex items-center gap-2 flex-shrink-0">
-                              <span className="text-sm font-bold text-gray-900">{`€${totalPrice.toFixed(2)}`}</span>
+                              <span className="text-sm font-bold text-gray-900">{fmt(totalPrice)}</span>
                               {isExpanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
                             </div>
                           </button>
@@ -711,14 +821,14 @@ export default function CompanyFinance() {
                               {sList.map((s: any) => (
                                 <div key={s.id} className="px-6 py-2 flex justify-between text-xs border-b border-gray-100 last:border-b-0">
                                   <div className="flex gap-2 min-w-0">
-                                    <span className="text-gray-500 shrink-0">{new Date(s.start_time).toLocaleDateString('lt-LT')}</span>
+                                    <span className="text-gray-500 shrink-0">{format(new Date(s.start_time), 'P', { locale: dateFnsLocale })}</span>
                                     <span className="text-gray-600 truncate">
                                       {s.invoice_row_kind === 'package'
                                         ? `${t('companyFinance.packageRowLabel')}${s.subjects?.name ? ` · ${s.subjects.name}` : ''}${s.total_lessons != null ? ` (${s.total_lessons})` : ''}`
                                         : s.subjects?.name || '–'}
                                     </span>
                                   </div>
-                                  <span className="font-medium text-gray-700 shrink-0">{s.price != null ? `€${Number(s.price).toFixed(2)}` : '–'}</span>
+                                  <span className="font-medium text-gray-700 shrink-0">{s.price != null ? fmt(Number(s.price)) : '–'}</span>
                                 </div>
                               ))}
                             </div>

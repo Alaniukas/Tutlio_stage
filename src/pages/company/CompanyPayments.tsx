@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
-import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DateInput } from '@/components/ui/date-input';
 import { Label } from '@/components/ui/label';
 import {
   Dialog,
@@ -21,107 +20,50 @@ import {
 } from '@/components/ui/select';
 import { Plus, CreditCard, Send, CheckCircle, Clock, AlertCircle, Trash2, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import Toast from '@/components/Toast';
-import { authHeaders } from '@/lib/apiHelpers';
+import { supabase } from '@/lib/supabase';
 import { sendEmail } from '@/lib/email';
+import { authHeaders } from '@/lib/apiHelpers';
+import { schoolContractAllowsInstallmentPayment } from '@/lib/schoolContractPaymentGate';
 import { useTranslation } from '@/lib/i18n';
-
-interface Contract {
-  id: string;
-  student_id: string;
-  annual_fee: number;
-  signing_status: string;
-  student?: { full_name: string; email: string; payer_email: string | null; payer_name: string | null };
-}
-
-interface Installment {
-  id: string;
-  contract_id: string;
-  installment_number: number;
-  amount: number;
-  due_date: string;
-  payment_status: 'pending' | 'paid' | 'overdue' | 'failed';
-  stripe_checkout_session_id: string | null;
-  paid_at: string | null;
-  created_at: string;
-  contract?: Contract;
-}
+import { useSchoolPaymentsData, type SchoolPaymentInstallment } from '@/hooks/useSchoolPaymentsData';
+import { format } from 'date-fns';
 
 interface NewInstallmentRow {
   amount: string;
   due_date: string;
 }
 
-const PAYMENTS_CACHE_KEY = 'company_payments';
-
 export default function CompanyPayments() {
-  const { t } = useTranslation();
+  const { t, dateFnsLocale } = useTranslation();
   const location = useLocation();
-  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
-  const pc = getCached<any>(PAYMENTS_CACHE_KEY);
-  const [orgId, setOrgId] = useState<string | null>(pc?.orgId ?? null);
-  const [orgName, setOrgName] = useState(pc?.orgName ?? '');
-  const [orgEmail, setOrgEmail] = useState(pc?.orgEmail ?? '');
-  const [contracts, setContracts] = useState<Contract[]>(pc?.contracts ?? []);
-  const [installments, setInstallments] = useState<Installment[]>(pc?.installments ?? []);
-  const [loading, setLoading] = useState(!pc);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const {
+    orgId,
+    orgName,
+    orgEmail,
+    orgContactEmail,
+    orgStripeConnected,
+    contracts,
+    installments,
+    loading,
+    reload,
+    setInstallments,
+  } = useSchoolPaymentsData();
 
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [selectedContractId, setSelectedContractId] = useState('');
   const [rows, setRows] = useState<NewInstallmentRow[]>([{ amount: '', due_date: '' }]);
   const [saving, setSaving] = useState(false);
   const [sendingId, setSendingId] = useState<string | null>(null);
+  const [markingId, setMarkingId] = useState<string | null>(null);
   const [collapsedContracts, setCollapsedContracts] = useState<Record<string, boolean>>({});
 
-  useEffect(() => { load(); }, []);
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get('success') === '1' || params.get('cancelled') === '1' || params.get('installment')) {
       reload();
     }
-  }, [location.search]);
-
-  const load = async () => {
-    if (!getCached(PAYMENTS_CACHE_KEY)) setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
-
-    const { data: admin } = await supabase
-      .from('organization_admins')
-      .select('organization_id, organizations(name, email)')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (!admin?.organization_id) { setLoading(false); return; }
-    setOrgId(admin.organization_id);
-    const name = (admin.organizations as any)?.name || '';
-    const email = (admin.organizations as any)?.email || '';
-    setOrgName(name);
-    setOrgEmail(email);
-
-    const [cRes, iRes] = await Promise.all([
-      supabase
-        .from('school_contracts')
-        .select('id, student_id, annual_fee, signing_status, archived_at, student:students(full_name, email, payer_email, payer_name)')
-        .eq('organization_id', admin.organization_id)
-        .is('archived_at', null)
-        .eq('signing_status', 'signed')
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('school_payment_installments')
-        .select('*, contract:school_contracts(id, student_id, annual_fee, signing_status, organization_id, archived_at, student:students(full_name, email, payer_email, payer_name))')
-        .order('due_date', { ascending: true }),
-    ]);
-
-    const cData = cRes.data || [];
-    const filtered = (iRes.data || []).filter((i: any) => i.contract?.organization_id === admin.organization_id && !i.contract?.archived_at);
-    setContracts(cData as unknown as Contract[]);
-    setInstallments(filtered);
-    setCache(PAYMENTS_CACHE_KEY, { orgId: admin.organization_id, orgName: name, orgEmail: email, contracts: cData, installments: filtered });
-    setLoading(false);
-  };
-
-  const reload = () => { invalidateCache(PAYMENTS_CACHE_KEY); load(); };
+  }, [location.search, reload]);
 
   const addRow = () => setRows([...rows, { amount: '', due_date: '' }]);
   const removeRow = (idx: number) => setRows(rows.filter((_, i) => i !== idx));
@@ -163,72 +105,91 @@ export default function CompanyPayments() {
     reload();
   };
 
-  const sendPaymentLink = async (installment: Installment) => {
+  const sendPaymentLink = async (installment: SchoolPaymentInstallment) => {
     setSendingId(installment.id);
     try {
-      const hdrs = await authHeaders();
-      const resp = await fetch('/api/create-school-installment-checkout', {
-        method: 'POST',
-        headers: { ...hdrs, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ installmentId: installment.id, returnPath: `${orgBasePath}/contracts` }),
-      });
-
-      const json = await resp.json().catch(() => ({}));
-      const paymentUrl = resp.ok && typeof json?.url === 'string' ? json.url : undefined;
-      const checkoutFailText = (() => {
-        if (paymentUrl) return undefined;
-        const raw =
-          (typeof json?.message === 'string' && json.message.trim()) ||
-          (typeof json?.error === 'string' && json.error) ||
-          `HTTP ${resp.status}`;
-        const code = typeof json?.code === 'string' ? json.code : '';
-        return code ? `${raw} (${code})` : raw;
-      })();
-
       const contract = installment.contract as any;
+      if (!schoolContractAllowsInstallmentPayment(contract?.signing_status)) {
+        setToast({ message: t('school.toastPaymentContractUnsigned'), type: 'error' });
+        setSendingId(null);
+        return;
+      }
       const student = contract?.student;
       const recipient = student?.payer_email || student?.email;
 
-      if (recipient) {
-        const totalInstallments = installments.filter((i) => i.contract_id === installment.contract_id).length;
-        const emailed = await sendEmail({
-          type: 'school_installment_request',
-          to: recipient,
-          data: {
-            schoolName: orgName,
-            schoolEmail: orgEmail,
-            studentName: student?.full_name || '',
-            parentName: student?.payer_name || student?.full_name || '',
-            recipientName: student?.payer_name || student?.full_name || '',
-            installmentNumber: installment.installment_number,
-            totalInstallments,
-            amount: Number(installment.amount).toFixed(2),
-            dueDate: new Date(installment.due_date).toLocaleDateString('lt-LT'),
-            ...(paymentUrl ? { paymentUrl } : {}),
-            ...(orgId ? { organizationId: orgId } : {}),
-          },
-        });
-        if (!emailed) {
-          setToast({ message: t('school.toastInstallmentEmailFail'), type: 'error' });
-          setSendingId(null);
-          return;
-        }
-        setToast({
-          message: paymentUrl
-            ? t('school.toastPaymentLinkSent')
-            : `${t('school.toastInstallmentInfoSentNoCheckout')} (${checkoutFailText})`,
-          type: 'success',
-        });
-      } else if (paymentUrl) {
-        window.open(paymentUrl, '_blank');
+      if (!recipient) {
+        window.open(`/api/pay-school-installment?installment=${installment.id}`, '_blank');
         setToast({ message: t('school.toastCheckoutCreated'), type: 'success' });
-      } else {
-        setToast({ message: checkoutFailText || t('school.toastPaymentError'), type: 'error' });
+        setSendingId(null);
+        return;
       }
+
+      const totalInstallments = installments.filter((i) => i.contract_id === installment.contract_id).length;
+      const emailed = await sendEmail({
+        type: 'school_installment_request',
+        to: recipient,
+        data: {
+          schoolName: orgName,
+          schoolEmail: orgEmail,
+          contactEmail: orgContactEmail || orgEmail,
+          studentName: student?.full_name || '',
+          parentName: student?.payer_name || student?.full_name || '',
+          recipientName: student?.payer_name || student?.full_name || '',
+          installmentNumber: installment.installment_number,
+          totalInstallments,
+          amount: Number(installment.amount).toFixed(2),
+          dueDate: format(new Date(installment.due_date), 'P', { locale: dateFnsLocale }),
+          installmentId: installment.id,
+          additionalFeeAmount: Number(contract?.additional_fee_amount || 0) > 0
+            ? Number(contract.additional_fee_amount).toFixed(2)
+            : undefined,
+          additionalFeePurpose: contract?.additional_fee_purpose || undefined,
+          contractAnnualFee: Number(contract?.annual_fee || 0).toFixed(2),
+          ...(orgId ? { organizationId: orgId } : {}),
+        },
+      });
+      if (!emailed) {
+        setToast({ message: t('school.toastInstallmentEmailFail'), type: 'error' });
+        setSendingId(null);
+        return;
+      }
+      setToast({
+        message: orgStripeConnected
+          ? t('school.toastPaymentLinkSent')
+          : t('school.toastInstallmentInfoSentNoCheckout'),
+        type: orgStripeConnected ? 'success' : 'error',
+      });
     } catch {
       setToast({ message: t('school.toastPaymentError'), type: 'error' });
     }
     setSendingId(null);
+  };
+
+  const markInstallmentPaid = async (installment: SchoolPaymentInstallment) => {
+    const contract = installment.contract as any;
+    if (!schoolContractAllowsInstallmentPayment(contract?.signing_status)) {
+      setToast({ message: t('school.toastPaymentContractUnsigned'), type: 'error' });
+      return;
+    }
+    if (!confirm(t('school.confirmMarkInstallmentPaid'))) return;
+    setMarkingId(installment.id);
+    try {
+      const resp = await fetch('/api/confirm-school-installment-manual', {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installmentId: installment.id }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setToast({ message: String(json?.error || t('school.toastError', { msg: resp.status })), type: 'error' });
+        return;
+      }
+      setToast({ message: t('school.toastInstallmentMarkedPaid'), type: 'success' });
+      reload();
+    } catch {
+      setToast({ message: t('school.toastPaymentError'), type: 'error' });
+    }
+    setMarkingId(null);
   };
 
   const deleteInstallment = async (id: string) => {
@@ -237,7 +198,7 @@ export default function CompanyPayments() {
     setInstallments((prev) => prev.filter((i) => i.id !== id));
   };
 
-  const statusBadge = (s: Installment['payment_status']) => {
+  const statusBadge = (s: SchoolPaymentInstallment['payment_status']) => {
     const map = {
       pending: { label: t('school.payStatusPending'), cls: 'bg-gray-100 text-gray-600', icon: Clock },
       paid: { label: t('school.payStatusPaid'), cls: 'bg-green-50 text-green-700', icon: CheckCircle },
@@ -248,7 +209,7 @@ export default function CompanyPayments() {
     return <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}><Icon className="w-3 h-3" />{label}</span>;
   };
 
-  const grouped = installments.reduce<Record<string, Installment[]>>((acc, i) => {
+  const grouped = installments.reduce<Record<string, SchoolPaymentInstallment[]>>((acc, i) => {
     const key = i.contract_id;
     if (!acc[key]) acc[key] = [];
     acc[key].push(i);
@@ -314,7 +275,7 @@ export default function CompanyPayments() {
                         className="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-900 px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
                       >
                         {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-                        {isCollapsed ? 'Išskleisti' : 'Suskleisti'}
+                        {isCollapsed ? t('stuSess.showMore') : t('stuSess.showLess')}
                       </button>
                     </div>
                   </div>
@@ -327,16 +288,28 @@ export default function CompanyPayments() {
                         <span className="text-sm font-medium text-gray-700 w-6 text-center">#{inst.installment_number}</span>
                         <div>
                           <p className="text-sm font-medium text-gray-900">&euro;{Number(inst.amount).toFixed(2)}</p>
-                          <p className="text-xs text-gray-400">{t('school.dueLabel')} {new Date(inst.due_date).toLocaleDateString('lt-LT')}</p>
+                          <p className="text-xs text-gray-400">{t('school.dueLabel')} {format(new Date(inst.due_date), 'P', { locale: dateFnsLocale })}</p>
                         </div>
                         {statusBadge(inst.payment_status)}
-                        {inst.paid_at && <span className="text-xs text-gray-400">{t('school.paidLabel')} {new Date(inst.paid_at).toLocaleDateString('lt-LT')}</span>}
+                        {inst.paid_at && <span className="text-xs text-gray-400">{t('school.paidLabel')} {format(new Date(inst.paid_at), 'P', { locale: dateFnsLocale })}</span>}
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {inst.payment_status !== 'paid' && (
-                          <Button size="sm" variant="outline" onClick={() => sendPaymentLink(inst)} disabled={sendingId === inst.id}>
+                          <Button size="sm" variant="outline" onClick={() => sendPaymentLink(inst)} disabled={sendingId === inst.id || markingId === inst.id}>
                             {sendingId === inst.id ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Send className="w-3.5 h-3.5 mr-1.5" />}
                             {t('school.sendLink')}
+                          </Button>
+                        )}
+                        {inst.payment_status !== 'paid' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => markInstallmentPaid(inst)}
+                            disabled={markingId === inst.id || sendingId === inst.id}
+                            className="text-green-700 border-green-200 hover:bg-green-50"
+                          >
+                            {markingId === inst.id ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <CheckCircle className="w-3.5 h-3.5 mr-1.5" />}
+                            {t('compSch.markPaid')}
                           </Button>
                         )}
                         {inst.payment_status !== 'paid' && (
@@ -399,7 +372,7 @@ export default function CompanyPayments() {
                   </div>
                   <div className="flex-1 space-y-1">
                     <Label className="text-xs">{t('school.dueDateField')}</Label>
-                    <Input type="date" value={row.due_date} onChange={(e) => updateRow(idx, 'due_date', e.target.value)} />
+                    <DateInput value={row.due_date} onChange={(e) => updateRow(idx, 'due_date', e.target.value)} className="rounded-xl" />
                   </div>
                   {rows.length > 1 && (
                     <button onClick={() => removeRow(idx)} className="p-2 text-gray-400 hover:text-red-500">

@@ -1,0 +1,24 @@
+{
+  "asset": "digital-business-card-facebook",
+  "sourceFormat": "png",
+  "deliveryFormat": "webp",
+  "dimensions": {
+    "width": 1122,
+    "height": 1402
+  },
+  "locales": {
+    "lt": "lt-digital-business-card-facebook.webp",
+    "en": "en-digital-business-card-facebook.webp",
+    "pl": "pl-digital-business-card-facebook.webp",
+    "lv": "lv-digital-business-card-facebook.webp",
+    "ee": "ee-digital-business-card-facebook.webp",
+    "fr": "fr-digital-business-card-facebook.webp",
+    "es": "es-digital-business-card-facebook.webp",
+    "de": "de-digital-business-card-facebook.webp",
+    "se": "se-digital-business-card-facebook.webp",
+    "dk": "dk-digital-business-card-facebook.webp",
+    "fi": "fi-digital-business-card-facebook.webp",
+    "no": "no-digital-business-card-facebook.webp",
+    "nl": "nl-digital-business-card-facebook.webp"
+  }
+}

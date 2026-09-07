@@ -10,33 +10,29 @@ import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
-
-const STRIPE_FEE_PERCENT = 0.015;
-const STRIPE_FEE_FIXED_EUR = 0.25;
-const PLATFORM_FEE_PERCENT = 0.02;
-
-function customerTotalEur(basePriceEur: number): number {
-    const platformFeeEur = basePriceEur * PLATFORM_FEE_PERCENT;
-    return (basePriceEur + platformFeeEur + STRIPE_FEE_FIXED_EUR) / (1 - STRIPE_FEE_PERCENT);
-}
-
-function lessonCheckoutBreakdownCents(basePriceEur: number): { baseCents: number; feesCents: number } {
-    const totalEur = customerTotalEur(basePriceEur);
-    const totalCents = Math.round(totalEur * 100);
-    const baseCents = Math.round(basePriceEur * 100);
-    const feesCents = totalCents - baseCents;
-    return { baseCents, feesCents };
-}
+import { marketFromRequest } from './_lib/market.js';
+import {
+  chargeCurrency,
+  lessonCheckoutBreakdownCents,
+  checkoutBaseMetadata,
+  creditNote,
+  orgFeeProfile,
+  type OrgFeeProfile,
+} from './_lib/marketMoney.js';
+import { publicOriginFromRequest } from './_lib/public-origin.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
     process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+
+    const market = marketFromRequest(req);
+    const currency = chargeCurrency(market);
+    const appOrigin = publicOriginFromRequest(req);
 
     const sessionId = typeof req.query.session === 'string' ? req.query.session.trim() : '';
     if (!sessionId) return res.status(400).send(errorPage('Klaida', 'Trūksta pamokos identifikatoriaus.'));
@@ -68,19 +64,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const tutor = session.profiles as any;
         const student = session.students as any;
 
+        const studentPaymentModelRaw = String(student?.payment_model || '').trim();
+        const allowsPerLessonPayment =
+            !studentPaymentModelRaw ||
+            studentPaymentModelRaw
+                .split(',')
+                .map((part: string) => part.trim())
+                .includes('per_lesson');
+
+        if (!allowsPerLessonPayment) {
+            return res.status(400).send(
+                errorPage(
+                    'Apmokėjimas nereikalingas',
+                    'Šiam mokiniui taikomas mėnesinis arba paketinis atsiskaitymas. Pamoką apmokėsite gavę mėnesinę sąskaitą.',
+                ),
+            );
+        }
+
         if (tutorUsesManualStudentPayments(tutor)) {
-            return res.redirect(302, `${APP_URL}/student/sessions`);
+            return res.redirect(302, `${appOrigin}/student/sessions`);
         }
 
         // 2. Determine Stripe account
         let stripeAccountId: string | null = null;
         let ownerName = tutor?.full_name || 'Korepetitorius';
         let useSchoolOrgAbsorbedFees = false;
+        let feeProfile: OrgFeeProfile | null = null;
 
         if (tutor?.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug')
                 .eq('id', tutor.organization_id)
                 .single();
             if (!org?.stripe_onboarding_complete || !org.stripe_account_id) {
@@ -88,7 +102,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
-            useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school';
+            feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
+            // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
+            useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school' && !feeProfile;
         } else {
             if (!tutor?.stripe_onboarding_complete || !tutor?.stripe_account_id) {
                 return res.status(500).send(errorPage('Klaida', 'Korepetitoriaus mokėjimo paskyra nėra prijungta.'));
@@ -96,19 +112,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             stripeAccountId = tutor.stripe_account_id;
         }
 
-        // 3. Try to reuse existing Stripe session if still open
-        if (session.stripe_checkout_session_id) {
-            try {
-                const existing = await stripe.checkout.sessions.retrieve(session.stripe_checkout_session_id);
-                if (existing.status === 'open' && existing.url) {
-                    return res.redirect(303, existing.url);
-                }
-            } catch {
-                // expired or invalid — create new below
-            }
-        }
-
-        // 4. Calculate price (apply credit balance)
+        // 3. Calculate price (apply credit balance)
         const rawPriceEur = session.price ?? 25;
         const creditBalance = Number(student?.credit_balance || 0);
         const creditToApply = Math.min(creditBalance, rawPriceEur);
@@ -120,52 +124,80 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(200).send(errorPage('Pamoka apmokėta ✓', 'Pamoka buvo apmokėta naudojant turimą kreditą.'));
         }
 
+        // Expected Stripe total (in cents) for the CURRENT price/credit.
+        let expectedTotalCents: number;
+        if (useSchoolOrgAbsorbedFees) {
+            expectedTotalCents = schoolInstallmentCheckoutCents(basePriceEur, market).chargeCents;
+        } else {
+            const breakdown = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
+            expectedTotalCents = breakdown.baseCents + breakdown.feesCents;
+        }
+
+        // 4. Reuse the existing Stripe session only if it is still open AND its amount matches
+        //    the current price. If the lesson price changed after the checkout was created
+        //    (e.g. the tutor extended a single lesson into a double one and raised the price),
+        //    the stale session is expired so the payer is charged the up-to-date amount
+        //    instead of the old, smaller one.
+        if (session.stripe_checkout_session_id) {
+            try {
+                const existing = await stripe.checkout.sessions.retrieve(session.stripe_checkout_session_id);
+                if (existing.status === 'open' && existing.url && existing.amount_total === expectedTotalCents) {
+                    return res.redirect(303, existing.url);
+                }
+                if (existing.status === 'open') {
+                    await stripe.checkout.sessions.expire(session.stripe_checkout_session_id).catch(() => {});
+                }
+            } catch {
+                // expired or invalid — create new below
+            }
+        }
+
         if (creditToApply > 0) {
             await supabase.from('sessions').update({ credit_applied_amount: creditToApply }).eq('id', sessionId);
         }
 
         const customerEmail = student?.payer_email || undefined;
         const itemName = session.topic || 'Pamoka';
-        const creditNote = creditToApply > 0 ? ` (kreditas -€${creditToApply.toFixed(2)})` : '';
-        const itemDesc = `Pamoka – ${ownerName}${creditNote}`;
+        const creditNoteStr = creditToApply > 0 ? creditNote(creditToApply, market) : '';
+        const itemDesc = `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}${creditNoteStr}`;
 
         // 5. Create Stripe Checkout Session
         let checkoutSession: Stripe.Checkout.Session;
 
         if (useSchoolOrgAbsorbedFees) {
-            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur);
+            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
             const applicationFeeCents = chargeCents - transferToSchoolCents;
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
                 payment_method_types: ['card'],
-                line_items: [{ price_data: { currency: 'eur', product_data: { name: itemName, description: itemDesc }, unit_amount: chargeCents }, quantity: 1 }],
+                line_items: [{ price_data: { currency, product_data: { name: itemName, description: itemDesc }, unit_amount: chargeCents }, quantity: 1 }],
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
                     transfer_data: { destination: stripeAccountId! },
                     metadata: { tutlio_session_id: sessionId, tutlio_school_org_absorbed: 'true' },
                 },
                 metadata: { tutlio_session_id: sessionId, tutlio_school_org_absorbed: 'true' },
-                success_url: `${APP_URL}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${APP_URL}/student/sessions`,
+                success_url: `${appOrigin}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${appOrigin}/student/sessions`,
             });
         } else {
-            const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur);
+            const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
                 payment_method_types: ['card'],
                 line_items: [
-                    { price_data: { currency: 'eur', product_data: { name: itemName, description: itemDesc }, unit_amount: baseCents }, quantity: 1 },
-                    { price_data: { currency: 'eur', product_data: { name: 'Platformos administravimo mokestis', description: 'Platform administration and payment processing fee' }, unit_amount: feesCents }, quantity: 1 },
+                    { price_data: { currency, product_data: { name: itemName, description: itemDesc }, unit_amount: baseCents }, quantity: 1 },
+                    { price_data: { currency, product_data: { name: 'Platformos administravimo mokestis', description: 'Paslaugos teikėjas: MB „Tutlio“' }, unit_amount: feesCents }, quantity: 1 },
                 ],
                 payment_intent_data: {
                     transfer_data: { destination: stripeAccountId!, amount: baseCents },
                     metadata: { tutlio_session_id: sessionId },
                 },
-                metadata: { tutlio_session_id: sessionId },
-                success_url: `${APP_URL}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${APP_URL}/student/sessions`,
+                metadata: { tutlio_session_id: sessionId, ...checkoutBaseMetadata(baseCents / 100, market) },
+                success_url: `${appOrigin}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${appOrigin}/student/sessions`,
             });
         }
 

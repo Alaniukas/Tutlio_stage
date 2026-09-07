@@ -17,6 +17,10 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
+import { fmtMoney, isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { sumProKlasePayBreakdown, type ProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
+import { parseTutorPayBySubject, sumOrgTutorLessonsPayEur } from '@/lib/orgTutorLessonPay';
+import { useUser } from '@/contexts/UserContext';
 import InvoiceSettingsForm from '@/components/InvoiceSettingsForm';
 import CreateInvoiceModal from '@/components/CreateInvoiceModal';
 import {
@@ -59,6 +63,9 @@ interface Invoice {
 
 export default function OrgTutorFinanceSummary() {
   const { t, dateFnsLocale } = useTranslation();
+  const { profile } = useUser();
+  const proKlasePayMode = isProKlaseOrg(profile?.organization_id);
+  const manoPayMode = isManoKorepetitoriusOrg(profile?.organization_id);
   const { payPerLessonEur, loading: policyLoading, invoiceIssuerMode } = useOrgTutorPolicy();
   const tutorCanIssueInvoice = invoiceIssuerMode !== 'company';
 
@@ -68,6 +75,9 @@ export default function OrgTutorFinanceSummary() {
   const [rangeEnd, setRangeEnd] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [rangeError, setRangeError] = useState<string | null>(null);
   const [completedCount, setCompletedCount] = useState(0);
+  const [payBreakdown, setPayBreakdown] = useState<ProKlasePayBreakdown | null>(null);
+  const [manoPayEur, setManoPayEur] = useState<number | null>(null);
+  const [manoHasSubjectRates, setManoHasSubjectRates] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -143,12 +153,104 @@ export default function OrgTutorFinanceSummary() {
         endIso = b.toISOString();
       }
 
-      const { count, error } = await supabase
+      let breakdown: ProKlasePayBreakdown | null = null;
+      let manoTotal: number | null = null;
+      let manoHasSubjectRatesLocal = false;
+      let conductedCount = 0;
+
+      if (proKlasePayMode) {
+        const { data: sessionRows, error: sessionErr } = await supabase
+          .from('sessions')
+          .select('id, status, price, is_complimentary, subjects(is_trial)')
+          .eq('tutor_id', user.id)
+          .in('status', ['completed', 'no_show'])
+          .lte('end_time', new Date().toISOString())
+          .gte('start_time', startIso)
+          .lte('start_time', endIso);
+
+        let adjustmentsEur = 0;
+        if (profile?.organization_id) {
+          const { data: adjRows } = await supabase
+            .from('tutor_adjustments')
+            .select('amount_eur')
+            .eq('tutor_id', user.id)
+            .eq('organization_id', profile.organization_id)
+            .gte('created_at', startIso)
+            .lte('created_at', endIso);
+          adjustmentsEur = (adjRows || []).reduce(
+            (sum, row) => sum + (Number((row as { amount_eur?: number }).amount_eur) || 0),
+            0,
+          );
+        }
+
+        breakdown = sumProKlasePayBreakdown(
+          (sessionRows || []) as any[],
+          payPerLessonEur,
+          adjustmentsEur,
+        );
+        conductedCount = (sessionRows || []).length;
+        if (cancelled) return;
+        if (sessionErr) {
+          console.error('[OrgTutorFinanceSummary]', sessionErr);
+          setCompletedCount(0);
+          setPayBreakdown(null);
+          setManoPayEur(null);
+          setManoHasSubjectRates(false);
+        } else {
+          setCompletedCount(conductedCount);
+          setPayBreakdown(breakdown);
+          setManoPayEur(null);
+          setManoHasSubjectRates(false);
+        }
+        setLoading(false);
+        return;
+      }
+
+      if (manoPayMode) {
+        const { data: sessionRows, error: sessionErr } = await supabase
+          .from('sessions')
+          .select('id, status, price, subject_id')
+          .eq('tutor_id', user.id)
+          .in('status', ['completed', 'no_show'])
+          .lte('end_time', new Date().toISOString())
+          .gte('start_time', startIso)
+          .lte('start_time', endIso);
+        const { data: payProfile } = await supabase
+          .from('profiles')
+          .select('company_commission_by_subject')
+          .eq('id', user.id)
+          .maybeSingle();
+        const bySubject = parseTutorPayBySubject((payProfile as any)?.company_commission_by_subject);
+        manoHasSubjectRatesLocal = Object.keys(bySubject).length > 0;
+        manoTotal = sumOrgTutorLessonsPayEur(
+          (sessionRows || []) as Array<{ subject_id?: string | null; price?: number | null }>,
+          payPerLessonEur,
+          bySubject,
+          profile?.organization_id,
+        );
+        conductedCount = (sessionRows || []).length;
+        if (cancelled) return;
+        if (sessionErr) {
+          console.error('[OrgTutorFinanceSummary]', sessionErr);
+          setCompletedCount(0);
+          setPayBreakdown(null);
+          setManoPayEur(null);
+          setManoHasSubjectRates(false);
+        } else {
+          setCompletedCount(conductedCount);
+          setPayBreakdown(null);
+          setManoPayEur(manoTotal);
+          setManoHasSubjectRates(manoHasSubjectRatesLocal);
+        }
+        setLoading(false);
+        return;
+      }
+
+      const { data: genericRows, error } = await supabase
         .from('sessions')
-        .select('*', { count: 'estimated', head: true })
+        .select('id, status')
         .eq('tutor_id', user.id)
-        .neq('status', 'cancelled')
-        .neq('status', 'no_show')
+        .eq('status', 'completed')
         .lte('end_time', new Date().toISOString())
         .gte('start_time', startIso)
         .lte('start_time', endIso);
@@ -157,8 +259,14 @@ export default function OrgTutorFinanceSummary() {
       if (error) {
         console.error('[OrgTutorFinanceSummary]', error);
         setCompletedCount(0);
+        setPayBreakdown(null);
+        setManoPayEur(null);
+        setManoHasSubjectRates(false);
       } else {
-        setCompletedCount(count ?? 0);
+        setCompletedCount((genericRows || []).length);
+        setPayBreakdown(null);
+        setManoPayEur(null);
+        setManoHasSubjectRates(false);
       }
       setLoading(false);
     };
@@ -168,7 +276,7 @@ export default function OrgTutorFinanceSummary() {
     return () => {
       cancelled = true;
     };
-  }, [month, periodMode, rangeStart, rangeEnd, policyLoading]);
+  }, [month, periodMode, rangeStart, rangeEnd, policyLoading, proKlasePayMode, manoPayMode, payPerLessonEur, profile?.organization_id, t]);
 
   const fetchInvoices = useCallback(async () => {
     const user = await dedupeAuthGetUser();
@@ -234,7 +342,7 @@ export default function OrgTutorFinanceSummary() {
     );
   };
 
-  const gross = completedCount * payPerLessonEur;
+  const gross = payBreakdown?.totalEur ?? manoPayEur ?? completedCount * payPerLessonEur;
 
   return (
     <div className="space-y-6">
@@ -247,7 +355,9 @@ export default function OrgTutorFinanceSummary() {
           <div>
             <h2 className="text-lg font-bold text-gray-900">{t('orgFinance.yourPay')}</h2>
             <p className="text-xs text-gray-500">
-              {t('orgFinance.fixedPayPerLesson', { amount: payPerLessonEur.toFixed(2) })}
+              {manoHasSubjectRates
+                ? t('orgFinance.payUsesSubjectRates', { amount: payPerLessonEur.toFixed(2) })
+                : t('orgFinance.fixedPayPerLesson', { amount: payPerLessonEur.toFixed(2) })}
             </p>
           </div>
         </div>
@@ -274,7 +384,7 @@ export default function OrgTutorFinanceSummary() {
               )}
             >
               <CalendarRange className="w-4 h-4" />
-              {t('orgFinance.dateRange', { days: MAX_RANGE_DAYS })}
+              {t('orgFinance.dateRange')}
             </button>
           </div>
 
@@ -324,10 +434,35 @@ export default function OrgTutorFinanceSummary() {
             <div className="flex items-center gap-2 mt-4 pt-4 border-t border-gray-200">
               <Euro className="w-5 h-5 text-emerald-600" />
               <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wide">{t('orgFinance.approxInvoiceAmount')}</p>
-                <p className="text-xl font-bold text-emerald-700">{gross.toFixed(2)} €</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wide">
+                  {proKlasePayMode ? t('orgFinance.payableTotal') : t('orgFinance.approxInvoiceAmount')}
+                </p>
+                <p className="text-xl font-bold text-emerald-700">{fmtMoney(gross)}</p>
               </div>
             </div>
+            {proKlasePayMode && payBreakdown && (
+              <div className="mt-4 space-y-2 text-sm">
+                <p className="font-medium text-gray-700">{t('orgFinance.payBreakdown')}</p>
+                <div className="flex justify-between text-gray-600">
+                  <span>{t('orgFinance.individualLessons')} ({payBreakdown.individualLessons})</span>
+                  <span>{fmtMoney(payBreakdown.individualEur)}</span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>{t('orgFinance.trialLessons')} ({payBreakdown.trialLessons})</span>
+                  <span>{fmtMoney(payBreakdown.trialEur)}</span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>{t('orgFinance.noShowLessons')} ({payBreakdown.noShowLessons})</span>
+                  <span>{fmtMoney(payBreakdown.noShowEur)}</span>
+                </div>
+                {payBreakdown.adjustmentsEur !== 0 && (
+                  <div className="flex justify-between text-rose-700">
+                    <span>{t('orgFinance.adjustments')}</span>
+                    <span>{fmtMoney(payBreakdown.adjustmentsEur)}</span>
+                  </div>
+                )}
+              </div>
+            )}
             <p className="text-xs text-gray-400 mt-3">
               {t('orgFinance.summaryNote')}
             </p>
@@ -337,8 +472,8 @@ export default function OrgTutorFinanceSummary() {
 
       {/* Invoice settings (rekvizitai) — always visible */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2 min-w-0">
             <FileText className="w-5 h-5 text-indigo-600" />
             {tutorCanIssueInvoice ? t('invoices.title') : t('invoices.settingsTitle')}
           </h2>
@@ -411,7 +546,7 @@ export default function OrgTutorFinanceSummary() {
                         </p>
                         {currentUserId && inv.issued_by_user_id !== currentUserId && (
                           <p className="text-[11px] text-indigo-600 truncate">
-                            Išrašė administratorius: {inv.issued_by_name || '—'}
+                            {t('companyLogin.loginSubtitle')}: {inv.issued_by_name || '—'}
                           </p>
                         )}
                       </div>

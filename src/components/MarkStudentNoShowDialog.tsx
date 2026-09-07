@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { type NoShowWhen, defaultNoShowWhenForNow } from '@/lib/noShowWhen';
+import { useTranslation } from '@/lib/i18n';
 
 interface Props {
   open: boolean;
@@ -26,6 +27,7 @@ export default function MarkStudentNoShowDialog({
   saving,
   onConfirm,
 }: Props) {
+  const { t } = useTranslation();
   const handleConfirm = () => {
     const when = defaultNoShowWhenForNow(sessionStart, sessionEnd, new Date());
     void onConfirm(when);
@@ -38,19 +40,18 @@ export default function MarkStudentNoShowDialog({
         className="z-[101] w-[95vw] sm:max-w-md rounded-2xl"
       >
         <DialogHeader>
-          <DialogTitle>Mokinys neatvyko</DialogTitle>
-          <DialogDescription className="text-sm text-muted-foreground leading-relaxed">
-            Pamoka bus pažymėta kaip <strong className="text-foreground">neįvykusi</strong>. Į komentarą įrašysime trumpą standartinį tekstą
-            (prieš / per / po pamoką) pagal <strong className="text-foreground">patvirtinimo</strong> momentą ir suplanuotą pamokos pradžią bei
-            pabaigą.
-          </DialogDescription>
+          <DialogTitle>{t('noShow.title')}</DialogTitle>
+          <DialogDescription
+            className="text-sm text-muted-foreground leading-relaxed"
+            dangerouslySetInnerHTML={{ __html: t('noShow.desc') }}
+          />
         </DialogHeader>
         <DialogFooter className="gap-2 sm:gap-0 pt-2">
           <Button type="button" variant="outline" className="rounded-xl" disabled={saving} onClick={() => onOpenChange(false)}>
-            Atšaukti
+            {t('common.cancel')}
           </Button>
           <Button type="button" className="rounded-xl bg-rose-600 hover:bg-rose-700" disabled={saving} onClick={handleConfirm}>
-            {saving ? 'Saugoma…' : 'Patvirtinti'}
+            {saving ? t('common.saving') : t('common.confirm')}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -6,7 +6,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { verifyPerlasToken } from './_lib/perlasFinance.js';
 
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
+const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://www.tutlio.lt';
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!;
@@ -144,15 +144,29 @@ async function handlePaymentCallback(decoded: Record<string, unknown>, supabase:
   const timeStr = sessionStart.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
   const sendEmailUrl = `${APP_URL}/api/send-email`;
 
+  let orgName: string | null = null;
+  if (tutor?.organization_id) {
+    const { data: orgRow } = await supabase
+      .from('organizations')
+      .select('name')
+      .eq('id', tutor.organization_id)
+      .maybeSingle();
+    orgName = (orgRow as { name?: string | null } | null)?.name || null;
+  }
+
   const emailData = {
     studentName: student?.full_name,
     tutorName: tutor?.full_name || 'Korepetitorius',
+    providerName: orgName || tutor?.full_name || 'Korepetitorius',
     date: dateStr,
     time: timeStr,
     subject: session.topic,
     price: session.price,
     lessonPriceEur: session.price,
+    // Perlas gross (lesson + platform/bank fee) — enables the receipt breakdown rows.
+    totalChargedEur: paidAmount > sessionPrice ? paidAmount : undefined,
     duration: durationMinutes,
+    ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
   };
 
   const recipients = new Set<string>();
@@ -188,6 +202,7 @@ async function handlePaymentCallback(decoded: Record<string, unknown>, supabase:
             time: timeStr,
             subject: session.topic,
             price: session.price,
+            ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
           },
         }),
       });

@@ -1,8 +1,10 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
-
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
+import { closeOpenSignaturesAsManuallyMarked } from './_lib/schoolContractSigning.js';
+import { cancelSigning } from './_lib/gosignClient.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.statusCode = status;
@@ -33,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: contract, error: contractErr } = await supabase
     .from('school_contracts')
     .select(
-      'id, organization_id, student_id, signing_status, signed_at, org:organizations(name), student:students(id, full_name, email, invite_code, payer_email, payer_name, parent_secondary_email, parent_secondary_name)',
+      'id, organization_id, student_id, signing_status, signed_at, signed_contract_url, org:organizations(name, features), student:students(id, full_name, email, invite_code, payer_email, payer_name, parent_secondary_email, parent_secondary_name)',
     )
     .eq('id', contractId)
     .maybeSingle();
@@ -43,83 +45,65 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const orgId = String((contract as any).organization_id || '').trim();
   if (!orgId) return json(res, 500, { error: 'Contract missing organization_id' });
 
-  const { data: adminRow } = await supabase
-    .from('organization_admins')
-    .select('id')
-    .eq('user_id', auth.userId)
-    .eq('organization_id', orgId)
-    .maybeSingle();
-  if (!adminRow) return json(res, 403, { error: 'Forbidden' });
+  const adminAccess = await getOrgAdminAccessByUserId(supabase, auth.userId);
+  if (
+    adminAccess?.organizationId !== orgId
+    || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.edit')
+  ) return json(res, 403, { error: 'Forbidden' });
+
+  const manualUpload = req.body?.manualUpload === true;
+  if ((contract as any).org?.features?.school_contract_esign === true && !manualUpload) {
+    return json(res, 409, { error: 'Šios organizacijos sutartys pasirašomos tik per Tutlio GoSign srautą.' });
+  }
+
+  const alreadySigned = (contract as any).signing_status === 'signed';
 
   // Mark signed (idempotent).
   const updatePayload: Record<string, unknown> = { signing_status: 'signed' };
   if (!(contract as any).signed_at) updatePayload.signed_at = new Date().toISOString();
   await supabase.from('school_contracts').update(updatePayload).eq('id', contractId);
 
-  const student = (contract as any).student || {};
-  const org = (contract as any).org || {};
+  // Close orphan pending/in_progress signature rows left behind by photo/PDF
+  // upload or non-eSign mark — and cancel their GoSign transactions best-effort.
+  let closedSignatures = 0;
+  try {
+    const closed = await closeOpenSignaturesAsManuallyMarked(supabase, {
+      contractId,
+      adminUserId: auth.userId,
+      signedPdfPath: (contract as any).signed_contract_url || null,
+      cancelGoSign: (transactionId) => cancelSigning(transactionId),
+    });
+    closedSignatures = closed.closed;
+  } catch (e) {
+    console.error('[school-contract-mark-signed] close signatures:', (e as Error)?.message || e);
+  }
 
+  const student = (contract as any).student || {};
+
+  // Ensure invite code exists for later Stripe payment flow; do not email here.
+  // Child booking invite → first paid Stripe installment (confirm-school-installment-payment).
+  // Parent portal invite → admin "Pakviesti tėvą" only.
   let inviteCode = String(student.invite_code || '').trim();
   if (!inviteCode) {
     inviteCode = generateInviteCode();
     await supabase.from('students').update({ invite_code: inviteCode }).eq('id', String(student.id || (contract as any).student_id));
   }
 
-  const bookingUrl = `${APP_URL.replace(/\/$/, '')}/book/${encodeURIComponent(inviteCode)}`;
-
-  /**
-   * When a contract is marked signed, we send the CHILD access invite (booking code + link).
-   * This goes to:
-   * - student.email (if present)
-   * - payer_email and parent_secondary_email (if present)
-   *
-   * We do NOT send parent portal invites here (that was confusing for schools).
-   */
-  type Recipient = { email: string; label: 'student' | 'parent' | 'parent2' };
-  const recipients: Recipient[] = [];
-  const pushUnique = (email: unknown, label: Recipient['label']) => {
-    const raw = String(email || '').trim();
-    if (!raw.includes('@')) return;
-    const norm = raw.toLowerCase();
-    if (recipients.some((r) => r.email.toLowerCase() === norm)) return;
-    recipients.push({ email: raw, label });
-  };
-  pushUnique(student.email, 'student');
-  pushUnique(student.payer_email, 'parent');
-  pushUnique(student.parent_secondary_email, 'parent2');
-
-  const inviteResults: Array<{ email: string; ok: boolean; label: Recipient['label']; error?: string }> = [];
-  for (const r of recipients) {
-    try {
-      await fetch(`${APP_URL.replace(/\/$/, '')}/api/send-email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
-        body: JSON.stringify({
-          type: 'invite_email',
-          to: r.email,
-          data: {
-            context: 'school',
-            studentName: String(student.full_name || ''),
-            tutorName: String(org.name || 'Mokykla'),
-            inviteCode,
-            bookingUrl,
-            ...(orgId ? { organizationId: orgId } : {}),
-          },
-        }),
-      });
-      inviteResults.push({ email: r.email, label: r.label, ok: true });
-    } catch (e: any) {
-      inviteResults.push({ email: r.email, label: r.label, ok: false, error: e?.message || 'send failed' });
-    }
-  }
+  // Frontend uses this to skip the installment request when nothing is unpaid.
+  const { data: unpaidRows } = await supabase
+    .from('school_payment_installments')
+    .select('id')
+    .eq('contract_id', contractId)
+    .neq('payment_status', 'paid')
+    .limit(1);
+  const hasUnpaidInstallment = Boolean(unpaidRows && unpaidRows.length > 0);
 
   return json(res, 200, {
     success: true,
     contractId,
     inviteCode,
-    bookingUrl,
-    sent: inviteResults.filter((x) => x.ok).length,
-    inviteResults,
+    alreadySigned,
+    closedSignatures,
+    hasUnpaidInstallment,
   });
 }
-

@@ -38,6 +38,12 @@ function isSubSectionTitle(key: string, prefix: string): boolean {
 
 export function renderLegalBody(locale: Locale, doc: LegalDoc): string {
   const prefix = doc;
+  const bodyKey = `${prefix}.bodyHtml`;
+  const bodyHtml = t(locale, bodyKey);
+  if (bodyHtml !== bodyKey) {
+    return `<article class="legal"><p class="legal-sub">${inlineHtml(t(locale, `${prefix}.subtitle`))}</p>${inlineHtml(bodyHtml)}</article>`;
+  }
+
   const skip = new Set([`${prefix}.title`, `${prefix}.subtitle`]);
   const keys = translationKeys(locale, prefix).filter((k) => !skip.has(k));
 

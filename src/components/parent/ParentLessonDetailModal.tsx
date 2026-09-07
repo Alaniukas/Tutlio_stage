@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { authHeaders } from '@/lib/apiHelpers';
+import { startPerlasPayment } from '@/lib/perlasPay';
 import { format, isAfter } from 'date-fns';
 import type { NavigateFunction } from 'react-router-dom';
 import type { Locale } from 'date-fns';
@@ -26,7 +27,10 @@ import {
 } from '@/components/ui/dialog';
 import StatusBadge from '@/components/StatusBadge';
 import WhiteboardButton from '@/components/WhiteboardButton';
-import { normalizeUrl } from '@/lib/utils';
+import JoinLessonButton from '@/components/JoinLessonButton';
+import SessionFiles from '@/components/SessionFiles';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
+import type { OrgFeeProfile } from '@/lib/marketMoney';
 /** Tutor contact + payment / cancellation rules (from profiles). */
 export type ParentTutorContactPolicy = {
   tutorId: string;
@@ -38,6 +42,14 @@ export type ParentTutorContactPolicy = {
   paymentTiming: 'before_lesson' | 'after_lesson';
   paymentDeadlineHours: number;
   perlasEnabled?: boolean;
+  /** School orgs absorb fees — parent pays the list price, no breakdown shown. */
+  orgIsSchool?: boolean;
+  /** Custom per-org fee deal (e.g. Proklasė); charged on top even for school orgs. */
+  orgFeeProfile?: OrgFeeProfile | null;
+  /** Service provider shown in the fee breakdown (org name when tutor belongs to one). */
+  providerName?: string | null;
+  /** Org feature disable_student_reschedule_cancel — self-service moves/cancels go through administration. */
+  studentActionsDisabled?: boolean;
 };
 
 /** Session row shape for the shared parent lesson modal. */
@@ -56,6 +68,8 @@ export type ParentLessonModalSession = {
   tutor_comment?: string | null;
   show_comment_to_student?: boolean;
   isGroupSubject?: boolean;
+  classGroupName?: string | null;
+  classGroupMemberNames?: string[];
 };
 
 export function ParentLessonDetailModal({
@@ -87,10 +101,18 @@ export function ParentLessonDetailModal({
   perlasEnabled?: boolean;
 }) {
   const headline =
+    session?.classGroupName ||
     session?.subjectName ||
     session?.topic ||
     (session ? t('common.lesson') : '');
+  const isGroupLesson = Boolean(session?.classGroupName || session?.isGroupSubject);
 
+  const orgIsSchool = !!tutorPolicy?.orgIsSchool;
+  const orgFee = tutorPolicy?.orgFeeProfile ?? null;
+  const providerName =
+    tutorPolicy?.providerName || tutorPolicy?.tutorName || t('studentDash.tutorLabel');
+
+  const { fmt, formatLessonCharge, lessonBreakdown, isPl } = useMarketMoney();
   const [stripeLoading, setStripeLoading] = useState(false);
   const [perlasLoading, setPerlasLoading] = useState(false);
 
@@ -109,11 +131,7 @@ export function ParentLessonDetailModal({
         error?: string;
       };
       if (json.url && json.token) {
-        if ((window as any).PerlasPay) {
-          (window as any).PerlasPay.init(json.url, json.token);
-        } else {
-          window.location.href = `${json.url}pay/${json.token}`;
-        }
+        await startPerlasPayment(json.url, json.token);
         setPerlasLoading(false);
         return;
       }
@@ -207,13 +225,21 @@ export function ParentLessonDetailModal({
               <p className="text-xl font-black text-gray-900 leading-tight">
                 {headline}
               </p>
-              {session.isGroupSubject && (
+              {isGroupLesson && (
                 <span className="bg-violet-100 text-violet-700 px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1">
                   <Users className="w-3.5 h-3.5" />
                   {t('studentDash.groupLesson')}
                 </span>
               )}
             </div>
+            {session.classGroupMemberNames && session.classGroupMemberNames.length > 0 && (
+              <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700 mb-1">
+                  {t('school.groups.members')}
+                </p>
+                <p className="text-sm text-violet-950">{session.classGroupMemberNames.join(', ')}</p>
+              </div>
+            )}
             {childName && (
               <p className="text-xs text-gray-500 mt-1 font-semibold">
                 {t('parent.forChild', { name: childName })}
@@ -239,7 +265,7 @@ export function ParentLessonDetailModal({
                 {t('studentDash.priceLabel')}
               </p>
               <p className="font-bold text-gray-900">
-                {session.price != null ? `€${session.price}` : '–'}
+                {session.price != null ? fmt(session.price) : '–'}
               </p>
             </div>
             <div className="bg-gray-50 rounded-xl p-4 text-center border border-gray-100 flex flex-col items-center justify-center">
@@ -267,15 +293,13 @@ export function ParentLessonDetailModal({
           )}
 
           {session.meeting_link && session.status !== 'cancelled' && (
-            <a
-              href={normalizeUrl(session.meeting_link) || undefined}
-              target="_blank"
-              rel="noreferrer"
+            <JoinLessonButton
+              session={session}
               className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100"
             >
               <Play className="w-4 h-4" />
               {t('studentDash.joinMeeting')}
-            </a>
+            </JoinLessonButton>
           )}
 
           <WhiteboardButton
@@ -283,6 +307,8 @@ export function ParentLessonDetailModal({
             sessionStatus={session.status}
             sessionEndTime={(session as any)?.end_time ?? null}
           />
+
+          <SessionFiles sessionId={session.id} role="student" />
 
           {tutorPolicy && session.status === 'active' && (
             <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1.5">
@@ -342,6 +368,25 @@ export function ParentLessonDetailModal({
             !session.paid &&
             isAfter(new Date(session.end_time), now) && (
               <div className="space-y-2">
+                {session.price != null && (!orgIsSchool || orgFee) && (() => {
+                  const b = lessonBreakdown(Number(session.price), orgFee);
+                  return (
+                    <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-sm space-y-1.5">
+                      <div className="flex items-start justify-between gap-3 text-gray-700">
+                        <span>{t('parent.feeBreakdownTeaching', { provider: providerName })}</span>
+                        <span className="font-semibold whitespace-nowrap">{fmt(b.base)}</span>
+                      </div>
+                      <div className="flex items-start justify-between gap-3 text-gray-700">
+                        <span>{t('parent.feeBreakdownPlatform')}</span>
+                        <span className="font-semibold whitespace-nowrap">{fmt(b.fee)}</span>
+                      </div>
+                      <div className="flex items-start justify-between gap-3 pt-1.5 border-t border-gray-200 font-bold text-gray-900">
+                        <span>{t('parent.feeBreakdownTotal')}</span>
+                        <span className="whitespace-nowrap">{fmt(b.total)}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <button
                   type="button"
                   disabled={stripeLoading}
@@ -354,9 +399,11 @@ export function ParentLessonDetailModal({
                     <CreditCard className="w-4 h-4" />
                   )}
                   {t('studentDash.pay')}
-                  {session.price != null ? ` · €${session.price}` : ''}
+                  {session.price != null
+                    ? ` · ${formatLessonCharge(Number(session.price), orgIsSchool, orgFee)}`
+                    : ''}
                 </button>
-                {(perlasEnabled ?? tutorPolicy?.perlasEnabled) && session.price != null && (() => {
+                {(perlasEnabled ?? tutorPolicy?.perlasEnabled) && !isPl && session.price != null && (() => {
                   const sp = Number(session.price || 0);
                   const pf = Math.round(sp * 2) / 100;
                   const bf = 0.18;
@@ -372,7 +419,7 @@ export function ParentLessonDetailModal({
                         {perlasLoading ? (
                           <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
                         ) : (
-                          <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: tot.toFixed(2) })}</>
+                          <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: fmt(tot) })}</>
                         )}
                       </button>
                     </>
@@ -410,6 +457,11 @@ export function ParentLessonDetailModal({
           {session.status === 'active' &&
             isAfter(new Date(session.start_time), now) &&
             childId && (
+              tutorPolicy?.studentActionsDisabled ? (
+                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                  {t('stuSess.actionsDisabledByOrg')}
+                </p>
+              ) : (
               <div className="flex flex-col sm:flex-row gap-2 pt-1">
                 <Button
                   variant="outline"
@@ -426,6 +478,7 @@ export function ParentLessonDetailModal({
                   {t('studentDash.cancelLesson')}
                 </Button>
               </div>
+              )
             )}
 
           {childId && (

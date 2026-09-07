@@ -28,12 +28,41 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+        // Precache ONLY the SPA shell (content-hashed) + static assets.
+        // Never pin index.html with a null Workbox revision: that treats the
+        // shell as immutable, so after deploy the SW keeps an old HTML that
+        // points at deleted /assets/main-*.js and users see a white screen.
+        // Including index.html in globPatterns gives it a real revision each build.
+        // Never glob all HTML or JS — that would pin every lazy route / marketing
+        // HTML and download ~20 MB of private chunks on a marketing visit.
+        globPatterns: ['index.html', '**/*.{css,ico,png,svg,woff2}'],
+        // Locale-specific marketing screenshots and quiz imagery are loaded on
+        // demand. The quiz warms only the next screen; global SW precaching
+        // would otherwise download every source PNG (~34 MB) on first visit.
+        globIgnores: [
+          'landing/digital-business-card-*.png',
+          'quiz/**',
+          'social/**',
+          'preview-assign-student-modal.html',
+          'preview-complimentary-lesson.html',
+        ],
+        maximumFileSizeToCacheInBytes: 7 * 1024 * 1024,
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        // SEO/crawler files must never be answered with the SPA shell from the SW.
+        navigateFallbackDenylist: [/^\/api\//, /^\/(robots\.txt|sitemap\.xml|llms(-full)?\.txt)$/, /\/blog\/rss\.xml$/, /^\/preview-assign-student-modal\.html$/, /^\/preview-complimentary-lesson\.html$/],
         importScripts: ['/push-sw.js'],
         runtimeCaching: [
+          // Cache visited hashed chunks, but revalidate so a post-deploy shell
+          // does not keep serving a permanently stale module graph.
+          {
+            urlPattern: /\/assets\/.*\.js$/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'app-js',
+              expiration: { maxEntries: 120, maxAgeSeconds: 30 * 24 * 60 * 60 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
           // Storage object GET/POST must not be served stale from SW during whiteboard collaboration.
           {
             urlPattern: /^https:\/\/[^/]+\.supabase\.co\/storage\/v1\//i,
@@ -78,5 +107,10 @@ export default defineConfig({
     // Vercelyje dideli chunk map failai (~10 MB+) lėtina build ir gali baigtis OOM.
     sourcemap: !process.env.VERCEL,
     reportCompressedSize: false,
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+      },
+    },
   },
 });

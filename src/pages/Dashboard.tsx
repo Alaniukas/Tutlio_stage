@@ -37,10 +37,13 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn, normalizeUrl } from '@/lib/utils';
+import { recordJoinClick } from '@/lib/joinTracking';
 import StatusBadge from '@/components/StatusBadge';
+import AttendanceBadge from '@/components/AttendanceBadge';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { Edit2 } from 'lucide-react';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
     tutorCalendarFallbackProfileDeduped,
@@ -53,6 +56,10 @@ import {
     tutorStudentCountEstimatedDeduped,
 } from '@/lib/preload';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { isProKlaseOrg } from '@/lib/marketMoney';
+import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
+import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
+import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import { buildNoShowSessionPatch, noShowWhenLabelLt, type NoShowWhen } from '@/lib/noShowWhen';
@@ -132,6 +139,7 @@ function nextYmdForDow(dow: number): string {
 
 export default function DashboardPage() {
     const { t, dateFnsLocale, locale } = useTranslation();
+    const { fmt } = useMarketMoney();
     const navigate = useNavigate();
     const location = useLocation();
     const { user: ctxUser, profile: ctxProfile } = useUser();
@@ -159,14 +167,18 @@ export default function DashboardPage() {
         restoreAll: restoreAllRecentPaymentRows,
         ready: recentPaymentRowsDismissReady,
     } = useDismissibleDashboardItemIds(recentPaymentRowsKey);
-    const { contactVisibility } = useOrgFeatures();
+    const { contactVisibility, hasFeature: hasOrgFeature, entityType, organizationId, loading: orgFeaturesLoading } = useOrgFeatures();
+    const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, entityType, hasOrgFeature, 'monthly_packages', orgFeaturesLoading);
+    // Org feature: ended lessons are not auto-completed — the tutor must confirm each outcome.
+    const requiresStatusConfirmation =
+      hasOrgFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(ctxProfile?.organization_id);
+    const [confirmingStatusId, setConfirmingStatusId] = useState<string | null>(null);
     const [searchParams, setSearchParams] = useSearchParams();
     const dc = getCached<any>('tutor_dashboard');
     const [sessions, setSessions] = useState<Session[]>(dc?.sessions ?? []);
     const [studentCount, setStudentCount] = useState(dc?.studentCount ?? 0);
     const [loading, setLoading] = useState(!dc);
     const [tutorName, setTutorName] = useState(dc?.tutorName ?? '');
-    const [showAllOverdue, setShowAllOverdue] = useState(false);
     const [showAllUpcoming, setShowAllUpcoming] = useState(false);
     const [showAllCancelled, setShowAllCancelled] = useState(false);
 
@@ -177,7 +189,7 @@ export default function DashboardPage() {
     const [cancellationReason, setCancellationReason] = useState('');
     const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
     const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
-    const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+    const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
     const [noShowPickerOpen, setNoShowPickerOpen] = useState(false);
     const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
     const [currentUserId, setCurrentUserId] = useState('');
@@ -185,8 +197,12 @@ export default function DashboardPage() {
     const [hasSubjects, setHasSubjects] = useState(false);
     const [orgTutorFallback, setOrgTutorFallback] = useState<boolean | null>(null);
     const isOrgTutor: boolean | null = ctxProfile ? !!ctxProfile.organization_id : orgTutorFallback;
+    const hideProKlaseOrgTutorCancel = isOrgTutor === true && isProKlaseOrg(ctxProfile?.organization_id);
+    const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
     const [isEditingTime, setIsEditingTime] = useState(false);
     const [editNewStartTime, setEditNewStartTime] = useState('');
+    const [rescheduleReason, setRescheduleReason] = useState('');
+    const [modalActionNotice, setModalActionNotice] = useState<string | null>(null);
 
     // View comment (same as Calendar – add/edit without full edit)
     const [viewCommentText, setViewCommentText] = useState('');
@@ -348,19 +364,54 @@ export default function DashboardPage() {
 
             const orgFeat = orgFeatRes.data?.features;
             const orgFeatObj = orgFeat && typeof orgFeat === 'object' && !Array.isArray(orgFeat) ? (orgFeat as Record<string, unknown>) : {};
-            const trialCommentRequired = orgFeatObj['trial_comment_required'] === true;
+            const trialPolicy = parseOrgTrialPolicy(orgFeatObj);
+            const proKlaseCommentRequired = isProKlaseOrg(organizationId);
 
-            const missingTrialComments = trialCommentRequired
-                ? (sessionsData || [])
-                    .filter((s: any) => s.status === 'completed' && s.subjects?.is_trial === true && !String(s.tutor_comment || '').trim())
-                    .slice(0, 5)
-                : [];
+            const trialsByStudent = new Map<string, Array<{ id: string; start_time?: string | null; status?: string | null }>>();
+            if (trialPolicy.commentRequired) {
+                const trialStudentIds = [...new Set(
+                    (sessionsData || [])
+                        .filter((s: any) => s.subjects?.is_trial === true && s.student_id)
+                        .map((s: any) => s.student_id as string),
+                )];
+                if (trialStudentIds.length > 0) {
+                    const { data: trialHistory } = await supabase
+                        .from('sessions')
+                        .select('id, student_id, start_time, status, subjects!inner(is_trial)')
+                        .eq('tutor_id', user.id)
+                        .in('student_id', trialStudentIds)
+                        .eq('subjects.is_trial', true)
+                        .order('start_time', { ascending: true });
+                    for (const row of trialHistory || []) {
+                        const sid = (row as { student_id: string }).student_id;
+                        const list = trialsByStudent.get(sid) ?? [];
+                        list.push(row as { id: string; start_time?: string | null; status?: string | null });
+                        trialsByStudent.set(sid, list);
+                    }
+                }
+            }
+
+            const missingComments = (sessionsData || [])
+                .filter((s: any) => {
+                    const needsComment = ['completed', 'no_show'].includes(String(s.status));
+                    if (!needsComment || String(s.tutor_comment || '').trim()) return false;
+                    if (proKlaseCommentRequired) return true;
+                    return sessionNeedsOrgTrialComment({
+                        policy: trialPolicy,
+                        isTrial: s.subjects?.is_trial === true,
+                        sessionId: s.id,
+                        studentTrials: trialsByStudent.get(s.student_id) ?? [{ id: s.id, start_time: s.start_time, status: s.status }],
+                    });
+                })
+                .slice(0, 5);
 
             const updates: TutorUpdateItem[] = [
-                ...missingTrialComments.map((s: any) => ({
+                ...missingComments.map((s: any) => ({
                     id: `missing_comment_${s.id}`,
                     tone: 'warning' as const,
-                    message: t('dash.trialCommentMissing', { count: 1 }),
+                    message: proKlaseCommentRequired
+                        ? t('dash.lessonCommentMissing')
+                        : t('dash.trialCommentMissing', { count: 1 }),
                     when: s.start_time,
                     sessionId: s.id,
                 })),
@@ -432,14 +483,20 @@ export default function DashboardPage() {
                 paidAt: s.start_time,
             }));
 
-            const packagePayments: RecentPayment[] = (paidPackagesRes.data || []).map((p: any) => ({
-                id: `package_${p.id}`,
-                type: 'package',
-                title: p.students?.full_name || 'Mokinys',
-                subtitle: `${p.total_lessons || 0} pam. · ${p.subjects?.name || 'Paketas'}`,
-                amount: Number(p.total_price || 0),
-                paidAt: p.paid_at,
-            }));
+            const packagePayments: RecentPayment[] = (paidPackagesRes.data || []).map((p: any) => {
+                const items = Array.isArray(p.lesson_package_items) ? p.lesson_package_items : [];
+                const subjectLabel = items.length > 1
+                    ? items.map((it: any) => it.subjects?.name).filter(Boolean).join(', ')
+                    : (p.subjects?.name || items[0]?.subjects?.name || 'Paketas');
+                return {
+                    id: `package_${p.id}`,
+                    type: 'package',
+                    title: p.students?.full_name || 'Mokinys',
+                    subtitle: `${p.total_lessons || 0} pam. · ${subjectLabel}`,
+                    amount: Number(p.total_price || 0),
+                    paidAt: p.paid_at,
+                };
+            });
 
             const invoicePayments: RecentPayment[] = (paidInvoicesRes.data || []).map((b: any) => ({
                 id: `invoice_${b.id}`,
@@ -505,14 +562,20 @@ export default function DashboardPage() {
                 paidAt: s.start_time,
             }));
 
-            const packagePayments: RecentPayment[] = (paidPackagesRes.data || []).map((p: any) => ({
-                id: `package_${p.id}`,
-                type: 'package',
-                title: p.students?.full_name || 'Mokinys',
-                subtitle: `${p.total_lessons || 0} pam. · ${p.subjects?.name || 'Paketas'}`,
-                amount: Number(p.total_price || 0),
-                paidAt: p.paid_at,
-            }));
+            const packagePayments: RecentPayment[] = (paidPackagesRes.data || []).map((p: any) => {
+                const items = Array.isArray(p.lesson_package_items) ? p.lesson_package_items : [];
+                const subjectLabel = items.length > 1
+                    ? items.map((it: any) => it.subjects?.name).filter(Boolean).join(', ')
+                    : (p.subjects?.name || items[0]?.subjects?.name || 'Paketas');
+                return {
+                    id: `package_${p.id}`,
+                    type: 'package',
+                    title: p.students?.full_name || 'Mokinys',
+                    subtitle: `${p.total_lessons || 0} pam. · ${subjectLabel}`,
+                    amount: Number(p.total_price || 0),
+                    paidAt: p.paid_at,
+                };
+            });
 
             const invoicePayments: RecentPayment[] = (paidInvoicesRes.data || []).map((b: any) => ({
                 id: `invoice_${b.id}`,
@@ -673,6 +736,25 @@ export default function DashboardPage() {
             const newStart = new Date(editNewStartTime);
             const newEnd = new Date(newStart.getTime() + durMs);
 
+            const truncMinPre = (d: Date) => Math.floor(d.getTime() / 60000);
+            if (truncMinPre(oldStart) !== truncMinPre(newStart) && rescheduleReason.trim().length < 5) {
+                alert(t('cal.rescheduleReasonRequired'));
+                setSaving(false);
+                return;
+            }
+
+            // Monthly packages (req 6): a package lesson can only be moved within
+            // the same calendar month (anchored on its original start). One-off /
+            // trial lessons (no package) are unconstrained.
+            if (oldStart.getTime() !== newStart.getTime() && pkMonthlyPackages && !!(selectedSession as any).lesson_package_id) {
+                const anchor = rescheduleAnchorDate((selectedSession as any).original_start_time, oldStart);
+                if (!isSameCalendarMonth(newStart, anchor)) {
+                    alert(t('cal.rescheduleSameMonthOnly'));
+                    setSaving(false);
+                    return;
+                }
+            }
+
             // Fetch to check overlaps (excluding current session)
             const { data: overlapping } = await supabase
                 .from('sessions')
@@ -698,11 +780,21 @@ export default function DashboardPage() {
             }
             const { error } = await supabase.from('sessions').update({
                 start_time: newStart.toISOString(),
-                end_time: newEnd.toISOString()
+                end_time: newEnd.toISOString(),
             }).eq('id', selectedSession.id);
 
             if (!error) {
-                const timeChanged = oldStart.getTime() !== newStart.getTime();
+                const truncMin = (d: Date) => Math.floor(d.getTime() / 60000);
+                const timeChanged = truncMin(oldStart) !== truncMin(newStart);
+
+                await supabase.from('sessions').update({
+                    original_start_time: (selectedSession as any).original_start_time ?? oldStart.toISOString(),
+                    rescheduled_at: new Date().toISOString(),
+                    reschedule_reason: rescheduleReason.trim(),
+                }).eq('id', selectedSession.id)
+                  .then(({ error: reschedErr }) => {
+                    if (reschedErr) console.warn('[Dashboard] reschedule tracking columns not available:', reschedErr.message);
+                  });
                 if (timeChanged && leaveFreeTimeOnReschedule && currentUserId) {
                     const released = await releaseSessionSlotViaApi({
                         tutorId: currentUserId,
@@ -739,6 +831,7 @@ export default function DashboardPage() {
                             newTime: format(newStart, 'HH:mm'),
                             rescheduledBy: 'tutor',
                             recipientRole: 'student',
+                            reason: rescheduleReason.trim(),
                         }
                     });
                 }
@@ -747,6 +840,7 @@ export default function DashboardPage() {
 
                 setIsEditingTime(false);
                 setLeaveFreeTimeOnReschedule(false);
+                setRescheduleReason('');
                 setToastMessage({ message: t('dash.rescheduleSuccess'), type: 'success' });
                 fetchData();
                 setIsModalOpen(false);
@@ -757,6 +851,13 @@ export default function DashboardPage() {
             console.error(err);
         }
         setSaving(false);
+    };
+
+    const openSessionTimeEditor = () => {
+        if (!selectedSession) return;
+        setEditNewStartTime(format(new Date(selectedSession.start_time), "yyyy-MM-dd'T'HH:mm"));
+        setRescheduleReason('');
+        setIsEditingTime(true);
     };
 
     const handleMarkCompleted = async () => {
@@ -788,6 +889,50 @@ export default function DashboardPage() {
             }).catch(() => {});
         }
         setSaving(false);
+    };
+
+    /**
+     * Org feature tutor_lesson_status_confirmation: the tutor confirms an ended
+     * lesson's outcome (įvyko / vėlavo / neatvyko / atšaukta) via the server,
+     * which stamps the confirmation and settles package counters.
+     */
+    const confirmLessonStatus = async (
+        session: Session,
+        status: 'completed' | 'no_show' | 'cancelled',
+        late = false,
+    ) => {
+        if (status === 'no_show' && !window.confirm(t('dash.confirmNoShowPrompt'))) return;
+        if (status === 'cancelled' && !window.confirm(t('dash.confirmCancelPrompt'))) return;
+        setConfirmingStatusId(session.id);
+        try {
+            const resp = await fetch('/api/confirm-session-status', {
+                method: 'POST',
+                headers: await authHeaders(),
+                body: JSON.stringify({ sessionId: session.id, status, late }),
+            });
+            const json = await resp.json().catch(() => ({} as Record<string, unknown>));
+            if (!resp.ok) {
+                setToastMessage({ message: t('dash.confirmStatusError', { msg: String((json as any).error || resp.status) }), type: 'error' });
+                return;
+            }
+            setSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, status } : s)));
+            if (selectedSession?.id === session.id) {
+                setSelectedSession({ ...selectedSession, status });
+                setIsModalOpen(false);
+            }
+            fetchData();
+            if (status === 'no_show') {
+                void (async () => {
+                    await fetch('/api/notify-session-no-show', {
+                        method: 'POST',
+                        headers: await authHeaders(),
+                        body: JSON.stringify({ sessionId: session.id }),
+                    });
+                })().catch(() => {});
+            }
+        } finally {
+            setConfirmingStatusId(null);
+        }
     };
 
     const handleRevertLessonToPlannedDashboard = async () => {
@@ -946,6 +1091,14 @@ export default function DashboardPage() {
         return s.status === 'active' && d.toDateString() === now.toDateString();
     });
 
+    // Must-do queue (tutor_lesson_status_confirmation): ended lessons whose outcome
+    // the tutor has not confirmed yet. Newest first; not dismissible by design.
+    const pendingStatusSessions = requiresStatusConfirmation
+        ? sessions
+              .filter((s) => s.status === 'active' && isBefore(new Date(s.end_time), now))
+              .sort((a, b) => new Date(b.end_time).getTime() - new Date(a.end_time).getTime())
+        : [];
+
     // Needs attention: sessions where payment deadline is approaching (within 6h) or passed and still unpaid
     const nowMs = now.getTime();
     const attentionWindowMs = 6 * 3600000; // 6 val. langas
@@ -969,14 +1122,14 @@ export default function DashboardPage() {
             return isRecent && (isOverdue || isSoon || pendingConfirm);
         })
         .sort((a, b) => {
-            // Always show on top those with payment_status === 'paid_by_student'
             if (a.payment_status === 'paid_by_student' && b.payment_status !== 'paid_by_student') return -1;
             if (b.payment_status === 'paid_by_student' && a.payment_status !== 'paid_by_student') return 1;
-            return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
+            return new Date(b.start_time).getTime() - new Date(a.start_time).getTime();
         });
 
-    const visibleOverduePayments = overduePayments.filter((s) => !dismissedAttentionRowIds.has(s.id));
-    const displayedOverdue = showAllOverdue ? visibleOverduePayments : visibleOverduePayments.slice(0, 5);
+    const attentionFeed = overduePayments.slice(0, 5);
+    const visibleOverduePayments = attentionFeed.filter((s) => !dismissedAttentionRowIds.has(s.id));
+    const displayedOverdue = visibleOverduePayments;
     const visibleRecentPayments = recentPayments.filter((p) => !dismissedRecentPaymentIds.has(p.id));
     const displayedRecentPayments = showAllRecentPayments ? visibleRecentPayments : visibleRecentPayments.slice(0, 5);
     const visibleTutorUpdates = tutorUpdates.filter((u) => !dismissedUpdateRowIds.has(u.id));
@@ -1085,7 +1238,7 @@ export default function DashboardPage() {
                                 </div>
                                 <span className="text-xs text-gray-400 font-medium">30 d.</span>
                             </div>
-                            <p className="text-2xl font-bold text-gray-900">€{thisMonthRevenue.toFixed(0)}</p>
+                            <p className="text-2xl font-bold text-gray-900">{fmt(thisMonthRevenue, { decimals: 0 })}</p>
                             <p className="text-xs text-gray-500 mt-1">{t('dash.revenue')}</p>
                         </div>
 
@@ -1096,7 +1249,7 @@ export default function DashboardPage() {
                                 </div>
                                 <span className="text-xs text-gray-400 font-medium">{t('dash.pending')}</span>
                             </div>
-                            <p className="text-2xl font-bold text-gray-900">€{pendingRevenue.toFixed(0)}</p>
+                            <p className="text-2xl font-bold text-gray-900">{fmt(pendingRevenue, { decimals: 0 })}</p>
                             <p className="text-xs text-gray-500 mt-1">{t('dash.unpaid')}</p>
                         </div>
                       </>
@@ -1113,6 +1266,86 @@ export default function DashboardPage() {
                         <p className="text-xs text-gray-500 mt-1">{t('dash.upcomingLessons')}</p>
                     </div>
                 </div>
+
+                {requiresStatusConfirmation && pendingStatusSessions.length > 0 && (
+                    <div className="bg-white rounded-2xl shadow-sm border-2 border-amber-300 p-5 mb-6">
+                        <div className="flex items-center justify-between mb-1">
+                            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                                <AlertCircle className="w-5 h-5 text-amber-600" />
+                                {t('dash.confirmStatusesTitle')}
+                            </h2>
+                            <span className="text-xs font-bold text-amber-800 bg-amber-100 px-2.5 py-1 rounded-full">
+                                {pendingStatusSessions.length}
+                            </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mb-4">{t('dash.confirmStatusesDesc')}</p>
+                        <div className="space-y-2">
+                            {pendingStatusSessions.slice(0, 8).map((s) => (
+                                <div key={s.id} className="flex flex-col sm:flex-row sm:items-center gap-2 p-3 rounded-xl bg-amber-50/60 border border-amber-100">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-semibold text-gray-900 truncate">{s.student?.full_name || '—'}</p>
+                                        <p className="text-xs text-gray-500">
+                                            {format(new Date(s.start_time), 'MMM d, HH:mm', { locale: dateFnsLocale })}
+                                            {' – '}
+                                            {format(new Date(s.end_time), 'HH:mm')}
+                                            {s.subjects?.name ? ` · ${s.subjects.name}` : s.topic ? ` · ${s.topic}` : ''}
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        <Button
+                                            size="sm"
+                                            disabled={confirmingStatusId === s.id}
+                                            onClick={() => void confirmLessonStatus(s, 'completed')}
+                                            className="rounded-lg h-8 px-2.5 text-xs bg-green-600 hover:bg-green-700 text-white"
+                                        >
+                                            <CheckCircle className="w-3.5 h-3.5 mr-1" />
+                                            {t('dash.statusHappened')}
+                                        </Button>
+                                        {!hideProKlaseOrgTutorCancel && (
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={confirmingStatusId === s.id}
+                                            onClick={() => void confirmLessonStatus(s, 'completed', true)}
+                                            className="rounded-lg h-8 px-2.5 text-xs text-amber-800 border-amber-300 hover:bg-amber-100"
+                                        >
+                                            <Clock className="w-3.5 h-3.5 mr-1" />
+                                            {t('dash.statusHappenedLate')}
+                                        </Button>
+                                        )}
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={confirmingStatusId === s.id}
+                                            onClick={() => void confirmLessonStatus(s, 'no_show')}
+                                            className="rounded-lg h-8 px-2.5 text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
+                                        >
+                                            <UserX className="w-3.5 h-3.5 mr-1" />
+                                            {t('dash.statusNoShow')}
+                                        </Button>
+                                        {!hideProKlaseOrgTutorCancel && (
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={confirmingStatusId === s.id}
+                                            onClick={() => void confirmLessonStatus(s, 'cancelled')}
+                                            className="rounded-lg h-8 px-2.5 text-xs text-gray-700 border-gray-300 hover:bg-gray-100"
+                                        >
+                                            <XCircle className="w-3.5 h-3.5 mr-1" />
+                                            {t('dash.statusCancelled')}
+                                        </Button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                            {pendingStatusSessions.length > 8 && (
+                                <Link to="/calendar" className="block text-center text-xs text-indigo-600 hover:underline pt-1">
+                                    {t('dash.confirmStatusesMore', { count: pendingStatusSessions.length - 8 })}
+                                </Link>
+                            )}
+                        </div>
+                    </div>
+                )}
 
                 <div className={cn('grid grid-cols-1 gap-6', isOrgTutor === true ? '' : 'md:grid-cols-2')}>
                     {/* Sessions: org tutor — separate upcoming + cancelled (no € / penalty resolution); others — tabs */}
@@ -1161,10 +1394,10 @@ export default function DashboardPage() {
                                           {isToday ? `${t('stuSched.today')}, ${format(start, 'HH:mm')}` : format(start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}
                                           {s.topic && <span className="ml-1">· {s.topic}</span>}
                                         </span>
-                                        <div className="scale-90 origin-left"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} /></div>
+                                        <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} pendingConfirmation={requiresStatusConfirmation} /><AttendanceBadge session={s} /></div>
                                       </div>
                                     </div>
-                                    {isOrgTutor !== true && s.price && <span className="text-sm font-semibold text-gray-700 flex-shrink-0">€{s.price}</span>}
+                                    {isOrgTutor !== true && s.price && <span className="text-sm font-semibold text-gray-700 flex-shrink-0">{fmt(s.price)}</span>}
                                   </div>
                                 );
                               })}
@@ -1203,7 +1436,7 @@ export default function DashboardPage() {
                                   <div key={s.id} onClick={() => { setSelectedSession(s); setIsModalOpen(true); }} className="flex flex-col gap-2 p-3 rounded-xl cursor-pointer border border-red-100 hover:shadow-md transition-all bg-red-50/50">
                                     <div className="flex items-center justify-between">
                                       <p className="text-sm font-semibold text-gray-900 truncate">{s.student?.full_name}</p>
-                                      <div className="scale-90 origin-right"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} /></div>
+                                      <div className="scale-90 origin-right"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} pendingConfirmation={requiresStatusConfirmation} /></div>
                                     </div>
                                     <p className="text-xs text-gray-500">
                                       {format(start, "EEE d MMM yyyy, HH:mm", { locale: dateFnsLocale })}
@@ -1384,10 +1617,10 @@ export default function DashboardPage() {
                                                                 {isToday ? `${t('stuSched.today')}, ${format(start, 'HH:mm')}` : format(start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}
                                                                 {s.topic && <span className="ml-1">· {s.topic}</span>}
                                                             </span>
-                                                            <div className="scale-90 origin-left"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} /></div>
+                                                            <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} /><AttendanceBadge session={s} /></div>
                                                         </div>
                                                     </div>
-                                                    {s.price && <span className="text-sm font-semibold text-gray-700 flex-shrink-0">€{s.price}</span>}
+                                                    {s.price ? <span className="text-sm font-semibold text-gray-700 flex-shrink-0">{fmt(s.price)}</span> : null}
                                                 </div>
                                             );
                                         })}
@@ -1463,7 +1696,7 @@ export default function DashboardPage() {
                             {(() => {
                                 const setupIncomplete = isOrgTutor === false && (!isStripeConnected || !hasSubjects);
                                 const setupCount = setupIncomplete ? (!isStripeConnected ? 1 : 0) + (!hasSubjects ? 1 : 0) : 0;
-                                const listCount = attentionRowsDismissReady ? visibleOverduePayments.length : overduePayments.length;
+                                const listCount = attentionRowsDismissReady ? visibleOverduePayments.length : attentionFeed.length;
                                 const attentionCount = listCount + setupCount;
                                 return (
                                     <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded-md">
@@ -1591,7 +1824,7 @@ export default function DashboardPage() {
                                                     <p className="text-sm font-semibold text-gray-900 truncate">
                                                         {s.student?.full_name}
                                                     </p>
-                                                    <span className="text-sm font-bold text-gray-900">€{s.price}</span>
+                                                    <span className="text-sm font-bold text-gray-900">{fmt(s.price)}</span>
                                                 </div>
                                                 <div className="text-xs text-gray-500 flex items-center gap-1.5 mt-0.5">
                                                     <span>{format(start, "d MMM", { locale: dateFnsLocale })}</span>
@@ -1627,22 +1860,6 @@ export default function DashboardPage() {
                                         </div>
                                     );
                                 })}
-                                {!showAllOverdue && visibleOverduePayments.length > 5 && (
-                                    <button
-                                        onClick={() => setShowAllOverdue(true)}
-                                        className="w-full text-center text-sm text-indigo-600 font-medium py-2 hover:bg-gray-50 rounded-xl transition-colors"
-                                    >
-                                        {t('dash.showMore', { count: String(visibleOverduePayments.length) })}
-                                    </button>
-                                )}
-                                {showAllOverdue && visibleOverduePayments.length > 5 && (
-                                    <button
-                                        onClick={() => setShowAllOverdue(false)}
-                                        className="w-full text-center text-sm text-gray-500 font-medium py-2 hover:bg-gray-50 rounded-xl transition-colors"
-                                    >
-                                        {t('dash.hide')}
-                                    </button>
-                                )}
                                 {attentionRowsDismissReady && attentionRowsKey && dismissedAttentionRowIds.size > 0 && visibleOverduePayments.length > 0 && (
                                     <button
                                         type="button"
@@ -1709,7 +1926,7 @@ export default function DashboardPage() {
                                                     </p>
                                                 </div>
                                             </div>
-                                            <span className="text-sm font-bold text-green-700 flex-shrink-0">+€{p.amount.toFixed(2)}</span>
+                                            <span className="text-sm font-bold text-green-700 flex-shrink-0">+{fmt(p.amount)}</span>
                                         </div>
                                         {recentPaymentRowsKey && (
                                             <button
@@ -1755,15 +1972,15 @@ export default function DashboardPage() {
                         <div className="space-y-3">
                             <div className="flex justify-between items-center">
                                 <span className="text-indigo-200 text-sm">{t('dash.totalRevenue')}</span>
-                                <span className="font-bold">€{totalRevenue.toFixed(0)}</span>
+                                <span className="font-bold">{fmt(totalRevenue, { decimals: 0 })}</span>
                             </div>
                             <div className="flex justify-between items-center">
                                 <span className="text-indigo-200 text-sm">{t('dash.pendingPayments')}</span>
-                                <span className="font-bold text-amber-300">€{pendingRevenue.toFixed(0)}</span>
+                                <span className="font-bold text-amber-300">{fmt(pendingRevenue, { decimals: 0 })}</span>
                             </div>
                             <div className="border-t border-indigo-500 pt-2 flex justify-between items-center">
                                 <span className="text-indigo-200 text-sm">{t('dash.thisMonth')}</span>
-                                <span className="font-bold text-green-300">€{thisMonthRevenue.toFixed(0)}</span>
+                                <span className="font-bold text-green-300">{fmt(thisMonthRevenue, { decimals: 0 })}</span>
                             </div>
                         </div>
                         <Link
@@ -1787,10 +2004,12 @@ export default function DashboardPage() {
                         setCancelConfirmId(null);
                         setIsEditingTime(false);
                         setNoShowPickerOpen(false);
+                        setModalActionNotice(null);
                     }
                 }}
             >
-                <DialogContent className="w-[95vw] sm:max-w-[480px] max-h-[90vh] overflow-y-auto">
+                <DialogContent className="w-[95vw] sm:max-w-[480px] max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
+                    <div className="overflow-y-auto flex-1 min-h-0 px-4 sm:px-6 pt-4 sm:pt-6">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <CalendarDays className="w-5 h-5 text-indigo-600" />
@@ -1889,6 +2108,7 @@ export default function DashboardPage() {
                                             type="button"
                                             onClick={() => {
                                                 setEditNewStartTime(format(new Date(selectedSession.start_time), "yyyy-MM-dd'T'HH:mm"));
+                                                setRescheduleReason('');
                                                 setIsEditingTime(true);
                                             }}
                                             className="text-gray-400 hover:text-indigo-600 p-1 rounded-md transition-colors shrink-0 -mr-1"
@@ -1901,6 +2121,7 @@ export default function DashboardPage() {
                                 {isEditingTime ? (
                                     <div className="mt-2 space-y-2">
                                         <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
+                                        {!hideProKlaseOrgTutorFreeTime && (
                                         <label className="flex items-start gap-2 cursor-pointer">
                                 <Checkbox
                                     checked={leaveFreeTimeOnReschedule}
@@ -1908,9 +2129,38 @@ export default function DashboardPage() {
                                 />
                                             <span className="text-xs text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
                                         </label>
+                                        )}
+                                        {editNewStartTime && selectedSession &&
+                                            Math.floor(new Date(editNewStartTime).getTime() / 60000) !== Math.floor(new Date(selectedSession.start_time).getTime() / 60000) && (
+                                            <div className="space-y-1">
+                                                <p className="text-xs font-medium text-gray-600">{t('cal.rescheduleReasonLabel')}</p>
+                                                <textarea
+                                                    value={rescheduleReason}
+                                                    onChange={(e) => setRescheduleReason(e.target.value)}
+                                                    placeholder={t('cal.rescheduleReasonPlaceholder')}
+                                                    className="w-full p-2 rounded-lg border border-gray-200 text-xs resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
+                                                    rows={2}
+                                                />
+                                                <p className="text-[11px] text-gray-500">
+                                                    {isOrgTutor ? t('cal.rescheduleReasonHelper') : t('cal.rescheduleReasonHelperSolo')}
+                                                </p>
+                                                {rescheduleReason.length > 0 && rescheduleReason.trim().length < 5 && (
+                                                    <p className="text-[11px] text-red-500">{t('dash.minChars', { min: '5', current: String(rescheduleReason.trim().length) })}</p>
+                                                )}
+                                            </div>
+                                        )}
                                         <div className="flex gap-2">
                                             <Button size="sm" variant="outline" className="h-7 px-2 text-xs flex-1 rounded-lg" onClick={() => setIsEditingTime(false)}>{t('dash.cancelEdit')}</Button>
-                                            <Button size="sm" className="h-7 px-2 text-xs flex-1 rounded-lg" onClick={handleReschedule} disabled={saving}>{saving ? '...' : t('dash.saveEdit')}</Button>
+                                            <Button
+                                                size="sm"
+                                                className="h-7 px-2 text-xs flex-1 rounded-lg"
+                                                onClick={handleReschedule}
+                                                disabled={saving || (
+                                                    !!editNewStartTime && !!selectedSession &&
+                                                    Math.floor(new Date(editNewStartTime).getTime() / 60000) !== Math.floor(new Date(selectedSession.start_time).getTime() / 60000) &&
+                                                    rescheduleReason.trim().length < 5
+                                                )}
+                                            >{saving ? '...' : t('dash.saveEdit')}</Button>
                                         </div>
                                     </div>
                                 ) : (
@@ -1953,6 +2203,7 @@ export default function DashboardPage() {
                                         orgTutorCopy
                                         hidePaymentStatus
                                         endTime={selectedSession?.end_time}
+                                        pendingConfirmation={requiresStatusConfirmation}
                                     />
                                 </div>
                             </div>
@@ -1960,7 +2211,7 @@ export default function DashboardPage() {
                             <div className="grid gap-3 text-sm grid-cols-3">
                                 <div className="bg-gray-50 rounded-xl p-3 text-center">
                                     <p className="text-xs text-gray-400 mb-1">{t('dash.priceLabel')}</p>
-                                    <p className="font-bold text-gray-900">€{selectedSession?.price || '–'}</p>
+                                    <p className="font-bold text-gray-900">{selectedSession?.price != null ? fmt(selectedSession.price) : '–'}</p>
                                     {selectedSession?.credit_applied_amount != null && selectedSession.credit_applied_amount > 0 && (
                                         <p className="text-[11px] text-green-600 mt-1">{t('dash.creditApplied', { amount: selectedSession.credit_applied_amount.toFixed(2) })}</p>
                                     )}
@@ -2028,11 +2279,14 @@ export default function DashboardPage() {
                             )}
                         </div>
 
+                        {selectedSession && <AttendanceBadge session={selectedSession as any} />}
+
                         {selectedSession?.meeting_link && (
                             <a
                                 href={normalizeUrl(selectedSession.meeting_link) || undefined}
                                 target="_blank"
                                 rel="noreferrer"
+                                onClick={() => recordJoinClick(selectedSession as any, 'tutor')}
                                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 text-blue-600 text-sm hover:bg-blue-100 transition-colors"
                             >
                                 {t('dash.joinVideoCall')}
@@ -2081,6 +2335,7 @@ export default function DashboardPage() {
                             {cancellationReason.length > 0 && cancellationReason.trim().length < 5 && (
                                 <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(cancellationReason.trim().length) })}</p>
                             )}
+                            {!hideProKlaseOrgTutorFreeTime && (
                             <label className="flex items-start gap-2 cursor-pointer pt-1">
                                 <Checkbox
                                     checked={leaveFreeTimeOnCancel}
@@ -2088,6 +2343,7 @@ export default function DashboardPage() {
                                 />
                                 <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
                             </label>
+                            )}
                             <div className="flex gap-2 mt-3">
                                 <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); }} className="rounded-xl flex-1">
                                     {t('dash.cancelBtn')}
@@ -2104,11 +2360,86 @@ export default function DashboardPage() {
                     {selectedSession?.id && (
                         <SessionFiles sessionId={selectedSession.id} role="tutor" />
                     )}
+                    </div>
 
-                    <DialogFooter className="flex flex-col gap-3 pt-4 mt-1 border-t border-gray-100 w-full sm:flex-col">
+                    {modalActionNotice && (
+                        <div className="mx-4 sm:mx-6 mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                            {modalActionNotice}
+                        </div>
+                    )}
+
+                    <DialogFooter className="flex flex-col gap-3 pt-4 px-4 sm:px-6 pb-4 sm:pb-6 mt-0 border-t border-gray-100 w-full sm:flex-col shrink-0 bg-background">
                         {cancelConfirmId !== selectedSession?.id && (
                         <>
-                        {selectedSession?.status === 'active' && (
+                        {isOrgTutor === true && requiresStatusConfirmation &&
+                            selectedSession?.status === 'active' &&
+                            isAfter(new Date(), new Date(selectedSession.end_time)) && (
+                            <div className="w-full rounded-xl border border-amber-300 bg-amber-50 p-3 space-y-2">
+                                <p className="text-sm font-semibold text-amber-900">{t('cal.confirmStatusPrompt')}</p>
+                                <p className="text-xs text-amber-800/80">{t('cal.confirmStatusDesc')}</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <Button
+                                        size="sm"
+                                        disabled={confirmingStatusId === selectedSession.id}
+                                        onClick={() => void confirmLessonStatus(selectedSession, 'completed')}
+                                        className="rounded-xl bg-green-600 hover:bg-green-700 text-white"
+                                    >
+                                        <CheckCircle className="w-4 h-4 mr-1" />
+                                        {t('cal.statusHappened')}
+                                    </Button>
+                                    {!hideProKlaseOrgTutorCancel && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={confirmingStatusId === selectedSession.id}
+                                        onClick={() => void confirmLessonStatus(selectedSession, 'completed', true)}
+                                        className="rounded-xl text-amber-800 border-amber-300 hover:bg-amber-100"
+                                    >
+                                        <Clock className="w-4 h-4 mr-1" />
+                                        {t('cal.statusHappenedLate')}
+                                    </Button>
+                                    )}
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={confirmingStatusId === selectedSession.id}
+                                        onClick={() => void confirmLessonStatus(selectedSession, 'no_show')}
+                                        className="rounded-xl text-rose-700 border-rose-200 hover:bg-rose-50"
+                                    >
+                                        <UserX className="w-4 h-4 mr-1" />
+                                        {t('cal.statusNoShowOpt')}
+                                    </Button>
+                                    {!hideProKlaseOrgTutorCancel && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={confirmingStatusId === selectedSession.id}
+                                        onClick={() => void confirmLessonStatus(selectedSession, 'cancelled')}
+                                        className="rounded-xl text-gray-700 border-gray-300 hover:bg-gray-100"
+                                    >
+                                        <XCircle className="w-4 h-4 mr-1" />
+                                        {t('cal.statusCancelledOpt')}
+                                    </Button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                        {selectedSession?.status === 'active' && isOrgTutor === true && (
+                            <div className="flex w-full flex-wrap gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={openSessionTimeEditor}
+                                    disabled={saving}
+                                    size="sm"
+                                    className="rounded-xl flex-1 text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+                                >
+                                    <CalendarDays className="w-4 h-4 mr-1" />
+                                    {t('cal.moveLesson')}
+                                </Button>
+                            </div>
+                        )}
+                        {selectedSession?.status === 'active' && isOrgTutor !== true && (
                             <div className="flex w-full flex-col gap-2">
                                 <div className="grid grid-cols-2 gap-2">
                                     <Button

@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { insertParentInviteAndSendEmail, type ParentInviteSource } from './_lib/parentInvite.js';
-import { inviteEmailLocale, publicOriginFromRequest } from './_lib/public-origin.js';
+import { inviteEmailLocale, orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
 
 /**
  * Legacy/server-only: use `x-internal-key` (service role) or POST from register-student /
@@ -53,13 +53,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: student, error: stErr } = await supabase
     .from('students')
-    .select('id, full_name, tutor_id')
+    .select('id, full_name, tutor_id, organization_id')
     .eq('id', studentId)
     .single();
 
   if (stErr || !student) return res.status(404).json({ error: 'Student not found' });
 
-  const appOrigin = publicOriginFromRequest(req);
+  let orgName: string | null = null;
+  let orgLocale: string | null = null;
+  let orgForBrand: {
+    name?: string | null;
+    logo_url?: string | null;
+    brand_color?: string | null;
+    brand_color_secondary?: string | null;
+    features?: unknown;
+  } | null = null;
+  const orgId = (student.organization_id as string | null) ?? null;
+  if (orgId) {
+    const { data: orgRow, error: orgErr } = await supabase
+      .from('organizations')
+      .select('name, preferred_locale, logo_url, brand_color, brand_color_secondary, features')
+      .eq('id', orgId)
+      .maybeSingle();
+    if (orgErr) {
+      const { data: fallbackRow } = await supabase
+        .from('organizations')
+        .select('name, logo_url, brand_color, brand_color_secondary, features')
+        .eq('id', orgId)
+        .maybeSingle();
+      orgName = (fallbackRow?.name as string | null) ?? null;
+      orgForBrand = fallbackRow;
+    } else {
+      orgName = (orgRow?.name as string | null) ?? null;
+      orgLocale = (orgRow?.preferred_locale as string | null) ?? null;
+      orgForBrand = orgRow;
+    }
+  }
+
+  const appOrigin = orgAwareOrigin(orgLocale, publicOriginFromRequest(req));
+  const explicitLocale =
+    typeof (req.body as { locale?: string })?.locale === 'string'
+      ? (req.body as { locale?: string }).locale
+      : undefined;
   const result = await insertParentInviteAndSendEmail({
     supabase,
     appUrl: appOrigin,
@@ -69,20 +104,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     parentName: parentName ?? null,
     source: source ?? null,
     invitedByUserId: invitedByUserId ?? null,
-    locale: inviteEmailLocale(
-      typeof (req.body as { locale?: string })?.locale === 'string'
-        ? (req.body as { locale?: string }).locale
-        : undefined,
-      appOrigin,
-    ),
-    uiLocale:
-      typeof (req.body as { locale?: string })?.locale === 'string'
-        ? (req.body as { locale?: string }).locale
-        : undefined,
+    locale: inviteEmailLocale(explicitLocale || orgLocale || undefined, appOrigin),
+    uiLocale: explicitLocale || orgLocale || undefined,
+    orgName,
+    organizationId: orgId,
+    org: orgForBrand,
   });
 
   if ('error' in result) {
     return res.status(500).json({ error: result.error });
+  }
+  if ('skipped' in result) {
+    return res.status(200).json({ success: true, skipped: true, reason: result.reason });
   }
 
   return res.status(200).json({

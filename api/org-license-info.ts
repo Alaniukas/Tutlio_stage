@@ -1,5 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {
@@ -29,21 +31,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { data: adminRow, error: adminErr } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', requester.id)
-      .maybeSingle();
-
-    if (adminErr || !adminRow?.organization_id) {
+    const adminAccess = await getOrgAdminAccessByUserId(supabase, requester.id);
+    if (!adminAccess || !hasOrgAdminPermission(adminAccess.role, adminAccess.permissions, 'tutors.view')) {
       return res.status(403).json({ error: 'Only organization admin can view license info' });
     }
+    const adminRow = { organization_id: adminAccess.organizationId };
 
     const orgId = adminRow.organization_id;
 
     const { data: org, error: orgErr } = await supabase
       .from('organizations')
-      .select('id, tutor_license_count')
+      .select('id, tutor_license_count, license_subscription_id, license_subscription_status, license_subscription_period_end')
       .eq('id', orgId)
       .maybeSingle();
 
@@ -54,10 +52,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       organizationId: orgId,
       tutorLicenseCount: Number((org as any).tutor_license_count) || 0,
+      hasLicenseSubscription: Boolean((org as any).license_subscription_id),
+      licenseSubscriptionStatus: (org as any).license_subscription_status || null,
+      licenseSubscriptionPeriodEnd: (org as any).license_subscription_period_end || null,
     });
   } catch (err: any) {
     console.error('[org-license-info] Error:', err?.message || err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 }
-

@@ -14,6 +14,8 @@ export interface DateInputProps {
   disabled?: boolean
   className?: string
   id?: string
+  /** Month shown when the field is empty (year/month dropdowns). */
+  defaultMonth?: Date
 }
 
 function parseDateValue(value: string): Date | undefined {
@@ -24,7 +26,7 @@ function parseDateValue(value: string): Date | undefined {
   return isNaN(date.getTime()) ? undefined : date
 }
 
-function DateInput({ value, onChange, min, max, disabled, className, id }: DateInputProps) {
+function DateInput({ value, onChange, min, max, disabled, className, id, defaultMonth }: DateInputProps) {
   const [open, setOpen] = React.useState(false)
   const { dateFnsLocale } = useTranslation()
 
@@ -43,7 +45,7 @@ function DateInput({ value, onChange, min, max, disabled, className, id }: DateI
   }
 
   const displayValue = selectedDate
-    ? format(selectedDate, "dd/MM/yyyy", { locale: dateFnsLocale })
+    ? format(selectedDate, "yyyy-MM-dd", { locale: dateFnsLocale })
     : undefined
 
   return (
@@ -62,7 +64,7 @@ function DateInput({ value, onChange, min, max, disabled, className, id }: DateI
           )}
         >
           <span className={displayValue ? "text-foreground" : "text-muted-foreground"}>
-            {displayValue || "dd/mm/yyyy"}
+            {displayValue || "yyyy-mm-dd"}
           </span>
           <CalendarDays className="ml-auto h-4 w-4 text-muted-foreground" />
         </button>
@@ -73,7 +75,7 @@ function DateInput({ value, onChange, min, max, disabled, className, id }: DateI
           selected={selectedDate}
           onSelect={handleSelect}
           disabled={disabledDays.length > 0 ? disabledDays : undefined}
-          defaultMonth={selectedDate}
+          defaultMonth={selectedDate ?? defaultMonth}
         />
       </PopoverContent>
     </Popover>

@@ -9,7 +9,8 @@ import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
 import { Checkbox } from '@/components/ui/checkbox';
 import { format } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
-import { CalendarDays, Search, ChevronDown, ListOrdered, UserX, XCircle, CheckCircle, Pencil, Ban, Loader2, MessageSquare, Trash2 } from 'lucide-react';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { CalendarDays, Search, ChevronDown, ListOrdered, UserX, XCircle, CheckCircle, Pencil, Ban, Loader2, MessageSquare, Trash2, Gift } from 'lucide-react';
 import { defaultNoShowWhenForNow, buildNoShowSessionPatch } from '@/lib/noShowWhen';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -29,11 +30,24 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import StatusBadge from '@/components/StatusBadge';
+import AttendanceBadge from '@/components/AttendanceBadge';
+import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { isAttendanceFlagged } from '@/lib/attendance';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
+import { orgStudentIdentityGroupKey, pickStudentsForOrgTutorPicker } from '@/lib/orgStudentIdentity';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
+import { useHideWaitlist } from '@/hooks/useHideWaitlist';
+import { isWaitlistHiddenForOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
+import {
+  resolveOrgSessionSubjectDefaults,
+  type OrgSubjectForDefaults,
+} from '@/lib/orgSessionSubjectDefaults';
+import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
+import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 
 interface Session {
   id: string;
@@ -45,8 +59,11 @@ interface Session {
   price: number | null;
   topic: string | null;
   paid: boolean;
+  class_group_id?: string | null;
+  is_complimentary?: boolean;
   payment_status: string | null;
   cancellation_reason: string | null;
+  reschedule_reason?: string | null;
   cancelled_by?: 'tutor' | 'student' | null;
   tutor_name: string;
   student_name: string;
@@ -58,14 +75,28 @@ interface Session {
   show_comment_to_student?: boolean;
   student_admin_comment?: string | null;
   student_admin_comment_visible_to_tutor?: boolean;
+  tutor_joined_at?: string | null;
+  student_joined_at?: string | null;
 }
 
-interface Subject {
-  id: string;
+interface Subject extends OrgSubjectForDefaults {
   name: string;
   price: number;
   tutor_id: string;
 }
+
+type OrgTutorRow = { id: string; full_name: string; personal_meeting_link?: string | null };
+type OrgStudentRow = {
+  id: string;
+  full_name: string;
+  tutor_id: string | null;
+  linked_user_id: string | null;
+  email?: string | null;
+  organization_id?: string | null;
+  personal_meeting_link?: string | null;
+  grade?: string | null;
+  pricing_lessons_per_week?: number | null;
+};
 
 const ORG_SESSION_DETAIL_SELECT =
   '*, student:students(full_name, admin_comment, admin_comment_visible_to_tutor), subjects(is_group), tutor_comment, show_comment_to_student';
@@ -81,8 +112,11 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
     price: row.price,
     topic: row.topic,
     paid: row.paid,
+    class_group_id: row.class_group_id ?? null,
+    is_complimentary: row.is_complimentary === true,
     payment_status: row.payment_status || null,
     cancellation_reason: row.cancellation_reason,
+    reschedule_reason: row.reschedule_reason ?? null,
     cancelled_by: row.cancelled_by ?? null,
     tutor_name: tutorList.find((t) => t.id === row.tutor_id)?.full_name || '–',
     student_name: row.student?.full_name || '–',
@@ -94,14 +128,23 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
     show_comment_to_student: row.show_comment_to_student ?? false,
     student_admin_comment: row.student?.admin_comment ?? null,
     student_admin_comment_visible_to_tutor: row.student?.admin_comment_visible_to_tutor ?? false,
+    tutor_joined_at: row.tutor_joined_at ?? null,
+    student_joined_at: row.student_joined_at ?? null,
   };
 }
 
 export default function CompanySessions() {
   const { t, locale, dateFnsLocale } = useTranslation();
+  const { fmt } = useMarketMoney();
+  const entityType = useOrgEntityType();
+  const isSchoolOrgView = entityType === 'school';
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
+  // Sync cache avoids first-paint flash before useOrgFeatures resolves.
+  const cachedOrgId = getCached<{ organizationId?: string }>('company_dashboard')?.organizationId ?? null;
+  const { hideWaitlist: hideWaitlistResolved } = useHideWaitlist({ failClosedWhileLoading: true });
+  const hideWaitlist = hideWaitlistResolved || isWaitlistHiddenForOrg(cachedOrgId);
 
   const statusOptions = useMemo(
     () => [
@@ -117,7 +160,7 @@ export default function CompanySessions() {
   const sc = getCached<any>('company_sessions');
   const [loading, setLoading] = useState(!sc);
   const [sessions, setSessions] = useState<Session[]>(sc?.sessions ?? []);
-  const [tutors, setTutors] = useState<{ id: string; full_name: string }[]>(sc?.tutors ?? []);
+  const [tutors, setTutors] = useState<OrgTutorRow[]>(sc?.tutors ?? []);
   const [filterTutor, setFilterTutor] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [search, setSearch] = useState('');
@@ -127,6 +170,7 @@ export default function CompanySessions() {
   const [isFilterActive, setIsFilterActive] = useState(false);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [markingNoShow, setMarkingNoShow] = useState(false);
+  const [noShowDialogOpen, setNoShowDialogOpen] = useState(false);
   const [cancelMode, setCancelMode] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
   const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
@@ -145,20 +189,109 @@ export default function CompanySessions() {
   const [groupEditChoice, setGroupEditChoice] = useState<'single' | 'all_future'>('single');
   const [savingEdit, setSavingEdit] = useState(false);
   const [togglingPaid, setTogglingPaid] = useState(false);
+  const [togglingComplimentary, setTogglingComplimentary] = useState(false);
+  const [organizationId, setOrganizationId] = useState<string | null>(cachedOrgId);
   const [deletingSession, setDeletingSession] = useState(false);
   const [deleteRecurringOpen, setDeleteRecurringOpen] = useState(false);
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [students, setStudents] = useState<{ id: string; full_name: string; tutor_id: string; linked_user_id: string | null }[]>(sc?.students ?? []);
+  const [students, setStudents] = useState<OrgStudentRow[]>(sc?.students ?? []);
+  const [individualPricing, setIndividualPricing] = useState<
+    Array<{ student_id: string; subject_id: string; price: number }>
+  >([]);
+  const [tutorSubjectPrices, setTutorSubjectPrices] = useState<
+    Array<{ tutor_id: string; org_subject_template_id: string; price: number; duration_minutes: number }>
+  >([]);
+  const [orgSubjectTemplates, setOrgSubjectTemplates] = useState<Array<{ id: string; name: string }>>([]);
+  const [dynamicPricingRules, setDynamicPricingRules] = useState<OrganizationDynamicPricingRule[]>([]);
+  const [trialDefaults, setTrialDefaults] = useState<{ topic: string; durationMinutes: number; priceEur: number }>({
+    topic: '',
+    durationMinutes: 60,
+    priceEur: 0,
+  });
   const [filterStudent, setFilterStudent] = useState('');
 
   useEffect(() => {
     if (!getCached('company_sessions')) loadData();
   }, []);
 
+  useEffect(() => {
+    if (!organizationId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('organizations')
+        .select('features, org_subject_templates')
+        .eq('id', organizationId)
+        .maybeSingle();
+      if (cancelled) return;
+      const feat = (data as any)?.features;
+      const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
+      setTrialDefaults({
+        topic: typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
+          ? featObj.trial_lesson_topic.trim()
+          : '',
+        durationMinutes: typeof featObj.trial_lesson_duration_minutes === 'number' && Number.isFinite(featObj.trial_lesson_duration_minutes)
+          ? Math.max(15, Math.round(featObj.trial_lesson_duration_minutes))
+          : 60,
+        priceEur: typeof featObj.trial_lesson_price_eur === 'number' && Number.isFinite(featObj.trial_lesson_price_eur)
+          ? Math.max(0, featObj.trial_lesson_price_eur)
+          : 0,
+      });
+      const tpl = (data as any)?.org_subject_templates;
+      if (Array.isArray(tpl)) {
+        setOrgSubjectTemplates(
+          tpl.filter((t: any) => t?.id && t?.name).map((t: any) => ({ id: t.id, name: String(t.name).trim() })),
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId]);
+
+  const applyEditSubjectDefaults = useCallback(
+    (subjectId: string) => {
+      const subj = subjects.find((s) => s.id === subjectId);
+      if (!subj) return;
+
+      const tutorRow = editTutorId ? tutors.find((t) => t.id === editTutorId) : undefined;
+      const defaults = resolveOrgSessionSubjectDefaults({
+        subject: subj,
+        studentId: editStudentId,
+        tutorId: editTutorId,
+        students,
+        individualPricing,
+        dynamicPricingRules: subj.is_group || subj.is_trial ? [] : dynamicPricingRules,
+        orgSubjectTemplates,
+        tutorSubjectPrices,
+        tutorPersonalMeetingLink: tutorRow?.personal_meeting_link,
+        trialDefaults,
+      });
+
+      setEditTopic(defaults.topic);
+      setEditPrice(defaults.price);
+      setEditDurationMinutes(defaults.durationMinutes);
+      setEditMeetingLink(defaults.meetingLink);
+    },
+    [
+      subjects,
+      editTutorId,
+      editStudentId,
+      tutors,
+      students,
+      individualPricing,
+      dynamicPricingRules,
+      orgSubjectTemplates,
+      tutorSubjectPrices,
+      trialDefaults,
+    ],
+  );
+
   const loadData = async () => {
     if (!getCached('company_sessions')) setLoading(true);
+    try {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    if (!user) return;
 
     const { data: adminRow } = await supabase
       .from('organization_admins')
@@ -166,32 +299,58 @@ export default function CompanySessions() {
       .eq('user_id', user.id)
       .maybeSingle();
     if (!adminRow) return;
+    setOrganizationId(adminRow.organization_id);
 
     const tutorList = await getOrgVisibleTutors(
       supabase as any,
       adminRow.organization_id,
-      'id, full_name, email',
+      'id, full_name, email, personal_meeting_link',
     );
     setTutors(tutorList);
 
-    const [studentsResult, subjectsResult] = await Promise.all([
+    const tutorIds = tutorList.map((t) => t.id);
+
+    const [studentsResult, subjectsResult, pricingResult, tspResult, dynamicResult] = await Promise.all([
       supabase
         .from('students')
-        .select('id, full_name, tutor_id, linked_user_id')
+        .select('id, full_name, tutor_id, linked_user_id, email, organization_id, personal_meeting_link, grade, pricing_lessons_per_week')
         .eq('organization_id', adminRow.organization_id)
         .order('full_name'),
       supabase
         .from('subjects')
-        .select('id, name, price, tutor_id')
-        .in('tutor_id', tutorList.map(t => t.id))
+        .select('id, name, price, tutor_id, duration_minutes, is_group, is_trial, meeting_link')
+        .in('tutor_id', tutorIds)
         .order('name'),
+      supabase
+        .from('student_individual_pricing')
+        .select('student_id, subject_id, price')
+        .in('tutor_id', tutorIds),
+      supabase
+        .from('tutor_subject_prices')
+        .select('tutor_id, org_subject_template_id, price, duration_minutes')
+        .in('tutor_id', tutorIds),
+      isProKlaseOrg(adminRow.organization_id)
+        ? supabase
+            .from('organization_dynamic_pricing')
+            .select('id, organization_id, grade_min, grade_max, lessons_per_week, price')
+            .eq('organization_id', adminRow.organization_id)
+        : Promise.resolve({ data: [] as OrganizationDynamicPricingRule[] }),
     ]);
     setStudents(studentsResult.data || []);
     setSubjects(subjectsResult.data || []);
+    setIndividualPricing(pricingResult.data || []);
+    setTutorSubjectPrices(tspResult.data || []);
+    setDynamicPricingRules(
+      (dynamicResult.data ?? []).map((row) => ({
+        ...row,
+        grade_min: Number(row.grade_min),
+        grade_max: Number(row.grade_max),
+        lessons_per_week: Number(row.lessons_per_week),
+        price: Number(row.price),
+      })),
+    );
 
-    if (tutorList.length === 0) { setLoading(false); return; }
-
-    const tutorIds = tutorList.map(t => t.id);
+    if (tutorList.length === 0) return;
 
     const threeMonthsAgo = new Date();
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
@@ -208,7 +367,9 @@ export default function CompanySessions() {
 
     setSessions(enriched);
     setCache('company_sessions', { sessions: enriched, tutors: tutorList, students: studentsResult.data || [] });
-    setLoading(false);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleMarkStudentNoShow = async () => {
@@ -216,10 +377,11 @@ export default function CompanySessions() {
     const sessionId = selectedSession.id;
     setMarkingNoShow(true);
     const when = defaultNoShowWhenForNow(new Date(selectedSession.start_time), new Date(selectedSession.end_time));
-    const patch = buildNoShowSessionPatch(when, (selectedSession as any).tutor_comment);
+    const patch = buildNoShowSessionPatch(when, selectedSession.tutor_comment);
     const { error } = await supabase.from('sessions').update(patch).eq('id', sessionId);
     setMarkingNoShow(false);
     if (!error) {
+      setNoShowDialogOpen(false);
       setSelectedSession(null);
       loadData();
       void (async () => {
@@ -231,6 +393,9 @@ export default function CompanySessions() {
       })().catch(() => {});
     }
   };
+
+  const selectedSessionAttendanceFlagged =
+    !!selectedSession && isAttendanceFlagged(selectedSession);
 
   const handleCancelSession = async () => {
     if (!selectedSession || cancellationReason.trim().length < 5) return;
@@ -267,13 +432,43 @@ export default function CompanySessions() {
     const newPaid = !selectedSession.paid;
     const { error } = await supabase
       .from('sessions')
-      .update({ paid: newPaid, payment_status: newPaid ? 'paid' : 'pending' })
+      .update({
+        paid: newPaid,
+        payment_status: newPaid ? 'paid' : 'pending',
+        ...(newPaid ? {} : { is_complimentary: false }),
+      })
       .eq('id', selectedSession.id);
     setTogglingPaid(false);
     if (!error) {
-      setSelectedSession({ ...selectedSession, paid: newPaid, payment_status: newPaid ? 'paid' : 'pending' });
-      setSessions(prev => prev.map(s => s.id === selectedSession.id ? { ...s, paid: newPaid, payment_status: newPaid ? 'paid' : 'pending' } : s));
+      setSelectedSession({
+        ...selectedSession,
+        paid: newPaid,
+        payment_status: newPaid ? 'paid' : 'pending',
+        is_complimentary: newPaid ? selectedSession.is_complimentary : false,
+      });
+      setSessions(prev => prev.map(s => s.id === selectedSession.id
+        ? { ...s, paid: newPaid, payment_status: newPaid ? 'paid' : 'pending', is_complimentary: newPaid ? s.is_complimentary : false }
+        : s));
     }
+  };
+
+  const handleMarkComplimentary = async () => {
+    if (!selectedSession) return;
+    setTogglingComplimentary(true);
+    const next = !selectedSession.is_complimentary;
+    const result = await setSessionComplimentary(selectedSession.id, next);
+    setTogglingComplimentary(false);
+    if (result.ok === false) {
+      alert(result.error);
+      return;
+    }
+    const patch = {
+      is_complimentary: next,
+      paid: next,
+      payment_status: next ? 'paid' : 'pending',
+    };
+    setSelectedSession({ ...selectedSession, ...patch });
+    setSessions(prev => prev.map(s => s.id === selectedSession.id ? { ...s, ...patch } : s));
   };
 
   const hardDeleteCompanySession = async (sessionId: string, deleteScope: 'single' | 'future' = 'single') => {
@@ -327,6 +522,7 @@ export default function CompanySessions() {
       if (Number.isNaN(newStart.getTime())) throw new Error(t('compSch.invalidStartDateTime'));
       const newEnd = new Date(newStart.getTime() + editDurationMinutes * 60 * 1000);
 
+      const paidChanged = editPaid !== selectedSession.paid;
       const payload: Record<string, any> = {
         start_time: newStart.toISOString(),
         end_time: newEnd.toISOString(),
@@ -337,7 +533,7 @@ export default function CompanySessions() {
         student_id: editStudentId || selectedSession.student_id,
         tutor_id: editTutorId || selectedSession.tutor_id,
         paid: editPaid,
-        payment_status: editPaid ? 'paid' : 'pending',
+        ...(paidChanged ? { payment_status: editPaid ? 'paid' : 'pending' } : {}),
         status: editStatus,
       };
 
@@ -360,6 +556,7 @@ export default function CompanySessions() {
       setSelectedSession(null);
       loadData();
     } catch (err: any) {
+      console.error('[CompanySessions] save edit error', err);
       alert(t('compSch.errorSaving', { msg: err.message }));
     }
     setSavingEdit(false);
@@ -472,7 +669,7 @@ export default function CompanySessions() {
   const uniqueStudents = useMemo(() => {
     const seen = new Map<string, { id: string; full_name: string; ids: Set<string> }>();
     for (const s of students) {
-      const key = s.linked_user_id || `name:${s.full_name}`;
+      const key = orgStudentIdentityGroupKey(s);
       if (!seen.has(key)) {
         seen.set(key, { id: s.id, full_name: s.full_name, ids: new Set([s.id]) });
       } else {
@@ -540,12 +737,14 @@ export default function CompanySessions() {
             <h1 className="text-2xl font-bold text-gray-900">{t('compSess.lessonsTitle')}</h1>
             <p className="text-sm text-gray-500 mt-0.5">{t('compSess.totalCount', { count: sessions.length })}</p>
           </div>
+          {!hideWaitlist && (
           <Button variant="outline" className="gap-2 rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0" asChild>
             <Link to={`${orgBasePath}/waitlist`}>
               <ListOrdered className="w-4 h-4" />
               {t('compSess.waitlist')}
             </Link>
           </Button>
+          )}
         </div>
 
         {/* Filters */}
@@ -674,6 +873,7 @@ export default function CompanySessions() {
                         {format(new Date(session.start_time), 'd MMM yyyy', { locale: dateFnsLocale })}{' '}
                         · {format(new Date(session.start_time), 'HH:mm')}–{format(new Date(session.end_time), 'HH:mm')}
                       </p>
+                      <AttendanceBadge session={session} className="mt-1.5" />
                     </div>
                     <div className="flex flex-col items-end gap-2 flex-shrink-0">
                       <div className="scale-90 origin-top-right">
@@ -681,19 +881,22 @@ export default function CompanySessions() {
                           status={session.status}
                           paymentStatus={session.payment_status ?? undefined}
                           paid={session.paid}
+                          isComplimentary={session.is_complimentary === true}
                           endTime={session.end_time}
                         />
                       </div>
                       <span
                         className={cn(
                           'inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border',
-                          paid ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'
+                          session.is_complimentary
+                            ? 'bg-sky-50 text-sky-800 border-sky-100'
+                            : paid ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'
                         )}
                       >
-                        {paid ? t('compSess.paidShort') : t('compSess.pendingShort')}
+                        {session.is_complimentary ? t('status.complimentary') : paid ? t('compSess.paidShort') : t('compSess.pendingShort')}
                       </span>
                       <span className="text-sm font-semibold text-gray-900">
-                        {session.price != null ? `${session.price.toFixed(2)} €` : '–'}
+                        {session.price != null ? fmt(session.price) : '–'}
                       </span>
                     </div>
                   </div>
@@ -740,17 +943,26 @@ export default function CompanySessions() {
                       {session.topic || '–'}
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge
-                        status={session.status}
-                        paymentStatus={session.payment_status ?? undefined}
-                        paid={session.paid}
-                        endTime={session.end_time}
-                      />
+                      <div className="flex flex-col items-start gap-1">
+                        <StatusBadge
+                          status={session.status}
+                          paymentStatus={session.payment_status ?? undefined}
+                          paid={session.paid}
+                          isComplimentary={session.is_complimentary === true}
+                          endTime={session.end_time}
+                        />
+                        <AttendanceBadge session={session} />
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       {session.paid || session.payment_status === 'paid' || session.payment_status === 'confirmed' ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-green-50 text-green-700 border border-green-100">
-                          {t('compSess.paidShort')}
+                        <span className={cn(
+                          'inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border',
+                          session.is_complimentary
+                            ? 'bg-sky-50 text-sky-800 border-sky-100'
+                            : 'bg-green-50 text-green-700 border-green-100',
+                        )}>
+                          {session.is_complimentary ? t('status.complimentary') : t('compSess.paidShort')}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100">
@@ -759,7 +971,7 @@ export default function CompanySessions() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-gray-800">
-                      {session.price != null ? `${session.price.toFixed(2)} €` : '–'}
+                      {session.price != null ? fmt(session.price) : '–'}
                     </td>
                   </tr>
                 ))}
@@ -841,7 +1053,7 @@ export default function CompanySessions() {
                       <Select value={editStudentId} onValueChange={setEditStudentId}>
                         <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {sortStudentsByFullName(students.filter(s => !editTutorId || s.tutor_id === editTutorId)).map(
+                          {sortStudentsByFullName(pickStudentsForOrgTutorPicker(students, editTutorId)).map(
                             (s) => (
                               <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
                             ),
@@ -856,8 +1068,7 @@ export default function CompanySessions() {
                     <Select value={editSubjectId || 'none'} onValueChange={(v) => {
                       const val = v === 'none' ? '' : v;
                       setEditSubjectId(val);
-                      const subj = subjects.find(s => s.id === val);
-                      if (subj) { setEditTopic(subj.name); setEditPrice(subj.price); }
+                      if (val) applyEditSubjectDefaults(val);
                     }}>
                       <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -942,19 +1153,21 @@ export default function CompanySessions() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label className="text-xs text-gray-500">{t('compSess.labelStatus')}</Label>
-                      <div className="mt-1">
+                      <div className="mt-1 flex flex-col items-start gap-1">
                         <StatusBadge
                           status={selectedSession.status}
                           paymentStatus={selectedSession.payment_status ?? undefined}
                           paid={selectedSession.paid}
+                          isComplimentary={selectedSession.is_complimentary === true}
                           endTime={selectedSession.end_time}
                         />
+                        <AttendanceBadge session={selectedSession} />
                       </div>
                     </div>
                     <div>
                       <Label className="text-xs text-gray-500">{t('compSess.labelPrice')}</Label>
                       <p className="font-semibold text-sm mt-1">
-                        {selectedSession.price != null ? `${selectedSession.price.toFixed(2)} €` : '–'}
+                        {selectedSession.price != null ? fmt(selectedSession.price) : '–'}
                       </p>
                     </div>
                   </div>
@@ -972,6 +1185,13 @@ export default function CompanySessions() {
                     <div>
                       <Label className="text-xs text-gray-500">{t('compSess.cancellationReason')}</Label>
                       <p className="text-sm mt-1 text-red-600">{selectedSession.cancellation_reason}</p>
+                    </div>
+                  )}
+
+                  {selectedSession.reschedule_reason && selectedSession.status !== 'cancelled' && (
+                    <div>
+                      <Label className="text-xs text-gray-500">{t('common.rescheduleReason')}</Label>
+                      <p className="text-sm mt-1 text-blue-700 whitespace-pre-wrap">{selectedSession.reschedule_reason}</p>
                     </div>
                   )}
 
@@ -1052,7 +1272,7 @@ export default function CompanySessions() {
 
                   {!cancelMode && (selectedSession.status === 'active' || selectedSession.status === 'completed') && (
                     <div className="space-y-2 pt-1">
-                      {selectedSession.status === 'active' && (
+                      {selectedSession.status === 'active' && !isSchoolOrgView && !isSchoolBilledSession(selectedSession) && (
                         <Button
                           variant="outline"
                           className={cn('w-full rounded-xl', selectedSession.paid ? 'border-amber-200 text-amber-700 hover:bg-amber-50' : 'border-green-200 text-green-700 hover:bg-green-50')}
@@ -1061,6 +1281,17 @@ export default function CompanySessions() {
                         >
                           {togglingPaid ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : selectedSession.paid ? <XCircle className="w-4 h-4 mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
                           {selectedSession.paid ? t('compSess.markUnpaid') : t('compSess.markPaid')}
+                        </Button>
+                      )}
+                      {isProKlaseOrg(organizationId) && (selectedSession.status === 'active' || selectedSession.status === 'completed') && (
+                        <Button
+                          variant="outline"
+                          className="w-full rounded-xl border-sky-200 text-sky-700 hover:bg-sky-50"
+                          disabled={togglingComplimentary}
+                          onClick={() => void handleMarkComplimentary()}
+                        >
+                          {togglingComplimentary ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Gift className="w-4 h-4 mr-2" />}
+                          {selectedSession.is_complimentary ? t('compSess.unmarkComplimentary') : t('compSess.markComplimentary')}
                         </Button>
                       )}
 
@@ -1077,15 +1308,19 @@ export default function CompanySessions() {
                         </>
                       )}
 
-                      {selectedSession.status === 'active' && (
+                      {selectedSessionAttendanceFlagged &&
+                        (selectedSession.status === 'active' || selectedSession.status === 'completed') && (
                         <Button
                           variant="outline"
                           className="w-full border-rose-200 text-rose-800 hover:bg-rose-50 rounded-xl"
                           disabled={markingNoShow}
-                          onClick={(e) => { e.stopPropagation(); void handleMarkStudentNoShow(); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setNoShowDialogOpen(true);
+                          }}
                         >
                           <UserX className="w-4 h-4 mr-2" />
-                          {markingNoShow ? t('compSess.markNoShowSaving') : t('compSess.markNoShow')}
+                          {t('compSess.markNoShow')}
                         </Button>
                       )}
 
@@ -1109,6 +1344,15 @@ export default function CompanySessions() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MarkStudentNoShowDialog
+        open={noShowDialogOpen && !!selectedSession}
+        onOpenChange={setNoShowDialogOpen}
+        sessionStart={selectedSession ? new Date(selectedSession.start_time) : new Date()}
+        sessionEnd={selectedSession ? new Date(selectedSession.end_time) : new Date()}
+        saving={markingNoShow}
+        onConfirm={handleMarkStudentNoShow}
+      />
 
       <Dialog open={deleteRecurringOpen} onOpenChange={setDeleteRecurringOpen}>
         <DialogContent className="w-[95vw] sm:max-w-[440px]">

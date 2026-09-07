@@ -4,7 +4,8 @@ import { getCached, setCache } from '@/lib/dataCache';
 import { COMPANY_TUTORS_CACHE_KEY } from '@/lib/preload';
 import {
   Users, Plus, Copy, Check, Trash2, UserCheck, UserX,
-  ChevronRight, ChevronDown, X, Pencil, Mail, Send, AlertCircle
+  ChevronRight, ChevronDown, X, Pencil, Mail, Send, AlertCircle,
+  CreditCard, Loader2
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
@@ -12,11 +13,32 @@ import { cn } from '@/lib/utils';
 import { dedupeSubjectPresets, subjectPresetKey, tutorSubjectsContainLessonDuplicate } from '@/lib/subjectPresetDedupe';
 import { removeOrgSubjectTemplatesMatchingPreset } from '@/lib/orgSubjectTemplateCleanup';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import {
+  groupsTaughtByTutor,
+  scheduleLabelFromGroupSlots,
+  type SchoolClassGroupRecord,
+} from '@/lib/schoolClassGroups';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import BuyLicensesDialog from '@/components/company/BuyLicensesDialog';
+import { fmtMoney, isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import {
+  compactTutorPayBySubject,
+  parseTutorPayBySubject,
+  sumOrgTutorLessonsPayEur,
+} from '@/lib/orgTutorLessonPay';
+import {
+  countConductedOrgSessions,
+  filterConductedOrgSessions,
+} from '@/lib/orgTutorConductedSessions';
+import { sumProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
+import { authHeaders } from '@/lib/apiHelpers';
+import { isPlMarket } from '@/lib/market';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,9 +54,16 @@ interface Tutor {
   break_between_lessons: number;
   min_booking_hours: number;
   company_commission_percent?: number;
+  company_commission_by_subject?: Record<string, number> | null;
   personal_meeting_link?: string | null;
+  /** Free-text subjects/grades note, e.g. "MAT 2-6 kls, LT 1-8 kls". */
+  teaching_notes?: string | null;
   has_active_license?: boolean;
+  /** Earliest accepted invite timestamp — used for school tutor list sorting. */
+  joined_at?: string | null;
 }
+
+type SchoolTutorSort = 'alpha' | 'newest' | 'oldest';
 
 interface Invite {
   id: string;
@@ -44,6 +73,7 @@ interface Invite {
   used_by_profile_id: string | null;
   invitee_name: string | null;
   invitee_email: string | null;
+  teaching_notes?: string | null;
   created_at: string;
   tutor?: Tutor | null;
 }
@@ -54,6 +84,7 @@ interface Subject {
   duration_minutes: number;
   price: number;
   color: string;
+  is_trial?: boolean | null;
 }
 
 interface SubjectPreset {
@@ -93,19 +124,91 @@ function generateToken(): string {
   return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 
+/** Dark pill next to tutor/invite name — matches the admin “klasių pastaba” mock. */
+function TeachingNotesBadge({ notes }: { notes?: string | null }) {
+  const text = String(notes || '').trim();
+  if (!text) return null;
+  return (
+    <span
+      className="shrink-0 text-[11px] font-medium text-white bg-slate-700 px-2 py-0.5 rounded-full max-w-[16rem] truncate"
+      title={text}
+    >
+      {text}
+    </span>
+  );
+}
+
 // ─── SubjectPresetList – shared in both invite types ─────────────────────────
+
+function CatalogSubjectSelect({
+  value,
+  onValueChange,
+  options,
+  hidePrice = false,
+  triggerClassName,
+}: {
+  value: string;
+  onValueChange: (key: string) => void;
+  options: { key: string; preset: SubjectPreset }[];
+  hidePrice?: boolean;
+  triggerClassName?: string;
+}) {
+  const { t } = useTranslation();
+  const [search, setSearch] = useState('');
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? options.filter((o) => (o.preset.name || '').toLowerCase().includes(q))
+    : options;
+
+  return (
+    <Select
+      value={value || '__none__'}
+      onValueChange={onValueChange}
+      onOpenChange={(open) => {
+        if (!open) setSearch('');
+      }}
+    >
+      <SelectTrigger className={cn('rounded-xl text-sm bg-white w-full', triggerClassName)}>
+        <SelectValue placeholder={t('compTut.selectSubject')} />
+      </SelectTrigger>
+      <SelectContent className="max-h-72 overflow-y-auto">
+        <div className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('common.search')}
+            className="h-9 rounded-xl"
+            onPointerDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          />
+        </div>
+        <SelectItem value="__none__">{t('compTut.selectDefault')}</SelectItem>
+        {filtered.map((o) => (
+          <SelectItem key={o.key} value={o.key}>
+            {hidePrice
+              ? `${o.preset.name} · ${o.preset.duration_minutes} min`
+              : `${o.preset.name} · ${fmtMoney(o.preset.price)} · ${o.preset.duration_minutes} min`}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
 
 function SubjectPresetList({
   subjects,
   onAdd,
   onRemove,
   orgCatalog,
+  hidePrice = false,
 }: {
   subjects: SubjectPreset[];
   onAdd: (s: SubjectPreset) => void;
   onRemove: (idx: number) => void;
   /** Subject catalog options from lesson settings */
   orgCatalog: { key: string; preset: SubjectPreset }[];
+  /** Dynamic pricing orgs — no per-subject list price */
+  hidePrice?: boolean;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -123,7 +226,7 @@ function SubjectPresetList({
 
   const add = () => {
     if (!name.trim()) return;
-    onAdd({ name: name.trim(), duration_minutes: duration, price, color });
+    onAdd({ name: name.trim(), duration_minutes: duration, price: hidePrice ? 0 : price, color });
     setName(''); setDuration(60); setPrice(25); setColor('#6366f1');
     setOpen(false);
   };
@@ -158,7 +261,9 @@ function SubjectPresetList({
         <div key={idx} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">
           <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
           <span className="flex-1 text-sm font-medium text-gray-800 truncate">{s.name}</span>
-          <span className="text-xs text-gray-500">{s.price} € · {s.duration_minutes} min</span>
+          <span className="text-xs text-gray-500">
+            {hidePrice ? `${s.duration_minutes} min` : `${fmtMoney(s.price)} · ${s.duration_minutes} min`}
+          </span>
           <button onClick={() => onRemove(idx)} className="text-gray-400 hover:text-red-500 transition-colors">
             <X className="w-3.5 h-3.5" />
           </button>
@@ -168,23 +273,18 @@ function SubjectPresetList({
       {/* Inline add form */}
       {open && (
         <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 space-y-3">
-          {orgCatalog.length > 0 && (
+      {orgCatalog.length > 0 && (
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-gray-600">{t('compTut.fromCatalog')}</Label>
+              <p className="text-[11px] text-gray-500 leading-relaxed">{t('compTut.orgCatalogHint')}</p>
               {catalogAvailable.length > 0 ? (
-                <Select value={catalogPick || '__none__'} onValueChange={pickFromCatalog}>
-                  <SelectTrigger className="rounded-xl h-9 text-sm bg-white">
-                    <SelectValue placeholder={t('compTut.selectSubject')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">{t('compTut.selectDefault')}</SelectItem>
-                    {catalogAvailable.map((o) => (
-                      <SelectItem key={o.key} value={o.key}>
-                        {o.preset.name} · {o.preset.price} € · {o.preset.duration_minutes} min
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <CatalogSubjectSelect
+                  value={catalogPick}
+                  onValueChange={pickFromCatalog}
+                  options={catalogAvailable}
+                  hidePrice={hidePrice}
+                  triggerClassName="h-9"
+                />
               ) : (
                 <p className="text-xs text-gray-500">{t('compTut.allCatalogAdded')}</p>
               )}
@@ -205,15 +305,17 @@ function SubjectPresetList({
             className="rounded-xl text-sm"
             autoFocus={orgCatalog.length === 0}
           />
-          <div className="grid grid-cols-2 gap-2">
+          <div className={hidePrice ? 'space-y-1' : 'grid grid-cols-2 gap-2'}>
             <div className="space-y-1">
               <Label className="text-xs text-gray-500">{t('compTut.durationMin')}</Label>
               <Input type="number" value={duration} onChange={e => setDuration(Number(e.target.value) || 0)} className="rounded-xl text-sm" />
             </div>
+            {!hidePrice && (
             <div className="space-y-1">
               <Label className="text-xs text-gray-500">{t('compTut.priceEur')}</Label>
               <Input type="number" value={price} onChange={e => setPrice(Number(e.target.value) || 0)} className="rounded-xl text-sm" />
             </div>
+            )}
           </div>
           <div className="flex gap-1.5 flex-wrap">
             {COLORS.map(c => (
@@ -235,16 +337,17 @@ function SubjectPresetList({
 
 // ─── SubjectRow – in tutor detail modal ──────────────────────────────────────
 
-function SubjectRow({ subject, onSave, onDelete }: {
+function SubjectRow({ subject, onSave, onDelete, hidePrice = false }: {
   subject: Subject;
   onSave: (s: Subject) => void;
   onDelete: (id: string) => void;
+  hidePrice?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [price, setPrice] = useState(subject.price);
   const [duration, setDuration] = useState(subject.duration_minutes);
 
-  const save = () => { onSave({ ...subject, price, duration_minutes: duration }); setEditing(false); };
+  const save = () => { onSave({ ...subject, price: hidePrice ? subject.price : price, duration_minutes: duration }); setEditing(false); };
 
   return (
     <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-2.5">
@@ -252,10 +355,12 @@ function SubjectRow({ subject, onSave, onDelete }: {
       <p className="flex-1 text-sm font-medium text-gray-800 truncate">{subject.name}</p>
       {editing ? (
         <>
+          {!hidePrice && (
           <div className="flex items-center gap-1">
             <Input type="number" value={price} onChange={e => setPrice(Number(e.target.value) || 0)} className="w-16 h-7 text-xs rounded-lg px-2" />
-            <span className="text-xs text-gray-400">€</span>
+            <span className="text-xs text-gray-400">{isPlMarket() ? 'zł' : '€'}</span>
           </div>
+          )}
           <div className="flex items-center gap-1">
             <Input type="number" value={duration} onChange={e => setDuration(Number(e.target.value) || 0)} className="w-16 h-7 text-xs rounded-lg px-2" />
             <span className="text-xs text-gray-400">min</span>
@@ -265,7 +370,9 @@ function SubjectRow({ subject, onSave, onDelete }: {
         </>
       ) : (
         <>
-          <span className="text-xs text-gray-500">{subject.price} € · {subject.duration_minutes} min</span>
+          <span className="text-xs text-gray-500">
+            {hidePrice ? `${subject.duration_minutes} min` : `${fmtMoney(subject.price)} · ${subject.duration_minutes} min`}
+          </span>
           <button onClick={() => setEditing(true)} className="text-gray-400 hover:text-indigo-600 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
           <button onClick={() => onDelete(subject.id)} className="text-gray-400 hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
         </>
@@ -305,7 +412,7 @@ function TutorSubjectPriceRow({ template, existing, onSave, onDelete }: {
         <>
           <div className="flex items-center gap-1">
             <Input type="number" value={price} onChange={e => setPrice(Number(e.target.value) || 0)} className="w-16 h-7 text-xs rounded-lg px-2" />
-            <span className="text-xs text-gray-400">€</span>
+            <span className="text-xs text-gray-400">{isPlMarket() ? 'zł' : '€'}</span>
           </div>
           <div className="flex items-center gap-1">
             <Input type="number" value={duration} onChange={e => setDuration(Number(e.target.value) || 0)} className="w-16 h-7 text-xs rounded-lg px-2" />
@@ -317,7 +424,7 @@ function TutorSubjectPriceRow({ template, existing, onSave, onDelete }: {
       ) : (
         <>
           <span className={cn("text-xs", hasOverride ? "text-indigo-600 font-medium" : "text-gray-400")}>
-            {hasOverride ? `${existing.price} € · ${existing.duration_minutes} min` : `${template.price} € · ${template.duration_minutes} min`}
+            {hasOverride ? `${fmtMoney(existing.price)} · ${existing.duration_minutes} min` : `${fmtMoney(template.price)} · ${template.duration_minutes} min`}
           </span>
           {hasOverride && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full font-medium">{t('compTut.customBadge')}</span>}
           <button onClick={() => setEditing(true)} className="text-gray-400 hover:text-indigo-600 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
@@ -334,17 +441,27 @@ function TutorSubjectPriceRow({ template, existing, onSave, onDelete }: {
 
 export default function CompanyTutors() {
   const { t, locale, dateFnsLocale } = useTranslation();
+  const orgEntityType = useOrgEntityType();
+  const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
+  const isSchoolView = orgEntityType === 'school';
   const tc = getCached<any>(COMPANY_TUTORS_CACHE_KEY);
   const [loading, setLoading] = useState(!tc);
   const [orgId, setOrgId] = useState<string | null>(tc?.orgId ?? null);
+  const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [tutorLicenseCount, setTutorLicenseCount] = useState<number>(tc?.tutorLicenseCount ?? 0);
   const [tutors, setTutors] = useState<Tutor[]>(tc?.tutors ?? []);
+  const [tutorSort, setTutorSort] = useState<SchoolTutorSort>('alpha');
   const [invites, setInvites] = useState<Invite[]>(tc?.invites ?? []);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [usedInvitesOpen, setUsedInvitesOpen] = useState(false);
   const [licenseBusyTutorIds, setLicenseBusyTutorIds] = useState<Set<string>>(new Set());
   const [licenseError, setLicenseError] = useState<string | null>(null);
   const [licenseInfoError, setLicenseInfoError] = useState<string | null>(null);
+
+  // ── Self-serve license purchase / billing portal ──
+  const [hasLicenseSubscription, setHasLicenseSubscription] = useState(false);
+  const [buyLicensesOpen, setBuyLicensesOpen] = useState(false);
+  const [licensePortalLoading, setLicensePortalLoading] = useState(false);
 
   // ── Invite modal ──
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
@@ -362,6 +479,7 @@ export default function CompanyTutors() {
   const [inviteMinBooking, setInviteMinBooking] = useState(1);
   const [inviteCommissionPercent, setInviteCommissionPercent] = useState(0);
   const [inviteMeetingLink, setInviteMeetingLink] = useState('');
+  const [inviteTeachingNotes, setInviteTeachingNotes] = useState('');
 
   // Organization default settings
   const [orgDefaults, setOrgDefaults] = useState({
@@ -389,6 +507,7 @@ export default function CompanyTutors() {
   const [archivingTutor, setArchivingTutor] = useState(false);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const [editTeachingNotes, setEditTeachingNotes] = useState('');
   const [showAddSubject, setShowAddSubject] = useState(false);
   const [newSubjectName, setNewSubjectName] = useState('');
   const [newSubjectDuration, setNewSubjectDuration] = useState(60);
@@ -396,6 +515,7 @@ export default function CompanyTutors() {
   const [newSubjectColor, setNewSubjectColor] = useState('#6366f1');
   const [addSubjectCatalogPick, setAddSubjectCatalogPick] = useState('');
   const [savingSubject, setSavingSubject] = useState(false);
+  const [assigningCatalogKey, setAssigningCatalogKey] = useState<string | null>(null);
   const [tutorSubjectPrices, setTutorSubjectPrices] = useState<{ id?: string; tutor_id: string; org_subject_template_id: string; price: number; duration_minutes: number }[]>([]);
   const [orgTemplates, setOrgTemplates] = useState<{ id: string; name: string; price: number; duration_minutes: number; color: string }[]>([]);
 
@@ -414,40 +534,136 @@ export default function CompanyTutors() {
   const [editBreakBetween, setEditBreakBetween] = useState(0);
   const [editMinBooking, setEditMinBooking] = useState(1);
   const [editCommissionPercent, setEditCommissionPercent] = useState(0);
+  const [editSubjectPay, setEditSubjectPay] = useState<Record<string, string>>({});
   const [editMeetingLink, setEditMeetingLink] = useState('');
+  const [tutorInvoiceProfile, setTutorInvoiceProfile] = useState<Record<string, string | null> | null>(null);
+  const [penaltyManualAmount, setPenaltyManualAmount] = useState('');
+  const [penaltyManualReason, setPenaltyManualReason] = useState('');
+  const [applyingPenalty, setApplyingPenalty] = useState(false);
+  const [applyingPenaltyType, setApplyingPenaltyType] = useState<string | null>(null);
+  const [penaltyFeedback, setPenaltyFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const isProKlaseAdmin = isProKlaseOrg(orgId);
+  const isManoKorepetitoriusAdmin = isManoKorepetitoriusOrg(orgId);
+  const classGroupsEnabled = isSchoolView && !orgFeaturesLoading && hasFeature('school_class_groups');
 
-  useEffect(() => { loadData({ silent: !!getCached(COMPANY_TUTORS_CACHE_KEY) }); }, []);
+  const sortedTutors = useMemo(() => {
+    const rows = [...tutors];
+    if (tutorSort === 'alpha') {
+      rows.sort((a, b) => a.full_name.localeCompare(b.full_name, locale || 'lt'));
+      return rows;
+    }
+    const joinTime = (row: Tutor) => {
+      const ts = row.joined_at ? Date.parse(row.joined_at) : NaN;
+      return Number.isFinite(ts) ? ts : 0;
+    };
+    rows.sort((a, b) => {
+      const diff = joinTime(a) - joinTime(b);
+      if (diff !== 0) return tutorSort === 'newest' ? -diff : diff;
+      return a.full_name.localeCompare(b.full_name, locale || 'lt');
+    });
+    return rows;
+  }, [tutors, tutorSort, locale]);
+
+  useEffect(() => {
+    if (!classGroupsEnabled) {
+      setClassGroups([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const headers = await authHeaders();
+      const res = await fetch('/api/school-class-groups', { headers });
+      const data = await res.json().catch(() => ({}));
+      if (!cancelled && res.ok) setClassGroups((data.groups || []) as SchoolClassGroupRecord[]);
+    })();
+    return () => { cancelled = true; };
+  }, [classGroupsEnabled]);
+
+  const applyTutorAdjustment = async (
+    type: 'penalty_tutor_no_show' | 'penalty_missing_report' | 'penalty_manual',
+    amountEur?: number,
+    reason?: string,
+  ) => {
+    if (!selectedTutor) return;
+    setApplyingPenalty(true);
+    setApplyingPenaltyType(type);
+    setPenaltyFeedback(null);
+    try {
+      const res = await fetch('/api/tutor-adjustment', {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tutorId: selectedTutor.id,
+          type,
+          amountEur,
+          reason,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPenaltyFeedback({
+          type: 'error',
+          message: (json as { error?: string }).error || t('compTut.penaltyFailed'),
+        });
+        return;
+      }
+      setPenaltyManualAmount('');
+      setPenaltyManualReason('');
+      setPenaltyFeedback({ type: 'success', message: t('compTut.penaltyApplied') });
+    } catch {
+      setPenaltyFeedback({ type: 'error', message: t('compTut.penaltyFailed') });
+    } finally {
+      setApplyingPenalty(false);
+      setApplyingPenaltyType(null);
+    }
+  };
+
+  const penaltyButtonLabel = (
+    type: string,
+    label: string,
+  ) => (
+    <>
+      {applyingPenalty && applyingPenaltyType === type ? (
+        <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+      ) : null}
+      <span>{label}</span>
+    </>
+  );
 
   const loadData = async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
     if (!silent) setLoading(true);
+    try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      if (!silent) setLoading(false);
       return;
     }
 
     const { data: adminRow } = await supabase
       .from('organization_admins')
-      .select('organization_id, organizations(tutor_license_count)')
+      .select('organization_id')
       .eq('user_id', user.id)
       .maybeSingle();
     if (!adminRow) {
-      if (!silent) setLoading(false);
       return;
     }
 
     setOrgId(adminRow.organization_id);
-    const orgJoinedRaw = (adminRow as any).organizations as any;
-    const orgJoined = Array.isArray(orgJoinedRaw) ? orgJoinedRaw[0] : orgJoinedRaw;
-    const joinedLicenseCount = Number(orgJoined?.tutor_license_count) || 0;
-    let effectiveLicenseCount = joinedLicenseCount;
+    let effectiveLicenseCount = 0;
     setLicenseInfoError(null);
+
+    // Separate query: column may not exist until the enterprise billing migration runs.
+    const { data: licenseOrgData } = await supabase
+      .from('organizations')
+      .select('license_subscription_id')
+      .eq('id', adminRow.organization_id)
+      .maybeSingle();
+    setHasLicenseSubscription(Boolean((licenseOrgData as any)?.license_subscription_id));
 
     // Try to load organization default settings (columns may not exist yet)
     const { data: orgData } = await supabase
       .from('organizations')
-      .select('tutor_license_count, default_cancellation_hours, default_cancellation_fee_percent, default_reminder_student_hours, default_reminder_tutor_hours, default_break_between_lessons, default_min_booking_hours, default_company_commission_percent')
+      .select('tutor_license_count, default_cancellation_hours, default_cancellation_fee_percent, default_reminder_student_hours, default_reminder_tutor_hours, default_break_between_lessons, default_min_booking_hours, default_company_commission_percent, org_subject_templates')
       .eq('id', adminRow.organization_id)
       .maybeSingle();
 
@@ -487,6 +703,9 @@ export default function CompanyTutors() {
           const json = await resp.json().catch(() => ({}));
           if (!resp.ok) return;
 
+          if (typeof json?.hasLicenseSubscription === 'boolean') {
+            setHasLicenseSubscription(json.hasLicenseSubscription);
+          }
           const apiCount = Number(json?.tutorLicenseCount) || 0;
           if (apiCount > 0) {
             setLicenseInfoError(null);
@@ -500,9 +719,14 @@ export default function CompanyTutors() {
     };
     startLicenseInfoFetch();
 
+    // Keep in sync with preload.ts — do not add optional migration columns here or
+    // profiles SELECT fails on DBs without them and wipes the tutor list on reload.
+    const tutorSelect =
+      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, personal_meeting_link, teaching_notes, has_active_license';
+
     const { data: tutorData } = await supabase
       .from('profiles')
-      .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, has_active_license')
+      .select(tutorSelect)
       .eq('organization_id', adminRow.organization_id);
 
     const { data: inviteData } = await supabase
@@ -511,18 +735,31 @@ export default function CompanyTutors() {
       .eq('organization_id', adminRow.organization_id)
       .order('created_at', { ascending: false });
 
-    const visibleTutors = await getOrgVisibleTutors(
-      supabase as any,
-      adminRow.organization_id,
-      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, has_active_license',
-    );
-    setTutors(visibleTutors as Tutor[]);
-
     const enriched = (inviteData || []).map((inv: any) => ({
       ...inv,
       tutor: (tutorData || []).find((t: any) => t.id === inv.used_by_profile_id) || null,
     }));
     setInvites(enriched);
+
+    const joinedAtByTutorId = new Map<string, string>();
+    for (const inv of enriched) {
+      if (!inv.used_by_profile_id || !inv.used) continue;
+      const prev = joinedAtByTutorId.get(inv.used_by_profile_id);
+      if (!prev || String(inv.created_at) < prev) {
+        joinedAtByTutorId.set(inv.used_by_profile_id, String(inv.created_at));
+      }
+    }
+
+    const visibleTutors = (await getOrgVisibleTutors(
+      supabase as any,
+      adminRow.organization_id,
+      tutorSelect,
+    )) as Tutor[];
+    const tutorsWithJoinedAt = visibleTutors.map((tutor) => ({
+      ...tutor,
+      joined_at: joinedAtByTutorId.get(tutor.id) ?? null,
+    }));
+    setTutors(tutorsWithJoinedAt);
 
     const catalogOptions: { key: string; preset: SubjectPreset }[] = [];
     const rawTpl = (orgData as { org_subject_templates?: unknown } | null)?.org_subject_templates;
@@ -573,10 +810,19 @@ export default function CompanyTutors() {
     setCache(COMPANY_TUTORS_CACHE_KEY, {
       orgId: adminRow.organization_id,
       tutorLicenseCount: effectiveLicenseCount,
-      tutors: visibleTutors, invites: enriched,
+      tutors: tutorsWithJoinedAt,
+      invites: enriched,
     });
-    if (!silent) setLoading(false);
+    } catch (err) {
+      console.error('[CompanyTutors] loadData failed:', err);
+    } finally {
+      if (!silent) setLoading(false);
+    }
   };
+
+  useEffect(() => {
+    void loadData({ silent: !!getCached(COMPANY_TUTORS_CACHE_KEY) });
+  }, []);
 
   const licenseUsedCount = useMemo(() => {
     if (!tutorLicenseCount) return 0;
@@ -587,6 +833,40 @@ export default function CompanyTutors() {
   const showLicenseUi = tutorLicenseCount > 0;
 
   const unusedInvites = useMemo(() => invites.filter((i) => !i.used), [invites]);
+
+  /** Existing license subscription -> Stripe billing portal; otherwise the purchase dialog. */
+  const handleManageLicenses = async () => {
+    if (!hasLicenseSubscription) {
+      setBuyLicensesOpen(true);
+      return;
+    }
+    setLicensePortalLoading(true);
+    setLicenseError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setLicensePortalLoading(false);
+        return;
+      }
+      const res = await fetch('/api/org-license-portal', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      if (data.code === 'NO_SUBSCRIPTION') {
+        setBuyLicensesOpen(true);
+      } else {
+        setLicenseError(data?.error || t('compTut.serverErrorGeneric'));
+      }
+    } catch (e: any) {
+      setLicenseError(e?.message || t('compTut.serverErrorGeneric'));
+    }
+    setLicensePortalLoading(false);
+  };
 
   const setTutorLicense = async (tutorId: string, next: boolean) => {
     if (!orgId) return;
@@ -645,6 +925,7 @@ export default function CompanyTutors() {
 
     setInviteeName(''); setInviteeEmail(''); setInviteePhone('');
     setInviteMeetingLink('');
+    setInviteTeachingNotes('');
     setInviteError(null); setInviteSuccess(null);
     setSettingsExpanded(false);
     setInviteModalOpen(true);
@@ -677,6 +958,7 @@ export default function CompanyTutors() {
           min_booking_hours: inviteMinBooking,
           company_commission_percent: inviteCommissionPercent,
           personal_meeting_link: inviteMeetingLink.trim() || undefined,
+          teaching_notes: inviteTeachingNotes.trim() || undefined,
           locale,
         }),
       });
@@ -715,8 +997,9 @@ export default function CompanyTutors() {
       }
     } catch (e: any) {
       setInviteError(e?.message || t('compTut.serverErrorGeneric'));
+    } finally {
+      setSendingInvite(false);
     }
-    setSendingInvite(false);
   };
 
   const handleDeleteInvite = async (inviteId: string) => {
@@ -743,10 +1026,11 @@ export default function CompanyTutors() {
 
     const { data: sessions } = await supabase
       .from('sessions')
-      .select('price, status')
+      .select('price, status, subject_id, is_complimentary, subjects(is_trial)')
       .eq('tutor_id', tutor.id)
-      .eq('status', 'completed')
+      .in('status', ['completed', 'no_show'])
       .gte('start_time', oneYearAgo.toISOString())
+      .lte('end_time', new Date().toISOString())
       .limit(1000);
 
     const { data: tspData } = await supabase
@@ -754,8 +1038,17 @@ export default function CompanyTutors() {
       .select('*')
       .eq('tutor_id', tutor.id);
 
-    const sessionCount = (sessions || []).length;
-    const earnings = (sessions || []).reduce((sum, s: any) => sum + (s.price || 0), 0);
+    const conducted = filterConductedOrgSessions(sessions || []);
+    const sessionCount = countConductedOrgSessions(conducted);
+    const tutorRate = tutor.company_commission_percent ?? orgDefaults.company_commission_percent;
+    const earnings = isProKlaseAdmin
+      ? sumProKlasePayBreakdown(conducted as any[], tutorRate).totalEur
+      : sumOrgTutorLessonsPayEur(
+          conducted,
+          tutorRate,
+          tutor.company_commission_by_subject,
+          orgId,
+        );
     setTutorSubjectPrices((tspData || []).map((r: any) => ({
       id: r.id, tutor_id: r.tutor_id, org_subject_template_id: r.org_subject_template_id,
       price: Number(r.price), duration_minutes: r.duration_minutes,
@@ -763,6 +1056,7 @@ export default function CompanyTutors() {
     setSelectedTutor({ ...tutor, subjects: subjects || [], sessionCount, earnings });
     setEditName(tutor.full_name);
     setEditPhone(tutor.phone || '');
+    setEditTeachingNotes(tutor.teaching_notes || '');
     setShowAddSubject(false);
     setNewSubjectName('');
     setAddSubjectCatalogPick('');
@@ -775,8 +1069,33 @@ export default function CompanyTutors() {
     setEditBreakBetween(tutor.break_between_lessons ?? orgDefaults.break_between_lessons);
     setEditMinBooking(tutor.min_booking_hours ?? orgDefaults.min_booking_hours);
     setEditCommissionPercent(tutor.company_commission_percent ?? orgDefaults.company_commission_percent);
+    const parsedPay = parseTutorPayBySubject(tutor.company_commission_by_subject);
+    const nextPay: Record<string, string> = {};
+    for (const subj of (subjects || []) as Subject[]) {
+      if (subj.is_trial) continue;
+      nextPay[subj.id] = parsedPay[subj.id] != null ? String(parsedPay[subj.id]) : '';
+    }
+    setEditSubjectPay(nextPay);
     setEditMeetingLink(tutor.personal_meeting_link || '');
+    setTutorInvoiceProfile(null);
+    setPenaltyFeedback(null);
     setTutorModalOpen(true);
+
+    try {
+      const res = await fetch(`/api/invoice-settings?scope=tutor&tutorId=${encodeURIComponent(tutor.id)}`, {
+        headers: await authHeaders(),
+      });
+      const json = await res.json().catch(() => ({}));
+      const profile =
+        (json as { data?: Record<string, string | null> | null; profile?: Record<string, string | null> | null }).data ??
+        (json as { profile?: Record<string, string | null> | null }).profile ??
+        null;
+      if (res.ok && profile) {
+        setTutorInvoiceProfile(profile);
+      }
+    } catch {
+      /* optional */
+    }
   };
 
   const handleSaveTutor = async () => {
@@ -792,7 +1111,11 @@ export default function CompanyTutors() {
       break_between_lessons: editBreakBetween,
       min_booking_hours: editMinBooking,
       company_commission_percent: editCommissionPercent,
+      ...(isManoKorepetitoriusAdmin
+        ? { company_commission_by_subject: compactTutorPayBySubject(editSubjectPay) }
+        : {}),
       personal_meeting_link: editMeetingLink.trim() || null,
+      teaching_notes: editTeachingNotes.trim() || null,
     }).eq('id', selectedTutor.id);
     await loadData();
     setTutorModalOpen(false);
@@ -801,9 +1124,7 @@ export default function CompanyTutors() {
 
   const handleArchiveTutor = async () => {
     if (!selectedTutor) return;
-    const confirmed = window.confirm(
-      'Ar tikrai archyvuoti šį korepetitorių? Paskyra nebus ištrinta, bet dings iš organizacijos sąrašų, o mokiniai bus atkabinti nuo šio korepetitoriaus.'
-    );
+    const confirmed = window.confirm(t('compTut.archiveConfirm'));
     if (!confirmed) return;
 
     setArchivingTutor(true);
@@ -819,13 +1140,13 @@ export default function CompanyTutors() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body?.error || 'Failed to archive tutor');
+        throw new Error(body?.error || t('compTut.archiveFailed'));
       }
       await loadData();
       setTutorModalOpen(false);
       setSelectedTutor(null);
     } catch (e: any) {
-      alert(e?.message || 'Nepavyko archyvuoti korepetitoriaus');
+      alert(e?.message || t('compTut.archiveFailed'));
     } finally {
       setArchivingTutor(false);
     }
@@ -878,11 +1199,12 @@ export default function CompanyTutors() {
 
   const handleAddSubject = async () => {
     if (!selectedTutor || !newSubjectName.trim()) return;
+    const subjectPrice = isProKlaseAdmin ? 0 : newSubjectPrice;
     if (
       tutorSubjectsContainLessonDuplicate(selectedTutor.subjects, {
         name: newSubjectName.trim(),
         duration_minutes: newSubjectDuration,
-        price: newSubjectPrice,
+        price: subjectPrice,
       })
     ) {
       alert(t('compSet.subjectDuplicateForTutor'));
@@ -891,10 +1213,12 @@ export default function CompanyTutors() {
     setSavingSubject(true);
     const { data } = await supabase.from('subjects').insert({
       tutor_id: selectedTutor.id, name: newSubjectName.trim(),
-      duration_minutes: newSubjectDuration, price: newSubjectPrice, color: newSubjectColor,
+      duration_minutes: newSubjectDuration, price: subjectPrice, color: newSubjectColor,
     }).select().single();
     if (data) {
-      if (orgId) {
+      // Keep org catalog rows when assigning from the catalog; only prune templates
+      // after a fully manual add that would otherwise duplicate Subject Management.
+      if (orgId && !addSubjectCatalogPick) {
         await removeOrgSubjectTemplatesMatchingPreset(orgId, {
           name: data.name,
           duration_minutes: data.duration_minutes,
@@ -903,6 +1227,9 @@ export default function CompanyTutors() {
         });
       }
       setSelectedTutor({ ...selectedTutor, subjects: [...selectedTutor.subjects, data] });
+      if (isManoKorepetitoriusAdmin && data.id && !(data as Subject).is_trial) {
+        setEditSubjectPay((prev) => ({ ...prev, [data.id]: prev[data.id] ?? '' }));
+      }
       await loadData({ silent: true });
     }
     setNewSubjectName(''); setNewSubjectDuration(60); setNewSubjectPrice(25); setNewSubjectColor('#6366f1');
@@ -910,9 +1237,52 @@ export default function CompanyTutors() {
     setSavingSubject(false);
   };
 
+  const handleAssignCatalogTemplate = async (tpl: {
+    id: string;
+    name: string;
+    price: number;
+    duration_minutes: number;
+    color: string;
+  }) => {
+    if (!selectedTutor) return;
+    if (
+      tutorSubjectsContainLessonDuplicate(selectedTutor.subjects, {
+        name: tpl.name,
+        duration_minutes: tpl.duration_minutes,
+        price: tpl.price,
+      })
+    ) {
+      alert(t('compSet.subjectDuplicateForTutor'));
+      return;
+    }
+    setAssigningCatalogKey(tpl.id);
+    const subjectPrice = isProKlaseAdmin ? 0 : tpl.price;
+    const { data } = await supabase.from('subjects').insert({
+      tutor_id: selectedTutor.id,
+      name: tpl.name,
+      duration_minutes: tpl.duration_minutes,
+      price: subjectPrice,
+      color: tpl.color || '#6366f1',
+    }).select().single();
+    if (data) {
+      setSelectedTutor({ ...selectedTutor, subjects: [...selectedTutor.subjects, data] });
+      if (isManoKorepetitoriusAdmin && data.id && !(data as Subject).is_trial) {
+        setEditSubjectPay((prev) => ({ ...prev, [data.id]: prev[data.id] ?? '' }));
+      }
+      await loadData({ silent: true });
+    }
+    setAssigningCatalogKey(null);
+  };
+
   const handleDeleteSubject = async (subjectId: string) => {
     await supabase.from('subjects').delete().eq('id', subjectId);
     if (selectedTutor) setSelectedTutor({ ...selectedTutor, subjects: selectedTutor.subjects.filter(s => s.id !== subjectId) });
+    setEditSubjectPay((prev) => {
+      if (!(subjectId in prev)) return prev;
+      const next = { ...prev };
+      delete next[subjectId];
+      return next;
+    });
   };
 
   if (loading) {
@@ -943,8 +1313,19 @@ export default function CompanyTutors() {
                 <p className="text-sm font-semibold text-gray-900">{t('compTut.license')}</p>
                 <p className="text-xs text-gray-500 mt-0.5">{t('compTut.licenseDesc')}</p>
               </div>
-              <div className="flex-shrink-0 text-sm font-semibold text-gray-900">
-                {licenseUsedCount} / {tutorLicenseCount}
+              <div className="flex-shrink-0 flex items-center gap-3">
+                <div className="text-sm font-semibold text-gray-900">
+                  {licenseUsedCount} / {tutorLicenseCount}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleManageLicenses}
+                  disabled={licensePortalLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-60"
+                >
+                  {licensePortalLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CreditCard className="w-3.5 h-3.5" />}
+                  {hasLicenseSubscription ? t('compTut.manageLicenses') : t('compTut.buyLicenses')}
+                </button>
               </div>
             </div>
             <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden mt-3">
@@ -966,21 +1347,54 @@ export default function CompanyTutors() {
         {!showLicenseUi && licenseInfoError && (
           <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-amber-900">
             <p className="text-sm font-semibold">{t('compTut.license')}</p>
-            <p className="text-xs mt-0.5">
-              Nepavyko įkelti licencijų informacijos. Patikrinkite naršyklės Network, ar `GET /api/org-license-info` grąžina 200.
-            </p>
-            <p className="text-[11px] mt-1 text-amber-800 break-all">Detalės: {licenseInfoError}</p>
+            <p className="text-xs mt-0.5">{t('common.error')}</p>
+            <p className="text-[11px] mt-1 text-amber-800 break-all">{licenseInfoError}</p>
+          </div>
+        )}
+        {/* License subscription ended (count dropped to 0) — offer reactivation via portal */}
+        {!showLicenseUi && hasLicenseSubscription && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-900">{t('compTut.license')}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{t('compTut.licenseSubscriptionInactive')}</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleManageLicenses}
+              disabled={licensePortalLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-60 shrink-0"
+            >
+              {licensePortalLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CreditCard className="w-3.5 h-3.5" />}
+              {t('compTut.manageLicenses')}
+            </button>
           </div>
         )}
 
         {/* Registered tutors */}
         <section>
-          <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-3">{t('compTut.registered', { count: String(tutors.length) })}</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider">{t('compTut.registered', { count: String(tutors.length) })}</h2>
+            {isSchoolView && tutors.length > 1 && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500">{t('school.tutors.sortLabel')}</span>
+                <Select value={tutorSort} onValueChange={(v) => setTutorSort(v as SchoolTutorSort)}>
+                  <SelectTrigger className="h-8 w-[170px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="alpha">{t('school.tutors.sortAlpha')}</SelectItem>
+                    <SelectItem value="newest">{t('school.tutors.sortNewest')}</SelectItem>
+                    <SelectItem value="oldest">{t('school.tutors.sortOldest')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
           {tutors.length === 0 ? (
             <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-8 text-center text-gray-400 text-sm">{t('compTut.noTutors')}</div>
           ) : (
             <div className="space-y-2">
-              {tutors.map(tutor => (
+              {sortedTutors.map(tutor => (
                 <button key={tutor.id} onClick={() => openTutor(tutor)}
                   className="w-full bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3.5 flex items-center gap-3 hover:border-indigo-200 hover:shadow-md transition-all text-left hover:bg-indigo-50/40"
                 >
@@ -988,8 +1402,9 @@ export default function CompanyTutors() {
                     <span className="text-sm font-bold text-indigo-700">{tutor.full_name.charAt(0).toUpperCase()}</span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 truncate">{tutor.full_name}</p>
+                      <TeachingNotesBadge notes={tutor.teaching_notes} />
                     </div>
                     <p className="text-xs text-gray-500 truncate">{tutor.email}</p>
                   </div>
@@ -1053,7 +1468,10 @@ export default function CompanyTutors() {
                       <Mail className="w-4 h-4 text-amber-600" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-800">{invite.invitee_name || invite.invitee_email}</p>
+                      <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                        <p className="text-sm font-semibold text-gray-800 truncate">{invite.invitee_name || invite.invitee_email}</p>
+                        <TeachingNotesBadge notes={invite.teaching_notes} />
+                      </div>
                       <p className="text-xs text-gray-400">{invite.invitee_email} · {format(new Date(invite.created_at), 'd MMM yyyy', { locale: dateFnsLocale })}</p>
                       {invite.token && (
                         <p className="text-xs font-mono text-violet-600 mt-1 truncate" title={invite.token}>
@@ -1131,15 +1549,25 @@ export default function CompanyTutors() {
                 <Input placeholder={t('compTut.namePlaceholder')} value={inviteeName} onChange={e => setInviteeName(e.target.value)} className="rounded-xl" />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-sm font-medium text-gray-700">Prisijungimo nuoroda (pasirinktinai)</Label>
+                <Label className="text-sm font-medium text-gray-700">{t('compTut.teachingNotes')}</Label>
+                <Input
+                  placeholder={t('compTut.teachingNotesPlaceholder')}
+                  value={inviteTeachingNotes}
+                  onChange={(e) => setInviteTeachingNotes(e.target.value)}
+                  className="rounded-xl"
+                />
+                <p className="text-xs text-gray-500">{t('compTut.teachingNotesDesc')}</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium text-gray-700">{t('compTut.personalMeetingLink')}</Label>
                 <Input
                   value={inviteMeetingLink}
                   onChange={(e) => setInviteMeetingLink(e.target.value)}
                   className="rounded-xl"
-                  placeholder="https://zoom.us/j/..."
+                  placeholder="https://meet.google.com/xxx-xxxx-xxx"
                 />
                 <p className="text-xs text-gray-500">
-                  Numatytoji šio korepetitoriaus pamokų nuoroda (Zoom ir pan.). Jei nurodyta, rodoma mokiniams vietoj dalyko nuorodos.
+                  {t('compTut.personalMeetingLinkDesc')}
                 </p>
               </div>
             </div>
@@ -1151,6 +1579,7 @@ export default function CompanyTutors() {
                 onAdd={s => setPresetSubjects(prev => [...prev, s])}
                 onRemove={idx => setPresetSubjects(prev => prev.filter((_, i) => i !== idx))}
                 orgCatalog={orgSubjectCatalogOptions}
+                hidePrice={isProKlaseAdmin}
               />
             </div>
 
@@ -1264,7 +1693,7 @@ export default function CompanyTutors() {
                   <p className="text-xs text-gray-500">{t('compTut.lessonsTaught')}</p>
                 </div>
                 <div className="bg-gray-50 rounded-xl p-3 text-center">
-                  <p className="text-xl font-bold text-gray-900">{selectedTutor.earnings.toFixed(2)} €</p>
+                  <p className="text-xl font-bold text-gray-900">{fmtMoney(selectedTutor.earnings)}</p>
                   <p className="text-xs text-gray-500">{t('compTut.totalEarned')}</p>
                 </div>
               </div>
@@ -1282,7 +1711,105 @@ export default function CompanyTutors() {
                   <Label className="text-xs font-medium text-gray-600">{t('compTut.phone')}</Label>
                   <Input value={editPhone} onChange={e => setEditPhone(e.target.value)} className="rounded-xl" />
                 </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-gray-600">{t('compTut.teachingNotes')}</Label>
+                  <Input
+                    value={editTeachingNotes}
+                    onChange={(e) => setEditTeachingNotes(e.target.value)}
+                    placeholder={t('compTut.teachingNotesPlaceholder')}
+                    className="rounded-xl"
+                  />
+                  <p className="text-[11px] text-gray-500">{t('compTut.teachingNotesDesc')}</p>
+                </div>
+                {classGroupsEnabled && (
+                  <div className="space-y-1.5 rounded-xl border border-gray-100 bg-gray-50/70 p-3">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      {t('school.groups.tutorMembership')}
+                    </p>
+                    {groupsTaughtByTutor(classGroups, selectedTutor.id).length === 0 ? (
+                      <p className="text-sm text-gray-500">{t('school.groups.tutorMembershipNone')}</p>
+                    ) : (
+                      <ul className="text-sm text-gray-900 space-y-1">
+                        {groupsTaughtByTutor(classGroups, selectedTutor.id).map((group) => (
+                          <li key={group.id}>
+                            <span className="font-medium">{group.name}</span>
+                            {group.slots?.length ? (
+                              <span className="text-gray-500"> · {scheduleLabelFromGroupSlots(group.slots)}</span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
               </div>
+
+              <div className="space-y-2 pt-3 border-t border-gray-100">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('compTut.invoiceRequisites')}</p>
+                {tutorInvoiceProfile ? (
+                  <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-sm text-gray-700 space-y-1">
+                    {tutorInvoiceProfile.entity_type && (
+                      <p>
+                        <span className="text-gray-500">{t('invoiceSettings.entityType')}:</span>{' '}
+                        {t(`invoiceSettings.entityType_${tutorInvoiceProfile.entity_type}` as 'invoiceSettings.entityType')}
+                      </p>
+                    )}
+                    {tutorInvoiceProfile.business_name && <p><span className="text-gray-500">{t('invoiceSettings.businessName')}:</span> {tutorInvoiceProfile.business_name}</p>}
+                    {tutorInvoiceProfile.company_code && <p><span className="text-gray-500">{t('invoiceSettings.companyCode')}:</span> {tutorInvoiceProfile.company_code}</p>}
+                    {tutorInvoiceProfile.vat_code && <p><span className="text-gray-500">{t('invoiceSettings.vatCode')}:</span> {tutorInvoiceProfile.vat_code}</p>}
+                    {tutorInvoiceProfile.address && <p><span className="text-gray-500">{t('invoiceSettings.address')}:</span> {tutorInvoiceProfile.address}</p>}
+                    {tutorInvoiceProfile.activity_number && <p><span className="text-gray-500">{t('invoiceSettings.activityNumber')}:</span> {tutorInvoiceProfile.activity_number}</p>}
+                    {tutorInvoiceProfile.personal_code && <p><span className="text-gray-500">{t('invoiceSettings.personalCode')}:</span> {tutorInvoiceProfile.personal_code}</p>}
+                    {tutorInvoiceProfile.contact_email && <p><span className="text-gray-500">{t('invoiceSettings.contactEmail')}:</span> {tutorInvoiceProfile.contact_email}</p>}
+                    {tutorInvoiceProfile.contact_phone && <p><span className="text-gray-500">{t('invoiceSettings.contactPhone')}:</span> {tutorInvoiceProfile.contact_phone}</p>}
+                    {tutorInvoiceProfile.invoice_series && <p><span className="text-gray-500">{t('invoiceSettings.invoiceSeries')}:</span> {tutorInvoiceProfile.invoice_series}</p>}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">{t('compTut.invoiceRequisitesEmpty')}</p>
+                )}
+              </div>
+
+              {isProKlaseAdmin && (
+              <div className="space-y-3 pt-3 border-t border-gray-100">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('compTut.penaltiesSection')}</p>
+                {penaltyFeedback && (
+                  <p className={cn(
+                    'text-sm rounded-lg px-3 py-2',
+                    penaltyFeedback.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800',
+                  )}>
+                    {penaltyFeedback.message}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant="outline" disabled={applyingPenalty}
+                    className="gap-1.5"
+                    onClick={() => void applyTutorAdjustment('penalty_tutor_no_show')}>
+                    {penaltyButtonLabel('penalty_tutor_no_show', t('compTut.penaltyTutorNoShow'))}
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" disabled={applyingPenalty}
+                    className="gap-1.5"
+                    onClick={() => void applyTutorAdjustment('penalty_missing_report')}>
+                    {penaltyButtonLabel('penalty_missing_report', t('compTut.penaltyMissingReport'))}
+                  </Button>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  <Input type="number" step="0.01" placeholder={t('compTut.penaltyManual')}
+                    value={penaltyManualAmount} onChange={(e) => setPenaltyManualAmount(e.target.value)} className="rounded-xl"
+                    disabled={applyingPenalty} />
+                  <Input placeholder={t('compTut.penaltyReason')}
+                    value={penaltyManualReason} onChange={(e) => setPenaltyManualReason(e.target.value)} className="rounded-xl"
+                    disabled={applyingPenalty} />
+                </div>
+                <Button type="button" size="sm" disabled={applyingPenalty || !penaltyManualAmount}
+                  className="gap-1.5"
+                  onClick={() => void applyTutorAdjustment('penalty_manual', Number(penaltyManualAmount), penaltyManualReason || undefined)}>
+                  {penaltyButtonLabel(
+                    'penalty_manual',
+                    applyingPenaltyType === 'penalty_manual' ? t('compTut.penaltyApplying') : t('compTut.applyPenalty'),
+                  )}
+                </Button>
+              </div>
+              )}
 
               <div className="space-y-3 pt-3 border-t border-gray-100">
                 <div className="pb-3 border-b border-gray-100">
@@ -1299,6 +1826,32 @@ export default function CompanyTutors() {
                     />
                     <span className="text-xs text-gray-500">{t('compTut.eurPerLesson')}</span>
                   </div>
+                  {isManoKorepetitoriusAdmin && selectedTutor.subjects.filter((s) => !s.is_trial).length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-xs font-medium text-gray-600">{t('compTut.payBySubject')}</p>
+                      <p className="text-[11px] text-gray-500">{t('compTut.payBySubjectHint')}</p>
+                      <div className="space-y-2">
+                        {selectedTutor.subjects.filter((s) => !s.is_trial).map((subj) => (
+                          <div
+                            key={subj.id}
+                            className="flex items-center gap-2 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2"
+                          >
+                            <span className="min-w-0 flex-1 text-sm font-medium text-gray-800 truncate">{subj.name}</span>
+                            <Input
+                              type="number"
+                              min={0}
+                              step={0.5}
+                              placeholder={String(editCommissionPercent || '')}
+                              value={editSubjectPay[subj.id] ?? ''}
+                              onChange={(e) => setEditSubjectPay((prev) => ({ ...prev, [subj.id]: e.target.value }))}
+                              className="rounded-xl w-24 h-9 bg-white"
+                            />
+                            <span className="text-xs text-gray-500 shrink-0">{t('compTut.eurPerLesson')}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="pb-3 border-b border-gray-100">
                   <Label className="text-xs font-medium text-gray-600">{t('compTut.personalMeetingLink')}</Label>
@@ -1306,7 +1859,7 @@ export default function CompanyTutors() {
                   <Input
                     value={editMeetingLink}
                     onChange={e => setEditMeetingLink(e.target.value)}
-                    placeholder="https://meet.google.com/..."
+                    placeholder="https://meet.google.com/xxx-xxxx-xxx"
                     className="rounded-xl"
                   />
                 </div>
@@ -1360,9 +1913,15 @@ export default function CompanyTutors() {
                 {selectedTutor.subjects.length > 0 && (
                   <div className="space-y-2 mb-3">
                     {selectedTutor.subjects.map(subj => (
-                      <SubjectRow key={subj.id} subject={subj} onSave={handleSaveSubject} onDelete={handleDeleteSubject} />
+                      <SubjectRow key={subj.id} subject={subj} onSave={handleSaveSubject} onDelete={handleDeleteSubject} hidePrice={isProKlaseAdmin} />
                     ))}
                   </div>
+                )}
+
+                {selectedTutor.subjects.length === 0 && !showAddSubject && (
+                  <p className="text-xs text-gray-400 italic mb-3">
+                    {orgTemplates.length > 0 ? t('compTut.assignedSubjectsEmpty') : t('compTut.noSubjects')}
+                  </p>
                 )}
 
                 {showAddSubject && (
@@ -1372,8 +1931,8 @@ export default function CompanyTutors() {
                     {orgSubjectCatalogOptions.length > 0 && catalogForAddSubject.length > 0 && (
                       <div className="space-y-1.5">
                         <Label className="text-xs font-medium text-gray-600">{t('compTut.fromOrgCatalog')}</Label>
-                        <Select
-                          value={addSubjectCatalogPick || '__none__'}
+                        <CatalogSubjectSelect
+                          value={addSubjectCatalogPick}
                           onValueChange={(key) => {
                             if (key === '__none__') {
                               setAddSubjectCatalogPick('');
@@ -1388,19 +1947,10 @@ export default function CompanyTutors() {
                             setNewSubjectColor(p.color);
                             setAddSubjectCatalogPick(key);
                           }}
-                        >
-                          <SelectTrigger className="rounded-xl h-10 text-sm bg-white w-full">
-                            <SelectValue placeholder={t('compTut.selectSubject')} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">{t('compTut.selectDefault')}</SelectItem>
-                            {catalogForAddSubject.map((o) => (
-                              <SelectItem key={o.key} value={o.key}>
-                                {o.preset.name} · {o.preset.price} € · {o.preset.duration_minutes} min
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          options={catalogForAddSubject}
+                          hidePrice={isProKlaseAdmin}
+                          triggerClassName="h-10"
+                        />
                       </div>
                     )}
 
@@ -1430,15 +1980,17 @@ export default function CompanyTutors() {
                       className="rounded-xl text-sm"
                       autoFocus={orgSubjectCatalogOptions.length === 0}
                     />
-                    <div className="grid grid-cols-2 sm:grid-cols-2 gap-3">
+                    <div className={isProKlaseAdmin ? 'space-y-1' : 'grid grid-cols-2 sm:grid-cols-2 gap-3'}>
                       <div className="space-y-1">
                         <Label className="text-xs text-gray-600">{t('compTut.durationMin')}</Label>
                         <Input type="number" value={newSubjectDuration} onChange={e => setNewSubjectDuration(Number(e.target.value) || 0)} className="rounded-xl text-sm" />
                       </div>
+                      {!isProKlaseAdmin && (
                       <div className="space-y-1">
                         <Label className="text-xs text-gray-600">{t('compTut.priceEur')}</Label>
                         <Input type="number" value={newSubjectPrice} onChange={e => setNewSubjectPrice(Number(e.target.value) || 0)} className="rounded-xl text-sm" />
                       </div>
+                      )}
                     </div>
                     <div className="flex gap-1.5 flex-wrap">
                       {COLORS.map(c => (
@@ -1457,30 +2009,62 @@ export default function CompanyTutors() {
                   </div>
                 )}
 
-                {selectedTutor.subjects.length === 0 && orgTemplates.length === 0 && !showAddSubject && (
-                  <p className="text-xs text-gray-400 italic">{t('compTut.noSubjects')}</p>
-                )}
-
-              {orgTemplates.length > 0 && (
-                <div className="pt-3 border-t border-gray-100">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{t('compTut.tutorPricing')}</p>
-                  <p className="text-[11px] text-gray-400 mb-3">{t('compTut.tutorPricingHint')}</p>
-                  <div className="space-y-2">
-                    {orgTemplates.map(tpl => {
-                      const existing = tutorSubjectPrices.find(p => p.org_subject_template_id === tpl.id);
-                      return (
-                        <TutorSubjectPriceRow
-                          key={tpl.id}
-                          template={tpl}
-                          existing={existing ? { price: existing.price, duration_minutes: existing.duration_minutes } : undefined}
-                          onSave={handleSaveTutorSubjectPrice}
-                          onDelete={handleDeleteTutorSubjectPrice}
-                        />
-                      );
-                    })}
+              {orgTemplates.length > 0 && !isProKlaseAdmin && (() => {
+                const assignedKeys = new Set(selectedTutor.subjects.map((s) => subjectPresetKey(s)));
+                const assignedTemplates = orgTemplates.filter((tpl) => assignedKeys.has(subjectPresetKey(tpl)));
+                const unassignedTemplates = orgTemplates.filter((tpl) => !assignedKeys.has(subjectPresetKey(tpl)));
+                return (
+                <div className="pt-3 border-t border-gray-100 space-y-4">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">{t('compTut.orgCatalogTitle')}</p>
+                    <p className="text-[11px] text-gray-500 leading-relaxed">{t('compTut.orgCatalogHint')}</p>
                   </div>
+                  {unassignedTemplates.length > 0 && (
+                    <div className="space-y-2">
+                      {unassignedTemplates.map((tpl) => (
+                        <div key={tpl.id} className="flex items-center gap-3 bg-slate-50 border border-dashed border-slate-200 rounded-xl px-3 py-2.5">
+                          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: tpl.color }} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-800 truncate">{tpl.name}</p>
+                            <p className="text-[11px] text-gray-400">{fmtMoney(tpl.price)} · {tpl.duration_minutes} min</p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="rounded-lg shrink-0"
+                            disabled={assigningCatalogKey === tpl.id}
+                            onClick={() => void handleAssignCatalogTemplate(tpl)}
+                          >
+                            {assigningCatalogKey === tpl.id ? t('compTut.saving') : t('compTut.assignToTutor')}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {assignedTemplates.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{t('compTut.tutorPricing')}</p>
+                      <p className="text-[11px] text-gray-400 mb-3">{t('compTut.tutorPricingHint')}</p>
+                      <div className="space-y-2">
+                        {assignedTemplates.map(tpl => {
+                          const existing = tutorSubjectPrices.find(p => p.org_subject_template_id === tpl.id);
+                          return (
+                            <TutorSubjectPriceRow
+                              key={tpl.id}
+                              template={tpl}
+                              existing={existing ? { price: existing.price, duration_minutes: existing.duration_minutes } : undefined}
+                              onSave={handleSaveTutorSubjectPrice}
+                              onDelete={handleDeleteTutorSubjectPrice}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+                );
+              })()}
               </div>
             </div>
           )}
@@ -1488,12 +2072,18 @@ export default function CompanyTutors() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setTutorModalOpen(false)}>{t('compTut.cancelBtn')}</Button>
             <Button variant="destructive" onClick={handleArchiveTutor} disabled={archivingTutor || savingTutor}>
-              {archivingTutor ? 'Archyvuojama...' : 'Archyvuoti'}
+              {archivingTutor ? t('compTut.archiving') : t('compTut.archive')}
             </Button>
             <Button onClick={handleSaveTutor} disabled={savingTutor}>{savingTutor ? t('compTut.saving') : t('compTut.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <BuyLicensesDialog
+        open={buyLicensesOpen}
+        onOpenChange={setBuyLicensesOpen}
+        currentLicenseCount={tutorLicenseCount}
+      />
     </>
   );
 }

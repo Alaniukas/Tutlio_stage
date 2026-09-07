@@ -15,6 +15,7 @@ export type CancelSessionParams = {
     penaltyPaidViaStripe?: boolean;
     /** Tutor cancel: when true, freed slot becomes bookable availability for other students */
     leaveFreeTime?: boolean;
+    cancellationReasonCode?: string;
 };
 
 export type ReleaseSessionSlotParams = {

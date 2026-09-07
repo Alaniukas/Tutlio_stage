@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
+import { fetchOrganizationRow } from '@/lib/orgLookup';
 import { useUser } from '@/contexts/UserContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,11 +20,20 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Trash2, Plus, BookOpen, Clock, Euro, Save, Pencil, ShieldAlert, Bell, CalendarClock, ChevronDown, Lock, Building2, AlertTriangle, Users } from 'lucide-react';
+import { Trash2, Plus, BookOpen, Clock, Euro, Save, Pencil, ShieldAlert, Bell, CalendarClock, ChevronDown, Lock, Building2, AlertTriangle, Users, Video, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useTranslation } from '@/lib/i18n';
 import { tutorSubjectsContainLessonDuplicate } from '@/lib/subjectPresetDedupe';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { isPlMarket } from '@/lib/market';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  EMAIL_OPT_OUT_KEYS,
+  parseEmailOptOutList,
+  toggleEmailOptOut,
+  type EmailOptOutKey,
+} from '@/lib/emailNotificationOptOut';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -188,7 +198,8 @@ function DropdownWithCustom({
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export default function LessonSettingsPage() {
-  const { t } = useTranslation();
+  const { t, tHtml } = useTranslation();
+  const { fmt } = useMarketMoney();
   const { user: ctxUser } = useUser();
   const orgPolicy = useOrgTutorPolicy();
   const [orgName, setOrgName] = useState<string | null>(null);
@@ -207,6 +218,12 @@ export default function LessonSettingsPage() {
   const [saved, setSaved] = useState(false);
   const [paymentTiming, setPaymentTiming] = useState<'before_lesson' | 'after_lesson'>('before_lesson');
   const [paymentDeadlineHours, setPaymentDeadlineHours] = useState<number | null>(null);
+
+  // Tutor's permanent meeting link (profiles.personal_meeting_link)
+  const [personalMeetingLink, setPersonalMeetingLink] = useState('');
+  const [savingPersonalLink, setSavingPersonalLink] = useState(false);
+  const [personalLinkSaved, setPersonalLinkSaved] = useState(false);
+  const [emailOptOut, setEmailOptOut] = useState<EmailOptOutKey[]>([]);
 
   // Subject dialog state
   const [isSubjectDialogOpen, setIsSubjectDialogOpen] = useState(false);
@@ -242,17 +259,19 @@ export default function LessonSettingsPage() {
   const fetchData = async () => {
     if (!ctxUser) return;
     setLoading(true);
+    try {
     const user = ctxUser;
     setUserId(user.id);
 
     const { data: tutorData } = await supabase
       .from('profiles')
-      .select('cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, payment_timing, payment_deadline_hours, organization_id, organizations(name)')
+      .select('cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, payment_timing, payment_deadline_hours, personal_meeting_link, organization_id, email_notification_opt_out')
       .eq('id', user.id)
       .single();
 
     if (tutorData?.organization_id) {
-      setOrgName((tutorData.organizations as any)?.name || null);
+      const org = await fetchOrganizationRow<{ name?: string }>(supabase as any, tutorData.organization_id, 'name');
+      setOrgName(org?.name || null);
     }
 
     setSettings({
@@ -265,6 +284,8 @@ export default function LessonSettingsPage() {
     });
     setPaymentTiming((tutorData?.payment_timing as 'before_lesson' | 'after_lesson') ?? 'before_lesson');
     setPaymentDeadlineHours(tutorData?.payment_deadline_hours ?? null);
+    setPersonalMeetingLink((tutorData as { personal_meeting_link?: string | null })?.personal_meeting_link || '');
+    setEmailOptOut(parseEmailOptOutList((tutorData as { email_notification_opt_out?: unknown })?.email_notification_opt_out));
 
     const { data: subjectsData, error } = await supabase
       .from('subjects')
@@ -273,7 +294,9 @@ export default function LessonSettingsPage() {
       .order('name');
 
     if (!error) setSubjects(subjectsData || []);
-    setLoading(false);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const canEditLessonSettings = !orgName || (!orgPolicy.loading && orgPolicy.canEditLessonPricing);
@@ -283,6 +306,13 @@ export default function LessonSettingsPage() {
   const canEditBreakBetween = !orgName || (!orgPolicy.loading && orgPolicy.editBreakBetweenLessons);
   const canEditMinBooking = !orgName || (!orgPolicy.loading && orgPolicy.editMinBookingHours);
   const canEditReminders = !orgName || (!orgPolicy.loading && orgPolicy.editReminders);
+  // Org-locked policy blocks are hidden entirely, not rendered read-only: tutors
+  // shouldn't be shown the org's internal rules (cancellation fees, booking windows).
+  const hideCancellation = !!(orgName && !canEditCancellation);
+  const hideMinBooking = !!(orgName && !canEditMinBooking);
+  const hideBreakBetween = !!(orgName && !canEditBreakBetween);
+  const hideReminders = !!(orgName && !canEditReminders);
+  const hidePolicySection = hideCancellation && hideMinBooking && hideBreakBetween && hideReminders;
   /** Profile fields (not subjects) – "Save all" */
   const canSaveProfileFields =
     !orgName ||
@@ -304,7 +334,7 @@ export default function LessonSettingsPage() {
     setSaving(true);
     const user = ctxUser;
 
-    const patch: Record<string, number> = {};
+    const patch: Record<string, number | string[]> = {};
     if (!orgName || orgPolicy.editCancellation) {
       patch.cancellation_hours = settings.cancellation_hours;
       patch.cancellation_fee_percent = settings.cancellation_fee_percent;
@@ -319,6 +349,7 @@ export default function LessonSettingsPage() {
       patch.reminder_student_hours = settings.reminder_student_hours;
       patch.reminder_tutor_hours = settings.reminder_tutor_hours;
     }
+    patch.email_notification_opt_out = emailOptOut;
 
     if (Object.keys(patch).length === 0) {
       setSaving(false);
@@ -338,6 +369,24 @@ export default function LessonSettingsPage() {
       setTimeout(() => setSaved(false), 3000);
     }
     setSaving(false);
+  };
+
+  const handleSavePersonalLink = async () => {
+    if (!ctxUser) return;
+    setSavingPersonalLink(true);
+    const { error } = await supabase
+      .from('profiles')
+      .update({ personal_meeting_link: personalMeetingLink.trim() || null })
+      .eq('id', ctxUser.id);
+
+    if (error) {
+      console.error('[LessonSettings] personal_meeting_link update', error);
+      alert(error.message || t('lessonSet.saveFailed'));
+    } else {
+      setPersonalLinkSaved(true);
+      setTimeout(() => setPersonalLinkSaved(false), 3000);
+    }
+    setSavingPersonalLink(false);
   };
 
   // Subject CRUD
@@ -475,6 +524,45 @@ export default function LessonSettingsPage() {
           </div>
         )}
 
+        {/* === PERSONAL MEETING LINK === */}
+        <SettingsSection
+          icon={<Video className="w-5 h-5 text-sky-600" />}
+          iconBg="bg-sky-100"
+          title={t('lessonSet.personalLinkTitle')}
+          description={t('lessonSet.personalLinkDesc')}
+          defaultOpen={true}
+        >
+          <div className="pt-4 space-y-3">
+            <div className="space-y-2">
+              <Label>{t('lessonSet.personalLinkTitle')} ({t('common.optional')})</Label>
+              <Input
+                type="url"
+                placeholder="https://meet.google.com/xxx-xxxx-xxx"
+                value={personalMeetingLink}
+                onChange={(e) => setPersonalMeetingLink(e.target.value)}
+                className="rounded-xl"
+              />
+              <p className="text-xs text-gray-500">{t('lessonSet.personalLinkHint')}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={handleSavePersonalLink}
+                disabled={savingPersonalLink || loading}
+                size="sm"
+                className="rounded-xl gap-2"
+              >
+                <Save className="w-4 h-4" />
+                {savingPersonalLink ? t('lessonSet.saving') : t('common.save')}
+              </Button>
+              {personalLinkSaved && (
+                <span className="text-sm text-green-600 font-medium animate-fade-in">
+                  {t('lessonSet.saved')}
+                </span>
+              )}
+            </div>
+          </div>
+        </SettingsSection>
+
         {/* === SUBJECTS / PRICING === */}
         <SettingsSection
           icon={<BookOpen className="w-5 h-5 text-emerald-600" />}
@@ -536,12 +624,13 @@ export default function LessonSettingsPage() {
                           </span>
                           {showSubjectPrices && (
                           <span className="flex items-center gap-1 text-indigo-600 text-xs font-semibold">
-                            <Euro className="w-3 h-3" />{subject.price}
+                            {!isPlMarket() && <Euro className="w-3 h-3" />}
+                            {fmt(subject.price)}
                           </span>
                           )}
                           {subject.grade_min !== null && subject.grade_max !== null && (
                             <span className="flex items-center gap-1 text-emerald-600 text-xs font-medium">
-                              🎓 {subject.grade_min}-{subject.grade_max === 13 ? 'Studentas' : `${subject.grade_max} kl`}
+                              🎓 {subject.grade_min}-{subject.grade_max === 13 ? t('lessonSet.gradeUniversity') : `${subject.grade_max} ${t('lessonSet.gradeShort')}`}
                             </span>
                           )}
                           {subject.is_group && (
@@ -570,7 +659,8 @@ export default function LessonSettingsPage() {
           </div>
         </SettingsSection>
 
-        {/* === LESSON & NOTIFICATION SETTINGS === */}
+        {/* === LESSON & NOTIFICATION SETTINGS (hidden when fully org-managed) === */}
+        {!hidePolicySection && (
         <SettingsSection
           icon={<Bell className="w-5 h-5 text-violet-600" />}
           iconBg="bg-violet-100"
@@ -581,15 +671,11 @@ export default function LessonSettingsPage() {
           <div className="pt-4 space-y-8">
 
             {/* Cancellation */}
+            {!hideCancellation && (
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                 <ShieldAlert className="w-4 h-4 text-amber-600" /> {t('lessonSet.cancelPolicy')}
               </h3>
-              {orgName && !canEditCancellation && (
-                <div className="flex items-center gap-2 mb-3 text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                  <Lock className="w-3.5 h-3.5 flex-shrink-0" /> {t('lessonSet.orgManaged')}
-                </div>
-              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <DropdownWithCustom
                   label={t('lessonSet.cancelDeadline')}
@@ -614,7 +700,7 @@ export default function LessonSettingsPage() {
                   min={0}
                   max={100}
                   hint={t('lessonSet.cancelFeeHint')}
-                  icon={<Euro className="w-4 h-4 text-gray-400" />}
+                  icon={isPlMarket() ? <span className="text-xs text-gray-400 font-medium">zł</span> : <Euro className="w-4 h-4 text-gray-400" />}
                   disabled={!!(orgName && !canEditCancellation)}
                   customLabel={t('lessonSet.customInput')} changeLabel={t('lessonSet.change')} listLabel={t('lessonSet.listView')}
                 />
@@ -622,30 +708,31 @@ export default function LessonSettingsPage() {
               </div>
               {settings.cancellation_fee_percent > 0 && (
                 <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-xl text-sm text-amber-700">
-                  <span dangerouslySetInnerHTML={{ __html: t('lessonSet.cancelExample', {
-                    hours: String(settings.cancellation_hours),
-                    price: String(subjects[0]?.price ?? 25),
-                    fee: ((subjects[0]?.price ?? 25) * settings.cancellation_fee_percent / 100).toFixed(2),
-                    percent: String(settings.cancellation_fee_percent),
-                  }) }} />
+                  <span dangerouslySetInnerHTML={{ __html: tHtml('lessonSet.cancelExample', (() => {
+                    const exampleBase = subjects[0]?.price ?? 25;
+                    const exampleFee = exampleBase * settings.cancellation_fee_percent / 100;
+                    return {
+                      hours: String(settings.cancellation_hours),
+                      price: isPlMarket() ? fmt(exampleBase) : String(exampleBase),
+                      fee: isPlMarket() ? fmt(exampleFee) : exampleFee.toFixed(2),
+                      percent: String(settings.cancellation_fee_percent),
+                    };
+                  })()) }} />
                 </div>
               )}
+              <div className="h-px bg-gray-100 mt-8" />
             </div>
-
-            <div className="h-px bg-gray-100" />
+            )}
 
             {/* Registration + Payment Validation */}
+            {!(hideMinBooking && hideBreakBetween) && (
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                 <CalendarClock className="w-4 h-4 text-blue-600" /> {t('lessonSet.registrationSettings')}
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {!hideMinBooking && (
                 <div className="space-y-2">
-                  {orgName && !canEditMinBooking && (
-                    <div className="flex items-center gap-2 text-xs text-blue-800 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-                      <Lock className="w-3.5 h-3.5 flex-shrink-0" /> {t('lessonSet.orgManagedShort')}
-                    </div>
-                  )}
                   <DropdownWithCustom
                     label={t('lessonSet.bookingDeadline')}
                     options={BOOKING_HOURS_OPTIONS}
@@ -667,12 +754,9 @@ export default function LessonSettingsPage() {
                     customLabel={t('lessonSet.customInput')} changeLabel={t('lessonSet.change')} listLabel={t('lessonSet.listView')}
                   />
                 </div>
+                )}
+                {!hideBreakBetween && (
                 <div className="space-y-2">
-                  {orgName && !canEditBreakBetween && (
-                    <div className="flex items-center gap-2 text-xs text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
-                      <Lock className="w-3.5 h-3.5 flex-shrink-0" /> {t('lessonSet.orgManagedShort')}
-                    </div>
-                  )}
                   <DropdownWithCustom
                     label={t('lessonSet.breakBetween')}
                     options={BREAK_MINUTES_OPTIONS}
@@ -687,21 +771,18 @@ export default function LessonSettingsPage() {
                     customLabel={t('lessonSet.customInput')} changeLabel={t('lessonSet.change')} listLabel={t('lessonSet.listView')}
                   />
                 </div>
+                )}
               </div>
+              <div className="h-px bg-gray-100 mt-8" />
             </div>
-
-            <div className="h-px bg-gray-100" />
+            )}
 
             {/* Notifications */}
+            {!hideReminders && (
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                 <Bell className="w-4 h-4 text-violet-600" /> {t('lessonSet.reminders')}
               </h3>
-              {orgName && !canEditReminders && (
-                <div className="flex items-center gap-2 mb-3 text-xs text-violet-800 bg-violet-50 border border-violet-100 rounded-lg px-3 py-2">
-                  <Lock className="w-3.5 h-3.5 flex-shrink-0" /> {t('lessonSet.orgManaged')}
-                </div>
-              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <DropdownWithCustom
                   label={t('lessonSet.reminderStudent')}
@@ -730,12 +811,35 @@ export default function LessonSettingsPage() {
                   customLabel={t('lessonSet.customInput')} changeLabel={t('lessonSet.change')} listLabel={t('lessonSet.listView')}
                 />
               </div>
+              <div className="mt-6 space-y-3">
+                <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-violet-600" /> {t('lessonSet.emailNotificationsTitle')}
+                </h4>
+                <p className="text-xs text-gray-500">{t('lessonSet.emailNotificationsHint')}</p>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={emailOptOut.includes('lesson_reminder_tutor')}
+                    onChange={() => setEmailOptOut((prev) => toggleEmailOptOut(prev, 'lesson_reminder_tutor'))}
+                  />
+                  <span className="text-sm text-gray-700">{t('lessonSet.emailOptOutLessonReminderTutor')}</span>
+                </label>
+                {!orgName && (
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={emailOptOut.includes('payment_deadline_warning')}
+                      onChange={() => setEmailOptOut((prev) => toggleEmailOptOut(prev, 'payment_deadline_warning'))}
+                    />
+                    <span className="text-sm text-gray-700">{t('lessonSet.emailOptOutPaymentDeadline')}</span>
+                  </label>
+                )}
+              </div>
+              <div className="h-px bg-gray-100 mt-8" />
             </div>
-
-            <div className="h-px bg-gray-100" />
+            )}
 
           </div>
         </SettingsSection>
+        )}
 
         {/* Bottom save button (mobile) */}
         <div className="pb-6 flex justify-end">
@@ -758,7 +862,7 @@ export default function LessonSettingsPage() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
-              <Label>Dalyko pavadinimas</Label>
+              <Label>{t('lessonSet.subjectName')}</Label>
               <Input
                 placeholder={t('lessonSet.namePlaceholder')}
                 value={newSubject.name}
@@ -768,7 +872,7 @@ export default function LessonSettingsPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Prisijungimo nuoroda (neprivaloma)</Label>
+              <Label>{t('lessonSet.meetingLink')} ({t('common.optional')})</Label>
               <Input
                 placeholder="https://meet.google.com/..."
                 value={newSubject.meeting_link}
@@ -795,7 +899,12 @@ export default function LessonSettingsPage() {
               {showSubjectPrices && (
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">
-                  <Euro className="w-4 h-4 text-gray-400" /> {t('lessonSet.priceLabel')}
+                  {isPlMarket() ? (
+                    <span className="text-xs text-gray-400 font-medium">zł</span>
+                  ) : (
+                    <Euro className="w-4 h-4 text-gray-400" />
+                  )}{' '}
+                  {t('lessonSet.priceLabel')}
                 </Label>
                 <Input
                   type="number"
@@ -912,7 +1021,7 @@ export default function LessonSettingsPage() {
                       <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
                       <div>
                         <p className="text-sm font-semibold text-amber-900">{t('lessonSet.important')}</p>
-                        <p className="text-xs text-amber-800 mt-1" dangerouslySetInnerHTML={{ __html: t('lessonSet.groupDesc') }} />
+                        <p className="text-xs text-amber-800 mt-1" dangerouslySetInnerHTML={{ __html: tHtml('lessonSet.groupDesc') }} />
                       </div>
                     </div>
                   </div>
@@ -930,7 +1039,7 @@ export default function LessonSettingsPage() {
                         max_students: parseInt(e.target.value) || null
                       })}
                       className="rounded-xl"
-                      placeholder="Pvz. 5"
+                      placeholder={t('lessonSet.maxStudentsPlaceholder')}
                     />
                     <p className="text-xs text-gray-500">
                       {t('lessonSet.maxStudentsHint')}

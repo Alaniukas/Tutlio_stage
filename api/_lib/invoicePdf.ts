@@ -1,4 +1,22 @@
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import fontkit from '@pdf-lib/fontkit';
+import { PDFDocument, rgb, type PDFImage, type PDFPage, type PDFFont, type RGB } from 'pdf-lib';
+import {
+  CLASSIC_LT_TUTOR_LAYOUT,
+  classicLtTutorBuyerLines,
+  classicLtTutorSellerLines,
+  formatClassicLtLessonPrice,
+  formatClassicLtSum,
+} from './manoKorepetitoriusInvoice.js';
+
+export interface InvoicePdfBranding {
+  brandName?: string;
+  primaryColor: RGB;
+  secondaryColor: RGB;
+  logo?: { bytes: Uint8Array; mime: 'png' | 'jpeg' };
+}
 
 export interface InvoicePdfData {
   invoiceNumber: string;
@@ -16,6 +34,9 @@ export interface InvoicePdfData {
     personalCode?: string;
     contactEmail?: string;
     contactPhone?: string;
+    bankName?: string;
+    iban?: string;
+    taxExemptionNote?: string;
   };
 
   buyer: {
@@ -35,12 +56,77 @@ export interface InvoicePdfData {
   }[];
 
   totalAmount: number;
+
+  deductedAmount?: number;
+  amountDue?: number;
+  paidNote?: string[];
+
+  branding?: InvoicePdfBranding;
+
+  isVatInvoice?: boolean;
+  invoiceNumberLabel?: string;
+  layout?: 'default' | 'pvm_education' | typeof CLASSIC_LT_TUTOR_LAYOUT;
+  notes?: string[];
+  lessonDetails?: { subject: string; price: number; datetime: string }[];
+  hidePlatformFooter?: boolean;
+  issuedByName?: string;
 }
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
 const MARGIN = 50;
 const COL_WIDTH = PAGE_WIDTH - MARGIN * 2;
+const DESC_COL_MAX_WIDTH = 268;
+const LINE_ITEM_FONT_SIZE = 9;
+const LINE_ITEM_LINE_HEIGHT = 13;
+const MIN_ROW_HEIGHT = 18;
+
+const FONT_FILES = {
+  regular: 'NotoSans-Regular.ttf',
+  bold: 'NotoSans-Bold.ttf',
+} as const;
+
+/** Candidate roots — Vercel serverless should use process.cwd(); local/tsx often uses import.meta.url. */
+export function invoiceFontCandidateDirs(): string[] {
+  const dirs: string[] = [];
+  const cwd = process.cwd();
+  dirs.push(join(cwd, 'api', '_lib', 'fonts'));
+  dirs.push(join(cwd, 'fonts'));
+  try {
+    dirs.push(join(dirname(fileURLToPath(import.meta.url)), 'fonts'));
+  } catch {
+    /* ignore */
+  }
+  return dirs;
+}
+
+export function resolveInvoiceFontPath(weight: 'regular' | 'bold'): string {
+  const fileName = FONT_FILES[weight];
+  for (const dir of invoiceFontCandidateDirs()) {
+    const full = join(dir, fileName);
+    if (existsSync(full)) return full;
+  }
+  throw new Error(
+    `Invoice PDF font missing: ${fileName}. Tried: ${invoiceFontCandidateDirs().join(' | ')}. ` +
+      'Ensure api/_lib/fonts/*.ttf are committed and listed in vercel.json includeFiles.',
+  );
+}
+
+let cachedRegular: Uint8Array | null = null;
+let cachedBold: Uint8Array | null = null;
+
+function loadInvoiceFontBytes(weight: 'regular' | 'bold'): Uint8Array {
+  if (weight === 'bold') {
+    if (!cachedBold) {
+      cachedBold = new Uint8Array(readFileSync(resolveInvoiceFontPath('bold')));
+    }
+    return cachedBold;
+  }
+  if (!cachedRegular) {
+    cachedRegular = new Uint8Array(readFileSync(resolveInvoiceFontPath('regular')));
+  }
+  return cachedRegular;
+}
 
 const LT_MAP: Record<string, string> = {
   'ą': 'a', 'č': 'c', 'ę': 'e', 'ė': 'e', 'į': 'i', 'š': 's', 'ų': 'u', 'ū': 'u', 'ž': 'z',
@@ -48,64 +134,337 @@ const LT_MAP: Record<string, string> = {
 };
 const LT_RE = new RegExp(`[${Object.keys(LT_MAP).join('')}]`, 'g');
 
-/** Strip Lithuanian diacritics so pdf-lib StandardFonts (WinAnsi) can render the text. */
-function asciify(text: string): string {
+export function asciify(text: string): string {
   return text.replace(LT_RE, (ch) => LT_MAP[ch] || ch);
+}
+
+export function wrapInvoiceDescription(
+  text: string,
+  font: PDFFont,
+  fontSize: number,
+  maxWidth: number,
+): string[] {
+  const out: string[] = [];
+  const paragraphs = String(text || '').split('\n');
+
+  for (const paragraph of paragraphs) {
+    const trimmed = paragraph.trim();
+    if (!trimmed) continue;
+
+    const words = trimmed.split(/\s+/);
+    let current = '';
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      const width = font.widthOfTextAtSize(candidate, fontSize);
+      if (width > maxWidth && current) {
+        out.push(current);
+        current = word;
+      } else {
+        current = candidate;
+      }
+    }
+    if (current) out.push(current);
+  }
+
+  return out.length > 0 ? out : [''];
+}
+
+type DrawCtx = {
+  page: PDFPage;
+  font: PDFFont;
+  fontBold: PDFFont;
+  primary: RGB;
+  secondary: RGB;
+  gray: RGB;
+  black: RGB;
+  lightGray: RGB;
+};
+
+function strokeRect(
+  page: PDFPage,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  color: RGB,
+  thickness = 0.8,
+) {
+  page.drawRectangle({
+    x,
+    y,
+    width,
+    height,
+    borderColor: color,
+    borderWidth: thickness,
+  });
+}
+
+function drawCentered(ctx: DrawCtx, text: string, x: number, width: number, yPos: number, opts?: { size?: number; bold?: boolean }) {
+  const f = opts?.bold ? ctx.fontBold : ctx.font;
+  const size = opts?.size || 10;
+  const tw = f.widthOfTextAtSize(text, size);
+  drawText(ctx, text, x + Math.max(0, (width - tw) / 2), yPos, { size, bold: opts?.bold, color: ctx.black });
+}
+
+/** Lithuanian tutor → company invoice (Mano Korepetitorius sample: IRIGUB). */
+function renderClassicLtTutorInvoice(
+  doc: PDFDocument,
+  ctx: DrawCtx,
+  data: InvoicePdfData,
+  title: string,
+  numberLabel: string,
+) {
+  let page = ctx.page;
+  const black = ctx.black;
+  const ink = rgb(0.08, 0.1, 0.18);
+  ctx.black = ink;
+
+  let y = PAGE_HEIGHT - MARGIN;
+  drawText(ctx, title, MARGIN, y, { size: 16, bold: true, color: ink });
+  y -= 20;
+  drawText(ctx, numberLabel, MARGIN, y, { size: 11, color: ink });
+  y -= 16;
+  drawText(ctx, data.issueDate, MARGIN, y, { size: 11, color: ink });
+  y -= 22;
+
+  const boxWidth = COL_WIDTH / 2;
+  const sellerLines = classicLtTutorSellerLines(data.seller);
+  const buyerLines = classicLtTutorBuyerLines(data.buyer);
+  const bodyLines = Math.max(sellerLines.length, buyerLines.length, 4);
+  const headerH = 22;
+  const lineH = 14;
+  const bodyPad = 10;
+  const boxH = headerH + bodyPad + bodyLines * lineH + 8;
+  const boxBottom = y - boxH;
+
+  strokeRect(page, MARGIN, boxBottom, boxWidth, boxH, ink, 1);
+  strokeRect(page, MARGIN + boxWidth, boxBottom, boxWidth, boxH, ink, 1);
+  page.drawLine({
+    start: { x: MARGIN, y: y - headerH },
+    end: { x: PAGE_WIDTH - MARGIN, y: y - headerH },
+    thickness: 1,
+    color: ink,
+  });
+  drawCentered(ctx, 'Pardavėjo rekvizitai', MARGIN, boxWidth, y - 15, { size: 11, bold: true });
+  drawCentered(ctx, 'Pirkėjo rekvizitai', MARGIN + boxWidth, boxWidth, y - 15, { size: 11, bold: true });
+
+  let textY = y - headerH - 16;
+  for (let i = 0; i < bodyLines; i++) {
+    if (sellerLines[i]) drawText(ctx, sellerLines[i], MARGIN + 10, textY, { size: 9, color: ink });
+    if (buyerLines[i]) drawText(ctx, buyerLines[i], MARGIN + boxWidth + 10, textY, { size: 9, color: ink });
+    textY -= lineH;
+  }
+  y = boxBottom - 18;
+
+  const colNrW = 55;
+  const colSumW = 90;
+  const colDescW = COL_WIDTH - colNrW - colSumW;
+  const rowH = 22;
+  const tableX = MARGIN;
+  const headerY = y - rowH;
+
+  const drawServiceHeader = (topY: number) => {
+    strokeRect(page, tableX, topY, colNrW, rowH, ink, 1);
+    strokeRect(page, tableX + colNrW, topY, colDescW, rowH, ink, 1);
+    strokeRect(page, tableX + colNrW + colDescW, topY, colSumW, rowH, ink, 1);
+    drawText(ctx, 'Eil. Nr.', tableX + 8, topY + 7, { size: 9, bold: true, color: ink });
+    drawText(ctx, 'Prekės ar paslaugos pavadinimas', tableX + colNrW + 8, topY + 7, {
+      size: 9,
+      bold: true,
+      color: ink,
+    });
+    drawText(ctx, 'Suma, EUR', tableX + colNrW + colDescW + 8, topY + 7, { size: 9, bold: true, color: ink });
+  };
+
+  drawServiceHeader(headerY);
+  const dataY = headerY - rowH;
+  strokeRect(page, tableX, dataY, colNrW, rowH, ink, 1);
+  strokeRect(page, tableX + colNrW, dataY, colDescW, rowH, ink, 1);
+  strokeRect(page, tableX + colNrW + colDescW, dataY, colSumW, rowH, ink, 1);
+  drawText(ctx, '1.', tableX + 8, dataY + 7, { size: 9, color: ink });
+  drawText(ctx, 'Mokymo paslaugos', tableX + colNrW + 8, dataY + 7, { size: 9, color: ink });
+  drawText(ctx, formatClassicLtSum(data.totalAmount), tableX + colNrW + colDescW + 8, dataY + 7, {
+    size: 9,
+    color: ink,
+  });
+  y = dataY - 16;
+
+  const totalBoxW = 170;
+  const totalBoxH = 24;
+  const totalBoxX = PAGE_WIDTH - MARGIN - totalBoxW;
+  const totalBoxY = y - totalBoxH;
+  strokeRect(page, totalBoxX, totalBoxY, totalBoxW, totalBoxH, ink, 1);
+  drawText(ctx, 'Iš viso:', totalBoxX + 10, totalBoxY + 8, { size: 10, bold: true, color: ink });
+  const totalLabel = `${formatClassicLtSum(data.totalAmount)} Eur`;
+  const totalW = ctx.fontBold.widthOfTextAtSize(totalLabel, 10);
+  drawText(ctx, totalLabel, totalBoxX + totalBoxW - 10 - totalW, totalBoxY + 8, {
+    size: 10,
+    bold: true,
+    color: ink,
+  });
+  y = totalBoxY - 28;
+
+  const lessons = data.lessonDetails || [];
+  if (lessons.length > 0) {
+    drawText(ctx, 'Papildoma informacija: pamokų išrašas', MARGIN, y, { size: 11, bold: true, color: ink });
+    y -= 16;
+
+    const lPamW = 250;
+    const lPriceW = 90;
+    const lDateW = COL_WIDTH - lPamW - lPriceW;
+    const lRowH = 20;
+
+    const drawLessonHeader = (topY: number) => {
+      strokeRect(page, tableX, topY, lPamW, lRowH, ink, 1);
+      strokeRect(page, tableX + lPamW, topY, lPriceW, lRowH, ink, 1);
+      strokeRect(page, tableX + lPamW + lPriceW, topY, lDateW, lRowH, ink, 1);
+      drawText(ctx, 'Pamoka', tableX + 8, topY + 6, { size: 9, bold: true, color: ink });
+      drawText(ctx, 'Kaina', tableX + lPamW + 8, topY + 6, { size: 9, bold: true, color: ink });
+      drawText(ctx, 'Data', tableX + lPamW + lPriceW + 8, topY + 6, { size: 9, bold: true, color: ink });
+    };
+
+    const newPage = () => {
+      page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+      ctx.page = page;
+      y = PAGE_HEIGHT - MARGIN;
+    };
+
+    if (y < MARGIN + 80) newPage();
+    let lessonHeaderY = y - lRowH;
+    drawLessonHeader(lessonHeaderY);
+    y = lessonHeaderY;
+
+    for (const lesson of lessons) {
+      if (y - lRowH < MARGIN + 40) {
+        newPage();
+        lessonHeaderY = y - lRowH;
+        drawLessonHeader(lessonHeaderY);
+        y = lessonHeaderY;
+      }
+      const rowY = y - lRowH;
+      strokeRect(page, tableX, rowY, lPamW, lRowH, ink, 1);
+      strokeRect(page, tableX + lPamW, rowY, lPriceW, lRowH, ink, 1);
+      strokeRect(page, tableX + lPamW + lPriceW, rowY, lDateW, lRowH, ink, 1);
+      drawText(ctx, lesson.subject, tableX + 8, rowY + 6, { size: 9, color: ink });
+      drawText(ctx, formatClassicLtLessonPrice(lesson.price), tableX + lPamW + 8, rowY + 6, {
+        size: 9,
+        color: ink,
+      });
+      drawText(ctx, lesson.datetime, tableX + lPamW + lPriceW + 8, rowY + 6, { size: 9, color: ink });
+      y = rowY;
+    }
+    y -= 28;
+  }
+
+  if (y < MARGIN + 40) {
+    page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    ctx.page = page;
+    y = PAGE_HEIGHT - MARGIN;
+  }
+  const issued = `Sąskaitą išrašė: ${data.issuedByName || data.seller.name || ''}`.trim();
+  drawText(ctx, issued, MARGIN, y, { size: 10, bold: true, color: ink });
+  y -= 18;
+  drawText(ctx, 'Sąskaitą priėmė:_____________________________________', MARGIN, y, {
+    size: 10,
+    bold: true,
+    color: ink,
+  });
+
+  ctx.black = black;
 }
 
 export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
-  const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  doc.registerFontkit(fontkit);
+  const font = await doc.embedFont(loadInvoiceFontBytes('regular'), { subset: true });
+  const fontBold = await doc.embedFont(loadInvoiceFontBytes('bold'), { subset: true });
+  let page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
 
-  const gray = rgb(0.3, 0.3, 0.3);
-  const black = rgb(0, 0, 0);
-  const lightGray = rgb(0.85, 0.85, 0.85);
-  const headerBlue = rgb(0.24, 0.35, 0.59);
+  const defaultPrimary = rgb(0.24, 0.35, 0.59);
+  const defaultSecondary = rgb(0.35, 0.45, 0.65);
+  const branding = data.branding;
+  const primary = branding?.primaryColor ?? defaultPrimary;
+  const secondary = branding?.secondaryColor ?? defaultSecondary;
+  const isClassicLtTutor = data.layout === CLASSIC_LT_TUTOR_LAYOUT;
+  const isPvmLayout = data.layout === 'pvm_education';
+  const isVatInvoice =
+    data.isVatInvoice === true || isPvmLayout || (!isClassicLtTutor && !!data.seller.vatCode);
+  const title = isVatInvoice ? 'PVM SĄSKAITA FAKTŪRA' : 'SĄSKAITA FAKTŪRA';
+  const numberLabel = data.invoiceNumberLabel || `Nr. ${data.invoiceNumber}`;
 
-  let y = PAGE_HEIGHT - MARGIN;
-
-  const drawText = (text: string, x: number, yPos: number, opts?: {
-    size?: number; bold?: boolean; color?: typeof black;
-  }) => {
-    const f = opts?.bold ? fontBold : font;
-    const size = opts?.size || 9;
-    page.drawText(asciify(text), { x, y: yPos, size, font: f, color: opts?.color || black });
+  const ctx: DrawCtx = {
+    page,
+    font,
+    fontBold,
+    primary,
+    secondary,
+    gray: rgb(0.3, 0.3, 0.3),
+    black: rgb(0, 0, 0),
+    lightGray: rgb(0.85, 0.85, 0.85),
   };
 
-  const drawLine = (x1: number, yPos: number, x2: number) => {
-    page.drawLine({
-      start: { x: x1, y: yPos },
-      end: { x: x2, y: yPos },
-      thickness: 0.5,
-      color: lightGray,
-    });
-  };
-
-  // --- Header ---
-  drawText('SASKAITA FAKTURA', MARGIN, y, { size: 16, bold: true, color: headerBlue });
-  y -= 20;
-  drawText(`Nr. ${data.invoiceNumber}`, MARGIN, y, { size: 11, bold: true });
-  drawText(`Data: ${data.issueDate}`, MARGIN + 250, y, { size: 9, color: gray });
-  y -= 12;
-
-  if (data.periodStart && data.periodEnd) {
-    drawText(`Laikotarpis: ${data.periodStart} - ${data.periodEnd}`, MARGIN, y, { size: 9, color: gray });
-    y -= 12;
+  if (isClassicLtTutor) {
+    renderClassicLtTutorInvoice(doc, ctx, data, title, numberLabel);
+    return doc.save();
   }
 
-  y -= 8;
-  drawLine(MARGIN, y, PAGE_WIDTH - MARGIN);
-  y -= 20;
+  const headerTop = PAGE_HEIGHT - MARGIN;
+  let logoBottom = headerTop;
 
-  // --- Seller / Buyer side by side ---
+  if (branding?.logo) {
+    const img = await embedInvoiceLogo(doc, branding.logo);
+    if (img) {
+      const maxW = 120;
+      const maxH = 48;
+      const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      page.drawImage(img, {
+        x: PAGE_WIDTH - MARGIN - w,
+        y: headerTop - h,
+        width: w,
+        height: h,
+      });
+      logoBottom = headerTop - h;
+    }
+  }
+
+  let y = headerTop - 16;
+  drawText(ctx, title, MARGIN, y, { size: 16, bold: true, color: primary });
+  y -= 22;
+  drawText(ctx, numberLabel, MARGIN, y, { size: 11, bold: true });
+  drawText(ctx, `Data: ${data.issueDate}`, MARGIN + 250, y, { size: 9, color: ctx.gray });
+  y -= 14;
+
+  if (data.periodStart && data.periodEnd) {
+    drawText(ctx, `Laikotarpis: ${data.periodStart} - ${data.periodEnd}`, MARGIN, y, {
+      size: 9,
+      color: ctx.gray,
+    });
+    y -= 14;
+  }
+
+  if (branding?.brandName) {
+    drawText(ctx, branding.brandName, MARGIN, y, { size: 8, color: ctx.gray });
+    y -= 14;
+  }
+
+  const headerBottom = Math.min(y, logoBottom) - 10;
+  page.drawRectangle({
+    x: MARGIN,
+    y: headerBottom - 2,
+    width: COL_WIDTH,
+    height: 2,
+    color: secondary,
+  });
+  y = headerBottom - 16;
+
   const halfWidth = COL_WIDTH / 2 - 10;
   const sellerX = MARGIN;
   const buyerX = MARGIN + halfWidth + 20;
 
-  drawText('PARDAVEJAS / PASLAUGU TEIKEJAS', sellerX, y, { size: 8, bold: true, color: gray });
-  drawText('PIRKEJAS / PASLAUGU GAVEJAS', buyerX, y, { size: 8, bold: true, color: gray });
+  drawText(ctx, 'PARDAVĖJAS / PASLAUGŲ TEIKĖJAS', sellerX, y, { size: 8, bold: true, color: ctx.gray });
+  drawText(ctx, 'PIRKĖJAS / PASLAUGŲ GAVĖJAS', buyerX, y, { size: 8, bold: true, color: ctx.gray });
   y -= 14;
 
   const sellerLines = buildEntityLines(data.seller);
@@ -113,70 +472,258 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   const maxLines = Math.max(sellerLines.length, buyerLines.length);
 
   for (let i = 0; i < maxLines; i++) {
-    if (sellerLines[i]) drawText(sellerLines[i], sellerX, y, { size: 9 });
-    if (buyerLines[i]) drawText(buyerLines[i], buyerX, y, { size: 9 });
+    if (sellerLines[i]) drawText(ctx, sellerLines[i], sellerX, y, { size: 9 });
+    if (buyerLines[i]) drawText(ctx, buyerLines[i], buyerX, y, { size: 9 });
     y -= 13;
   }
 
   y -= 10;
-  drawLine(MARGIN, y, PAGE_WIDTH - MARGIN);
+  drawLine(ctx, MARGIN, y, PAGE_WIDTH - MARGIN);
   y -= 20;
 
-  // --- Line items table ---
   const colDesc = MARGIN;
   const colQty = MARGIN + 280;
   const colUnit = MARGIN + 340;
   const colTotal = MARGIN + 420;
+  const headerFill = rgb(
+    primary.red * 0.12 + 0.88,
+    primary.green * 0.12 + 0.88,
+    primary.blue * 0.12 + 0.88,
+  );
 
-  drawText('Paslaugos aprasymas', colDesc, y, { size: 8, bold: true, color: gray });
-  drawText('Kiekis', colQty, y, { size: 8, bold: true, color: gray });
-  drawText('Vnt. kaina', colUnit, y, { size: 8, bold: true, color: gray });
-  drawText('Suma, EUR', colTotal, y, { size: 8, bold: true, color: gray });
-  y -= 6;
-  drawLine(MARGIN, y, PAGE_WIDTH - MARGIN);
-  y -= 14;
+  const ensureSpace = (needed: number) => {
+    if (y >= MARGIN + needed) return;
+    page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    ctx.page = page;
+    y = PAGE_HEIGHT - MARGIN - 20;
+  };
 
-  for (const item of data.lineItems) {
-    if (y < MARGIN + 60) break;
-    drawText(truncate(item.description, 55), colDesc, y, { size: 9 });
-    drawText(String(item.quantity), colQty + 10, y, { size: 9 });
-    drawText(formatEur(item.unitPrice), colUnit, y, { size: 9 });
-    drawText(formatEur(item.totalPrice), colTotal, y, { size: 9, bold: true });
-    y -= 16;
+  const drawTableHeaderBar = (labels: { text: string; x: number }[]) => {
+    const tableHeaderHeight = 20;
+    const tableHeaderBottom = y - tableHeaderHeight;
+    page.drawRectangle({
+      x: MARGIN,
+      y: tableHeaderBottom,
+      width: COL_WIDTH,
+      height: tableHeaderHeight,
+      color: headerFill,
+    });
+    const tableHeaderTextY = tableHeaderBottom + 6;
+    for (const label of labels) {
+      drawText(ctx, label.text, label.x, tableHeaderTextY, { size: 8, bold: true, color: primary });
+    }
+    y = tableHeaderBottom - 6;
+    drawLine(ctx, MARGIN, y, PAGE_WIDTH - MARGIN);
+    y -= 12;
+  };
+
+  if (isPvmLayout) {
+    drawTableHeaderBar([
+      { text: 'Eil. Nr.', x: colDesc },
+      { text: 'Prekės ar paslaugos pavadinimas', x: colDesc + 50 },
+      { text: 'Suma, EUR', x: colTotal },
+    ]);
+    ensureSpace(40);
+    drawText(ctx, '1', colDesc, y, { size: LINE_ITEM_FONT_SIZE });
+    drawText(ctx, 'Mokymo paslaugos', colDesc + 50, y, { size: LINE_ITEM_FONT_SIZE });
+    drawText(ctx, formatEur(data.totalAmount), colTotal, y, { size: LINE_ITEM_FONT_SIZE, bold: true });
+    y -= MIN_ROW_HEIGHT;
+  } else {
+    drawTableHeaderBar([
+      { text: 'Paslaugos aprašymas', x: colDesc },
+      { text: 'Kiekis', x: colQty },
+      { text: 'Vnt. kaina', x: colUnit },
+      { text: 'Suma, EUR', x: colTotal },
+    ]);
+
+    for (const item of data.lineItems) {
+      const descLines = wrapInvoiceDescription(
+        item.description,
+        font,
+        LINE_ITEM_FONT_SIZE,
+        DESC_COL_MAX_WIDTH,
+      );
+      const rowHeight = Math.max(MIN_ROW_HEIGHT, descLines.length * LINE_ITEM_LINE_HEIGHT);
+      ensureSpace(rowHeight + 40);
+
+      for (let i = 0; i < descLines.length; i++) {
+        drawText(ctx, descLines[i], colDesc, y - i * LINE_ITEM_LINE_HEIGHT, {
+          size: LINE_ITEM_FONT_SIZE,
+        });
+      }
+      drawText(ctx, String(item.quantity), colQty + 10, y, { size: LINE_ITEM_FONT_SIZE });
+      drawText(ctx, formatEur(item.unitPrice), colUnit, y, { size: LINE_ITEM_FONT_SIZE });
+      drawText(ctx, formatEur(item.totalPrice), colTotal, y, {
+        size: LINE_ITEM_FONT_SIZE,
+        bold: true,
+      });
+      y -= rowHeight;
+    }
   }
 
   y -= 4;
-  drawLine(MARGIN, y, PAGE_WIDTH - MARGIN);
+  drawLine(ctx, MARGIN, y, PAGE_WIDTH - MARGIN);
   y -= 18;
 
-  // --- Totals ---
-  drawText('IS VISO:', colUnit - 30, y, { size: 11, bold: true });
-  drawText(`${formatEur(data.totalAmount)} EUR`, colTotal, y, { size: 11, bold: true, color: headerBlue });
-  y -= 30;
+  const taxExemptionNote = data.seller.taxExemptionNote?.trim();
+  ensureSpace(taxExemptionNote ? 98 : 80);
+  drawText(ctx, 'IŠ VISO:', colUnit - 30, y, { size: 11, bold: true });
+  const totalAmountText = `${formatEur(data.totalAmount)} EUR`;
+  drawText(ctx, totalAmountText, colTotal, y, {
+    size: 11,
+    bold: true,
+    color: primary,
+  });
+  y -= 18;
 
-  // --- Footer ---
-  drawLine(MARGIN, y, PAGE_WIDTH - MARGIN);
-  y -= 14;
-  drawText('Saskaita suformuota Tutlio platformoje | www.tutlio.lt', MARGIN, y, { size: 7, color: gray });
+  if (taxExemptionNote) {
+    const noteSize = 8;
+    const noteWidth = ctx.font.widthOfTextAtSize(taxExemptionNote, noteSize);
+    const totalAmountRight = colTotal + ctx.fontBold.widthOfTextAtSize(totalAmountText, 11);
+    drawText(ctx, taxExemptionNote, Math.max(MARGIN, totalAmountRight - noteWidth), y, {
+      size: noteSize,
+      color: ctx.black,
+    });
+    y -= 16;
+  }
+
+  if (data.deductedAmount != null && data.deductedAmount > 0) {
+    drawText(ctx, 'Jau apmokėta (išskaityta iš jūsų lėšų):', colDesc + 130, y, {
+      size: 9,
+      color: ctx.gray,
+    });
+    drawText(ctx, `-${formatEur(data.deductedAmount)} EUR`, colTotal, y, { size: 9, color: ctx.gray });
+    y -= 16;
+  }
+
+  if (data.amountDue != null) {
+    drawText(ctx, 'MOKĖTINA SUMA:', colUnit - 30, y, { size: 12, bold: true });
+    drawText(ctx, `${formatEur(data.amountDue)} EUR`, colTotal, y, {
+      size: 12,
+      bold: true,
+      color: primary,
+    });
+    y -= 18;
+  }
+
+  if (data.paidNote && data.paidNote.length > 0) {
+    y -= 6;
+    const [first, ...rest] = data.paidNote;
+    drawText(ctx, first, colDesc, y, { size: 10, bold: true, color: rgb(0.1, 0.5, 0.3) });
+    y -= 14;
+    for (const line of rest) {
+      drawText(ctx, line, colDesc, y, { size: 8, color: ctx.gray });
+      y -= 12;
+    }
+  }
+  y -= 12;
+
+  if (isPvmLayout && data.lessonDetails && data.lessonDetails.length > 0) {
+    ensureSpace(50);
+    drawText(ctx, 'Pamokų detalizacija', MARGIN, y, { size: 10, bold: true });
+    y -= 16;
+    drawTableHeaderBar([
+      { text: 'Pamoka', x: colDesc },
+      { text: 'Kaina', x: colUnit },
+      { text: 'Data', x: colTotal - 10 },
+    ]);
+    for (const lesson of data.lessonDetails) {
+      ensureSpace(24);
+      drawText(ctx, lesson.subject, colDesc, y, { size: LINE_ITEM_FONT_SIZE });
+      drawText(ctx, `${formatEur(lesson.price)} Eur`, colUnit, y, { size: LINE_ITEM_FONT_SIZE });
+      drawText(ctx, lesson.datetime, colTotal - 10, y, { size: LINE_ITEM_FONT_SIZE });
+      y -= MIN_ROW_HEIGHT;
+    }
+    y -= 8;
+  }
+
+  if (data.notes && data.notes.length > 0) {
+    for (const note of data.notes) {
+      const noteLines = wrapInvoiceDescription(note, font, 8, COL_WIDTH);
+      ensureSpace(noteLines.length * 12 + 8);
+      for (const line of noteLines) {
+        drawText(ctx, line, MARGIN, y, { size: 8, color: ctx.gray });
+        y -= 12;
+      }
+      y -= 4;
+    }
+  }
+
+  if (!data.hidePlatformFooter && !isPvmLayout) {
+    drawLine(ctx, MARGIN, y, PAGE_WIDTH - MARGIN);
+    y -= 14;
+    drawText(ctx, 'Sąskaita suformuota Tutlio platformoje | www.tutlio.lt', MARGIN, y, {
+      size: 7,
+      color: ctx.gray,
+    });
+  }
 
   return doc.save();
 }
 
+async function embedInvoiceLogo(
+  doc: PDFDocument,
+  logo: { bytes: Uint8Array; mime: 'png' | 'jpeg' },
+): Promise<PDFImage | null> {
+  try {
+    return logo.mime === 'jpeg' ? await doc.embedJpg(logo.bytes) : await doc.embedPng(logo.bytes);
+  } catch {
+    try {
+      return await doc.embedJpg(logo.bytes);
+    } catch {
+      try {
+        return await doc.embedPng(logo.bytes);
+      } catch {
+        return null;
+      }
+    }
+  }
+}
+
+function drawText(
+  ctx: DrawCtx,
+  text: string,
+  x: number,
+  yPos: number,
+  opts?: { size?: number; bold?: boolean; color?: RGB },
+) {
+  const f = opts?.bold ? ctx.fontBold : ctx.font;
+  const size = opts?.size || 9;
+  ctx.page.drawText(String(text ?? ''), {
+    x,
+    y: yPos,
+    size,
+    font: f,
+    color: opts?.color || ctx.black,
+  });
+}
+
+function drawLine(ctx: DrawCtx, x1: number, yPos: number, x2: number) {
+  ctx.page.drawLine({
+    start: { x: x1, y: yPos },
+    end: { x: x2, y: yPos },
+    thickness: 0.5,
+    color: ctx.lightGray,
+  });
+}
+
 function buildEntityLines(seller: InvoicePdfData['seller']): string[] {
   const lines: string[] = [seller.name];
-  if (seller.companyCode) lines.push(`Imones kodas: ${seller.companyCode}`);
+  if (seller.companyCode) lines.push(`Įmonės kodas: ${seller.companyCode}`);
   if (seller.vatCode) lines.push(`PVM kodas: ${seller.vatCode}`);
   if (seller.address) lines.push(seller.address);
   if (seller.activityNumber) lines.push(`Veiklos Nr.: ${seller.activityNumber}`);
   if (seller.personalCode) lines.push(`Asmens kodas: ${seller.personalCode}`);
   if (seller.contactEmail) lines.push(seller.contactEmail);
   if (seller.contactPhone) lines.push(seller.contactPhone);
+  if (seller.bankName) lines.push(`Bankas: ${seller.bankName}`);
+  if (seller.iban) lines.push(`Sąskaita: ${seller.iban}`);
   return lines;
 }
 
 function buildBuyerLines(buyer: InvoicePdfData['buyer']): string[] {
   const lines: string[] = [buyer.name];
-  if (buyer.companyCode) lines.push(`Imones kodas: ${buyer.companyCode}`);
+  if (buyer.companyCode) lines.push(`Įmonės kodas: ${buyer.companyCode}`);
   if (buyer.vatCode) lines.push(`PVM kodas: ${buyer.vatCode}`);
   if (buyer.address) lines.push(buyer.address);
   if (buyer.email) lines.push(buyer.email);
@@ -184,10 +731,6 @@ function buildBuyerLines(buyer: InvoicePdfData['buyer']): string[] {
   return lines;
 }
 
-function formatEur(amount: number): string {
-  return amount.toFixed(2);
-}
-
-function truncate(text: string, maxLen: number): string {
-  return text.length > maxLen ? text.slice(0, maxLen - 3) + '...' : text;
+function formatEur(n: number): string {
+  return n.toFixed(2).replace('.', ',');
 }

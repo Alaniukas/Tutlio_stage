@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Building2, CalendarDays, ListOrdered, Users } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
-import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
+import { loadPublicLandingLessonCount } from '@/lib/landingStats';
+import { buildLocalizedPath, localizedPagePath, useTranslation } from '@/lib/i18n';
+import { CUSTOMER_LOGOS } from '@/lib/landingLogos';
 import Reveal from './Reveal';
 
 export type LandingVariant = 'tutor' | 'schools';
@@ -38,44 +39,29 @@ function AnimatedCount({ value }: { value: number }) {
   return <span ref={ref}>{display.toLocaleString()}</span>;
 }
 
-/** `invert:false` — spalvotas logotipas violetiniame marquee (nebenaudojamas brightness/invert maršalas). */
-const CUSTOMER_LOGOS: { src: string; alt: string; invert?: boolean }[] = [
-  { src: '/wyzant-logo-reversed2x.png', alt: 'Wyzant' },
-  { src: '/672a303d02b19dab2f248fd9_iTutor-logo.svg', alt: 'iTutor' },
-  { src: '/hey_tutor_logo_2026.webp', alt: 'HeyTutor' },
-  { src: '/602428438327a78cb4e7fcb3_learnerlogo.svg', alt: 'Learner' },
-  { src: '/67cab891e121bff1e23d95eb_66ad096240b243e78bd71431_Fullmind-logo-plum-on-clear (1) 1.png', alt: 'Fullmind' },
-  { src: '/moku-moku-logo.png', alt: 'Moku Moku', invert: false },
-  { src: '/logo.png', alt: 'Tutlio' },
-  { src: '/tut_logo.svg', alt: 'Tut' },
-];
-
 const HERO_SPOT_ICONS_TUTOR = [CalendarDays, ListOrdered] as const;
 const HERO_SPOT_ICONS_SCHOOLS = [Building2, Users] as const;
-
-function scrollToFeaturesSection() {
-  document.getElementById('tutlio-privalumai')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
 
 export default function HeroSection({ variant = 'tutor' }: { variant?: LandingVariant }) {
   const { t, locale } = useTranslation();
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
-  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : buildLocalizedPath('/pricing', locale);
+  const ctaLink = variant === 'schools' ? buildLocalizedPath(localizedPagePath('contacts', locale), locale) : buildLocalizedPath('/pricing', locale);
   const spotIcons = variant === 'schools' ? HERO_SPOT_ICONS_SCHOOLS : HERO_SPOT_ICONS_TUTOR;
 
   const [lessonCount, setLessonCount] = useState<number | null>(null);
   useEffect(() => {
     let cancelled = false;
-    supabase.rpc('get_public_landing_stats').then(({ data }) => {
-      if (cancelled || !data) return;
-      const d = data as { completed_lessons: number; upcoming_lessons: number };
-      setLessonCount(d.completed_lessons + d.upcoming_lessons);
+    const stop = loadPublicLandingLessonCount((n) => {
+      if (!cancelled) setLessonCount(n);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      stop();
+    };
   }, []);
 
   return (
-    <section className="relative overflow-hidden bg-gradient-to-b from-[#f5f5f3] via-[#f0efed] to-[#eae9e6]">
+    <section className="relative overflow-hidden bg-gradient-to-b from-white via-[#f7f7f6] to-[#eae9e6]">
       <div className="absolute top-[5%] left-1/2 -translate-x-1/2 w-[800px] h-[500px] bg-white/40 rounded-full blur-[120px] pointer-events-none" />
 
       <div className="relative z-10 max-w-[1200px] mx-auto px-5 sm:px-6 pt-8 sm:pt-10 lg:pt-14 pb-12 sm:pb-16 lg:pb-20 text-center">
@@ -153,13 +139,12 @@ export default function HeroSection({ variant = 'tutor' }: { variant?: LandingVa
               })}
             </ul>
             <div className="mt-8 flex justify-center">
-              <button
-                type="button"
-                onClick={scrollToFeaturesSection}
+              <Link
+                to={buildLocalizedPath('/features', locale)}
                 className="inline-flex items-center justify-center h-10 sm:h-11 px-6 text-[13px] sm:text-sm rounded-full border border-gray-300/90 bg-white/80 font-medium text-gray-700 hover:bg-white hover:border-gray-400 transition-all duration-200 active:scale-[0.98] touch-manipulation"
               >
                 {t(`${p}.heroMoreFeaturesCta`)}
-              </button>
+              </Link>
             </div>
           </div>
         </Reveal>

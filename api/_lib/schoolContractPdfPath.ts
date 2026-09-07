@@ -4,6 +4,29 @@
  * regenerate overwrites via upsert instead of accumulating random keys.
  */
 
+/** The (private) Storage bucket holding school contract templates + generated PDFs. */
+export const SCHOOL_CONTRACTS_BUCKET = 'school-contracts';
+
+/**
+ * Resolve the in-bucket object key from a stored value that may be a public
+ * Storage URL (legacy), a signed URL, or an already-bare path. The
+ * `school-contracts` bucket is private, so callers must mint a signed URL from
+ * this path (service role) instead of fetching a public URL directly.
+ */
+export function extractSchoolContractStoragePath(urlOrPath: string): string {
+  const value = String(urlOrPath || '');
+  const markers = [
+    `/object/public/${SCHOOL_CONTRACTS_BUCKET}/`,
+    `/object/sign/${SCHOOL_CONTRACTS_BUCKET}/`,
+    `/object/${SCHOOL_CONTRACTS_BUCKET}/`,
+  ];
+  for (const marker of markers) {
+    const idx = value.indexOf(marker);
+    if (idx !== -1) return decodeURIComponent(value.slice(idx + marker.length).replace(/\?.*$/, ''));
+  }
+  return value;
+}
+
 export function sanitizeContractNumberForFilename(raw: unknown, maxLen = 80): string {
   const s = String(raw ?? '')
     .trim()

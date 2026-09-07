@@ -3,6 +3,21 @@ import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'crypto';
 
 /**
+ * Constant-time check that the request carries the internal server-to-server
+ * key (x-internal-key matching the service role key).
+ */
+export function isInternalRequest(req: VercelRequest): boolean {
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const internalKey = typeof req.headers['x-internal-key'] === 'string' ? req.headers['x-internal-key'] : '';
+  if (!internalKey || !serviceKey || internalKey.length !== serviceKey.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(internalKey, 'utf8'), Buffer.from(serviceKey, 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Verifies that the request is either from an authenticated user (Bearer token)
  * or from an internal server-to-server call (x-internal-key matching service role key).
  * Returns the authenticated user's ID on success, or null on failure.
@@ -12,13 +27,8 @@ export async function verifyRequestAuth(
 ): Promise<{ userId: string | null; isInternal: boolean } | null> {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-  const internalKey = typeof req.headers['x-internal-key'] === 'string' ? req.headers['x-internal-key'] : '';
-  if (internalKey && serviceKey && internalKey.length === serviceKey.length) {
-    try {
-      if (timingSafeEqual(Buffer.from(internalKey, 'utf8'), Buffer.from(serviceKey, 'utf8'))) {
-        return { userId: null, isInternal: true };
-      }
-    } catch { /* length mismatch — fall through */ }
+  if (isInternalRequest(req)) {
+    return { userId: null, isInternal: true };
   }
 
   const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
@@ -26,9 +36,9 @@ export async function verifyRequestAuth(
   if (!serviceKey) return null;
 
   const token = authHeader.slice(7);
-  const urls = [process.env.SUPABASE_URL, process.env.VITE_SUPABASE_URL].filter(
-    (u, i, arr): u is string => Boolean(u) && arr.indexOf(u) === i,
-  );
+  const urls = [process.env.SUPABASE_URL, process.env.VITE_SUPABASE_URL]
+    .filter((u, i, arr): u is string => Boolean(u) && arr.indexOf(u) === i)
+    .filter((u) => !u.includes('xklzjhfztjxltrdkplog'));
   if (urls.length === 0) return null;
 
   for (const url of urls) {

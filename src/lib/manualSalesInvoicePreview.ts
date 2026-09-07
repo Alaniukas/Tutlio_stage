@@ -11,6 +11,8 @@ export type ManualPackageInvoiceRow = {
   subjects: unknown;
   payment_status: string;
   total_lessons: number;
+  /** Set when this row represents one subject of a multi-subject package. */
+  package_id?: string;
 };
 
 export type SalesInvoicePreviewMode = 'manual_org' | 'stripe';
@@ -38,19 +40,48 @@ function inPaidWindow(
   return t >= startMs && t <= endMs;
 }
 
-function mapPackageRow(p: Record<string, unknown>): ManualPackageInvoiceRow {
-  return {
-    invoice_row_kind: 'package',
-    id: p.id as string,
+/**
+ * Map one package row to invoice preview rows. Multi-subject packages produce
+ * one preview row per `lesson_package_items` row; single-subject packages
+ * (or rows without items, e.g. legacy data) produce a single row.
+ */
+function mapPackageRow(p: Record<string, unknown>): ManualPackageInvoiceRow[] {
+  const pkgId = p.id as string;
+  const baseStart = (p.paid_at || p.created_at) as string;
+  const itemsRaw = Array.isArray((p as any).lesson_package_items)
+    ? ((p as any).lesson_package_items as any[])
+    : [];
+  if (itemsRaw.length > 0) {
+    return itemsRaw
+      .slice()
+      .sort((a, b) => Number(a.position || 0) - Number(b.position || 0))
+      .map((it, idx) => ({
+        invoice_row_kind: 'package' as const,
+        id: `${pkgId}::${idx}`,
+        package_id: pkgId,
+        tutor_id: p.tutor_id as string,
+        student_id: p.student_id as string,
+        start_time: baseStart,
+        price: Number(it.total_price) || 0,
+        students: p.students,
+        subjects: it.subjects || { name: 'Pamoka' },
+        payment_status: 'paid',
+        total_lessons: Number(it.total_lessons) || 0,
+      }));
+  }
+  return [{
+    invoice_row_kind: 'package' as const,
+    id: pkgId,
+    package_id: pkgId,
     tutor_id: p.tutor_id as string,
     student_id: p.student_id as string,
-    start_time: (p.paid_at || p.created_at) as string,
+    start_time: baseStart,
     price: Number(p.total_price) || 0,
     students: p.students,
     subjects: p.subjects,
     payment_status: 'paid',
     total_lessons: p.total_lessons as number,
-  };
+  }];
 }
 
 /**
@@ -115,7 +146,8 @@ export async function fetchPaidSalesInvoiceCandidates(
       id, tutor_id, student_id, subject_id, total_price, total_lessons, paid_at, created_at,
       paid, payment_method, manual_sales_invoice_id,
       students!inner(full_name, email, payer_email, payer_name),
-      subjects(name)
+      subjects(name),
+      lesson_package_items(subject_id, total_lessons, total_price, position, subjects!inner(name))
     `
     )
     .in('tutor_id', tutorIds)
@@ -130,7 +162,7 @@ export async function fetchPaidSalesInvoiceCandidates(
 
   const packageRows = (pkgData || [])
     .filter(p => inPaidWindow(periodStart, periodEnd, p) && !sessionPackageIds.has(p.id))
-    .map(p => mapPackageRow(p as Record<string, unknown>));
+    .flatMap(p => mapPackageRow(p as Record<string, unknown>));
 
   const merged = [...sessionRows, ...packageRows].sort(
     (a: { start_time?: string }, b: { start_time?: string }) =>

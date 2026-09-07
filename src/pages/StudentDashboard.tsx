@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import JoinLessonButton from '@/components/JoinLessonButton';
 import StudentLayout from '@/components/StudentLayout';
 import StatusBadge from '@/components/StatusBadge';
 import SessionFiles from '@/components/SessionFiles';
 import WhiteboardButton from '@/components/WhiteboardButton';
 import { supabase } from '@/lib/supabase';
+import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
+import { startPerlasPayment } from '@/lib/perlasPay';
 import { getCached, setCache } from '@/lib/dataCache';
 import {
     fetchStudentActiveLessonPackagesDeduped,
@@ -11,6 +14,8 @@ import {
 } from '@/lib/studentLessonPackagesLight';
 import { authHeaders } from '@/lib/apiHelpers';
 import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
+import { schoolContractAllowsInstallmentPayment } from '@/lib/schoolContractPaymentGate';
+import { displayStudentGrade } from '@/lib/studentGrade';
 import { useUser } from '@/contexts/UserContext';
 import { format, isAfter, isBefore } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
@@ -18,16 +23,32 @@ import { CalendarDays, Clock, Zap, BookOpen, Settings, Play, XCircle, CheckCircl
 import { cn, normalizeUrl } from '@/lib/utils';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
-import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
+import { formatLessonStripeChargeEur, formatMarketAmount, orgFeeProfile, type OrgFeeProfile } from '@/lib/stripeLessonPricing';
+import { currentMarket } from '@/lib/market';
+import { tutorUsesManualStudentPayments } from '@/lib/subscription';
+import { viewerCanPayLessons } from '@/lib/lessonPayerView';
+import {
+    isMonthlyBillingOnlyStudent,
+    shouldShowPerLessonPaymentUi,
+} from '@/lib/studentPaymentModel';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/lib/i18n';
+import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
 
-interface Session { id: string; start_time: string; end_time: string; status: string; paid: boolean; price: number | null; topic: string | null; meeting_link: string | null; payment_status?: string; tutor_comment?: string | null; show_comment_to_student?: boolean; subject_id?: string | null; subjects?: { is_group?: boolean; max_students?: number } | null; }
+interface Session { id: string; start_time: string; end_time: string; status: string; paid: boolean; price: number | null; topic: string | null; meeting_link: string | null; payment_status?: string; tutor_comment?: string | null; show_comment_to_student?: boolean; subject_id?: string | null; subjects?: { is_group?: boolean; max_students?: number; is_trial?: boolean } | null; }
 interface StudentInfo {
     full_name: string;
     grade: string | null;
+    email?: string | null;
+    payer_email?: string | null;
     tutor: { full_name: string; email?: string; phone?: string | null } | null;
+}
+interface LessonPackageItem {
+    subject_id: string;
+    subject_name?: string;
+    total_lessons: number;
+    available_lessons: number;
 }
 interface LessonPackage {
     id: string;
@@ -36,6 +57,7 @@ interface LessonPackage {
     expires_at?: string | null;
     subject_id: string;
     subjects?: any;
+    items: LessonPackageItem[];
 }
 
 interface InstallmentPayment {
@@ -46,11 +68,14 @@ interface InstallmentPayment {
     payment_status: 'pending' | 'paid' | 'overdue' | 'failed';
     paid_at: string | null;
     contract_id: string;
+    contract_signing_status: string;
 }
 
 export default function StudentDashboard() {
     const navigate = useNavigate();
     const { t, dateFnsLocale } = useTranslation();
+    const market = currentMarket();
+    const fmt = (amount: number | null | undefined) => formatMarketAmount(amount, market);
     const { user: ctxUser } = useUser();
     const sdc = getCached<any>('student_dashboard');
     const [student, setStudent] = useState<StudentInfo | null>(sdc?.student ?? null);
@@ -66,11 +91,40 @@ export default function StudentDashboard() {
     const [activeStudentId, setActiveStudentId] = useState<string | null>(null);
     const [isSchoolOrgStudent, setIsSchoolOrgStudent] = useState(false);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
+    const [tutorOrgFeeProfile, setTutorOrgFeeProfile] = useState<OrgFeeProfile | null>(null);
     const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
+    const [manualPaymentsOnly, setManualPaymentsOnly] = useState(false);
     const [perlasLoading, setPerlasLoading] = useState(false);
+    const [studentPaymentModel, setStudentPaymentModel] = useState<string | null>(null);
+    const [studentPaymentOverrideActive, setStudentPaymentOverrideActive] = useState(false);
+    const [tutorPaymentFlags, setTutorPaymentFlags] = useState({
+        enable_per_lesson: true,
+        enable_monthly_billing: false,
+    });
+    // Org feature disable_student_reschedule_cancel — hide self-service reschedule/cancel entry points.
+    // Seeded from the pre-mount StudentPolicyProvider so gated UI never flashes;
+    // the data fetch below still reconciles as a backstop.
+    const portalPolicy = useStudentPolicy();
+    const [studentActionsDisabled, setStudentActionsDisabled] = useState(portalPolicy.actionsDisabled);
+    // Org feature disable_student_booking — hide self-service booking entry points.
+    const [studentBookingDisabled, setStudentBookingDisabled] = useState(portalPolicy.bookingDisabled);
+    useEffect(() => {
+        if (!portalPolicy.resolved) return;
+        if (portalPolicy.actionsDisabled) setStudentActionsDisabled(true);
+        if (portalPolicy.bookingDisabled) setStudentBookingDisabled(true);
+    }, [portalPolicy.resolved, portalPolicy.actionsDisabled, portalPolicy.bookingDisabled]);
     const { blocked: paymentBookingBlocked, loading: paymentBlockLoading } = useStudentPaymentBlock(activeStudentId);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const now = new Date();
+    const canPayLessons = useMemo(
+        () => viewerCanPayLessons(
+            paymentPayer,
+            ctxUser?.email ?? null,
+            student?.email ?? null,
+            student?.payer_email ?? null,
+        ),
+        [paymentPayer, ctxUser?.email, student?.email, student?.payer_email],
+    );
 
     const handleStripePayment = async (session: Session) => {
         setStripeLoading(true);
@@ -107,11 +161,7 @@ export default function StudentDashboard() {
             });
             const json = await res.json().catch(() => ({ error: t('stuSess.paymentConnectFailed') }));
             if (json.url && json.token) {
-                if ((window as any).PerlasPay) {
-                    (window as any).PerlasPay.init(json.url, json.token);
-                } else {
-                    window.location.href = `${json.url}pay/${json.token}`;
-                }
+                await startPerlasPayment(json.url, json.token);
                 setPerlasLoading(false);
                 return;
             }
@@ -175,6 +225,7 @@ export default function StudentDashboard() {
             setActiveStudentId(null);
             setIsSchoolOrgStudent(false);
             setTutorOrgIsSchool(false);
+            setTutorOrgFeeProfile(null);
             setStudent(null);
             setSessions([]);
             setActivePackages([]);
@@ -185,6 +236,8 @@ export default function StudentDashboard() {
         if (studentRow) {
             setActiveStudentId(studentRow.id);
             setPaymentPayer(studentRow.payment_payer || null);
+            setStudentPaymentModel(studentRow.payment_model || null);
+            setStudentPaymentOverrideActive(!!(studentRow as { payment_override_active?: boolean }).payment_override_active);
             const ent = String((studentRow as { organization_entity_type?: string }).organization_entity_type ?? '').trim();
             setIsSchoolOrgStudent(ent === 'school');
 
@@ -194,7 +247,7 @@ export default function StudentDashboard() {
             const [tutorResult, sessionsResult, pkgsRows, installmentsResult] = await Promise.all([
                 studentRow.tutor_id
                     ? Promise.all([
-                        supabase.from('profiles').select('email, phone, organization_id, perlas_finance_enabled').eq('id', studentRow.tutor_id).single(),
+                        supabase.from('profiles').select('email, phone, organization_id, perlas_finance_enabled, enable_per_lesson, enable_monthly_billing, subscription_plan, manual_subscription_exempt, enable_manual_student_payments').eq('id', studentRow.tutor_id).single(),
                         supabase.rpc('get_tutor_contact_visibility_for_student', { p_tutor_id: studentRow.tutor_id }),
                     ])
                     : Promise.resolve(null),
@@ -208,7 +261,7 @@ export default function StudentDashboard() {
                 fetchStudentActiveLessonPackagesDeduped(supabase, studentRow.id),
                 supabase
                     .from('school_payment_installments')
-                    .select('id, installment_number, amount, due_date, payment_status, paid_at, contract:school_contracts!inner(id, student_id)')
+                    .select('id, installment_number, amount, due_date, payment_status, paid_at, contract:school_contracts!inner(id, student_id, signing_status)')
                     .eq('contract.student_id', studentRow.id)
                     .order('due_date', { ascending: true }),
             ]);
@@ -225,16 +278,19 @@ export default function StudentDashboard() {
                 let tutorOrgSchoolResolved =
                     String((studentRow as { tutor_organization_entity_type?: string }).tutor_organization_entity_type ?? '')
                         .trim() === 'school';
+                let resolvedFeeProfile: OrgFeeProfile | null = null;
                 const oid = (tutorProf as { organization_id?: string | null } | null)?.organization_id;
-                if (!tutorOrgSchoolResolved && oid) {
+                if (oid) {
                     const { data: oe } = await supabase
                         .from('organizations')
-                        .select('entity_type')
+                        .select('entity_type, slug')
                         .eq('id', oid)
                         .maybeSingle();
                     tutorOrgSchoolResolved = oe?.entity_type === 'school';
+                    resolvedFeeProfile = orgFeeProfile((oe as { slug?: string | null })?.slug) ?? orgFeeProfile(oid);
                 }
                 setTutorOrgIsSchool(tutorOrgSchoolResolved);
+                setTutorOrgFeeProfile(resolvedFeeProfile);
 
                 let perlasFlag = !!(tutorProf as any)?.perlas_finance_enabled;
                 if (!perlasFlag && oid) {
@@ -245,15 +301,44 @@ export default function StudentDashboard() {
                         .maybeSingle();
                     perlasFlag = !!(orgP as any)?.perlas_finance_enabled;
                 }
-                setTutorPerlasEnabled(perlasFlag);
+                setTutorPerlasEnabled(PERLAS_FINANCE_ENABLED && perlasFlag);
+                setManualPaymentsOnly(tutorUsesManualStudentPayments(tutorProf as Parameters<typeof tutorUsesManualStudentPayments>[0]));
+
+                let enablePerLesson = (tutorProf as { enable_per_lesson?: boolean | null })?.enable_per_lesson ?? true;
+                let enableMonthlyBilling = !!(tutorProf as { enable_monthly_billing?: boolean | null })?.enable_monthly_billing;
+                if (oid) {
+                    const { data: orgPay } = await supabase
+                        .from('organizations')
+                        .select('enable_per_lesson, enable_monthly_billing, features')
+                        .eq('id', oid)
+                        .maybeSingle();
+                    if (orgPay) {
+                        enablePerLesson = (orgPay as { enable_per_lesson?: boolean }).enable_per_lesson ?? enablePerLesson;
+                        enableMonthlyBilling = !!(orgPay as { enable_monthly_billing?: boolean }).enable_monthly_billing;
+                        const orgFeatures = (orgPay as { features?: Record<string, unknown> | null }).features;
+                        setStudentActionsDisabled(orgFeatures?.disable_student_reschedule_cancel === true);
+                        setStudentBookingDisabled(orgFeatures?.disable_student_booking === true);
+                    }
+                } else {
+                    setStudentActionsDisabled(false);
+                    setStudentBookingDisabled(false);
+                }
+                setTutorPaymentFlags({
+                    enable_per_lesson: enablePerLesson,
+                    enable_monthly_billing: enableMonthlyBilling,
+                });
             } else {
                 setTutorOrgIsSchool(false);
+                setTutorOrgFeeProfile(null);
                 setTutorPerlasEnabled(false);
+                setManualPaymentsOnly(false);
             }
 
             setStudent({
                 full_name: studentRow.full_name,
                 grade: studentRow.grade,
+                email: studentRow.email ?? null,
+                payer_email: (studentRow as { payer_email?: string | null }).payer_email ?? null,
                 tutor: tutorInfo,
             });
 
@@ -267,17 +352,18 @@ export default function StudentDashboard() {
             } else {
                 const rows = (sessionRowsRaw || []) as Record<string, unknown>[];
                 const subjectIds = [...new Set(rows.map((r) => r.subject_id).filter(Boolean) as string[])];
-                let subjectMeta: Record<string, { is_group?: boolean; max_students?: number | null }> = {};
+                let subjectMeta: Record<string, { is_group?: boolean; max_students?: number | null; is_trial?: boolean }> = {};
                 if (subjectIds.length > 0) {
                     const { data: subs } = await supabase
                         .from('subjects')
-                        .select('id,is_group,max_students')
+                        .select('id,is_group,max_students,is_trial')
                         .in('id', subjectIds);
                     for (const s of subs ?? []) {
-                        const row = s as { id: string; is_group?: boolean; max_students?: number | null };
+                        const row = s as { id: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean };
                         subjectMeta[row.id] = {
                             is_group: row.is_group ?? undefined,
                             max_students: row.max_students,
+                            is_trial: row.is_trial ?? undefined,
                         };
                     }
                 }
@@ -290,6 +376,7 @@ export default function StudentDashboard() {
                             ? {
                                   is_group: sm.is_group,
                                   max_students: sm.max_students ?? undefined,
+                                  is_trial: sm.is_trial,
                               }
                             : null,
                     };
@@ -297,10 +384,14 @@ export default function StudentDashboard() {
                 setSessions(merged);
             }
 
-            const nameMap = await fetchSubjectNamesByIds(
-                supabase,
-                pkgsRows.map((p) => p.subject_id).filter(Boolean) as string[],
-            );
+            const allSubjectIds = new Set<string>();
+            for (const p of pkgsRows) {
+                if (p.subject_id) allSubjectIds.add(p.subject_id);
+                for (const it of p.items || []) {
+                    if (it.subject_id) allSubjectIds.add(it.subject_id);
+                }
+            }
+            const nameMap = await fetchSubjectNamesByIds(supabase, [...allSubjectIds]);
             const nowTs = Date.now();
             const visiblePackages: LessonPackage[] = pkgsRows
                 .filter((pkg) => {
@@ -318,6 +409,12 @@ export default function StudentDashboard() {
                         p.subject_id && nameMap[p.subject_id]
                             ? { name: nameMap[p.subject_id] }
                             : undefined,
+                    items: (p.items || []).map((it) => ({
+                        subject_id: it.subject_id,
+                        subject_name: nameMap[it.subject_id],
+                        total_lessons: Number(it.total_lessons || 0),
+                        available_lessons: Number(it.available_lessons || 0),
+                    })),
                 }));
             setActivePackages(visiblePackages);
 
@@ -329,6 +426,7 @@ export default function StudentDashboard() {
                 payment_status: row.payment_status,
                 paid_at: row.paid_at,
                 contract_id: row.contract?.id,
+                contract_signing_status: String(row.contract?.signing_status || ''),
             })));
         }
         setLoading(false);
@@ -350,6 +448,13 @@ export default function StudentDashboard() {
         return t('studentDash.inNDays', { n: Math.floor(diffH / 24) });
     };
 
+    const showPerLessonPayment = shouldShowPerLessonPaymentUi(
+        studentPaymentModel,
+        studentPaymentOverrideActive,
+        tutorPaymentFlags,
+    );
+    const isMonthlyBillingOnly = isMonthlyBillingOnlyStudent(studentPaymentModel);
+
     if (loading) return (
         <StudentLayout>
             <div className="flex h-[80vh] items-center justify-center">
@@ -367,9 +472,9 @@ export default function StudentDashboard() {
                         <p className="text-gray-500 font-medium text-sm mb-0.5">{getGreeting()},</p>
                         <h1 className="text-3xl font-black text-gray-900 leading-tight">{firstName} 👋</h1>
                     </div>
-                    {student?.grade && (
+                    {displayStudentGrade(student?.grade) && (
                         <div className="bg-violet-100/80 text-violet-700 px-3 py-1.5 rounded-2xl text-xs font-black shadow-sm border border-violet-200/50">
-                            {student.grade}
+                            {displayStudentGrade(student.grade)}
                         </div>
                     )}
                 </div>
@@ -390,13 +495,15 @@ export default function StudentDashboard() {
                     </div>
                 )}
 
-                <div className="grid grid-cols-3 gap-3">
-                    <button onClick={() => navigate('/student/schedule')} className="bg-white hover:bg-violet-50 hover:border-violet-200 transition-all rounded-3xl p-4 flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm aspect-square group">
-                        <div className="w-12 h-12 rounded-full bg-violet-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                            <CalendarDays className="w-5 h-5 text-violet-600" />
-                        </div>
-                        <span className="text-xs font-bold text-gray-700">{t('studentDash.book')}</span>
-                    </button>
+                <div className={`grid ${studentBookingDisabled ? 'grid-cols-2' : 'grid-cols-3'} gap-3`}>
+                    {!studentBookingDisabled && (
+                        <button onClick={() => navigate('/student/schedule')} className="bg-white hover:bg-violet-50 hover:border-violet-200 transition-all rounded-3xl p-4 flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm aspect-square group">
+                            <div className="w-12 h-12 rounded-full bg-violet-100 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                <CalendarDays className="w-5 h-5 text-violet-600" />
+                            </div>
+                            <span className="text-xs font-bold text-gray-700">{t('studentDash.book')}</span>
+                        </button>
+                    )}
                     <button onClick={() => navigate('/student/sessions')} className="bg-white hover:bg-blue-50 hover:border-blue-200 transition-all rounded-3xl p-4 flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm aspect-square group">
                         <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center group-hover:scale-110 transition-transform">
                             <BookOpen className="w-5 h-5 text-blue-600" />
@@ -416,7 +523,7 @@ export default function StudentDashboard() {
                         <div className="flex items-center gap-2 mb-2">
                             <Package className="w-4 h-4 text-violet-700" />
                             <p className="text-sm font-bold text-violet-800">
-                                {activePackages.length === 1 && activePackages[0].subjects?.name
+                                {activePackages.length === 1 && activePackages[0].items.length === 1 && activePackages[0].subjects?.name
                                     ? activePackages[0].subjects.name
                                     : t('studentDash.lessonPackages')}{' '}
                                 {activePackages.length > 1 && `(${activePackages.length})`}
@@ -434,12 +541,26 @@ export default function StudentDashboard() {
                                 })}
                             </p>
                         )}
+                        {activePackages.length === 1 && activePackages[0].items.length > 1 && (
+                            <div className="space-y-1 mt-3 pt-3 border-t border-violet-200">
+                                {activePackages[0].items.map((it) => (
+                                    <div key={it.subject_id} className="flex items-center justify-between text-xs">
+                                        <span className="text-violet-600 truncate">{it.subject_name || '—'}</span>
+                                        <span className="font-semibold text-violet-800 tabular-nums">
+                                            {it.available_lessons}/{it.total_lessons} {t('studentDash.lessonsSuffix')}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                         {activePackages.length > 1 && (
                             <div className="space-y-2 mt-3 pt-3 border-t border-violet-200">
                                 {activePackages.map((pkg, idx) => (
                                     <div key={pkg.id} className="flex items-center justify-between text-xs">
                                         <span className="text-violet-600">
-                                            {pkg.subjects?.name || t('studentDash.packageN', { n: idx + 1 })}
+                                            {pkg.items.length > 1
+                                                ? pkg.items.map((it) => it.subject_name).filter(Boolean).join(', ')
+                                                : (pkg.subjects?.name || t('studentDash.packageN', { n: idx + 1 }))}
                                             {pkg.expires_at
                                                 ? ` · ${t('package.expiresAt', { date: format(new Date(pkg.expires_at), "yyyy 'm.' MMMM d 'd.'", { locale: dateFnsLocale }) })}`
                                                 : ''}
@@ -454,7 +575,7 @@ export default function StudentDashboard() {
                     </div>
                 )}
 
-                {installments.length > 0 && !isSchoolOrgStudent && (
+                {installments.length > 0 && (
                     <div className="bg-white border border-gray-200 rounded-3xl p-4">
                         <button
                             type="button"
@@ -462,10 +583,12 @@ export default function StudentDashboard() {
                             className="w-full flex items-center justify-between"
                         >
                             <div className="text-left">
-                                <p className="text-sm font-bold text-gray-900">Mokejimai</p>
+                                <p className="text-sm font-bold text-gray-900">{t('school.paymentsTitle')}</p>
                                 <p className="text-xs text-gray-500">
-                                    {installments.length > 1 ? `Dalimis (${installments.length})` : 'Vienas mokejimas'} ·
-                                    {' '}Apmoketa {installments.filter((i) => i.payment_status === 'paid').length}/{installments.length}
+                                    {installments.length > 1
+                                        ? `${t('school.installments')} (${installments.length})`
+                                        : t('school.payFull')} ·{' '}
+                                    {t('school.paidLabel')} {installments.filter((i) => i.payment_status === 'paid').length}/{installments.length}
                                 </p>
                             </div>
                             {paymentsExpanded ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
@@ -474,24 +597,40 @@ export default function StudentDashboard() {
                         {paymentsExpanded && (
                             <div className="mt-3 space-y-2">
                                 {installments.map((i) => (
-                                    <div key={i.id} className="rounded-xl border border-gray-100 p-3 flex items-center justify-between">
+                                    <div key={i.id} className="rounded-xl border border-gray-100 p-3 flex items-center justify-between gap-3">
                                         <div>
-                                            <p className="text-sm font-semibold text-gray-900">Imoka #{i.installment_number} · €{i.amount.toFixed(2)}</p>
+                                            <p className="text-sm font-semibold text-gray-900">#{i.installment_number} · {fmt(i.amount)}</p>
                                             <p className="text-xs text-gray-500">
-                                                Terminas: {new Date(i.due_date).toLocaleDateString('lt-LT')}
-                                                {i.paid_at ? ` · Apmoketa: ${new Date(i.paid_at).toLocaleDateString('lt-LT')}` : ''}
+                                                {t('school.dueDateField')}: {format(new Date(i.due_date), 'P', { locale: dateFnsLocale })}
+                                                {i.paid_at ? ` · ${t('school.paidLabel')}: ${format(new Date(i.paid_at), 'P', { locale: dateFnsLocale })}` : ''}
                                             </p>
                                         </div>
-                                        <span className={cn(
-                                            'text-xs px-2 py-1 rounded-full font-semibold',
-                                            i.payment_status === 'paid' ? 'bg-green-50 text-green-700' :
-                                                i.payment_status === 'overdue' ? 'bg-red-50 text-red-700' :
-                                                    i.payment_status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'
-                                        )}>
-                                            {i.payment_status === 'paid' ? 'Apmoketa' :
-                                                i.payment_status === 'overdue' ? 'Pradelsta' :
-                                                    i.payment_status === 'failed' ? 'Nepavyko' : 'Laukia'}
-                                        </span>
+                                        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                                            <span className={cn(
+                                                'text-xs px-2 py-1 rounded-full font-semibold',
+                                                i.payment_status === 'paid' ? 'bg-green-50 text-green-700' :
+                                                    i.payment_status === 'overdue' ? 'bg-red-50 text-red-700' :
+                                                        i.payment_status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'
+                                            )}>
+                                                {i.payment_status === 'paid' ? t('school.payStatusPaid') :
+                                                    i.payment_status === 'overdue' ? t('school.payStatusOverdue') :
+                                                        i.payment_status === 'failed' ? t('school.payStatusFailed') : t('school.payStatusPending')}
+                                            </span>
+                                            {i.payment_status !== 'paid' && schoolContractAllowsInstallmentPayment(i.contract_signing_status) && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { window.location.href = `/api/pay-school-installment?installment=${i.id}`; }}
+                                                    className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-violet-600 text-white hover:bg-violet-700 transition-colors"
+                                                >
+                                                    <CreditCard className="w-3.5 h-3.5" /> {t('school.payNowBtn')}
+                                                </button>
+                                            )}
+                                            {i.payment_status !== 'paid' && !schoolContractAllowsInstallmentPayment(i.contract_signing_status) && (
+                                                <span className="text-[11px] text-gray-500 text-right max-w-[9rem] leading-tight">
+                                                    {t('school.payAwaitingContract')}
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -533,6 +672,11 @@ export default function StudentDashboard() {
                                                             <Users className="w-3 h-3" />
                                                         </span>
                                                     )}
+                                                    {nextSession.subjects?.is_trial && (
+                                                        <span className="bg-amber-200/90 text-amber-950 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide">
+                                                            {t('status.trialLesson')}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <p className="text-violet-200 text-xs font-medium mb-1">{t('studentDash.duration')}</p>
                                                 <div className="mt-1">
@@ -540,7 +684,9 @@ export default function StudentDashboard() {
                                                         status={nextSession.status}
                                                         paymentStatus={nextSession.payment_status}
                                                         paid={nextSession.paid}
+                                                        isTrial={nextSession.subjects?.is_trial === true}
                                                         endTime={nextSession.end_time}
+                                                        treatUnpaidAsReserved={!showPerLessonPayment}
                                                     />
                                                 </div>
                                             </div>
@@ -556,12 +702,17 @@ export default function StudentDashboard() {
                         </div>
                     </div>
                 ) : (
-                    <div onClick={() => navigate('/student/schedule')} className="rounded-[2rem] p-8 bg-white border-2 border-dashed border-gray-200 text-center cursor-pointer hover:border-violet-300 hover:bg-violet-50/50 transition-all flex flex-col items-center justify-center group">
+                    <div
+                        onClick={studentBookingDisabled ? undefined : () => navigate('/student/schedule')}
+                        className={`rounded-[2rem] p-8 bg-white border-2 border-dashed border-gray-200 text-center transition-all flex flex-col items-center justify-center group ${studentBookingDisabled ? '' : 'cursor-pointer hover:border-violet-300 hover:bg-violet-50/50'}`}
+                    >
                         <div className="w-16 h-16 rounded-full bg-gray-50 group-hover:bg-violet-100 flex items-center justify-center mb-4 transition-colors">
                             <CalendarDays className="w-7 h-7 text-gray-400 group-hover:text-violet-600 transition-colors" />
                         </div>
                         <h3 className="text-xl font-bold text-gray-900 mb-1 tracking-tight">{t('studentDash.noLessons')}</h3>
-                        <p className="text-gray-500 text-sm font-medium">{t('studentDash.tapToBook')}</p>
+                        {!studentBookingDisabled && (
+                            <p className="text-gray-500 text-sm font-medium">{t('studentDash.tapToBook')}</p>
+                        )}
                     </div>
                 )}
 
@@ -586,12 +737,17 @@ export default function StudentDashboard() {
                                                         <Users className="w-3 h-3" />
                                                     </span>
                                                 )}
+                                                {s.subjects?.is_trial && (
+                                                    <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide">
+                                                        {t('status.trialLesson')}
+                                                    </span>
+                                                )}
                                             </div>
                                             <p className="text-xs text-gray-500 font-medium flex items-center gap-1.5 mt-0.5">
                                                 <Clock className="w-3.5 h-3.5" /> {format(new Date(s.start_time), 'HH:mm')}
                                             </p>
                                         </div>
-                                        <StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} />
+                                        <StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} endTime={s.end_time} treatUnpaidAsReserved={!showPerLessonPayment} />
                                     </div>
                                 </div>
                             ))}
@@ -650,20 +806,20 @@ export default function StudentDashboard() {
                         {isSchoolOrgStudent ? (
                             <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center">
                                 <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">{t('studentDash.statusLabel')}</p>
-                                <StatusBadge status={selectedSession?.status || ''} paymentStatus={selectedSession?.payment_status} paid={selectedSession?.paid} endTime={selectedSession?.end_time} />
+                                <StatusBadge status={selectedSession?.status || ''} paymentStatus={selectedSession?.payment_status} paid={selectedSession?.paid} isTrial={selectedSession?.subjects?.is_trial === true} endTime={selectedSession?.end_time} treatUnpaidAsReserved={!showPerLessonPayment} />
                             </div>
                         ) : (
                             <div className="grid grid-cols-2 gap-3 text-sm">
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                     <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('studentDash.priceLabel')}</p>
-                                    <p className="font-bold text-gray-900">€{selectedSession?.price ?? '–'}</p>
-                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && (
-                                        <p className="text-[11px] text-gray-500 mt-1">{t('studentDash.cardTotal', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}</p>
+                                    <p className="font-bold text-gray-900">{fmt(selectedSession?.price)}</p>
+                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && showPerLessonPayment && !manualPaymentsOnly && (
+                                        <p className="text-[11px] text-gray-500 mt-1">{t('studentDash.cardTotal', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool, tutorOrgFeeProfile) })}</p>
                                     )}
                                 </div>
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center">
                                     <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">{t('studentDash.statusLabel')}</p>
-                                    <StatusBadge status={selectedSession?.status || ''} paymentStatus={selectedSession?.payment_status} paid={selectedSession?.paid} endTime={selectedSession?.end_time} />
+                                    <StatusBadge status={selectedSession?.status || ''} paymentStatus={selectedSession?.payment_status} paid={selectedSession?.paid} isTrial={selectedSession?.subjects?.is_trial === true} endTime={selectedSession?.end_time} treatUnpaidAsReserved={!showPerLessonPayment} />
                                 </div>
                             </div>
                         )}
@@ -676,14 +832,12 @@ export default function StudentDashboard() {
                         )}
 
                         {selectedSession?.meeting_link && selectedSession.status !== 'cancelled' && (
-                            <a
-                                href={normalizeUrl(selectedSession.meeting_link) || undefined}
-                                target="_blank"
-                                rel="noreferrer"
+                            <JoinLessonButton
+                                session={selectedSession as any}
                                 className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100 mt-2"
                             >
                                 {t('studentDash.joinMeeting')}
-                            </a>
+                            </JoinLessonButton>
                         )}
 
                         <WhiteboardButton
@@ -692,18 +846,28 @@ export default function StudentDashboard() {
                           sessionEndTime={(selectedSession as any)?.end_time ?? null}
                         />
 
-                        {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && isAfter(new Date(selectedSession.end_time), now) && (
+                        {selectedSession?.status === 'active' && !selectedSession.paid && isMonthlyBillingOnly && (
+                            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100 text-sm text-blue-700">
+                                <CalendarDays className="w-4 h-4 flex-shrink-0" />
+                                <span>{t('stuSess.monthlyBillingNote')}</span>
+                            </div>
+                        )}
+
+                        {/* Stripe checkout is unavailable for manual-payment tutors (server rejects it), but Perlas bank payments stay available. */}
+                        {selectedSession?.status === 'active' && !selectedSession.paid && canPayLessons && isAfter(new Date(selectedSession.end_time), now) && showPerLessonPayment && (!manualPaymentsOnly || tutorPerlasEnabled) && (
                             <div className="space-y-2">
-                                <button
-                                    onClick={() => handleStripePayment(selectedSession)}
-                                    disabled={stripeLoading}
-                                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
-                                >
-                                    {stripeLoading
-                                        ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}</>
-                                        : <><CreditCard className="w-4 h-4" /> {t('studentDash.stripePayBtn', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}</>
-                                    }
-                                </button>
+                                {!manualPaymentsOnly && (
+                                    <button
+                                        onClick={() => handleStripePayment(selectedSession)}
+                                        disabled={stripeLoading}
+                                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
+                                    >
+                                        {stripeLoading
+                                            ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}</>
+                                            : <><CreditCard className="w-4 h-4" /> {t('studentDash.stripePayBtn', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool, tutorOrgFeeProfile) })}</>
+                                        }
+                                    </button>
+                                )}
                                 {tutorPerlasEnabled && (() => {
                                     const sp = Number(selectedSession.price || 0);
                                     const pf = Math.round(sp * 2) / 100;
@@ -746,6 +910,11 @@ export default function StudentDashboard() {
                     )}
 
                     {selectedSession?.status === 'active' && isAfter(new Date(selectedSession.end_time), new Date()) && (
+                        studentActionsDisabled ? (
+                            <p className="mt-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                                {t('stuSess.actionsDisabledByOrg')}
+                            </p>
+                        ) : (
                         <DialogFooter className="mt-2 flex gap-2 sm:flex-row">
                             <Button
                                 variant="outline"
@@ -764,6 +933,7 @@ export default function StudentDashboard() {
                                 {t('studentDash.cancelLesson')}
                             </Button>
                         </DialogFooter>
+                        )
                     )}
                 </DialogContent>
             </Dialog>

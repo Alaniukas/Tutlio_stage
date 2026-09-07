@@ -7,6 +7,9 @@ export type ParentInvitePreviewRow = {
   parent_name: string | null;
   student_full_name: string | null;
   parent_phone?: string | null;
+  organization_id?: string | null;
+  student_grade?: string | null;
+  student_birth_date?: string | null;
 };
 
 /** RPC returns a set; avoid .maybeSingle() — PostgREST responds 406 when there are 0 rows. */

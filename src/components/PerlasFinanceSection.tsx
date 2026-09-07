@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Landmark, Loader2, CheckCircle2, XCircle, Clock, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n';
+import { isPlMarket } from '@/lib/market';
 
 interface LedgerRow {
   id: string;
@@ -22,6 +23,7 @@ interface Props {
 }
 
 export default function PerlasFinanceSection({ entityType, entityId }: Props) {
+  if (isPlMarket()) return null;
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [iban, setIban] = useState('');
@@ -149,7 +151,7 @@ export default function PerlasFinanceSection({ entityType, entityId }: Props) {
             <RefreshCw className="w-4 h-4" />
           </button>
         </div>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <span className="text-xs text-gray-500">{t('perlasFinance.pending')}</span>
             <p className="text-2xl font-bold text-gray-900">{`€${pendingNet.toFixed(2)}`}</p>
@@ -227,7 +229,6 @@ export default function PerlasFinanceSection({ entityType, entityId }: Props) {
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">
                       {`€${Number(l.net_amount).toFixed(2)}`}
-                      <span className="text-xs text-gray-400 ml-2">{`(apimtis: €${Number(l.volume).toFixed(2)})`}</span>
                     </p>
                     <p className="text-xs text-gray-500">
                       {new Date(l.created_at).toLocaleDateString('lt-LT')}

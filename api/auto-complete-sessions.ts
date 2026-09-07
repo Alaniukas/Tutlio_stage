@@ -11,24 +11,54 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
+import { requireCronAuth } from './_lib/cronAuth.js';
+import {
+  partitionByStatusConfirmation,
+  movePackageCountersToCompleted,
+} from './_lib/sessionStatusConfirmation.js';
+import { orgHasJoinNoShow, shouldMarkStudentNoShowFromMissedJoin } from '../src/lib/schoolJoinNoShow.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+async function partitionJoinNoShow<T extends { id: string; tutor_id?: string | null; start_time?: string; end_time?: string | null; status?: string | null; meeting_link?: string | null; student_joined_at?: string | null; tutor_joined_at?: string | null }>(
+  sb: typeof supabase,
+  sessions: T[],
+): Promise<{ autoCompletable: T[]; skippedJoinNoShow: T[] }> {
+  const tutorIds = [...new Set(sessions.map((s) => s.tutor_id).filter(Boolean))] as string[];
+  if (!tutorIds.length) return { autoCompletable: sessions, skippedJoinNoShow: [] };
+  const { data: tutors } = await sb.from('profiles').select('id, organization_id').in('id', tutorIds);
+  const orgByTutor = new Map((tutors || []).map((t) => [t.id, t.organization_id]));
+  const orgIds = [...new Set([...orgByTutor.values()].filter(Boolean))] as string[];
+  if (!orgIds.length) return { autoCompletable: sessions, skippedJoinNoShow: [] };
+  const { data: orgs } = await sb.from('organizations').select('id, features').in('id', orgIds);
+  const flagged = new Set(
+    (orgs || [])
+      .filter((o) => orgHasJoinNoShow((o.features || {}) as Record<string, unknown>))
+      .map((o) => o.id),
+  );
+  const autoCompletable: T[] = [];
+  const skippedJoinNoShow: T[] = [];
+  const now = new Date();
+  for (const s of sessions) {
+    const orgId = s.tutor_id ? orgByTutor.get(s.tutor_id) : null;
+    if (orgId && flagged.has(orgId) && shouldMarkStudentNoShowFromMissedJoin(s as any, now)) {
+      skippedJoinNoShow.push(s);
+    } else {
+      autoCompletable.push(s);
+    }
+  }
+  return { autoCompletable, skippedJoinNoShow };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
-    if (auth !== `Bearer ${cronSecret}`) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-  }
+  if (!requireCronAuth(req, res)) return;
 
   try {
     const now = new Date().toISOString();
@@ -42,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const lookback = new Date(Date.now() - 7 * 24 * 3600000).toISOString();
     const { data: sessions, error } = await supabase
       .from('sessions')
-      .select('id, tutor_id, end_time, status, paid, payment_status, lesson_package_id')
+      .select('id, tutor_id, start_time, end_time, status, paid, payment_status, lesson_package_id, subject_id, meeting_link, student_joined_at, tutor_joined_at')
       .eq('status', 'active')
       .lt('end_time', now)
       .gte('end_time', lookback)
@@ -57,7 +87,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ success: true, updated: 0 });
     }
 
-    const idsToComplete = sessions.map((s: any) => s.id);
+    // Orgs with tutor_lesson_status_confirmation: their lessons stay 'active'
+    // until the tutor explicitly confirms the outcome (/api/confirm-session-status).
+    const { autoCompletable: afterJoinNoShow, skippedJoinNoShow } = await partitionJoinNoShow(
+      supabase,
+      sessions as any[],
+    );
+    const { autoCompletable, awaitingConfirmation } = await partitionByStatusConfirmation(
+      supabase,
+      afterJoinNoShow as any[],
+    );
+    if (autoCompletable.length === 0) {
+      return res.status(200).json({
+        success: true,
+        updated: 0,
+        awaitingTutorConfirmation: awaitingConfirmation.length,
+        skippedJoinNoShow: skippedJoinNoShow.length,
+      });
+    }
+    const completableSessions = autoCompletable as any[];
+
+    const idsToComplete = completableSessions.map((s: any) => s.id);
 
     const { error: updateErr } = await supabase
       .from('sessions')
@@ -71,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Sync completed sessions to Google Calendar (background, best-effort)
     const tutorSessionMap = new Map<string, string[]>();
-    for (const s of sessions) {
+    for (const s of completableSessions) {
       const tutorId = (s as any).tutor_id as string;
       if (!tutorId) continue;
       const arr = tutorSessionMap.get(tutorId) || [];
@@ -86,41 +136,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Update lesson packages: move from reserved to completed (batch optimized)
-    const sessionsWithPackages = sessions.filter((s: any) => s.lesson_package_id);
-    const packageIds = [...new Set(sessionsWithPackages.map((s: any) => s.lesson_package_id))];
-
-    if (packageIds.length > 0) {
-      // Batch fetch all packages at once
-      const { data: packages } = await supabase
-        .from('lesson_packages')
-        .select('id, reserved_lessons, completed_lessons')
-        .in('id', packageIds);
-
-      if (packages && packages.length > 0) {
-        // Calculate updates for each package
-        const updates = packages.map(pkg => {
-          const completedCount = sessionsWithPackages.filter((s: any) => s.lesson_package_id === pkg.id).length;
-          return {
-            id: pkg.id,
-            reserved_lessons: Math.max(0, pkg.reserved_lessons - completedCount),
-            completed_lessons: pkg.completed_lessons + completedCount,
-          };
-        });
-
-        // Batch update all packages
-        for (const update of updates) {
-          await supabase
-            .from('lesson_packages')
-            .update({
-              reserved_lessons: update.reserved_lessons,
-              completed_lessons: update.completed_lessons,
-            })
-            .eq('id', update.id);
-        }
-
-        console.log(`[auto-complete-sessions] Batch updated ${updates.length} packages`);
-      }
+    // Update lesson packages: move from reserved to completed (batch optimized).
+    // For multi-subject packages, the per-subject item counters are also moved.
+    const packagesUpdated = await movePackageCountersToCompleted(supabase, completableSessions);
+    if (packagesUpdated > 0) {
+      console.log(`[auto-complete-sessions] Batch updated ${packagesUpdated} packages + items`);
     }
 
     // Remove waitlist entries for completed sessions
@@ -153,7 +173,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       success: true,
       updated: idsToComplete.length,
-      packagesUpdated: packageIds.length,
+      awaitingTutorConfirmation: awaitingConfirmation.length,
+      skippedJoinNoShow: skippedJoinNoShow.length,
+      packagesUpdated,
       waitlistEntriesRemoved: (waitlistDeleted || 0) + (oldWaitlistDeleted || 0)
     });
   } catch (err: any) {

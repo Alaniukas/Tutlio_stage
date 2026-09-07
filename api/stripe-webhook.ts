@@ -6,6 +6,17 @@ import { tryIssueSalesInvoiceForStripePackage } from './_lib/issuePackageSalesIn
 import { markInvoicesPaidForPackage } from './_lib/markPackageInvoicePaid.js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
+import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
+import {
+    handleEnterpriseCheckoutCompleted,
+    handleEnterpriseLicenseSubscriptionDeleted,
+    syncEnterpriseLicenseSubscription,
+} from './_lib/enterpriseLicenseWebhook.js';
+import { isSubscriptionOnlyPriceId } from './_lib/stripe-subscription-env.js';
+import { summarizeStripeOnboarding } from './_lib/stripeAccountOnboarding.js';
+import { sendTrialReservationConfirmedNotifications } from './_lib/trialReservation.js';
+import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
+import { markSchoolMonthlyInvoicePaid } from './_lib/schoolMonthlyInvoiceEmail.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -46,6 +57,16 @@ function getStripeId(value: unknown): string | null {
     return null;
 }
 
+/** Provider name for receipts: org name when the tutor belongs to one. */
+async function getOrgName(
+    supabase: NonNullable<ReturnType<typeof getSupabase>>,
+    orgId: string | null | undefined,
+): Promise<string | null> {
+    if (!orgId) return null;
+    const { data } = await supabase.from('organizations').select('name').eq('id', orgId).maybeSingle();
+    return (data as { name?: string | null } | null)?.name || null;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') return res.status(405).send('Method not allowed');
 
@@ -79,25 +100,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     
     const sigHeader = req.headers['stripe-signature'];
     const sig = Array.isArray(sigHeader) ? sigHeader[0] : (sigHeader as string | undefined);
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    // Platform events use STRIPE_WEBHOOK_SECRET. Connected-account events (e.g. account.updated)
+    // arrive from a separate Connect webhook endpoint with its own secret, when configured.
+    const webhookSecrets = [
+        process.env.STRIPE_WEBHOOK_SECRET,
+        process.env.STRIPE_CONNECT_WEBHOOK_SECRET,
+    ].filter((s): s is string => Boolean(s));
 
-    let event: Stripe.Event;
+    if (webhookSecrets.length === 0) {
+        console.error('[stripe-webhook] No webhook secret set — refusing to process unverified event');
+        return res.status(500).send('Server misconfigured: STRIPE_WEBHOOK_SECRET missing');
+    }
 
-    try {
-        if (!webhookSecret) {
-            console.error('[stripe-webhook] STRIPE_WEBHOOK_SECRET is not set — refusing to process unverified event');
-            return res.status(500).send('Server misconfigured: STRIPE_WEBHOOK_SECRET missing');
+    let event: Stripe.Event | null = null;
+    let verifyErr: any = null;
+    for (const secret of webhookSecrets) {
+        try {
+            event = stripe.webhooks.constructEvent(buf, sig ?? '', secret);
+            verifyErr = null;
+            break;
+        } catch (err: any) {
+            verifyErr = err;
         }
-        event = stripe.webhooks.constructEvent(buf, sig ?? '', webhookSecret);
-    } catch (err: any) {
-        console.error(`[stripe-webhook] Webhook signature verification failed: ${err.message}`);
+    }
+
+    if (!event) {
+        console.error(`[stripe-webhook] Webhook signature verification failed: ${verifyErr?.message}`);
         console.error('[stripe-webhook] Raw body diagnostics:', {
             bufLen: buf?.length ?? null,
             bodyType: typeof (req as any).body,
             hasSig: Boolean(sig && String(sig).length > 0),
             contentType: req.headers['content-type'],
+            secretsTried: webhookSecrets.length,
         });
-        return res.status(400).send(`Webhook Error: ${err.message}`);
+        return res.status(400).send(`Webhook Error: ${verifyErr?.message}`);
     }
 
     try {
@@ -109,6 +145,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 console.warn('[stripe-webhook] Missing customer id in subscription event');
                 return res.json({ received: true });
             }
+
+            // Enterprise license subscriptions belong to organizations, not tutor profiles.
+            if (await syncEnterpriseLicenseSubscription(supabase, subscription)) {
+                return res.json({ received: true });
+            }
+
             const isCanceledOrScheduled = subscription.status === 'canceled' || (subscription as any).cancel_at_period_end === true;
 
             const { data: profile } = await supabase
@@ -127,9 +169,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         console.log(`[stripe-webhook] Ignoring canceled sub ${subscription.id}, using active sub ${otherActive.id} for profile ${profile.id}`);
                     }
                 }
-                const subOnlyPriceId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID;
                 const priceItem = subToUse.items.data[0];
-                const plan = priceItem?.price.id === subOnlyPriceId
+                const plan = isSubscriptionOnlyPriceId(priceItem?.price)
                     ? 'subscription_only'
                     : priceItem?.price.recurring?.interval === 'year' ? 'yearly' : 'monthly';
                 const periodEnd = new Date((subToUse as Stripe.Subscription & { current_period_end: number }).current_period_end * 1000).toISOString();
@@ -157,6 +198,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 return res.json({ received: true });
             }
 
+            // Enterprise license subscriptions belong to organizations, not tutor profiles.
+            if (await handleEnterpriseLicenseSubscriptionDeleted(supabase, subscription)) {
+                return res.json({ received: true });
+            }
+
             const { data: profile } = await supabase
                 .from('profiles')
                 .select('id')
@@ -167,9 +213,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const all = await stripe.subscriptions.list({ customer: customerId, status: 'all', limit: 10 });
                 const otherActive = all.data.find(s => s.id !== subscription.id && (s.status === 'active' || s.status === 'trialing'));
                 if (otherActive) {
-                    const subOnlyPriceId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID;
-                    const otherPriceId = otherActive.items.data[0]?.price?.id;
-                    const plan = otherPriceId === subOnlyPriceId
+                    const otherPrice = otherActive.items.data[0]?.price;
+                    const plan = isSubscriptionOnlyPriceId(otherPrice)
                         ? 'subscription_only'
                         : otherActive.items.data[0]?.price.recurring?.interval === 'year'
                             ? 'yearly'
@@ -253,6 +298,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
         }
 
+        // ─── Connect Account Events ──────────────────────────────────────────────────
+        // When a connected account finishes Stripe's review (e.g. document verification),
+        // flip stripe_onboarding_complete so schools/tutors don't have to manually re-verify.
+        else if (event.type === 'account.updated') {
+            const account = event.data.object as Stripe.Account;
+            const { complete } = summarizeStripeOnboarding(account);
+            if (complete && account.id) {
+                // stripe_account_id is unique across both tables, so only one of these matches.
+                // Write idempotently (no "!= true" filter, which would skip NULL flags).
+                for (const table of ['organizations', 'profiles'] as const) {
+                    const { error: flagErr } = await supabase
+                        .from(table)
+                        .update({ stripe_onboarding_complete: true })
+                        .eq('stripe_account_id', account.id);
+                    if (flagErr) console.error(`[stripe-webhook] account.updated ${table} flag error:`, flagErr);
+                }
+                console.log(`[stripe-webhook] account.updated: onboarding marked complete for ${account.id}`);
+            }
+        }
+
         // ─── Lesson Payment Events ───────────────────────────────────────────────────
         else if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
             const session = event.data.object as Stripe.Checkout.Session;
@@ -263,6 +328,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const subscriptionId = getStripeId(session.subscription);
                 if (!customerId || !subscriptionId) {
                     console.warn('[stripe-webhook] Missing customer/subscription id in checkout.session.completed subscription mode');
+                    return res.json({ received: true });
+                }
+
+                // Enterprise license purchase: apply licenses to the org / provision a new one.
+                if (session.metadata?.tutlio_enterprise === '1') {
+                    await handleEnterpriseCheckoutCompleted({
+                        stripe,
+                        supabase,
+                        session,
+                        customerId,
+                        subscriptionId,
+                        appUrl: APP_URL,
+                    });
                     return res.json({ received: true });
                 }
 
@@ -283,9 +361,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         .maybeSingle();
 
                     if (profile) {
-                        const subOnlyPriceId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID;
-                        const currentPriceId = subscription.items.data[0]?.price?.id;
-                        const plan = currentPriceId === subOnlyPriceId
+                        const currentPrice = subscription.items.data[0]?.price;
+                        const plan = isSubscriptionOnlyPriceId(currentPrice)
                             ? 'subscription_only'
                             : subscription.items.data[0]?.price.recurring?.interval === 'year'
                                 ? 'yearly'
@@ -350,7 +427,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     .eq('id', packageId)
                     .eq('paid', false)
                     .select(
-                        'id, tutor_id, total_lessons, available_lessons, total_price, payment_method, manual_sales_invoice_id, paid_at, students(full_name, email, payer_email, payer_name), subject:subjects(name)'
+                        'id, tutor_id, total_lessons, available_lessons, total_price, payment_method, manual_sales_invoice_id, paid_at, students(full_name, email, payer_email, payer_name), subject:subjects(name), lesson_package_items(subject_id, total_lessons, price_per_lesson, position, subjects!inner(name))'
                     )
                     .maybeSingle();
 
@@ -359,12 +436,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 } else if (updatedPackage) {
                     const student = updatedPackage.students as any;
                     const subject = (updatedPackage as any).subject || (updatedPackage as any).subjects;
+                    const rawWebhookItems = Array.isArray((updatedPackage as any).lesson_package_items)
+                        ? (updatedPackage as any).lesson_package_items
+                        : [];
+                    const webhookEmailItems = rawWebhookItems
+                        .slice()
+                        .sort((a: any, b: any) => Number(a.position || 0) - Number(b.position || 0))
+                        .map((it: any) => ({
+                            subjectName: it.subjects?.name || '',
+                            totalLessons: Number(it.total_lessons || 0),
+                            pricePerLesson: Number(it.price_per_lesson || 0),
+                        }));
                     // Resolve tutor separately to avoid brittle relationship-name dependency in lesson_packages select.
                     const { data: tutor } = await supabase
                         .from('profiles')
                         .select('full_name, email, organization_id')
                         .eq('id', (updatedPackage as any).tutor_id)
                         .maybeSingle();
+
+                    const orgName = await getOrgName(supabase, tutor?.organization_id);
+                    const providerName = orgName || tutor?.full_name || 'Korepetitorius';
+                    const packageGrossEur = session.amount_total != null ? session.amount_total / 100 : null;
+                    const packageBaseEur = metadataBaseEur(session.metadata) ?? Number(updatedPackage.total_price);
+
+                    await recordStripePlatformFee(supabase, {
+                        sourceType: 'package',
+                        sourceId: packageId,
+                        baseAmountEur: packageBaseEur,
+                        grossAmountEur: packageGrossEur,
+                        organizationId: tutor?.organization_id ?? null,
+                        tutorId: (updatedPackage as any).tutor_id ?? null,
+                        stripeCheckoutSessionId: session.id,
+                    });
 
                     // Send success email to both payer and student (if different)
                     const recipientPairs: Array<{ email: string; recipientName: string }> = [];
@@ -398,10 +501,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     recipientName: r.recipientName,
                                     studentName: student.full_name,
                                     tutorName: tutor?.full_name || 'Korepetitorius',
-                                    subjectName: subject?.name || '–',
+                                    providerName,
+                                    subjectName: subject?.name || webhookEmailItems[0]?.subjectName || '–',
                                     totalLessons: updatedPackage.total_lessons,
                                     availableLessons: updatedPackage.available_lessons,
                                     totalPrice: updatedPackage.total_price.toFixed(2),
+                                    baseTotalEur: packageBaseEur,
+                                    ...(packageGrossEur != null ? { totalChargedEur: packageGrossEur } : {}),
+                                    items: webhookEmailItems,
                                     ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
                                 },
                             }),
@@ -442,15 +549,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 // If there are pre-created sessions tied to this package (e.g. trial lessons),
                 // mark them as paid now so the UI doesn't show "awaiting payment".
                 try {
+                    // Confirm trial soft-holds. The atomic UPDATE ... WHERE payment_status='reserved'
+                    // is the exactly-once guard: this and confirm-package-payment.ts both attempt it,
+                    // but only the caller that actually flips a row notifies (tutor email + deferred
+                    // student/parent invite), so the success-page/webhook race can't double-send.
+                    const { data: confirmedHolds } = await supabase
+                        .from('sessions')
+                        .update({ paid: true, payment_status: 'paid', reservation_expires_at: null })
+                        .eq('lesson_package_id', packageId)
+                        .eq('payment_status', 'reserved')
+                        .select('id, tutor_id, student_id, start_time, end_time, topic, meeting_link');
+
                     const { data: paidSessions } = await supabase
                         .from('sessions')
                         .update({ paid: true, payment_status: 'paid' })
                         .eq('lesson_package_id', packageId)
                         .eq('paid', false)
                         .select('id, tutor_id');
-                    for (const ps of paidSessions || []) {
+
+                    for (const ps of [...(confirmedHolds || []), ...(paidSessions || [])]) {
                         syncSessionToGoogle(ps.id, ps.tutor_id).catch(() => {});
                     }
+
+                    if (confirmedHolds && confirmedHolds.length > 0) {
+                        await sendTrialReservationConfirmedNotifications(supabase, {
+                            appUrl: APP_URL,
+                            holds: confirmedHolds as any,
+                        });
+                    }
+
+                    // Calendar-month packages (req 6): cap validity to the month of the first lesson.
+                    await applyMonthlyPackageExpiry(supabase, {
+                        packageId,
+                        tutorId: (updatedPackage as any).tutor_id,
+                    });
                 } catch (e) {
                     console.error('[stripe-webhook] Error updating sessions for prepaid package:', e);
                 }
@@ -505,6 +637,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     const periodEnd = new Date(updatedBatch.period_end_date);
                     const periodText = `${periodStart.toLocaleDateString('lt-LT')} - ${periodEnd.toLocaleDateString('lt-LT')}`;
 
+                    const batchOrgName = await getOrgName(supabase, tutor?.organization_id);
+                    const batchProviderName = batchOrgName || tutor?.full_name || 'Korepetitorius';
+                    const batchGrossEur = session.amount_total != null ? session.amount_total / 100 : null;
+                    const batchBaseEur = metadataBaseEur(session.metadata) ?? Number(updatedBatch.total_amount || 0);
+
+                    await recordStripePlatformFee(supabase, {
+                        sourceType: 'billing_batch',
+                        sourceId: batchId,
+                        baseAmountEur: batchBaseEur,
+                        grossAmountEur: batchGrossEur,
+                        organizationId: tutor?.organization_id ?? null,
+                        tutorId: updatedBatch.tutor_id ?? null,
+                        stripeCheckoutSessionId: session.id,
+                    });
+
                     const sessionsCount = batchSessions?.length || 0;
                     const tutorName = tutor?.full_name || 'Korepetitorius';
                     const tutorEmail = tutor?.email || null;
@@ -551,8 +698,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     data: {
                                         recipientName: r.recipientName,
                                         tutorName,
+                                        providerName: batchProviderName,
                                         periodText,
                                         totalAmount: Number(updatedBatch.total_amount || 0).toFixed(2),
+                                        baseTotalEur: batchBaseEur,
+                                        ...(batchGrossEur != null ? { totalChargedEur: batchGrossEur } : {}),
                                         sessionsCount,
                                         ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
                                     },
@@ -606,6 +756,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     console.log(`[stripe-webhook] School installment ${installmentId} was already paid, skipping`);
                 }
             }
+            // Monthly extra-lessons invoice paid from the emailed "Apmokėti" link
+            else if (session.payment_status === 'paid' && session.metadata?.tutlio_school_monthly_invoice_id) {
+                const invoiceId = session.metadata.tutlio_school_monthly_invoice_id;
+                const result = await markSchoolMonthlyInvoicePaid(supabase, invoiceId, {
+                    paidVia: 'stripe',
+                    stripePaymentIntentId: typeof (session as any).payment_intent === 'string' ? (session as any).payment_intent : null,
+                });
+                if (result.ok === false) console.error('[stripe-webhook] school monthly invoice update failed:', invoiceId, result.error);
+                else console.log(`[stripe-webhook] School monthly invoice ${invoiceId} ${result.alreadyPaid ? 'already paid' : 'marked as paid'}`);
+            }
             // Handle lesson payment — update DB and send emails directly (same pattern as packages)
             // Do NOT call /api/confirm-stripe-payment here: StripeSuccess page also calls that endpoint,
             // and two concurrent callers would race and sometimes both send emails.
@@ -617,7 +777,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     const { data: dbSession } = await supabase
                         .from('sessions')
                         .select(`
-                            id, price, topic, start_time, end_time, meeting_link, tutor_id,
+                            id, price, topic, start_time, end_time, meeting_link, tutor_id, credit_applied_amount,
                             students!inner(full_name, email, payment_payer, payer_email),
                             profiles!sessions_tutor_id_fkey(full_name, email, cancellation_hours, cancellation_fee_percent, organization_id)
                         `)
@@ -638,6 +798,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             (new Date((dbSession as any).end_time).getTime() - sessionStart.getTime()) / 60000
                         );
                         const amountTotal = (session as Stripe.Checkout.Session).amount_total;
+                        const grossEur = amountTotal != null ? amountTotal / 100 : null;
+                        const lessonOrgName = await getOrgName(supabase, tutor?.organization_id);
+                        const providerName = lessonOrgName || tutor?.full_name || 'Korepetitorius';
+                        // Base actually charged for the lesson: metadata (exact) or price minus applied credit.
+                        const lessonBaseEur =
+                            metadataBaseEur(session.metadata) ??
+                            Math.max(0, Number((dbSession as any).price || 0) - Number((dbSession as any).credit_applied_amount || 0));
 
                         const sendEmailUrl = `${APP_URL}/api/send-email`;
 
@@ -654,6 +821,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             if (penErr) {
                                 console.error('[stripe-webhook] Penalty timestamp error:', penErr);
                             } else if (penaltyFirst) {
+                                // Penalty base comes only from checkout metadata (lesson price is not the penalty base).
+                                await recordStripePlatformFee(supabase, {
+                                    sourceType: 'penalty',
+                                    sourceId: sessionId,
+                                    baseAmountEur: metadataBaseEur(session.metadata),
+                                    grossAmountEur: grossEur,
+                                    organizationId: tutor?.organization_id ?? null,
+                                    tutorId: (dbSession as any).tutor_id ?? null,
+                                    stripeCheckoutSessionId: session.id,
+                                });
+
                                 const emailData = {
                                     studentName: student.full_name,
                                     tutorName: tutor.full_name || 'Korepetitorius',
@@ -707,15 +885,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             } else if (updated) {
                                 syncSessionToGoogle(sessionId, (updated as any).tutor_id || (dbSession as any).tutor_id).catch(() => {});
 
+                                await recordStripePlatformFee(supabase, {
+                                    sourceType: 'session',
+                                    sourceId: sessionId,
+                                    baseAmountEur: lessonBaseEur,
+                                    grossAmountEur: grossEur,
+                                    organizationId: tutor?.organization_id ?? null,
+                                    tutorId: (dbSession as any).tutor_id ?? null,
+                                    stripeCheckoutSessionId: session.id,
+                                });
+
                                 const emailData = {
                                     studentName: student.full_name,
                                     tutorName: tutor.full_name || 'Korepetitorius',
+                                    providerName,
                                     date: dateStr,
                                     time: timeStr,
                                     subject: (dbSession as any).topic,
                                     price: (dbSession as any).price,
-                                    lessonPriceEur: (dbSession as any).price,
-                                    totalChargedEur: amountTotal != null ? amountTotal / 100 : undefined,
+                                    lessonPriceEur: lessonBaseEur,
+                                    totalChargedEur: grossEur ?? undefined,
                                     duration: durationMinutes,
                                     cancellationHours: tutor.cancellation_hours ?? 24,
                                     cancellationFeePercent: tutor.cancellation_fee_percent ?? 0,
@@ -747,6 +936,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                                 date: dateStr,
                                                 time: timeStr,
                                                 subject: (dbSession as any).topic,
+                                                sessionId: dbSession.id,
                                                 meetingLink: (dbSession as any).meeting_link || '',
                                                 organizationId: tutor.organization_id,
                                             },
@@ -832,6 +1022,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.json({ received: true });
     } catch (err: any) {
         console.error('[stripe-webhook] Handler error:', err);
-        return res.status(200).json({ received: true, warning: 'processing_error' });
+        return res.status(500).json({ error: 'Webhook processing failed' });
     }
 }

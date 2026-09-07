@@ -4,8 +4,8 @@ import { reconcileElements, CaptureUpdateAction } from '@excalidraw/excalidraw';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 type ExcalidrawImperativeAPI = any;
 
-const SAVE_DEBOUNCE_MS = 15_000;
-const SAVE_MAX_DELAY_MS = 30_000;
+const SAVE_DEBOUNCE_MS = 5_000;
+const SAVE_MAX_DELAY_MS = 10_000;
 const SAVE_TIMEOUT_MS = 20_000;
 const SAVE_ERROR_COOLDOWN_MS = 15_000;
 const UPLOAD_ERROR_COOLDOWN_MS = 30_000;

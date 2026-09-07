@@ -22,6 +22,8 @@ interface DateRangeFilterProps {
   onEndDateChange: (date: Date | null) => void;
   onClear: () => void;
   onSearch?: () => void;
+  /** When set, presets and Search immediately apply this range (stats pages). */
+  onApplyRange?: (start: Date, end: Date) => void;
   /** Merge with default Card styles (e.g. padding, shadow). */
   className?: string;
 }
@@ -33,8 +35,14 @@ export function DateRangeFilter({
   onEndDateChange,
   onClear,
   onSearch,
+  onApplyRange,
   className,
 }: DateRangeFilterProps) {
+  const applyRange = (start: Date, end: Date) => {
+    onStartDateChange(start);
+    onEndDateChange(end);
+    onApplyRange?.(start, end);
+  };
   const { t } = useTranslation();
   const today = new Date();
   const maxDate = format(today, 'yyyy-MM-dd');
@@ -43,30 +51,29 @@ export function DateRangeFilter({
     {
       label: t('dateFilter.thisWeek'),
       onClick: () => {
-        onStartDateChange(startOfWeek(today, { weekStartsOn: 1 }));
-        onEndDateChange(endOfWeek(today, { weekStartsOn: 1 }));
+        applyRange(
+          startOfWeek(today, { weekStartsOn: 1 }),
+          endOfWeek(today, { weekStartsOn: 1 }),
+        );
       },
     },
     {
       label: t('dateFilter.thisMonth'),
       onClick: () => {
-        onStartDateChange(startOfMonth(today));
-        onEndDateChange(endOfMonth(today));
+        applyRange(startOfMonth(today), endOfMonth(today));
       },
     },
     {
       label: t('dateFilter.lastMonth'),
       onClick: () => {
         const lastMonth = subMonths(today, 1);
-        onStartDateChange(startOfMonth(lastMonth));
-        onEndDateChange(endOfMonth(lastMonth));
+        applyRange(startOfMonth(lastMonth), endOfMonth(lastMonth));
       },
     },
     {
       label: t('dateFilter.last3Months'),
       onClick: () => {
-        onStartDateChange(subMonths(today, 3));
-        onEndDateChange(today);
+        applyRange(subMonths(today, 3), today);
       },
     },
   ];
@@ -141,7 +148,11 @@ export function DateRangeFilter({
       {onSearch && (
         <div className="flex justify-end">
           <Button
-            onClick={onSearch}
+            onClick={() => {
+              if (!startDate || !endDate || startDate > endDate) return;
+              onApplyRange?.(startDate, endDate);
+              onSearch?.();
+            }}
             disabled={!startDate || !endDate || (startDate > endDate)}
             className="gap-2 rounded-xl"
           >

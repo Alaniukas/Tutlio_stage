@@ -21,11 +21,28 @@ import {
   isValid,
   subDays,
 } from 'date-fns';
-import { lt } from 'date-fns/locale';
-import { enUS } from 'date-fns/locale';
+import {
+  da,
+  de,
+  enUS,
+  es,
+  et,
+  fi,
+  fr,
+  lt,
+  lv,
+  nb,
+  nl,
+  pl,
+  sv,
+} from 'date-fns/locale';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 
 import Layout from '@/components/Layout';
+import {
+  allowsPerLessonPaymentForStudent,
+  defaultSessionPaymentStatusForStudent,
+} from '@/lib/studentPaymentModel';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import { useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
@@ -34,6 +51,7 @@ import { sendEmail } from '@/lib/email';
 import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
 import { authHeaders } from '@/lib/apiHelpers';
 import { autoCloseBillingBatchIfAllPaid } from '@/lib/autoCloseBillingBatch';
+import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -60,8 +78,9 @@ import { DateInput } from '@/components/ui/date-input';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { buildSameSlotPeerIdMap, hasOverlapWithExclusions } from '@/lib/calendarSessionOverlap';
-import TimeSpinner, { DateTimeSpinner } from '@/components/TimeSpinner';
+import TimeSpinner, { CompactTimeSelect, DateTimeSpinner } from '@/components/TimeSpinner';
 import AvailabilityManager from '@/components/AvailabilityManager';
+import RecurrenceFields from '@/components/RecurrenceFields';
 import SessionFiles from '@/components/SessionFiles';
 import WhiteboardButton from '@/components/WhiteboardButton';
 import {
@@ -93,12 +112,40 @@ import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/le
 import { Checkbox } from '@/components/ui/checkbox';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import {
+  buildRecurringFreeTimeRows,
+  isValidTimeRange,
+  resolveFreeTimeEndDate,
+  timeRangesOverlap,
+  type DayTime,
+  type FreeTimeUntilMode,
+} from '@/lib/calendarFreeTimeFromSlot';
+import {
   advanceRecurringOccurrence,
+  isRecurringEndDateOpen,
   recurringMaterializeEndDate,
 } from '@/lib/recurringSessions';
 import { resolveLessonMeetingLink } from '@/lib/meetingLink';
+import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { resolveOrCreateTrialSubject } from '@/pages/company/orgAdminSessionCreate';
+import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
+import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
+import { calendarSessionTitlePrefix, getCalendarSessionEventStyle } from '@/lib/calendarSessionEventStyle';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import {
+  buildClassGroupMetaMap,
+  calendarSessionTopicSuffix,
+  calendarTitleForSession,
+  classGroupParticipantsForModal,
+  isMergedClassGroupSession,
+  mergeSchoolClassGroupSessions,
+  type MergedClassGroupSession,
+} from '@/lib/schoolClassGroupSessions';
+import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
+import type { SchoolClassGroupRecord } from '@/lib/schoolClassGroups';
+import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
 import Toast from '@/components/Toast';
 import { dedupeAsync } from '@/lib/dataCache';
@@ -115,7 +162,24 @@ import {
   organizationSubjectTemplatesDeduped,
 } from '@/lib/preload';
 
-const locales = { lt, en: enUS };
+// React Big Calendar receives Tutlio's URL locale codes as its `culture`.
+// Keep the date-fns locale map keyed by those codes (some intentionally differ
+// from ISO language codes, e.g. ee/et, se/sv, dk/da and no/nb).
+const locales = {
+  lt,
+  en: enUS,
+  pl,
+  lv,
+  ee: et,
+  fr,
+  es,
+  de,
+  se: sv,
+  dk: da,
+  fi,
+  no: nb,
+  nl,
+};
 
 const localizer = dateFnsLocalizer({
   format,
@@ -126,7 +190,7 @@ const localizer = dateFnsLocalizer({
 });
 
 const CALENDAR_SESSION_COLUMNS =
-  'id, tutor_id, student_id, start_time, end_time, status, paid, meeting_link, whiteboard_room_id, cancellation_reason, cancelled_at, topic, price, payment_status, tutor_comment, show_comment_to_student, hidden_from_calendar, subject_id, available_spots, recurring_session_id, lesson_package_id, payment_batch_id, no_show_when, is_late_cancelled, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade, admin_comment, admin_comment_visible_to_tutor)';
+  '*, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade, admin_comment, admin_comment_visible_to_tutor)';
 
 interface Session {
   id: string;
@@ -138,6 +202,7 @@ interface Session {
   paid: boolean;
   meeting_link?: string;
   cancellation_reason?: string;
+  reschedule_reason?: string | null;
   cancelled_at?: string;
   topic?: string;
   price?: number;
@@ -147,8 +212,18 @@ interface Session {
   hidden_from_calendar?: boolean;
   subject_id?: string;
   subjects?: { name?: string | null; is_trial?: boolean } | null;
+  is_makeup?: boolean;
+  cancellation_reason_code?: string | null;
+  original_start_time?: string | null;
+  lesson_package_id?: string | null;
   available_spots?: number | null;
   recurring_session_id?: string | null;
+  class_group_id?: string | null;
+  _isClassGroup?: boolean;
+  _classGroupId?: string;
+  _classGroupName?: string;
+  _classGroupSessions?: Session[];
+  _classGroupMembers?: Array<{ student_id: string; full_name: string; grade?: string | null }>;
   student?: {
     full_name: string;
     email?: string;
@@ -181,6 +256,7 @@ interface Subject {
   grade_max?: number | null;
   is_group?: boolean;
   max_students?: number | null;
+  is_trial?: boolean | null;
 }
 
 interface Availability {
@@ -196,6 +272,8 @@ interface Availability {
   start_date?: string | null;
   created_at?: string | null;
   subject_ids?: string[];
+  /** Visible on the public tutor page for external registration / enquiries. */
+  public_bookable?: boolean;
 }
 
 function parseStudentGrade(grade: string | null | undefined): number {
@@ -220,13 +298,30 @@ function uniqueSubjectIds(ids: string[] | null | undefined): string[] {
 
 export default function CalendarPage() {
   const { t, locale, dateFnsLocale } = useTranslation();
+  const rtlLocalizer = useMemo(() => dateFnsLocalizer({
+    format, parse, startOfWeek, getDay, locales: { [locale]: dateFnsLocale },
+  }), [locale, dateFnsLocale]);
+  const { fmt } = useMarketMoney();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const orgPolicy = useOrgTutorPolicy();
   const licenseFrozen = orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && !orgPolicy.hasActiveLicense;
-  const { contactVisibility } = useOrgFeatures();
+  const { contactVisibility, hasFeature: hasOrgFeature, entityType: orgEntityType, organizationId, loading: orgFeaturesLoading } = useOrgFeatures();
+  const showClassGroups = !!organizationId && !orgFeaturesLoading && hasOrgFeature('school_class_groups');
+  const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, orgEntityType, hasOrgFeature, 'monthly_packages', orgFeaturesLoading);
   const { user: ctxUser, profile: ctxProfile } = useUser();
+  // Org feature: ended lessons are not auto-completed — the tutor must confirm the outcome.
+  const requiresStatusConfirmation =
+    hasOrgFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(ctxProfile?.organization_id);
+  const showTutorTrialToggle =
+    orgPolicy.isOrgTutor && !orgFeaturesLoading && isMoksloVaisiaiOrg(organizationId);
+  const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
+  const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
+  const hideProKlaseOrgTutorDelete = hideProKlaseOrgTutorCancel;
+  const showProKlaseCalendarFeatures =
+    orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
+  const [eventModalNotice, setEventModalNotice] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -263,7 +358,16 @@ export default function CalendarPage() {
 
   // Slot choice popup (C2: Calendar day click → create free time or lesson)
   const [slotChoiceOpen, setSlotChoiceOpen] = useState(false);
+  const [slotChoiceStep, setSlotChoiceStep] = useState<'choice' | 'free-time'>('choice');
   const [pendingSlot, setPendingSlot] = useState<{ start: Date; end: Date } | null>(null);
+  const [savingFreeTimeFromSlot, setSavingFreeTimeFromSlot] = useState(false);
+  const [freeTimeRepeat, setFreeTimeRepeat] = useState(false);
+  const [freeTimeDays, setFreeTimeDays] = useState<number[]>([]);
+  const [freeTimeSameTimes, setFreeTimeSameTimes] = useState(true);
+  const [freeTimeDayTimes, setFreeTimeDayTimes] = useState<Record<number, DayTime>>({});
+  const [freeTimeUntilMode, setFreeTimeUntilMode] = useState<FreeTimeUntilMode>('weeks');
+  const [freeTimeUntilDate, setFreeTimeUntilDate] = useState('');
+  const [freeTimeWeeks, setFreeTimeWeeks] = useState(8);
 
   // Modal states
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -276,6 +380,9 @@ export default function CalendarPage() {
       setIsEditingSession(false);
       setGroupEditChoice(null);
       setGroupCancelChoice(null);
+      setEventModalNotice(null);
+      setIsClassGroupSession(false);
+      setClassGroupParticipants([]);
     }
   };
   const [isAvailabilityModalOpen, setIsAvailabilityModalOpen] = useState(false);
@@ -288,7 +395,32 @@ export default function CalendarPage() {
   const [selectedEvent, setSelectedEvent] = useState<Session | null>(null);
   const [selectedGroupSessions, setSelectedGroupSessions] = useState<Session[]>([]);
   const [isGroupSession, setIsGroupSession] = useState(false);
+  const [isClassGroupSession, setIsClassGroupSession] = useState(false);
+  const [classGroupParticipants, setClassGroupParticipants] = useState<
+    Array<{ student_id: string; full_name: string; grade?: string | null; session: Session | null }>
+  >([]);
+  const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null);
+
+  // Deep-link from lesson reminder emails: /calendar?sessionId=…
+  useEffect(() => {
+    const sessionId = searchParams.get('sessionId');
+    if (!sessionId || sessions.length === 0) return;
+    const sess = sessions.find((s) => s.id === sessionId);
+    if (!sess) return;
+    setIsGroupSession(false);
+    setIsClassGroupSession(false);
+    setClassGroupParticipants([]);
+    setSelectedGroupSessions([]);
+    setSelectedEvent(sess);
+    setIsEventModalOpen(true);
+    const start = sess.start_time instanceof Date ? sess.start_time : new Date(sess.start_time);
+    if (isValid(start)) setCurrentDate(startOfDay(start));
+    const next = new URLSearchParams(searchParams);
+    next.delete('sessionId');
+    next.delete('date');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, sessions, setSearchParams]);
 
   // Form states
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
@@ -300,6 +432,8 @@ export default function CalendarPage() {
   const [price, setPrice] = useState<number>(25);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
+  /** True once the tutor manually set a duration/end in the create modal — subject/start changes stop overwriting it. */
+  const [createDurationTouched, setCreateDurationTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [noShowSavingId, setNoShowSavingId] = useState<string | null>(null);
   const [newSessionId, setNewSessionId] = useState<string | null>(null);
@@ -308,6 +442,11 @@ export default function CalendarPage() {
   const [cancellationReason, setCancellationReason] = useState('');
   const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
   const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
+  const [availabilityPrefill, setAvailabilityPrefill] = useState<{
+    specificDate?: string;
+    specificStart?: string;
+    specificEnd?: string;
+  } | null>(null);
 
   // Mass cancel states
   const [massCancelStartDate, setMassCancelStartDate] = useState('');
@@ -319,6 +458,9 @@ export default function CalendarPage() {
   const [massCancelError, setMassCancelError] = useState<string | null>(null);
   const [isEditingSession, setIsEditingSession] = useState(false);
   const [editNewStartTime, setEditNewStartTime] = useState('');
+  const [rescheduleReason, setRescheduleReason] = useState('');
+  /** "Kieno prašymu perkelta?" — required whenever the start time moves. */
+  const [rescheduleRequestedBy, setRescheduleRequestedBy] = useState<'' | 'student' | 'tutor'>('');
   const [editDurationMinutes, setEditDurationMinutes] = useState<number>(60);
   const [editTopic, setEditTopic] = useState('');
   const [editMeetingLink, setEditMeetingLink] = useState('');
@@ -329,11 +471,13 @@ export default function CalendarPage() {
 
   // View-mode comment (visible when opening session without "Redaguoti")
   const [viewCommentText, setViewCommentText] = useState('');
+  const [trialCommentHint, setTrialCommentHint] = useState<'none' | 'optional' | 'required'>('none');
   const [viewShowToStudent, setViewShowToStudent] = useState(false);
   const [forceTrialCommentVisibility, setForceTrialCommentVisibility] = useState(false);
   const [viewCommentSaving, setViewCommentSaving] = useState(false);
 
   // Recurring session
+  const [createIsTrial, setCreateIsTrial] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringEndDate, setRecurringEndDate] = useState('');
   const [recurringFrequency, setRecurringFrequency] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
@@ -344,11 +488,13 @@ export default function CalendarPage() {
 
   // Availability slot edit
   const [isSlotEditOpen, setIsSlotEditOpen] = useState(false);
-  const [editingSlot, setEditingSlot] = useState<{ ruleId: string; ruleStart: string; ruleEnd: string; ruleIsRecurring: boolean; ruleDate: string | null; ruleDayOfWeek: number | null; blockStart: Date; subjectIds: string[]; meetingLink?: string | null } | null>(null);
+  const [editingSlot, setEditingSlot] = useState<{ ruleId: string; ruleStart: string; ruleEnd: string; ruleIsRecurring: boolean; ruleDate: string | null; ruleDayOfWeek: number | null; blockStart: Date; subjectIds: string[]; meetingLink?: string | null; publicBookable?: boolean } | null>(null);
   const [slotEditStart, setSlotEditStart] = useState('');
   const [slotEditEnd, setSlotEditEnd] = useState('');
+  // The selector is no longer shown, but preserve legacy restrictions when editing old rows.
   const [slotEditSubjects, setSlotEditSubjects] = useState<string[]>([]);
   const [slotEditMeetingLink, setSlotEditMeetingLink] = useState('');
+  const [slotEditPublicBookable, setSlotEditPublicBookable] = useState(false);
   const [slotSaving, setSlotSaving] = useState(false);
 
   // Assign student to availability slot
@@ -379,6 +525,31 @@ export default function CalendarPage() {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctxUser?.id]);
+
+  useEffect(() => {
+    if (!showClassGroups) {
+      setClassGroups([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const headers = await authHeaders();
+        const res = await fetch('/api/school-class-groups', { headers });
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok) {
+          setClassGroups((data.groups || []) as SchoolClassGroupRecord[]);
+        } else if (!cancelled) {
+          setClassGroups([]);
+        }
+      } catch {
+        if (!cancelled) setClassGroups([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showClassGroups]);
 
   // Set default dates when mass cancel modal opens
   useEffect(() => {
@@ -418,6 +589,7 @@ export default function CalendarPage() {
     setViewCommentText(selectedEvent.tutor_comment ?? '');
     setViewShowToStudent(selectedEvent.show_comment_to_student ?? false);
     setForceTrialCommentVisibility(false);
+    setTrialCommentHint('none');
 
     (async () => {
       const subjectId = (selectedEvent as any)?.subject_id as string | null | undefined;
@@ -427,16 +599,38 @@ export default function CalendarPage() {
       const { data: tutorProfile } = await tutorSidebarProfileDeduped(user.id);
       const orgId = tutorProfile?.organization_id as string | null | undefined;
       if (!orgId) return;
-      const [{ data: orgRow }, { data: subjRow }] = await Promise.all([
+      const [{ data: orgRow }, { data: subjRow }, { data: orgFeatRow }] = await Promise.all([
         orgSuspensionRowDeduped(orgId),
         supabase.from('subjects').select('is_trial').eq('id', subjectId).maybeSingle(),
+        supabase.from('organizations').select('features').eq('id', orgId).maybeSingle(),
       ]);
-      const feat = (orgRow as any)?.features;
+      const feat = (orgFeatRow as any)?.features ?? (orgRow as any)?.features;
       const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
-      const shouldForce = featObj['trial_lesson_comment_mode'] === 'student_and_parent' && (subjRow as any)?.is_trial === true;
+      const isTrial = (subjRow as any)?.is_trial === true || selectedEvent.subjects?.is_trial === true;
+      const shouldForce = featObj['trial_lesson_comment_mode'] === 'student_and_parent' && isTrial;
       if (!cancelled && shouldForce) {
         setForceTrialCommentVisibility(true);
         setViewShowToStudent(true);
+      }
+      if (!cancelled && isTrial) {
+        const policy = parseOrgTrialPolicy(featObj);
+        if (policy.commentRequired) {
+          const { data: trialHistory } = selectedEvent.student_id
+            ? await supabase
+                .from('sessions')
+                .select('id, start_time, status, subjects!inner(is_trial)')
+                .eq('student_id', selectedEvent.student_id)
+                .eq('subjects.is_trial', true)
+                .order('start_time', { ascending: true })
+            : { data: [] };
+          const required = sessionNeedsOrgTrialComment({
+            policy,
+            isTrial: true,
+            sessionId: selectedEvent.id,
+            studentTrials: (trialHistory || []) as Array<{ id: string; start_time?: string | null; status?: string | null }>,
+          });
+          if (!cancelled) setTrialCommentHint(required ? 'required' : 'optional');
+        }
       }
     })();
 
@@ -445,12 +639,15 @@ export default function CalendarPage() {
     };
   }, [selectedEvent?.id]);
 
-  const fetchData = async () => {
+  const fetchData = async (opts?: { silent?: boolean }) => {
     if (!ctxUser) { setLoading(false); return; }
     const user = ctxUser;
 
     await dedupeAsync(`cal:${user.id}`, async () => {
-    setLoading(true);
+    // Silent refresh (after an action with an optimistic local update) keeps the
+    // current grid on screen instead of flashing the full-screen loading spinner.
+    if (!opts?.silent) setLoading(true);
+    try {
     setCurrentUserId(user.id);
 
     let profileData: {
@@ -578,8 +775,11 @@ export default function CalendarPage() {
 
     const { data: av } = await tutorAvailabilityAllRowsDeduped(user.id);
     setAvailability(av || []);
-
-    setLoading(false);
+    } catch (error) {
+      console.error('[Calendar] fetchData failed:', error);
+    } finally {
+      setLoading(false);
+    }
     });
   };
 
@@ -592,24 +792,25 @@ export default function CalendarPage() {
 
   // Filter subjects based on selected student's grade
   const filteredSubjects = useMemo(() => {
-    if (!selectedStudentId || !subjects.length) {
-      return subjects;
+    const catalog = showTutorTrialToggle ? subjects.filter((s) => !s.is_trial) : subjects;
+    if (!selectedStudentId || !catalog.length) {
+      return catalog;
     }
 
     const selectedStudent = students.find(s => s.id === selectedStudentId);
     if (!selectedStudent || !selectedStudent.grade) {
-      return subjects;
+      return catalog;
     }
 
     const studentGrade = parseStudentGrade(selectedStudent.grade);
 
-    const filtered = subjects.filter(subject => {
+    const filtered = catalog.filter(subject => {
       if (!subject.grade_min || !subject.grade_max) return true;
       return studentGrade >= subject.grade_min && studentGrade <= subject.grade_max;
     });
 
     return filtered;
-  }, [selectedStudentId, students, subjects]);
+  }, [selectedStudentId, students, subjects, showTutorTrialToggle]);
 
   // Subjects available in "assign student to slot" flow
   const assignFilteredSubjects = useMemo(() => {
@@ -649,7 +850,7 @@ export default function CalendarPage() {
 
     // Entire visible calendar grid (month = full weeks including adjacent months' days),
     // not a narrow window from currentDate — otherwise free time disappears for half the month's days.
-    const weekOpts = { weekStartsOn: 1 as const };
+    const weekOpts = { weekStartsOn: locale === 'he' ? 0 as const : 1 as const };
     let rangeStart: Date;
     let rangeEndExclusive: Date;
     if (currentView === Views.MONTH) {
@@ -733,21 +934,33 @@ export default function CalendarPage() {
               ruleDayOfWeek: rule.day_of_week,
               ruleSubjectIds: uniqueSubjectIds(rule.subject_ids),
               ruleMeetingLink: rule.meeting_link || '',
+              rulePublicBookable: Boolean(rule.public_bookable),
             });
           }
         });
       });
     }
     return generated;
-  }, [availability, currentDate, currentView, sessions]);
+  }, [availability, currentDate, currentView, sessions, locale]);
 
   // Helper function to merge group lesson sessions
-  const mergeGroupSessions = useCallback((sessions: Session[]) => {
+  const classGroupMeta = useMemo(() => buildClassGroupMetaMap(classGroups), [classGroups]);
+
+  const sessionsAfterClassGroups = useMemo(
+    () => mergeSchoolClassGroupSessions(sessions, classGroupMeta) as Session[],
+    [sessions, classGroupMeta],
+  );
+
+  const mergeGroupSessions = useCallback((sessionsToMerge: Session[]) => {
     const grouped = new Map<string, Session[]>();
     const individual: Session[] = [];
 
     // Group sessions by time + subject for group lessons
-    sessions.forEach(session => {
+    sessionsToMerge.forEach(session => {
+      if (isMergedClassGroupSession(session)) {
+        individual.push(session);
+        return;
+      }
       const subject = subjects.find(s => s.id === session.subject_id);
       if (subject?.is_group) {
         const key = `${session.start_time.getTime()}_${session.end_time.getTime()}_${session.subject_id}`;
@@ -797,7 +1010,10 @@ export default function CalendarPage() {
     return [...individual, ...mergedGroups];
   }, [subjects, orgPolicy.isOrgTutor]);
 
-  const mergedSessions = useMemo(() => mergeGroupSessions(sessions), [sessions, mergeGroupSessions]);
+  const mergedSessions = useMemo(
+    () => mergeGroupSessions(sessionsAfterClassGroups),
+    [sessionsAfterClassGroups, mergeGroupSessions],
+  );
 
   const allEvents = useMemo(() => {
     return [...mergedSessions, ...backgroundEvents];
@@ -818,8 +1034,8 @@ export default function CalendarPage() {
       rangeStart = startOfDay(currentDate);
       rangeEnd = endOfDay(currentDate);
     } else {
-      rangeStart = startOfWeek(currentDate, { weekStartsOn: 1 });
-      rangeEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
+      rangeStart = startOfWeek(currentDate, { weekStartsOn: locale === 'he' ? 0 : 1 });
+      rangeEnd = endOfWeek(currentDate, { weekStartsOn: locale === 'he' ? 0 : 1 });
     }
 
     const relevant = allEvents.filter(ev => {
@@ -849,7 +1065,7 @@ export default function CalendarPage() {
     const scrollToTime = new Date(1970, 0, 1, Math.max(floorH, Math.min(minH, 7)), 0, 0);
 
     return { min, max, scrollToTime };
-  }, [allEvents, currentDate, currentView]);
+  }, [allEvents, currentDate, currentView, locale]);
 
   // Google Calendar handlers
   const handleGoogleCalendarConnect = async () => {
@@ -910,20 +1126,21 @@ export default function CalendarPage() {
         const availErr = data.availabilityError;
         let msg = t('cal.syncSuccess', { sessions: String(n), avail: String(availCount) });
         if (availErr) {
-          msg += `\n\nLaisvo laiko klaida: ${availErr}`;
+          console.error('Availability sync failed');
+          msg += '\n\n' + t('cal.legendFreeTime') + ': ' + t('cal.failedToSync');
         }
         if (total !== undefined && total > 0 && n < total && data.sessionError) {
-          msg += '\n\n' + t('cal.syncSendFailed', { error: data.sessionError });
+          msg += '\n\n' + t('cal.syncSendFailed');
         } else if (data.sessionError) {
-          msg += '\n\n' + t('cal.syncSessionError', { error: data.sessionError });
+          msg += '\n\n' + t('cal.syncSessionError');
         }
         if ((n > 0 || availCount > 0) && !availErr && !data.sessionError) {
           msg += '\n\n' + t('cal.syncCheckGoogle');
         }
         alert(msg);
       } else {
-        const msg = data?.message || data?.error || t('cal.failedToSync');
-        alert('Google Calendar: ' + msg);
+        console.error('Calendar sync failed');
+        alert(t('cal.failedToSync'));
       }
     } catch (err: any) {
       console.error('Sync error:', err);
@@ -972,10 +1189,14 @@ export default function CalendarPage() {
           ruleDayOfWeek: hit.ruleDayOfWeek,
           blockStart: hit.start_time,
           subjectIds: uniqueSubjectIds(hit.ruleSubjectIds),
+          meetingLink: hit.ruleMeetingLink,
+          publicBookable: Boolean(hit.rulePublicBookable),
         });
         setSlotEditStart(hit.ruleStart);
         setSlotEditEnd(hit.ruleEnd);
         setSlotEditSubjects(uniqueSubjectIds(hit.ruleSubjectIds));
+        setSlotEditMeetingLink(hit.ruleMeetingLink || '');
+        setSlotEditPublicBookable(Boolean(hit.rulePublicBookable));
         setIsSlotEditOpen(true);
         return;
       }
@@ -985,6 +1206,7 @@ export default function CalendarPage() {
       setSelectedSlot({ start, end });
       setStartTime(format(start, "yyyy-MM-dd'T'HH:mm"));
       setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
+      setCreateDurationTouched(true);
       setSelectedStudentId('');
       setSelectedSubjectId('');
       setMeetingLink('');
@@ -993,12 +1215,24 @@ export default function CalendarPage() {
       setNewTutorComment('');
       setNewShowCommentToStudent(false);
       setIsRecurring(false);
+      setCreateIsTrial(false);
       setRecurringEndDate('');
       setIsCreateModalOpen(true);
       return;
     }
 
     setPendingSlot({ start, end });
+    setSlotChoiceStep('choice');
+    setFreeTimeRepeat(false);
+    setFreeTimeSameTimes(true);
+    setFreeTimeUntilMode('weeks');
+    setFreeTimeUntilDate('');
+    setFreeTimeWeeks(8);
+    const startHm = format(start, 'HH:mm');
+    const endHm = format(end, 'HH:mm');
+    const dow = getDay(start);
+    setFreeTimeDays([dow]);
+    setFreeTimeDayTimes({ [dow]: { start: startHm, end: endHm } });
     setSlotChoiceOpen(true);
   }, [isAvailabilityModalOpen, isEventModalOpen, isCreateModalOpen, isUpcomingListModalOpen, backgroundEvents, stripeConnected, subjects.length, isOrgTutor, licenseFrozen, t]);
 
@@ -1012,6 +1246,7 @@ export default function CalendarPage() {
     setSelectedSlot(pendingSlot);
     setStartTime(format(pendingSlot.start, "yyyy-MM-dd'T'HH:mm"));
     setEndTime(format(pendingSlot.end, "yyyy-MM-dd'T'HH:mm"));
+    setCreateDurationTouched(true);
     setSelectedStudentId('');
     setSelectedSubjectId('');
     setMeetingLink('');
@@ -1020,13 +1255,167 @@ export default function CalendarPage() {
     setNewTutorComment('');
     setNewShowCommentToStudent(false);
     setIsRecurring(false);
+    setCreateIsTrial(false);
     setRecurringEndDate('');
     setIsCreateModalOpen(true);
   };
 
-  const openCreateFreeTimeFromSlot = () => {
-    setSlotChoiceOpen(false);
-    setIsAvailabilityModalOpen(true);
+  const openCreateFreeTimeFromSlot = async () => {
+    if (!pendingSlot || !ctxUser) return;
+
+    if (!isOrgTutor && !stripeConnected) {
+      setSlotChoiceOpen(false);
+      alert(t('avail.stripeRequired'));
+      return;
+    }
+
+    const specificDate = format(pendingSlot.start, 'yyyy-MM-dd');
+    const specificStart = format(pendingSlot.start, 'HH:mm');
+    const specificEnd = format(pendingSlot.end, 'HH:mm');
+    const blockStart = pendingSlot.start;
+
+    if (!isValidTimeRange(specificStart, specificEnd)) {
+      setToastMessage({ message: t('avail.invalidTimeRange'), type: 'error' });
+      return;
+    }
+
+    if (freeTimeRepeat) {
+      if (freeTimeDays.length === 0) {
+        setToastMessage({ message: t('cal.freeTimeNeedDay'), type: 'error' });
+        return;
+      }
+      for (const day of freeTimeDays) {
+        const times = freeTimeSameTimes
+          ? { start: specificStart, end: specificEnd }
+          : (freeTimeDayTimes[day] || { start: specificStart, end: specificEnd });
+        if (!isValidTimeRange(times.start, times.end)) {
+          setToastMessage({ message: t('avail.invalidTimeRange'), type: 'error' });
+          return;
+        }
+      }
+      const endDate = resolveFreeTimeEndDate({
+        mode: freeTimeUntilMode,
+        untilDate: freeTimeUntilDate,
+        weeks: freeTimeWeeks,
+        fromDate: specificDate,
+      });
+      if (!endDate) {
+        setToastMessage({ message: t('cal.freeTimeNeedUntil'), type: 'error' });
+        return;
+      }
+      if (endDate < specificDate) {
+        setToastMessage({ message: t('cal.freeTimeNeedUntil'), type: 'error' });
+        return;
+      }
+
+      setSavingFreeTimeFromSlot(true);
+      try {
+        const { data: existingRecurring } = await supabase
+          .from('availability')
+          .select('id, start_time, end_time, end_date, day_of_week')
+          .eq('tutor_id', ctxUser.id)
+          .eq('is_recurring', true)
+          .in('day_of_week', freeTimeDays);
+
+        const stillValid = (existingRecurring || []).filter((s) => !s.end_date || s.end_date >= specificDate);
+        const hasOverlap = freeTimeDays.some((day) => {
+          const times = freeTimeSameTimes
+            ? { start: specificStart, end: specificEnd }
+            : (freeTimeDayTimes[day] || { start: specificStart, end: specificEnd });
+          return stillValid.some((s) =>
+            s.day_of_week === day && timeRangesOverlap(times.start, times.end, s.start_time, s.end_time),
+          );
+        });
+        if (hasOverlap) {
+          setToastMessage({ message: t('avail.overlapError'), type: 'error' });
+          return;
+        }
+
+        const rows = buildRecurringFreeTimeRows({
+          tutorId: ctxUser.id,
+          days: freeTimeDays,
+          sameTimes: freeTimeSameTimes,
+          defaultStart: specificStart,
+          defaultEnd: specificEnd,
+          dayTimes: freeTimeDayTimes,
+          endDate,
+        });
+        const { error } = await supabase.from('availability').insert(rows);
+        if (error) {
+          console.error('Error adding recurring free time:', error);
+          setToastMessage({ message: t('avail.addFailed'), type: 'error' });
+          return;
+        }
+
+        setSlotChoiceOpen(false);
+        setSlotChoiceStep('choice');
+        setPendingSlot(null);
+        setToastMessage({ message: t('cal.freeTimeCreatedRecurring'), type: 'success' });
+        fetchData();
+      } finally {
+        setSavingFreeTimeFromSlot(false);
+      }
+      return;
+    }
+
+    setSavingFreeTimeFromSlot(true);
+    try {
+      const { data: existingSpecific } = await supabase
+        .from('availability')
+        .select('id, start_time, end_time')
+        .eq('tutor_id', ctxUser.id)
+        .eq('is_recurring', false)
+        .eq('specific_date', specificDate);
+
+      if (existingSpecific?.some((s) =>
+        timeRangesOverlap(specificStart, specificEnd, s.start_time, s.end_time),
+      )) {
+        setToastMessage({ message: t('avail.overlapError'), type: 'error' });
+        return;
+      }
+
+      const { data: inserted, error } = await supabase.from('availability').insert({
+        tutor_id: ctxUser.id,
+        specific_date: specificDate,
+        start_time: specificStart,
+        end_time: specificEnd,
+        is_recurring: false,
+        subject_ids: [],
+        public_bookable: false,
+      }).select('id').single();
+
+      if (error || !inserted?.id) {
+        console.error('Error adding free time slot:', error);
+        setToastMessage({ message: t('avail.addFailed'), type: 'error' });
+        return;
+      }
+
+      setSlotChoiceOpen(false);
+      setSlotChoiceStep('choice');
+      setPendingSlot(null);
+
+      setEditingSlot({
+        ruleId: inserted.id,
+        ruleStart: specificStart,
+        ruleEnd: specificEnd,
+        ruleIsRecurring: false,
+        ruleDate: specificDate,
+        ruleDayOfWeek: null,
+        blockStart,
+        subjectIds: [],
+        meetingLink: '',
+        publicBookable: false,
+      });
+      setSlotEditStart(specificStart);
+      setSlotEditEnd(specificEnd);
+      setSlotEditSubjects([]);
+      setSlotEditMeetingLink('');
+      setSlotEditPublicBookable(false);
+      setIsSlotEditOpen(true);
+      fetchData();
+    } finally {
+      setSavingFreeTimeFromSlot(false);
+    }
   };
 
   const handleSelectEvent = useCallback((event: any) => {
@@ -1042,22 +1431,37 @@ export default function CalendarPage() {
         blockStart: event.start_time,
         subjectIds: uniqueSubjectIds(event.ruleSubjectIds),
         meetingLink: event.ruleMeetingLink,
+        publicBookable: Boolean(event.rulePublicBookable),
       });
       setSlotEditStart(event.ruleStart);
       setSlotEditEnd(event.ruleEnd);
       setSlotEditSubjects(uniqueSubjectIds(event.ruleSubjectIds));
       setSlotEditMeetingLink(event.ruleMeetingLink || '');
+      setSlotEditPublicBookable(Boolean(event.rulePublicBookable));
       setIsSlotEditOpen(true);
       return;
     }
 
-    // Check if this is a group session
-    if (event._isGroup && event._groupSessions) {
+    // School class group (merged by class_group_id + time)
+    if (event._isClassGroup && event._classGroupSessions) {
       setIsGroupSession(true);
+      setIsClassGroupSession(true);
+      setSelectedGroupSessions(event._classGroupSessions);
+      setClassGroupParticipants(classGroupParticipantsForModal(event as MergedClassGroupSession<Session>));
+      setSelectedEvent({
+        ...event._classGroupSessions[0],
+        topic: event._classGroupName || event._classGroupSessions[0].topic,
+      });
+    } else if (event._isGroup && event._groupSessions) {
+      setIsGroupSession(true);
+      setIsClassGroupSession(false);
+      setClassGroupParticipants([]);
       setSelectedGroupSessions(event._groupSessions);
       setSelectedEvent(event._groupSessions[0]); // Use first session as base
     } else {
       setIsGroupSession(false);
+      setIsClassGroupSession(false);
+      setClassGroupParticipants([]);
       setSelectedGroupSessions([]);
       setSelectedEvent(event);
     }
@@ -1077,7 +1481,7 @@ export default function CalendarPage() {
       return;
     }
 
-    // Check if there's individual pricing for this student and subject
+    // Student-specific pricing legitimately re-defaults the duration unless user drew a slot.
     const pricing = individualPricing.find(
       (p) => p.student_id === studentId && p.subject_id === selectedSubjectId,
     );
@@ -1091,16 +1495,18 @@ export default function CalendarPage() {
     setMeetingLink(resolveMeetingLink(subj.meeting_link, selectedStudentId));
 
     // Auto-adjust end time based on individual duration (if available) or subject duration
-    const durationMinutes =
-      (pricing && typeof pricing.duration_minutes === 'number'
-        ? pricing.duration_minutes
-        : subj.duration_minutes) || 60;
+    if (!createDurationTouched) {
+      const durationMinutes =
+        (pricing && typeof pricing.duration_minutes === 'number'
+          ? pricing.duration_minutes
+          : subj.duration_minutes) || 60;
 
-    if (startTime) {
-      const start = new Date(startTime);
-      if (!Number.isNaN(start.getTime())) {
-        const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
-        setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
+      if (startTime) {
+        const start = new Date(startTime);
+        if (!Number.isNaN(start.getTime())) {
+          const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+          setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
+        }
       }
     }
   };
@@ -1130,7 +1536,7 @@ export default function CalendarPage() {
         setPrice(pricing.price);
         setMeetingLink(resolveMeetingLink(subj.meeting_link, selectedStudentId));
         // Auto-adjust end time based on individual duration
-        if (startTime) {
+        if (!createDurationTouched && startTime) {
           const start = new Date(startTime);
           const end = new Date(start.getTime() + pricing.duration_minutes * 60 * 1000);
           setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
@@ -1141,7 +1547,7 @@ export default function CalendarPage() {
         setPrice(tsp?.price ?? subj.price);
         setMeetingLink(resolveMeetingLink(subj.meeting_link, selectedStudentId));
         const dur = tsp?.duration_minutes ?? subj.duration_minutes ?? 60;
-        if (startTime) {
+        if (!createDurationTouched && startTime) {
           const start = new Date(startTime);
           const end = new Date(start.getTime() + dur * 60 * 1000);
           setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
@@ -1166,24 +1572,28 @@ export default function CalendarPage() {
     return 60;
   };
 
-  // Calculate available time slots when assigning student to availability slot
+  // Calculate available time slots when assigning a student to an availability block.
+  // Slots sit on a fixed grid anchored to the block's start time, so round start
+  // times (e.g. 13:00) stay selectable even when another part of the block is busy.
   const calculateAssignSlots = useCallback(() => {
-    if (!editingSlot || !assignSubjectId || !assignStudentId) {
+    if (!editingSlot || !assignSubjectId) {
       setAssignAvailableSlots([]);
       return;
     }
 
-    const student = students.find(s => s.id === assignStudentId);
     const subject = subjects.find(s => s.id === assignSubjectId);
 
-    const pricing = individualPricing.find(
-      (p) => p.student_id === assignStudentId && p.subject_id === assignSubjectId
-    );
+    // Duration follows the student's individual pricing when a student is chosen,
+    // otherwise falls back to the tutor/subject default so slots can render before a
+    // student is picked (and for group lessons that use a multi-student list).
+    const pricing = assignStudentId
+      ? individualPricing.find(
+          (p) => p.student_id === assignStudentId && p.subject_id === assignSubjectId
+        )
+      : undefined;
     const tspCalc = getTutorSubjectPrice(subject?.name);
     const duration = pricing?.duration_minutes ?? tspCalc?.duration_minutes ?? subject?.duration_minutes ?? 60;
     setAssignDuration(duration);
-
-    const breakBetweenLessons = 0; // No break needed for tutor-side scheduling
 
     // Get the date from editingSlot
     let dateStr: string;
@@ -1195,16 +1605,20 @@ export default function CalendarPage() {
       dateStr = editingSlot.ruleDate || format(editingSlot.blockStart, 'yyyy-MM-dd');
     }
 
-    const slots: string[] = [];
     const toMinutes = (time: string) => {
       const [h, m] = time.split(':').map(Number);
       return h * 60 + m;
     };
 
-    let currentMin = toMinutes(editingSlot.ruleStart);
+    const startMin = toMinutes(editingSlot.ruleStart);
     const endMin = toMinutes(editingSlot.ruleEnd);
 
-    while (currentMin + duration <= endMin) {
+    const slots: string[] = [];
+    // Walk the block on a fixed `duration` grid. Every candidate start time that
+    // fits inside the block and doesn't overlap an active session is offered –
+    // a busy stretch only removes the slots it actually covers, it never shifts
+    // the remaining slots off their round start times.
+    for (let currentMin = startMin; currentMin + duration <= endMin; currentMin += duration) {
       const hh = Math.floor(currentMin / 60).toString().padStart(2, '0');
       const mm = (currentMin % 60).toString().padStart(2, '0');
       const timeStr = `${hh}:${mm}`;
@@ -1212,46 +1626,30 @@ export default function CalendarPage() {
       const slotStart = new Date(`${dateStr}T${timeStr}`);
       const slotEnd = new Date(slotStart.getTime() + duration * 60 * 1000);
 
-      // Check if this slot overlaps with existing sessions (ANY tutor's sessions or student's own sessions)
-      const overlappingSession = sessions.find(session => {
-        const sStart = new Date(session.start_time);
-        const sEnd = new Date(new Date(session.end_time).getTime() + breakBetweenLessons * 60000);
-        return session.status !== 'cancelled' && slotStart < sEnd && slotEnd > sStart;
-      });
-
-      // Also check if the selected student has any sessions at this time
-      const studentHasSession = sessions.find(session => {
-        if (session.student_id !== assignStudentId) return false;
+      const hasConflict = sessions.some(session => {
+        if (session.status === 'cancelled') return false;
         const sStart = new Date(session.start_time);
         const sEnd = new Date(session.end_time);
-        return session.status !== 'cancelled' && slotStart < sEnd && slotEnd > sStart;
+        return slotStart < sEnd && slotEnd > sStart;
       });
 
-      if (overlappingSession || studentHasSession) {
-        const blockingSession = overlappingSession || studentHasSession;
-        if (!blockingSession) {
-          currentMin += 5;
-          continue;
-        }
-        // Fast-forward currentMin to the end of the overlapping session
-        const sEnd = new Date(new Date(blockingSession.end_time).getTime() + breakBetweenLessons * 60000);
-        const overrideMin = sEnd.getHours() * 60 + sEnd.getMinutes();
-        currentMin = Math.max(currentMin + 5, overrideMin);
-      } else {
+      if (!hasConflict) {
         slots.push(timeStr);
-        currentMin += duration;
       }
     }
 
-    setAssignAvailableSlots(slots.sort());
-  }, [editingSlot, assignSubjectId, assignStudentId, students, subjects, individualPricing, tutorSubjectPrices, calOrgSubjectTemplates, sessions, getTutorSubjectPrice]);
+    setAssignAvailableSlots(slots);
+  }, [editingSlot, assignSubjectId, assignStudentId, subjects, individualPricing, sessions, getTutorSubjectPrice]);
 
-  // When assign student/subject/duration changes, recalculate slots
+  // Recalculate slots whenever the assign modal is open and its inputs change;
+  // clear them when it closes so stale slots never leak into a different block.
   useEffect(() => {
-    if (isAssignStudentOpen && assignStudentId && assignSubjectId) {
+    if (isAssignStudentOpen) {
       calculateAssignSlots();
+    } else {
+      setAssignAvailableSlots([]);
     }
-  }, [isAssignStudentOpen, assignStudentId, assignSubjectId, assignDuration, calculateAssignSlots]);
+  }, [isAssignStudentOpen, assignDuration, calculateAssignSlots]);
 
   // Keep selected subject valid when filters change
   useEffect(() => {
@@ -1264,10 +1662,18 @@ export default function CalendarPage() {
   }, [assignSubjectId, assignFilteredSubjects]);
 
   const handleStartTimeChange = (newVal: string) => {
+    const previousStart = new Date(startTime);
+    const previousEnd = new Date(endTime);
     setStartTime(newVal);
     const newStart = new Date(newVal);
     if (!isNaN(newStart.getTime())) {
-      const durationMs = getSubjectDuration() * 60 * 1000;
+      // A manually set duration survives start-time changes; otherwise the
+      // subject/pricing duration keeps driving the end time.
+      const manualDurationMs =
+        createDurationTouched && !isNaN(previousStart.getTime()) && !isNaN(previousEnd.getTime())
+          ? previousEnd.getTime() - previousStart.getTime()
+          : 0;
+      const durationMs = manualDurationMs > 0 ? manualDurationMs : getSubjectDuration() * 60 * 1000;
       const newEnd = new Date(newStart.getTime() + durationMs);
       setEndTime(format(newEnd, "yyyy-MM-dd'T'HH:mm"));
     }
@@ -1298,6 +1704,26 @@ export default function CalendarPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setSaving(false); return; }
 
+    let sessionSubjectId = selectedSubjectId;
+    let sessionPrice = price;
+    if (createIsTrial) {
+      if (isRecurring) {
+        alert(t('compSch.trialLessonDesc'));
+        setSaving(false);
+        return;
+      }
+      try {
+        const trialMeta = await resolveOrCreateTrialSubject(supabase, user.id, price);
+        sessionSubjectId = trialMeta.subject.id;
+        sessionPrice = trialMeta.price;
+      } catch (err) {
+        console.error(err);
+        alert(err instanceof Error ? err.message : t('cal.errorCreating'));
+        setSaving(false);
+        return;
+      }
+    }
+
     const startDate = new Date(startTime);
     const endDate = new Date(endTime);
     const durationMs = endDate.getTime() - startDate.getTime();
@@ -1307,7 +1733,6 @@ export default function CalendarPage() {
       const subject = subjects.find((s) => s.id === selectedSubjectId);
       const studentIdsToCreate = isGroupLesson ? selectedStudentIds : [selectedStudentId];
 
-      const tspRecur = getTutorSubjectPrice(subject?.name);
       // Determine which days to create templates for
       const daysToCreate = (recurringFrequency !== 'monthly' && selectedWeekdays.length > 0)
         ? selectedWeekdays
@@ -1326,17 +1751,12 @@ export default function CalendarPage() {
         }
 
         for (const studentId of studentIdsToCreate) {
-          const pricing = individualPricing.find(
-            (p) => p.student_id === studentId && p.subject_id === selectedSubjectId
-          );
-          const studentPrice = pricing?.price ?? tspRecur?.price ?? subject?.price ?? price;
-
           const { data: template } = await supabase
             .from('recurring_individual_sessions')
             .insert({
               tutor_id: user.id,
               student_id: studentId,
-              subject_id: selectedSubjectId || null,
+              subject_id: sessionSubjectId || null,
               day_of_week: dayOfWeek,
               start_time: timeStr,
               end_time: endTimeStr,
@@ -1344,8 +1764,9 @@ export default function CalendarPage() {
               end_date: recurringEndDate.trim() || null,
               meeting_link: meetingLink || null,
               topic: topic || null,
-              price: studentPrice,
+              price: sessionPrice,
               active: true,
+              frequency: recurringFrequency,
             })
             .select('id, student_id')
             .single();
@@ -1356,24 +1777,30 @@ export default function CalendarPage() {
         }
       }
 
-      // Check for lesson packages for each student template (for recurring sessions)
-      const packagesByStudent = new Map();
-      if (!isPaid && selectedSubjectId) {
-        const uniqueStudentIds = [...new Set(recurringTemplates.map((t: any) => t.student_id))];
+      // Check for lesson packages for each student template (for recurring sessions).
+      // Multi-subject packages live in `lesson_package_items` — look up the matching
+      // item for the recurring subject and remember both the package and the item.
+      const packagesByStudent = new Map<string, {
+        id: string;
+        available_lessons: number;
+        reserved_lessons: number;
+        item_id: string;
+        item_available_lessons: number;
+        item_reserved_lessons: number;
+      }>();
+      if (!createIsTrial && !isPaid && sessionSubjectId) {
+        const uniqueStudentIds = [...new Set(recurringTemplates.map((t: any) => t.student_id))] as string[];
         for (const sid of uniqueStudentIds) {
-          const { data: packages } = await supabase
-            .from('lesson_packages')
-            .select('*')
-            .eq('student_id', sid)
-            .eq('subject_id', selectedSubjectId)
-            .eq('active', true)
-            .eq('paid', true)
-            .gt('available_lessons', 0)
-            .order('created_at', { ascending: true })
-            .limit(1);
-
-          if (packages && packages.length > 0) {
-            packagesByStudent.set(sid, packages[0]);
+          const match = await findActivePackageForBooking(supabase, { studentId: sid, subjectId: sessionSubjectId });
+          if (match) {
+            packagesByStudent.set(sid, {
+              id: match.pkg.id,
+              available_lessons: match.pkg.available_lessons,
+              reserved_lessons: match.pkg.reserved_lessons,
+              item_id: match.item.id,
+              item_available_lessons: match.item.available_lessons,
+              item_reserved_lessons: match.item.reserved_lessons,
+            });
           }
         }
       }
@@ -1384,43 +1811,53 @@ export default function CalendarPage() {
 
       for (const template of recurringTemplates) {
         let current = new Date(template.firstOccurrence);
-        const pricing = individualPricing.find(
-          (p: any) => p.student_id === template.student_id && p.subject_id === selectedSubjectId
-        );
-        const studentPrice = pricing?.price ?? tspRecur?.price ?? subject?.price ?? price;
 
         while (!isBefore(endLimit, current)) {
           const sessionEnd = new Date(current.getTime() + durationMs);
 
+          const recurStudent = students.find((s) => s.id === template.student_id);
           let sessionPaid = isPaid;
-          let sessionPaymentStatus = isPaid ? 'paid' : 'pending';
+          let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(recurStudent?.payment_model, {
+            paid: isPaid,
+            hasPackage: false,
+          });
           let lessonPackageId = null;
 
           if (!isPaid) {
             const pkg = packagesByStudent.get(template.student_id);
             if (pkg) {
               const used = packagesUsage.get(pkg.id) || 0;
-              const remaining = pkg.available_lessons - used;
+              const remaining = Math.min(pkg.available_lessons, pkg.item_available_lessons) - used;
 
               if (remaining > 0) {
                 lessonPackageId = pkg.id;
                 sessionPaid = true;
                 sessionPaymentStatus = 'confirmed';
                 packagesUsage.set(pkg.id, used + 1);
+              } else {
+                sessionPaymentStatus = defaultSessionPaymentStatusForStudent(recurStudent?.payment_model, {
+                  paid: false,
+                  hasPackage: false,
+                });
               }
+            } else {
+              sessionPaymentStatus = defaultSessionPaymentStatusForStudent(recurStudent?.payment_model, {
+                paid: false,
+                hasPackage: false,
+              });
             }
           }
 
           sessions.push({
             tutor_id: user.id,
             student_id: template.student_id,
-            subject_id: selectedSubjectId || null,
+            subject_id: sessionSubjectId || null,
             start_time: current.toISOString(),
             end_time: sessionEnd.toISOString(),
             status: 'active',
             meeting_link: meetingLink || null,
             topic: topic || null,
-            price: studentPrice,
+            price: sessionPrice,
             paid: sessionPaid,
             payment_status: sessionPaymentStatus,
             lesson_package_id: lessonPackageId,
@@ -1435,6 +1872,44 @@ export default function CalendarPage() {
       }
 
       if (sessions.length > 0) {
+        // Conflict check BEFORE inserting: every occurrence is compared against
+        // the tutor's existing lessons; on conflict the just-created templates
+        // are rolled back so nothing half-exists.
+        const uniqueSlots = new Map<string, { start: Date; end: Date }>();
+        for (const row of sessions) {
+          const key = `${row.start_time}_${row.end_time}`;
+          if (!uniqueSlots.has(key)) {
+            uniqueSlots.set(key, { start: new Date(row.start_time), end: new Date(row.end_time) });
+          }
+        }
+        const slotList = [...uniqueSlots.values()];
+        const earliest = new Date(Math.min(...slotList.map((s) => s.start.getTime())));
+        const latest = new Date(Math.max(...slotList.map((s) => s.end.getTime())));
+        const { data: existingBusy } = await supabase
+          .from('sessions')
+          .select('id, start_time, end_time')
+          .eq('tutor_id', user.id)
+          .neq('status', 'cancelled')
+          .lt('start_time', latest.toISOString())
+          .gt('end_time', earliest.toISOString());
+        const conflictSlots = slotList.filter((slot) =>
+          hasOverlapWithExclusions(slot.start, slot.end, existingBusy ?? [], new Set()),
+        );
+        if (conflictSlots.length > 0) {
+          const tplIds = recurringTemplates.map((tpl: any) => tpl.id).filter(Boolean);
+          if (tplIds.length > 0) {
+            await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
+          }
+          alert(t('cal.createOverlapDates', {
+            dates: conflictSlots
+              .slice(0, 5)
+              .map((slot) => format(slot.start, 'MM-dd HH:mm'))
+              .join(', '),
+          }));
+          setSaving(false);
+          return;
+        }
+
         const { data: createdSessions, error } = await supabase.from('sessions').insert(sessions).select();
         if (error) {
           console.error('Error creating recurring sessions:', error);
@@ -1443,11 +1918,24 @@ export default function CalendarPage() {
           return;
         }
 
-        // Update lesson packages based on usage
+        // Update lesson packages based on usage (per-item + parent aggregate)
         if (packagesUsage.size > 0) {
           for (const [pkgId, usedCount] of packagesUsage.entries()) {
             const pkg = Array.from(packagesByStudent.values()).find(p => p.id === pkgId);
-            if (pkg) {
+            if (pkg && usedCount > 0) {
+              const { error: itemErr } = await supabase
+                .from('lesson_package_items')
+                .update({
+                  available_lessons: pkg.item_available_lessons - usedCount,
+                  reserved_lessons: pkg.item_reserved_lessons + usedCount,
+                })
+                .eq('id', pkg.item_id);
+
+              if (itemErr) {
+                console.error('Error updating lesson package item:', itemErr);
+                continue;
+              }
+
               const { error: pkgError } = await supabase
                 .from('lesson_packages')
                 .update({
@@ -1520,9 +2008,15 @@ export default function CalendarPage() {
             const normalizedPayer = String(studentData.payment_payer || '').trim().toLowerCase();
             const payerEmail = String(studentData.payer_email || '').trim();
             const hasPayer = normalizedPayer === 'parent' && payerEmail.length > 0;
-            const weekdayNames = ['sekmadienį', 'pirmadienį', 'antradienį', 'trečiadienį', 'ketvirtadienį', 'penktadienį', 'šeštadienį'];
-            const recurringWeekday = weekdayNames[getDay(firstStart)];
+            const recurringWeekday = getDay(firstStart);
             const recurringTime = format(firstStart, 'HH:mm');
+            const schedule = Array.from(new Map(
+              studentSessionList.map((session) => {
+                const start = new Date(session.start_time);
+                const item = { weekday: getDay(start), time: format(start, 'HH:mm') };
+                return [`${item.weekday}-${item.time}`, item] as const;
+              }),
+            ).values()).sort((a, b) => a.weekday - b.weekday || a.time.localeCompare(b.time));
 
             const studentNotifyTo = await resolveStudentNotificationEmail(studentData);
             if (studentNotifyTo) {
@@ -1538,6 +2032,8 @@ export default function CalendarPage() {
                   sessions: sessionDates,
                   recurringWeekday,
                   recurringTime,
+                  ongoingSchedule: isRecurringEndDateOpen(recurringEndDate),
+                  schedule,
                   ...(orgIdBranding ? { organizationId: orgIdBranding } : {}),
                 },
               }).catch(err => console.error('Error sending recurring booking email:', err));
@@ -1559,6 +2055,8 @@ export default function CalendarPage() {
                   sessions: sessionDates,
                   recurringWeekday,
                   recurringTime,
+                  ongoingSchedule: isRecurringEndDateOpen(recurringEndDate),
+                  schedule,
                   paymentReminderNote: true,
                   ...(orgIdBranding ? { organizationId: orgIdBranding } : {}),
                 },
@@ -1567,12 +2065,11 @@ export default function CalendarPage() {
 
             // 2) Payment email to parent (only if not paid via package)
             const studentModel = (studentData as any)?.payment_model as string | null | undefined;
-            const allowsPerLessonNow =
-              studentModel === 'per_lesson'
-                ? true
-                : studentModel === 'monthly_billing' || studentModel === 'prepaid_packages'
-                  ? false
-                  : effectiveEnablePerLesson && !effectiveEnableMonthlyBilling;
+            const allowsPerLessonNow = allowsPerLessonPaymentForStudent(
+              studentModel,
+              effectiveEnablePerLesson,
+              effectiveEnableMonthlyBilling,
+            );
 
             const shouldSendParentPaymentNow =
               !firstSession.paid &&
@@ -1655,7 +2152,7 @@ export default function CalendarPage() {
             }).catch(err => ({ ok: false, json: async () => ({ error: err?.message }) }));
             const syncData = await (syncRes as Response).json?.().catch(() => ({}));
             if (!(syncRes as Response).ok || syncData?.success === false) {
-              alert(t('cal.syncGoogleFailed', { error: syncData?.error || syncData?.message || 'unknown' }));
+              alert(t('cal.failedToSync'));
             }
           }
         }
@@ -1683,45 +2180,46 @@ export default function CalendarPage() {
 
       // Check for lesson packages for each student and prepare sessions
       const sessionsToInsert = [];
-      const packagesToUpdate = [];
-      const tspSingle = getTutorSubjectPrice(subject?.name);
-
+      const packagesToUpdate: Array<{
+        id: string;
+        available_lessons: number;
+        reserved_lessons: number;
+        item_id: string;
+        item_available_lessons: number;
+        item_reserved_lessons: number;
+        studentId: string;
+      }> = [];
       for (const studentId of studentIdsToCreate) {
-        // Check for individual pricing for THIS student
-        const pricing = individualPricing.find(
-          (p) => p.student_id === studentId && p.subject_id === selectedSubjectId
-        );
-        const studentPrice = pricing?.price ?? tspSingle?.price ?? subject?.price ?? price;
-
-        // Check if student has available lesson package for this subject
+        const studentRow = students.find((s) => s.id === studentId);
+        // Check if student has available lesson package item for this subject
         let sessionPaid = isPaid;
-        let sessionPaymentStatus = isPaid ? 'paid' : 'pending';
+        let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentRow?.payment_model, {
+          paid: isPaid,
+          hasPackage: false,
+        });
         let lessonPackageId = null;
 
-        if (!isPaid && selectedSubjectId) {
-          const { data: packages } = await supabase
-            .from('lesson_packages')
-            .select('*')
-            .eq('student_id', studentId)
-            .eq('subject_id', selectedSubjectId)
-            .eq('active', true)
-            .eq('paid', true)
-            .gt('available_lessons', 0)
-            .order('created_at', { ascending: true })
-            .limit(1);
-
-          if (packages && packages.length > 0) {
-            const pkg = packages[0];
+        if (!createIsTrial && !isPaid && sessionSubjectId) {
+          const match = await findActivePackageForBooking(supabase, { studentId, subjectId: sessionSubjectId });
+          if (match) {
+            const { pkg, item } = match;
             lessonPackageId = pkg.id;
             sessionPaid = true;
             sessionPaymentStatus = 'confirmed';
 
-            // Track package update
             packagesToUpdate.push({
               id: pkg.id,
               available_lessons: pkg.available_lessons - 1,
               reserved_lessons: pkg.reserved_lessons + 1,
-              studentId: studentId
+              item_id: item.id,
+              item_available_lessons: item.available_lessons - 1,
+              item_reserved_lessons: item.reserved_lessons + 1,
+              studentId,
+            });
+          } else {
+            sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentRow?.payment_model, {
+              paid: false,
+              hasPackage: false,
             });
           }
         }
@@ -1729,13 +2227,13 @@ export default function CalendarPage() {
         sessionsToInsert.push({
           tutor_id: user.id,
           student_id: studentId,
-          subject_id: selectedSubjectId || null,
+          subject_id: sessionSubjectId || null,
           start_time: startDate.toISOString(),
           end_time: endDate.toISOString(),
           status: 'active',
           meeting_link: meetingLink || null,
           topic: topic || null,
-          price: studentPrice,
+          price: sessionPrice,
           paid: sessionPaid,
           payment_status: sessionPaymentStatus,
           lesson_package_id: lessonPackageId,
@@ -1745,11 +2243,39 @@ export default function CalendarPage() {
         });
       }
 
+      // Conflict check before inserting: warn instead of silently double-booking.
+      {
+        const { data: existingBusy } = await supabase
+          .from('sessions')
+          .select('id, start_time, end_time')
+          .eq('tutor_id', user.id)
+          .neq('status', 'cancelled')
+          .lt('start_time', endDate.toISOString())
+          .gt('end_time', startDate.toISOString());
+        if (hasOverlapWithExclusions(startDate, endDate, existingBusy ?? [], new Set())) {
+          alert(t('cal.duplicateTime'));
+          setSaving(false);
+          return;
+        }
+      }
+
       const { data: created, error } = await supabase.from('sessions').insert(sessionsToInsert).select();
 
-      // Update lesson packages
+      // Update lesson packages (per-item + parent aggregate)
       if (!error && packagesToUpdate.length > 0) {
         for (const pkgUpdate of packagesToUpdate) {
+          const { error: itemErr } = await supabase
+            .from('lesson_package_items')
+            .update({
+              available_lessons: pkgUpdate.item_available_lessons,
+              reserved_lessons: pkgUpdate.item_reserved_lessons,
+            })
+            .eq('id', pkgUpdate.item_id);
+          if (itemErr) {
+            console.error('Error updating lesson package item:', itemErr);
+            continue;
+          }
+
           const { error: pkgError } = await supabase
             .from('lesson_packages')
             .update({
@@ -1768,7 +2294,7 @@ export default function CalendarPage() {
 
       if (error) {
         console.error('Error creating session:', error);
-        alert(t('cal.errorCreating', { msg: error.message }));
+        alert(t('cal.errorCreating'));
         setSaving(false);
         return;
       } else {
@@ -1820,6 +2346,7 @@ export default function CalendarPage() {
               type: 'booking_confirmation',
               to: studentBookingTo,
               data: {
+                sessionId: session.id,
                 studentName: studentData!.full_name,
                 tutorName: tutorProfile?.full_name || '',
                 date: format(startDate, 'yyyy-MM-dd'),
@@ -1842,6 +2369,7 @@ export default function CalendarPage() {
               type: 'booking_confirmation',
               to: payerEmail,
               data: {
+                sessionId: session.id,
                 forPayer: true,
                 bookedBy: 'tutor',
                 studentName: studentData?.full_name || '',
@@ -1862,12 +2390,11 @@ export default function CalendarPage() {
 
           // 2) Send payment email to parent if needed (only if not paid via package)
           const studentModel = (studentData as any)?.payment_model as string | null | undefined;
-          const allowsPerLessonNow =
-            studentModel === 'per_lesson'
-              ? true
-              : studentModel === 'monthly_billing' || studentModel === 'prepaid_packages'
-                ? false
-                : effectiveEnablePerLesson && !effectiveEnableMonthlyBilling;
+          const allowsPerLessonNow = allowsPerLessonPaymentForStudent(
+            studentModel,
+            effectiveEnablePerLesson,
+            effectiveEnableMonthlyBilling,
+          );
 
           const shouldSendParentPaymentNow =
             !session.paid &&
@@ -1998,7 +2525,7 @@ export default function CalendarPage() {
           if (selectedEvent.student_id) {
             const { data: studentRow } = await supabase
               .from('students')
-              .select('email, payer_email, full_name, linked_user_id')
+              .select('email, payer_email, full_name, linked_user_id, organization_id, tutor_id')
               .eq('id', selectedEvent.student_id)
               .single();
             payerEmail = (studentRow?.payer_email || null) as any;
@@ -2129,40 +2656,44 @@ export default function CalendarPage() {
 
         // Check if student has available lesson package for this subject
         let sessionPaid = false;
-        let sessionPaymentStatus = 'pending';
+        let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(student?.payment_model, {
+          paid: false,
+          hasPackage: false,
+        });
         let lessonPackageId = null;
 
         if (assignSubjectId) {
-          const { data: packages } = await supabase
-            .from('lesson_packages')
-            .select('*')
-            .eq('student_id', studentId)
-            .eq('subject_id', assignSubjectId)
-            .eq('active', true)
-            .eq('paid', true)
-            .gt('available_lessons', 0)
-            .order('created_at', { ascending: true })
-            .limit(1);
-
-          if (packages && packages.length > 0) {
-            const pkg = packages[0];
+          const match = await findActivePackageForBooking(supabase, { studentId, subjectId: assignSubjectId });
+          if (match) {
+            const { pkg, item } = match;
             lessonPackageId = pkg.id;
             sessionPaid = true;
             sessionPaymentStatus = 'confirmed';
 
-            // Update package: available_lessons-- and reserved_lessons++
-            const { error: pkgError } = await supabase
-              .from('lesson_packages')
+            // Decrement item first, then parent aggregate
+            const { error: itemErr } = await supabase
+              .from('lesson_package_items')
               .update({
-                available_lessons: pkg.available_lessons - 1,
-                reserved_lessons: pkg.reserved_lessons + 1,
+                available_lessons: item.available_lessons - 1,
+                reserved_lessons: item.reserved_lessons + 1,
               })
-              .eq('id', pkg.id);
-
-            if (pkgError) {
-              console.error('Error updating lesson package:', pkgError);
+              .eq('id', item.id);
+            if (itemErr) {
+              console.error('Error updating lesson package item:', itemErr);
             } else {
-              console.log(`[Calendar] Auto-deducted 1 lesson from package ${pkg.id} for student ${studentId}`);
+              const { error: pkgError } = await supabase
+                .from('lesson_packages')
+                .update({
+                  available_lessons: pkg.available_lessons - 1,
+                  reserved_lessons: pkg.reserved_lessons + 1,
+                })
+                .eq('id', pkg.id);
+
+              if (pkgError) {
+                console.error('Error updating lesson package:', pkgError);
+              } else {
+                console.log(`[Calendar] Auto-deducted 1 lesson from package ${pkg.id} item ${item.id} for student ${studentId}`);
+              }
             }
           }
         }
@@ -2255,7 +2786,6 @@ export default function CalendarPage() {
             time: format(new Date(s.start_time), 'HH:mm'),
           }));
           const firstDow = getDay(new Date(first.start_time));
-          const weekdayNames = ['sekmadienį', 'pirmadienį', 'antradienį', 'trečiadienį', 'ketvirtadienį', 'penktadienį', 'šeštadienį'];
           const studentAssignTo = await resolveStudentNotificationEmail(student);
           if (studentAssignTo) {
             void sendEmail({
@@ -2269,7 +2799,7 @@ export default function CalendarPage() {
                 duration,
                 totalLessons: sorted.length,
                 sessions: sessionDates,
-                recurringWeekday: weekdayNames[firstDow],
+                recurringWeekday: firstDow,
                 recurringTime: assignSelectedSlot,
                 ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
               },
@@ -2289,7 +2819,7 @@ export default function CalendarPage() {
                 duration,
                 totalLessons: sorted.length,
                 sessions: sessionDates,
-                recurringWeekday: weekdayNames[firstDow],
+                recurringWeekday: firstDow,
                 recurringTime: assignSelectedSlot,
                 paymentReminderNote: true,
                 ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
@@ -2370,20 +2900,25 @@ export default function CalendarPage() {
     if (!orgPolicy.canToggleSessionPaid) return;
     setSaving(true);
 
+    const targetId = selectedEvent.id;
     const newPaid = !selectedEvent.paid;
     const newStatus = newPaid ? 'confirmed' : 'pending';
 
     const { error } = await supabase
       .from('sessions')
       .update({ paid: newPaid, payment_status: newStatus })
-      .eq('id', selectedEvent.id);
+      .eq('id', targetId);
 
     if (!error) {
+      // Optimistic update so the paid/confirmed state shows immediately.
+      setSessions((prev) =>
+        prev.map((s) => (s.id === targetId ? { ...s, paid: newPaid, payment_status: newStatus } : s))
+      );
       if (newPaid) {
-        autoCloseBillingBatchIfAllPaid(selectedEvent.id);
+        autoCloseBillingBatchIfAllPaid(targetId);
       }
       setIsEventModalOpen(false);
-      fetchData();
+      fetchData({ silent: true });
     }
     setSaving(false);
   };
@@ -2645,9 +3180,10 @@ export default function CalendarPage() {
       fetchData();
 
       // Show success message
-      alert(
-        t('cal.massCancelSuccess', { success: String(successCount), failPart: failCount > 0 ? t('cal.massCancelFailed', { count: String(failCount) }) : '' })
-      );
+      const failureMessage = failCount > 0
+        ? `\n${t('cal.massCancelFailed', { count: String(failCount) })}`
+        : '';
+      alert(`${t('cal.massCancelSuccess', { count: String(successCount) })}${failureMessage}`);
     } catch (err: any) {
       console.error('Error during mass cancel:', err);
       setMassCancelError(err.message || t('cal.massCancelError'));
@@ -2691,9 +3227,21 @@ export default function CalendarPage() {
       const newStart = new Date(editNewStartTime);
       const newEnd = new Date(newStart.getTime() + durMs);
 
-      const timeChanged = oldStart.getTime() !== newStart.getTime();
+      const truncMin = (d: Date) => Math.floor(d.getTime() / 60000);
+      const timeChanged = truncMin(oldStart) !== truncMin(newStart);
       const durationChanged =
         Math.round((oldEnd.getTime() - oldStart.getTime()) / 60000) !== Math.round(editDurationMinutes);
+
+      if (timeChanged && rescheduleReason.trim().length < 5) {
+        alert(t('cal.rescheduleReasonRequired'));
+        setSaving(false);
+        return;
+      }
+      if (timeChanged && !rescheduleRequestedBy) {
+        alert(t('cal.rescheduleRequestedByRequired'));
+        setSaving(false);
+        return;
+      }
 
       /** Same calendar slot = same wall-clock start/end (group lesson: one row per student). */
       const groupPeerIdSet =
@@ -2725,6 +3273,19 @@ export default function CalendarPage() {
       }
 
       const applyToAllFuture = groupEditChoice === 'all_future' && (isGroupSession || !!selectedEvent.recurring_session_id);
+
+      // Monthly packages (req 6): a package lesson can only be moved within the
+      // same calendar month (anchored on its original start). One-off / trial
+      // lessons (no package) are unconstrained.
+      if (timeChanged && !applyToAllFuture && pkMonthlyPackages && !!(selectedEvent as any).lesson_package_id) {
+        const anchor = rescheduleAnchorDate((selectedEvent as any).original_start_time, oldStart);
+        if (!isSameCalendarMonth(newStart, anchor)) {
+          alert(t('cal.rescheduleSameMonthOnly'));
+          setSaving(false);
+          return;
+        }
+      }
+
       let error: any = null;
 
       const editSessionPayload = {
@@ -2808,6 +3369,19 @@ export default function CalendarPage() {
                 break;
               }
             }
+
+            if (!error && timeChanged && futureList.length > 0) {
+              await supabase
+                .from('sessions')
+                .update({
+                  reschedule_reason: rescheduleReason.trim(),
+                  reschedule_requested_by: rescheduleRequestedBy || null,
+                })
+                .in('id', futureList.map((s) => s.id))
+                .then(({ error: reschedErr }) => {
+                  if (reschedErr) console.warn('[Calendar] reschedule tracking columns not available:', reschedErr.message);
+                });
+            }
           }
         }
       } else {
@@ -2817,6 +3391,18 @@ export default function CalendarPage() {
           ...editSessionPayload,
         }).eq('id', selectedEvent.id);
         error = singleError;
+
+        if (!singleError && timeChanged) {
+          await supabase.from('sessions').update({
+            original_start_time: (selectedEvent as any).original_start_time ?? oldStart.toISOString(),
+            rescheduled_at: new Date().toISOString(),
+            reschedule_reason: rescheduleReason.trim(),
+            reschedule_requested_by: rescheduleRequestedBy || null,
+          }).eq('id', selectedEvent.id)
+            .then(({ error: reschedErr }) => {
+              if (reschedErr) console.warn('[Calendar] reschedule tracking columns not available:', reschedErr.message);
+            });
+        }
       }
 
       if (!error) {
@@ -2884,6 +3470,7 @@ export default function CalendarPage() {
                 newTime: format(newStart, 'HH:mm'),
                 rescheduledBy: 'tutor',
                 recipientRole: 'student',
+                reason: rescheduleReason.trim(),
                 ...(orgIdEditSave ? { organizationId: orgIdEditSave } : {}),
               }
             });
@@ -2909,6 +3496,49 @@ export default function CalendarPage() {
             console.error('Google Calendar sync error:', e);
           }
         }
+
+        const savedFields: Partial<Session> = {
+          start_time: newStart,
+          end_time: newEnd,
+          topic: editTopic,
+          meeting_link: editMeetingLink,
+          tutor_comment: editTutorComment || null,
+          show_comment_to_student: editShowCommentToStudent,
+          ...(!orgPolicy.hideMoney
+            ? { price: Number.isFinite(Number(editPrice)) ? Number(editPrice) : 0 }
+            : {}),
+        };
+
+        const matchesFutureEditScope = (s: Session) => {
+          if (!applyToAllFuture) return s.id === selectedEvent.id;
+          if (s.status !== 'active') return false;
+          if (s.start_time.getTime() < selectedEvent.start_time.getTime()) return false;
+          if (selectedEvent.recurring_session_id) {
+            return s.recurring_session_id === selectedEvent.recurring_session_id;
+          }
+          return s.subject_id === selectedEvent.subject_id;
+        };
+
+        const applySavedFieldsToSession = (s: Session): Session => {
+          if (!matchesFutureEditScope(s)) return s;
+          if (applyToAllFuture && (timeChanged || durationChanged)) {
+            const shiftMs = newStart.getTime() - oldStart.getTime();
+            const rowNewStart = new Date(s.start_time.getTime() + shiftMs);
+            return {
+              ...s,
+              ...savedFields,
+              start_time: rowNewStart,
+              end_time: new Date(rowNewStart.getTime() + durMs),
+            };
+          }
+          return { ...s, ...savedFields };
+        };
+
+        setSessions((prev) => prev.map(applySavedFieldsToSession));
+        setSelectedEvent((prev) => (prev ? applySavedFieldsToSession(prev) : prev));
+        setSelectedGroupSessions((prev) => prev.map(applySavedFieldsToSession));
+        setViewCommentText(editTutorComment || '');
+        setViewShowToStudent(editShowCommentToStudent);
 
         setIsEditingSession(false);
         setGroupEditChoice(null);
@@ -2982,16 +3612,50 @@ export default function CalendarPage() {
     await hardDeleteSelectedWithApproval('single');
   };
 
+  /**
+   * Opens the inline edit form for the selected lesson. Shared by the header
+   * "edit" icon and the "reschedule lesson" button — rescheduling is just the
+   * edit form with a new start time, so both entry points land in one place.
+   * Group/recurring lessons first need the single-vs-series choice.
+   */
+  const openSessionEditor = () => {
+    if (!selectedEvent) return;
+    if ((isGroupSession || selectedEvent.recurring_session_id) && !groupEditChoice) {
+      setGroupEditChoice('single');
+      return;
+    }
+    setEditNewStartTime(format(selectedEvent.start_time, "yyyy-MM-dd'T'HH:mm"));
+    setEditDurationMinutes(Math.max(5, Math.round((selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime()) / 60000)));
+    setEditTopic(selectedEvent.topic || '');
+    setEditMeetingLink(selectedEvent.meeting_link || '');
+    setEditPrice(Number(selectedEvent.price ?? 0) || 0);
+    setEditTutorComment(selectedEvent.tutor_comment || '');
+    setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
+    setRescheduleReason('');
+    setRescheduleRequestedBy('');
+    setIsEditingSession(true);
+  };
+
   const handleMarkCompleted = async () => {
     if (!selectedEvent) return;
     setSaving(true);
 
+    const targetId = selectedEvent.id;
     const { error } = await supabase
       .from('sessions')
       .update({ status: 'completed', no_show_when: null })
-      .eq('id', selectedEvent.id);
+      .eq('id', targetId);
 
     if (!error) {
+      // Optimistic update: reflect the confirmed lesson right away (event turns green and
+      // the "Patvirtintos" counter increments) instead of waiting for a full refetch.
+      setSessions((prev) =>
+        prev.map((s) => (s.id === targetId ? { ...s, status: 'completed', no_show_when: null } : s))
+      );
+      setSelectedEvent((prev) =>
+        prev && prev.id === targetId ? { ...prev, status: 'completed', no_show_when: null } : prev
+      );
+
       if (orgPolicy.isOrgTutor && selectedEvent.subjects?.is_trial) {
         const { data: { user } } = await supabase.auth.getUser();
         const orgId = user ? (await supabase.from('profiles').select('organization_id').eq('id', user.id).maybeSingle()).data?.organization_id : null;
@@ -2999,16 +3663,31 @@ export default function CalendarPage() {
           const { data: orgRow } = await supabase.from('organizations').select('features').eq('id', orgId).maybeSingle();
           const feat = (orgRow as any)?.features;
           const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
-          if (featObj['trial_comment_required'] === true && !viewCommentText.trim()) {
+          const trialPolicy = parseOrgTrialPolicy(featObj);
+          const { data: trialHistory } = selectedEvent.student_id
+            ? await supabase
+                .from('sessions')
+                .select('id, start_time, status, subjects!inner(is_trial)')
+                .eq('student_id', selectedEvent.student_id)
+                .eq('subjects.is_trial', true)
+                .order('start_time', { ascending: true })
+            : { data: [] as Array<{ id: string; start_time?: string | null; status?: string | null }> };
+          const needsTrialComment = sessionNeedsOrgTrialComment({
+            policy: trialPolicy,
+            isTrial: true,
+            sessionId: selectedEvent.id,
+            studentTrials: (trialHistory || []) as Array<{ id: string; start_time?: string | null; status?: string | null }>,
+          });
+          if (needsTrialComment && !viewCommentText.trim()) {
             setToastMessage({ message: t('cal.trialCommentReminder'), type: 'warning' });
             setSaving(false);
-            fetchData();
+            fetchData({ silent: true });
             return;
           }
         }
       }
       setIsEventModalOpen(false);
-      fetchData();
+      fetchData({ silent: true });
     }
     setSaving(false);
   };
@@ -3072,6 +3751,69 @@ export default function CalendarPage() {
           );
         }
         fetchData();
+      }
+    } finally {
+      setNoShowSavingId(null);
+    }
+  };
+
+  /**
+   * Org feature tutor_lesson_status_confirmation: finalize an ended lesson via the
+   * server, which stamps who/when confirmed and settles package counters.
+   */
+  const handleConfirmSessionStatus = async (
+    session: Session,
+    status: 'completed' | 'no_show' | 'cancelled',
+    late = false,
+  ) => {
+    if (status === 'no_show' && !window.confirm(t('dash.confirmNoShowPrompt'))) return;
+    if (status === 'cancelled' && !window.confirm(t('cal.confirmStatusCancelPrompt'))) return;
+    setNoShowSavingId(session.id);
+    try {
+      const resp = await fetch('/api/confirm-session-status', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          sessionId: session.id,
+          status,
+          late,
+          ...(status === 'no_show'
+            ? { noShowWhen: defaultNoShowWhenForNow(new Date(session.start_time), new Date(session.end_time)) }
+            : {}),
+        }),
+      });
+      const json = await resp.json().catch(() => ({} as Record<string, unknown>));
+      if (!resp.ok) {
+        setToastMessage({
+          message: t('cal.confirmStatusError', { msg: String((json as any).error || resp.status) }),
+          type: 'error',
+        });
+        return;
+      }
+      setSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, status } : s)));
+      setSelectedEvent((prev) => (prev && prev.id === session.id ? { ...prev, status } : prev));
+      const needsProKlaseComment =
+        hideProKlaseOrgTutorCancel && (status === 'completed' || status === 'no_show');
+      const hasComment = Boolean(
+        viewCommentText.trim() || session.tutor_comment?.trim(),
+      );
+      if (!needsProKlaseComment || hasComment) {
+        setIsEventModalOpen(false);
+      } else {
+        setToastMessage({
+          message: t('dash.lessonCommentMissing'),
+          type: 'warning',
+        });
+      }
+      fetchData({ silent: true });
+      if (status === 'no_show') {
+        void (async () => {
+          await fetch('/api/notify-session-no-show', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({ sessionId: session.id }),
+          });
+        })().catch(() => {});
       }
     } finally {
       setNoShowSavingId(null);
@@ -3185,6 +3927,7 @@ export default function CalendarPage() {
                 type: 'booking_confirmation',
                 to: groupBookingTo,
                 data: {
+                  sessionId: firstSession.id,
                   studentName: studentData!.full_name,
                   tutorName: tutorProfile?.full_name || '',
                   date: format(new Date(firstSession.start_time), 'yyyy-MM-dd'),
@@ -3253,6 +3996,7 @@ export default function CalendarPage() {
               type: 'booking_confirmation',
               to: singleGroupBookingTo,
               data: {
+                sessionId: newSession.id,
                 studentName: studentData!.full_name,
                 tutorName: tutorProfile?.full_name || '',
                 date: format(selectedEvent.start_time, 'yyyy-MM-dd'),
@@ -3302,7 +4046,7 @@ export default function CalendarPage() {
       try {
         await hardDeleteSession(sessionToRemove.id);
       } catch (e: any) {
-        alert(t('cal.errorRemovingStudent', { msg: e?.message || t('cal.failedToRemove') }));
+        alert(t('cal.failedToRemove'));
         setSaving(false);
         return;
       }
@@ -3384,69 +4128,40 @@ export default function CalendarPage() {
     }
 
     const subj = subjects.find((s) => s.name === event.topic);
-    let backgroundColor = subj?.color || '#6366f1';
+    const isTrial = event.subjects?.is_trial === true;
+    const endAt = new Date(event.end ?? event.end_time);
+    const isMovedLesson =
+      pkMonthlyPackages && !!event.original_start_time && !!event.lesson_package_id;
 
-    if (event.status === 'cancelled') {
-      return {
-        style: {
-          backgroundColor: '#ef4444',
-          opacity: 0.5,
-          border: 'none',
-          borderRadius: '8px',
-          color: 'white',
-        },
-      };
-    }
-    if (event.status === 'no_show') {
-      return {
-        style: {
-          backgroundColor: '#fda4af',
-          opacity: 1,
-          border: 'none',
-          borderRadius: '8px',
-          color: 'white',
-        },
-      };
-    }
-
-    const endAt = event.end ?? event.end_time;
-    const hasEnded = new Date(endAt).getTime() <= Date.now();
-    const isPaid =
-      event.paid === true ||
-      event.payment_status === 'paid' ||
-      event.payment_status === 'confirmed';
-
-    if (orgPolicy.isOrgTutor) {
-      if (event.status === 'completed') {
-        backgroundColor = '#10b981';
-      }
-    } else {
-      const unpaidOccurred =
-        (event.status === 'completed' && !isPaid) ||
-        (event.status === 'active' && hasEnded && !isPaid) ||
-        (hasEnded && event.payment_status === 'paid_by_student');
-
-      if (unpaidOccurred) {
-        backgroundColor = '#ca8a04';
-      } else if (event.status === 'completed') {
-        backgroundColor = '#10b981';
-      }
-    }
+    const eventStyle = getCalendarSessionEventStyle({
+      status: event.status,
+      paid: event.paid,
+      payment_status: event.payment_status,
+      endAt,
+      isTrial,
+      isMakeup: showProKlaseCalendarFeatures && event.is_makeup === true,
+      cancellationReasonCode: showProKlaseCalendarFeatures ? event.cancellation_reason_code : undefined,
+      isMovedLesson,
+      isOrgTutor: orgPolicy.isOrgTutor || isSchoolBilledSession(event),
+      defaultColor: subj?.color || '#6366f1',
+    });
 
     return {
       style: {
-        backgroundColor,
-        opacity: 1,
-        border: 'none',
+        ...eventStyle,
         borderRadius: '8px',
-        color: 'white',
+        pointerEvents: 'auto' as const,
       },
     };
   };
 
   // Stats
   const activeSessions = sessions.filter((s) => s.status === 'active').length;
-  const paidSessions = sessions.filter((s) => s.paid).length;
+  // Org tutors don't toggle payment — a lesson is "confirmed" (Patvirtinta) once it's
+  // marked occurred (status=completed). Solo tutors still count paid lessons here.
+  const paidSessions = orgPolicy.isOrgTutor
+    ? sessions.filter((s) => s.status === 'completed').length
+    : sessions.filter((s) => s.paid).length;
   const cancelledSessions = sessions.filter((s) => s.status === 'cancelled').length;
 
   // Calendar label
@@ -3496,7 +4211,7 @@ export default function CalendarPage() {
         {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-4 flex-shrink-0 min-w-0">
         <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Kalendorius</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{t('nav.calendar')}</h1>
           <p className="text-sm text-gray-500 mt-0.5">{t('cal.manageSchedule')}</p>
         </div>
         <div className="flex gap-2 flex-wrap w-full sm:w-auto min-w-0 sm:justify-end">
@@ -3507,13 +4222,13 @@ export default function CalendarPage() {
                 onClick={handleGoogleCalendarSync}
                 disabled={googleCalendarSyncing}
                 className="gap-2 rounded-2xl bg-green-600 hover:bg-green-700 text-white shadow-sm border border-green-500"
-                title="Sinchronizuoti su Google Calendar"
+                title={t('cal.syncGoogleCalendar')}
               >
                 <CalendarDays className="w-4 h-4" />
                 {googleCalendarSyncing ? (
-                  <span className="hidden sm:inline font-semibold">Sinchronizuojama...</span>
+                  <span className="hidden sm:inline font-semibold">{t('cal.syncingGoogleCalendar')}</span>
                 ) : (
-                  <span className="hidden sm:inline font-semibold">Sinchronizuoti Google Calendar</span>
+                  <span className="hidden sm:inline font-semibold">{t('cal.syncGoogleCalendar')}</span>
                 )}
               </Button>
               <Button
@@ -3521,7 +4236,7 @@ export default function CalendarPage() {
                 onClick={handleGoogleCalendarDisconnect}
                 disabled={googleCalendarSyncing}
                 className="gap-2 rounded-xl border-gray-200 text-gray-600 hover:bg-gray-50"
-                title="Atjungti Google Calendar"
+                title={t('cal.disconnectGoogleCalendar')}
               >
                 <XCircle className="w-4 h-4" />
               </Button>
@@ -3531,10 +4246,10 @@ export default function CalendarPage() {
               variant="outline"
               onClick={handleGoogleCalendarConnect}
               className="gap-2 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50"
-              title="Prijungti Google Calendar"
+              title={t('cal.connectGoogleCalendar')}
             >
               <CalendarDays className="w-4 h-4" />
-              <span className="hidden sm:inline">Prijungti Google Calendar</span>
+              <span className="hidden sm:inline">{t('cal.connectGoogleCalendar')}</span>
             </Button>
           )}
           <Button
@@ -3551,6 +4266,7 @@ export default function CalendarPage() {
             <Settings2 className="w-4 h-4" />
             <span className="hidden sm:inline">{t('cal.scheduleSettings')}</span>
           </Button>
+          {!hideProKlaseOrgTutorCancel && (
           <Button
             variant="outline"
             onClick={() => setIsMassCancelModalOpen(true)}
@@ -3559,11 +4275,16 @@ export default function CalendarPage() {
             <XCircle className="w-4 h-4" />
             <span className="hidden sm:inline">{t('cal.cancelLessons')}</span>
           </Button>
+          )}
           <Button
             onClick={() => {
+              // Default the new lesson to the date the calendar is currently showing
+              // (not today) so navigating to another week/day keeps that date.
               const now = new Date();
-              const end = addHours(now, 1);
-              handleSelectSlot({ start: now, end }, { forceCreate: true });
+              const start = new Date(currentDate);
+              start.setHours(now.getHours(), now.getMinutes(), 0, 0);
+              const end = addHours(start, 1);
+              handleSelectSlot({ start, end }, { forceCreate: true });
             }}
             disabled={licenseFrozen}
             title={licenseFrozen ? t('cal.licenseFrozenTitle') : undefined}
@@ -3732,7 +4453,7 @@ export default function CalendarPage() {
               )}
             >
               <List className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Diena</span>
+              <span className="hidden sm:inline">{t('cal.day')}</span>
             </button>
           </div>
         </div>
@@ -3740,7 +4461,8 @@ export default function CalendarPage() {
         <div
           className={cn(
             'p-1.5 sm:p-3',
-            !calendarExpanded && 'max-h-[50vh] overflow-y-auto',
+            // No outer scroll: the calendar scrolls internally (rbc-time-content) so the
+            // sticky weekday header stays visible instead of scrolling away.
             (isAvailabilityModalOpen || isEventModalOpen || isCreateModalOpen || isSlotEditOpen) && 'pointer-events-none',
           )}
         >
@@ -3748,11 +4470,12 @@ export default function CalendarPage() {
             <div className="flex items-center justify-center py-32 text-gray-400">
               <div className="text-center">
                 <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-500 rounded-full animate-spin mx-auto mb-3" />
-                <p className="text-sm">Kraunamas kalendorius...</p>
+                <p className="text-sm">{t('cal.loadingCalendar')}</p>
               </div>
             </div>
           ) : (
             <BigCalendar
+              rtl={locale === 'ar' || locale === 'he'}
               className={cn(
                 // Month view needs explicit height; otherwise rows can collapse and appear "empty".
                 currentView === Views.MONTH
@@ -3767,7 +4490,7 @@ export default function CalendarPage() {
                   ? 700
                   : (calendarExpanded ? 1100 : 700),
               }}
-              localizer={localizer}
+              localizer={locale === 'ar' || locale === 'he' ? rtlLocalizer : localizer}
               events={mergedSessions}
               backgroundEvents={backgroundEvents}
               startAccessor="start_time"
@@ -3800,14 +4523,15 @@ export default function CalendarPage() {
               titleAccessor={(event) => {
                 if (event.isBackground) return t('cal.freeSlot');
 
-                const name = event.student?.full_name || t('cal.unknown');
-                const topic = event.topic ? ` · ${event.topic}` : '';
+                const name = calendarTitleForSession(event, t('cal.unknown'));
+                const topic = calendarSessionTopicSuffix(name, event.topic);
+                const skipPaymentUi = orgPolicy.isOrgTutor || isSchoolBilledSession(event);
 
                 let statusText = '';
                 if (event.status === 'cancelled') {
                   statusText = t('cal.statusCancelled');
-                } else if (orgPolicy.isOrgTutor) {
-                  // no payment status text for org_tutor
+                } else if (skipPaymentUi) {
+                  // School / org tutor: no per-lesson payment status in calendar title
                 } else if (event.paid) {
                   statusText = t('cal.statusPaid');
                 } else if (event.payment_status === 'paid_by_student') {
@@ -3816,7 +4540,13 @@ export default function CalendarPage() {
                   statusText = t('cal.statusPending');
                 }
 
-                return `${name}${topic}${statusText}`;
+                const prefix = calendarSessionTitlePrefix({
+                  isTrial: event.subjects?.is_trial === true,
+                  isMakeup: showProKlaseCalendarFeatures && event.is_makeup === true,
+                  cancellationReasonCode: showProKlaseCalendarFeatures ? event.cancellation_reason_code : undefined,
+                  status: event.status,
+                });
+                return `${prefix}${name}${topic}${statusText}`;
               }}
             />
           )}
@@ -3846,13 +4576,24 @@ export default function CalendarPage() {
         {[
           { color: '#6366f1', label: t('cal.legendReserved') },
           { color: '#10b981', label: t('cal.legendCompleted') },
-          ...(!orgPolicy.isOrgTutor ? [{ color: '#ca8a04', label: t('cal.legendUnpaidOccurred') }] : []),
+          { color: '#ca8a04', label: t('cal.legendUnpaidOccurred') },
+          { color: '#a855f7', label: t('cal.legendTrial'), border: '2px solid #7e22ce' },
+          ...(showProKlaseCalendarFeatures
+            ? [
+                { color: '#8b5cf6', label: t('cal.legendMakeup'), border: '2px solid #6d28d9' },
+                { color: '#ef4444', label: t('cal.legendTutorNoShow'), opacity: true, border: '2px dashed #991b1b' },
+              ]
+            : []),
           { color: '#ef4444', label: t('cal.legendCancelled'), opacity: true },
         ].map((item) => (
           <div key={item.label} className="flex items-center gap-2">
             <span
               className="w-3 h-3 rounded-full"
-              style={{ backgroundColor: item.color, opacity: item.opacity ? 0.5 : 1 }}
+              style={{
+                backgroundColor: item.color,
+                opacity: item.opacity ? 0.55 : 1,
+                border: item.border ?? 'none',
+              }}
             />
             <span className="text-xs text-gray-500">{item.label}</span>
           </div>
@@ -3872,6 +4613,7 @@ export default function CalendarPage() {
         if (!open) {
           setNewSessionId(null);
           setSelectedStudentIds([]);
+          setCreateIsTrial(false);
         }
       }}>
         <DialogContent className="w-[95vw] sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
@@ -3907,11 +4649,11 @@ export default function CalendarPage() {
                           )}
                           {subj.grade_min && subj.grade_max && (
                             <span className="text-xs text-emerald-600">
-                              ({subj.grade_min}-{subj.grade_max === 13 ? 'Studentas' : `${subj.grade_max} kl`})
+                              ({subj.grade_min}-{subj.grade_max === 13 ? t('lessonSet.gradeUniversity') : `${subj.grade_max} ${t('lessonSet.gradeShort')}`})
                             </span>
                           )}
                           · {subj.duration_minutes}min
-                          {!orgPolicy.hideMoney && <> · €{subj.price}</>}
+                          {!orgPolicy.hideMoney && <> · {fmt(subj.price)}</>}
                         </div>
                       </SelectItem>
                     ))}
@@ -3996,8 +4738,38 @@ export default function CalendarPage() {
               <Label>{t('cal.endTimeRequired')}</Label>
               <DateTimeSpinner
                 value={endTime}
-                onChange={setEndTime}
+                onChange={(value) => {
+                  setEndTime(value);
+                  setCreateDurationTouched(true);
+                }}
               />
+            </div>
+
+            {/* Duration (min) — the tutor can size the lesson directly */}
+            <div className="space-y-2">
+              <Label>{t('cal.durationLabel')}</Label>
+              <Input
+                type="number"
+                min={15}
+                max={240}
+                step={5}
+                value={(() => {
+                  const start = new Date(startTime);
+                  const end = new Date(endTime);
+                  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '';
+                  const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
+                  return minutes > 0 ? minutes : '';
+                })()}
+                onChange={(e) => {
+                  const minutes = Number(e.target.value);
+                  const start = new Date(startTime);
+                  if (!Number.isFinite(minutes) || minutes <= 0 || Number.isNaN(start.getTime())) return;
+                  setCreateDurationTouched(true);
+                  setEndTime(format(new Date(start.getTime() + minutes * 60000), "yyyy-MM-dd'T'HH:mm"));
+                }}
+                className="rounded-xl"
+              />
+              <p className="text-xs text-gray-500">{t('cal.durationHint')}</p>
             </div>
 
             {/* Topic */}
@@ -4013,7 +4785,7 @@ export default function CalendarPage() {
 
             {/* Meeting link */}
             <div className="space-y-2">
-              <Label>Nuoroda (Zoom / Meet)</Label>
+              <Label>{t('cal.meetingLinkLabel')} (Zoom / Meet)</Label>
               <Input
                 placeholder="https://meet.google.com/..."
                 value={meetingLink}
@@ -4054,6 +4826,53 @@ export default function CalendarPage() {
             </div>
             )}
 
+            {showTutorTrialToggle && !subjects.find((s) => s.id === selectedSubjectId)?.is_group && (
+              <div className="border border-amber-100 rounded-xl p-4 bg-amber-50/50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void (async () => {
+                      const next = !createIsTrial;
+                      if (!next) {
+                        setCreateIsTrial(false);
+                        if (selectedSubjectId) handleSubjectChange(selectedSubjectId);
+                        return;
+                      }
+                      const { data: { user } } = await supabase.auth.getUser();
+                      if (!user) return;
+                      try {
+                        const trialMeta = await resolveOrCreateTrialSubject(supabase, user.id);
+                        setCreateIsTrial(true);
+                        setIsRecurring(false);
+                        setRecurringEndDate('');
+                        setSelectedWeekdays([]);
+                        setPrice(trialMeta.price);
+                        setTopic((prev) => (prev.trim() ? prev : trialMeta.topic));
+                        if (startTime) {
+                          const start = new Date(startTime);
+                          if (!Number.isNaN(start.getTime())) {
+                            setEndTime(format(new Date(start.getTime() + trialMeta.durationMinutes * 60000), "yyyy-MM-dd'T'HH:mm"));
+                            setCreateDurationTouched(true);
+                          }
+                        }
+                      } catch (err) {
+                        alert(err instanceof Error ? err.message : t('cal.errorCreating'));
+                      }
+                    })();
+                  }}
+                  className="flex items-center justify-between w-full text-left"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-amber-900">{t('compSch.trialLesson')}</p>
+                    <p className="text-xs text-amber-800/80 mt-0.5">{t('cal.tutorTrialToggleHint')}</p>
+                  </div>
+                  <div className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${createIsTrial ? 'bg-amber-500' : 'bg-gray-300'}`}>
+                    <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${createIsTrial ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </div>
+                </button>
+              </div>
+            )}
+
             {/* Comment */}
             <div className="space-y-2">
               <Label>{t('cal.commentOptional')}</Label>
@@ -4076,119 +4895,20 @@ export default function CalendarPage() {
             </div>
 
             {/* Recurring toggle */}
-            <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !isRecurring;
-                  setIsRecurring(next);
-                  setRecurringEndDate('');
-                  setRecurringFrequency('weekly');
-                  if (next && startTime) {
-                    setSelectedWeekdays([new Date(startTime).getDay()]);
-                  } else {
-                    setSelectedWeekdays([]);
-                  }
-                }}
-                className="flex items-center justify-between w-full"
-              >
-                <div>
-                  <p className="text-sm font-medium text-gray-900 text-left">{t('cal.recurringLesson')}</p>
-                  <p className="text-xs text-gray-500 text-left mt-0.5">{t('cal.recurringDesc')}</p>
-                </div>
-                <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 flex-shrink-0 ml-4 ${isRecurring ? 'bg-indigo-500' : 'bg-gray-300'}`}>
-                  <span className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${isRecurring ? 'translate-x-6' : 'translate-x-1'}`} />
-                </div>
-              </button>
-
-              {isRecurring && (
-                <div className="space-y-3 pt-1 border-t border-gray-200">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">{t('cal.recurringFrequencyLabel')}</Label>
-                    <select
-                      value={recurringFrequency}
-                      onChange={(e) => setRecurringFrequency(e.target.value as 'weekly' | 'biweekly' | 'monthly')}
-                      className="w-full rounded-xl text-sm border border-gray-300 px-3 py-2 bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                      <option value="weekly">{t('cal.freqWeekly')}</option>
-                      <option value="biweekly">{t('cal.freqBiweekly')}</option>
-                      <option value="monthly">{t('cal.freqMonthly')}</option>
-                    </select>
-                  </div>
-                  {recurringFrequency !== 'monthly' && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">{t('cal.weekdaysLabel')}</Label>
-                      <div className="flex gap-1.5 flex-wrap">
-                        {[1, 2, 3, 4, 5, 6, 0].map((day) => {
-                          const labels = [t('cal.wdSun'), t('cal.wdMon'), t('cal.wdTue'), t('cal.wdWed'), t('cal.wdThu'), t('cal.wdFri'), t('cal.wdSat')];
-                          const isSelected = selectedWeekdays.includes(day);
-                          return (
-                            <button
-                              key={day}
-                              type="button"
-                              onClick={() => {
-                                setSelectedWeekdays(prev =>
-                                  isSelected
-                                    ? prev.filter(d => d !== day)
-                                    : [...prev, day]
-                                );
-                              }}
-                              className={cn(
-                                'px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border',
-                                isSelected
-                                  ? 'bg-indigo-500 text-white border-indigo-500'
-                                  : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300',
-                              )}
-                            >
-                              {labels[day]}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {selectedWeekdays.length === 0 && (
-                        <p className="text-xs text-amber-600">{t('cal.selectAtLeastOneDay')}</p>
-                      )}
-                    </div>
-                  )}
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Kartotis iki (neprivaloma)</Label>
-                    <DateInput
-                      value={recurringEndDate}
-                      onChange={(e) => setRecurringEndDate(e.target.value)}
-                      min={startTime ? format(addWeeks(new Date(startTime), 1), 'yyyy-MM-dd') : undefined}
-                      className="rounded-xl text-sm"
-                    />
-                    {!recurringEndDate && (
-                      <p className="text-xs text-gray-500">
-                        Jei paliksite tuščią, pamokos kartosis nuolat (sistemoje sugeneruojamos į priekį ~2 metus).
-                      </p>
-                    )}
-                    {recurringEndDate && startTime && (() => {
-                      const startMs = new Date(startTime).getTime();
-                      const endMs = parseISO(recurringEndDate).getTime();
-                      const diffMs = endMs - startMs;
-                      let countPerDay: number;
-                      if (recurringFrequency === 'monthly') {
-                        const s = new Date(startTime);
-                        const e = parseISO(recurringEndDate);
-                        countPerDay = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth()) + 1;
-                      } else {
-                        const weekInterval = recurringFrequency === 'biweekly' ? 2 : 1;
-                        countPerDay = Math.floor(diffMs / (weekInterval * 7 * 24 * 60 * 60 * 1000)) + 1;
-                      }
-                      const daysCount = (recurringFrequency !== 'monthly' && selectedWeekdays.length > 0) ? selectedWeekdays.length : 1;
-                      const count = countPerDay * daysCount;
-                      return (
-                        <p className="text-xs text-indigo-600 font-medium">
-                          Bus sukurta ≈{count} pamok{count === 1 ? 'a' : 'os'}
-                          {daysCount > 1 && ` (${daysCount} d/sav × ≈${countPerDay})`}
-                        </p>
-                      );
-                    })()}
-                  </div>
-                </div>
-              )}
-            </div>
+            {!createIsTrial && (
+            <RecurrenceFields
+              enabled={isRecurring}
+              onEnabledChange={setIsRecurring}
+              frequency={recurringFrequency}
+              onFrequencyChange={setRecurringFrequency}
+              weekdays={selectedWeekdays}
+              onWeekdaysChange={setSelectedWeekdays}
+              endDate={recurringEndDate}
+              onEndDateChange={setRecurringEndDate}
+              startTime={startTime}
+              showEstimate
+            />
+            )}
           </div>
 
           {newSessionId ? (
@@ -4224,31 +4944,19 @@ export default function CalendarPage() {
 
       {/* === EVENT DETAILS MODAL === */}
       <Dialog open={isEventModalOpen} onOpenChange={handleEventModalOpenChange}>
-        <DialogContent className="w-[95vw] sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 pr-6">
+        <DialogContent className="w-[min(96vw,40rem)] max-w-[40rem] max-h-[90vh] min-w-0 overflow-y-auto overflow-x-hidden">
+          <DialogHeader className="min-w-0 pr-8">
+            <DialogTitle className="flex flex-wrap items-center gap-2 pr-2 min-w-0">
               <CalendarDays className="w-5 h-5 text-indigo-600 flex-shrink-0" />
-              <span className="flex-1 truncate">{t('cal.lessonInfo')}</span>
+              <span className="flex-1 min-w-0 truncate">{t('cal.lessonInfo')}</span>
               {!isEditingSession && (selectedEvent?.status === 'active' || selectedEvent?.status === 'completed') && (
                 <div className="flex items-center gap-1 flex-shrink-0">
                 {selectedEvent?.status === 'active' && (
-                <Button variant="ghost" size="sm" onClick={() => {
-                  if ((isGroupSession || selectedEvent?.recurring_session_id) && !groupEditChoice) {
-                    setGroupEditChoice('single');
-                    return;
-                  }
-                  setEditNewStartTime(format(selectedEvent.start_time, "yyyy-MM-dd'T'HH:mm"));
-                  setEditDurationMinutes(Math.max(5, Math.round((selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime()) / 60000)));
-                  setEditTopic(selectedEvent.topic || '');
-                  setEditMeetingLink(selectedEvent.meeting_link || '');
-                  setEditPrice(Number(selectedEvent.price ?? 0) || 0);
-                  setEditTutorComment(selectedEvent.tutor_comment || '');
-                  setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
-                  setIsEditingSession(true);
-                }} className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 h-8 px-2 flex-shrink-0">
+                <Button variant="ghost" size="sm" onClick={openSessionEditor} className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 h-8 px-2 flex-shrink-0">
                   <Edit2 className="w-3.5 h-3.5 mr-1" /> <span className="hidden sm:inline">{t('cal.editBtn')}</span>
                 </Button>
                 )}
+                {!hideProKlaseOrgTutorDelete && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -4258,13 +4966,14 @@ export default function CalendarPage() {
                 >
                   <Trash2 className="w-3.5 h-3.5 mr-1" /> <span className="hidden sm:inline">{t('cal.delete')}</span>
                 </Button>
+                )}
                 </div>
               )}
             </DialogTitle>
           </DialogHeader>
 
           {isEditingSession ? (
-            <div className="space-y-4 py-2">
+            <div className="space-y-4 py-2 min-w-0">
               <div className="space-y-2">
                 <Label>{t('compSch.topicSubject')}</Label>
                 <Input value={editTopic} onChange={(e) => setEditTopic(e.target.value)} placeholder={t('cal.topicPlaceholder')} className="rounded-xl" />
@@ -4273,6 +4982,43 @@ export default function CalendarPage() {
                 <Label>{t('cal.timeLabel')}</Label>
                 <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
               </div>
+              {editNewStartTime && selectedEvent &&
+                Math.floor(new Date(editNewStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) && (
+                <div className="space-y-2">
+                  <Label>{t('cal.rescheduleReasonLabel')}</Label>
+                  <textarea
+                    value={rescheduleReason}
+                    onChange={(e) => setRescheduleReason(e.target.value)}
+                    placeholder={t('cal.rescheduleReasonPlaceholder')}
+                    className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
+                    rows={2}
+                  />
+                  <p className="text-xs text-gray-500">
+                    {isOrgTutor ? t('cal.rescheduleReasonHelper') : t('cal.rescheduleReasonHelperSolo')}
+                  </p>
+                  {rescheduleReason.length > 0 && rescheduleReason.trim().length < 5 && (
+                    <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(rescheduleReason.trim().length) })}</p>
+                  )}
+                  <Label>{t('cal.rescheduleRequestedByLabel')}</Label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRescheduleRequestedBy('student')}
+                      className={`flex-1 text-xs py-1.5 px-3 rounded-lg border font-medium transition-colors ${rescheduleRequestedBy === 'student' ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                    >
+                      {t('cal.requestedByStudent')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRescheduleRequestedBy('tutor')}
+                      className={`flex-1 text-xs py-1.5 px-3 rounded-lg border font-medium transition-colors ${rescheduleRequestedBy === 'tutor' ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                    >
+                      {t('cal.requestedByTutor')}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {!hideProKlaseOrgTutorFreeTime && (
               <label className="flex items-start gap-2 cursor-pointer">
                 <Checkbox
                   checked={leaveFreeTimeOnReschedule}
@@ -4280,6 +5026,7 @@ export default function CalendarPage() {
                 />
                 <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
               </label>
+              )}
               <div className="space-y-2">
                 <Label>{t('cal.durationLabel')}</Label>
                 <Input
@@ -4333,13 +5080,21 @@ export default function CalendarPage() {
               </div>
               <div className="flex gap-2 pt-2">
                 <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setIsEditingSession(false)}>{t('cal.cancelEdit')}</Button>
-                <Button onClick={handleSaveChanges} disabled={saving} className="flex-1 rounded-xl">
+                <Button
+                  onClick={handleSaveChanges}
+                  disabled={saving || (
+                    !!editNewStartTime && !!selectedEvent &&
+                    Math.floor(new Date(editNewStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) &&
+                    rescheduleReason.trim().length < 5
+                  )}
+                  className="flex-1 rounded-xl"
+                >
                   {saving ? t('cal.savingEdit') : t('cal.saveEdit')}
                 </Button>
               </div>
             </div>
           ) : (
-            <div className="space-y-3 py-2">
+            <div className="space-y-3 py-2 min-w-0">
               {/* Student name - Group or Individual */}
               {isGroupSession ? (
                 <div className="space-y-2">
@@ -4347,16 +5102,45 @@ export default function CalendarPage() {
                     <div className="flex items-center gap-2">
                       <Users className="w-5 h-5 text-violet-600" />
                       <div>
-                        <p className="font-bold text-gray-900">{t('cal.groupLessonTitle')}</p>
+                        <p className="font-bold text-gray-900">
+                          {isClassGroupSession
+                            ? (selectedEvent?.topic || t('school.groups.title'))
+                            : t('cal.groupLessonTitle')}
+                        </p>
                         <p className="text-xs text-violet-600">
-                          {t('cal.studentsCount', { count: String(selectedGroupSessions.length) })}
-                          {selectedEvent?.topic && ` • ${selectedEvent.topic}`}
+                          {isClassGroupSession
+                            ? `${t('school.groups.members')}: ${classGroupParticipants.length}`
+                            : t('cal.studentsCount', { count: String(selectedGroupSessions.length) })}
+                          {!isClassGroupSession && selectedEvent?.topic && ` • ${selectedEvent.topic}`}
                         </p>
                       </div>
                     </div>
                   </div>
                   <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                    {selectedGroupSessions.map((session, idx) => (
+                    {(isClassGroupSession ? classGroupParticipants : selectedGroupSessions.map((session) => ({
+                      student_id: session.student_id,
+                      full_name: session.student?.full_name || '—',
+                      grade: session.student?.grade,
+                      session,
+                    }))).map((participant) => {
+                      const session = participant.session;
+                      if (!session && isClassGroupSession) {
+                        return (
+                          <div key={participant.student_id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg opacity-80">
+                            <div className="w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                              {participant.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-900">{participant.full_name}</p>
+                              {participant.grade && (
+                                <p className="text-xs text-emerald-600">🎓 {participant.grade}</p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+                      if (!session) return null;
+                      return (
                       <div key={session.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
                         <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
                           {session.student?.full_name?.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
@@ -4398,19 +5182,49 @@ export default function CalendarPage() {
                               );
                             }
                             if (session.status === 'active') {
-                              return (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 px-2 text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
-                                  disabled={noShowSavingId === session.id || saving}
-                                  onClick={() => void handleMarkStudentNoShowForSession(session)}
-                                >
-                                  <UserX className="w-3.5 h-3.5 mr-1" />
-                                  {noShowSavingId === session.id ? '…' : t('common.noShow')}
-                                </Button>
-                              );
+                              if (requiresStatusConfirmation && isAfter(new Date(), rowEnd)) {
+                                return (
+                                  <div className="flex flex-wrap gap-1 justify-end">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      className="h-8 px-2 text-xs bg-green-600 hover:bg-green-700 text-white"
+                                      disabled={noShowSavingId === session.id || saving}
+                                      onClick={() => void handleConfirmSessionStatus(session, 'completed')}
+                                    >
+                                      <CheckCircle className="w-3.5 h-3.5 mr-1" />
+                                      {t('cal.statusHappened')}
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 px-2 text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
+                                      disabled={noShowSavingId === session.id || saving}
+                                      onClick={() => void handleConfirmSessionStatus(session, 'no_show')}
+                                    >
+                                      <UserX className="w-3.5 h-3.5 mr-1" />
+                                      {noShowSavingId === session.id ? '…' : t('cal.statusNoShowOpt')}
+                                    </Button>
+                                  </div>
+                                );
+                              }
+                              if (!requiresStatusConfirmation) {
+                                return (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
+                                    disabled={noShowSavingId === session.id || saving}
+                                    onClick={() => void handleMarkStudentNoShowForSession(session)}
+                                  >
+                                    <UserX className="w-3.5 h-3.5 mr-1" />
+                                    {noShowSavingId === session.id ? '…' : t('common.noShow')}
+                                  </Button>
+                                );
+                              }
+                              return null;
                             }
                             if (session.status === 'completed' && rowFuture) {
                               return (
@@ -4455,20 +5269,20 @@ export default function CalendarPage() {
                           )}
                         </div>
                       </div>
-                    ))}
+                    );})}
                   </div>
                 </div>
               ) : (
-                <div className="bg-indigo-50 rounded-xl px-4 py-3 flex items-center gap-3">
+                <div className="bg-indigo-50 rounded-xl px-4 py-3 flex items-start gap-3 min-w-0">
                   <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
                     {selectedEvent?.student?.full_name?.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-900">{selectedEvent?.student?.full_name}</p>
+                    <p className="font-semibold text-gray-900 break-words">{selectedEvent?.student?.full_name}</p>
                     {selectedEvent?.student?.grade && (
                       <p className="text-xs text-emerald-600 font-medium">🎓 {selectedEvent.student.grade}</p>
                     )}
-                    <p className="text-xs text-gray-500 truncate">
+                    <p className="text-xs text-gray-500 break-words">
                       {contactVisibility
                         ? formatContactForTutorView(
                           selectedEvent?.student?.email,
@@ -4477,7 +5291,7 @@ export default function CalendarPage() {
                         )
                         : (orgPolicy.isOrgTutor ? '—' : ((selectedEvent?.student?.email || '').trim() || '—'))}
                     </p>
-                    <p className="text-xs text-gray-500 truncate">
+                    <p className="text-xs text-gray-500 break-words">
                       {contactVisibility
                         ? formatContactForTutorView(
                           selectedEvent?.student?.phone,
@@ -4487,7 +5301,7 @@ export default function CalendarPage() {
                         : (orgPolicy.isOrgTutor ? '—' : ((selectedEvent?.student?.phone || '').trim() || '—'))}
                     </p>
                     {selectedEvent?.topic && (
-                      <p className="text-xs text-indigo-600 mt-0.5 font-medium">{selectedEvent.topic}</p>
+                      <p className="text-xs text-indigo-600 mt-0.5 font-medium break-words">{selectedEvent.topic}</p>
                     )}
                   </div>
                 </div>
@@ -4531,14 +5345,14 @@ export default function CalendarPage() {
 
               <div
                 className={cn(
-                  'grid gap-2 text-sm',
-                  orgPolicy.hideMoney ? 'grid-cols-1' : 'grid-cols-3',
+                  'grid gap-2 text-sm min-w-0',
+                  orgPolicy.hideMoney ? 'grid-cols-1' : 'grid-cols-2 sm:grid-cols-3',
                 )}
               >
                 {!orgPolicy.hideMoney && (
                 <div className="bg-gray-50 rounded-xl p-2 sm:p-3 text-center">
                   <p className="text-xs text-gray-400 mb-1">{t('dash.priceLabel')}</p>
-                  <p className="font-bold text-gray-900">€{selectedEvent?.price || '–'}</p>
+                  <p className="font-bold text-gray-900">{selectedEvent?.price != null ? fmt(selectedEvent.price) : '–'}</p>
                 </div>
                 )}
                 <div className="bg-gray-50 rounded-xl p-2 sm:p-3 text-center flex flex-col items-center justify-center">
@@ -4551,6 +5365,8 @@ export default function CalendarPage() {
                     orgTutorCopy={orgPolicy.isOrgTutor}
                     hidePaymentStatus={orgPolicy.isOrgTutor}
                     endTime={selectedEvent?.end_time}
+                    pendingConfirmation={requiresStatusConfirmation}
+                    moved={pkMonthlyPackages && !!(selectedEvent as any)?.original_start_time && !!(selectedEvent as any)?.lesson_package_id}
                   />
                 </div>
                 {!orgPolicy.hideMoney && !orgPolicy.isOrgTutor && (
@@ -4567,17 +5383,30 @@ export default function CalendarPage() {
                 )}
               </div>
 
+              {selectedEvent?.reschedule_reason && selectedEvent.status !== 'cancelled' && (
+                <div className="p-3 rounded-xl border border-blue-100 bg-blue-50">
+                  <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1">{t('common.rescheduleReason')}</p>
+                  <p className="text-sm text-blue-900 whitespace-pre-wrap">{selectedEvent.reschedule_reason}</p>
+                </div>
+              )}
+
               {/* Comment – always visible and editable in view mode */}
               <div className="space-y-2 mt-3 pt-3 border-t border-gray-100">
                 <p className="text-sm font-semibold text-gray-700">{t('dash.commentLabel')}</p>
+                {trialCommentHint === 'optional' && (
+                  <p className="text-xs text-gray-500 break-words">{t('cal.trialCommentOptionalHint')}</p>
+                )}
+                {trialCommentHint === 'required' && (
+                  <p className="text-xs text-amber-800 break-words">{t('cal.trialCommentRequiredHint')}</p>
+                )}
                 <textarea
                   value={viewCommentText}
                   onChange={(e) => setViewCommentText(e.target.value)}
                   placeholder={t('cal.commentPlaceholder')}
-                  className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
+                  className="w-full min-w-0 max-w-full box-border p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
                   rows={2}
                 />
-                <label className="flex items-center gap-2 cursor-pointer">
+                <label className="flex items-start gap-2 cursor-pointer min-w-0">
                   <input
                     type="checkbox"
                     checked={viewShowToStudent}
@@ -4586,9 +5415,9 @@ export default function CalendarPage() {
                       setViewShowToStudent(e.target.checked);
                     }}
                     disabled={forceTrialCommentVisibility}
-                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 flex-shrink-0"
                   />
-                  <span className="text-sm text-gray-700">
+                  <span className="text-sm text-gray-700 min-w-0 break-words">
                     {forceTrialCommentVisibility
                       ? t('cal.orgCommentAutoSend')
                       : t('cal.showToStudentCheckbox')}
@@ -4617,6 +5446,17 @@ export default function CalendarPage() {
                   href={normalizeUrl(selectedEvent.meeting_link) || undefined}
                   target="_blank"
                   rel="noreferrer"
+                  onClick={() => recordJoinClick({
+                    id: String((selectedEvent as any).id),
+                    tutor_id: currentUserId,
+                    start_time: selectedEvent.start_time instanceof Date
+                      ? selectedEvent.start_time.toISOString()
+                      : String((selectedEvent as any).start_time),
+                    end_time: selectedEvent.end_time instanceof Date
+                      ? selectedEvent.end_time.toISOString()
+                      : ((selectedEvent as any)?.end_time ? String((selectedEvent as any).end_time) : null),
+                    status: selectedEvent.status,
+                  }, 'tutor')}
                   className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 text-blue-600 text-sm font-semibold hover:bg-blue-100 transition-colors border border-blue-100 mt-2"
                 >
                   {t('cal.joinVideoCall')}
@@ -4658,6 +5498,7 @@ export default function CalendarPage() {
               {cancellationReason.length > 0 && cancellationReason.trim().length < 5 && (
                 <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(cancellationReason.trim().length) })}</p>
               )}
+              {!hideProKlaseOrgTutorFreeTime && (
               <label className="flex items-start gap-2 cursor-pointer pt-1">
                 <Checkbox
                   checked={leaveFreeTimeOnCancel}
@@ -4665,6 +5506,7 @@ export default function CalendarPage() {
                 />
                 <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
               </label>
+              )}
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); }} className="rounded-xl flex-1">
                   {t('cal.cancelBtn')}
@@ -4677,9 +5519,15 @@ export default function CalendarPage() {
             </div>
           )}
 
+          {eventModalNotice && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {eventModalNotice}
+            </div>
+          )}
+
           {cancelConfirmId !== selectedEvent?.id && (
           <div className="flex flex-col gap-2 pt-2">
-            {selectedEvent?.status === 'completed' && (
+            {selectedEvent?.status === 'completed' && !hideProKlaseOrgTutorCancel && (
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="destructive"
@@ -4697,7 +5545,81 @@ export default function CalendarPage() {
                 </Button>
               </div>
             )}
+            {requiresStatusConfirmation &&
+              !isGroupSession &&
+              selectedEvent?.status === 'active' &&
+              isAfter(new Date(), selectedEvent.end_time) && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 space-y-2">
+                  <p className="text-sm font-semibold text-amber-900">{t('cal.confirmStatusPrompt')}</p>
+                  <p className="text-xs text-amber-800/80">{t('cal.confirmStatusDesc')}</p>
+                  <div className={`grid gap-2 ${hideProKlaseOrgTutorCancel ? 'grid-cols-2' : 'grid-cols-2'}`}>
+                    <Button
+                      size="sm"
+                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'completed')}
+                      disabled={noShowSavingId === selectedEvent.id}
+                      className="rounded-xl bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      <CheckCircle className="w-4 h-4 mr-1" />
+                      {t('cal.statusHappened')}
+                    </Button>
+                    {!hideProKlaseOrgTutorCancel && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'completed', true)}
+                      disabled={noShowSavingId === selectedEvent.id}
+                      className="rounded-xl text-amber-800 border-amber-300 hover:bg-amber-100"
+                    >
+                      <Clock className="w-4 h-4 mr-1" />
+                      {t('cal.statusHappenedLate')}
+                    </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'no_show')}
+                      disabled={noShowSavingId === selectedEvent.id}
+                      className="rounded-xl text-rose-700 border-rose-200 hover:bg-rose-50"
+                    >
+                      <UserX className="w-4 h-4 mr-1" />
+                      {t('cal.statusNoShowOpt')}
+                    </Button>
+                    {!hideProKlaseOrgTutorCancel && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'cancelled')}
+                      disabled={noShowSavingId === selectedEvent.id}
+                      className="rounded-xl text-gray-700 border-gray-300 hover:bg-gray-100"
+                    >
+                      <XCircle className="w-4 h-4 mr-1" />
+                      {t('cal.statusCancelledOpt')}
+                    </Button>
+                    )}
+                  </div>
+                </div>
+              )}
             {selectedEvent?.status === 'active' && (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  onClick={openSessionEditor}
+                  disabled={saving}
+                  size="sm"
+                  className="rounded-xl flex-1 text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+                >
+                  <CalendarDays className="w-4 h-4 mr-1" />
+                  {t('cal.moveLesson')}
+                </Button>
+              </div>
+            )}
+            {selectedEvent?.status === 'active' &&
+              !hideProKlaseOrgTutorCancel &&
+              !(
+                requiresStatusConfirmation &&
+                !isGroupSession &&
+                isAfter(new Date(), selectedEvent.end_time)
+              ) && (
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="destructive"
@@ -5089,6 +6011,8 @@ export default function CalendarPage() {
                   setEditPrice(Number(selectedEvent.price ?? 0) || 0);
                   setEditTutorComment(selectedEvent.tutor_comment || '');
                   setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
+                  setRescheduleReason('');
+                  setRescheduleRequestedBy('');
                   setIsEditingSession(true);
                 }
               }}
@@ -5150,7 +6074,7 @@ export default function CalendarPage() {
               onClick={() => setGroupCancelChoice(null)}
               className="rounded-xl"
             >
-              Atgal
+              {t('common.back')}
             </Button>
             <Button
               variant="destructive"
@@ -5167,27 +6091,254 @@ export default function CalendarPage() {
       </Dialog>
 
       {/* === SLOT CHOICE POPUP (C2) === */}
-      <Dialog open={slotChoiceOpen} onOpenChange={setSlotChoiceOpen}>
-        <DialogContent className="max-w-xs">
+      <Dialog
+        open={slotChoiceOpen}
+        onOpenChange={(open) => {
+          setSlotChoiceOpen(open);
+          if (!open) setSlotChoiceStep('choice');
+        }}
+      >
+        <DialogContent className={slotChoiceStep === 'free-time' ? 'max-w-md overflow-x-hidden' : 'max-w-xs'}>
           <DialogHeader>
-            <DialogTitle>{t('cal.slotChoiceTitle')}</DialogTitle>
+            <DialogTitle>
+              {slotChoiceStep === 'free-time' ? t('cal.createFreeTime') : t('cal.slotChoiceTitle')}
+            </DialogTitle>
+            {pendingSlot && (
+              <DialogDescription>
+                {format(pendingSlot.start, 'yyyy-MM-dd HH:mm')} – {format(pendingSlot.end, 'HH:mm')}
+              </DialogDescription>
+            )}
           </DialogHeader>
-          <div className="flex flex-col gap-3 pt-2">
-            <Button variant="outline" className="justify-start gap-3 h-12" onClick={openCreateFreeTimeFromSlot}>
-              <Clock className="w-5 h-5 text-green-600" />
-              {t('cal.createFreeTime')}
-            </Button>
-            <Button
-              variant="outline"
-              className="justify-start gap-3 h-12"
-              onClick={openCreateLessonFromSlot}
-              disabled={licenseFrozen}
-              title={licenseFrozen ? t('cal.licenseFrozenTitle') : undefined}
-            >
-              <Plus className="w-5 h-5 text-indigo-600" />
-              {t('cal.createLessonOption')}
-            </Button>
-          </div>
+          {slotChoiceStep === 'choice' ? (
+            <div className="flex flex-col gap-3 pt-2">
+              <Button
+                variant="outline"
+                className="justify-start gap-3 h-12"
+                onClick={() => setSlotChoiceStep('free-time')}
+                disabled={savingFreeTimeFromSlot}
+              >
+                <Clock className="w-5 h-5 text-green-600" />
+                {t('cal.createFreeTime')}
+              </Button>
+              <Button
+                variant="outline"
+                className="justify-start gap-3 h-12"
+                onClick={openCreateLessonFromSlot}
+                disabled={licenseFrozen}
+                title={licenseFrozen ? t('cal.licenseFrozenTitle') : undefined}
+              >
+                <Plus className="w-5 h-5 text-indigo-600" />
+                {t('cal.createLessonOption')}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4 pt-1 min-w-0">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <Checkbox
+                  checked={freeTimeRepeat}
+                  onChange={(e) => setFreeTimeRepeat(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="text-sm font-medium text-gray-900">{t('cal.freeTimeRepeat')}</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">{t('cal.freeTimeRepeatHint')}</span>
+                </span>
+              </label>
+
+              {freeTimeRepeat && (
+                <>
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-gray-800">{t('cal.freeTimeDays')}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { value: 1, label: t('avail.monday') },
+                        { value: 2, label: t('avail.tuesday') },
+                        { value: 3, label: t('avail.wednesday') },
+                        { value: 4, label: t('avail.thursday') },
+                        { value: 5, label: t('avail.friday') },
+                        { value: 6, label: t('avail.saturday') },
+                        { value: 0, label: t('avail.sunday') },
+                      ].map((day) => {
+                        const active = freeTimeDays.includes(day.value);
+                        return (
+                          <button
+                            key={day.value}
+                            type="button"
+                            onClick={() => {
+                              setFreeTimeDays((prev) => {
+                                const next = prev.includes(day.value)
+                                  ? prev.filter((d) => d !== day.value)
+                                  : [...prev, day.value];
+                                return next;
+                              });
+                              setFreeTimeDayTimes((prev) => {
+                                if (prev[day.value] || !pendingSlot) return prev;
+                                return {
+                                  ...prev,
+                                  [day.value]: {
+                                    start: format(pendingSlot.start, 'HH:mm'),
+                                    end: format(pendingSlot.end, 'HH:mm'),
+                                  },
+                                };
+                              });
+                            }}
+                            className={cn(
+                              'px-2.5 py-1 rounded-full text-xs font-medium border transition-colors',
+                              active
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300',
+                            )}
+                          >
+                            {day.label.slice(0, 3)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-gray-800">{t('cal.freeTimeTimeMode')}</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setFreeTimeSameTimes(true)}
+                        className={cn(
+                          'px-3 py-2 rounded-xl text-xs font-medium border text-left',
+                          freeTimeSameTimes ? 'border-indigo-500 bg-indigo-50 text-indigo-800' : 'border-gray-200 text-gray-600',
+                        )}
+                      >
+                        {t('cal.freeTimeSameTimes')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFreeTimeSameTimes(false)}
+                        className={cn(
+                          'px-3 py-2 rounded-xl text-xs font-medium border text-left',
+                          !freeTimeSameTimes ? 'border-indigo-500 bg-indigo-50 text-indigo-800' : 'border-gray-200 text-gray-600',
+                        )}
+                      >
+                        {t('cal.freeTimeCustomTimes')}
+                      </button>
+                    </div>
+                    {!freeTimeSameTimes && pendingSlot && (
+                      <div className="space-y-2 pt-1 min-w-0">
+                        {freeTimeDays.map((day) => {
+                          const label = [
+                            t('avail.sunday'),
+                            t('avail.monday'),
+                            t('avail.tuesday'),
+                            t('avail.wednesday'),
+                            t('avail.thursday'),
+                            t('avail.friday'),
+                            t('avail.saturday'),
+                          ][day];
+                          const times = freeTimeDayTimes[day] || {
+                            start: format(pendingSlot.start, 'HH:mm'),
+                            end: format(pendingSlot.end, 'HH:mm'),
+                          };
+                          return (
+                            <div key={day} className="rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2.5 space-y-2 min-w-0">
+                              <p className="text-xs font-medium text-gray-700">{label}</p>
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <label className="flex flex-col gap-1 min-w-0">
+                                  <span className="text-[11px] text-gray-400">{t('avail.startTime')}</span>
+                                  <CompactTimeSelect
+                                    value={times.start}
+                                    onChange={(v) => setFreeTimeDayTimes((prev) => ({
+                                      ...prev,
+                                      [day]: { ...times, start: v },
+                                    }))}
+                                    minuteStep={5}
+                                  />
+                                </label>
+                                <span className="hidden sm:block text-gray-300 pt-5">–</span>
+                                <label className="flex flex-col gap-1 min-w-0">
+                                  <span className="text-[11px] text-gray-400">{t('avail.endTime')}</span>
+                                  <CompactTimeSelect
+                                    value={times.end}
+                                    onChange={(v) => setFreeTimeDayTimes((prev) => ({
+                                      ...prev,
+                                      [day]: { ...times, end: v },
+                                    }))}
+                                    minuteStep={5}
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-gray-800">{t('cal.freeTimeUntil')}</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setFreeTimeUntilMode('weeks')}
+                        className={cn(
+                          'px-3 py-2 rounded-xl text-xs font-medium border',
+                          freeTimeUntilMode === 'weeks' ? 'border-indigo-500 bg-indigo-50 text-indigo-800' : 'border-gray-200 text-gray-600',
+                        )}
+                      >
+                        {t('cal.freeTimeUntilWeeks')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFreeTimeUntilMode('date')}
+                        className={cn(
+                          'px-3 py-2 rounded-xl text-xs font-medium border',
+                          freeTimeUntilMode === 'date' ? 'border-indigo-500 bg-indigo-50 text-indigo-800' : 'border-gray-200 text-gray-600',
+                        )}
+                      >
+                        {t('cal.freeTimeUntilDate')}
+                      </button>
+                    </div>
+                    {freeTimeUntilMode === 'weeks' ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min={1}
+                          max={52}
+                          value={freeTimeWeeks}
+                          onChange={(e) => setFreeTimeWeeks(Number(e.target.value) || 1)}
+                          className="w-20 rounded-xl"
+                        />
+                        <span className="text-sm text-gray-500">{t('cal.freeTimeWeeksUnit')}</span>
+                      </div>
+                    ) : (
+                      <DateInput
+                        value={freeTimeUntilDate}
+                        min={pendingSlot ? format(pendingSlot.start, 'yyyy-MM-dd') : undefined}
+                        onChange={(e) => setFreeTimeUntilDate(e.target.value)}
+                      />
+                    )}
+                  </div>
+                </>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setSlotChoiceStep('choice')}
+                  disabled={savingFreeTimeFromSlot}
+                >
+                  {t('common.back')}
+                </Button>
+                <Button
+                  type="button"
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700"
+                  onClick={openCreateFreeTimeFromSlot}
+                  disabled={savingFreeTimeFromSlot}
+                >
+                  {savingFreeTimeFromSlot ? t('avail.saving') : t('cal.freeTimeCreate')}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -5197,6 +6348,7 @@ export default function CalendarPage() {
         onOpenChange={(open) => {
           setIsAvailabilityModalOpen(open);
           if (!open) {
+            setAvailabilityPrefill(null);
             // Refetch when closing so the calendar gets new availability slots immediately
             fetchData();
           }
@@ -5209,7 +6361,7 @@ export default function CalendarPage() {
               {t('cal.setWorkHours')}
             </DialogDescription>
           </DialogHeader>
-          <AvailabilityManager />
+          <AvailabilityManager prefill={availabilityPrefill} />
         </DialogContent>
       </Dialog>
       {/* === UPCOMING SESSIONS LIST MODAL === */}
@@ -5339,6 +6491,31 @@ export default function CalendarPage() {
             </div>
 
             <div className="space-y-2">
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('cal.linkLabel')}</label>
+              <Input
+                type="url"
+                value={slotEditMeetingLink}
+                onChange={(e) => setSlotEditMeetingLink(e.target.value)}
+                className="rounded-xl"
+                placeholder="https://meet.google.com/..."
+              />
+              <p className="text-xs text-gray-400">{t('cal.linkUsedAsDefault')}</p>
+            </div>
+
+            <label className="flex items-start gap-3 rounded-xl border border-gray-100 bg-gray-50/80 p-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                checked={slotEditPublicBookable}
+                onChange={(e) => setSlotEditPublicBookable(e.target.checked)}
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-gray-800">{t('avail.publicBookable')}</span>
+                <span className="block text-xs text-gray-500 mt-0.5">{t('avail.publicBookableHint')}</span>
+              </span>
+            </label>
+
+            <div className="space-y-2">
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('cal.subjectsForSlot')}</label>
               <div className="text-xs text-gray-400 mb-2">
                 {slotEditSubjects.length > 0
@@ -5346,15 +6523,18 @@ export default function CalendarPage() {
                   : t('cal.noSubjectsSelected')}
               </div>
               <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1">
-                {subjects.map(subject => (
+                {subjects.map((subject) => (
                   <label key={subject.id} className="flex items-start gap-2 p-2 rounded-lg border border-gray-100 hover:bg-gray-50 cursor-pointer">
                     <input
                       type="checkbox"
                       className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
                       checked={slotEditSubjects.includes(subject.id)}
                       onChange={(e) => {
-                        if (e.target.checked) setSlotEditSubjects([...slotEditSubjects, subject.id]);
-                        else setSlotEditSubjects(slotEditSubjects.filter(id => id !== subject.id));
+                        if (e.target.checked) {
+                          setSlotEditSubjects((prev) => uniqueSubjectIds([...prev, subject.id]));
+                        } else {
+                          setSlotEditSubjects((prev) => prev.filter((id) => id !== subject.id));
+                        }
                       }}
                     />
                     <div className="flex flex-col">
@@ -5367,24 +6547,14 @@ export default function CalendarPage() {
                         )}
                       </span>
                       {subject.grade_min && subject.grade_max && (
-                        <span className="text-[10px] text-gray-400">{subject.grade_min}-{subject.grade_max === 13 ? 'Stud.' : `${subject.grade_max} kl`}</span>
+                        <span className="text-[10px] text-gray-400">
+                          {subject.grade_min}-{subject.grade_max === 13 ? t('lessonSet.gradeUniversity') : `${subject.grade_max} ${t('lessonSet.gradeShort')}`}
+                        </span>
                       )}
                     </div>
                   </label>
                 ))}
               </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('cal.linkLabel')}</label>
-              <Input
-                type="url"
-                value={slotEditMeetingLink}
-                onChange={(e) => setSlotEditMeetingLink(e.target.value)}
-                className="rounded-xl"
-                placeholder="https://zoom.us/j/... arba https://meet.google.com/..."
-              />
-              <p className="text-xs text-gray-400">{t('cal.linkUsedAsDefault')}</p>
             </div>
 
             {/* Add Student Button */}
@@ -5446,7 +6616,8 @@ export default function CalendarPage() {
                     start_time: slotEditStart,
                     end_time: slotEditEnd,
                     subject_ids: uniqueSubjectIds(slotEditSubjects),
-                    meeting_link: slotEditMeetingLink || null
+                    meeting_link: slotEditMeetingLink || null,
+                    public_bookable: slotEditPublicBookable,
                   }).eq('id', editingSlot.ruleId);
                   if (!error && currentUserId) {
                     try {
@@ -5531,11 +6702,11 @@ export default function CalendarPage() {
                         )}
                         {s.grade_min && s.grade_max && (
                           <span className="text-xs text-gray-500 ml-2">
-                            ({s.grade_min}-{s.grade_max === 13 ? 'Stud.' : `${s.grade_max} kl`})
+                            ({s.grade_min}-{s.grade_max === 13 ? t('lessonSet.gradeUniversity') : `${s.grade_max} ${t('lessonSet.gradeShort')}`})
                           </span>
                         )}
                         <span className="text-xs text-gray-500 ml-2">
-                          ({s.duration_minutes} min{!orgPolicy.hideMoney && <>, €{s.price}</>})
+                          ({s.duration_minutes} min{!orgPolicy.hideMoney && <>, {fmt(s.price)}</>})
                         </span>
                       </SelectItem>
                     ))
@@ -5639,7 +6810,7 @@ export default function CalendarPage() {
                     value={assignMeetingLink}
                     onChange={(e) => setAssignMeetingLink(e.target.value)}
                     className="rounded-xl"
-                    placeholder="https://zoom.us/j/... arba https://meet.google.com/..."
+                    placeholder="https://meet.google.com/..."
                   />
                   <p className="text-xs text-gray-400">
                     {editingSlot?.meetingLink
@@ -5728,7 +6899,7 @@ export default function CalendarPage() {
               {assignSaving ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Sukuriama...
+                  {t('compSch.creating')}
                 </>
               ) : (
                 <>
@@ -5764,7 +6935,7 @@ export default function CalendarPage() {
                   <div>
                     <Label className="text-sm font-semibold text-gray-700 flex items-center gap-1">
                       <CalendarDays className="w-4 h-4" />
-                      Nuo datos *
+                      {t('dateFilter.fromDate')} *
                     </Label>
                     <DateInput
                       value={massCancelStartDate}
@@ -5775,7 +6946,7 @@ export default function CalendarPage() {
                   <div>
                     <Label className="text-sm font-semibold text-gray-700 flex items-center gap-1">
                       <CalendarDays className="w-4 h-4" />
-                      Iki datos *
+                      {t('dateFilter.toDate')} *
                     </Label>
                     <DateInput
                       value={massCancelEndDate}
@@ -5822,7 +6993,7 @@ export default function CalendarPage() {
                   <div className="flex justify-between items-start mb-2">
                     <div>
                       <p className="text-sm font-semibold text-red-900">
-                        Laikotarpis: {format(new Date(massCancelStartDate), 'yyyy-MM-dd')} - {format(new Date(massCancelEndDate), 'yyyy-MM-dd')}
+                        {t('common.period')}: {format(new Date(massCancelStartDate), 'yyyy-MM-dd')} - {format(new Date(massCancelEndDate), 'yyyy-MM-dd')}
                       </p>
                       <p className="text-xs text-red-700 mt-1">
                         {t('cal.massCancelCount', { count: String(massCancelPreviewSessions.length) })}
@@ -5835,7 +7006,7 @@ export default function CalendarPage() {
                       className="text-xs"
                       disabled={massCancelLoading}
                     >
-                      ← Atgal
+                      ← {t('common.back')}
                     </Button>
                   </div>
                 </div>
@@ -5844,7 +7015,7 @@ export default function CalendarPage() {
                   <div className="flex items-start gap-2">
                     <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm font-semibold text-amber-900">Svarbu!</p>
+                      <p className="text-sm font-semibold text-amber-900">{t('lessonSet.important')}</p>
                       <p className="text-xs text-amber-800 mt-1">
                         {t('cal.massCancelNote')}
                       </p>
@@ -5873,7 +7044,7 @@ export default function CalendarPage() {
                             )}
                           </div>
                           {session.price && !orgPolicy.hideMoney && (
-                            <p className="text-sm font-semibold text-gray-700">€{session.price.toFixed(2)}</p>
+                            <p className="text-sm font-semibold text-gray-700">{fmt(session.price)}</p>
                           )}
                         </div>
                       </div>
@@ -5910,7 +7081,7 @@ export default function CalendarPage() {
                     disabled={massCancelLoading}
                     className="flex-1 rounded-lg"
                   >
-                    Atgal
+                    {t('common.back')}
                   </Button>
                   <Button
                     onClick={handleMassCancelConfirm}

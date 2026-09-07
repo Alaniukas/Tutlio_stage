@@ -6,6 +6,14 @@ import {
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
+import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
+import { defaultSessionPaymentStatusForStudent } from '@/lib/studentPaymentModel';
+import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
+import {
+  contractedLessonsPerWeek,
+  resolveOrganizationLessonPrice,
+  type OrganizationDynamicPricingRule,
+} from '@/lib/organizationDynamicPricing';
 
 type SubjectLite = {
   id: string;
@@ -14,6 +22,7 @@ type SubjectLite = {
   duration_minutes?: number | null;
   is_group?: boolean | null;
   max_students?: number | null;
+  is_trial?: boolean | null;
 };
 
 type PricingRow = { student_id: string; subject_id: string; price: number };
@@ -29,6 +38,106 @@ type CreatedSessionRow = {
   start_time: string;
   end_time: string;
 };
+
+type TrialSubjectMeta = {
+  subject: SubjectLite;
+  price: number;
+  durationMinutes: number;
+  topic: string;
+};
+
+/** Resolve org trial defaults and the tutor's trial subject (create if missing). */
+export async function resolveOrCreateTrialSubject(
+  supabase: SupabaseClient,
+  tutorId: string,
+  priceOverride?: number,
+  options?: { useOrgPriceOnly?: boolean },
+): Promise<TrialSubjectMeta> {
+  const { data: tutorOrgRow } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', tutorId)
+    .maybeSingle();
+  let featObj: Record<string, unknown> = {};
+  const trialOrgId = (tutorOrgRow as { organization_id?: string | null })?.organization_id;
+  if (trialOrgId) {
+    const { data: orgRow } = await supabase
+      .from('organizations')
+      .select('features')
+      .eq('id', trialOrgId)
+      .maybeSingle();
+    const feat = (orgRow as { features?: unknown })?.features;
+    if (feat && typeof feat === 'object' && !Array.isArray(feat)) featObj = feat as Record<string, unknown>;
+  }
+  const trialName =
+    typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
+      ? String(featObj.trial_lesson_topic).trim()
+      : 'Bandomoji pamoka';
+  const trialDuration =
+    typeof featObj.trial_lesson_duration_minutes === 'number'
+      ? Math.max(15, Math.round(featObj.trial_lesson_duration_minutes as number))
+      : 60;
+  const trialPriceDefault =
+    typeof featObj.trial_lesson_price_eur === 'number'
+      ? Math.max(0, featObj.trial_lesson_price_eur as number)
+      : 0;
+
+  const { data: existingTrial } = await supabase
+    .from('subjects')
+    .select('id, name, price, duration_minutes, is_group, max_students, is_trial')
+    .eq('tutor_id', tutorId)
+    .eq('is_trial', true)
+    .maybeSingle();
+
+  let trialSubject = existingTrial as SubjectLite | null;
+  if (!trialSubject) {
+    const { data: createdTrial, error: trialErr } = await supabase
+      .from('subjects')
+      .insert({
+        tutor_id: tutorId,
+        name: trialName,
+        duration_minutes: trialDuration,
+        price: trialPriceDefault,
+        color: '#fbbf24',
+        is_trial: true,
+      })
+      .select('id, name, price, duration_minutes, is_group, max_students, is_trial')
+      .single();
+    if (trialErr || !createdTrial) {
+      throw new Error(trialErr?.message || 'Nepavyko sukurti bandomosios pamokos dalyko.');
+    }
+    trialSubject = createdTrial as SubjectLite;
+  }
+
+  const requestedPrice = Number(priceOverride);
+  const price =
+    options?.useOrgPriceOnly
+      ? trialPriceDefault
+      : Number.isFinite(requestedPrice) && requestedPrice >= 0
+        ? requestedPrice
+        : Number(trialSubject.price ?? trialPriceDefault);
+
+  return {
+    subject: trialSubject,
+    price,
+    durationMinutes: trialDuration,
+    topic: trialName,
+  };
+}
+
+async function persistRecurringPlanFrequency(
+  supabase: SupabaseClient,
+  studentIds: string[],
+  lessonsPerWeek: number,
+): Promise<void> {
+  if (!lessonsPerWeek || lessonsPerWeek < 1) return;
+  for (const studentId of studentIds) {
+    await supabase.rpc('set_student_pricing_frequency', {
+      p_student_id: studentId,
+      p_lessons_per_week: lessonsPerWeek,
+    });
+  }
+}
 
 function rawPaymentStatusForEmail(paid: boolean, payment_status?: string | null): string {
   if (!paid) return 'pending';
@@ -75,6 +184,7 @@ async function notifyAfterOrgAdminSessionsCreated(
   sessionsForNotify: CreatedSessionRow[],
   subjectLabel: string,
   isRecurring = false,
+  isOpenEnded = false,
 ) {
   if (sessionsForNotify.length === 0) return;
 
@@ -146,9 +256,15 @@ async function notifyAfterOrgAdminSessionsCreated(
         time: format(new Date(s.start_time), 'HH:mm'),
       }));
       const firstStart = new Date(firstSess.start_time);
-      const weekdayNames = ['sekmadienį', 'pirmadienį', 'antradienį', 'trečiadienį', 'ketvirtadienį', 'penktadienį', 'šeštadienį'];
-      const recurringWeekday = weekdayNames[getDay(firstStart)];
+      const recurringWeekday = getDay(firstStart);
       const recurringTime = format(firstStart, 'HH:mm');
+      const schedule = Array.from(new Map(
+        studentSessions.map((session) => {
+          const start = new Date(session.start_time);
+          const item = { weekday: getDay(start), time: format(start, 'HH:mm') };
+          return [`${item.weekday}-${item.time}`, item] as const;
+        }),
+      ).values()).sort((a, b) => a.weekday - b.weekday || a.time.localeCompare(b.time));
 
       if (st.email) {
         void sendEmail({
@@ -164,6 +280,8 @@ async function notifyAfterOrgAdminSessionsCreated(
             sessions: sessionDates,
             recurringWeekday,
             recurringTime,
+            ongoingSchedule: isOpenEnded,
+            schedule,
             ...orgIdPayload,
           },
         }).catch(err => console.error('[OrgSchedule] recurring student email', err));
@@ -185,6 +303,8 @@ async function notifyAfterOrgAdminSessionsCreated(
             sessions: sessionDates,
             recurringWeekday,
             recurringTime,
+            ongoingSchedule: isOpenEnded,
+            schedule,
             paymentReminderNote: true,
             ...orgIdPayload,
           },
@@ -213,6 +333,7 @@ async function notifyAfterOrgAdminSessionsCreated(
         type: 'booking_confirmation',
         to: st.email,
         data: {
+          sessionId: sess.id,
           studentName: st.full_name,
           tutorName: tutorProfile?.full_name || '',
           date: format(sStart, 'yyyy-MM-dd'),
@@ -235,6 +356,7 @@ async function notifyAfterOrgAdminSessionsCreated(
         type: 'booking_confirmation',
         to: payerRaw,
         data: {
+          sessionId: sess.id,
           forPayer: true,
           bookedBy: 'org_admin',
           studentName: st.full_name,
@@ -256,6 +378,7 @@ async function notifyAfterOrgAdminSessionsCreated(
         type: 'booking_confirmation',
         to: payerRaw,
         data: {
+          sessionId: sess.id,
           forPayer: true,
           bookedBy: 'org_admin',
           studentName: st.full_name,
@@ -294,22 +417,37 @@ export interface OrgAdminCreateSessionInput {
   createRecurringWeekdays?: number[];
   createIsPaid: boolean;
   createPrice: number;
+  /** Create as the tutor's trial subject (bandomoji pamoka) — one-off, individual only. */
+  createIsTrial?: boolean;
+  /** Recurring schedule where the chronologically first session is a trial lesson. */
+  createFirstLessonIsTrial?: boolean;
   createTutorComment: string;
   createShowCommentToStudent: boolean;
+  /** Pro Klasė: compensation lesson — client not charged via package. */
+  createIsMakeup?: boolean;
   subjects: SubjectLite[];
   individualPricing: PricingRow[];
   tutorSubjectPrices?: TutorSubjectPriceRow[];
   orgSubjectTemplateId?: string;
+  /** Reusable multi-create dialogs render their own inline success state. */
+  suppressSuccessAlert?: boolean;
+  dynamicPricingRules?: OrganizationDynamicPricingRule[];
+  /** School class group: tag sessions and book every selected member even if the subject is individual. */
+  classGroupId?: string | null;
+}
+
+export interface OrgAdminCreateSessionResult {
+  /** Ids of the sessions inserted by this call, earliest first. */
+  createdSessionIds: string[];
 }
 
 /**
  * Org admin calendar: create one-off or recurring session(s) for an org tutor (same rules as tutor Calendar).
  */
-export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): Promise<void> {
+export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): Promise<OrgAdminCreateSessionResult> {
   const {
     supabase,
     createTutorId,
-    createSubjectId,
     createStudentId,
     createStudentIds,
     createStartTime,
@@ -321,20 +459,32 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     createRecurringFrequency = 'weekly',
     createRecurringWeekdays = [],
     createIsPaid,
-    createPrice,
+    createIsTrial = false,
+    createFirstLessonIsTrial = false,
     createTutorComment,
     createShowCommentToStudent,
+    createIsMakeup = false,
     subjects,
     individualPricing,
-    tutorSubjectPrices,
-    orgSubjectTemplateId,
+    dynamicPricingRules = [],
+    classGroupId = null,
   } = p;
+  const schoolClassGroupId = classGroupId ? String(classGroupId).trim() : '';
+  let { createSubjectId, createPrice } = p;
 
-  const subj = subjects.find(s => s.id === createSubjectId);
+  let subj = subjects.find(s => s.id === createSubjectId);
   if (!subj) throw new Error('Dalykas nerastas.');
-  const tutorSubjPrice = (tutorSubjectPrices || []).find(
-    t => t.tutor_id === createTutorId && t.org_subject_template_id === (orgSubjectTemplateId || ''),
-  );
+
+  if (createIsTrial && createIsRecurring) {
+    throw new Error('Bandomoji pamoka negali būti pasikartojanti. Naudokite „Pirma pamoka bandomoji“.');
+  }
+
+  if (createIsTrial && !createIsRecurring) {
+    const trialMeta = await resolveOrCreateTrialSubject(supabase, createTutorId, createPrice);
+    createSubjectId = trialMeta.subject.id;
+    subj = trialMeta.subject;
+    createPrice = trialMeta.price;
+  }
   let effectiveShowCommentToStudent = createShowCommentToStudent;
   if ((createTutorComment || '').trim()) {
     try {
@@ -360,12 +510,24 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     }
   }
   const isGroupLesson = Boolean(subj.is_group);
-  const studentIdsToCreate = isGroupLesson
-    ? createStudentIds
+  const requestedStudentIds = isGroupLesson || schoolClassGroupId
+    ? (createStudentIds.length ? createStudentIds : (createStudentId ? [createStudentId] : []))
     : (createStudentId ? [createStudentId] : []);
-  if (studentIdsToCreate.length === 0) {
+  if (requestedStudentIds.length === 0) {
     throw new Error(isGroupLesson ? 'Select at least one student for a group lesson.' : 'Select a student.');
   }
+
+  // Cross-tutor booking (e.g. free-time search from the student card) must
+  // land on a students row paired with the booked tutor, so the tutor sees the
+  // student on their pages and appears assigned on /students. No-op when the
+  // selected row already belongs to the tutor.
+  const studentIdsToCreate = [
+    ...new Set(
+      await Promise.all(
+        requestedStudentIds.map((sid) => ensureStudentPairedWithTutor(supabase, sid, createTutorId)),
+      ),
+    ),
+  ];
 
   const startDate = new Date(createStartTime);
   const endDate = new Date(createEndTime);
@@ -390,6 +552,48 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
   }
 
   const durationMs = endDate.getTime() - startDate.getTime();
+
+  const { data: studentPaymentRows } = await supabase
+    .from('students')
+    .select('id, payment_model, grade, pricing_lessons_per_week')
+    .in('id', studentIdsToCreate);
+  const paymentModelByStudentId = new Map(
+    (studentPaymentRows ?? []).map((row: { id: string; payment_model?: string | null }) => [
+      row.id,
+      row.payment_model ?? null,
+    ]),
+  );
+  const pricingStudentById = new Map(
+    (studentPaymentRows ?? []).map((row: {
+      id: string;
+      grade?: string | null;
+      pricing_lessons_per_week?: number | null;
+    }) => [row.id, row]),
+  );
+  const planFrequency = contractedLessonsPerWeek(
+    createIsRecurring,
+    createRecurringWeekdays,
+    null,
+  );
+  const pricingRulesForSubject = subj.is_group || subj.is_trial ? [] : dynamicPricingRules;
+  const priceByStudentId = new Map(
+    studentIdsToCreate.map((studentId) => {
+      const individualPrice = individualPricing.find(
+        (row) => row.student_id === studentId && row.subject_id === createSubjectId,
+      )?.price;
+      const student = pricingStudentById.get(studentId);
+      return [
+        studentId,
+        resolveOrganizationLessonPrice({
+          rules: pricingRulesForSubject,
+          student,
+          lessonsPerWeek: createIsRecurring ? planFrequency : student?.pricing_lessons_per_week,
+          individualPrice,
+          fallbackPrice: createPrice,
+        }),
+      ];
+    }),
+  );
 
   const syncGoogle = (sessionId: string) => {
     void (async () => {
@@ -422,10 +626,6 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       }
 
       for (const studentId of studentIdsToCreate) {
-        const pricing = individualPricing.find(
-          row => row.student_id === studentId && row.subject_id === createSubjectId,
-        );
-        const studentPrice = pricing?.price ?? tutorSubjPrice?.price ?? subj.price ?? createPrice;
         const { data: template, error: tErr } = await supabase
           .from('recurring_individual_sessions')
           .insert({
@@ -439,8 +639,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
             end_date: (createRecurringEndDate || '').trim() || null,
             meeting_link: createMeetingLink || null,
             topic: createTopic || null,
-            price: studentPrice,
+            price: priceByStudentId.get(studentId) ?? createPrice,
             active: true,
+            frequency: freq,
           })
           .select('id, student_id')
           .single();
@@ -455,21 +656,29 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       }
     }
 
-    const packagesByStudent = new Map<string, any>();
+    type PackageForRecurring = {
+      id: string;
+      available_lessons: number;
+      reserved_lessons: number;
+      item_id: string;
+      item_available_lessons: number;
+      item_reserved_lessons: number;
+    };
+    const packagesByStudent = new Map<string, PackageForRecurring>();
     if (!createIsPaid && createSubjectId) {
       const uniqueStudentIds = [...new Set(recurringTemplates.map(t => t.student_id))];
       for (const sid of uniqueStudentIds) {
-        const { data: packages } = await supabase
-          .from('lesson_packages')
-          .select('*')
-          .eq('student_id', sid)
-          .eq('subject_id', createSubjectId)
-          .eq('active', true)
-          .eq('paid', true)
-          .gt('available_lessons', 0)
-          .order('created_at', { ascending: true })
-          .limit(1);
-        if (packages?.[0]) packagesByStudent.set(sid, packages[0]);
+        const match = await findActivePackageForBooking(supabase, { studentId: sid, subjectId: createSubjectId });
+        if (match) {
+          packagesByStudent.set(sid, {
+            id: match.pkg.id,
+            available_lessons: match.pkg.available_lessons,
+            reserved_lessons: match.pkg.reserved_lessons,
+            item_id: match.item.id,
+            item_available_lessons: match.item.available_lessons,
+            item_reserved_lessons: match.item.reserved_lessons,
+          });
+        }
       }
     }
 
@@ -481,23 +690,34 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       let current = new Date(template.firstOccurrence);
       while (!isBefore(endLimit, current)) {
         const sessionEnd = new Date(current.getTime() + durationMs);
-        const pricing = individualPricing.find(
-          row => row.student_id === template.student_id && row.subject_id === createSubjectId,
-        );
-        const studentPrice = pricing?.price ?? tutorSubjPrice?.price ?? subj.price ?? createPrice;
+        const studentPaymentModel = paymentModelByStudentId.get(template.student_id) ?? null;
         let sessionPaid = createIsPaid;
-        let sessionPaymentStatus = createIsPaid ? 'paid' : 'pending';
+        let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentPaymentModel, {
+          paid: createIsPaid,
+          hasPackage: false,
+        });
         let lessonPackageId: string | null = null;
         if (!createIsPaid) {
           const pkg = packagesByStudent.get(template.student_id);
           if (pkg) {
             const used = packagesUsage.get(pkg.id) || 0;
-            if (pkg.available_lessons - used > 0) {
+            const remaining = Math.min(pkg.available_lessons, pkg.item_available_lessons) - used;
+            if (remaining > 0) {
               lessonPackageId = pkg.id;
               sessionPaid = true;
               sessionPaymentStatus = 'confirmed';
               packagesUsage.set(pkg.id, used + 1);
+            } else {
+              sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentPaymentModel, {
+                paid: false,
+                hasPackage: false,
+              });
             }
+          } else {
+            sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentPaymentModel, {
+              paid: false,
+              hasPackage: false,
+            });
           }
         }
         sessionsRows.push({
@@ -509,7 +729,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           status: 'active',
           meeting_link: createMeetingLink || null,
           topic: createTopic || null,
-          price: studentPrice,
+          price: priceByStudentId.get(template.student_id) ?? createPrice,
           paid: sessionPaid,
           payment_status: sessionPaymentStatus,
           lesson_package_id: lessonPackageId,
@@ -518,8 +738,29 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           recurring_session_id: template.id,
           created_by_role: 'org_admin',
           available_spots: subj.is_group ? subj.max_students : null,
+          ...(schoolClassGroupId
+            ? { class_group_id: schoolClassGroupId, school_billing_kind: 'base' }
+            : {}),
         });
         current = advanceRecurringOccurrence(current, freq);
+      }
+    }
+
+    if (createFirstLessonIsTrial && sessionsRows.length > 0) {
+      const trialMeta = await resolveOrCreateTrialSubject(supabase, createTutorId, undefined, {
+        useOrgPriceOnly: true,
+      });
+      const firstRow = [...sessionsRows].sort(
+        (a, b) => new Date(String(a.start_time)).getTime() - new Date(String(b.start_time)).getTime(),
+      )[0];
+      if (firstRow) {
+        const firstStart = new Date(String(firstRow.start_time));
+        firstRow.subject_id = trialMeta.subject.id;
+        firstRow.price = trialMeta.price;
+        firstRow.end_time = new Date(firstStart.getTime() + trialMeta.durationMinutes * 60 * 1000).toISOString();
+        if (!String(firstRow.topic || '').trim()) {
+          firstRow.topic = trialMeta.topic;
+        }
       }
     }
 
@@ -547,16 +788,26 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     if (insErr) throw new Error(insErr.message);
 
     for (const [pkgId, usedCount] of packagesUsage.entries()) {
-      const pkg = Array.from(packagesByStudent.values()).find((x: any) => x.id === pkgId);
-      if (pkg) {
-        await supabase
-          .from('lesson_packages')
-          .update({
-            available_lessons: pkg.available_lessons - usedCount,
-            reserved_lessons: (pkg.reserved_lessons || 0) + usedCount,
-          })
-          .eq('id', pkgId);
+      const pkg = Array.from(packagesByStudent.values()).find((x) => x.id === pkgId);
+      if (!pkg || usedCount <= 0) continue;
+      const { error: itemErr } = await supabase
+        .from('lesson_package_items')
+        .update({
+          available_lessons: pkg.item_available_lessons - usedCount,
+          reserved_lessons: pkg.item_reserved_lessons + usedCount,
+        })
+        .eq('id', pkg.item_id);
+      if (itemErr) {
+        console.error('[OrgSchedule] item update failed:', itemErr);
+        continue;
       }
+      await supabase
+        .from('lesson_packages')
+        .update({
+          available_lessons: pkg.available_lessons - usedCount,
+          reserved_lessons: (pkg.reserved_lessons || 0) + usedCount,
+        })
+        .eq('id', pkgId);
     }
 
     const allCreated = ((inserted || []) as CreatedSessionRow[]).sort(
@@ -568,50 +819,65 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       allCreated,
       createTopic || subj.name || 'Pamoka',
       true,
+      !(createRecurringEndDate || '').trim(),
     );
 
     for (const row of inserted || []) {
       syncGoogle((row as { id: string }).id);
     }
 
-    alert(`Created ${sessionsRows.length} recurring lessons.`);
-    return;
+    await persistRecurringPlanFrequency(supabase, [...new Set(recurringTemplates.map((t) => t.student_id))], planFrequency);
+
+    if (!p.suppressSuccessAlert) alert(`Created ${sessionsRows.length} recurring lessons.`);
+    return { createdSessionIds: allCreated.map((row) => row.id) };
   }
 
   const sessionsToInsert: Record<string, unknown>[] = [];
-  const packagesToUpdate: { id: string; available_lessons: number; reserved_lessons: number }[] = [];
+  const packagesToUpdate: Array<{
+    id: string;
+    available_lessons: number;
+    reserved_lessons: number;
+    item_id: string;
+    item_available_lessons: number;
+    item_reserved_lessons: number;
+  }> = [];
 
   for (const studentId of studentIdsToCreate) {
-    const pricing = individualPricing.find(
-      row => row.student_id === studentId && row.subject_id === createSubjectId
-    );
-    const studentPrice = pricing?.price ?? tutorSubjPrice?.price ?? subj.price ?? createPrice;
+    const studentPaymentModel = paymentModelByStudentId.get(studentId) ?? null;
     let sessionPaid = createIsPaid;
-    let sessionPaymentStatus = createIsPaid ? 'paid' : 'pending';
+    let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentPaymentModel, {
+      paid: createIsPaid,
+      hasPackage: false,
+    });
     let lessonPackageId: string | null = null;
 
-    if (!createIsPaid && createSubjectId) {
-      const { data: packages } = await supabase
-        .from('lesson_packages')
-        .select('*')
-        .eq('student_id', studentId)
-        .eq('subject_id', createSubjectId)
-        .eq('active', true)
-        .eq('paid', true)
-        .gt('available_lessons', 0)
-        .order('created_at', { ascending: true })
-        .limit(1);
-      if (packages?.[0]) {
-        const pkg = packages[0];
+    if (!createIsMakeup && !createIsPaid && createSubjectId) {
+      const match = await findActivePackageForBooking(supabase, { studentId, subjectId: createSubjectId });
+      if (match) {
+        const { pkg, item } = match;
         lessonPackageId = pkg.id;
         sessionPaid = true;
         sessionPaymentStatus = 'confirmed';
         packagesToUpdate.push({
           id: pkg.id,
           available_lessons: pkg.available_lessons - 1,
-          reserved_lessons: (pkg.reserved_lessons || 0) + 1,
+          reserved_lessons: pkg.reserved_lessons + 1,
+          item_id: item.id,
+          item_available_lessons: item.available_lessons - 1,
+          item_reserved_lessons: item.reserved_lessons + 1,
+        });
+      } else {
+        sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentPaymentModel, {
+          paid: false,
+          hasPackage: false,
         });
       }
+    }
+
+    if (createIsMakeup) {
+      sessionPaid = true;
+      sessionPaymentStatus = 'confirmed';
+      lessonPackageId = null;
     }
 
     sessionsToInsert.push({
@@ -623,7 +889,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       status: 'active',
       meeting_link: createMeetingLink || null,
       topic: createTopic || null,
-      price: studentPrice,
+      price: priceByStudentId.get(studentId) ?? createPrice,
       paid: sessionPaid,
       payment_status: sessionPaymentStatus,
       lesson_package_id: lessonPackageId,
@@ -631,6 +897,10 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       show_comment_to_student: effectiveShowCommentToStudent,
       created_by_role: 'org_admin',
       available_spots: subj.is_group ? subj.max_students : null,
+      is_makeup: createIsMakeup,
+      ...(schoolClassGroupId
+        ? { class_group_id: schoolClassGroupId, school_billing_kind: 'base' }
+        : {}),
     });
   }
 
@@ -640,6 +910,17 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
   if (error) throw new Error(error.message);
 
   for (const pkgUpdate of packagesToUpdate) {
+    const { error: itemErr } = await supabase
+      .from('lesson_package_items')
+      .update({
+        available_lessons: pkgUpdate.item_available_lessons,
+        reserved_lessons: pkgUpdate.item_reserved_lessons,
+      })
+      .eq('id', pkgUpdate.item_id);
+    if (itemErr) {
+      console.error('[OrgSchedule] item update failed:', itemErr);
+      continue;
+    }
     await supabase
       .from('lesson_packages')
       .update({
@@ -724,9 +1005,18 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     syncGoogle(sess.id);
   }
 
-  if (isGroupLesson && studentIdsToCreate.length > 1) {
-    alert(`Created ${studentIdsToCreate.length} group lessons.`);
-  } else {
-    alert('Pamoka sukurta!');
+  if (!p.suppressSuccessAlert) {
+    if (isGroupLesson && studentIdsToCreate.length > 1) {
+      alert(`Created ${studentIdsToCreate.length} group lessons.`);
+    } else {
+      alert('Pamoka sukurta!');
+    }
   }
+
+  return {
+    createdSessionIds: ((created || []) as Array<{ id: string; start_time: string }>)
+      .slice()
+      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+      .map((row) => row.id),
+  };
 }

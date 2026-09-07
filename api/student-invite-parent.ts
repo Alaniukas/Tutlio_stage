@@ -85,6 +85,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if ('error' in result) {
     return res.status(500).json({ error: result.error });
   }
+  if ('skipped' in result) {
+    return res.status(200).json({ success: true, skipped: true, reason: result.reason });
+  }
 
   return res.status(200).json({
     success: true,

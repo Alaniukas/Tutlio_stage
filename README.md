@@ -5,7 +5,7 @@ Moderni platforma korepetitoriams ir korepetitorių organizacijoms valdyti mokin
 ## 🚀 Greitas startas
 
 ### Reikalavimai
-- Node.js 18+
+- Node.js 22–24 (Vercel produkcijai rekomenduojama 24.x)
 - npm arba yarn
 - Supabase paskyra
 - Stripe paskyra (mokėjimams)

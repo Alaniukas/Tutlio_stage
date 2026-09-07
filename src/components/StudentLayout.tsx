@@ -6,16 +6,20 @@ import {
     fetchStudentActiveLessonPackagesDeduped,
     fetchSubjectNamesByIds,
 } from '@/lib/studentLessonPackagesLight';
-import { LayoutDashboard, BookOpen, CalendarDays, Clock, Settings, Info, Mail, HelpCircle, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, BookOpen, CalendarDays, Clock, Settings, Info, Mail, HelpCircle, MessageSquare, CreditCard } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
 import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 import BrandedLogo from '@/components/BrandedLogo';
 import { clearOrgBrandingCache } from '@/contexts/OrgBrandingContext';
+import { clearStudentPolicyCache, useStudentPolicy } from '@/contexts/StudentPolicyContext';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
+import { useOrgTerminologyMode } from '@/hooks/useOrgTerminologyMode';
+import { useSchoolTerminology } from '@/hooks/useSchoolTerminology';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
+import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 
 interface StudentLayoutProps {
     children: React.ReactNode;
@@ -25,7 +29,17 @@ interface StudentLayoutProps {
 
 const STUDENT_LAYOUT_CACHE_KEY = 'tutlio_student_layout_cache';
 
-function getCachedLayoutData(): { studentName: string; tutor: any; studentProfiles: Array<{ id: string; tutor_id: string | null; tutor_full_name: string | null; tutor_email: string | null }> } | null {
+function getCachedLayoutData(): {
+  studentName: string;
+  tutor: any;
+  studentProfiles: Array<{
+    id: string;
+    tutor_id: string | null;
+    tutor_full_name: string | null;
+    tutor_email: string | null;
+    full_name: string | null;
+  }>;
+} | null {
     try {
         const raw = sessionStorage.getItem(STUDENT_LAYOUT_CACHE_KEY);
         if (!raw) return null;
@@ -33,7 +47,17 @@ function getCachedLayoutData(): { studentName: string; tutor: any; studentProfil
     } catch { return null; }
 }
 
-function setCachedLayoutData(studentName: string, tutor: any, studentProfiles: Array<{ id: string; tutor_id: string | null; tutor_full_name: string | null; tutor_email: string | null }>) {
+function setCachedLayoutData(
+  studentName: string,
+  tutor: any,
+  studentProfiles: Array<{
+    id: string;
+    tutor_id: string | null;
+    tutor_full_name: string | null;
+    tutor_email: string | null;
+    full_name: string | null;
+  }>,
+) {
     try {
         sessionStorage.setItem(STUDENT_LAYOUT_CACHE_KEY, JSON.stringify({ studentName, tutor, studentProfiles }));
     } catch { /* ignore */ }
@@ -51,12 +75,50 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     const [isTutorModalOpen, setIsTutorModalOpen] = useState(false);
     /** `null` = nerodyti badge (paketų nėra arba dar neįkelta) — nelieka 0/0. */
     const [packageCountLabel, setPackageCountLabel] = useState<string | null>(null);
-    const [studentProfiles, setStudentProfiles] = useState<Array<{ id: string; tutor_id: string | null; tutor_full_name: string | null; tutor_email: string | null }>>(cached?.studentProfiles || []);
+    const [studentProfiles, setStudentProfiles] = useState<Array<{
+        id: string;
+        tutor_id: string | null;
+        tutor_full_name: string | null;
+        tutor_email: string | null;
+        full_name: string | null;
+    }>>(cached?.studentProfiles || []);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const activeStudentProfileId = useMemo(
         () => (typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY) : null),
         []
     );
+
+    /** Org portal flags — resolved pre-mount by StudentPolicyProvider, so the nav is correct on first paint. */
+    const { resolved, bookingDisabled, paymentsPageEnabled, organizationId, waitlistHidden } = useStudentPolicy();
+    // Students of a school org read "mokytojas" / "užsiėmimas" like their parents and teachers.
+    useSchoolTerminology(useOrgTerminologyMode(organizationId));
+
+    /**
+     * One switcher row per child+tutor. Same child on two tutors still collapses
+     * duplicate rows; siblings who share a login stay separate even with the same teacher.
+     */
+    const distinctTutorProfiles = useMemo(() => {
+        const byKey = new Map<string, (typeof studentProfiles)[number]>();
+        for (const sp of studentProfiles) {
+            const name = String(sp.full_name || '').trim().toLowerCase();
+            const key = `${sp.tutor_id || 'none'}:${name || sp.id}`;
+            if (!byKey.has(key) || sp.id === activeStudentProfileId) byKey.set(key, sp);
+        }
+        return [...byKey.values()];
+    }, [studentProfiles, activeStudentProfileId]);
+    const showChildNameInSwitcher = useMemo(() => {
+        const names = new Set(
+            distinctTutorProfiles.map((sp) => String(sp.full_name || '').trim().toLowerCase()).filter(Boolean),
+        );
+        return names.size > 1;
+    }, [distinctTutorProfiles]);
+
+    const hideWaitlist =
+      !resolved ||
+      waitlistHidden ||
+      bookingDisabled ||
+      isWaitlistHiddenForOrg(organizationId);
+    const hideInstructions = !resolved || isInstructionsHiddenForOrg(organizationId);
 
     const navItems = [
         { href: '/student', label: t('studentNav.home'), icon: LayoutDashboard },
@@ -64,8 +126,17 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
         { href: '/student/schedule', label: t('studentNav.book'), icon: CalendarDays },
         { href: '/student/messages', label: t('studentNav.messages'), icon: MessageSquare },
         { href: '/student/waitlist', label: t('studentNav.queue'), icon: Clock },
+        ...(paymentsPageEnabled
+            ? [{ href: '/student/payments', label: t('studentNav.payments'), icon: CreditCard }]
+            : []),
         { href: '/student/settings', label: t('studentNav.settings'), icon: Settings },
-    ];
+    ].filter((item) => {
+        if (bookingDisabled && item.href === '/student/schedule') return false;
+        if (hideWaitlist && item.href === '/student/waitlist') return false;
+        return true;
+    });
+    const navGridClass =
+        navItems.length <= 4 ? 'grid-cols-4' : navItems.length === 5 ? 'grid-cols-5' : 'grid-cols-6';
 
     useEffect(() => {
         const load = async () => {
@@ -86,6 +157,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                     tutor_id: row.tutor_id,
                     tutor_full_name: row.tutor_full_name,
                     tutor_email: row.tutor_email,
+                    full_name: row.full_name || null,
                 })));
                 const selectedStudentData =
                     rows.find((row: any) => row.id === activeStudentProfileId) ||
@@ -121,6 +193,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                         tutor_id: row.tutor_id,
                         tutor_full_name: row.tutor_full_name,
                         tutor_email: row.tutor_email,
+                        full_name: row.full_name || null,
                     }));
                     setCachedLayoutData(name, tutorData, profiles);
                 }
@@ -185,6 +258,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
         if (typeof window !== 'undefined') {
             localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, studentProfileId);
             clearOrgBrandingCache();
+            clearStudentPolicyCache();
             window.dispatchEvent(new Event('student-profile-changed'));
             window.location.reload();
         }
@@ -204,13 +278,14 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     return (
         <div className="min-h-screen bg-white flex flex-col relative overflow-x-hidden">
             <OrgSuspendedBanner />
-            <PwaInstallPrompt settingsPath="/student/instructions" />
+            <PwaInstallPrompt settingsPath={hideInstructions ? '/student/settings' : '/student/instructions'} />
             <div className="absolute top-0 right-0 w-96 h-96 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none bg-[color-mix(in_srgb,var(--org-brand)_12%,#ffffff)]" />
             <div className="absolute bottom-0 left-0 w-96 h-96 bg-slate-50/30 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none" />
 
             <header className="bg-white/80 backdrop-blur-md border-b border-gray-100 px-3 sm:px-4 py-3 flex items-center justify-between gap-2 sticky top-0 z-40 min-w-0">
                 <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
-                    <Link to="/" className="flex items-center gap-2 flex-shrink-0">
+                    {/* Logged-in logo click stays in the app (student home), not the marketing landing. */}
+                    <Link to="/student" className="flex items-center gap-2 flex-shrink-0">
                         <BrandedLogo size="sm" nameClassName="hidden sm:block" />
                     </Link>
 
@@ -221,17 +296,30 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                                 <p className="text-sm font-bold text-gray-900 truncate max-w-[40vw] sm:max-w-[14rem]">{tutor?.full_name || '—'}</p>
                             </div>
                             <Info className="w-4 h-4 text-[color-mix(in_srgb,var(--org-brand)_45%,#94a3b8)]" onClick={() => setIsTutorModalOpen(true)} />
-                            {studentProfiles.length > 1 && (
+                            {distinctTutorProfiles.length > 1 && (
                                 <select
-                                    value={activeStudentProfileId || studentProfiles[0]?.id || ''}
+                                    value={
+                                        distinctTutorProfiles.some((sp) => sp.id === activeStudentProfileId)
+                                            ? (activeStudentProfileId as string)
+                                            : distinctTutorProfiles[0]?.id || ''
+                                    }
                                     onChange={(e) => handleProfileSwitch(e.target.value)}
+                                    title={t('studentLayout.chooseTutor')}
+                                    aria-label={t('studentLayout.chooseTutor')}
                                     className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-700"
                                 >
-                                    {studentProfiles.map((sp) => (
-                                        <option key={sp.id} value={sp.id}>
-                                            {sp.tutor_full_name || t('common.tutor')}
-                                        </option>
-                                    ))}
+                                    {distinctTutorProfiles.map((sp) => {
+                                        const childName = String(sp.full_name || '').trim();
+                                        const tutorName = String(sp.tutor_full_name || '').trim();
+                                        const label = showChildNameInSwitcher
+                                            ? [childName, tutorName].filter(Boolean).join(' · ')
+                                            : tutorName || childName || t('common.tutor');
+                                        return (
+                                            <option key={sp.id} value={sp.id}>
+                                                {label}
+                                            </option>
+                                        );
+                                    })}
                                 </select>
                             )}
                         </div>
@@ -285,7 +373,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                 className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-100 z-50 max-w-[100vw] overflow-x-hidden"
                 style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
             >
-                <div className="grid grid-cols-6 gap-0 px-0.5 sm:px-1 pt-2 pb-1 w-full">
+                <div className={`grid ${navGridClass} gap-0 px-0.5 sm:px-1 pt-2 pb-1 w-full`}>
                     {navItems.map((item) => {
                         const Icon = item.icon;
                         const active = location.pathname === item.href;

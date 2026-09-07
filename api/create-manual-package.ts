@@ -1,12 +1,33 @@
 // ─── Vercel Serverless: Create Manual Lesson Package (Individual Tutors) ──────
 // POST /api/create-manual-package
-// Body: { tutorId, studentId, subjectId, totalLessons, pricePerLesson? }
+// Body (multi-subject):
+//   { tutorId, studentId, items: [{ subjectId, totalLessons, pricePerLesson? }], expiresAt?, attachSalesInvoice? }
+// Body (legacy single-subject, still accepted):
+//   { tutorId, studentId, subjectId, totalLessons, pricePerLesson?, expiresAt?, attachSalesInvoice? }
 // No Stripe — package starts as pending, tutor confirms payment later.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import {
+  normalizePackageItemsInput,
+  resolvePackageItems,
+  aggregatePackageTotals,
+  itemsForEmailPayload,
+} from './_lib/packageItems.js';
+import {
+  isPackageReservationFlowEnabled,
+  getPackagePaymentDeadlineHours,
+} from './_lib/trialReservation.js';
+import { reservePackageSlots, type PackageSlotInput } from './_lib/packageSlots.js';
+import {
+    resolveRecurringPackagePlan,
+    recurringPlanPackageFields,
+    type MonthlyPlanInput,
+} from './_lib/recurringPackagePlan.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function isSafeHttpUrl(raw: string): boolean {
     try {
@@ -25,6 +46,11 @@ function json(res: VercelResponse, status: number, body: unknown) {
 function getEnv(name: string): string | null {
     const v = process.env[name];
     return v && String(v).trim().length > 0 ? String(v) : null;
+}
+
+function packageExpiryIso(value: string): string {
+    const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T23:59:59.999Z` : value;
+    return new Date(normalized).toISOString();
 }
 
 async function postJsonWithTimeout(url: string, payload: unknown, timeoutMs = 7000) {
@@ -57,32 +83,44 @@ function resolveApiUrl(req: VercelRequest, path: string): string {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
 
-    const { tutorId, studentId, subjectId, totalLessons, pricePerLesson: requestedPriceRaw, expiresAt, attachSalesInvoice } = req.body as {
-        tutorId: string;
-        studentId: string;
-        subjectId: string;
-        totalLessons: number;
+    const body = req.body as {
+        tutorId?: string;
+        studentId?: string;
+        // Legacy single-subject fields:
+        subjectId?: string;
+        totalLessons?: number;
         pricePerLesson?: number;
+        // New multi-subject payload:
+        items?: Array<{ subjectId: string; totalLessons: number; pricePerLesson?: number }>;
         expiresAt?: string;
         /** Generate S.F. and attach PDF to email */
         attachSalesInvoice?: boolean;
+        /** Reservation flow (req 3): pre-book lesson times held until paid by the deadline. */
+        slots?: PackageSlotInput[];
+        monthlyPlan?: MonthlyPlanInput;
+        recurringPlanId?: string;
+        billingPeriodStart?: string;
+        billingPeriodEnd?: string;
     };
-    const shouldAttachSf = attachSalesInvoice === true;
+    const tutorId = body.tutorId;
+    const studentId = body.studentId;
+    const expiresAt = body.expiresAt;
+    const shouldAttachSf = body.attachSalesInvoice === true;
 
-    if (!tutorId || !studentId || !subjectId || !totalLessons) {
+    if (!tutorId || !studentId) {
         return json(res, 400, { error: 'Missing required fields' });
     }
 
-    if (totalLessons <= 0 || totalLessons > 100) {
-        return json(res, 400, { error: 'Lesson count must be between 1 and 100' });
+    const { items: normalizedItems, error: normalizeErr } = normalizePackageItemsInput(body);
+    if (normalizeErr) {
+        return json(res, 400, { error: normalizeErr });
     }
 
     try {
         const auth = await verifyRequestAuth(req);
-        if (!auth?.userId || auth.isInternal) {
+        if (!auth || (!auth.userId && !(auth.isInternal && body.recurringPlanId))) {
             return json(res, 401, { error: 'Unauthorized' });
         }
-        const callerId = auth.userId;
 
         const supabaseUrl = getEnv('SUPABASE_URL') || getEnv('VITE_SUPABASE_URL');
         const supabaseServiceRoleKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
@@ -96,6 +134,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 
+        let callerId = auth.userId;
+        if (auth.isInternal && body.recurringPlanId) {
+            const { data: planCreator } = await supabase
+                .from('recurring_monthly_package_plans')
+                .select('created_by')
+                .eq('id', body.recurringPlanId)
+                .eq('active', true)
+                .maybeSingle();
+            callerId = planCreator?.created_by || null;
+        }
+        if (!callerId) return json(res, 401, { error: 'Unauthorized recurring package plan.' });
+
         const { data: tutor, error: tutorErr } = await supabase
             .from('profiles')
             .select(
@@ -108,14 +158,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 404, { error: 'Korepetitorius nerastas', details: tutorErr?.message });
         }
 
-        const { data: adminRow } = await supabase
-            .from('organization_admins')
-            .select('organization_id')
-            .eq('user_id', callerId)
-            .maybeSingle();
+        const adminRow = await getOrgAdminAccessByUserId(supabase, callerId);
 
         let callerAuthorized = callerId === tutorId;
-        if (!callerAuthorized && adminRow?.organization_id && tutor.organization_id === adminRow.organization_id) {
+        if (
+            !callerAuthorized
+            && adminRow
+            && tutor.organization_id === adminRow.organizationId
+            && hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.edit')
+        ) {
             callerAuthorized = true;
         }
         if (!callerAuthorized) {
@@ -142,20 +193,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         if (adminRow && callerId !== tutorId) {
-            if (!tutor.organization_id || (student as { organization_id?: string | null }).organization_id !== adminRow.organization_id) {
+            if (!tutor.organization_id || (student as { organization_id?: string | null }).organization_id !== adminRow.organizationId) {
                 return json(res, 403, { error: 'Forbidden' });
             }
         }
 
         let manualPaymentUrl = '';
         let orgDisplayName: string | null = null;
+        let orgFeatures: Record<string, unknown> | null = null;
+        let orgEntityType: string | null = null;
         if (tutor.organization_id) {
             const { data: orgRow } = await supabase
                 .from('organizations')
-                .select('name, features')
+                .select('name, features, entity_type')
                 .eq('id', tutor.organization_id)
                 .single();
             const features = (orgRow?.features || {}) as Record<string, unknown>;
+            orgFeatures = features;
+            orgEntityType = (orgRow as { entity_type?: string | null } | null)?.entity_type ?? null;
             const rawUrl = features.manual_payment_url;
             if (typeof rawUrl === 'string' && rawUrl.trim()) {
                 const tUrl = rawUrl.trim();
@@ -164,48 +219,68 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             orgDisplayName = orgRow?.name || null;
         }
 
-        const { data: subject, error: subjectErr } = await supabase
-            .from('subjects')
-            .select('id, name, price')
-            .eq('id', subjectId)
-            .single();
-
-        if (subjectErr || !subject) {
-            return json(res, 404, { error: 'Dalykas nerastas', details: subjectErr?.message });
+        // Resolve every item: subject ownership + per-student pricing + price fallback
+        const { items: resolvedItems, error: itemsErr } = await resolvePackageItems(supabase, {
+            tutorId,
+            studentId,
+            items: normalizedItems,
+        });
+        if (itemsErr) {
+            return json(res, 400, { error: itemsErr });
         }
-
-        const { data: individualPricing } = await supabase
-            .from('student_individual_pricing')
-            .select('price')
-            .eq('student_id', studentId)
-            .eq('subject_id', subjectId)
-            .single();
-
-        const requestedPrice =
-            typeof requestedPriceRaw === 'number' && Number.isFinite(requestedPriceRaw) && requestedPriceRaw >= 0
-                ? requestedPriceRaw
-                : null;
-
-        const pricePerLesson = requestedPrice ?? individualPricing?.price ?? subject.price ?? 25;
-        const totalPrice = pricePerLesson * totalLessons;
+        const { totalLessons, totalPriceEur: totalPrice } = aggregatePackageTotals(resolvedItems);
+        // Auto (schedule-derived) plans are multi-subject by design.
+        let recurringPlanIsAuto = false;
+        if (body.recurringPlanId) {
+            const { data: planMeta } = await supabase
+                .from('recurring_monthly_package_plans')
+                .select('auto_from_schedule')
+                .eq('id', body.recurringPlanId)
+                .maybeSingle();
+            recurringPlanIsAuto = (planMeta as { auto_from_schedule?: boolean } | null)?.auto_from_schedule === true;
+        }
+        if ((body.monthlyPlan || (body.recurringPlanId && !recurringPlanIsAuto)) && resolvedItems.length !== 1) {
+            return json(res, 400, { error: 'A recurring monthly package must contain exactly one subject.' });
+        }
+        const primarySubjectId = resolvedItems.length === 1 ? resolvedItems[0]!.subjectId : null;
+        const primaryPricePerLesson = resolvedItems.length === 1 ? resolvedItems[0]!.pricePerLesson : null;
+        const { data: recurringPlan, error: recurringPlanError } = await resolveRecurringPackagePlan({
+            supabase,
+            organizationId: tutor.organization_id || null,
+            createdBy: callerId,
+            tutorId,
+            studentId,
+            subjectId: primarySubjectId,
+            paymentMethod: 'manual',
+            attachSalesInvoice: shouldAttachSf,
+            monthlyPlan: body.monthlyPlan,
+            recurringPlanId: body.recurringPlanId,
+            billingPeriodStart: body.billingPeriodStart,
+            billingPeriodEnd: body.billingPeriodEnd,
+        });
+        if (recurringPlanError || !recurringPlan) {
+            return json(res, 400, { error: recurringPlanError || 'Failed to resolve monthly package plan.' });
+        }
+        const effectiveExpiresAt = expiresAt || recurringPlan.billingPeriodEnd;
 
         const { data: lessonPackage, error: packageErr } = await supabase
             .from('lesson_packages')
             .insert({
                 tutor_id: tutorId,
                 student_id: studentId,
-                subject_id: subjectId,
+                subject_id: primarySubjectId,
                 total_lessons: totalLessons,
                 available_lessons: totalLessons,
                 reserved_lessons: 0,
                 completed_lessons: 0,
-                price_per_lesson: pricePerLesson,
+                price_per_lesson: primaryPricePerLesson,
                 total_price: totalPrice,
                 paid: false,
                 payment_status: 'pending',
                 active: true,
                 payment_method: 'manual',
-                ...(expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {}),
+                ...recurringPlanPackageFields(recurringPlan),
+                ...(effectiveExpiresAt ? { expires_at: packageExpiryIso(effectiveExpiresAt) } : {}),
             })
             .select()
             .single();
@@ -213,6 +288,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (packageErr || !lessonPackage) {
             console.error('Error creating manual package:', packageErr);
             return json(res, 500, { error: 'Nepavyko sukurti paketo', details: packageErr?.message });
+        }
+
+        const itemRows = resolvedItems.map((it, idx) => ({
+            package_id: lessonPackage.id,
+            subject_id: it.subjectId,
+            total_lessons: it.totalLessons,
+            available_lessons: it.totalLessons,
+            reserved_lessons: 0,
+            completed_lessons: 0,
+            price_per_lesson: it.pricePerLesson,
+            total_price: it.itemTotalPrice,
+            position: idx,
+        }));
+        const { error: itemsInsertErr } = await supabase
+            .from('lesson_package_items')
+            .insert(itemRows);
+        if (itemsInsertErr) {
+            console.error('Error creating manual package items:', itemsInsertErr);
+            await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
+            return json(res, 500, { error: 'Nepavyko sukurti paketo punktų', details: itemsInsertErr.message });
+        }
+
+        // Reservation flow (req 3+5): pre-book times held until the manual payment
+        // is confirmed; unpaid holds auto-release via the cron at the deadline.
+        if (isPackageReservationFlowEnabled(orgFeatures, tutor.organization_id, orgEntityType) && Array.isArray(body.slots) && body.slots.length > 0) {
+            const reserveResult = await reservePackageSlots(supabase, {
+                tutorId,
+                studentId,
+                packageId: lessonPackage.id,
+                slots: body.slots,
+                items: resolvedItems.map((it) => ({
+                    subjectId: it.subjectId,
+                    subjectName: it.subjectName,
+                    pricePerLesson: it.pricePerLesson,
+                    totalLessons: it.totalLessons,
+                })),
+                deadlineHours: getPackagePaymentDeadlineHours(orgFeatures),
+            });
+            if (reserveResult.error) {
+                await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
+                return json(res, reserveResult.status || 500, { error: reserveResult.error });
+            }
         }
 
         // Generate S.F. and get PDF for email attachment
@@ -263,6 +380,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const toEmail = (student.payer_email || student.email || '').trim();
         if (toEmail) {
             try {
+                const firstItem = resolvedItems[0]!;
                 const emailPayload: Record<string, unknown> = {
                     type: 'manual_package_request',
                     to: toEmail,
@@ -270,9 +388,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         recipientName: student.payer_name || student.full_name,
                         studentName: student.full_name,
                         orgName: orgDisplayName || tutorName,
-                        subjectName: subject.name,
+                        // Multi-subject payload:
+                        items: itemsForEmailPayload(resolvedItems),
+                        // Back-compat keys (first item):
+                        subjectName: firstItem.subjectName,
+                        pricePerLesson: firstItem.pricePerLesson.toFixed(2),
                         totalLessons,
-                        pricePerLesson: pricePerLesson.toFixed(2),
                         totalPrice: totalPrice.toFixed(2),
                         bankDetails: (tutor as { manual_payment_bank_details?: string | null }).manual_payment_bank_details || '',
                         ...(manualPaymentUrl ? { paymentUrl: manualPaymentUrl } : {}),
@@ -303,6 +424,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             packageId: lessonPackage.id,
             emailSent,
             ...(manualPaymentUrl ? { paymentUrl: manualPaymentUrl } : {}),
+            recurringPlanId: recurringPlan.planId,
         });
     } catch (err: any) {
         console.error('create-manual-package error:', err);

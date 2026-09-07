@@ -18,6 +18,15 @@ function sofficeCandidates(): string[] {
   return [
     ...fromEnv,
     'soffice',
+    'libreoffice',
+    // macOS default install location
+    '/Applications/LibreOffice.app/Contents/MacOS/soffice',
+    // Common Linux locations
+    '/usr/bin/soffice',
+    '/usr/local/bin/soffice',
+    '/opt/libreoffice/program/soffice',
+    '/snap/bin/libreoffice',
+    // Windows
     'soffice.exe',
     'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
     'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
@@ -120,8 +129,21 @@ export async function convertDocxBufferToPdfWithFallbacks(docxBuffer: Buffer): P
   if (hasRemote) {
     try {
       return await convertWithDocxConverterService(docxBuffer);
-    } catch {
-      // fall through
+    } catch (remoteError) {
+      const remoteMessage = remoteError instanceof Error ? remoteError.message : 'Remote DOCX converter failed';
+      if (process.env.CONVERTAPI_SECRET) {
+        try {
+          return await convertWithConvertApi(docxBuffer, process.env.CONVERTAPI_SECRET);
+        } catch (apiErr) {
+          const apiMessage = apiErr instanceof Error ? apiErr.message : 'ConvertAPI failed';
+          throw new Error(`${remoteMessage}. ConvertAPI fallback also failed: ${apiMessage}`);
+        }
+      }
+      // On serverless (Vercel) LibreOffice is unavailable — surface the hosted converter error.
+      if (process.env.VERCEL) {
+        throw new Error(remoteMessage);
+      }
+      // fall through to local LibreOffice on dev machines
     }
   }
 

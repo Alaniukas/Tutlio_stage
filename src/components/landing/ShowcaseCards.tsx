@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Check } from 'lucide-react';
-import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
+import { buildLocalizedPath, localizedPagePath, useTranslation } from '@/lib/i18n';
 import Reveal from './Reveal';
 import type { LandingVariant } from './HeroSection';
 
@@ -31,7 +31,7 @@ function CheckItem({ text, color }: { text: string; color: string }) {
 export default function ShowcaseCards({ variant = 'tutor' }: { variant?: LandingVariant }) {
   const { t, locale } = useTranslation();
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
-  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : buildLocalizedPath('/pricing', locale);
+  const ctaLink = variant === 'schools' ? buildLocalizedPath(localizedPagePath('contacts', locale), locale) : buildLocalizedPath('/pricing', locale);
 
   const checks1 = [
     t(`${p}.showcase1Check1`),

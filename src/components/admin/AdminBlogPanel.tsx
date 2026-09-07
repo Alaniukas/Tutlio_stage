@@ -2,18 +2,22 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ArrowLeft, Plus, Pencil, Trash2, Eye, Globe, Upload, X, Image as ImageIcon } from 'lucide-react';
-import { SUPPORTED_LOCALES, LOCALE_LABELS, type Locale } from '@/lib/i18n/core';
+import { LOCALE_LABELS, type Locale } from '@/lib/i18n/core';
+import { BLOG_SCHEMA_LOCALES } from '@/lib/i18n/localeRelease';
+import { blogPostPath } from '@/lib/blogLocale';
+import AdminBlogAutoPanel from '@/components/admin/AdminBlogAutoPanel';
 
 type BlogFormData = Record<string, string>;
 
-type BlogView = 'list' | 'edit';
+type BlogView = 'list' | 'edit' | 'auto';
 
 const LOCALE_FIELD_TYPES = ['title', 'excerpt', 'content'] as const;
 
 function buildEmptyForm(): BlogFormData {
   const f: BlogFormData = { slug: '', cover_image: '', tag: '', status: 'draft' };
-  for (const loc of SUPPORTED_LOCALES) {
+  for (const loc of BLOG_SCHEMA_LOCALES) {
     for (const type of LOCALE_FIELD_TYPES) f[`${type}_${loc}`] = '';
+    f[`slug_${loc}`] = '';
   }
   return f;
 }
@@ -142,7 +146,7 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
             <div className="flex items-center gap-2 mb-2">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Post details</p>
               <div className="ml-auto flex gap-1">
-                {SUPPORTED_LOCALES.map(loc => (
+                {BLOG_SCHEMA_LOCALES.map(loc => (
                   <button key={loc} type="button" onClick={() => setLang(loc)}
                     className={`px-3 py-1 rounded-lg text-xs font-medium ${lang === loc ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
                     {LOCALE_LABELS[loc]}
@@ -163,10 +167,11 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-slate-300">Slug</Label>
-              <Input value={form.slug} onChange={(e) => updateField('slug', e.target.value)} placeholder="auto-generated-from-title"
+              <Label className="text-slate-300">URL slug ({LOCALE_LABELS[lang]})</Label>
+              <Input value={form[`slug_${lang}`] || ''} onChange={(e) => updateField(`slug_${lang}`, e.target.value)}
+                placeholder="auto-generated-from-title"
                 className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl" />
-              <p className="text-xs text-slate-500">Leave empty to auto-generate from Lithuanian title</p>
+              <p className="text-xs text-slate-500">Leave empty to auto-generate from {LOCALE_LABELS[lang]} title</p>
             </div>
 
             <div className="space-y-1.5">
@@ -238,9 +243,9 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
               {saving ? 'Saving...' : editId ? 'Update post' : 'Create post'}
             </button>
             {editId && form.status === 'published' && (
-              <a href={`/blog/${form.slug}`} target="_blank" rel="noopener noreferrer"
+              <a href={blogPostPath(form, lang)} target="_blank" rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-sm text-slate-300">
-                <Eye className="w-4 h-4" /> View
+                <Eye className="w-4 h-4" /> View ({LOCALE_LABELS[lang]})
               </a>
             )}
           </div>
@@ -251,12 +256,37 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => setView('list')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium ${view === 'list' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            Posts
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('auto')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium ${view === 'auto' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            Auto SEO
+          </button>
+        </div>
+        {view === 'list' && (
+          <button type="button" onClick={openNew}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-xl text-sm font-medium">
+            <Plus className="w-4 h-4" /> New post
+          </button>
+        )}
+      </div>
+
+      {view === 'auto' && <AdminBlogAutoPanel adminSecret={adminSecret} />}
+
+      {view === 'list' && (
+        <>
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-300">Blog Posts ({posts.length})</h2>
-        <button type="button" onClick={openNew}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-xl text-sm font-medium">
-          <Plus className="w-4 h-4" /> New post
-        </button>
       </div>
 
       {(error || success) && (
@@ -280,6 +310,11 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
                     <span className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full font-semibold ${post.status === 'published' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
                       {String(post.status)}
                     </span>
+                    {(post as any).source === 'auto' && (
+                      <span className="flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full font-semibold bg-violet-500/20 text-violet-300">
+                        auto
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-500 truncate">
                     /{String(post.slug)}
@@ -290,7 +325,7 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
                   {post.status === 'published' && (
-                    <a href={`/blog/${String(post.slug)}`} target="_blank" rel="noopener noreferrer"
+                    <a href={blogPostPath(post, 'lt')} target="_blank" rel="noopener noreferrer"
                       className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-white/10" title="View">
                       <Globe className="w-4 h-4" />
                     </a>
@@ -307,6 +342,8 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }

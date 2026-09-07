@@ -10,6 +10,10 @@ interface TimeSpinnerProps {
 
 const ITEM_HEIGHT = 36;
 const VISIBLE_EXTRA = 2;
+/** One step per tick; speed comes from short cooldown + draining leftover delta. */
+const WHEEL_STEP_THRESHOLD_PX = 28;
+const WHEEL_STEP_COOLDOWN_MS = 20;
+const WHEEL_GESTURE_RESET_MS = 100;
 
 function SpinnerColumn({
   items,
@@ -27,25 +31,94 @@ function SpinnerColumn({
   const isDragging = useRef(false);
   const startY = useRef(0);
   const startIndex = useRef(0);
+  const selectedIndexRef = useRef(selectedIndex);
+  const wheelDelta = useRef(0);
+  const lastWheelStepAt = useRef(Number.NEGATIVE_INFINITY);
+  const wheelResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wheelDrainTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [inputVal, setInputVal] = useState('');
+
+  useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+
+  const stepOnceFromWheel = useCallback((): boolean => {
+    const now = Date.now();
+    if (now - lastWheelStepAt.current < WHEEL_STEP_COOLDOWN_MS) return false;
+    if (Math.abs(wheelDelta.current) < WHEEL_STEP_THRESHOLD_PX) return false;
+
+    const direction = wheelDelta.current > 0 ? 1 : -1;
+    wheelDelta.current -= direction * WHEEL_STEP_THRESHOLD_PX;
+    lastWheelStepAt.current = now;
+
+    let newIndex = selectedIndexRef.current + direction;
+    newIndex = ((newIndex % items.length) + items.length) % items.length;
+    selectedIndexRef.current = newIndex;
+    onIndexChange(newIndex);
+    return true;
+  }, [items.length, onIndexChange]);
+
+  const scheduleWheelDrain = useCallback(() => {
+    if (wheelDrainTimer.current !== null) return;
+    if (Math.abs(wheelDelta.current) < WHEEL_STEP_THRESHOLD_PX) return;
+
+    const tick = () => {
+      wheelDrainTimer.current = null;
+      if (Math.abs(wheelDelta.current) < WHEEL_STEP_THRESHOLD_PX) return;
+
+      const now = Date.now();
+      const wait = Math.max(0, WHEEL_STEP_COOLDOWN_MS - (now - lastWheelStepAt.current));
+      wheelDrainTimer.current = setTimeout(() => {
+        wheelDrainTimer.current = null;
+        if (stepOnceFromWheel()) {
+          scheduleWheelDrain();
+        } else if (Math.abs(wheelDelta.current) >= WHEEL_STEP_THRESHOLD_PX) {
+          scheduleWheelDrain();
+        }
+      }, wait);
+    };
+    tick();
+  }, [stepOnceFromWheel]);
 
   const handleWheel = useCallback(
     (e: WheelEvent) => {
       e.preventDefault();
-      const delta = e.deltaY > 0 ? 1 : -1;
-      let newIndex = (selectedIndex + delta) % items.length;
-      if (newIndex < 0) newIndex += items.length;
-      onIndexChange(newIndex);
+
+      const normalizedDelta = e.deltaY * (
+        e.deltaMode === e.DOM_DELTA_LINE
+          ? 16
+          : e.deltaMode === e.DOM_DELTA_PAGE
+            ? ITEM_HEIGHT
+            : 1
+      );
+      if (normalizedDelta === 0) return;
+
+      wheelDelta.current += normalizedDelta;
+      if (wheelResetTimer.current) clearTimeout(wheelResetTimer.current);
+      wheelResetTimer.current = setTimeout(() => {
+        wheelDelta.current = 0;
+        if (wheelDrainTimer.current) {
+          clearTimeout(wheelDrainTimer.current);
+          wheelDrainTimer.current = null;
+        }
+      }, WHEEL_GESTURE_RESET_MS);
+
+      stepOnceFromWheel();
+      scheduleWheelDrain();
     },
-    [selectedIndex, items.length, onIndexChange]
+    [stepOnceFromWheel, scheduleWheelDrain]
   );
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     el.addEventListener('wheel', handleWheel, { passive: false });
-    return () => el.removeEventListener('wheel', handleWheel);
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      if (wheelResetTimer.current) clearTimeout(wheelResetTimer.current);
+      if (wheelDrainTimer.current) clearTimeout(wheelDrainTimer.current);
+    };
   }, [handleWheel]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -164,6 +237,67 @@ function SpinnerColumn({
         </div>
       )}
       <span className="text-xs text-gray-300 mt-1">{t('time.scrollOrType')}</span>
+    </div>
+  );
+}
+
+/** Compact 24h hour:minute selects — no AM/PM, safe inside dialogs. */
+export function CompactTimeSelect({
+  value,
+  onChange,
+  minuteStep = 5,
+}: TimeSpinnerProps) {
+  const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
+  const minutes: string[] = [];
+  for (let m = 0; m < 60; m += minuteStep) {
+    minutes.push(m.toString().padStart(2, '0'));
+  }
+
+  const parts = (value || '08:00').split(':');
+  const hour = (parts[0] || '08').padStart(2, '0');
+  const rawMin = parseInt(parts[1] || '00', 10);
+  let minute = minutes[0] || '00';
+  let best = Infinity;
+  minutes.forEach((opt) => {
+    const diff = Math.abs(parseInt(opt, 10) - rawMin);
+    if (diff < best) {
+      best = diff;
+      minute = opt;
+    }
+  });
+
+  const selectClass =
+    'h-10 min-w-[4.25rem] appearance-none rounded-xl border border-gray-200 bg-white px-3 pr-7 text-sm font-semibold tabular-nums text-gray-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100';
+
+  return (
+    <div className="inline-flex items-center gap-1">
+      <div className="relative">
+        <select
+          value={hours.includes(hour) ? hour : '08'}
+          onChange={(e) => onChange(`${e.target.value}:${minute}`)}
+          className={selectClass}
+          aria-label="valandos"
+        >
+          {hours.map((h) => (
+            <option key={h} value={h}>{h}</option>
+          ))}
+        </select>
+        <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">▾</span>
+      </div>
+      <span className="text-gray-400 font-semibold px-0.5">:</span>
+      <div className="relative">
+        <select
+          value={minute}
+          onChange={(e) => onChange(`${hours.includes(hour) ? hour : '08'}:${e.target.value}`)}
+          className={selectClass}
+          aria-label="minutės"
+        >
+          {minutes.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+        <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">▾</span>
+      </div>
     </div>
   );
 }
