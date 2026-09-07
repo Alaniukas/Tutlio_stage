@@ -237,7 +237,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .select('name, tutor:profiles!school_class_groups_tutor_id_fkey(full_name)')
       .eq('id', groupId)
       .maybeSingle();
-    if (grp?.tutor?.full_name) tutorName = String(grp.tutor.full_name);
+    const tutorRel = grp?.tutor as { full_name?: string } | { full_name?: string }[] | null | undefined;
+    const tutorRow = Array.isArray(tutorRel) ? tutorRel[0] : tutorRel;
+    if (tutorRow?.full_name) tutorName = String(tutorRow.full_name);
     if (!groupName && grp?.name) groupName = String(grp.name);
   }
   if (subjectId) {
