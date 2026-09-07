@@ -28,6 +28,7 @@ import {
 import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock, MessageSquare, Archive, ArchiveRestore, Download, AlertCircle, Ban, Pencil } from 'lucide-react';
 import { sendEmail, sendEmailDetailed } from '@/lib/email';
 import Toast from '@/components/Toast';
+import { parentInviteProblem, type ParentInviteResponse } from '@/lib/parentInviteFeedback';
 import { useTranslation } from '@/lib/i18n';
 import {
   ALL_SCHOOL_STUDENT_EXPORT_COLUMNS,
@@ -2055,11 +2056,13 @@ export default function CompanyStudents() {
       }
     }
 
+    const parentInviteProblems: string[] = [];
     // When admin chose "student + parent", send parent portal invites.
     // Plain company: always; school: only with flexible_invitations (Pro Klasė-style).
     if (shouldSendParentInviteOnCreate(newStudent.invite_target) && (!isSchoolView || hasFeature('flexible_invitations'))) {
       for (const row of inserted) {
-        await sendParentPortalInvites(row.id, false);
+        const problem = await sendParentPortalInvites(row.id, false);
+        if (problem) parentInviteProblems.push(problem);
       }
     }
 
@@ -2092,7 +2095,7 @@ export default function CompanyStudents() {
         : null;
 
     const toastType: 'success' | 'error' =
-      (shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk) || lessonCreateFailed ? 'error' : 'success';
+      (shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk) || lessonCreateFailed || parentInviteProblems.length > 0 ? 'error' : 'success';
     const toastMessage =
       shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
         ? t('compStu.emailSendFailed')
@@ -2114,7 +2117,9 @@ export default function CompanyStudents() {
               : t('compStu.studentAdded');
 
     setToastMessage({
-      message: toastMessage,
+      message: parentInviteProblems.length > 0
+        ? [t('compStu.studentAdded'), ...(lessonCreateFailed || !emailOk ? [toastMessage] : []), ...new Set(parentInviteProblems)].join('\n')
+        : toastMessage,
       type: toastType,
     });
     setIsDialogOpen(false);
@@ -2620,10 +2625,11 @@ export default function CompanyStudents() {
         headers: await authHeaders(),
         body: JSON.stringify({ studentId, locale }),
       });
-      const json = await res.json().catch(() => ({}));
+      const json: ParentInviteResponse = await res.json().catch(() => ({}));
+      const problem = parentInviteProblem(json, res.ok, t);
       if (showToast) {
-        if (!res.ok) {
-          setToastMessage({ message: (json as { error?: string }).error || t('common.error'), type: 'error' });
+        if (problem) {
+          setToastMessage({ message: problem, type: 'error' });
         } else {
           const n = (json as { sent?: number }).sent ?? 0;
           setToastMessage({
@@ -2632,8 +2638,11 @@ export default function CompanyStudents() {
           });
         }
       }
+      return problem;
     } catch {
-      if (showToast) setToastMessage({ message: t('common.error'), type: 'error' });
+      const problem = t('compStu.parentInviteEmailFailed');
+      if (showToast) setToastMessage({ message: problem, type: 'error' });
+      return problem;
     } finally {
       setSendingParentInvites(false);
     }

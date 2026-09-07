@@ -1537,7 +1537,7 @@ export const lt: Record<string, string> = {
   'compStu.sendingNow': 'Siunčiama...',
   'compStu.inviteSentNowSuccess': 'Kvietimas išsiųstas.',
   'compStu.inviteSentNowFailed': 'Nepavyko išsiųsti kvietimo.',
-  'compStu.inviteSkippedAlreadyRegistered': 'Ši paskyra jau aktyvi. Kvietimas nesiunčiamas – vartotojas turi prisijungti.',
+  'compStu.inviteSkippedAlreadyRegistered': "Paskyra su šiuo el. paštu jau egzistuoja. Kvietimo laiškas neišsiųstas.",
   'compStu.noInviteRecipient': 'Nėra el. pašto, kuriuo būtų galima išsiųsti kvietimą.',
   'compStu.inviteMissingCode': 'Mokiniui nerastas pakvietimo kodas.',
   'compStu.inviteParent': 'Pakviesti tėvą',
