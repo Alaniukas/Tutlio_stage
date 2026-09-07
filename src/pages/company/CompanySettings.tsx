@@ -119,10 +119,7 @@ export default function CompanySettings() {
   const [orgFeaturesSnapshot, setOrgFeaturesSnapshot] = useState<Record<string, unknown>>(
     sc?.orgFeaturesSnapshot ?? {}
   );
-  const showTrialSettings = useMemo(() => {
-    if (isSchoolOrgView) return false;
-    return isProKlaseOrg(orgId);
-  }, [isSchoolOrgView, orgId]);
+  const showTrialSettings = !isSchoolOrgView;
   /** Dynamic pricing orgs don't need per-subject list prices. */
   const hideSubjectPrice = isProKlaseOrg(orgId);
   const [contactTutorStudentEmail, setContactTutorStudentEmail] = useState<TutorSeesContactMode>(

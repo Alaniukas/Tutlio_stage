@@ -102,6 +102,8 @@ export type ExtraLessonsOrderSnapshot = {
   group_id?: string | null;
   group_name?: string | null;
   tutor_name?: string | null;
+  subject_id?: string | null;
+  subject_name?: string | null;
 };
 
 export const START_WITHIN_14_CHECKBOX_TEXT =
@@ -166,6 +168,8 @@ export function buildExtraLessonsOrderSnapshot(input: {
   group_id?: string | null;
   group_name?: string | null;
   tutor_name?: string | null;
+  subject_id?: string | null;
+  subject_name?: string | null;
   individual_cancel_terms?: string;
   revision_label?: string;
 }): ExtraLessonsOrderSnapshot {
@@ -199,9 +203,11 @@ export function buildExtraLessonsOrderSnapshot(input: {
     school_email: String(input.school_email || '').trim(),
     school_phone: String(input.school_phone || '').trim(),
     data_protection_contact: String(input.data_protection_contact || input.school_email || '').trim(),
-    group_id: input.group_id || null,
-    group_name: input.group_name || null,
+    group_id: type === 'individual' ? null : (input.group_id || null),
+    group_name: type === 'individual' ? null : (input.group_name || null),
     tutor_name: input.tutor_name ? String(input.tutor_name).trim() || null : null,
+    subject_id: type === 'group' ? null : (input.subject_id || null),
+    subject_name: type === 'group' ? null : (input.subject_name || null),
   };
 }
 
@@ -246,6 +252,9 @@ export function mergeExtraLessonsOrderPatch(
     base_lessons_per_month: patch.base_lessons_per_month ?? base.base_lessons_per_month,
     group_id: patch.group_id !== undefined ? patch.group_id : base.group_id,
     group_name: patch.group_name !== undefined ? patch.group_name : base.group_name,
+    tutor_name: patch.tutor_name !== undefined ? patch.tutor_name : base.tutor_name,
+    subject_id: patch.subject_id !== undefined ? patch.subject_id : base.subject_id,
+    subject_name: patch.subject_name !== undefined ? patch.subject_name : base.subject_name,
   });
 }
 

@@ -58,6 +58,7 @@ import { downloadSchoolContractsXlsx } from '@/lib/schoolContractsXlsxExport';
 import { fetchOrganizationRow } from '@/lib/orgLookup';
 import ExtraLessonsOfferDialog from '@/components/company/ExtraLessonsOfferDialog';
 import { isExtraLessonsContractKind } from '@/lib/extraLessonsContract';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import {
   extraLessonsContractListDetails,
   extraLessonsContractListTitle,
@@ -274,6 +275,13 @@ export default function CompanyContracts() {
     meeting_link?: string | null;
     school_year_end?: string | null;
     slots?: { weekday: number; start_time: string; end_time: string }[];
+  }>>([]);
+  const [individualSubjects, setIndividualSubjects] = useState<Array<{
+    id: string;
+    name: string;
+    duration_minutes?: number | null;
+    price?: number | null;
+    tutor_name?: string | null;
   }>>([]);
   const [isTemplateDragActive, setIsTemplateDragActive] = useState(false);
   const templateFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -2040,6 +2048,39 @@ export default function CompanyContracts() {
                           })));
                         }
                       } catch { /* ignore */ }
+                      try {
+                        if (orgId) {
+                          const tutors = await getOrgVisibleTutors(supabase as any, orgId, 'id, full_name');
+                          const tutorIds = tutors.map((t) => t.id);
+                          if (tutorIds.length > 0) {
+                            const { data: subjectRows } = await supabase
+                              .from('subjects')
+                              .select('id, name, duration_minutes, price, tutor_id, is_group')
+                              .in('tutor_id', tutorIds)
+                              .order('name');
+                            const nameByTutor = new Map(tutors.map((t) => [t.id, t.full_name]));
+                            setIndividualSubjects(
+                              (subjectRows || [])
+                                .filter((row: { is_group?: boolean | null }) => row.is_group !== true)
+                                .map((row: {
+                                  id: string;
+                                  name: string;
+                                  duration_minutes?: number | null;
+                                  price?: number | null;
+                                  tutor_id: string;
+                                }) => ({
+                                  id: row.id,
+                                  name: row.name,
+                                  duration_minutes: row.duration_minutes,
+                                  price: row.price,
+                                  tutor_name: nameByTutor.get(row.tutor_id) || null,
+                                })),
+                            );
+                          } else {
+                            setIndividualSubjects([]);
+                          }
+                        }
+                      } catch { /* ignore */ }
                       setExtraOfferOpen(true);
                     }}
                   >
@@ -3196,6 +3237,7 @@ export default function CompanyContracts() {
         organizationId={orgId}
         students={students}
         groups={classGroups}
+        individualSubjects={individualSubjects}
         onCreated={(info) => {
           const mail = info.emailTo ? ` ${info.emailTo}` : '';
           if (info.emailSent) {

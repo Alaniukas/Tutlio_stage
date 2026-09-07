@@ -1,5 +1,5 @@
 /**
- * Idempotent demo org for „Mano Korepetitorius“ sales demo.
+ * Idempotent demo org (slug `manokorepetitorius`, display name DEMO).
  *
  * Usage: node scripts/seed-manokorepetitorius-demo.mjs
  * Requires: .env with VITE_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
@@ -16,7 +16,7 @@ const ROOT = join(__dirname, '..');
 const DEMO = {
   orgId: 'c1a00000-7e57-4000-8000-000000000001',
   slug: 'manokorepetitorius',
-  name: 'Mano Korepetitorius',
+  name: 'DEMO',
   email: 'manokorepetitorius.demo.admin@tutlio.lt',
   brandColor: '#4F33B2',
   brandColorSecondary: '#68AE4A',
@@ -183,10 +183,10 @@ async function main() {
   const features = {
     custom_branding: true,
     hide_powered_by: true,
-    public_name: 'Mano Korepetitorius',
+    public_name: 'DEMO',
     contact_email: DEMO.email,
-    email_team_signature: 'Mano Korepetitoriaus komanda',
-    email_sender_name: 'Mano Korepetitorius',
+    email_team_signature: 'DEMO komanda',
+    email_sender_name: 'DEMO',
     login_description:
       'Individualus dėmesys kiekvienam mokiniui. Patyrę ir kruopščiai atrinkti korepetitoriai — gyvai Vilniuje ir nuotoliu visoje Lietuvoje.',
     manual_payments: false,

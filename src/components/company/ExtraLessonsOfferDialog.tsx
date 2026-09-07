@@ -95,12 +95,21 @@ function applyGroupDefaults(
   };
 }
 
+export type ExtraLessonsTaughtSubject = {
+  id: string;
+  name: string;
+  duration_minutes?: number | null;
+  price?: number | null;
+  tutor_name?: string | null;
+};
+
 export default function ExtraLessonsOfferDialog(props: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   organizationId?: string | null;
   students: Student[];
   groups: Group[];
+  individualSubjects?: ExtraLessonsTaughtSubject[];
   onCreated: (info: {
     acceptUrl: string;
     contractNumber: string;
@@ -121,6 +130,7 @@ export default function ExtraLessonsOfferDialog(props: {
   const [baseLessons, setBaseLessons] = useState('');
   const [slots, setSlots] = useState<ExtraLessonsScheduleSlot[]>([]);
   const [groupId, setGroupId] = useState('');
+  const [subjectId, setSubjectId] = useState('');
   const [studentSearch, setStudentSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,6 +152,7 @@ export default function ExtraLessonsOfferDialog(props: {
     setBaseLessons('');
     setSlots([]);
     setGroupId('');
+    setSubjectId('');
     setError(null);
     baseLessonsManual.current = false;
     unitPriceManual.current = false;
@@ -161,6 +172,7 @@ export default function ExtraLessonsOfferDialog(props: {
     });
   }, [sortedStudents, studentSearch]);
 
+  const subjects = props.individualSubjects || [];
   const selectedGroup = props.groups.find((g) => g.id === groupId);
 
   const recalcBaseLessons = (nextSlots: ExtraLessonsScheduleSlot[], start: string, end: string, group?: Group) => {
@@ -176,6 +188,7 @@ export default function ExtraLessonsOfferDialog(props: {
 
   const applyGroupSelection = (id: string) => {
     setGroupId(id);
+    setSubjectId('');
     const g = props.groups.find((x) => x.id === id);
     if (!g) return;
     setServiceType('group');
@@ -189,6 +202,28 @@ export default function ExtraLessonsOfferDialog(props: {
     recalcBaseLessons(defaults.slots, startDate, endDate, g);
   };
 
+  const applySubjectSelection = (id: string) => {
+    setSubjectId(id);
+    setGroupId('');
+    const subject = subjects.find((x) => x.id === id);
+    if (!subject) return;
+    setServiceType('individual');
+    setServiceName(subject.name);
+    if (subject.duration_minutes && Number(subject.duration_minutes) > 0) {
+      setDuration(String(subject.duration_minutes));
+    } else if (styledPrefill && !duration) {
+      setDuration(String(LAISVI_VAIKIAI_EXTRA_DURATION_MINUTES));
+    }
+    if (styledPrefill && !unitPriceManual.current) {
+      setUnitPrice(laisviVaikaiExtraUnitPriceEur('individual').toFixed(2));
+    } else if (!unitPriceManual.current && subject.price && Number(subject.price) > 0) {
+      setUnitPrice(String(subject.price));
+    }
+    if (styledPrefill && !platform) {
+      setPlatform(LAISVI_VAIKIAI_EXTRA_PLATFORM);
+    }
+  };
+
   const onServiceTypeChange = (next: '' | 'group' | 'individual') => {
     setServiceType(next);
     if (styledPrefill && !unitPriceManual.current) {
@@ -196,6 +231,9 @@ export default function ExtraLessonsOfferDialog(props: {
     }
     if (next === 'individual') {
       setGroupId('');
+    }
+    if (next === 'group') {
+      setSubjectId('');
     }
     if (styledPrefill && next === 'group' && !platform) {
       setPlatform(LAISVI_VAIKIAI_EXTRA_PLATFORM);
@@ -221,20 +259,23 @@ export default function ExtraLessonsOfferDialog(props: {
     setBusy(true);
     setError(null);
     const group = props.groups.find((g) => g.id === groupId);
+    const subject = subjects.find((s) => s.id === subjectId);
     const order = buildExtraLessonsOrderSnapshot({
-      service_name: serviceName || group?.name || '',
+      service_name: serviceName || subject?.name || group?.name || '',
       service_type: serviceType,
       platform,
-      duration_minutes: Number(duration) || 0,
+      duration_minutes: Number(duration) || Number(subject?.duration_minutes) || 0,
       schedule_slots: slots,
       schedule_label: scheduleLabel,
       start_date: startDate,
       end_date: endDate,
       unit_price_eur: Number(unitPrice) || 0,
       base_lessons_per_month: Number(baseLessons) || 0,
-      group_id: groupId || null,
-      group_name: group?.name || null,
-      tutor_name: group?.tutor_name || null,
+      group_id: serviceType === 'individual' ? null : (groupId || null),
+      group_name: serviceType === 'individual' ? null : (group?.name || null),
+      tutor_name: subject?.tutor_name || group?.tutor_name || null,
+      subject_id: serviceType === 'group' ? null : (subjectId || null),
+      subject_name: serviceType === 'group' ? null : (subject?.name || null),
     });
     try {
       const headers = await authHeaders();
@@ -273,8 +314,8 @@ export default function ExtraLessonsOfferDialog(props: {
           <DialogTitle>Papildomų užsiėmimų sutartis</DialogTitle>
         </DialogHeader>
         <p className="text-xs text-gray-500">
-          Privaloma: mokinys ir užsiėmimo kaina. Tipą (grupinis / individualus), trukmę, grafiką, datas ir kiekius
-          galite palikti tuščius — tėvai juos užpildys priimdami sutartį.
+          Privaloma: mokinys ir užsiėmimo kaina. Grupinei sutarčiai rinkitės klasės grupę, individualiai — dėstomą dalyką.
+          Grafiką, datas ir kiekius galite palikti tuščius — tėvai juos užpildys priimdami sutartį.
         </p>
         <div className="space-y-3">
           {error && <p className="text-sm text-red-600">{error}</p>}
@@ -308,17 +349,21 @@ export default function ExtraLessonsOfferDialog(props: {
           </div>
           <div>
             <Label>Paslaugos pavadinimas</Label>
-            <Input value={serviceName} onChange={(e) => setServiceName(e.target.value)} placeholder="nebūtina, jei pasirinkta grupė" />
+            <Input
+              value={serviceName}
+              onChange={(e) => setServiceName(e.target.value)}
+              placeholder={serviceType === 'individual' ? 'užpildoma iš dalyko' : 'nebūtina, jei pasirinkta grupė'}
+            />
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label>Tipas</Label>
-              <select className="w-full border rounded-md h-9 px-2 text-sm" value={serviceType} onChange={(e) => onServiceTypeChange(e.target.value as '' | 'group' | 'individual')}>
-                <option value="">Tėvai pasirinks</option>
-                <option value="group">Grupinė</option>
-                <option value="individual">Individuali</option>
-              </select>
-            </div>
+          <div>
+            <Label>Tipas</Label>
+            <select className="w-full border rounded-md h-9 px-2 text-sm" value={serviceType} onChange={(e) => onServiceTypeChange(e.target.value as '' | 'group' | 'individual')}>
+              <option value="">Tėvai pasirinks</option>
+              <option value="group">Grupinė</option>
+              <option value="individual">Individuali</option>
+            </select>
+          </div>
+          {serviceType !== 'individual' && (
             <div>
               <Label>Grupė</Label>
               <select className="w-full border rounded-md h-9 px-2 text-sm" value={groupId} onChange={(e) => applyGroupSelection(e.target.value)}>
@@ -328,7 +373,25 @@ export default function ExtraLessonsOfferDialog(props: {
                 ))}
               </select>
             </div>
-          </div>
+          )}
+          {serviceType === 'individual' && (
+            <div>
+              <Label>Dėstomas dalykas</Label>
+              <select className="w-full border rounded-md h-9 px-2 text-sm" value={subjectId} onChange={(e) => applySubjectSelection(e.target.value)}>
+                <option value="">Pasirinkite dalyką…</option>
+                {subjects.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.tutor_name ? `${s.name} — ${s.tutor_name}` : s.name}
+                  </option>
+                ))}
+              </select>
+              {subjects.length === 0 && (
+                <p className="text-xs text-amber-700 mt-1">
+                  Nėra individualių dėstomų dalykų. Pridėkite juos nustatymuose (dalykų valdymas).
+                </p>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <div>
               <Label>Platforma</Label>

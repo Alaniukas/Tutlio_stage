@@ -226,7 +226,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let tutorName = body.tutor_name ? String(body.tutor_name).trim() : '';
   let groupName = body.group_name ? String(body.group_name) : null;
-  const groupId = body.group_id ? String(body.group_id) : null;
+  const serviceType = parseExtraLessonsServiceType(body.service_type);
+  let groupId = body.group_id ? String(body.group_id) : null;
+  if (serviceType === 'individual') groupId = null;
+  const subjectId = serviceType === 'group' ? null : (body.subject_id ? String(body.subject_id) : null);
+  let subjectName = body.subject_name ? String(body.subject_name).trim() : '';
   if (groupId && !tutorName) {
     const { data: grp } = await supabase
       .from('school_class_groups')
@@ -236,10 +240,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (grp?.tutor?.full_name) tutorName = String(grp.tutor.full_name);
     if (!groupName && grp?.name) groupName = String(grp.name);
   }
+  if (subjectId) {
+    const { data: subject } = await supabase
+      .from('subjects')
+      .select('id, name, tutor_id')
+      .eq('id', subjectId)
+      .maybeSingle();
+    if (subject?.name && !subjectName) subjectName = String(subject.name);
+    if (subject?.tutor_id && !tutorName) {
+      const { data: tutor } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', subject.tutor_id)
+        .maybeSingle();
+      if (tutor?.full_name) tutorName = String(tutor.full_name);
+    }
+  }
 
   const order = buildExtraLessonsOrderSnapshot({
-    service_name: String(body.service_name || groupName || ''),
-    service_type: parseExtraLessonsServiceType(body.service_type),
+    service_name: String(body.service_name || subjectName || groupName || ''),
+    service_type: serviceType,
     platform: String(body.platform || ''),
     duration_minutes: Number(body.duration_minutes || 0),
     schedule_slots: Array.isArray(body.schedule_slots) ? body.schedule_slots as any : [],
@@ -255,6 +275,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     group_id: groupId,
     group_name: groupName,
     tutor_name: tutorName || null,
+    subject_id: subjectId,
+    subject_name: subjectName || null,
     individual_cancel_terms: String(body.individual_cancel_terms || ''),
   });
   const missing = validateExtraLessonsOffer(order);
