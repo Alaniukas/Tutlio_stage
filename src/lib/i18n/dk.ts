@@ -5617,4 +5617,10 @@ export const dk: Record<string, string> = {
   "invoices.csvTutors": "Underviserfakturaer (CSV)",
   'school.confirmLessonOutcome': "Jeg bekræfter det valgte lektionsresultat",
   'school.confirmLessonOutcomeHint': "Bekræft først efter at have kontrolleret, at lektionen fandt sted, eller at eleven var fraværende. Dette bruges til månedlig fakturering.",
+  'stu.childConnected': "Barnets konto tilknyttet",
+  'stu.childNotConnected': "Barnets konto ikke tilknyttet",
+  'stu.parentConnected': "Forælderens konto tilknyttet",
+  'stu.parentNotConnected': "Forælderens konto ikke tilknyttet",
+  'stu.parentConnectionUnknown': "Forælderens status ukendt",
+  'stu.connectionHint': "Viser konti, der er knyttet til eleven, ikke om de er online lige nu.",
 };

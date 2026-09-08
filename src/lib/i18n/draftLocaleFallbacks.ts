@@ -7,6 +7,12 @@
  * an unrelated missing key still fails the locale quality tests.
  */
 export const DRAFT_LOCALE_ALANO_FALLBACK_KEYS = new Set<string>([
+  'stu.childConnected',
+  'stu.childNotConnected',
+  'stu.parentConnected',
+  'stu.parentNotConnected',
+  'stu.parentConnectionUnknown',
+  'stu.connectionHint',
   'auth.proklasePrivacyPolicy',
   'auth.proklaseTermsOfService',
   'auth.showPassword',

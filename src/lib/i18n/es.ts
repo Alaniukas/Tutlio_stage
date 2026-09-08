@@ -5568,4 +5568,10 @@ export const es: Record<string, string> = {
   "invoices.csvTutors": "Facturas de tutores (CSV)",
   'school.confirmLessonOutcome': "Confirmo el resultado seleccionado de la clase",
   'school.confirmLessonOutcomeHint': "Confirma solo después de comprobar que la clase tuvo lugar o que el alumno estuvo ausente. Se utiliza para la facturación mensual.",
+  'stu.childConnected': "Cuenta del hijo vinculada",
+  'stu.childNotConnected': "Cuenta del hijo no vinculada",
+  'stu.parentConnected': "Cuenta del progenitor vinculada",
+  'stu.parentNotConnected': "Cuenta del progenitor no vinculada",
+  'stu.parentConnectionUnknown': "Estado del progenitor desconocido",
+  'stu.connectionHint': "Muestra las cuentas vinculadas al alumno, no si están en línea ahora.",
 };

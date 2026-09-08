@@ -5565,4 +5565,10 @@ export const de: Record<string, string> = {
   "invoices.csvTutors": "Nachhilfelehrer-Rechnungen (CSV)",
   'school.confirmLessonOutcome': "Ich bestätige das gewählte Unterrichtsergebnis",
   'school.confirmLessonOutcomeHint': "Bestätigen Sie erst nach Prüfung, dass der Unterricht stattfand oder der Schüler fehlte. Dies wird für die monatliche Abrechnung verwendet.",
+  'stu.childConnected': "Kind verknüpft",
+  'stu.childNotConnected': "Kind nicht verknüpft",
+  'stu.parentConnected': "Elternkonto verknüpft",
+  'stu.parentNotConnected': "Elternkonto nicht verknüpft",
+  'stu.parentConnectionUnknown': "Elternstatus unbekannt",
+  'stu.connectionHint': "Zeigt die mit dem Schüler verknüpften Konten, nicht den aktuellen Online-Status.",
 };

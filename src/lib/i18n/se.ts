@@ -5510,4 +5510,10 @@ export const se: Record<string, string> = {
   "invoices.csvTutors": "Lärarfakturor (CSV)",
   'school.confirmLessonOutcome': "Jag bekräftar det valda lektionsresultatet",
   'school.confirmLessonOutcomeHint': "Bekräfta först när du har kontrollerat att lektionen ägde rum eller att eleven var frånvarande. Detta används för månadsfakturering.",
+  'stu.childConnected': "Barnets konto länkat",
+  'stu.childNotConnected': "Barnets konto inte länkat",
+  'stu.parentConnected': "Förälderns konto länkat",
+  'stu.parentNotConnected': "Förälderns konto inte länkat",
+  'stu.parentConnectionUnknown': "Förälderns status okänd",
+  'stu.connectionHint': "Visar konton som är länkade till eleven, inte om de är online just nu.",
 };

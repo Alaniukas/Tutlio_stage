@@ -122,7 +122,6 @@ export async function renderAndStoreExtraLessonsPdf(
   });
 
   const bundled = usesBundledExtraLessonsDocx(params.contract.organization_id);
-  let lastDocxError = '';
   if (bundled) {
     try {
       pdfBytes = new Uint8Array(await withTimeout(
@@ -130,8 +129,8 @@ export async function renderAndStoreExtraLessonsPdf(
         55000,
       ));
     } catch (e) {
-      lastDocxError = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
-      console.error('[extra-lessons] bundled DOCX PDF failed, trying org template', lastDocxError);
+      const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
+      throw new Error(`Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${detail}`, { cause: e });
     }
   }
 
@@ -159,16 +158,9 @@ export async function renderAndStoreExtraLessonsPdf(
         );
       } catch (e) {
         const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
-        const prefix = lastDocxError ? `${lastDocxError}; org šablonas: ` : '';
-        throw new Error(`Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${prefix}${detail}`, { cause: e });
+        throw new Error(`Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${detail}`, { cause: e });
       }
     }
-  }
-
-  if (!pdfBytes && bundled) {
-    throw new Error(
-      `Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${lastDocxError || 'šablonas nerastas'}`,
-    );
   }
 
   if (!pdfBytes) {

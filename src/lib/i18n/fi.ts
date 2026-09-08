@@ -5566,4 +5566,10 @@ export const fi: Record<string, string> = {
   "invoices.csvTutors": "Opettajien laskut (CSV)",
   'school.confirmLessonOutcome': "Vahvistan valitun oppitunnin tuloksen",
   'school.confirmLessonOutcomeHint': "Vahvista vasta tarkistettuasi, että oppitunti pidettiin tai oppilas oli poissa. Tietoa käytetään kuukausilaskutukseen.",
+  'stu.childConnected': "Lapsen tili yhdistetty",
+  'stu.childNotConnected': "Lapsen tiliä ei ole yhdistetty",
+  'stu.parentConnected': "Huoltajan tili yhdistetty",
+  'stu.parentNotConnected': "Huoltajan tiliä ei ole yhdistetty",
+  'stu.parentConnectionUnknown': "Huoltajan tila tuntematon",
+  'stu.connectionHint': "Näyttää oppilaaseen yhdistetyt tilit, ei sitä, ovatko käyttäjät verkossa juuri nyt.",
 };

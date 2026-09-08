@@ -5495,4 +5495,10 @@ export const nl: Record<string, string> = {
   "invoices.csvTutors": "Bijlesdocentfacturen (CSV)",
   'school.confirmLessonOutcome': "Ik bevestig het gekozen lesresultaat",
   'school.confirmLessonOutcomeHint': "Bevestig pas nadat u hebt gecontroleerd dat de les plaatsvond of de leerling afwezig was. Dit wordt gebruikt voor de maandfactuur.",
+  'stu.childConnected': "Kinderaccount gekoppeld",
+  'stu.childNotConnected': "Kinderaccount niet gekoppeld",
+  'stu.parentConnected': "Ouderaccount gekoppeld",
+  'stu.parentNotConnected': "Ouderaccount niet gekoppeld",
+  'stu.parentConnectionUnknown': "Ouderstatus onbekend",
+  'stu.connectionHint': "Toont accounts die aan de leerling zijn gekoppeld, niet of ze nu online zijn.",
 };

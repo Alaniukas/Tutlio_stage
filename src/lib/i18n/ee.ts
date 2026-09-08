@@ -6070,4 +6070,10 @@ export const ee: Record<string, string> = {
   "invoices.csvTutors": "Eraõpetajate arved (CSV)",
   'school.confirmLessonOutcome': "Kinnitan valitud tunni tulemuse",
   'school.confirmLessonOutcomeHint': "Kinnitage alles pärast kontrollimist, et tund toimus või õpilane puudus. Seda kasutatakse igakuise arve koostamiseks.",
+  'stu.childConnected': "Lapse konto seotud",
+  'stu.childNotConnected': "Lapse konto sidumata",
+  'stu.parentConnected': "Vanema konto seotud",
+  'stu.parentNotConnected': "Vanema konto sidumata",
+  'stu.parentConnectionUnknown': "Vanema olek teadmata",
+  'stu.connectionHint': "Näitab õpilasega seotud kontosid, mitte seda, kas kasutajad on praegu võrgus.",
 };

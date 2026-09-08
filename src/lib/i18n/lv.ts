@@ -6090,4 +6090,10 @@ export const lv: Record<string, string> = {
   "invoices.csvTutors": "Privātskolotāju rēķini (CSV)",
   'school.confirmLessonOutcome': "Apstiprinu izvēlēto nodarbības rezultātu",
   'school.confirmLessonOutcomeHint': "Apstipriniet tikai pēc pārbaudes, ka nodarbība notika vai skolēns neieradās. Tas tiek izmantots ikmēneša rēķinam.",
+  'stu.childConnected': "Bērna konts saistīts",
+  'stu.childNotConnected': "Bērna konts nav saistīts",
+  'stu.parentConnected': "Vecāka konts saistīts",
+  'stu.parentNotConnected': "Vecāka konts nav saistīts",
+  'stu.parentConnectionUnknown': "Vecāka statuss nav zināms",
+  'stu.connectionHint': "Rāda ar skolēnu saistītos kontus, nevis to, vai lietotāji pašlaik ir tiešsaistē.",
 };
