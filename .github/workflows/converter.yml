@@ -1,0 +1,9 @@
+name: Converter reliability
+on: [push, pull_request]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t tutlio-converter-test .
+      - run: docker run --rm --memory=1g --pids-limit=256 tutlio-converter-test npm test

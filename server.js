@@ -4,14 +4,27 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import PizZip from 'pizzip';
+import { createWorker, runProcess } from './worker.js';
 
-const execFileAsync = promisify(execFile);
 const app = express();
 
-app.use(express.json({ limit: '50mb' }));
+let admitted = 0;
+app.use('/convert-docx-to-pdf', (req, res, next) => {
+  const auth = checkConvertApiKey(req);
+  if (!auth.allowed) return res.status(auth.status).json({ error: auth.error });
+  if (admitted >= 3 || restarting) {
+    res.setHeader('Retry-After', '5');
+    return res.status(503).json({ error: 'Converter busy' });
+  }
+  admitted++;
+  let released = false;
+  const release = () => { if (!released) { released = true; admitted--; } };
+  res.once('finish', release);
+  res.once('close', release);
+  next();
+});
+app.use(express.json({ limit: '8mb' }));
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && 'body' in err) {
     console.warn('[docx-converter] invalid JSON body');
@@ -20,9 +33,17 @@ app.use((err, req, res, next) => {
   return next(err);
 });
 
-const SERVICE_VERSION = '2.1.4';
-let conversionQueue = Promise.resolve();
-const LO_USER_PROFILE = path.join(os.tmpdir(), 'tutlio-lo-profile');
+const SERVICE_VERSION = '2.2.0';
+const worker = createWorker();
+let lastProbe = null;
+let restarting = false;
+function restartWorker() {
+  if (restarting) return;
+  restarting = true;
+  worker.stop();
+  // Non-zero exit triggers Railway ON_FAILURE restart; do not accept more work.
+  setTimeout(() => process.exit(1), 250).unref();
+}
 
 /** Calibrated on Railway Linux LO vs Word Save-as-PDF for annex table "Dalykas" x=120. */
 const FLOATING_TABLE_TBL_IND = Number(process.env.FLOATING_TABLE_TBL_IND || -580);
@@ -195,29 +216,6 @@ function safePrepareDocxForLibreOffice(docxBuffer) {
   }
 }
 
-function formatExecError(error) {
-  if (!(error instanceof Error)) return 'LibreOffice conversion failed';
-  const stderr = typeof error.stderr === 'string' ? error.stderr.trim().slice(0, 1500) : '';
-  const stdout = typeof error.stdout === 'string' ? error.stdout.trim().slice(0, 500) : '';
-  return [error.message, stderr, stdout].filter(Boolean).join(' | ');
-}
-
-function sofficeCandidates() {
-  const fromEnv = process.env.LIBREOFFICE_PATH ? [process.env.LIBREOFFICE_PATH] : [];
-  const linux = [
-    'soffice',
-    '/usr/bin/soffice',
-    '/usr/lib/libreoffice/program/soffice',
-    '/usr/lib/libreoffice/program/soffice.bin',
-  ];
-  const win = [
-    'soffice.exe',
-    'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
-    'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
-  ];
-  return [...new Set([...fromEnv, ...(process.platform === 'win32' ? win : linux)])];
-}
-
 function timingSafeEqualStr(a, b) {
   const ba = Buffer.from(a, 'utf8');
   const bb = Buffer.from(b, 'utf8');
@@ -251,124 +249,49 @@ function checkConvertApiKey(req) {
   return { allowed: true };
 }
 
-function serializeConversion(task) {
-  const current = conversionQueue.then(task, task);
-  conversionQueue = current.then(() => undefined, () => undefined);
-  return current;
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForPdf(outputPath, timeoutMs = 20000) {
-  const started = Date.now();
-  let lastErr = null;
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const pdf = await fs.readFile(outputPath);
-      if (pdf.length > 0) return pdf;
-    } catch (error) {
-      lastErr = error;
-    }
-    await sleep(250);
-  }
-  throw lastErr || new Error(`Timed out waiting for ${outputPath}`);
-}
-
 async function runLibreOfficeOnce(docxBytes) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tutlio-docx-'));
-  const inputPath = path.join(workDir, 'contract.docx');
-  const outputPath = path.join(workDir, 'contract.pdf');
-  const profileUrl = pathToFileURL(LO_USER_PROFILE).href;
-  await fs.mkdir(LO_USER_PROFILE, { recursive: true });
-  await fs.writeFile(inputPath, docxBytes);
-
-  const convertArgs = [
-    `-env:UserInstallation=${profileUrl}`,
-    '--headless',
-    '--nologo',
-    '--nodefault',
-    '--nofirststartwizard',
-    '--nolockcheck',
-    '--norestore',
-    '--convert-to',
-    'pdf',
-    '--outdir',
-    workDir,
-    inputPath,
-  ];
-
-  let lastError = null;
-  const tried = [];
   try {
-    return await serializeConversion(async () => {
-      for (const bin of sofficeCandidates()) {
-        tried.push(bin);
-        try {
-          await execFileAsync(bin, convertArgs, {
-            timeout: 90000,
-            windowsHide: true,
-          });
-          return await waitForPdf(outputPath);
-        } catch (error) {
-          lastError = error;
-        }
-      }
-      const listing = await fs.readdir(workDir).catch(() => []);
-      throw new Error(
-        `LibreOffice did not produce a PDF (tried: ${tried.join(', ')}; dir: ${listing.join(', ') || '(empty)'}). Last error: ${formatExecError(lastError)}`,
-      );
-    });
+    const inputPath = path.join(workDir, 'contract.docx');
+    await fs.writeFile(inputPath, docxBytes);
+    await runProcess(process.env.LIBREOFFICE_PATH || '/usr/bin/soffice', [
+      '-env:UserInstallation=' + pathToFileURL(path.join(workDir, 'profile')).href,
+      '--headless', '--nologo', '--nodefault', '--nofirststartwizard', '--norestore',
+      '--convert-to', 'pdf', '--outdir', workDir, inputPath,
+    ], { env: { ...process.env, HOME: workDir, TMPDIR: workDir,
+      SAL_USE_VCLPLUGIN: 'gen', OMP_NUM_THREADS: '1', OPENBLAS_NUM_THREADS: '1' } });
+    const pdf = await fs.readFile(path.join(workDir, 'contract.pdf'));
+    if (pdf.subarray(0, 5).toString() !== '%PDF-') throw new Error('Invalid PDF output');
+    return pdf;
   } finally {
-    await fs.rm(workDir, { recursive: true, force: true });
+    await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
 async function convertWithLibreOffice(docxBuffer) {
   const prepared = safePrepareDocxForLibreOffice(docxBuffer);
-  try {
-    const pdf = await runLibreOfficeOnce(prepared.buffer);
-    return { pdf, meta: prepared.meta };
-  } catch (firstError) {
-    const original = Buffer.from(docxBuffer);
-    if (original.equals(Buffer.from(prepared.buffer))) throw firstError;
-    console.error(
-      '[docx-converter] prepared DOCX failed, retrying original bytes:',
-      firstError instanceof Error ? firstError.message : firstError,
-    );
-    const pdf = await runLibreOfficeOnce(original);
-    return { pdf, meta: { ...prepared.meta, retriedOriginal: true } };
-  }
+  const pdf = await runLibreOfficeOnce(prepared.buffer);
+  return { pdf, meta: prepared.meta };
 }
 
-async function probeFont(requestedFamily) {
+async function probeConversion() {
+  if (worker.state().active || worker.state().pending || restarting) return;
   try {
-    const { stdout } = await execFileAsync('fc-match', [requestedFamily], { timeout: 5000 });
-    return stdout.trim().split('\n')[0] || null;
-  } catch {
-    return null;
-  }
+    await worker.run(async () => {
+      const zip = new PizZip();
+      zip.file('[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+      zip.file('_rels/.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+      zip.file('word/document.xml', '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Tutlio health check</w:t></w:r></w:p></w:body></w:document>');
+      await runLibreOfficeOnce(zip.generate({ type: 'nodebuffer' }));
+      lastProbe = new Date().toISOString();
+    });
+  } catch (error) { console.error('[worker] health conversion failed', error.message); restartWorker(); }
 }
 
-app.get('/health', async (_req, res) => {
-  const [timesNewRoman, liberationSerif, dejaVuSerif] = await Promise.all([
-    probeFont('Times New Roman'),
-    probeFont('Liberation Serif'),
-    probeFont('DejaVu Serif'),
-  ]);
-  res.status(200).json({
-    ok: true,
-    version: SERVICE_VERSION,
-    exportFilter: 'simple',
-    floatingTableTblInd: FLOATING_TABLE_TBL_IND,
-    fonts: {
-      timesNewRoman,
-      liberationSerif,
-      dejaVuSerif,
-      timesResolved: /times new roman|liberation serif/i.test(timesNewRoman || ''),
-    },
-  });
+app.get('/health', (_req, res) => {
+  const state = worker.state();
+  const ok = Boolean(lastProbe) && state.healthy;
+  res.status(ok ? 200 : 503).json({ ok, version: SERVICE_VERSION, lastSuccessfulConversion: lastProbe, ...state });
 });
 
 app.get('/', (_req, res) => {
@@ -387,8 +310,12 @@ app.post('/convert-docx-to-pdf', async (req, res) => {
   }
 
   try {
-    const docxBuffer = Buffer.from(fileBase64, 'base64');
-    const { pdf, meta } = await convertWithLibreOffice(docxBuffer);
+    const { pdf, meta } = await worker.run(async () => {
+      const docxBuffer = Buffer.from(fileBase64, 'base64');
+      const result = await convertWithLibreOffice(docxBuffer);
+      lastProbe = new Date().toISOString();
+      return result;
+    });
     return res.status(200).json({
       pdfBase64: pdf.toString('base64'),
       meta: {
@@ -401,7 +328,10 @@ app.post('/convert-docx-to-pdf', async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'DOCX to PDF conversion failed';
     console.error('[docx-converter] convert failed:', message);
-    return res.status(500).json({ error: message });
+    if (error.infrastructureFailure) restartWorker();
+    const status = error.status || (error.infrastructureFailure ? 503 : 422);
+    if (status === 503) res.setHeader('Retry-After', '5');
+    return res.status(status).json({ error: status === 503 ? 'Converter temporarily unavailable' : 'Document conversion failed' });
   }
 });
 
@@ -409,4 +339,6 @@ const port = Number(process.env.PORT || 3001);
 const host = '0.0.0.0';
 app.listen(port, host, () => {
   console.log(`tutlio-docx-converter listening on ${host}:${port}`);
+  void probeConversion();
+  setInterval(() => void probeConversion(), 60000).unref();
 });

@@ -1,43 +1,41 @@
-# Tutlio DOCX Converter
+# Tutlio DOCX converter 2.2.0
 
-Standalone microservice for converting `DOCX -> PDF` with LibreOffice.
+Prepared from PDF-converteris revision 0ea41dc89353378ea0d2a682e86483f9c30d1744. The production branch has a root-level server.js; this directory contains the complete corresponding release, including its fonts and DOCX layout adjustments. Do not deploy the previous server.mjs implementation separately. server.mjs now forwards to server.js.
 
-Conversions are serialized inside each container and use an isolated LibreOffice profile per request. This prevents concurrent contract previews from sharing a locked profile or exhausting the container's process/thread allowance (`osl::Thread::create failed` on Railway).
+## Reliability changes
 
-## Fidelity notes (school contracts)
+- Authentication and maximum three admitted HTTP requests before JSON decoding; 8 MB JSON limit.
+- One active conversion and at most two waiting jobs. Waiting expires after 5 seconds; overload returns 503 and Retry-After.
+- One LibreOffice invocation, isolated HOME/TMPDIR/profile, 12 second process deadline. Linux process-group SIGKILL removes wrapper descendants. tini reaps orphans.
+- Resource exhaustion or timeout marks the worker unavailable and exits nonzero. Railway ON_FAILURE restarts the container, with a finite 10-restart cap to surface persistent faults.
+- Startup and idle once-per-minute synthetic DOCX conversions validate the engine. GET /health is 503 until successful. It does not launch processes per HTTP health request.
+- No retry with original DOCX after a layout-adjusted conversion fails: retries must not silently change contract layout.
+- Tutlio uses an 18 second remote request abort and validates PDF header bytes.
 
-- Installs **Times New Roman** (MS core fonts) + **Liberation Serif** fallback so LibreOffice does not substitute DejaVu (which reflows text and changes page count).
-- Uses **Writer PDF export filter** (`writer_pdf_Export`) with embedded standard fonts instead of generic `--convert-to pdf`.
-- **fontconfig** aliases map Times New Roman → Liberation Serif before DejaVu.
-- `GET /health` reports which font `fc-match` resolves for Times New Roman (verify after deploy).
+## Test before release
 
-## API
+From this directory:
 
-- `GET /health` -> `{ ok: true }`
-- `POST /convert-docx-to-pdf`
-  - body: `{ "fileBase64": "<docx_base64>" }`
-  - required header: `X-API-Key: <DOCX_CONVERTER_API_KEY>` or `Authorization: Bearer <DOCX_CONVERTER_API_KEY>`
-  - response: `{ "pdfBase64": "<pdf_base64>" }`
+    npm test
+    docker build -t tutlio-converter-test .
+    docker run --rm --memory=1g --pids-limit=256 tutlio-converter-test npm test
 
-## Local run
+The Linux test runs 20 sequential real conversions followed by a 12-request burst and verifies recovery after overload. It skips explicitly when LibreOffice is unavailable. The nested .github/workflows/converter.yml belongs at the root of PDF-converteris when publishing this directory there; it is not an active workflow in the application branch.
 
-1. `npm install`
-2. Copy `.env.example` -> `.env` and set vars.
-3. `npm start`
+Also compare anonymous annual and extra-lessons contract PDFs visually against the current approved layout before production promotion. Preserve the fontconfig file and bundled fonts.
 
-## Deploy to Railway
+## Deployment
 
-1. Create new Git repo from this folder.
-2. Push to GitHub.
-3. In Railway: **New Project -> Deploy from GitHub Repo**.
-4. Set environment variable `DOCX_CONVERTER_API_KEY` (required; requests are rejected without it or without a matching header).
-5. Deploy.
+No production deployment was performed by preparing these files. Publish the directory contents to PDF-converteris only after review; changing that branch may trigger Railway deployment. Keep DOCX_CONVERTER_API_KEY and the existing public URL. Apply railway.json and verify GET /health reports version 2.2.0 and an actual successful conversion. Deploy the Tutlio API changes separately.
 
-## Connect from main app
+Railway deployment healthchecks only gate startup, not ongoing health. The internal conversion probe and nonzero exit implement runtime recovery. Configure external outage notifications separately; none were created here.
 
-Main Tutlio app env (in `simono_school`) should use:
+References: https://docs.railway.com/deployments/healthchecks and https://docs.railway.com/deployments/restart-policy
 
-- `DOCX_CONVERTER_URL=https://<your-railway-domain>`
-- `DOCX_CONVERTER_API_KEY=<same-key>`
+## Scope and remaining limitations
 
-Then main app can call this converter endpoint from its own API route.
+The converter admission queue remains bounded in memory. Tutlio now persists final acceptance work separately in school_acceptance_jobs before requesting conversion. See docs/school-acceptance-queue.md in the application repository for deployment order and recovery semantics.
+
+The Tutlio changes serve saved offer PDFs without conversion, prevent unsaved previews from replacing contract pointers, and store each generated PDF under its byte hash. New invitation emails are withheld if PDF generation/storage fails. Such contracts remain saved for retry through the existing resend action. Final acceptance freezes filled source bytes and choices in the durable DB job. A cron worker generates the PDF and atomically marks the contract signed only after storing it; converter failure schedules a retry.
+
+Hash-named PDF objects preserve prior versions and consume storage; a future retention task must exclude all referenced/frozen documents. No existing PDFs or customer data are deleted or migrated.

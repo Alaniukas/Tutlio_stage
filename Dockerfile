@@ -11,7 +11,8 @@ RUN sed -i 's/Components: main/Components: main contrib/' /etc/apt/sources.list.
   && apt-get update \
   && echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections \
   && apt-get install -y --no-install-recommends \
-    libreoffice \
+    libreoffice-writer-nogui \
+    tini \
     fontconfig \
     fonts-liberation \
     fonts-crosextra-carlito \
@@ -27,7 +28,7 @@ RUN fc-cache -f
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
 COPY . .
 
@@ -36,4 +37,5 @@ ENV PORT=3000
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
+CMD ["node", "server.js"]
