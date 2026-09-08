@@ -29,6 +29,11 @@ interface PricingPayload {
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cacheByMarket = new Map<string, { payload: PricingPayload; expiresAt: number }>();
+const warnedMissingPriceIds = new Set<string>();
+
+function isMissingStripeResource(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && (error as { code?: unknown }).code === 'resource_missing');
+}
 
 function canonicalPayload(market: TutlioMarket): PricingPayload {
   const { minLicenses, maxSelfServe } = getEnterpriseLicenseBounds();
@@ -57,27 +62,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  const market = marketFromRequest(req);
+  let configuredPriceId: string | undefined;
   try {
-    const market = marketFromRequest(req);
     const cached = cacheByMarket.get(market);
     if (cached && cached.expiresAt > Date.now()) {
       return res.status(200).json(cached.payload);
     }
 
-    const priceId = getEnterprisePriceId(market);
-    if (!priceId) {
+    configuredPriceId = getEnterprisePriceId(market);
+    if (!configuredPriceId) {
       const payload = canonicalPayload(market);
       cacheByMarket.set(market, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
       return res.status(200).json(payload);
     }
 
-    const price = await stripe.prices.retrieve(priceId);
+    const price = await stripe.prices.retrieve(configuredPriceId);
     if (price.type !== 'recurring' || !price.recurring) {
       return res.status(500).json({ error: 'Enterprise license price must be a recurring Stripe price.' });
     }
     if (price.billing_scheme !== 'tiered' || price.tiers_mode !== 'volume') {
       console.warn(
-        `[enterprise-license-pricing] ${priceId} should be tiered volume; got ${price.billing_scheme}/${price.tiers_mode}`,
+        `[enterprise-license-pricing] ${configuredPriceId} should be tiered volume; got ${price.billing_scheme}/${price.tiers_mode}`,
       );
     }
 
@@ -88,8 +94,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     cacheByMarket.set(market, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
     return res.status(200).json(payload);
   } catch (error: any) {
-    console.error('[enterprise-license-pricing] Error:', error?.message || error);
-    const market = marketFromRequest(req);
+    if (configuredPriceId && isMissingStripeResource(error)) {
+      if (!warnedMissingPriceIds.has(configuredPriceId)) {
+        warnedMissingPriceIds.add(configuredPriceId);
+        console.warn(
+          `[enterprise-license-pricing] Configured ${market} price ${configuredPriceId} was not found; using canonical pricing.`,
+        );
+      }
+    } else {
+      console.error('[enterprise-license-pricing] Error:', error?.message || error);
+    }
     const payload = canonicalPayload(market);
     cacheByMarket.set(market, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
     return res.status(200).json(payload);
