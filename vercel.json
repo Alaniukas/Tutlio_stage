@@ -5,6 +5,18 @@
     "devCommand": null,
     "trailingSlash": false,
     "functions": {
+        "api/stripe-webhook.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
+        "api/confirm-stripe-payment.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
+        "api/confirm-package-payment.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
+        "api/confirm-manual-payment.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
         "api/generate-invoice.ts": {
             "includeFiles": "api/_lib/fonts/**"
         },
@@ -108,7 +120,11 @@
             "includeFiles": "src/lib/**"
         },
         "api/bill-school-extra-lessons.ts": {
+            "maxDuration": 300,
             "includeFiles": "src/lib/**"
+        },
+        "api/retry-school-monthly-invoice-emails.ts": {
+            "maxDuration": 90
         }
     },
     "headers": [
@@ -257,7 +273,11 @@
         },
         {
             "path": "/api/bill-school-extra-lessons",
-            "schedule": "0 4 1 * *"
+            "schedule": "0 4-23 1 * *"
+        },
+        {
+            "path": "/api/retry-school-monthly-invoice-emails",
+            "schedule": "17 * * * *"
         },
         {
             "path": "/api/cleanup-whiteboard-data",

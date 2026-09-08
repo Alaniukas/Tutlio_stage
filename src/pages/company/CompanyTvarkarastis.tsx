@@ -32,12 +32,13 @@ import type { Locale } from 'date-fns';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 
 import { useTranslation } from '@/lib/i18n';
-import { getCached, setCache } from '@/lib/dataCache';
+import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { supabase } from '@/lib/supabase';
 import { sendEmail } from '@/lib/email';
 import { assertTutorSlotsFree, runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
+import { subtractSessionsFromAvailability } from '@/lib/calendarAvailabilityBlocks';
 import { authHeaders } from '@/lib/apiHelpers';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
@@ -321,6 +322,7 @@ interface Student {
   personal_meeting_link?: string | null;
   grade?: string | null;
   pricing_lessons_per_week?: number | null;
+  pricing_lessons_per_week_is_manual?: boolean | null;
   linked_user_id?: string | null;
   organization_id?: string | null;
 }
@@ -332,7 +334,7 @@ export default function CompanyTvarkarastis() {
   }), [locale, dateFnsLocale]);
   const { fmt } = useMarketMoney();
   const { loading: featuresLoading, hasFeature, organizationId } = useOrgFeatures();
-  const { isOwner, loading: accessLoading } = useOrgAdminAccess();
+  const { isOwner, can, loading: accessLoading } = useOrgAdminAccess();
   const orgEntityType = useOrgEntityType();
   const isSchoolOrgView = isSchoolOrg(orgEntityType);
   const isProKlase = isProKlaseOrg(organizationId);
@@ -718,7 +720,7 @@ export default function CompanyTvarkarastis() {
 
       // Visi org mokiniai (legacy rows may lack organization_id but have tutor_id in org)
       const studentSelect =
-        'id, full_name, tutor_id, email, personal_meeting_link, grade, pricing_lessons_per_week, linked_user_id, organization_id';
+        'id, full_name, tutor_id, email, personal_meeting_link, grade, pricing_lessons_per_week, pricing_lessons_per_week_is_manual, linked_user_id, organization_id';
       let studentsData: Student[] = [];
       if (organizationId && tutorIds.length > 0) {
         const [byTutorRes, byOrgRes] = await Promise.all([
@@ -883,9 +885,9 @@ export default function CompanyTvarkarastis() {
           const [startHour, startMin] = avail.start_time.split(':');
           const [endHour, endMin] = avail.end_time.split(':');
           const blockStart = new Date(d);
-          blockStart.setHours(parseInt(startHour), parseInt(startMin), 0);
+          blockStart.setHours(parseInt(startHour), parseInt(startMin), 0, 0);
           const blockEnd = new Date(d);
-          blockEnd.setHours(parseInt(endHour), parseInt(endMin), 0);
+          blockEnd.setHours(parseInt(endHour), parseInt(endMin), 0, 0);
 
           blocks.push({
             id: `avail-${avail.id}-${d.toISOString()}`,
@@ -903,9 +905,9 @@ export default function CompanyTvarkarastis() {
         const [startHour, startMin] = avail.start_time.split(':');
         const [endHour, endMin] = avail.end_time.split(':');
         const blockStart = new Date(specificDate);
-        blockStart.setHours(parseInt(startHour), parseInt(startMin), 0);
+        blockStart.setHours(parseInt(startHour), parseInt(startMin), 0, 0);
         const blockEnd = new Date(specificDate);
-        blockEnd.setHours(parseInt(endHour), parseInt(endMin), 0);
+        blockEnd.setHours(parseInt(endHour), parseInt(endMin), 0, 0);
 
         blocks.push({
           id: `avail-${avail.id}`,
@@ -919,8 +921,9 @@ export default function CompanyTvarkarastis() {
       }
     });
 
-    return blocks;
-  }, [filteredAvailability, currentDate, showOnlySessions]);
+    // Subject/display filters must not make occupied time appear available.
+    return subtractSessionsFromAvailability(blocks, sessions);
+  }, [filteredAvailability, currentDate, showOnlySessions, sessions]);
 
   /** Trial (bandomoji) lessons get a distinct highlight in the calendar. */
   const trialSubjectIds = useMemo(
@@ -2032,6 +2035,10 @@ export default function CompanyTvarkarastis() {
 
     try {
       await hardDeleteScheduleSession(targetSessionId, deleteScope);
+      invalidateCache('company_tvarkarastis');
+      invalidateCache('company_sessions');
+      invalidateCache('company_dashboard');
+      invalidateCache('tutor_dashboard');
       fetchData();
     } catch (e: any) {
       alert(e?.message || t('cal.deleteFailed'));
@@ -3725,6 +3732,18 @@ export default function CompanyTvarkarastis() {
                     </Button>
                   </div>
                 </div>
+              )}
+
+              {isSchoolOrgView && can('sessions.edit') && !selectedEvent.class_group_id && !cancelConfirmOpen && (
+                <Button
+                  variant="outline"
+                  className="w-full rounded-xl border-red-200 text-red-700 hover:bg-red-50"
+                  disabled={saving}
+                  onClick={handleHardDeleteScheduleSession}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  {t('cal.deleteSession')}
+                </Button>
               )}
 
               {canView && selectedEvent.status !== 'cancelled' && !cancelConfirmOpen && !isSchoolOrgView && !isSchoolBilledSession(selectedEvent) && (

@@ -6,6 +6,7 @@ import { en } from './en.js';
  * See docs/ITALIAN_LOCALIZATION_REVIEW.md before publishing this locale.
  */
 export const itOverrides: Record<string, string> = {
+  'stats.cancellationPartTutor': "insegnante: {count}",
   'common.reloadPage': "Ricarica la pagina",
   'common.reloadPageWarning': "Ricaricando la pagina perderai le modifiche non salvate. Continuare?",
   "cal.rescheduleSameMonthOnly": "Le lezioni possono essere spostate solo all'interno dello stesso mese.",
@@ -5062,9 +5063,7 @@ export const itOverrides: Record<string, string> = {
   "support.contact.back": "Torna all'assistenza IA",
 };
 
-export const it: Record<string, string> = {
-  ...en,
-  ...itOverrides,
+Object.assign(itOverrides, {
   'nav.forAgencies': 'Agenzie di tutor',
   "compStu.inviteParentFirst": "Prima il genitore",
   "compStu.inviteParentFirstHint": "Viene inviato solo l'invito al portale del genitore. Sarà lui ad aggiungere in seguito il figlio e i dati dell'account.",
@@ -5565,4 +5564,6 @@ export const it: Record<string, string> = {
   "compare.customChip2": "Regole di compenso",
   "compare.customChip3": "Link di accettazione per i genitori",
   "compare.customChip4": "Portali con il tuo marchio",
-};
+});
+
+export const it: Record<string, string> = { ...en, ...itOverrides };

@@ -89,6 +89,51 @@ describe('CompanyClassGroups edit modal', () => {
     });
   });
 
+  it.each([true, false])('deletes an individual lesson only after confirmation (%s)', async (confirmed) => {
+    vi.spyOn(window, 'confirm').mockReturnValue(confirmed);
+    render(
+      <OrgEntityProvider value="school">
+        <MemoryRouter initialEntries={['/school/groups']}>
+          <CompanyClassGroups />
+        </MemoryRouter>
+      </OrgEntityProvider>,
+    );
+    const button = await screen.findByRole('button', { name: 'Ištrinti pamoką' });
+    fireEvent.click(button);
+    if (confirmed) {
+      await waitFor(() => expect(screen.queryByText('Lietuvių kalba 6 klasė')).toBeNull());
+      const request = fetchMock.mock.calls.find(([url]) => url === '/api/delete-session');
+      expect(request?.[1]?.method).toBe('POST');
+      expect(JSON.parse(request?.[1]?.body)).toEqual({ sessionId: 'individual-1', deleteScope: 'single' });
+      expect(request?.[1]?.headers.Authorization).toBe('Bearer tok');
+    } else {
+      expect(fetchMock.mock.calls.some(([url]) => url === '/api/delete-session')).toBe(false);
+      expect(screen.getByText('Lietuvių kalba 6 klasė')).toBeTruthy();
+    }
+    expect(screen.getByText('QA Legal Matematika')).toBeTruthy();
+    vi.mocked(window.confirm).mockRestore();
+  });
+
+  it('keeps the individual lesson visible when deletion fails', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fetchMock.mockImplementation(async (url) => ({
+      ok: url !== '/api/delete-session',
+      json: async () => ({ groups: [group] }),
+    }));
+    render(
+      <OrgEntityProvider value="school">
+        <MemoryRouter initialEntries={['/school/groups']}>
+          <CompanyClassGroups />
+        </MemoryRouter>
+      </OrgEntityProvider>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Ištrinti pamoką' }));
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.getByText('Lietuvių kalba 6 klasė')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Ištrinti pamoką' }) as HTMLButtonElement).disabled).toBe(false);
+    vi.mocked(window.confirm).mockRestore();
+  });
+
   it('renders the groups page without raw i18n keys', async () => {
     render(
       <OrgEntityProvider value="school">

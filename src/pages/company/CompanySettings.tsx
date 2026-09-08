@@ -152,7 +152,7 @@ export default function CompanySettings() {
   // Optional address shown to parents (e.g. contract emails) for questions; empty falls back to the org email.
   const [contactEmail, setContactEmail] = useState<string>(sc?.contactEmail ?? '');
   const [publicName, setPublicName] = useState<string>(sc?.publicName ?? '');
-  const [adminEmailOptOut, setAdminEmailOptOut] = useState<string[]>([]);
+  const [adminEmailOptOut, setAdminEmailOptOut] = useState<ReturnType<typeof parseEmailOptOutList>>([]);
   const [orgLocale, setOrgLocale] = useState<string>(sc?.orgLocale ?? '');
 
   useEffect(() => { if (!getCached('company_settings')) fetchSettings(); }, []);

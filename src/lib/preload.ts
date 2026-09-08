@@ -200,7 +200,7 @@ export function tutorStudentsRowsDeduped(tutorId: string) {
   return dedupeAsync(`tutor_students_star:${tutorId}`, () =>
     supabase
       .from('students')
-      .select('*, linked_user_id')
+      .select('*, linked_user_id, parent_students(parent_id)')
       .eq('tutor_id', tutorId)
       .is('detached_at', null)
       .order('created_at', { ascending: false }),

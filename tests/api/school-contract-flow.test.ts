@@ -38,6 +38,7 @@ vi.mock('../../api/_lib/auth', async () => {
   const { flowDb } = await import('../helpers/schoolContractFlowFixtures');
   return {
     verifyRequestAuth: vi.fn(async () => ({ userId: flowDb.adminUserId, isInternal: false })),
+    isInternalRequest: vi.fn(() => false),
   };
 });
 
@@ -71,6 +72,11 @@ function mockRes() {
     },
     end(body?: string) {
       if (body !== undefined) out.body = body;
+      return res;
+    },
+    redirect(code: number, url: string) {
+      out.statusCode = code;
+      out.headers.Location = url;
       return res;
     },
     getResult: () => out,
@@ -167,7 +173,7 @@ describe('School contract full flow (API integration)', () => {
     accessToken = new URL(completionUrl).searchParams.get('token') || '';
     expect(flowDb.findToken(accessToken)).toBeTruthy();
 
-    // 2) send-email: unified token for PDF + completion
+    // 2) The email opens the completion page; that page serves the PDF with the same token.
     const sendHandler = (await import('../../api/send-email')).default;
     const sendRes = mockRes();
     await sendHandler(
@@ -195,14 +201,10 @@ describe('School contract full flow (API integration)', () => {
     expect(sendRes.getResult().statusCode).toBe(200);
     expect(resendSend).toHaveBeenCalled();
     const emailCall = resendSend.mock.calls[0]?.[0] as { html?: string };
-    expect(emailCall.html).toContain('/api/school-contract-pdf?token=');
     expect(emailCall.html).toContain('/school-contract-complete?token=');
-    const pdfMatch = emailCall.html!.match(/school-contract-pdf\?token=([^"'&]+)/);
     const formMatch = emailCall.html!.match(/school-contract-complete\?token=([^"'&]+)/);
-    const pdfToken = pdfMatch ? decodeURIComponent(pdfMatch[1]) : null;
     const formToken = formMatch ? decodeURIComponent(formMatch[1]) : null;
-    expect(pdfToken).toBe(formToken);
-    expect(pdfToken).toBe(accessToken);
+    expect(formToken).toBe(accessToken);
 
     // 3) Parent: GET form meta
     const completeHandler = (await import('../../api/school-contract-complete')).default;
@@ -265,14 +267,14 @@ describe('School contract full flow (API integration)', () => {
     expect(flowDb.student.invite_code).toBeTruthy();
 
     // 7) Checkout for installment
-    const checkoutHandler = (await import('../../api/create-school-installment-checkout')).default;
+    const checkoutHandler = (await import('../../api/pay-school-installment')).default;
     const checkoutRes = mockRes();
     await checkoutHandler(
-      mockReq('POST', { body: { installmentId: flowDb.installments[0].id } }) as any,
+      mockReq('GET', { query: { installment: flowDb.installments[0].id } }) as any,
       checkoutRes as any,
     );
-    const checkoutJson = JSON.parse(checkoutRes.getResult().body || '{}');
-    expect(checkoutJson.url).toContain('checkout.stripe');
+    expect(checkoutRes.getResult().statusCode).toBe(303);
+    expect(checkoutRes.getResult().headers.Location).toContain('checkout.stripe');
     expect(stripeCheckoutCreate).toHaveBeenCalled();
     expect(flowDb.installments[0].stripe_checkout_session_id).toBe('cs_test_flow');
 

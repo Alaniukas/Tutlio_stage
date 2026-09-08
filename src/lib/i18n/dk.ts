@@ -5613,4 +5613,8 @@ export const dk: Record<string, string> = {
   "compare.customChip2": "Honorarregler",
   "compare.customChip3": "Accept-links til forældre",
   "compare.customChip4": "Portaler i dit brand",
+  "invoices.csvClients": "Kundefakturaer (CSV)",
+  "invoices.csvTutors": "Underviserfakturaer (CSV)",
+  'school.confirmLessonOutcome': "Jeg bekræfter det valgte lektionsresultat",
+  'school.confirmLessonOutcomeHint': "Bekræft først efter at have kontrolleret, at lektionen fandt sted, eller at eleven var fraværende. Dette bruges til månedlig fakturering.",
 };

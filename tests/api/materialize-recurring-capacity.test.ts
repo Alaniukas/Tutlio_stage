@@ -56,7 +56,7 @@ function tableBuilder(table: string) {
     maybeSingle: () => Promise.resolve({ data: null, error: null }),
     insert: () => Promise.resolve({ error: null }),
     order(column: string, options: unknown) {
-      mocks.orderCalls.push({ column, options });
+      if (table === 'recurring_individual_sessions') mocks.orderCalls.push({ column, options });
       return builder;
     },
     limit(value: number) {

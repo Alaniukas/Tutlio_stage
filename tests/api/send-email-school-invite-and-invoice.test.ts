@@ -17,6 +17,13 @@ vi.mock('resend', () => ({
 vi.mock('../../api/_lib/sendPush', () => ({
   sendPushForEmail: pushMock,
 }));
+vi.mock('../../api/_lib/schoolMonthlyInvoiceDelivery', () => ({
+  schoolMonthlyInvoiceIdempotencyKey: (id: string) => `school-monthly-invoice/${id}`,
+  deliverSchoolMonthlyInvoiceOnce: async ({ payload, send, invoiceId }: any) => {
+    const result = await send(payload, `school-monthly-invoice/${invoiceId}`);
+    return { sent: true, id: result.id };
+  },
+}));
 
 function mockRes() {
   const out: { statusCode: number; body: any } = { statusCode: 0, body: null };
@@ -29,11 +36,12 @@ function mockRes() {
 }
 
 async function sendEmail(type: string, data: Record<string, unknown>) {
+  if (type === 'school_monthly_invoice') data = { invoiceId: 'invoice-1', ...data };
   const { default: handler } = await import('../../api/send-email');
   const res = mockRes();
   await handler({
     method: 'POST',
-    body: { type, to: 'parent@example.com', data, locale: 'lt' },
+    body: { type, to: 'parent@example.com', data, locale: 'lt', ...(type === 'school_monthly_invoice' ? { idempotencyKey: `school-monthly-invoice/${data.invoiceId}` } : {}) },
     headers: { 'content-type': 'application/json', 'x-internal-key': 'service-key-test' },
     query: {},
   } as any, res as any);
@@ -50,6 +58,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.RESEND_API_KEY = 'test-resend-key';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-key-test';
+  process.env.VITE_SUPABASE_URL = 'https://example.supabase.co';
   sendMock.mockResolvedValue({ data: { id: 'email-1' }, error: null });
 });
 

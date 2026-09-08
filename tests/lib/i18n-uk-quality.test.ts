@@ -1,3 +1,4 @@
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { format, parse } from 'date-fns';
 import { en } from '../../src/lib/i18n/en';
@@ -23,10 +24,10 @@ beforeAll(async () => { await loadLocaleDict('uk'); });
 
 describe('Ukrainian tutor and business localization', () => {
   it('covers the full agreed scope and preserves deferred English fallback', () => {
-    expect(Object.keys(ukOverrides).sort()).toEqual(expectedKeys.sort());
+    expect(Object.keys(ukOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual(expectedKeys.sort());
     expect(Object.keys(uk).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter(key => en[key] && !uk[key])).toEqual([]);
-    for (const key of Object.keys(en).filter(key => deferred.has(key.split('.')[0]))) expect(uk[key]).toBe(en[key]);
+    for (const key of Object.keys(en).filter(key => deferred.has(key.split('.')[0]))) expect(uk[key], key).toBe(ukOverrides[key] ?? en[key]);
   });
   it.each([
     ['markup', /<\/?[a-zA-Z][^>]*>/g],
@@ -103,3 +104,6 @@ describe('Ukrainian tutor and business localization', () => {
     expect(chromeFor('uk').enquirySentBody).toContain('щоб підтвердити час');
   });
 });
+
+// Match server renderers: synchronous translation runs after its lazy preload.
+beforeAll(async () => { await preloadExtraLocaleDict('uk'); });

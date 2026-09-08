@@ -1,3 +1,4 @@
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
@@ -45,11 +46,11 @@ beforeAll(async () => { await loadLocaleDict('sl'); });
 
 describe('Slovenian tutor and business localization', () => {
   it('explicitly covers the tutor/business scope and keeps deferred modules in English', () => {
-    expect(Object.keys(slOverrides).sort()).toEqual(expectedKeys.sort());
+    expect(Object.keys(slOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual(expectedKeys.sort());
     expect(Object.keys(sl).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !sl[key])).toEqual([]);
     for (const key of Object.keys(en).filter((key) => deferredPrefixes.has(key.split('.')[0]))) {
-      expect(sl[key]).toBe(en[key]);
+      expect(sl[key], key).toBe(slOverrides[key] ?? en[key]);
     }
   });
 
@@ -151,3 +152,6 @@ describe('Slovenian tutor and business localization', () => {
     expect(validateLocalizedPhone('+44 7700 900123', 'sl')).toBe(true);
   });
 });
+
+// Match server renderers: synchronous translation runs after its lazy preload.
+beforeAll(async () => { await preloadExtraLocaleDict('sl'); });

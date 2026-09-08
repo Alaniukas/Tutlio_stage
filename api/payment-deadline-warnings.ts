@@ -1,3 +1,4 @@
+import { allowsPerLessonBilling } from './_lib/perLessonBillingEligibility.js';
 // ─── Vercel Cron Function: Payment Deadline Warnings ─────────────────────────
 // Runs every 5 minutes via vercel.json cron schedule.
 // Finds active, unpaid sessions whose payment deadline is between now and 30 minutes
@@ -31,13 +32,6 @@ const supabase = createClient(
 
 const BASE_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
-function hasPerLessonModel(value: string | null | undefined): boolean {
-    if (!value) return false;
-    return value
-        .split(',')
-        .map((v) => v.trim())
-        .includes('per_lesson');
-}
 
 async function sendWarningEmail(payload: any) {
     const url = `${BASE_URL}/api/send-email`;
@@ -141,6 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           full_name,
           email,
           organization_id,
+          enable_per_lesson,
           cancellation_hours,
           payment_timing,
           payment_deadline_hours,
@@ -154,6 +149,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `)
             .eq('status', 'active')
             .eq('paid', false)
+            .is('lesson_package_id', null)
+            .is('payment_batch_id', null)
             .is('payment_deadline_warning_sent', null)
             .gte('start_time', windowStart)
             .lte('start_time', windowEnd)
@@ -173,15 +170,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 .map((s: any) => (s.tutor as any)?.organization_id)
                 .filter((id: any) => typeof id === 'string' && id.length > 0) as string[]
         )];
+        const orgBillingMap = new Map<string, { enable_per_lesson: boolean }>();
         const orgPerlasMap = new Map<string, boolean>();
         const orgEntityTypeMap = new Map<string, string>();
         const orgAdminOptOutMap = new Map<string, ReturnType<typeof orgAdminEmailOptOut>>();
         if (orgIdsForLookup.length > 0) {
-            const { data: orgs } = await supabase
+            const { data: orgs, error: orgError } = await supabase
                 .from('organizations')
-                .select('id, perlas_finance_enabled, entity_type, features')
+                .select('id, perlas_finance_enabled, entity_type, features, enable_per_lesson')
                 .in('id', orgIdsForLookup);
+            if (orgError) throw orgError;
             for (const o of orgs ?? []) {
+                orgBillingMap.set(o.id, { enable_per_lesson: o.enable_per_lesson });
                 orgPerlasMap.set(o.id, !!(o as any).perlas_finance_enabled);
                 orgEntityTypeMap.set(o.id, String((o as any).entity_type || ''));
                 orgAdminOptOutMap.set(o.id, orgAdminEmailOptOut((o as any).features));
@@ -199,10 +199,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 continue;
             }
 
-            const studentPaymentModelRaw = String(student?.payment_model || '').trim();
+            const billingFlags = orgId ? orgBillingMap.get(orgId) : tutor;
 
             // Per-student payment override: monthly/package students must not get per-lesson payment reminders.
-            if (studentPaymentModelRaw && !hasPerLessonModel(studentPaymentModelRaw)) {
+            if (!billingFlags || !allowsPerLessonBilling(student?.payment_model, billingFlags)) {
                 skipped.push(session.id);
                 continue;
             }

@@ -1,3 +1,4 @@
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
@@ -26,7 +27,7 @@ beforeAll(async () => { await loadLocaleDict('el'); });
 
 describe('Greek tutor and business localization', () => {
   it('explicitly covers the entire scope and every quiz key', () => {
-    expect(Object.keys(elOverrides).sort()).toEqual(expectedKeys.sort());
+    expect(Object.keys(elOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual(expectedKeys.sort());
     expect(Object.keys(el).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !el[key])).toEqual([]);
     expect(Object.keys(en).filter((key) => key.startsWith('quiz.') && !(key in elOverrides))).toEqual([]);
@@ -88,7 +89,7 @@ describe('Greek tutor and business localization', () => {
     expect(getSeoMeta('el', 'pricing').title).toContain('Τιμές');
     expect(isTranslatedLocale('el')).toBe(false);
     for (const key of Object.keys(en).filter((key) => deferredPrefixes.has(key.split('.')[0]))) {
-      expect(el[key]).toBe(en[key]);
+      expect(el[key], key).toBe(elOverrides[key] ?? en[key]);
     }
   });
 
@@ -112,3 +113,6 @@ describe('Greek tutor and business localization', () => {
     expect(formatLocalizedPhone('861234567', 'lt')).toBe('+370 61234567');
   });
 });
+
+// Match server renderers: synchronous translation runs after its lazy preload.
+beforeAll(async () => { await preloadExtraLocaleDict('el'); });

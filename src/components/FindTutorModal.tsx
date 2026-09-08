@@ -121,6 +121,7 @@ export default function FindTutorModal({
   const [results, setResults] = useState<MatchSlot[]>([]);
   const [searched, setSearched] = useState(false);
   const [tutors, setTutors] = useState<Record<string, string>>({});
+  const [teachingNotes, setTeachingNotes] = useState<Record<string, string>>({});
   const [selectedSlotKeys, setSelectedSlotKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -183,12 +184,13 @@ export default function FindTutorModal({
         .eq('id', orgId)
         .single();
       const orgUsesLicenses = (Number(orgRow?.tutor_license_count) || 0) > 0;
-      const tutorList = (await getOrgVisibleTutors(supabase, orgId, 'id, full_name, email, has_active_license')).filter(
+      const tutorList = (await getOrgVisibleTutors(supabase, orgId, 'id, full_name, email, has_active_license, teaching_notes')).filter(
         (p) => !orgUsesLicenses || p.has_active_license !== false,
       );
       const map: Record<string, string> = {};
       tutorList.forEach((t: any) => { map[t.id] = t.full_name; });
       setTutors(map);
+      setTeachingNotes(Object.fromEntries(tutorList.map((t: any) => [t.id, String(t.teaching_notes || '').trim()])));
 
       const tutorIds = tutorList.map((t: any) => t.id);
       if (tutorIds.length === 0) return;
@@ -759,6 +761,7 @@ export default function FindTutorModal({
                   <div className="flex items-center justify-between gap-2 px-1 pb-2">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 truncate">{group.tutorName}</p>
+                      {teachingNotes[group.tutorId] && <p className="text-xs text-gray-600 whitespace-pre-wrap break-words">{teachingNotes[group.tutorId]}</p>}
                       {group.isPrimary && (
                         <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">
                           <Star className="w-3 h-3" />

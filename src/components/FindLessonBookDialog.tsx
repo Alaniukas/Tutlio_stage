@@ -1,4 +1,5 @@
-﻿import { useState, useEffect, useMemo, useRef } from 'react';
+import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -319,7 +320,7 @@ export default function FindLessonBookDialog({
             max_students: subject.max_students,
           },
         ],
-        individualPricing: [],
+        individualPricing: overridePrice == null ? [] : [{ student_id: studentId, subject_id: pick.subjectId, price: overridePrice }],
         suppressSuccessAlert: true,
       });
 

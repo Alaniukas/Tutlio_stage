@@ -6,6 +6,7 @@ import { en } from './en.js';
  * See docs/INDONESIAN_LOCALIZATION_REVIEW.md before publication.
  */
 export const idOverrides: Record<string, string> = {
+  'stats.cancellationPartTutor': "pengajar: {count}",
   'common.reloadPage': "Muat ulang halaman",
   'common.reloadPageWarning': "Memuat ulang akan menghapus perubahan yang belum disimpan. Lanjutkan?",
   "cal.rescheduleSameMonthOnly": "Sesi les hanya dapat dijadwalkan ulang dalam bulan kalender yang sama.",

@@ -5561,4 +5561,8 @@ export const de: Record<string, string> = {
   "compare.customChip2": "Vergütungsregeln",
   "compare.customChip3": "Zustimmungslinks für Eltern",
   "compare.customChip4": "Portale in Ihrer Marke",
+  "invoices.csvClients": "Kundenrechnungen (CSV)",
+  "invoices.csvTutors": "Nachhilfelehrer-Rechnungen (CSV)",
+  'school.confirmLessonOutcome': "Ich bestätige das gewählte Unterrichtsergebnis",
+  'school.confirmLessonOutcomeHint': "Bestätigen Sie erst nach Prüfung, dass der Unterricht stattfand oder der Schüler fehlte. Dies wird für die monatliche Abrechnung verwendet.",
 };

@@ -17,6 +17,7 @@ import {
 } from './_lib/emailOrgBranding.js';
 import { Resend } from 'resend';
 import { htmlLanguageCode, localeDirection, LOCALE_FORMAT_TAGS } from '../src/lib/i18n/locales.js';
+import { preloadExtraLocaleDict } from './_lib/loadExtraLocaleDict.js';
 import {
   applySchoolTerminology,
   schoolTerminologyForOrg,
@@ -39,6 +40,7 @@ import { schoolInstallmentPaymentBreakdown } from './_lib/schoolBookingInvite.js
 import { studentRegistrationAlreadyActive } from './_lib/registrationInviteGate.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission, type OrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { deliverSchoolMonthlyInvoiceOnce, schoolMonthlyInvoiceIdempotencyKey } from './_lib/schoolMonthlyInvoiceDelivery.js';
 
 
 function randomToken() {
@@ -2354,7 +2356,7 @@ function schoolContractExtraOffer(d: any, locale: Locale) {
         </p>
         ${rows ? `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>` : ''}
         ${acceptUrl ? `<div style="text-align:center; margin:24px 0 10px;">${outlookEmailButton(acceptUrl, 'Peržiūrėti ir patvirtinti sutartį', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
-        ${contact ? `<p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(contact)}.</p>` : ''}
+        ${contact ? `<p style="color:#6b7280; font-size:13px; text-align:center;">Jei turite klausimų, susisiekite su mokykla: ${esc(contact)}.</p>` : ''}
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -2444,7 +2446,7 @@ function schoolMonthlyInvoice(d: any, locale: Locale) {
   const rows = [
     td('Laikotarpis', String(d.periodLabel || `${d.periodStart} – ${d.periodEnd}`)),
     baseLessons > 0
-      ? td(`Baziniai užsiėmimai (${baseLessons} × ${emailMoney(d.unitPrice, locale)})`, emailMoney(d.baseAmount, locale))
+      ? td(`${d.billingModel === 'actual' ? 'Apmokami užsiėmimai' : 'Baziniai užsiėmimai'} (${baseLessons} × ${emailMoney(d.unitPrice, locale)})`, emailMoney(d.baseAmount, locale))
       : '',
     extraLessons > 0
       ? td(`Papildomi užsiėmimai (${extraLessons} × ${emailMoney(d.unitPrice, locale)})`, emailMoney(d.extraAmount, locale))
@@ -3143,6 +3145,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const { type, to, data: rawData, locale: bodyLocale } = req.body;
+    const requestedIdempotencyKey = req.body?.idempotencyKey;
+    if (requestedIdempotencyKey !== undefined && (!isInternalRequest(req)
+      || type !== 'school_monthly_invoice'
+      || typeof rawData?.invoiceId !== 'string'
+      || requestedIdempotencyKey !== schoolMonthlyInvoiceIdempotencyKey(rawData.invoiceId))) {
+      return res.status(403).json({ error: 'Invalid internal invoice delivery key' });
+    }
+    if (type === 'school_monthly_invoice' && !requestedIdempotencyKey) {
+      return res.status(400).json({ error: 'Invoice delivery requires an idempotency key' });
+    }
     if (!type || !to) {
       return res.status(400).json({ error: 'Missing required fields: type, to' });
     }
@@ -3401,6 +3413,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       locale = await notificationLocale(client, to, bodyLocale, organizationLocale);
     }
 
+    // Load only the recipient dictionary before synchronous template rendering.
+    await preloadExtraLocaleDict(locale);
+
     // Patch the email HTML post-generation to inject org branding into the wrap() header
     function applyBranding(result: { subject: string; html: string }): { subject: string; html: string } {
       let html = applyOrgBrandingToHtml(result.html, {
@@ -3544,6 +3559,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         filename: a.filename || 'document.pdf',
         content: Buffer.from(a.content, 'base64'),
       }));
+    }
+
+    if (type === 'school_monthly_invoice') {
+      const delivery = await deliverSchoolMonthlyInvoiceOnce({
+        supabase: createClient(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, supabaseServiceRoleClientOptions()),
+        invoiceId: rawData.invoiceId,
+        organizationId: String(rawData.organizationId || ''),
+        payload: { from: emailPayload.from, to: Array.isArray(emailPayload.to) ? emailPayload.to : [emailPayload.to], subject: emailPayload.subject, html: emailContent.html },
+        send: async (payload, idempotencyKey) => {
+          const response = await resend.emails.send(payload, { idempotencyKey });
+          return { id: response.data?.id, error: response.error?.message };
+        },
+      });
+      if (delivery.reason) return res.status(503).json({ error: delivery.reason });
+      return res.status(200).json({ success: true, ...delivery });
     }
 
     const { data: result, error } = await resend.emails.send(emailPayload);

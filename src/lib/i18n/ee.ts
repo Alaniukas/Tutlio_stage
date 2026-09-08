@@ -6066,4 +6066,8 @@ export const ee: Record<string, string> = {
   "compare.customChip2": "Tasureeglid",
   "compare.customChip3": "Lapsevanemate kinnituslingid",
   "compare.customChip4": "Portaalid teie brändiga",
+  "invoices.csvClients": "Klientide arved (CSV)",
+  "invoices.csvTutors": "Eraõpetajate arved (CSV)",
+  'school.confirmLessonOutcome': "Kinnitan valitud tunni tulemuse",
+  'school.confirmLessonOutcomeHint': "Kinnitage alles pärast kontrollimist, et tund toimus või õpilane puudus. Seda kasutatakse igakuise arve koostamiseks.",
 };

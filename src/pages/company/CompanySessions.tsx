@@ -1,3 +1,4 @@
+import type { OrganizationDynamicPricingRule } from '@/lib/organizationDynamicPricing';
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { SessionStatCards } from '@/components/SessionStatCards';
@@ -96,6 +97,7 @@ type OrgStudentRow = {
   personal_meeting_link?: string | null;
   grade?: string | null;
   pricing_lessons_per_week?: number | null;
+  pricing_lessons_per_week_is_manual?: boolean | null;
 };
 
 const ORG_SESSION_DETAIL_SELECT =
@@ -186,6 +188,7 @@ export default function CompanySessions() {
   const [editMeetingLink, setEditMeetingLink] = useState('');
   const [editPaid, setEditPaid] = useState(false);
   const [editStatus, setEditStatus] = useState('active');
+  const [confirmSchoolOutcome, setConfirmSchoolOutcome] = useState(false);
   const [groupEditChoice, setGroupEditChoice] = useState<'single' | 'all_future'>('single');
   const [savingEdit, setSavingEdit] = useState(false);
   const [togglingPaid, setTogglingPaid] = useState(false);
@@ -313,7 +316,7 @@ export default function CompanySessions() {
     const [studentsResult, subjectsResult, pricingResult, tspResult, dynamicResult] = await Promise.all([
       supabase
         .from('students')
-        .select('id, full_name, tutor_id, linked_user_id, email, organization_id, personal_meeting_link, grade, pricing_lessons_per_week')
+        .select('id, full_name, tutor_id, linked_user_id, email, organization_id, personal_meeting_link, grade, pricing_lessons_per_week, pricing_lessons_per_week_is_manual')
         .eq('organization_id', adminRow.organization_id)
         .order('full_name'),
       supabase
@@ -521,6 +524,10 @@ export default function CompanySessions() {
       const newStart = new Date(editStartTime);
       if (Number.isNaN(newStart.getTime())) throw new Error(t('compSch.invalidStartDateTime'));
       const newEnd = new Date(newStart.getTime() + editDurationMinutes * 60 * 1000);
+      const confirmOutcome = isSchoolOrgView && ['completed', 'no_show'].includes(editStatus)
+        && (editStatus !== selectedSession.status || confirmSchoolOutcome);
+      if (confirmOutcome && groupEditChoice === 'all_future') throw new Error(t('compSch.thisOnly'));
+      if (confirmOutcome && (!Number.isFinite(newEnd.getTime()) || newEnd.getTime() > Date.now())) throw new Error(t('school.confirmLessonOutcomeHint'));
 
       const paidChanged = editPaid !== selectedSession.paid;
       const payload: Record<string, any> = {
@@ -534,7 +541,8 @@ export default function CompanySessions() {
         tutor_id: editTutorId || selectedSession.tutor_id,
         paid: editPaid,
         ...(paidChanged ? { payment_status: editPaid ? 'paid' : 'pending' } : {}),
-        status: editStatus,
+        ...(!confirmOutcome ? { status: editStatus } : {}),
+        ...(isSchoolOrgView && editStatus === 'active' && selectedSession.status !== 'active' ? { status_confirmed_at: null, status_confirmed_by: null } : {}),
       };
 
       if (groupEditChoice === 'all_future' && selectedSession.recurring_session_id) {
@@ -550,6 +558,15 @@ export default function CompanySessions() {
           .update(payload)
           .eq('id', selectedSession.id);
         if (error) throw new Error(error.message);
+      }
+
+      if (confirmOutcome) {
+        const response = await fetch('/api/confirm-session-status', {
+          method: 'POST', headers: await authHeaders(),
+          body: JSON.stringify({ sessionId: selectedSession.id, status: editStatus, confirmExisting: true }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || t('school.confirmLessonOutcomeHint'));
       }
 
       setEditMode(false);
@@ -583,6 +600,7 @@ export default function CompanySessions() {
       setEditMeetingLink(session.meeting_link || '');
       setEditPaid(session.paid);
       setEditStatus(session.status);
+      setConfirmSchoolOutcome(false);
 
       const sid = session.id;
       void (async () => {
@@ -1105,7 +1123,8 @@ export default function CompanySessions() {
                         <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="active">{t('compSch.statusActive')}</SelectItem>
-                          <SelectItem value="completed">{t('compSch.statusCompleted')}</SelectItem>
+                          <SelectItem value="completed" disabled={isSchoolOrgView && selectedSession.status !== 'active' && selectedSession.status !== 'completed'}>{t('compSch.statusCompleted')}</SelectItem>
+                          {isSchoolOrgView && <SelectItem value="no_show" disabled={selectedSession.status !== 'active' && selectedSession.status !== 'no_show'}>{t('cal.statusNoShowOpt')}</SelectItem>}
                           <SelectItem value="cancelled">{t('compSch.statusCancelled')}</SelectItem>
                         </SelectContent>
                       </Select>
@@ -1117,6 +1136,16 @@ export default function CompanySessions() {
                       </label>
                     </div>
                   </div>
+
+                  {isSchoolOrgView && ['completed', 'no_show'].includes(editStatus) && groupEditChoice === 'single' && (
+                    <label className="flex items-start gap-2 rounded-xl border border-indigo-100 p-3">
+                      <input type="checkbox" checked={confirmSchoolOutcome} onChange={e => setConfirmSchoolOutcome(e.target.checked)} className="mt-1 h-4 w-4" />
+                      <span className="text-sm">
+                        <span className="block font-medium">{t('school.confirmLessonOutcome')}</span>
+                        <span className="block text-xs text-gray-500">{t('school.confirmLessonOutcomeHint')}</span>
+                      </span>
+                    </label>
+                  )}
 
                   <div className="flex gap-2 pt-2">
                     <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setEditMode(false)}>

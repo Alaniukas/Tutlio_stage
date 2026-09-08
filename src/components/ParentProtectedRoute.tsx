@@ -1,3 +1,4 @@
+import TemporaryPasswordGate from '@/components/TemporaryPasswordGate';
 import { useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { resolveAccountPortals } from '@/lib/account-portal';
@@ -139,7 +140,7 @@ export default function ParentProtectedRoute() {
         );
     }
 
-    if (status === 'parent') return <Outlet />;
+    if (status === 'parent') return <TemporaryPasswordGate><Outlet /></TemporaryPasswordGate>;
     if (status === 'tutor') return <Navigate to="/dashboard" replace />;
     if (status === 'student') return <Navigate to="/student" replace />;
     return <Navigate to={loginHrefWithNext(`${location.pathname}${location.search}`)} replace />;

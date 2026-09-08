@@ -6,6 +6,7 @@ import { en } from './en.js';
  * retain English. See docs/MEXICAN_SPANISH_LOCALIZATION_REVIEW.md before release.
  */
 export const esMxOverrides: Record<string, string> = {
+  'stats.cancellationPartTutor': "tutor: {count}",
   'common.reloadPage': "Recargar la página",
   'common.reloadPageWarning': "Al recargar se perderán los cambios sin guardar. ¿Continuar?",
   "cal.rescheduleSameMonthOnly": "Las clases solo se pueden mover dentro del mismo mes natural.",
@@ -5062,9 +5063,7 @@ export const esMxOverrides: Record<string, string> = {
   "support.contact.back": "Volver a la asistencia con IA"
 };
 
-export const esMx: Record<string, string> = {
-  ...en,
-  ...esMxOverrides,
+Object.assign(esMxOverrides, {
   'nav.forAgencies': 'Agencias de clases particulares',
   "compStu.inviteParentFirst": "Primero el padre o la madre",
   "compStu.inviteParentFirstHint": "Solo se envía la invitación al portal para padres. Ellos agregarán después al hijo/a y los datos de la cuenta.",
@@ -5565,4 +5564,6 @@ export const esMx: Record<string, string> = {
   "compare.customChip2": "Reglas de pago",
   "compare.customChip3": "Ligas de aceptación para padres de familia",
   "compare.customChip4": "Portales con tu marca",
-};
+});
+
+export const esMx: Record<string, string> = { ...en, ...esMxOverrides };

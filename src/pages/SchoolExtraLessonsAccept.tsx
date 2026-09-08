@@ -81,7 +81,7 @@ export default function SchoolExtraLessonsAccept() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [startWithin14, setStartWithin14] = useState(true);
-  const [recordingConsent, setRecordingConsent] = useState<boolean | null>(null);
+  const [recordingConsent, setRecordingConsent] = useState<boolean | null>(true);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState<{ sha256: string; acceptedAt?: string } | null>(null);
   const [withdrawn, setWithdrawn] = useState(false);
@@ -387,7 +387,7 @@ export default function SchoolExtraLessonsAccept() {
       <Card className="space-y-5">
         <BrandMark />
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Peržiūrėkite ir priimkite sutartį</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2 text-center">Peržiūrėkite sutartį ir pateikite užsakymą</h1>
           <p className="text-gray-600 text-sm">
             Peržiūrėkite visą papildomų užsiėmimų sutartį, jei reikia papildykite užsakymo duomenis ir pažymėkite sutikimus.
             Sutartis sudaroma elektroniniu būdu — el. parašas (GoSign) čia nenaudojamas.
@@ -534,7 +534,7 @@ export default function SchoolExtraLessonsAccept() {
               onChange={(e) => setAcceptedTerms(e.target.checked)}
               className="mt-0.5 h-4 w-4 rounded border-indigo-300 text-indigo-600"
             />
-            <span>{termsText} *</span>
+            <span>{termsText}</span>
           </label>
           {start14.applies && (
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
@@ -592,10 +592,10 @@ export default function SchoolExtraLessonsAccept() {
           )}
           <Button
             type="submit"
-            className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700"
+            className="w-full h-auto min-h-10 whitespace-normal rounded-xl bg-emerald-600 hover:bg-emerald-700"
             disabled={!acceptedTerms || !recordingReady || submitting}
           >
-            {submitting ? 'Siunčiama…' : 'Patvirtinti sutartį'}
+            {submitting ? 'Siunčiama…' : 'Užsakymas su prievole sumokėti'}
           </Button>
         </form>
       </Card>

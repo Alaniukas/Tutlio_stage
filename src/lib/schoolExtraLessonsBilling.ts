@@ -9,6 +9,8 @@ export type ExtraLessonsBillableSession = {
   student_joined_at?: string | null;
   school_billing_kind?: 'base' | 'extra' | null;
   cancelled?: boolean;
+  class_group_id?: string | null;
+  subject_id?: string | null;
 };
 
 export type ExtraLessonsBillingInput = {
@@ -19,6 +21,7 @@ export type ExtraLessonsBillingInput = {
   sessions: ExtraLessonsBillableSession[];
   serviceStartYmd?: string | null;
   endedAtIso?: string | null;
+  serviceEndYmd?: string | null;
 };
 
 export type ExtraLessonsBillingResult = {
@@ -34,12 +37,12 @@ export type ExtraLessonsBillingResult = {
 };
 
 function inPeriod(iso: string, start: string, end: string): boolean {
-  const day = iso.slice(0, 10);
+  const day = sessionYmdVilnius(iso);
   return day >= start && day <= end;
 }
 
 function isPayableExtra(session: ExtraLessonsBillableSession): boolean {
-  if (session.status === 'cancelled') return false;
+  if (session.cancelled || session.status === 'cancelled') return false;
   if (session.school_billing_kind !== 'extra') return false;
   if (session.status === 'no_show') return false;
   return Boolean(session.student_joined_at) || session.status === 'completed';
@@ -49,16 +52,36 @@ export function sessionYmdUtc(iso: string): string {
   return String(iso || '').slice(0, 10);
 }
 
+export function sessionYmdVilnius(iso: string): string {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Vilnius', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(date);
+}
+
+/** Scope each student's lessons to this agreement, never to all their subjects/groups. */
+export function sessionMatchesExtraLessonsContract(
+  session: ExtraLessonsBillableSession,
+  scope: { service_type: string; group_id?: string | null; subject_id?: string | null },
+): boolean {
+  if (scope.service_type === 'group') return Boolean(scope.group_id) && session.class_group_id === scope.group_id;
+  if (scope.service_type === 'individual') {
+    return !session.class_group_id && Boolean(scope.subject_id) && session.subject_id === scope.subject_id;
+  }
+  return false;
+}
+
 /** Skip lessons before allowed start and after withdrawal/termination. */
 export function isSessionInExtraLessonsServiceWindow(
   sessionStartIso: string,
   opts: { serviceStartYmd: string; endedAtIso?: string | null },
 ): boolean {
-  const day = sessionYmdUtc(sessionStartIso);
+  const day = sessionYmdVilnius(sessionStartIso);
   if (!day) return false;
   if (opts.serviceStartYmd && day < opts.serviceStartYmd) return false;
   if (opts.endedAtIso) {
-    const endDay = sessionYmdUtc(opts.endedAtIso);
+    const endDay = sessionYmdVilnius(opts.endedAtIso);
     if (endDay && day > endDay) return false;
     if (Date.parse(sessionStartIso) >= Date.parse(opts.endedAtIso)) return false;
   }
@@ -70,15 +93,17 @@ export function computeExtraLessonsMonthlyBill(input: ExtraLessonsBillingInput):
   const baseLessons = Math.max(0, Math.round(Number(input.base_lessons_per_month) || 0));
   const extraIds = input.sessions
     .filter((s) => inPeriod(s.start_time, input.period_start, input.period_end)
-      && (!input.serviceStartYmd || isSessionInExtraLessonsServiceWindow(s.start_time, {
-        serviceStartYmd: input.serviceStartYmd,
+      && (!input.serviceEndYmd || sessionYmdVilnius(s.start_time) <= input.serviceEndYmd)
+      && isSessionInExtraLessonsServiceWindow(s.start_time, {
+        serviceStartYmd: input.serviceStartYmd || '',
         endedAtIso: input.endedAtIso,
-      }))
+      })
       && isPayableExtra(s))
     .map((s) => s.id);
   const extraLessons = extraIds.length;
-  const periodOverlapsService = !input.serviceStartYmd
-    || input.period_end >= input.serviceStartYmd;
+  const periodOverlapsService = (!input.serviceStartYmd || input.period_end >= input.serviceStartYmd)
+    && (!input.serviceEndYmd || input.period_start <= input.serviceEndYmd)
+    && (!input.endedAtIso || input.period_start <= sessionYmdVilnius(input.endedAtIso));
   const billableBase = periodOverlapsService ? baseLessons : 0;
   const extraAmount = Math.round(extraLessons * unit * 100) / 100;
   const baseAmount = Math.round(billableBase * unit * 100) / 100;

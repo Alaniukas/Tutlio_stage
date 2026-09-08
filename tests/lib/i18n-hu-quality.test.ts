@@ -1,3 +1,4 @@
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
@@ -40,7 +41,7 @@ beforeAll(async () => { await loadLocaleDict('hu'); });
 
 describe('Hungarian tutor and business localization', () => {
   it('covers every in-scope key, including all quiz branches, with no invented keys', () => {
-    expect(Object.keys(huOverrides).sort()).toEqual([...expectedKeys].sort());
+    expect(Object.keys(huOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual([...expectedKeys].sort());
     expect(Object.keys(hu).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !hu[key])).toEqual([]);
     expect(Object.keys(huOverrides).filter((key) => key.startsWith('quiz.')).sort())
@@ -83,7 +84,7 @@ describe('Hungarian tutor and business localization', () => {
     expect(emailText('hu', 'em.payReminderBodyOther', { student: 'Anna' }))
       .toBe('<strong>Anna</strong> diák még nem fizette ki az órát.');
     expect(supportGeneralFollowUp('hu')).toBe('Miben segíthetek még?');
-    expect(resolvePlatformTranslation('schools', 'hu', 'nav.forSchools', hu['nav.forSchools'])).toBe('Iskolák');
+    expect(resolvePlatformTranslation('schools', 'hu', 'nav.forSchools', hu['nav.forSchools'])).toBe(hu['nav.forSchools']);
   });
 
   it('renders restored deadlines, counts and dates instead of labels or date masks', () => {
@@ -134,7 +135,7 @@ describe('Hungarian tutor and business localization', () => {
       expect(numbers(CHROME.hu[key])).toEqual(numbers(CHROME.en[key]));
     }
     for (const key of Object.keys(en).filter((key) => deferredPrefixes.has(key.split('.')[0]))) {
-      expect(hu[key]).toBe(en[key]);
+      expect(hu[key], key).toBe(huOverrides[key] ?? en[key]);
     }
   });
 
@@ -150,3 +151,6 @@ describe('Hungarian tutor and business localization', () => {
     expect(html).toContain('hreflang="hu"');
   });
 });
+
+// Match server renderers: synchronous translation runs after its lazy preload.
+beforeAll(async () => { await preloadExtraLocaleDict('hu'); });

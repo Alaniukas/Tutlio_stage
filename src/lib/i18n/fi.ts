@@ -5562,4 +5562,8 @@ export const fi: Record<string, string> = {
   "compare.customChip2": "Palkkiosäännöt",
   "compare.customChip3": "Vanhempien hyväksyntälinkit",
   "compare.customChip4": "Portaalit omalla ilmeellä",
+  "invoices.csvClients": "Asiakkaiden laskut (CSV)",
+  "invoices.csvTutors": "Opettajien laskut (CSV)",
+  'school.confirmLessonOutcome': "Vahvistan valitun oppitunnin tuloksen",
+  'school.confirmLessonOutcomeHint': "Vahvista vasta tarkistettuasi, että oppitunti pidettiin tai oppilas oli poissa. Tietoa käytetään kuukausilaskutukseen.",
 };

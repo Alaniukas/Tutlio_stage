@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { startVisiblePolling } from '@/lib/visiblePolling';
 import { useSearchParams } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import TutorOnboarding from '@/components/TutorOnboarding';
@@ -597,17 +598,8 @@ export default function DashboardPage() {
 
     useEffect(() => {
         if (!currentUserId) return;
-        let attempts = 0;
-        const maxAttempts = 8; // ~2 minutes
-
-        const intervalId = setInterval(() => {
-            attempts += 1;
-            void fetchRecentPayments();
-            if (attempts >= maxAttempts) clearInterval(intervalId);
-        }, 15000);
-
-        return () => clearInterval(intervalId);
-    }, [currentUserId]);
+        return startVisiblePolling(fetchRecentPayments, 15000, 8);
+    }, [currentUserId, isOrgTutor]);
 
     const syncSessionToGoogleCalendar = async (sessionId: string) => {
         if (!sessionId || !currentUserId) return;

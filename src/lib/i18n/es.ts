@@ -5564,4 +5564,8 @@ export const es: Record<string, string> = {
   "compare.customChip2": "Reglas de retribución",
   "compare.customChip3": "Enlaces de aceptación para padres",
   "compare.customChip4": "Portales con su marca",
+  "invoices.csvClients": "Facturas de clientes (CSV)",
+  "invoices.csvTutors": "Facturas de tutores (CSV)",
+  'school.confirmLessonOutcome': "Confirmo el resultado seleccionado de la clase",
+  'school.confirmLessonOutcomeHint': "Confirma solo después de comprobar que la clase tuvo lugar o que el alumno estuvo ausente. Se utiliza para la facturación mensual.",
 };

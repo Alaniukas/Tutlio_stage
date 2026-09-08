@@ -1,4 +1,4 @@
-import { familyCatalogTrialCopy } from './familyCatalogTrialCopy';
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 
 export const en: Record<string, string> = {
   ...familyCatalogTrialCopy.en,
@@ -1920,6 +1920,8 @@ export const en: Record<string, string> = {
   'dynamicPricing.studentFrequency': 'Contracted frequency: {frequency}/week.',
   'dynamicPricing.studentFrequencyUnset': 'Contracted frequency will be set when a recurring schedule is created.',
   'dynamicPricing.frequencyLabel': 'Lessons per week (pricing)',
+  'invoices.csvClients': 'Client invoices (CSV)',
+  'invoices.csvTutors': 'Tutor invoices (CSV)',
   'dynamicPricing.frequencyAuto': 'Automatic — from the recurring schedule',
   'dynamicPricing.frequencyOption': '{n}/week',
   'dynamicPricing.frequencySaved': 'Contracted frequency saved. Upcoming lesson prices updated.',
@@ -3522,6 +3524,12 @@ export const en: Record<string, string> = {
   'stu.completedSessions': 'Completed lessons',
   'stu.recentCompleted': 'Recent lessons',
   'stu.noRecentCompleted': 'No completed lessons',
+  'stu.childConnected': 'Child connected',
+  'stu.childNotConnected': 'Child not connected',
+  'stu.parentConnected': 'Parent connected',
+  'stu.parentNotConnected': 'Parent not connected',
+  'stu.parentConnectionUnknown': 'Parent status unknown',
+  'stu.connectionHint': 'Shows accounts linked to the student, not whether they are online now.',
   'stu.connected': 'Connected',
   'stu.adminCommentTitle': 'Admin comment',
   'stu.copyLink': 'Copy link',
@@ -6178,4 +6186,6 @@ export const en: Record<string, string> = {
   'compare.customChip2': 'Tutor pay rules',
   'compare.customChip3': 'Parent acceptance links',
   'compare.customChip4': 'Branded portals',
+  "school.confirmLessonOutcome": "I confirm the selected lesson outcome",
+  "school.confirmLessonOutcomeHint": "Confirm only after checking that the lesson took place or the student was absent. This is used for monthly billing.",
 };

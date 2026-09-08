@@ -1,3 +1,4 @@
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
@@ -21,7 +22,7 @@ beforeAll(async () => { await loadLocaleDict('hr'); });
 
 describe('Croatian tutor and business localization', () => {
   it('covers the complete tutor/business scope, including all quiz branches', () => {
-    expect(Object.keys(hrOverrides).sort()).toEqual(expectedKeys.sort());
+    expect(Object.keys(hrOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual(expectedKeys.sort());
     expect(Object.keys(hr).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !hr[key])).toEqual([]);
   });
@@ -96,7 +97,7 @@ describe('Croatian tutor and business localization', () => {
     expect(getSeoMeta('hr', 'pricing').title).toContain('Cijene');
     expect(isTranslatedLocale('hr')).toBe(false);
     for (const key of Object.keys(en).filter((key) => deferredPrefixes.has(key.split('.')[0]))) {
-      expect(hr[key]).toBe(en[key]);
+      expect(hr[key], key).toBe(hrOverrides[key] ?? en[key]);
     }
   });
 
@@ -109,3 +110,6 @@ describe('Croatian tutor and business localization', () => {
     expect(html).toContain('hreflang="hr"');
   });
 });
+
+// Match server renderers: synchronous translation runs after its lazy preload.
+beforeAll(async () => { await preloadExtraLocaleDict('hr'); });

@@ -262,8 +262,14 @@ export function parseEditorialBrief(raw: unknown): BlogEditorialBrief {
 }
 
 function geminiEndpoint(apiKey: string): string {
-  const model = (process.env.GEMINI_MODEL || 'gemini-2.5-pro').trim();
+  const model = process.env.GEMINI_MODEL?.trim() || 'gemini-3.1-pro-preview';
   return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+}
+
+class GeminiHttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(`Gemini API error ${status}: ${message}`);
+  }
 }
 
 async function requestGeminiJson(prompt: string, maxOutputTokens: number): Promise<Record<string, unknown>> {
@@ -289,6 +295,7 @@ async function requestGeminiJson(prompt: string, maxOutputTokens: number): Promi
   try {
     json = JSON.parse(rawText);
   } catch {
+    if (!resp.ok) throw new GeminiHttpError(resp.status, rawText.slice(0, 200));
     throw new Error(`Gemini returned non-JSON (${resp.status}): ${rawText.slice(0, 200)}`);
   }
 
@@ -297,7 +304,7 @@ async function requestGeminiJson(prompt: string, maxOutputTokens: number): Promi
       json && typeof json === 'object' && 'error' in json
         ? String((json as { error: { message?: string } }).error?.message || rawText.slice(0, 200))
         : rawText.slice(0, 200);
-    throw new Error(`Gemini API error ${resp.status}: ${msg}`);
+    throw new GeminiHttpError(resp.status, msg);
   }
 
   return coerceJsonObject(extractGeminiText(json));
@@ -310,7 +317,13 @@ async function requestGeminiJsonWithRetry(prompt: string, maxOutputTokens: numbe
       return await requestGeminiJson(prompt, maxOutputTokens);
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
+      if (e instanceof GeminiHttpError && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429) {
+        throw e;
+      }
       console.warn(`[blog-ai] Gemini attempt ${attempt}/${GEMINI_BLOG_MAX_ATTEMPTS} failed: ${lastError}`);
+      if (attempt < GEMINI_BLOG_MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** (attempt - 1)));
+      }
     }
   }
   throw new Error(`Gemini blog generation failed after ${GEMINI_BLOG_MAX_ATTEMPTS} attempts: ${lastError}`);

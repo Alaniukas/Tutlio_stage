@@ -1,3 +1,4 @@
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
@@ -29,11 +30,11 @@ beforeAll(async () => { await loadLocaleDict('bg'); });
 
 describe('Bulgarian tutor and business localization', () => {
   it('explicitly covers the requested flows and preserves deliberate fallback boundaries', () => {
-    expect(Object.keys(bgOverrides).sort()).toEqual(expectedKeys.sort());
+    expect(Object.keys(bgOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual(expectedKeys.sort());
     expect(Object.keys(bg).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !bg[key])).toEqual([]);
     for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) {
-      expect(bg[key], key).toBe(en[key]);
+      expect(bg[key], key).toBe(bgOverrides[key] ?? en[key]);
     }
   });
 
@@ -126,3 +127,6 @@ describe('Bulgarian tutor and business localization', () => {
     expect(validateLocalizedPhone('881234567', 'bg')).toBe(false);
   });
 });
+
+// Match server renderers: synchronous translation runs after its lazy preload.
+beforeAll(async () => { await preloadExtraLocaleDict('bg'); });

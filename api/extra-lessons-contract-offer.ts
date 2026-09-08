@@ -221,6 +221,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .from('students')
     .select('id, full_name, email, grade, payer_name, payer_email, payer_phone, organization_id, tutor_id')
     .eq('id', studentId)
+    .eq('organization_id', access.access.organizationId)
     .maybeSingle();
   if (!student) return res.status(404).json({ error: 'Student not found' });
 
@@ -231,12 +232,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (serviceType === 'individual') groupId = null;
   const subjectId = serviceType === 'group' ? null : (body.subject_id ? String(body.subject_id) : null);
   let subjectName = body.subject_name ? String(body.subject_name).trim() : '';
-  if (groupId && !tutorName) {
+  if (groupId) {
     const { data: grp } = await supabase
       .from('school_class_groups')
       .select('name, tutor:profiles!school_class_groups_tutor_id_fkey(full_name)')
       .eq('id', groupId)
+      .eq('organization_id', access.access.organizationId)
       .maybeSingle();
+    if (!grp) return res.status(400).json({ error: 'Grupė nepriklauso šiai organizacijai.' });
     const tutorRel = grp?.tutor as { full_name?: string } | { full_name?: string }[] | null | undefined;
     const tutorRow = Array.isArray(tutorRel) ? tutorRel[0] : tutorRel;
     if (tutorRow?.full_name) tutorName = String(tutorRow.full_name);
@@ -248,6 +251,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .select('id, name, tutor_id')
       .eq('id', subjectId)
       .maybeSingle();
+    if (!subject) return res.status(400).json({ error: 'Dalykas nerastas.' });
+    const { data: subjectTutor } = await supabase.from('profiles').select('id, full_name')
+      .eq('id', subject.tutor_id).eq('organization_id', access.access.organizationId).maybeSingle();
+    if (!subjectTutor) return res.status(400).json({ error: 'Dalykas nepriklauso šiai organizacijai.' });
+    tutorName = subjectTutor.full_name || tutorName;
     if (subject?.name && !subjectName) subjectName = String(subject.name);
     if (subject?.tutor_id && !tutorName) {
       const { data: tutor } = await supabase

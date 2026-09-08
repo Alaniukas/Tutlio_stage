@@ -612,9 +612,9 @@ export default function StudentSchedule() {
                 .select('student_id, students(full_name)')
                 .eq('parent_id', parentProfileId);
             const options: ParentChildOption[] = (links ?? [])
-                .map((row: { student_id?: string; students?: { full_name?: string } | null }) => ({
+                .map((row: { student_id?: string; students?: { full_name?: string } | { full_name?: string }[] | null }) => ({
                     id: String(row.student_id ?? ''),
-                    fullName: String(row.students?.full_name ?? '').trim(),
+                    fullName: String((Array.isArray(row.students) ? row.students[0] : row.students)?.full_name ?? '').trim(),
                 }))
                 .filter((p) => p.id);
             options.sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }));

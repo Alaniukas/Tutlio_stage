@@ -5502,4 +5502,8 @@ export const no: Record<string, string> = {
   "compare.customChip2": "Godtgjørelsesregler",
   "compare.customChip3": "Godkjenningslenker for foreldre",
   "compare.customChip4": "Portaler i din merkevare",
+  "invoices.csvClients": "Kundefakturaer (CSV)",
+  "invoices.csvTutors": "Lærerfakturaer (CSV)",
+  'school.confirmLessonOutcome': "Jeg bekrefter det valgte undervisningsresultatet",
+  'school.confirmLessonOutcomeHint': "Bekreft først etter at du har kontrollert at timen fant sted eller eleven var fraværende. Dette brukes til månedlig fakturering.",
 };

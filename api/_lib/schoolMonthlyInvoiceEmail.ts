@@ -6,6 +6,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildSchoolMonthlyInvoicePayUrl } from './publicLinkToken.js';
+import { schoolMonthlyInvoiceIdempotencyKey } from './schoolMonthlyInvoiceDelivery.js';
 
 export type SchoolMonthlyInvoiceRow = {
   id: string;
@@ -22,6 +23,8 @@ export type SchoolMonthlyInvoiceRow = {
   total_eur: number | string;
   due_date: string | null;
   payment_status: string;
+  invoice_email_sent_at?: string | null;
+  billing_model?: string;
 };
 
 export type SchoolMonthlyInvoiceEmailContext = {
@@ -91,6 +94,7 @@ export function buildSchoolMonthlyInvoiceEmailData(
     recipientName: ctx.student.payer_name || ctx.student.full_name || '',
     contractNumber: ctx.contract.contract_number || '',
     invoiceId: invoice.id,
+    billingModel: invoice.billing_model || 'fixed',
     periodLabel: monthLabelLt(invoice.period_start),
     periodStart: ltDate(invoice.period_start),
     periodEnd: ltDate(invoice.period_end),
@@ -109,7 +113,9 @@ export async function sendSchoolMonthlyInvoiceEmail(
   supabase: SupabaseClient,
   invoice: SchoolMonthlyInvoiceRow,
   ctx: SchoolMonthlyInvoiceEmailContext,
-): Promise<{ sent: boolean; reason?: string }> {
+): Promise<{ sent: boolean; alreadySent?: boolean; reason?: string }> {
+  if (invoice.invoice_email_sent_at) return { sent: false, alreadySent: true };
+  if (invoice.payment_status !== 'pending') return { sent: false, alreadySent: true };
   const to = String(ctx.student.payer_email || ctx.student.email || '').trim();
   if (!to) return { sent: false, reason: 'no payer email' };
   const data = buildSchoolMonthlyInvoiceEmailData(invoice, ctx);
@@ -118,21 +124,19 @@ export async function sendSchoolMonthlyInvoiceEmail(
     resp = await fetch(`${ctx.apiOrigin.replace(/\/$/, '')}/api/send-email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-internal-key': ctx.serviceRoleKey },
-      body: JSON.stringify({ type: 'school_monthly_invoice', to, data }),
+      body: JSON.stringify({ type: 'school_monthly_invoice', to, data, idempotencyKey: schoolMonthlyInvoiceIdempotencyKey(invoice.id) }),
+      signal: AbortSignal.timeout(20_000),
     });
   } catch (e) {
     return { sent: false, reason: (e as Error)?.message || 'fetch failed' };
   }
-  if (!resp.ok) return { sent: false, reason: `send-email ${resp.status}` };
-  // Column arrives with migration 20260905120000 — a missing column must not fail the cron.
-  await supabase
-    .from('school_monthly_invoices')
-    .update({ invoice_email_sent_at: new Date().toISOString() })
-    .eq('id', invoice.id)
-    .then(({ error }) => {
-      if (error) console.warn('[school-monthly-invoice] could not stamp invoice_email_sent_at', error.message);
-    });
-  return { sent: true };
+  let result: { success?: boolean; sent?: boolean; alreadySent?: boolean; error?: string };
+  try { result = await resp.json(); }
+  catch { return { sent: false, reason: `send-email ${resp.status}: invalid confirmation` }; }
+  if (!resp.ok || !result.success || (!result.sent && !result.alreadySent)) {
+    return { sent: false, reason: result.error || `send-email ${resp.status}: delivery not confirmed` };
+  }
+  return result.alreadySent ? { sent: false, alreadySent: true } : { sent: true };
 }
 
 /** Idempotent paid write shared by webhook, success page and (later) manual confirmation. */

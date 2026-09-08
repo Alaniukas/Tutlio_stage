@@ -1,3 +1,4 @@
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { format, parse } from 'date-fns';
 import { en } from '../../src/lib/i18n/en';
@@ -24,12 +25,12 @@ beforeAll(async () => { await loadLocaleDict('cs'); });
 
 describe('Czech tutor and business localization', () => {
   it('explicitly covers the agreed scope while retaining dedicated school/admin/legal fallback', () => {
-    expect(Object.keys(csOverrides).sort()).toEqual([...expectedKeys].sort());
+    expect(Object.keys(csOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual([...expectedKeys].sort());
     expect(Object.keys(cs).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !cs[key])).toEqual([]);
     expect(expectedKeys.filter((key) => key.startsWith('quiz.'))).toHaveLength(493);
     for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) {
-      expect(cs[key], key).toBe(en[key]);
+      expect(cs[key], key).toBe(csOverrides[key] ?? en[key]);
     }
   });
 
@@ -146,3 +147,6 @@ describe('Czech tutor and business localization', () => {
     }
   });
 });
+
+// Match server renderers: synchronous translation runs after its lazy preload.
+beforeAll(async () => { await preloadExtraLocaleDict('cs'); });

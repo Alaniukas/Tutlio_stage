@@ -4,6 +4,8 @@ import { createClient } from '@supabase/supabase-js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
+import { ensurePaidTrialInvoice } from './_lib/paidTrialInvoice.js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -239,6 +241,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             if (!updatedSession) {
+                if (isProKlaseOrg(tutor?.organization_id)) await ensurePaidTrialInvoice(supabase, sessionId);
                 return res.status(200).json({ success: true, already_paid: true });
             }
 
@@ -351,6 +354,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }
             }
 
+            if (isProKlaseOrg(tutor?.organization_id)) await ensurePaidTrialInvoice(supabase, sessionId);
             return res.status(200).json({ success: true });
         } else {
             return res.status(400).json({ error: 'Payment not successful yet' });

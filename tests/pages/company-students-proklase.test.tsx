@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import CompanyStudents from '@/pages/company/CompanyStudents';
@@ -6,6 +6,7 @@ import { PRO_KLASE_ORG_ID } from '@/lib/marketMoney';
 
 const testState = vi.hoisted(() => ({
   from: vi.fn(),
+  insert: vi.fn(),
   cache: {
     students: [
       {
@@ -96,6 +97,7 @@ describe('CompanyStudents Pro Klasė list', () => {
         {},
         {
           get: (_t, prop) => {
+            if (prop === 'insert') return (payload: unknown) => { testState.insert(payload); return query; };
             if (prop === 'then') return (resolve: (value: unknown) => void) => resolve({ data: [], error: null, count: 0 });
             return () => query;
           },
@@ -117,6 +119,22 @@ describe('CompanyStudents Pro Klasė list', () => {
 
     fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
     expect(screen.getByText('Mokinio informacija')).toBeTruthy();
+  });
+
+  it('includes the initial admin comment and visibility in student creation', async () => {
+    render(<MemoryRouter initialEntries={['/company/students']}><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti mokinį' }));
+    fireEvent.change(screen.getByPlaceholderText('Jonas Jonaitis'), { target: { value: 'Naujas Mokinys' } });
+    fireEvent.change(screen.getByLabelText('Administratoriaus komentaras'), { target: { value: '  Aptarti mokymosi tikslus.  ' } });
+    const visibility = screen.getByRole('checkbox', { name: 'Rodyti komentarą korepetitoriui' });
+    expect((visibility as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(visibility);
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti', exact: true }));
+    await waitFor(() => expect(testState.insert).toHaveBeenCalledWith(expect.objectContaining({
+      full_name: 'Naujas Mokinys',
+      admin_comment: 'Aptarti mokymosi tikslus.',
+      admin_comment_visible_to_tutor: false,
+    })));
   });
 
   it('does not show school-only personal code fields for company orgs with full_student_edit', () => {

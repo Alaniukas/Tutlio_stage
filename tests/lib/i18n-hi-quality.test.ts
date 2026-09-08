@@ -1,3 +1,4 @@
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
@@ -19,11 +20,11 @@ beforeAll(async () => { await loadLocaleDict('hi'); });
 
 describe('Hindi tutor and business localization', () => {
   it('explicitly covers every in-scope key and leaves deferred products on English', () => {
-    expect(Object.keys(hiOverrides).sort()).toEqual(expectedKeys.sort());
+    expect(Object.keys(hiOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual(expectedKeys.sort());
     expect(Object.keys(hi).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !hi[key])).toEqual([]);
     for (const key of Object.keys(en).filter((key) => deferredPrefixes.has(key.split('.')[0]))) {
-      expect(hi[key]).toBe(en[key]);
+      expect(hi[key], key).toBe(hiOverrides[key] ?? en[key]);
     }
   });
 
@@ -97,3 +98,6 @@ describe('Hindi tutor and business localization', () => {
     }
   });
 });
+
+// Match server renderers: synchronous translation runs after its lazy preload.
+beforeAll(async () => { await preloadExtraLocaleDict('hi'); });

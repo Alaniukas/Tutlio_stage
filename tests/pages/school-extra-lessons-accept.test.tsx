@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SchoolExtraLessonsAccept from '../../src/pages/SchoolExtraLessonsAccept';
@@ -82,7 +82,14 @@ describe('SchoolExtraLessonsAccept', () => {
     expect((screen.getByRole('radio', { name: 'Palaukti' }) as HTMLInputElement).checked).toBe(false);
     expect(screen.getByText('Sutinku')).toBeTruthy();
     expect(screen.getByText('Nesutinku')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Patvirtinti sutartį' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Peržiūrėkite sutartį ir pateikite užsakymą' })).toBeTruthy();
+    const submitButton = screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }) as HTMLButtonElement;
+    expect(submitButton.disabled).toBe(true);
+    expect((screen.getByRole('radio', { name: 'Sutinku' }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole('radio', { name: 'Nesutinku' }));
+    expect((screen.getByRole('radio', { name: 'Nesutinku' }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(submitButton.disabled).toBe(false);
     expect(screen.getByText('Tutlio 🎓')).toBeTruthy();
     expect(screen.getByText(/Grupiniai užsiėmimai užsakomi visam mėnesiui/)).toBeTruthy();
     expect(
@@ -207,6 +214,6 @@ describe('SchoolExtraLessonsAccept', () => {
     });
     expect(screen.getByText(/Tik atsisakymo forma/)).toBeTruthy();
     expect(screen.queryByText('VISA SUTARTIS')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Patvirtinti sutartį' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Užsakymas su prievole sumokėti' })).toBeNull();
   });
 });

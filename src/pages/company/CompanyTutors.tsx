@@ -130,7 +130,7 @@ function TeachingNotesBadge({ notes }: { notes?: string | null }) {
   if (!text) return null;
   return (
     <span
-      className="shrink-0 text-[11px] font-medium text-white bg-slate-700 px-2 py-0.5 rounded-full max-w-[16rem] truncate"
+      className="text-[11px] font-medium text-white bg-slate-700 px-2 py-0.5 rounded-lg max-w-full sm:max-w-[16rem] whitespace-pre-wrap break-words"
       title={text}
     >
       {text}
@@ -1101,7 +1101,7 @@ export default function CompanyTutors() {
   const handleSaveTutor = async () => {
     if (!selectedTutor) return;
     setSavingTutor(true);
-    await supabase.from('profiles').update({ 
+    const { data: saved, error } = await supabase.from('profiles').update({
       full_name: editName, 
       phone: editPhone,
       cancellation_hours: editCancellationHours,
@@ -1116,7 +1116,12 @@ export default function CompanyTutors() {
         : {}),
       personal_meeting_link: editMeetingLink.trim() || null,
       teaching_notes: editTeachingNotes.trim() || null,
-    }).eq('id', selectedTutor.id);
+    }).eq('id', selectedTutor.id).select('id').maybeSingle();
+    if (error || !saved) {
+      setSavingTutor(false);
+      alert(t('common.error'));
+      return;
+    }
     await loadData();
     setTutorModalOpen(false);
     setSavingTutor(false);
@@ -1396,13 +1401,13 @@ export default function CompanyTutors() {
             <div className="space-y-2">
               {sortedTutors.map(tutor => (
                 <button key={tutor.id} onClick={() => openTutor(tutor)}
-                  className="w-full bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3.5 flex items-center gap-3 hover:border-indigo-200 hover:shadow-md transition-all text-left hover:bg-indigo-50/40"
+                  className="w-full bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3.5 flex flex-wrap sm:flex-nowrap items-center gap-3 hover:border-indigo-200 hover:shadow-md transition-all text-left hover:bg-indigo-50/40"
                 >
                   <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
                     <span className="text-sm font-bold text-indigo-700">{tutor.full_name.charAt(0).toUpperCase()}</span>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="flex-1 min-w-[calc(100%-4rem)] sm:min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 truncate">{tutor.full_name}</p>
                       <TeachingNotesBadge notes={tutor.teaching_notes} />
                     </div>

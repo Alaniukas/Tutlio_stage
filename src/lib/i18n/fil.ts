@@ -6,6 +6,7 @@
 import { en } from './en.js';
 
 export const filOverrides: Record<string, string> = {
+  'stats.cancellationPartTutor': "tutor: {count}",
   'common.reloadPage': "I-reload ang pahina",
   'common.reloadPageWarning': "Mawawala ang mga pagbabagong hindi pa nai-save kapag nag-reload. Magpatuloy?",
   "cal.rescheduleSameMonthOnly": "Maaari lamang ilipat ang mga sesyon sa loob ng parehong buwan sa kalendaryo.",

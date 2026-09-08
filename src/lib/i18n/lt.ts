@@ -1,4 +1,4 @@
-import { familyCatalogTrialCopy } from './familyCatalogTrialCopy';
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 
 export const lt: Record<string, string> = {
   ...familyCatalogTrialCopy.lt,
@@ -1918,6 +1918,8 @@ export const lt: Record<string, string> = {
   'dynamicPricing.studentFrequency': 'Sutartinis dažnis: {frequency} k./sav.',
   'dynamicPricing.studentFrequencyUnset': 'Sutartinis dažnis bus nustatytas sukūrus pasikartojantį grafiką.',
   'dynamicPricing.frequencyLabel': 'Pamokų per savaitę (kainodara)',
+  'invoices.csvClients': 'Klientų SF (CSV)',
+  'invoices.csvTutors': 'Korepetitorių SF (CSV)',
   'dynamicPricing.frequencyAuto': 'Automatinis – pagal pasikartojantį grafiką',
   'dynamicPricing.frequencyOption': '{n} k./sav.',
   'dynamicPricing.frequencySaved': 'Sutartinis dažnis išsaugotas. Būsimų pamokų kainos atnaujintos.',
@@ -3522,6 +3524,12 @@ export const lt: Record<string, string> = {
   'stu.completedSessions': 'Įvykusios pamokos',
   'stu.recentCompleted': 'Naujausios pamokos',
   'stu.noRecentCompleted': 'Nėra įvykusių pamokų',
+  'stu.childConnected': 'Prisijungęs vaikas',
+  'stu.childNotConnected': 'Vaikas neprisijungęs',
+  'stu.parentConnected': 'Prisijungę tėvai',
+  'stu.parentNotConnected': 'Tėvai neprisijungę',
+  'stu.parentConnectionUnknown': 'Tėvų būsena nežinoma',
+  'stu.connectionHint': 'Rodomas paskyrų susiejimas su mokiniu, o ne buvimas internete šiuo metu.',
   'stu.connected': 'Prisijungęs',
   'stu.adminCommentTitle': 'Administratoriaus komentaras',
   'stu.copyLink': 'Kopijuoti nuorodą',
@@ -6176,4 +6184,6 @@ export const lt: Record<string, string> = {
   'compare.customChip2': 'Atlygio taisyklės',
   'compare.customChip3': 'Tėvų pritarimo nuorodos',
   'compare.customChip4': 'Portalai su jūsų ženklu',
+  "school.confirmLessonOutcome": "Patvirtinu pasirinktą užsiėmimo rezultatą",
+  "school.confirmLessonOutcomeHint": "Patvirtinkite tik patikrinę, kad užsiėmimas įvyko arba mokinys neatvyko. Tai naudojama mėnesio sąskaitai.",
 };

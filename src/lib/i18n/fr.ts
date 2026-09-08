@@ -5502,4 +5502,8 @@ export const fr: Record<string, string> = {
   "compare.customChip2": "Règles de rémunération",
   "compare.customChip3": "Liens d'acceptation pour les parents",
   "compare.customChip4": "Espaces à votre marque",
+  "invoices.csvClients": "Factures clients (CSV)",
+  "invoices.csvTutors": "Factures des professeurs (CSV)",
+  'school.confirmLessonOutcome': "Je confirme le résultat choisi pour le cours",
+  'school.confirmLessonOutcomeHint': "Confirmez uniquement après avoir vérifié que le cours a eu lieu ou que l’élève était absent. Cette information sert à la facturation mensuelle.",
 };

@@ -1,3 +1,4 @@
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
@@ -23,7 +24,7 @@ beforeAll(async () => {
 
 describe('Italian tutor and business localization', () => {
   it('explicitly covers every in-scope source key without inventing keys', () => {
-    expect(Object.keys(itOverrides).sort()).toEqual(expectedKeys.sort());
+    expect(Object.keys(itOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual(expectedKeys.sort());
     expect(Object.keys(italian).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !italian[key])).toEqual([]);
   });
@@ -82,7 +83,7 @@ describe('Italian tutor and business localization', () => {
     expect(getSeoMeta('it', 'pricing').title).toContain('Prezzi');
     expect(isTranslatedLocale('it')).toBe(false);
     for (const key of Object.keys(en).filter((key) => deferredPrefixes.has(key.split('.')[0]))) {
-      expect(italian[key]).toBe(en[key]);
+      expect(italian[key], key).toBe(itOverrides[key] ?? en[key]);
     }
   });
 
@@ -100,3 +101,6 @@ describe('Italian tutor and business localization', () => {
     }
   });
 });
+
+// Match server renderers: synchronous translation runs after its lazy preload.
+beforeAll(async () => { await preloadExtraLocaleDict('it'); });

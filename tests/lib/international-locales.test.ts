@@ -1,3 +1,4 @@
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadLocaleDict, t, tHtml } from '../../src/lib/i18n/core';
 import { buildLocalizedPath, getDateFnsLocale, getLocaleFromPathname, getStoredLocale, storeLocale, stripLocalePrefix } from '../../src/lib/i18n';
@@ -11,6 +12,7 @@ afterEach(() => localStorage.clear());
 describe('translation-ready international locales', () => {
   it.each(PENDING_TRANSLATION_LOCALES)('%s loads its dictionary without needing the English UI locale first', async (locale) => {
     await loadLocaleDict(locale);
+    await preloadExtraLocaleDict(locale);
     // Pending means unpublished; a dictionary may already contain a translation draft.
     const expected = serverTranslate(locale, 'common.login');
     expect(expected).not.toBe('common.login');

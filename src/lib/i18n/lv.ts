@@ -6086,4 +6086,8 @@ export const lv: Record<string, string> = {
   "compare.customChip2": "Atalgojuma noteikumi",
   "compare.customChip3": "Vecāku apstiprinājuma saites",
   "compare.customChip4": "Portāli jūsu zīmolā",
+  "invoices.csvClients": "Klientu rēķini (CSV)",
+  "invoices.csvTutors": "Privātskolotāju rēķini (CSV)",
+  'school.confirmLessonOutcome': "Apstiprinu izvēlēto nodarbības rezultātu",
+  'school.confirmLessonOutcomeHint': "Apstipriniet tikai pēc pārbaudes, ka nodarbība notika vai skolēns neieradās. Tas tiek izmantots ikmēneša rēķinam.",
 };

@@ -14,6 +14,7 @@ import { parseEmailOptOutList, isEmailOptedOut } from './_lib/emailNotificationO
 import { isMissingPostgrestRpc } from './_lib/postgrestRpc.js';
 import { moksloVaisiaiRoutesLessonCommsToPayer } from './_lib/moksloVaisiaiLessonComms.js';
 import { buildSchoolHomeworkUrl, publicAppOrigin } from './_lib/publicLinkToken.js';
+import { resolveSessionMeetingLink } from './_lib/sessionMeetingLink.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -62,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const now = new Date();
     const sessionSelect = `
-          id, start_time, end_time, topic, price, meeting_link,
+          id, tutor_id, subject_id, start_time, end_time, topic, price, meeting_link,
           reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
           student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name, organization_id, linked_user_id),
           tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id, email_notification_opt_out)
@@ -109,6 +110,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const tutor = session.tutor as any;
         const student = session.student as any;
         if (!tutor || !student) continue;
+        const meetingLink = await resolveSessionMeetingLink(supabase, session);
+        if (!meetingLink && await isSchoolOrg(student?.organization_id || tutor?.organization_id || null)) {
+          console.warn('[send-reminders] Missing lesson join link; reminder not marked sent', session.id);
+          continue;
+        }
 
         const reminderStudentHours = Number(tutor?.reminder_student_hours ?? 2);
         const reminderTutorHours = Number(tutor?.reminder_tutor_hours ?? 2);
@@ -116,7 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const tz = 'Europe/Vilnius';
         const dateStr = startTime.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz });
         const timeStr = startTime.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit', timeZone: tz });
-        const orgId = (tutor as any)?.organization_id || null;
+        const orgId = student?.organization_id || tutor?.organization_id || null;
         // sessionId lets /api/send-email swap the link for a tracked /api/join-session URL (attendance).
         // Whiteboard link intentionally omitted: it pointed at the deployment domain and
         // recipients (parents/students) often lack board access — it lives in-app only.
@@ -128,11 +134,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           topic: session.topic,
           duration: durationMinutes,
           price: session.price,
-          meetingLink: session.meeting_link,
+          meetingLink,
           ...(orgId ? { organizationId: orgId } : {}),
         };
 
-        if (reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
+        if (reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email?.trim()) {
           try {
             emailAttempts += 1;
             const resp = await fetch(`${API_URL}/api/send-email`, {
@@ -140,7 +146,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
               body: JSON.stringify({
                 type: 'session_reminder',
-                to: student.email,
+                to: student.email.trim(),
                 data: { ...baseData, recipientName: student.full_name, otherName: tutor?.full_name, isTutor: false },
               }),
             });
@@ -177,9 +183,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const candidates: ReminderRecipient[] = [];
 
           if (schoolFlow && !flexibleInvites) {
-            if (payerEmail) candidates.push({ email: payerEmail, name: payerName });
+            if (!studentEmailNorm && payerEmail) candidates.push({ email: payerEmail, name: payerName });
             const secEmail = (student as any)?.parent_secondary_email?.trim() || '';
-            if (secEmail) candidates.push({ email: secEmail, name: (student as any)?.parent_secondary_name || null });
+            if (!studentEmailNorm && secEmail) candidates.push({ email: secEmail, name: (student as any)?.parent_secondary_name || null });
           } else if (flexibleInvites) {
             if (payerEmail) candidates.push({ email: payerEmail, name: payerName });
             const secEmail = (student as any)?.parent_secondary_email?.trim() || '';
@@ -200,7 +206,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 if (p?.email) candidates.push({ email: String(p.email), name: p.full_name || null });
               }
             }
-          } else if ((isPayerParent || mvPayerInbox) && payerEmail) {
+          } else if ((isPayerParent || mvPayerInbox || !studentEmailNorm) && payerEmail) {
             candidates.push({ email: payerEmail, name: payerName });
           }
 
@@ -283,7 +289,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               time: timeStr,
               topic: session.topic,
               duration: durationMinutes,
-              meetingLink: session.meeting_link,
+              meetingLink,
             };
             const tutorReminderData = isOrgTutor(tutor.organization_id)
               ? { ...tutorReminderCore, ...(orgId ? { organizationId: orgId } : {}) }

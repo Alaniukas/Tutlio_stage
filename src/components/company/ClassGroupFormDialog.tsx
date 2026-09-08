@@ -119,6 +119,7 @@ export default function ClassGroupFormDialog(props: {
     emptyDraft('').slots,
   );
   const [studentIds, setStudentIds] = useState<string[]>([]);
+  const [memberSchedules, setMemberSchedules] = useState<Record<string, SchoolClassGroupSlot[] | null>>({});
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +140,7 @@ export default function ClassGroupFormDialog(props: {
       setMeetingLink(draft.meeting_link || '');
       setSlots(draft.slots.length ? draft.slots : emptyDraft(draft.tutor_id).slots);
       setStudentIds(draft.student_ids || []);
+      setMemberSchedules(draft.member_schedules || {});
       return;
     }
     const blank = emptyDraft(props.defaultTutorId);
@@ -152,6 +154,7 @@ export default function ClassGroupFormDialog(props: {
     setMeetingLink(blank.meeting_link);
     setSlots(blank.slots);
     setStudentIds([]);
+    setMemberSchedules({});
   }, [props.open, props.mode, props.group, props.defaultTutorId]);
 
   const normalizedSlots = useMemo(
@@ -225,6 +228,7 @@ export default function ClassGroupFormDialog(props: {
         ...draft,
         slots: normalizedSlots,
         student_ids: props.canEditMembers ? studentIds : undefined,
+        member_schedules: props.canEditMembers ? Object.fromEntries(studentIds.map(id => [id, memberSchedules[id] ?? null])) : undefined,
       };
       if (props.mode === 'edit' && props.group) payload.id = props.group.id;
       const res = await fetch('/api/school-class-groups', {
@@ -366,6 +370,22 @@ export default function ClassGroupFormDialog(props: {
             </div>
             {props.canEditMembers && (
               <>
+                {selectedStudents.map(student => (
+                  <fieldset key={student.id} className="rounded-lg border bg-white p-2 space-y-1">
+                    <legend className="text-xs font-medium">{student.full_name}: lankymo grafikas</legend>
+                    <label className="flex gap-2 text-xs"><input type="checkbox" checked={memberSchedules[student.id] == null}
+                      onChange={e => setMemberSchedules(prev => ({ ...prev, [student.id]: e.target.checked ? null : [...normalizedSlots] }))} />Visi grupės laikai</label>
+                    {memberSchedules[student.id] != null && normalizedSlots.map(slot => {
+                      const matches = (s: SchoolClassGroupSlot) => s.weekday === slot.weekday && s.start_time.slice(0, 5) === slot.start_time.slice(0, 5);
+                      return <label key={`${slot.weekday}-${slot.start_time}`} className="flex gap-2 text-xs">
+                        <input type="checkbox" checked={memberSchedules[student.id]!.some(matches)} onChange={e => setMemberSchedules(prev => ({ ...prev,
+                          [student.id]: e.target.checked ? [...(prev[student.id] || []), slot] : (prev[student.id] || []).filter(s => !matches(s)),
+                        }))} />{weekdayOptions.find(day => day.v === slot.weekday)?.label} {slot.start_time.slice(0, 5)}
+                      </label>;
+                    })}
+                  </fieldset>
+                ))}
+                <p className="text-xs text-gray-500">Lankymo pakeitimai taikomi būsimoms pamokoms. Sutartyje nustatytas kiekis ir kaina keičiami atskirai.</p>
                 <Input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}

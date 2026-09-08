@@ -1,3 +1,5 @@
+import { StudentConnectionStatus } from '@/components/StudentConnectionStatus';
+import StudentAccountSetup from '@/components/company/StudentAccountSetup';
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { extractStoragePath, openContractFileInNewTab } from '@/lib/contractStorage';
@@ -166,6 +168,7 @@ interface Student {
   payment_model?: string | null;
   payment_payer?: 'self' | 'parent' | string | null;
   linked_user_id?: string | null;
+  parent_students?: { parent_id: string }[];
   created_at: string;
   admin_comment?: string | null;
   admin_comment_visible_to_tutor?: boolean;
@@ -374,6 +377,8 @@ export default function CompanyStudents() {
   const [addStudentPickedLessons, setAddStudentPickedLessons] = useState<AddStudentLessonPick[]>([]);
   const [addStudentFirstLessonIsTrial, setAddStudentFirstLessonIsTrial] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [newAdminComment, setNewAdminComment] = useState('');
+  const [newCommentVisibleToTutor, setNewCommentVisibleToTutor] = useState<boolean | null>(null);
   const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [baseUrl, setBaseUrl] = useState('');
   /** Org preferred_locale — invite links use the org's canonical domain (.lt for Pro Klasė). */
@@ -1166,12 +1171,12 @@ export default function CompanyStudents() {
       const [byTutorRes, unassignedRes] = await Promise.all([
         supabase
           .from('students')
-          .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+          .select('*, linked_user_id, parent_students(parent_id), tutor:profiles!students_tutor_id_fkey(full_name)')
           .in('tutor_id', tutorIds)
           .order('created_at', { ascending: false }),
         supabase
           .from('students')
-          .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+          .select('*, linked_user_id, parent_students(parent_id), tutor:profiles!students_tutor_id_fkey(full_name)')
           .is('tutor_id', null)
           .eq('organization_id', organizationId)
           .order('created_at', { ascending: false }),
@@ -1190,7 +1195,7 @@ export default function CompanyStudents() {
     } else {
       const { data, error } = await supabase
         .from('students')
-        .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+        .select('*, linked_user_id, parent_students(parent_id), tutor:profiles!students_tutor_id_fkey(full_name)')
         .is('tutor_id', null)
         .eq('organization_id', organizationId)
         .order('created_at', { ascending: false });
@@ -1868,6 +1873,8 @@ export default function CompanyStudents() {
               : newStudent.full_name,
           email: newStudent.email?.trim() || null,
           phone: newStudent.phone?.trim() || null,
+          admin_comment: newAdminComment.trim() || null,
+          admin_comment_visible_to_tutor: newCommentVisibleToTutor ?? proKlaseAdminUi,
           grade: (normalizeStudentGrade1to12(newStudent.grade) ?? newStudent.grade) || null,
           school_year: isSchoolView ? (newStudent.school_year || null) : null,
           enrollment_status: isSchoolView ? newStudent.enrollment_status : 'active',
@@ -2127,6 +2134,8 @@ export default function CompanyStudents() {
       type: toastType,
     });
     setIsDialogOpen(false);
+    setNewAdminComment('');
+    setNewCommentVisibleToTutor(null);
     setAddStudentFirstLessonIsTrial(false);
     setAddStudentPickedLessons([]);
     setNewStudent({
@@ -2169,20 +2178,23 @@ export default function CompanyStudents() {
 
   const handleSaveComment = async () => {
     if (!selectedStudent) return;
+    const ids = selectedStudentGroup.length ? selectedStudentGroup.map((row) => row.id) : [selectedStudent.id];
     setSavingComment(true);
-    const { error } = await supabase
+    const { data: saved, error } = await supabase
       .from('students')
       .update({
         admin_comment: commentDraft.trim() || null,
         admin_comment_visible_to_tutor: commentVisibleToTutor,
       })
-      .eq('id', selectedStudent.id);
-    if (error) {
+      .in('id', ids)
+      .select('id');
+    if (error || saved?.length !== ids.length) {
       setToastMessage({ message: t('compStu.commentSaveFailed'), type: 'error' });
     } else {
       setSelectedStudent((s) =>
         s ? { ...s, admin_comment: commentDraft.trim() || null, admin_comment_visible_to_tutor: commentVisibleToTutor } : null,
       );
+      setSelectedStudentGroup((rows) => rows.map((row) => ({ ...row, admin_comment: commentDraft.trim() || null, admin_comment_visible_to_tutor: commentVisibleToTutor })));
       setToastMessage({ message: t('compStu.commentSaved'), type: 'success' });
       setEditingComment(false);
       fetchData();
@@ -3312,6 +3324,30 @@ export default function CompanyStudents() {
                     </>
                   )}
 
+                  <div className="border-t border-gray-100 pt-4 space-y-2">
+                    <label htmlFor="new-student-admin-comment" className="font-semibold text-gray-900 flex items-center gap-2">
+                      <MessageSquare className="w-4 h-4 text-blue-500" />
+                      {t('compStu.adminComment')}
+                    </label>
+                    <textarea
+                      id="new-student-admin-comment"
+                      value={newAdminComment}
+                      onChange={(e) => setNewAdminComment(e.target.value)}
+                      rows={3}
+                      className="w-full rounded-xl border border-gray-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 resize-none"
+                      placeholder={t('compStu.commentPlaceholder')}
+                    />
+                    <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newCommentVisibleToTutor ?? proKlaseAdminUi}
+                        onChange={(e) => setNewCommentVisibleToTutor(e.target.checked)}
+                        className="rounded border-gray-300"
+                      />
+                      {t('compStu.commentVisibleToTutor')}
+                    </label>
+                  </div>
+
                   <div className="border-t border-gray-200 pt-4 space-y-3">
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
@@ -3745,15 +3781,7 @@ export default function CompanyStudents() {
                               </span>
                             )}
                           </div>
-                          {student.linked_user_id ? (
-                            <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-1.5 py-0.5 flex-shrink-0">
-                              {t('compStu.connected')}
-                            </span>
-                          ) : (
-                            <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5 flex-shrink-0">
-                              {t('compStu.notConnected')}
-                            </span>
-                          )}
+                          <StudentConnectionStatus students={g.rows} />
                         </div>
                         {needsPackage && (
                           <div className="mt-1">
@@ -3888,11 +3916,7 @@ export default function CompanyStudents() {
                                 )}
                               </div>
                               <div className="mt-1 flex flex-wrap items-center gap-1">
-                                {student.linked_user_id ? (
-                                  <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-0.5">{t('compStu.connected')}</span>
-                                ) : (
-                                  <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5">{t('compStu.notConnected')}</span>
-                                )}
+                                <StudentConnectionStatus students={g.rows} />
                                 {needsPackage && (
                                   <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-0.5">
                                     <AlertCircle className="w-3 h-3" />
@@ -4260,9 +4284,7 @@ export default function CompanyStudents() {
                         value={
                           selectedStudent.pricing_lessons_per_week_is_manual && selectedStudent.pricing_lessons_per_week
                             ? String(selectedStudent.pricing_lessons_per_week)
-                            : selectedStudent.pricing_lessons_per_week
-                              ? String(selectedStudent.pricing_lessons_per_week)
-                              : 'auto'
+                            : 'auto'
                         }
                         onValueChange={(value) => void handleUpdateStudentFrequency(value)}
                       >
@@ -4549,15 +4571,19 @@ export default function CompanyStudents() {
                           {sendingParentInvites ? t('common.loading') : t('compStu.inviteParent')}
                         </Button>
                       )}
-                      {selectedStudent.linked_user_id ? (
-                        <span className="inline-flex items-center gap-1 text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-1 text-xs">
-                          <CheckCircle className="w-3.5 h-3.5" /> {t('compStu.connected')}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 text-xs">
-                          <XCircle className="w-3.5 h-3.5" /> {t('compStu.notConnected')}
-                        </span>
-                      )}
+                      <StudentAccountSetup key={selectedStudent.id} studentId={selectedStudent.id} onProvisioned={async result => {
+                        const studentId = selectedStudent.id;
+                        if (result.role === 'student') {
+                          setSelectedStudent(prev => prev?.id === studentId ? { ...prev, linked_user_id: result.userId } : prev);
+                        } else {
+                          const { data, error } = await supabase.from('parent_students').select('parent_id').eq('student_id', studentId);
+                          if (!error) {
+                            setSelectedStudent(prev => prev?.id === studentId ? { ...prev, parent_students: data || [] } : prev);
+                          }
+                        }
+                        void fetchData();
+                      }} />
+                      <StudentConnectionStatus students={[selectedStudent, ...selectedStudentGroup.filter((row) => row.id !== selectedStudent.id)]} />
                     </div>
                   </div>
 
@@ -4696,7 +4722,7 @@ export default function CompanyStudents() {
                               );
                               const { data, error } = await supabase
                                 .from('students')
-                                .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+                                .select('*, linked_user_id, parent_students(parent_id), tutor:profiles!students_tutor_id_fkey(full_name)')
                                 .eq('id', pairedId)
                                 .single();
                               if (error || !data) {
@@ -4774,7 +4800,7 @@ export default function CompanyStudents() {
                           className="text-xs rounded-lg"
                           onClick={() => {
                             setCommentDraft(selectedStudent.admin_comment || '');
-                            setCommentVisibleToTutor(selectedStudent.admin_comment_visible_to_tutor ?? false);
+                            setCommentVisibleToTutor(selectedStudent.admin_comment ? selectedStudent.admin_comment_visible_to_tutor ?? false : proKlaseAdminUi);
                             setEditingComment(true);
                           }}
                         >

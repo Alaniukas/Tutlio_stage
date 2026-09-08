@@ -100,6 +100,23 @@ describe('expectedClassGroupOccurrences', () => {
 });
 
 describe('reconcileClassGroupSessions', () => {
+  it('reconciles only the selected weekly times for one member and leaves others unchanged', async () => {
+    const db = fakeSupabase([]);
+    const window = materializationWindow(NOW, 14);
+    const slots = [
+      { weekday: 1, start_time: '19:00', end_time: '19:45' },
+      { weekday: 3, start_time: '19:00', end_time: '19:45' },
+      { weekday: 5, start_time: '19:00', end_time: '19:45' },
+    ];
+    await reconcileClassGroupSessions(db.client, group({ slots }), { window });
+    const originalOther = db.tables.sessions.filter(s => s.student_id === 's2').map(s => s.id);
+    const reduced = group({ slots, members: [{ student_id: 's1', schedule_slots: slots.slice(0, 2) }, { student_id: 's2' }] });
+    const changed = await reconcileClassGroupSessions(db.client, reduced, { window });
+    expect(changed.deleted).toBe(3);
+    expect(db.tables.sessions.filter(s => s.student_id === 's1')).toHaveLength(4);
+    expect(db.tables.sessions.filter(s => s.student_id === 's2').map(s => s.id)).toEqual(originalOther);
+    expect((await reconcileClassGroupSessions(db.client, reduced, { window })).created).toBe(0);
+  });
   it('creates one lesson per member and occurrence, then is idempotent', async () => {
     const db = fakeSupabase([]);
     const window = materializationWindow(NOW, 14);

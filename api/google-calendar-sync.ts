@@ -29,10 +29,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const { userId, sessionId } = req.body;
+    const { userId, sessionId, sessionIds } = req.body ?? {};
 
     if (!userId) {
       return res.status(400).json({ error: 'Missing userId' });
+    }
+
+    if (sessionIds !== undefined && (
+      sessionId !== undefined || !Array.isArray(sessionIds) || sessionIds.length === 0 || sessionIds.length > 10
+      || sessionIds.some((id: unknown) => typeof id !== 'string' || !id.trim())
+    )) {
+      return res.status(400).json({ error: 'Provide between 1 and 10 sessionIds, without sessionId' });
     }
 
     // Get user with tokens
@@ -69,6 +76,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!profile.google_calendar_access_token) {
       return res.status(400).json({ error: 'No access token found' });
+    }
+
+    if (sessionIds !== undefined) {
+      const ids: string[] = [...new Set<string>(sessionIds)];
+      // Validate the entire batch before any external calendar write.
+      const { data: sessions, error } = await supabase.from('sessions')
+        .select('id, tutor_id').in('id', ids);
+      if (error) throw error;
+      if (!sessions || sessions.length !== ids.length) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (sessions.some((session) => session.tutor_id !== userId)) {
+        return res.status(403).json({ error: 'Session does not belong to this tutor' });
+      }
+      for (const id of ids) {
+        const result = await syncSessionToGoogle(id, userId);
+        if (!result.success) {
+          console.warn('[google-calendar-sync] Batch session failed:', result.error);
+          return res.status(502).json({ success: false, error: result.error });
+        }
+      }
+      return res.status(200).json({ success: true, synced: 'sessions', sessionsCount: ids.length });
     }
 
     // If sessionId provided, sync only that session (no lock needed)

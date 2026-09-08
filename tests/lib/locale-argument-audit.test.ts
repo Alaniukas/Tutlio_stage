@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 function audit(source: string) {
@@ -10,7 +11,7 @@ function audit(source: string) {
     mkdirSync(join(directory, 'src'));
     mkdirSync(join(directory, 'api'));
     writeFileSync(join(directory, 'src', 'fixture.ts'), source);
-    return spawnSync(process.execPath, ['--import', resolve('node_modules/tsx/dist/loader.mjs'), resolve('scripts/audit-locale-arguments.ts'), '--check'], {
+    return spawnSync(process.execPath, ['--import', pathToFileURL(resolve('node_modules/tsx/dist/loader.mjs')).href, resolve('scripts/audit-locale-arguments.ts'), '--check'], {
       cwd: directory, encoding: 'utf8', timeout: 20_000,
     });
   } finally {

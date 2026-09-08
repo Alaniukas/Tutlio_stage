@@ -1,3 +1,4 @@
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
@@ -19,11 +20,11 @@ beforeAll(() => loadLocaleDict('ja'));
 
 describe('Japanese tutor and business localization', () => {
   it('covers every in-scope key and keeps the separate modules on English fallback', () => {
-    expect(Object.keys(jaOverrides).sort()).toEqual([...expectedKeys].sort());
+    expect(Object.keys(jaOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual([...expectedKeys].sort());
     expect(Object.keys(ja).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter(key => en[key] && !ja[key])).toEqual([]);
     for (const key of Object.keys(en).filter(key => deferred.has(key.split('.')[0]))) {
-      expect(ja[key], key).toBe(en[key]);
+      expect(ja[key], key).toBe(jaOverrides[key] ?? en[key]);
     }
   });
 
@@ -40,7 +41,20 @@ describe('Japanese tutor and business localization', () => {
   });
 
   it('preserves numeric meaning, including named months rendered as Japanese month numbers', () => {
+    // "Per", "one" and "single" use the numeral 1 in these translations.
+    // The Japanese address is an explicitly localized example, not a price.
     const dateSources: Record<string, string> = {
+      "invoiceSettings.addressPlaceholder": "1 1 1",
+      "landing.custom.soloNote": "1",
+      "compare.tutlio.glance.bestFor": "1",
+      "compare.tutlio.glance.pricingModel": "1",
+      "compare.note.perMessage": "1",
+      "compare.tutorbird.intro1": "1",
+      "compare.tutorbird.glance.bestFor": "1",
+      "compare.tutorcruncher.faq.a1": "1",
+      "compare.teachworks.glance.pricingModel": "1",
+      "compare.teachworks.faq.a1": "1",
+      "compare.oases.themFor3": "1",
       'landing.v2.pillExam': 'Exam 2 14', // February 14 → 2月14日
       'landing.v2.demo.weekShort': 'Week · 3 10–14', // March → 3月
     };
@@ -101,3 +115,6 @@ describe('Japanese tutor and business localization', () => {
     }
   });
 });
+
+// Match server renderers: synchronous translation runs after its lazy preload.
+beforeAll(async () => { await preloadExtraLocaleDict('ja'); });

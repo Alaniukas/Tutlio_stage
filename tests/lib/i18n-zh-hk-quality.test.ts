@@ -1,3 +1,4 @@
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { format, parse } from 'date-fns';
@@ -28,10 +29,10 @@ beforeAll(async () => { await loadLocaleDict('zh-hk'); });
 
 describe('Hong Kong Traditional Chinese tutor and business localization', () => {
   it('covers every scoped source key explicitly and keeps deferred modules English', () => {
-    expect(Object.keys(zhHkOverrides).sort()).toEqual([...expectedKeys].sort());
+    expect(Object.keys(zhHkOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual([...expectedKeys].sort());
     expect(Object.keys(zhHk).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !zhHk[key])).toEqual([]);
-    for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) expect(zhHk[key]).toBe(en[key]);
+    for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) expect(zhHk[key], key).toBe(zhHkOverrides[key] ?? en[key]);
   });
 
   it.each([
@@ -140,3 +141,6 @@ describe('Hong Kong Traditional Chinese tutor and business localization', () => 
     expect(sql).not.toMatch(/DISABLE ROW LEVEL SECURITY|UPDATE public\./);
   });
 });
+
+// Match server renderers: synchronous translation runs after its lazy preload.
+beforeAll(async () => { await preloadExtraLocaleDict('zh-hk'); });

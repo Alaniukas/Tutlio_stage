@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { DateInput } from '@/components/ui/date-input';
 import { MonthFilterInput } from '@/components/ui/month-filter-input';
@@ -36,6 +36,7 @@ import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { orgTutorSessionPayEur } from '@/lib/orgTutorLessonPay';
 import { ORG_TUTOR_CARD_LIST_SCROLL_CLASS } from '@/lib/orgUi';
+import { downloadInvoiceCsv } from '@/lib/invoiceCsv';
 
 interface Invoice {
   id: string;
@@ -61,6 +62,7 @@ export default function CompanyInvoices() {
   const [orgId, setOrgId] = useState<string | null>(ic?.orgId ?? null);
   const [invoices, setInvoices] = useState<Invoice[]>(ic?.invoices ?? []);
   const [loading, setLoading] = useState(!ic);
+  const [loadError, setLoadError] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [reserveOpen, setReserveOpen] = useState(false);
   const [reserveCount, setReserveCount] = useState(1);
@@ -120,13 +122,14 @@ export default function CompanyInvoices() {
     return { start: tutorPeriodStart, end: tutorPeriodEnd };
   }, [tutorPeriodMode, tutorMonth, tutorPeriodStart, tutorPeriodEnd]);
 
-  const loadData = useCallback(async () => {
-    if (!getCached('company_invoices')) setLoading(true);
-
+  // Metadata is scoped to this mounted page, never shared across signed-in users.
+  const metadataRequest = useRef<Promise<{ orgIdVal: string; tutorsList: { id: string; full_name: string }[] } | null> | null>(null);
+  const requestSequence = useRef(0);
+  const loadMetadata = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       setLoading(false);
-      return;
+      return null;
     }
 
     const { data: adminRow } = await supabase
@@ -140,7 +143,7 @@ export default function CompanyInvoices() {
       setInvoices([]);
       setTutors([]);
       setLoading(false);
-      return;
+      return null;
     }
 
     const orgIdVal = adminRow.organization_id;
@@ -171,17 +174,31 @@ export default function CompanyInvoices() {
     }
     setOrgBuyerNames(buyerNameSet);
 
+    return { orgIdVal, tutorsList };
+  }, []);
+
+  const loadData = useCallback(async () => {
+    const sequence = ++requestSequence.current;
+    setLoadError(false);
+    if (!getCached('company_invoices')) setLoading(true);
+    try {
+    metadataRequest.current ??= loadMetadata().catch(error => { metadataRequest.current = null; throw error; });
+    const metadata = await metadataRequest.current;
+    if (!metadata || sequence !== requestSequence.current) return;
+    const { orgIdVal, tutorsList } = metadata;
+
     let query = supabase
       .from('invoices')
-      .select('*, billing_batches(paid)')
+      .select('id, invoice_number, issue_date, period_start, period_end, seller_snapshot, buyer_snapshot, subtotal, total_amount, status, issued_by_user_id, created_at, billing_batch_id, origin, billing_batches(paid)')
       .eq('organization_id', orgIdVal)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false });
 
     if (statusFilter !== 'all') {
       query = query.eq('status', statusFilter);
     }
 
-    if (invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth)) {
+    if (invoicePeriodMode === 'month' && invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth)) {
       const [yStr, mStr] = invoiceMonth.split('-');
       const y = parseInt(yStr, 10);
       const m = parseInt(mStr, 10);
@@ -191,8 +208,23 @@ export default function CompanyInvoices() {
       query = query.gte('issue_date', start).lte('issue_date', endStr);
     }
 
-    const { data } = await query;
-    const invoicesList = (data || []) as Invoice[];
+    if (invoicePeriodMode === 'range' && /^\d{4}-\d{2}-\d{2}$/.test(invoiceRangeStart) && /^\d{4}-\d{2}-\d{2}$/.test(invoiceRangeEnd)) {
+      const [start, end] = [invoiceRangeStart, invoiceRangeEnd].sort();
+      query = query.gte('issue_date', start).lte('issue_date', end);
+    }
+
+    // PostgREST caps a response at 1,000 rows; exports must include every page.
+    const invoicesList: Invoice[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const { data, error } = await query.range(offset, offset + 999);
+      if (sequence !== requestSequence.current) return;
+      if (error) throw error;
+      invoicesList.push(...(data || []).map(row => ({
+        ...row,
+        billing_batches: Array.isArray(row.billing_batches) ? row.billing_batches[0] ?? null : row.billing_batches,
+      })) as Invoice[]);
+      if (!data || data.length < 1000) break;
+    }
 
     setOrgId(orgIdVal);
     setTutors(tutorsList);
@@ -203,11 +235,17 @@ export default function CompanyInvoices() {
       tutors: tutorsList,
     });
     setLoading(false);
-  }, [statusFilter, invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd]);
+    } catch (error) {
+      if (sequence !== requestSequence.current) return;
+      console.error('[CompanyInvoices] load failed', error);
+      setInvoices([]); setLoadError(true); setLoading(false);
+    }
+  }, [loadMetadata, statusFilter, invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd]);
 
   useEffect(() => {
     // Always refresh in background; cache is only for quick initial paint.
     void loadData();
+    return () => { requestSequence.current++; };
   }, [loadData]);
 
   const loadTutorSessions = useCallback(async () => {
@@ -574,16 +612,16 @@ export default function CompanyInvoices() {
           )}
         </div>
 
-        <div className={showSettings ? '' : 'hidden'}>
+        {showSettings && <div>
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('invoices.orgSettingsTitle')}</h2>
             <InvoiceSettingsForm
               scope="organization"
               allowedEntityTypes={['mb', 'uab', 'ii', 'individuali_veikla']}
-              onSaved={() => setShowSettings(false)}
+              onSaved={() => { setShowSettings(false); metadataRequest.current = null; void loadData(); }}
             />
           </div>
-        </div>
+        </div>}
 
         {/* Tutors tab */}
         {activeTab === 'tutors' && companyCanIssueTutorInvoices && (
@@ -1017,7 +1055,7 @@ export default function CompanyInvoices() {
                 </div>
               </div>
             </div>
-            <div className="flex gap-2 shrink-0">
+            <div className="flex flex-wrap gap-2 min-w-0">
               <button
                 type="button"
                 onClick={() => setSortAsc((prev) => !prev)}
@@ -1040,9 +1078,20 @@ export default function CompanyInvoices() {
                 )}
                 {t('invoices.downloadAllFiltered', { count: String(filteredInvoices.length) })}
               </Button>
+              {(['clients', 'tutors'] as const).map((kind) => {
+                const rows = filteredInvoices.filter((invoice) => {
+                  const isTutorInvoice = orgBuyerNames.has(String(invoice.buyer_snapshot?.name || '').trim().toLowerCase());
+                  return kind === 'tutors' ? isTutorInvoice : !isTutorInvoice;
+                });
+                return <Button key={kind} variant="outline" size="sm" className="rounded-xl gap-2" disabled={loading || rows.length === 0}
+                  onClick={() => downloadInvoiceCsv(rows, kind)}>
+                  <Download className="w-4 h-4" />{t(kind === 'clients' ? 'invoices.csvClients' : 'invoices.csvTutors')} ({rows.length})
+                </Button>;
+              })}
             </div>
           </div>
 
+          {loadError && <p role="alert" className="text-sm text-red-600">{t('common.error')}</p>}
           {loading ? (
             <div className="flex justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />

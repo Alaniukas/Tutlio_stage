@@ -4,8 +4,9 @@ import {
   recurringMaterializeEndDate,
 } from '@/lib/recurringSessions';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
+import { sendEmail } from '@/lib/email';
+import { syncCreatedSessionsToGoogle } from '@/lib/syncCreatedSessionsToGoogle';
 import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
 import { defaultSessionPaymentStatusForStudent } from '@/lib/studentPaymentModel';
 import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
@@ -466,7 +467,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     createIsMakeup = false,
     subjects,
     individualPricing,
-    dynamicPricingRules = [],
+    dynamicPricingRules: suppliedPricingRules,
     classGroupId = null,
   } = p;
   const schoolClassGroupId = classGroupId ? String(classGroupId).trim() : '';
@@ -555,7 +556,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
 
   const { data: studentPaymentRows } = await supabase
     .from('students')
-    .select('id, payment_model, grade, pricing_lessons_per_week')
+    .select('id, payment_model, grade, pricing_lessons_per_week, pricing_lessons_per_week_is_manual')
     .in('id', studentIdsToCreate);
   const paymentModelByStudentId = new Map(
     (studentPaymentRows ?? []).map((row: { id: string; payment_model?: string | null }) => [
@@ -568,6 +569,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       id: string;
       grade?: string | null;
       pricing_lessons_per_week?: number | null;
+      pricing_lessons_per_week_is_manual?: boolean | null;
     }) => [row.id, row]),
   );
   const planFrequency = contractedLessonsPerWeek(
@@ -575,6 +577,16 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     createRecurringWeekdays,
     null,
   );
+  let dynamicPricingRules = suppliedPricingRules ?? [];
+  if (!suppliedPricingRules && !subj.is_group && !subj.is_trial) {
+    const { data: tutor, error: tutorError } = await supabase.from('profiles').select('organization_id').eq('id', createTutorId).single();
+    if (tutorError) throw tutorError;
+    if (tutor?.organization_id) {
+      const { data: rules, error } = await supabase.from('organization_dynamic_pricing').select('*').eq('organization_id', tutor.organization_id);
+      if (error) throw error;
+      dynamicPricingRules = rules || [];
+    }
+  }
   const pricingRulesForSubject = subj.is_group || subj.is_trial ? [] : dynamicPricingRules;
   const priceByStudentId = new Map(
     studentIdsToCreate.map((studentId) => {
@@ -595,14 +607,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     }),
   );
 
-  const syncGoogle = (sessionId: string) => {
-    void (async () => {
-      await fetch('/api/google-calendar-sync', {
-        method: 'POST',
-        headers: await authHeaders(),
-        body: JSON.stringify({ userId: createTutorId, sessionId }),
-      });
-    })().catch(() => {});
+  const syncGoogle = (sessionIds: string[]) => {
+    void syncCreatedSessionsToGoogle(supabase, createTutorId, sessionIds)
+      .catch((error) => console.warn('[OrgSchedule] Google Calendar sync failed:', error));
   };
 
   if (createIsRecurring) {
@@ -822,9 +829,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       !(createRecurringEndDate || '').trim(),
     );
 
-    for (const row of inserted || []) {
-      syncGoogle((row as { id: string }).id);
-    }
+    syncGoogle(allCreated.map((row) => row.id));
 
     await persistRecurringPlanFrequency(supabase, [...new Set(recurringTemplates.map((t) => t.student_id))], planFrequency);
 
@@ -1001,9 +1006,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
         },
       }).catch(() => {});
     }
-
-    syncGoogle(sess.id);
   }
+
+  syncGoogle(((created || []) as Array<{ id: string }>).map((row) => row.id));
 
   if (!p.suppressSuccessAlert) {
     if (isGroupLesson && studentIdsToCreate.length > 1) {
