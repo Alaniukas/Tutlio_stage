@@ -18,6 +18,20 @@ export default function StudentAccountSetup({ studentId, onProvisioned }: { stud
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
+  const [emailCheck, setEmailCheck] = useState<{ studentId: string; recipients: { email: string; status: string; reason?: string }[] } | null>(null);
+  const [checkingEmail, setCheckingEmail] = useState(false);
+  useEffect(() => { setEmailCheck(null); setCheckingEmail(false); }, [studentId]);
+  const checkEmails = async () => {
+    setCheckingEmail(true); setError('');
+    try {
+      const response = await fetch(`/api/admin-student-email-status?student_id=${encodeURIComponent(studentId)}`, { headers: await authHeaders() });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Nepavyko patikrinti el. pašto.');
+      if (currentStudent.current === studentId) setEmailCheck({ studentId, recipients: data.recipients });
+    } catch (err) {
+      if (currentStudent.current === studentId) setError(err instanceof Error ? err.message : 'Nepavyko patikrinti el. pašto.');
+    } finally { if (currentStudent.current === studentId) setCheckingEmail(false); }
+  };
   useEffect(() => { setCredentials([]); setBusy(false); }, [studentId]);
   useEffect(() => {
     let cancelled = false;
@@ -60,6 +74,19 @@ export default function StudentAccountSetup({ studentId, onProvisioned }: { stud
       <p>Laikinas slaptažodis: <code>{c.temporaryPassword}</code></p>
       <p className="text-xs">Nukopijuokite ir perduokite paskyros savininkui. Uždarius kortelę slaptažodis nebebus rodomas. Prisijungus reikės jį pakeisti.</p>
     </div>)}
+    <div className="space-y-2 border-t pt-2">
+      <Button type="button" variant="outline" size="sm" disabled={checkingEmail} onClick={() => void checkEmails()}>{checkingEmail ? 'Tikrinama…' : 'Patikrinti el. pašto blokavimą'}</Button>
+      {emailCheck?.studentId === studentId && <div aria-live="polite" className="space-y-1">
+        {!emailCheck.recipients.length && <p>El. pašto adresai nenurodyti.</p>}
+        {emailCheck.recipients.map(recipient => <p key={recipient.email} className={`break-all ${recipient.status === 'blocked' ? 'text-red-700' : 'text-gray-600'}`}>
+          {recipient.email}: {recipient.status === 'blocked' ? 'Pristatymas užblokuotas' : recipient.status === 'not_blocked' ? 'Blokavimo nerasta' : 'Būsenos patikrinti nepavyko'}
+          {recipient.reason === 'bounce' && ' (gavėjo serveris atmetė ankstesnį laišką)'}
+          {recipient.reason === 'complaint' && ' (gautas skundas dėl šlamšto)'}
+          {recipient.reason === 'manual' && ' (rankinis blokavimas)'}
+        </p>)}
+        <p className="text-xs text-gray-500">Tikrinamas dabartinis adresų blokavimas, o ne konkrečių laiškų pristatymas. Jei adresas užblokuotas, patikslinkite jį su gavėju ir kreipkitės į Tutlio pagalbą.</p>
+      </div>}
+    </div>
     {error && <p role="alert" className="text-red-600">{error}</p>}
   </section>;
 }
