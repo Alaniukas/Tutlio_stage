@@ -95,7 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const orgFeatures = (org.features || {}) as Record<string, unknown>;
     const recordingsEnabled = orgFeatures.school_lesson_recordings === true;
     payload.start_within_14_label = startWithin14Label(start14.status);
-    payload.recording_consent_label = recordingsEnabled ? '—' : 'NETAIKOMA';
+    payload.recording_consent_label = recordingsEnabled ? 'TAIP' : 'NETAIKOMA';
     payload.sutikimo_su_salygomis_busena = contract.accepted_at ? 'TAIP' : '—';
     const filled = fillExtraLessonsBody({
       templateBody,
@@ -169,7 +169,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const orgFeatures = (org.features || {}) as Record<string, unknown>;
       const recordingsEnabled = orgFeatures.school_lesson_recordings === true;
       payload.start_within_14_label = startWithin14Label(start14.status);
-      payload.recording_consent_label = recordingsEnabled ? '—' : 'NETAIKOMA';
+      payload.recording_consent_label = recordingsEnabled ? 'TAIP' : 'NETAIKOMA';
       payload.sutikimo_su_salygomis_busena = contract.accepted_at ? 'TAIP' : '—';
       const filled = fillExtraLessonsBody({
         templateBody,

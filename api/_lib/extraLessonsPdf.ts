@@ -49,17 +49,31 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   }
 }
 
-export function resolveExtraLessonsBundledDocxPath(): string {
+export function extraLessonsBundledDocxCandidates(): string[] {
   const here = typeof __dirname !== 'undefined'
     ? __dirname
     : dirname(fileURLToPath(import.meta.url));
-  const candidates = [
+  return [
     join(here, 'templates', 'extra-lessons-laisvi-vaikai.docx'),
     join(process.cwd(), 'api/_lib/templates/extra-lessons-laisvi-vaikai.docx'),
     join(process.cwd(), 'docs/legal/extra-lessons-laisvi-vaikai.docx'),
     join(here, '../../docs/legal/extra-lessons-laisvi-vaikai.docx'),
+    join(here, '../templates/extra-lessons-laisvi-vaikai.docx'),
   ];
+}
+
+export function resolveExtraLessonsBundledDocxPath(): string {
+  const candidates = extraLessonsBundledDocxCandidates();
   return candidates.find((p) => existsSync(p)) || candidates[0];
+}
+
+export function readBundledExtraLessonsDocx(): Buffer {
+  const candidates = extraLessonsBundledDocxCandidates();
+  const found = candidates.find((p) => existsSync(p));
+  if (!found) {
+    throw new Error(`Bundled extra-lessons DOCX nerastas. Bandytos vietos: ${candidates.join('; ')}`);
+  }
+  return readFileSync(found);
 }
 
 function extraLessonsDocxPayload(params: {
@@ -107,18 +121,21 @@ export async function renderAndStoreExtraLessonsPdf(
     contractNumber: params.contract.contract_number,
   });
 
-  if (usesBundledExtraLessonsDocx(params.contract.organization_id)) {
+  const bundled = usesBundledExtraLessonsDocx(params.contract.organization_id);
+  let lastDocxError = '';
+  if (bundled) {
     try {
-      const templateBytes = readFileSync(resolveExtraLessonsBundledDocxPath());
       pdfBytes = new Uint8Array(await withTimeout(
-        renderDocxTemplateBufferToPdfBuffer({ templateBytes, payload }),
-        35000,
+        renderDocxTemplateBufferToPdfBuffer({ templateBytes: readBundledExtraLessonsDocx(), payload }),
+        55000,
       ));
     } catch (e) {
-      const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
-      throw new Error(`Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${detail}`, { cause: e });
+      lastDocxError = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
+      console.error('[extra-lessons] bundled DOCX PDF failed, trying org template', lastDocxError);
     }
-  } else if (params.contract.template_id) {
+  }
+
+  if (!pdfBytes && params.contract.template_id) {
     const { data: tpl, error: templateErr } = await supabase
       .from('school_contract_templates')
       .select('pdf_url, name')
@@ -138,13 +155,20 @@ export async function renderAndStoreExtraLessonsPdf(
         }
         pdfBytes = await withTimeout(
           createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload }),
-          35000,
+          55000,
         );
       } catch (e) {
         const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
-        throw new Error(`Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${detail}`, { cause: e });
+        const prefix = lastDocxError ? `${lastDocxError}; org šablonas: ` : '';
+        throw new Error(`Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${prefix}${detail}`, { cause: e });
       }
     }
+  }
+
+  if (!pdfBytes && bundled) {
+    throw new Error(
+      `Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${lastDocxError || 'šablonas nerastas'}`,
+    );
   }
 
   if (!pdfBytes) {
@@ -238,7 +262,7 @@ export async function renderExtraLessonsAnnexPdf(
 
   if (usesBundledExtraLessonsDocx(params.contract.organization_id)) {
     try {
-      const templateBytes = readFileSync(resolveExtraLessonsBundledDocxPath());
+      const templateBytes = readBundledExtraLessonsDocx();
       return await annexPdfFromFilledDocx({
         templateBytes,
         payload,
