@@ -14,6 +14,7 @@ import { parseEmailOptOutList, isEmailOptedOut } from './_lib/emailNotificationO
 import { isMissingPostgrestRpc } from './_lib/postgrestRpc.js';
 import { moksloVaisiaiRoutesLessonCommsToPayer } from './_lib/moksloVaisiaiLessonComms.js';
 import { buildSchoolHomeworkUrl, publicAppOrigin } from './_lib/publicLinkToken.js';
+import { resolveSessionMeetingLink } from '../src/lib/meetingLink.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -64,8 +65,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const sessionSelect = `
           id, start_time, end_time, topic, price, meeting_link,
           reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
-          student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name, organization_id, linked_user_id),
-          tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id, email_notification_opt_out)
+          student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name, organization_id, linked_user_id, personal_meeting_link),
+          tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id, email_notification_opt_out, personal_meeting_link),
+          subjects(meeting_link)
         `;
     const { data: dueSessionRows, error: dueSessionError } = await supabase.rpc(
       'get_due_session_reminder_ids',
@@ -120,6 +122,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // sessionId lets /api/send-email swap the link for a tracked /api/join-session URL (attendance).
         // Whiteboard link intentionally omitted: it pointed at the deployment domain and
         // recipients (parents/students) often lack board access — it lives in-app only.
+        const resolvedMeetingLink = resolveSessionMeetingLink({
+          sessionLink: session.meeting_link,
+          tutorPersonalLink: tutor?.personal_meeting_link,
+          studentPersonalLink: student?.personal_meeting_link,
+          subjectLink: (session as { subjects?: { meeting_link?: string | null } | null }).subjects?.meeting_link,
+        });
         const baseData = {
           sessionId: session.id,
           studentId: student?.id || undefined,
@@ -128,7 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           topic: session.topic,
           duration: durationMinutes,
           price: session.price,
-          meetingLink: session.meeting_link,
+          meetingLink: resolvedMeetingLink || null,
           ...(orgId ? { organizationId: orgId } : {}),
         };
 

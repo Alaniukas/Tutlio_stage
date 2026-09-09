@@ -34,6 +34,7 @@ import {
   toggleEmailOptOut,
   type EmailOptOutKey,
 } from '@/lib/emailNotificationOptOut';
+import { backfillTutorMeetingLinks } from '@/lib/backfillTutorMeetingLinks';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -383,6 +384,10 @@ export default function LessonSettingsPage() {
       console.error('[LessonSettings] personal_meeting_link update', error);
       alert(error.message || t('lessonSet.saveFailed'));
     } else {
+      const link = personalMeetingLink.trim() || null;
+      if (link) {
+        await backfillTutorMeetingLinks(supabase, ctxUser.id, link);
+      }
       setPersonalLinkSaved(true);
       setTimeout(() => setPersonalLinkSaved(false), 3000);
     }

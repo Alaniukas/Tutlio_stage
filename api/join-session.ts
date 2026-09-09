@@ -9,6 +9,7 @@ import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClie
 import { isJoinRole, verifyJoinToken } from './_lib/joinLink.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { isWithinJoinClickWindow } from '../src/lib/attendance.js';
+import { resolveSessionMeetingLinkFromDb } from './_lib/sessionMeetingLink.js';
 
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -74,7 +75,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const target = normalizeMeetingUrl(session.meeting_link);
+    const resolvedLink = await resolveSessionMeetingLinkFromDb(supabase, session);
+    const target = normalizeMeetingUrl(resolvedLink);
     return res.redirect(302, target || appOrigin);
   } catch (e) {
     console.error('[join-session] error:', e);

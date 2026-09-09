@@ -27,6 +27,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import BuyLicensesDialog from '@/components/company/BuyLicensesDialog';
 import { fmtMoney, isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { backfillTutorMeetingLinks } from '@/lib/backfillTutorMeetingLinks';
 import {
   compactTutorPayBySubject,
   parseTutorPayBySubject,
@@ -1104,6 +1105,7 @@ export default function CompanyTutors() {
   const handleSaveTutor = async () => {
     if (!selectedTutor) return;
     setSavingTutor(true);
+    const personalLink = editMeetingLink.trim() || null;
     await supabase.from('profiles').update({ 
       full_name: editName, 
       phone: editPhone,
@@ -1117,9 +1119,12 @@ export default function CompanyTutors() {
       ...(isManoKorepetitoriusAdmin
         ? { company_commission_by_subject: compactTutorPayBySubject(editSubjectPay) }
         : {}),
-      personal_meeting_link: editMeetingLink.trim() || null,
+      personal_meeting_link: personalLink,
       teaching_notes: editTeachingNotes.trim() || null,
     }).eq('id', selectedTutor.id);
+    if (personalLink) {
+      await backfillTutorMeetingLinks(supabase, selectedTutor.id, personalLink);
+    }
     await loadData();
     setTutorModalOpen(false);
     setSavingTutor(false);

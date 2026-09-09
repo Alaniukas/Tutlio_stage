@@ -15,6 +15,10 @@ import {
   materializationWindow,
   reconcileClassGroupSessions,
 } from './_lib/schoolClassGroupMaterialize.js';
+import {
+  buildMeetingLinkFallbackMaps,
+  resolveTemplateMeetingLink,
+} from './_lib/sessionMeetingLink.js';
 
 const HORIZON_DAYS = 60;
 export const MATERIALIZER_BATCH_SIZE = 100;
@@ -98,6 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const groupSubjectIds = new Set(
     (subjectRows || []).filter((subject: any) => subject.is_group === true).map((subject: any) => subject.id as string),
   );
+  const meetingLinkMaps = await buildMeetingLinkFallbackMaps(supabase, templates);
 
   for (const template of templates) {
     // Archived (detached) students no longer get new lessons — for anyone.
@@ -183,7 +188,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         start_time: startIso,
         end_time: end.toISOString(),
         status: 'active',
-        meeting_link: template.meeting_link,
+        meeting_link: resolveTemplateMeetingLink(template, meetingLinkMaps),
         topic: template.topic,
         price: template.price,
         paid: usesPackage,

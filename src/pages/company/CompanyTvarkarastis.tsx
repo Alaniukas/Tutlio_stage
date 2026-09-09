@@ -159,6 +159,7 @@ import {
   resolveOrgMeetingLink,
   resolveOrgSessionSubjectDefaults,
 } from '@/lib/orgSessionSubjectDefaults';
+import { enrichSessionMeetingLink } from '@/lib/meetingLink';
 
 const locales = { lt, en: enUS };
 const localizer = dateFnsLocalizer({
@@ -724,7 +725,6 @@ export default function CompanyTvarkarastis() {
         start_time: new Date(session.start_time),
         end_time: new Date(session.end_time),
       }));
-      setSessions(parsedSessions);
 
       // Fetch availability for org tutors
       const tutorNameById = new Map(filteredTutors.map((t: any) => [t.id, t.full_name || '']));
@@ -789,6 +789,23 @@ export default function CompanyTvarkarastis() {
 
       setStudents(studentsData);
 
+      const tutorLinksById = new Map(
+        filteredTutors.map((t: { id: string; personal_meeting_link?: string | null }) => [
+          t.id,
+          t.personal_meeting_link,
+        ]),
+      );
+      const studentsById = new Map(studentsData.map((s) => [s.id, s]));
+      const subjectsById = new Map((subjectsData || []).map((s: { id: string; meeting_link?: string | null }) => [s.id, s]));
+      const enrichedSessions = parsedSessions.map((session) =>
+        enrichSessionMeetingLink(session, {
+          tutorPersonalLink: tutorLinksById.get(session.tutor_id),
+          studentsById,
+          subjectsById,
+        }),
+      );
+      setSessions(enrichedSessions);
+
       const { data: pricingData } = await supabase
         .from('student_individual_pricing')
         .select('student_id, subject_id, price')
@@ -835,7 +852,7 @@ export default function CompanyTvarkarastis() {
 
       setCache('company_tvarkarastis', {
         orgTutors: filteredTutors,
-        sessions: parsedSessions,
+        sessions: enrichedSessions,
         availability: mappedAvailability,
         subjects: subjectsData || [],
         students: studentsData || [],
@@ -1716,9 +1733,16 @@ export default function CompanyTvarkarastis() {
     setEditStartTime(Number.isNaN(start.getTime()) ? '' : format(start, "yyyy-MM-dd'T'HH:mm"));
     setEditDurationMinutes(Math.max(15, Math.round(durMs / 60000) || 60));
     setEditTopic(isClassGroupSession ? (siblingTopic || '') : (session.topic || ''));
+    const tutorRow = orgTutors.find((t) => t.id === session.tutor_id);
     setEditMeetingLink(
       selectedGroupSessions.find((row) => row.meeting_link)?.meeting_link
       || session.meeting_link
+      || resolveOrgMeetingLink(
+        subjects.find((s) => s.id === session.subject_id)?.meeting_link,
+        session.student_id,
+        tutorRow?.personal_meeting_link,
+        students,
+      )
       || '',
     );
     setEditPrice(Number(session.price) || 0);

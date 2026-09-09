@@ -124,7 +124,7 @@ import {
   isRecurringEndDateOpen,
   recurringMaterializeEndDate,
 } from '@/lib/recurringSessions';
-import { resolveLessonMeetingLink } from '@/lib/meetingLink';
+import { enrichSessionMeetingLink, resolveLessonMeetingLink } from '@/lib/meetingLink';
 import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
@@ -751,7 +751,6 @@ export default function CalendarPage() {
       start_time: new Date(session.start_time),
       end_time: new Date(session.end_time),
     }));
-    setSessions(parsedSessions);
 
     const { data: studentsData } = await tutorStudentsRowsDeduped(user.id);
     const calStudents =
@@ -769,7 +768,25 @@ export default function CalendarPage() {
     setStudents(calStudents as Student[]);
 
     const { data: subjectsData } = await tutorSubjectsCalendarDeduped(user.id);
-    setSubjects(dedupeSubjectsById(subjectsData || []));
+    const calSubjects = dedupeSubjectsById(subjectsData || []);
+    setSubjects(calSubjects);
+
+    const tutorLink = (profileData as { personal_meeting_link?: string | null })?.personal_meeting_link || '';
+    const studentsById = new Map(
+      calStudents.map((s) => [String(s.id), { personal_meeting_link: s.personal_meeting_link as string | null | undefined }]),
+    );
+    const subjectsById = new Map(
+      calSubjects.map((s) => [s.id, { meeting_link: s.meeting_link }]),
+    );
+    setSessions(
+      parsedSessions.map((session) =>
+        enrichSessionMeetingLink(session, {
+          tutorPersonalLink: tutorLink,
+          studentsById,
+          subjectsById,
+        }),
+      ),
+    );
 
     const { data: pricingData } = await tutorStudentPricingAllDeduped(user.id);
     setIndividualPricing(pricingData || []);
@@ -3744,7 +3761,14 @@ export default function CalendarPage() {
     setEditNewStartTime(format(selectedEvent.start_time, "yyyy-MM-dd'T'HH:mm"));
     setEditDurationMinutes(Math.max(5, Math.round((selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime()) / 60000)));
     setEditTopic(selectedEvent.topic || '');
-    setEditMeetingLink(selectedEvent.meeting_link || '');
+    setEditMeetingLink(
+      selectedEvent.meeting_link
+      || resolveMeetingLink(
+        subjects.find((s) => s.id === selectedEvent.subject_id)?.meeting_link,
+        selectedEvent.student_id,
+      )
+      || '',
+    );
     setEditPrice(Number(selectedEvent.price ?? 0) || 0);
     setEditTutorComment(selectedEvent.tutor_comment || '');
     setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
