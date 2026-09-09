@@ -80,10 +80,13 @@ describe('SchoolExtraLessonsAccept', () => {
     expect(screen.getByText('Palaukti')).toBeTruthy();
     expect((screen.getByRole('radio', { name: 'Sutinku pradėti iš karto' }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole('radio', { name: 'Palaukti' }) as HTMLInputElement).checked).toBe(false);
-    expect(screen.getByText('Sutinku')).toBeTruthy();
-    expect(screen.getByText('Nesutinku')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Patvirtinti sutartį' })).toBeTruthy();
-    expect(screen.getByText('Tutlio 🎓')).toBeTruthy();
+    expect((screen.getByRole('radio', { name: 'Sutinku' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('radio', { name: 'Nesutinku' }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' })).toBeTruthy();
+    expect(screen.getByText('Tutlio')).toBeTruthy();
+    expect(screen.queryByText('Tutlio 🎓')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Peržiūrėkite sutartį ir pateikite užsakymą' })).toBeTruthy();
+    expect(screen.queryByText(/\*\s*$/)).toBeNull();
     expect(screen.getByText(/Grupiniai užsiėmimai užsakomi visam mėnesiui/)).toBeTruthy();
     expect(
       screen.getByRole('link', { name: 'Sutarties atsisakymo forma' }).getAttribute('href'),
@@ -207,6 +210,6 @@ describe('SchoolExtraLessonsAccept', () => {
     });
     expect(screen.getByText(/Tik atsisakymo forma/)).toBeTruthy();
     expect(screen.queryByText('VISA SUTARTIS')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Patvirtinti sutartį' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Užsakymas su prievole sumokėti' })).toBeNull();
   });
 });

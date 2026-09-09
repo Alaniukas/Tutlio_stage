@@ -68,7 +68,7 @@ function Card({ children, className = '' }: { children: ReactNode; className?: s
 function BrandMark() {
   return (
     <div className="text-center mb-4">
-      <div className="inline-block text-3xl font-black text-indigo-600 tracking-tight">Tutlio 🎓</div>
+      <div className="inline-block text-3xl font-black text-indigo-600 tracking-tight">Tutlio</div>
     </div>
   );
 }
@@ -109,7 +109,10 @@ export default function SchoolExtraLessonsAccept() {
     setEndDate(o?.end_date || '');
     setBaseLessons(o?.base_lessons_per_month ? String(o.base_lessons_per_month) : '');
     setSlots(Array.isArray(o?.schedule_slots) ? o.schedule_slots : []);
-    if (!data.alreadyAccepted) setStartWithin14(data.startWithin14Default !== false);
+    if (!data.alreadyAccepted) {
+      setStartWithin14(data.startWithin14Default !== false);
+      setRecordingConsent(data.recordingsEnabled ? true : null);
+    }
     if (data.alreadyAccepted) setDone({ sha256: '', acceptedAt: data.acceptedAt || undefined });
     if (data.withdrawn) {
       setWithdrawn(true);
@@ -386,8 +389,8 @@ export default function SchoolExtraLessonsAccept() {
     <PageShell>
       <Card className="space-y-5">
         <BrandMark />
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Peržiūrėkite ir priimkite sutartį</h1>
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Peržiūrėkite sutartį ir pateikite užsakymą</h1>
           <p className="text-gray-600 text-sm">
             Peržiūrėkite visą papildomų užsiėmimų sutartį, jei reikia papildykite užsakymo duomenis ir pažymėkite sutikimus.
             Sutartis sudaroma elektroniniu būdu — el. parašas (GoSign) čia nenaudojamas.
@@ -534,7 +537,7 @@ export default function SchoolExtraLessonsAccept() {
               onChange={(e) => setAcceptedTerms(e.target.checked)}
               className="mt-0.5 h-4 w-4 rounded border-indigo-300 text-indigo-600"
             />
-            <span>{termsText} *</span>
+            <span>{termsText}</span>
           </label>
           {start14.applies && (
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
@@ -595,7 +598,7 @@ export default function SchoolExtraLessonsAccept() {
             className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700"
             disabled={!acceptedTerms || !recordingReady || submitting}
           >
-            {submitting ? 'Siunčiama…' : 'Patvirtinti sutartį'}
+            {submitting ? 'Siunčiama…' : 'Užsakymas su prievole sumokėti'}
           </Button>
         </form>
       </Card>

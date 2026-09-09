@@ -70,7 +70,11 @@ describe('school_extra_first_lesson_invite', () => {
       homeworkUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc',
       waitsFor14Days: false,
     });
-    expect(subject).toBe('Kvietimas į pirmą užsiėmimą — Austėja Mockutė, 2026-09-08 16:00');
+    expect(subject).toBe('Kvietimas į užsiėmimą — Austėja Mockutė, 2026-09-08 16:00');
+    expect(html).toContain('Kvietimas į užsiėmimą');
+    expect(html).not.toContain('pirmą užsiėmimą');
+    expect(html).not.toContain('antras');
+    expect(html).toContain('Užsiėmimų nenumeruojame');
     expect(html).toContain('Prisijungti prie užsiėmimo');
     expect(html).toContain('/api/join-session?');
     expect(html).toContain('school-homework?student=s1');
@@ -78,7 +82,7 @@ describe('school_extra_first_lesson_invite', () => {
     expect(html).toContain('QA Legal Matematika');
     expect(html).not.toContain('/parent/');
     expect(html).not.toMatch(/registr/i);
-    expect(html).toContain('paskyros kurti nereikia');
+    expect(html).toContain('Paskyros kurti nereikia');
   });
 
   it('falls back to the planned schedule when no lesson row exists yet and explains the 14-day wait', async () => {
@@ -91,7 +95,7 @@ describe('school_extra_first_lesson_invite', () => {
       waitsFor14Days: true,
       homeworkUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc',
     });
-    expect(subject).toBe('Kvietimas į pirmą užsiėmimą — Austėja Mockutė');
+    expect(subject).toBe('Kvietimas į užsiėmimą — Austėja Mockutė');
     expect(html).toContain('antradienis 16:00–16:45');
     expect(html).toContain('2026-09-19');
     expect(html).toContain('14 dienų');

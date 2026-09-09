@@ -2347,18 +2347,18 @@ function schoolContractExtraOffer(d: any, locale: Locale) {
     subject: `Papildomų užsiėmimų sutartis${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
-        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Papildomų užsiėmimų sutartis</h1>
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Peržiūrėkite sutartį ir pateikite užsakymą</h1>
         <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
       </div>
-      <div class="body">
-        <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
-        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+      <div class="body" style="text-align:center;">
+        <p class="greeting" style="text-align:center;">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6; text-align:center; margin:0 auto; max-width:480px;">
           ${esc(d.schoolName || 'Mokykla')} parengė nuotolinių papildomų užsiėmimų sutartį mokiniui
-          <strong>${esc(d.studentName)}</strong>. Atidarykite nuorodą, peržiūrėkite dokumentą ir patvirtinkite sutartį.
+          <strong>${esc(d.studentName)}</strong>. Atidarykite nuorodą, peržiūrėkite dokumentą ir pateikite užsakymą.
         </p>
-        ${rows ? `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>` : ''}
-        ${acceptUrl ? `<div style="text-align:center; margin:24px 0 10px;">${outlookEmailButton(acceptUrl, 'Peržiūrėti ir patvirtinti sutartį', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
-        ${contact ? `<p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(contact)}.</p>` : ''}
+        ${rows ? `<div class="info-card" style="text-align:left;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>` : ''}
+        ${acceptUrl ? `<div style="text-align:center; margin:24px 0 10px;">${outlookEmailButton(acceptUrl, 'Užsakymas su prievole sumokėti', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
+        ${contact ? `<p style="color:#6b7280; font-size:13px; text-align:center;">Jei turite klausimų, susisiekite su mokykla: ${esc(contact)}</p>` : ''}
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -2416,26 +2416,26 @@ function schoolExtraFirstLessonInvite(d: any, locale: Locale) {
     ].join('');
   const lead = hasSession
     ? `Sutartis${contractRef} patvirtinta. Kviečiame <strong>${d.studentName}</strong> į artimiausią užsiėmimą:`
-    : `Sutartis${contractRef} patvirtinta. Artimiausio užsiėmimo laiką patikslins mokykla — prisijungimo nuorodą atsiųsime priminimu el. paštu prieš užsiėmimą.`;
+    : `Sutartis${contractRef} patvirtinta. Artimiausio užsiėmimo laiką patikslins mokykla. Prisijungimo nuorodą atsiųsime priminimu el. paštu prieš užsiėmimą.`;
   const waitNote = d.waitsFor14Days && d.serviceStartDate
     ? `<p style="color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:12px; padding:12px 14px; font-size:13px; line-height:1.6;">Pasirinkote pradėti pasibaigus 14 dienų atsisakymo terminui, todėl užsiėmimai vyks nuo <strong>${d.serviceStartDate}</strong>.</p>`
     : '';
   return {
-    subject: `Kvietimas į pirmą užsiėmimą — ${d.studentName || 'Mokinys'}${hasSession ? `, ${d.date} ${d.time}` : ''}`,
+    subject: `Kvietimas į užsiėmimą — ${d.studentName || 'Mokinys'}${hasSession ? `, ${d.date} ${d.time}` : ''}`,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#4f46e5', '#7c3aed')}">
-        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Kvietimas į pirmą užsiėmimą</h1>
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Kvietimas į užsiėmimą</h1>
         <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${d.schoolName || 'Mokykla'}</p>
       </div>
-      <div class="body">
-        <p class="greeting">Sveiki${d.parentName ? `, ${d.parentName}` : ''}!</p>
-        <p style="color:#4b5563; font-size:14px; line-height:1.6;">${lead}</p>
-        <div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>
+      <div class="body" style="text-align:center;">
+        <p class="greeting" style="text-align:center;">Sveiki${d.parentName ? `, ${d.parentName}` : ''}!</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6; text-align:center;">${lead}</p>
+        <div class="info-card" style="text-align:left;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>
         ${waitNote}
         ${joinButton}
         ${homeworkButton}
-        <p style="color:#6b7280; font-size:13px; line-height:1.6; margin-top:16px;">
-          Prieš kiekvieną užsiėmimą atsiųsime priminimą su prisijungimo nuoroda. Namų darbus ir mokytojo medžiagą rasite pagal aukščiau esančią nuorodą — paskyros kurti nereikia.
+        <p style="color:#6b7280; font-size:13px; line-height:1.6; margin-top:16px; text-align:center;">
+          Prieš kiekvieną kitą užsiėmimą gausite atskirą priminimą su data, laiku ir prisijungimo nuoroda. Užsiėmimų nenumeruojame. Namų darbus ir mokytojo medžiagą rasite pagal aukščiau esančią nuorodą. Paskyros kurti nereikia.
         </p>
       </div>${footerFor(locale)}`, locale),
   };
