@@ -1130,6 +1130,8 @@ export default function CompanySessions() {
 
                   {!selectedSession.class_group_id && (
                   <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.tutor')}</Label>
                       <Select value={editTutorId} onValueChange={setEditTutorId}>
                         <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                         <SelectContent>
