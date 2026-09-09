@@ -63,7 +63,8 @@ export function getCalendarSessionEventStyle(input: CalendarSessionStyleInput): 
     };
   }
 
-  const hasEnded = endAt.getTime() <= Date.now();
+  const endMs = endAt instanceof Date ? endAt.getTime() : new Date(endAt as Date).getTime();
+  const hasEnded = Number.isFinite(endMs) && endMs <= Date.now();
   const isPaid =
     paid === true || payment_status === 'paid' || payment_status === 'confirmed';
 

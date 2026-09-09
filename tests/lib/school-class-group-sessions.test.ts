@@ -4,9 +4,11 @@ import {
   calendarSessionTopicSuffix,
   calendarTitleForSession,
   classGroupDisplayName,
+  classGroupParticipantStatusForDisplay,
   classGroupParticipantsForModal,
   isMergedClassGroupSession,
   mergeSchoolClassGroupSessions,
+  sessionStatusI18nKey,
   type MergedClassGroupSession,
 } from '../../src/lib/schoolClassGroupSessions';
 
@@ -186,6 +188,117 @@ describe('schoolClassGroupSessions', () => {
     ]);
     expect(classGroupDisplayName('g1', meta)).toBe('LT 5 kl.');
     expect(classGroupDisplayName('missing', meta)).toBeNull();
+  });
+
+  it('picks cancelled over leftover completed when a group slot was cancelled', () => {
+    const meta = buildClassGroupMetaMap(groups);
+    const merged = mergeSchoolClassGroupSessions(
+      [
+        {
+          id: 'completed-row',
+          student_id: 's1',
+          class_group_id: 'g1',
+          start_time: start,
+          end_time: end,
+          status: 'completed',
+        },
+        {
+          id: 'cancelled-row',
+          student_id: 's2',
+          class_group_id: 'g1',
+          start_time: start,
+          end_time: end,
+          status: 'canceled',
+        },
+      ],
+      meta,
+      { preferCancelledOccurrence: true },
+    )[0] as MergedClassGroupSession<{
+      id: string;
+      student_id: string;
+      class_group_id: string;
+      start_time: Date;
+      end_time: Date;
+      status: string;
+    }>;
+
+    expect(merged.status).toBe('canceled');
+    const participants = classGroupParticipantsForModal(merged);
+    expect(
+      participants.map((p) =>
+        classGroupParticipantStatusForDisplay(
+          p.session?.status,
+          participants.map((x) => x.session?.status || ''),
+          { coerceCompletedAfterGroupCancel: true },
+        ),
+      ),
+    ).toEqual(['cancelled', 'cancelled']);
+  });
+
+  it('does not rewrite leftover completed unless explicitly opted in', () => {
+    expect(classGroupParticipantStatusForDisplay('completed', ['completed', 'cancelled', 'completed'])).toBe(
+      'completed',
+    );
+  });
+
+  it('treats leftover completed as cancelled when a third of the slot was cancelled', () => {
+    expect(classGroupParticipantStatusForDisplay('completed', ['completed', 'cancelled', 'completed'], {
+      coerceCompletedAfterGroupCancel: true,
+    })).toBe('cancelled');
+  });
+
+  it('keeps completed when only one classmate was cancelled', () => {
+    expect(
+      classGroupParticipantStatusForDisplay('completed', [
+        'completed',
+        'completed',
+        'cancelled',
+        'completed',
+        'completed',
+        'completed',
+      ]),
+    ).toBe('completed');
+    expect(sessionStatusI18nKey('completed')).toBe('status.completed');
+    expect(sessionStatusI18nKey('canceled')).toBe('status.cancelled');
+    expect(sessionStatusI18nKey('cancelled')).toBe('status.cancelled');
+  });
+
+  it('prefers cancelled leftover over completed without throwing on invalid sibling times', () => {
+    const meta = buildClassGroupMetaMap(groups);
+    const invalidStart = new Date('not-a-date');
+    const merged = mergeSchoolClassGroupSessions(
+      [
+        {
+          id: 'a',
+          student_id: 's1',
+          class_group_id: 'g1',
+          start_time: start,
+          end_time: end,
+          status: 'cancelled',
+        },
+        {
+          id: 'b',
+          student_id: 's2',
+          class_group_id: 'g1',
+          start_time: start,
+          end_time: end,
+          status: 'completed',
+        },
+        {
+          id: 'broken',
+          student_id: 's1',
+          class_group_id: 'g1',
+          start_time: invalidStart,
+          end_time: end,
+          status: 'active',
+        },
+      ],
+      meta,
+      { preferCancelledOccurrence: true },
+    );
+    const groupRow = merged.find((row) => isMergedClassGroupSession(row));
+    expect(groupRow && 'status' in groupRow ? groupRow.status : null).toBe('cancelled');
+    expect(merged.some((row) => row.id === 'broken')).toBe(true);
   });
 
   it('includes grade in 1:1 calendar title when student grade is set', () => {

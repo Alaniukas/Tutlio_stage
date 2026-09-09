@@ -981,7 +981,10 @@ export default function CompanyTutors() {
 
       if (data.success) {
         await loadData();
-        if (data.emailSent === false) {
+        if (data.alreadyMember) {
+          setInviteError(null);
+          setInviteSuccess(t('compTut.inviteSent', { email: inviteeEmail }));
+        } else if (data.emailSent === false) {
           setInviteSuccess(null);
           setInviteError(
             [data.emailError, t('compTut.inviteCreatedCopy')]

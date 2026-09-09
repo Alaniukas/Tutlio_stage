@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEMO_MOKYKLA_ORG_ID,
   DEMO_MOKYKLA_SLUG,
+  isLaisviVaikaiOrg,
   isProKlaseOrg,
   LAISVI_VAIKIAI_ORG_ID,
   LAISVI_VAIKIAI_SLUG,
@@ -25,6 +26,16 @@ describe('isProKlaseOrg', () => {
     expect(isProKlaseOrg('other-org')).toBe(false);
     expect(isProKlaseOrg(null)).toBe(false);
     expect(isProKlaseOrg('')).toBe(false);
+  });
+});
+
+describe('isLaisviVaikaiOrg', () => {
+  it('matches the existing org id and slug constants (must not throw)', () => {
+    expect(isLaisviVaikaiOrg(LAISVI_VAIKIAI_ORG_ID)).toBe(true);
+    expect(isLaisviVaikaiOrg(LAISVI_VAIKIAI_SLUG)).toBe(true);
+    expect(isLaisviVaikaiOrg('Laisvi-Vaikai')).toBe(true);
+    expect(isLaisviVaikaiOrg(DEMO_MOKYKLA_ORG_ID)).toBe(false);
+    expect(isLaisviVaikaiOrg(null)).toBe(false);
   });
 });
 

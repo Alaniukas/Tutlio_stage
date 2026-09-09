@@ -128,7 +128,7 @@ import { resolveLessonMeetingLink } from '@/lib/meetingLink';
 import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
-import { isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { isLaisviVaikaiOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
 import { resolveOrCreateTrialSubject } from '@/pages/company/orgAdminSessionCreate';
 import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
@@ -140,8 +140,12 @@ import {
   calendarTitleForSession,
   classGroupParticipantsForModal,
   classGroupCancelTargets,
+  classGroupOccurrenceSessionIds,
   isMergedClassGroupSession,
+  isUsableCalendarDateRange,
   mergeSchoolClassGroupSessions,
+  pickClassGroupOccurrenceSession,
+  sessionStatusCanCancel,
   type MergedClassGroupSession,
 } from '@/lib/schoolClassGroupSessions';
 import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
@@ -318,6 +322,7 @@ export default function CalendarPage() {
   const showTutorTrialToggle =
     orgPolicy.isOrgTutor && !orgFeaturesLoading && isMoksloVaisiaiOrg(organizationId);
   const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
+  const isLaisviVaikai = isLaisviVaikaiOrg(organizationId) || isLaisviVaikaiOrg(ctxProfile?.organization_id);
   const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
   const hideProKlaseOrgTutorDelete = hideProKlaseOrgTutorCancel;
   const showProKlaseCalendarFeatures =
@@ -953,8 +958,10 @@ export default function CalendarPage() {
   const classGroupMeta = useMemo(() => buildClassGroupMetaMap(classGroups), [classGroups]);
 
   const sessionsAfterClassGroups = useMemo(
-    () => mergeSchoolClassGroupSessions(sessions, classGroupMeta) as Session[],
-    [sessions, classGroupMeta],
+    () => mergeSchoolClassGroupSessions(sessions, classGroupMeta, {
+      preferCancelledOccurrence: isLaisviVaikai,
+    }) as Session[],
+    [sessions, classGroupMeta, isLaisviVaikai],
   );
 
   const mergeGroupSessions = useCallback((sessionsToMerge: Session[]) => {
@@ -967,9 +974,11 @@ export default function CalendarPage() {
         individual.push(session);
         return;
       }
+      const startMs = new Date(session.start_time).getTime();
+      const endMs = new Date(session.end_time).getTime();
       const subject = subjects.find(s => s.id === session.subject_id);
-      if (subject?.is_group) {
-        const key = `${session.start_time.getTime()}_${session.end_time.getTime()}_${session.subject_id}`;
+      if (subject?.is_group && Number.isFinite(startMs) && Number.isFinite(endMs)) {
+        const key = `${startMs}_${endMs}_${session.subject_id}`;
         if (!grouped.has(key)) {
           grouped.set(key, []);
         }
@@ -1021,9 +1030,18 @@ export default function CalendarPage() {
     [sessionsAfterClassGroups, mergeGroupSessions],
   );
 
+  const calendarGridSessions = useMemo(
+    () => mergedSessions.filter((session) =>
+      isUsableCalendarDateRange(session.start_time, session.end_time),
+    ),
+    [mergedSessions],
+  );
+
   const allEvents = useMemo(() => {
-    return [...mergedSessions, ...backgroundEvents];
-  }, [mergedSessions, backgroundEvents]);
+    return [...calendarGridSessions, ...backgroundEvents].filter((ev) =>
+      isUsableCalendarDateRange(ev.start_time, ev.end_time),
+    );
+  }, [calendarGridSessions, backgroundEvents]);
 
   const timeRangeBounds = useMemo(() => {
     const defaultMin = new Date(1970, 0, 1, 7, 0, 0);
@@ -1045,6 +1063,7 @@ export default function CalendarPage() {
     }
 
     const relevant = allEvents.filter(ev => {
+      if (!isUsableCalendarDateRange(ev.start_time, ev.end_time)) return false;
       const s = new Date(ev.start_time);
       const e = new Date(ev.end_time);
       return s.getTime() < rangeEnd.getTime() && e.getTime() > rangeStart.getTime();
@@ -1059,10 +1078,14 @@ export default function CalendarPage() {
     relevant.forEach(ev => {
       const s = new Date(ev.start_time);
       const e = new Date(ev.end_time);
+      if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) return;
       minH = Math.min(minH, s.getHours());
       const eH = e.getHours() + (e.getMinutes() > 0 ? 1 : 0);
       maxH = Math.max(maxH, eH);
     });
+    if (!Number.isFinite(minH) || !Number.isFinite(maxH) || minH > maxH) {
+      return { min: defaultMin, max: defaultMax, scrollToTime: defaultScroll };
+    }
 
     const floorH = Math.min(minH, 7);
     const ceilH = Math.max(maxH, 21);
@@ -1454,9 +1477,12 @@ export default function CalendarPage() {
       setIsClassGroupSession(true);
       setSelectedGroupSessions(event._classGroupSessions);
       setClassGroupParticipants(classGroupParticipantsForModal(event as MergedClassGroupSession<Session>));
+      const displayRow = (isLaisviVaikai
+        ? pickClassGroupOccurrenceSession(event._classGroupSessions)
+        : event._classGroupSessions[0]) ?? event._classGroupSessions[0] ?? event;
       setSelectedEvent({
-        ...event._classGroupSessions[0],
-        topic: event._classGroupName || event._classGroupSessions[0].topic,
+        ...displayRow,
+        topic: event._classGroupName || displayRow.topic,
       });
     } else if (event._isGroup && event._groupSessions) {
       setIsGroupSession(true);
@@ -1472,7 +1498,7 @@ export default function CalendarPage() {
       setSelectedEvent(event);
     }
     setIsEventModalOpen(true);
-  }, []);
+  }, [isLaisviVaikai]);
 
   // When student changes, check for individual pricing to auto-fill
   const handleStudentChange = (studentId: string) => {
@@ -2935,9 +2961,11 @@ export default function CalendarPage() {
     // Step 1: Show cancel button (first click)
     if (cancelConfirmId !== selectedEvent.id) {
       if (isClassGroupSession) {
-        const firstActive = selectedGroupSessions.find((s) => s.status === 'active');
+        const firstCancellable = selectedGroupSessions.find((s) =>
+          isLaisviVaikai ? sessionStatusCanCancel(s.status) : s.status === 'active',
+        );
         setClassGroupCancelScope('whole_occurrence');
-        setClassGroupCancelStudentId(firstActive?.student_id || selectedEvent.student_id || '');
+        setClassGroupCancelStudentId(firstCancellable?.student_id || selectedEvent.student_id || '');
         setCancelConfirmId(selectedEvent.id);
         setCancellationReason('');
         return;
@@ -2968,6 +2996,7 @@ export default function CalendarPage() {
           selectedGroupSessions,
           classGroupCancelScope,
           classGroupCancelStudentId,
+          { includeCompleted: isLaisviVaikai },
         );
         if (targets.length === 0) {
           setToastMessage({ message: t('cal.errorCancelling'), type: 'error' });
@@ -3439,6 +3468,18 @@ export default function CalendarPage() {
             }
           }
         }
+      } else if (isClassGroupSession) {
+        const ids = classGroupOccurrenceSessionIds(selectedGroupSessions);
+        if (!ids.length) {
+          error = new Error(t('cal.errorGeneric'));
+        } else {
+          const { error: groupError } = await supabase.from('sessions').update({
+            start_time: newStart.toISOString(),
+            end_time: newEnd.toISOString(),
+            ...editSessionPayload,
+          }).in('id', ids);
+          error = groupError;
+        }
       } else {
         const { error: singleError } = await supabase.from('sessions').update({
           start_time: newStart.toISOString(),
@@ -3462,7 +3503,7 @@ export default function CalendarPage() {
 
       if (!error) {
         // Send comment email if checkbox is checked AND it wasn't already checked/sent
-        if (editShowCommentToStudent && editTutorComment && (editTutorComment !== selectedEvent.tutor_comment || (!selectedEvent.show_comment_to_student && editShowCommentToStudent))) {
+        if (editShowCommentToStudent && !isClassGroupSession && editTutorComment && (editTutorComment !== selectedEvent.tutor_comment || (!selectedEvent.show_comment_to_student && editShowCommentToStudent))) {
           let studentEmail: string | undefined = selectedEvent?.student?.email;
           if (selectedEvent?.student_id) {
             const { data: studentRow } = await supabase
@@ -3505,7 +3546,7 @@ export default function CalendarPage() {
         }
 
         // Send reschedule email only to student
-        if (timeChanged) {
+        if (timeChanged && !isClassGroupSession) {
           const { data: studentData } = await supabase
             .from('students')
             .select('email, linked_user_id')
@@ -3675,6 +3716,23 @@ export default function CalendarPage() {
    */
   const openSessionEditor = () => {
     if (!selectedEvent) return;
+    if (isClassGroupSession) {
+      setEditNewStartTime(format(selectedEvent.start_time, "yyyy-MM-dd'T'HH:mm"));
+      setEditDurationMinutes(Math.max(5, Math.round((selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime()) / 60000)));
+      const groupName = String((selectedEvent as Session & { _classGroupName?: string })._classGroupName || '');
+      const siblingTopic = selectedGroupSessions
+        .map((row) => String(row.topic || '').trim())
+        .find((topic) => topic && topic !== groupName);
+      setEditTopic(siblingTopic || '');
+      setEditMeetingLink(selectedGroupSessions.find((row) => row.meeting_link)?.meeting_link || selectedEvent.meeting_link || '');
+      setEditPrice(Number(selectedEvent.price ?? 0) || 0);
+      setEditTutorComment(selectedEvent.tutor_comment || '');
+      setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
+      setRescheduleReason('');
+      setRescheduleRequestedBy('');
+      setIsEditingSession(true);
+      return;
+    }
     if ((isGroupSession || selectedEvent.recurring_session_id) && !groupEditChoice) {
       setGroupEditChoice('single');
       return;
@@ -4546,7 +4604,7 @@ export default function CalendarPage() {
                   : (calendarExpanded ? 1100 : 700),
               }}
               localizer={locale === 'ar' || locale === 'he' ? rtlLocalizer : localizer}
-              events={mergedSessions}
+              events={calendarGridSessions}
               backgroundEvents={backgroundEvents}
               startAccessor="start_time"
               endAccessor="end_time"
@@ -5073,7 +5131,7 @@ export default function CalendarPage() {
                   </div>
                 </div>
               )}
-              {!hideProKlaseOrgTutorFreeTime && (
+              {!hideProKlaseOrgTutorFreeTime && !isClassGroupSession && (
               <label className="flex items-start gap-2 cursor-pointer">
                 <Checkbox
                   checked={leaveFreeTimeOnReschedule}
@@ -5183,7 +5241,7 @@ export default function CalendarPage() {
                         return (
                           <div key={participant.student_id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg opacity-80">
                             <div className="w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
-                              {participant.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
+                              {String(participant.full_name || '?').split(/\s+/).filter(Boolean).map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-semibold text-gray-900">{participant.full_name}</p>
@@ -5550,7 +5608,9 @@ export default function CalendarPage() {
                   onScopeChange={setClassGroupCancelScope}
                   studentId={classGroupCancelStudentId}
                   onStudentIdChange={setClassGroupCancelStudentId}
-                  students={selectedGroupSessions.filter((s) => s.status === 'active').map((s) => ({
+                  students={selectedGroupSessions.filter((s) =>
+                    isLaisviVaikai ? sessionStatusCanCancel(s.status) : s.status === 'active',
+                  ).map((s) => ({
                     student_id: s.student_id,
                     name: s.student?.full_name || s.student_id,
                   }))}
@@ -5597,7 +5657,12 @@ export default function CalendarPage() {
 
           {cancelConfirmId !== selectedEvent?.id && (
           <div className="flex flex-col gap-2 pt-2">
-            {selectedEvent?.status === 'completed' && !hideProKlaseOrgTutorCancel && (
+            {(selectedEvent?.status === 'completed' ||
+              (isLaisviVaikai &&
+                isClassGroupSession &&
+                selectedEvent?.status !== 'active' &&
+                selectedGroupSessions.some((s) => sessionStatusCanCancel(s.status)))) &&
+              !hideProKlaseOrgTutorCancel && (
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="destructive"

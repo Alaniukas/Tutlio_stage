@@ -1,10 +1,11 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { SessionStatCards } from '@/components/SessionStatCards';
-import { calculateSessionStats } from '@/lib/session-stats';
+import { calculateSessionStats, calculateOrgSessionListStats } from '@/lib/session-stats';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
+import { planRecurringSeriesPatches, sortSeriesPatchesForApply } from '@/lib/recurringSessions';
 import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
 import { Checkbox } from '@/components/ui/checkbox';
 import { format } from 'date-fns';
@@ -40,7 +41,7 @@ import { orgStudentIdentityGroupKey, pickStudentsForOrgTutorPicker } from '@/lib
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { useHideWaitlist } from '@/hooks/useHideWaitlist';
-import { isWaitlistHiddenForOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { isWaitlistHiddenForOrg, isProKlaseOrg, isLaisviVaikaiOrg } from '@/lib/marketMoney';
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
 import {
   resolveOrgSessionSubjectDefaults,
@@ -48,7 +49,7 @@ import {
 } from '@/lib/orgSessionSubjectDefaults';
 import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
 import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
-import { classGroupCancelTargets, usesClassGroupCancelFlow } from '@/lib/schoolClassGroupSessions';
+import { classGroupCancelTargets, classGroupOccurrenceSessionIds, sessionStatusCanCancel, usesClassGroupCancelFlow } from '@/lib/schoolClassGroupSessions';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 
 interface Session {
@@ -192,11 +193,14 @@ export default function CompanySessions() {
   const [editMeetingLink, setEditMeetingLink] = useState('');
   const [editPaid, setEditPaid] = useState(false);
   const [editStatus, setEditStatus] = useState('active');
+  const [editTutorComment, setEditTutorComment] = useState('');
+  const [editShowCommentToStudent, setEditShowCommentToStudent] = useState(false);
   const [groupEditChoice, setGroupEditChoice] = useState<'single' | 'all_future'>('single');
   const [savingEdit, setSavingEdit] = useState(false);
   const [togglingPaid, setTogglingPaid] = useState(false);
   const [togglingComplimentary, setTogglingComplimentary] = useState(false);
   const [organizationId, setOrganizationId] = useState<string | null>(cachedOrgId);
+  const isLaisviVaikai = isLaisviVaikaiOrg(organizationId);
   const [deletingSession, setDeletingSession] = useState(false);
   const [deleteRecurringOpen, setDeleteRecurringOpen] = useState(false);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -412,7 +416,9 @@ export default function CompanySessions() {
     try {
       const pool = classGroupCancelRows.length > 0 ? classGroupCancelRows : [selectedSession];
       const targets = isClassGroupCancel
-        ? classGroupCancelTargets(pool, classGroupCancelScope, classGroupCancelStudentId)
+        ? classGroupCancelTargets(pool, classGroupCancelScope, classGroupCancelStudentId, {
+            includeCompleted: isLaisviVaikai,
+          })
         : [selectedSession];
       if (targets.length === 0) {
         alert(t('compSch.errorCancelling', { msg: t('cal.errorCancelling') }));
@@ -548,31 +554,84 @@ export default function CompanySessions() {
       const newEnd = new Date(newStart.getTime() + editDurationMinutes * 60 * 1000);
 
       const paidChanged = editPaid !== selectedSession.paid;
-      const payload: Record<string, any> = {
-        start_time: newStart.toISOString(),
-        end_time: newEnd.toISOString(),
-        topic: editTopic || null,
-        meeting_link: editMeetingLink || null,
-        price: editPrice,
-        subject_id: editSubjectId || null,
-        student_id: editStudentId || selectedSession.student_id,
-        tutor_id: editTutorId || selectedSession.tutor_id,
-        paid: editPaid,
-        ...(paidChanged ? { payment_status: editPaid ? 'paid' : 'pending' } : {}),
-        status: editStatus,
-      };
+      const isClassGroupEdit = Boolean(selectedSession.class_group_id);
+      const seriesFields: Record<string, any> = isClassGroupEdit
+        ? {
+            topic: editTopic || null,
+            meeting_link: editMeetingLink || null,
+            price: editPrice,
+            tutor_comment: editTutorComment || null,
+            show_comment_to_student: editShowCommentToStudent,
+          }
+        : {
+            topic: editTopic || null,
+            meeting_link: editMeetingLink || null,
+            price: editPrice,
+            subject_id: editSubjectId || null,
+            student_id: editStudentId || selectedSession.student_id,
+            tutor_id: editTutorId || selectedSession.tutor_id,
+            paid: editPaid,
+            ...(paidChanged ? { payment_status: editPaid ? 'paid' : 'pending' } : {}),
+            status: editStatus,
+            tutor_comment: editTutorComment || null,
+            show_comment_to_student: editShowCommentToStudent,
+          };
 
-      if (groupEditChoice === 'all_future' && selectedSession.recurring_session_id) {
+      if (isClassGroupEdit) {
+        const { data: siblingRows, error: siblingErr } = await supabase
+          .from('sessions')
+          .select('id')
+          .eq('class_group_id', selectedSession.class_group_id)
+          .eq('start_time', selectedSession.start_time);
+        if (siblingErr) throw new Error(siblingErr.message);
+        const ids = classGroupOccurrenceSessionIds([
+          selectedSession,
+          ...((siblingRows || []) as Array<{ id: string }>),
+        ]);
+        if (!ids.length) throw new Error(t('compSch.saveFailedPermissionsOrRecords'));
         const { error } = await supabase
           .from('sessions')
-          .update(payload)
+          .update({
+            start_time: newStart.toISOString(),
+            end_time: newEnd.toISOString(),
+            ...seriesFields,
+          })
+          .in('id', ids);
+        if (error) throw new Error(error.message);
+      } else if (groupEditChoice === 'all_future' && selectedSession.recurring_session_id) {
+        const { data: futureRows, error: futureErr } = await supabase
+          .from('sessions')
+          .select('id, start_time, end_time')
           .eq('recurring_session_id', selectedSession.recurring_session_id)
           .gte('start_time', selectedSession.start_time);
-        if (error) throw new Error(error.message);
+        if (futureErr) throw new Error(futureErr.message);
+        const rows = futureRows || [];
+        if (!rows.length) throw new Error(t('compSch.saveFailedPermissionsOrRecords'));
+        const patches = sortSeriesPatchesForApply(
+          planRecurringSeriesPatches(
+            rows,
+            {
+              id: selectedSession.id,
+              start_time: selectedSession.start_time,
+              end_time: selectedSession.end_time,
+            },
+            { start: newStart, end: newEnd },
+            seriesFields,
+          ),
+          rows,
+        );
+        for (const { id, patch } of patches) {
+          const { error } = await supabase.from('sessions').update(patch).eq('id', id);
+          if (error) throw new Error(error.message);
+        }
       } else {
         const { error } = await supabase
           .from('sessions')
-          .update(payload)
+          .update({
+            start_time: newStart.toISOString(),
+            end_time: newEnd.toISOString(),
+            ...seriesFields,
+          })
           .eq('id', selectedSession.id);
         if (error) throw new Error(error.message);
       }
@@ -611,6 +670,8 @@ export default function CompanySessions() {
       setEditMeetingLink(session.meeting_link || '');
       setEditPaid(session.paid);
       setEditStatus(session.status);
+      setEditTutorComment(session.tutor_comment || '');
+      setEditShowCommentToStudent(Boolean(session.show_comment_to_student));
 
       const sid = session.id;
       void (async () => {
@@ -855,9 +916,12 @@ export default function CompanySessions() {
 
         {/* Stats */}
         {filtered.length > 0 && (() => {
-          const stats = calculateSessionStats(filtered as any, null, null);
+          const stats = isLaisviVaikai
+            ? calculateOrgSessionListStats(filtered as any)
+            : calculateSessionStats(filtered as any, null, null);
           return (
             <SessionStatCards
+              totalUpcoming={isLaisviVaikai ? (stats as { totalUpcoming?: number }).totalUpcoming : undefined}
               totalSuccessful={stats.totalSuccessful}
               totalStudentNoShow={stats.totalStudentNoShow}
               totalCancelled={stats.totalCancelled}
@@ -1031,7 +1095,7 @@ export default function CompanySessions() {
 
               {editMode ? (
                 <div className="space-y-4">
-                  {selectedSession.recurring_session_id && (
+                  {selectedSession.recurring_session_id && !selectedSession.class_group_id && (
                     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
                       <p className="text-xs font-semibold text-amber-800 mb-2">{t('compSch.recurringSeriesPart')}</p>
                       <div className="flex gap-2">
@@ -1064,9 +1128,8 @@ export default function CompanySessions() {
                     </div>
                   </div>
 
+                  {!selectedSession.class_group_id && (
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.tutor')}</Label>
                       <Select value={editTutorId} onValueChange={setEditTutorId}>
                         <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                         <SelectContent>
@@ -1090,7 +1153,9 @@ export default function CompanySessions() {
                       </Select>
                     </div>
                   </div>
+                  )}
 
+                  {!selectedSession.class_group_id && (
                   <div>
                     <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.subject')}</Label>
                     <Select value={editSubjectId || 'none'} onValueChange={(v) => {
@@ -1109,6 +1174,7 @@ export default function CompanySessions() {
                       </SelectContent>
                     </Select>
                   </div>
+                  )}
 
                   <div>
                     <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.topic')}</Label>
@@ -1126,6 +1192,27 @@ export default function CompanySessions() {
                     </div>
                   </div>
 
+                  <div>
+                    <Label className="text-xs text-gray-500 mb-1 block">{t('dash.commentLabel')}</Label>
+                    <textarea
+                      value={editTutorComment}
+                      onChange={(e) => setEditTutorComment(e.target.value)}
+                      placeholder={t('dash.commentPlaceholder')}
+                      className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
+                      rows={3}
+                    />
+                    <label className="flex items-center gap-2 cursor-pointer mt-2">
+                      <input
+                        type="checkbox"
+                        checked={editShowCommentToStudent}
+                        onChange={(e) => setEditShowCommentToStudent(e.target.checked)}
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-sm text-gray-700">{t('cal.showToStudent')}</span>
+                    </label>
+                  </div>
+
+                  {!selectedSession.class_group_id && (
                   <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
                     <div>
                       <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.status')}</Label>
@@ -1145,6 +1232,7 @@ export default function CompanySessions() {
                       </label>
                     </div>
                   </div>
+                  )}
 
                   <div className="flex gap-2 pt-2">
                     <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setEditMode(false)}>
@@ -1273,7 +1361,9 @@ export default function CompanySessions() {
                           onScopeChange={setClassGroupCancelScope}
                           studentId={classGroupCancelStudentId}
                           onStudentIdChange={setClassGroupCancelStudentId}
-                          students={classGroupCancelRows.filter((s) => s.status === 'active').map((s) => ({
+                          students={classGroupCancelRows.filter((s) =>
+                            isLaisviVaikai ? sessionStatusCanCancel(s.status) : s.status === 'active',
+                          ).map((s) => ({
                             student_id: s.student_id,
                             name: s.student_name,
                           }))}
@@ -1338,12 +1428,18 @@ export default function CompanySessions() {
                         </Button>
                       )}
 
-                      {selectedSession.status === 'active' && isFutureSession(selectedSession) && (
-                        <>
-                          <Button variant="outline" className="w-full rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50" onClick={() => setEditMode(true)}>
-                            <Pencil className="w-4 h-4 mr-2" />
-                            {t('compSess.editLesson')}
-                          </Button>
+                      {(
+                        (Boolean(selectedSession.class_group_id) && (selectedSession.status === 'active' || selectedSession.status === 'completed'))
+                        || (selectedSession.status === 'active' && isFutureSession(selectedSession))
+                      ) && (
+                        <Button variant="outline" className="w-full rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50" onClick={() => setEditMode(true)}>
+                          <Pencil className="w-4 h-4 mr-2" />
+                          {t('compSess.editLesson')}
+                        </Button>
+                      )}
+                      {(isLaisviVaikai
+                        ? sessionStatusCanCancel(selectedSession.status)
+                        : selectedSession.status === 'active' && isFutureSession(selectedSession)) && (
                           <Button variant="outline" className="w-full rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => {
                             setClassGroupCancelScope(selectedSession.class_group_id ? 'whole_occurrence' : 'one_student');
                             setClassGroupCancelStudentId(selectedSession.student_id);
@@ -1371,7 +1467,6 @@ export default function CompanySessions() {
                             <Ban className="w-4 h-4 mr-2" />
                             {t('compSess.cancelLesson')}
                           </Button>
-                        </>
                       )}
 
                       {selectedSessionAttendanceFlagged &&

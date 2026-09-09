@@ -52,3 +52,51 @@ export function iterateRecurringOccurrences(
   }
   return out;
 }
+
+export type RecurringSeriesTimeRow = {
+  id: string;
+  start_time: string | Date;
+  end_time: string | Date;
+};
+
+/**
+ * Org "apply to all future" used to stamp the edited row's start/end onto every
+ * sibling, stacking dozens of lessons on one day and breaking the week grid.
+ * Price/topic-only edits must not rewrite times. Time edits shift each occurrence.
+ */
+export function planRecurringSeriesPatches(
+  rows: RecurringSeriesTimeRow[],
+  edited: RecurringSeriesTimeRow,
+  next: { start: Date; end: Date },
+  sharedFields: Record<string, unknown>,
+): Array<{ id: string; patch: Record<string, unknown> }> {
+  const oldStartMs = new Date(edited.start_time).getTime();
+  const oldEndMs = new Date(edited.end_time).getTime();
+  const newStartMs = next.start.getTime();
+  const newEndMs = next.end.getTime();
+  const timesValid = [oldStartMs, oldEndMs, newStartMs, newEndMs].every(Number.isFinite);
+  const timeChanged = timesValid && (oldStartMs !== newStartMs || oldEndMs !== newEndMs);
+  const shiftMs = timeChanged ? newStartMs - oldStartMs : 0;
+  const durationMs = timesValid ? Math.max(60_000, newEndMs - newStartMs) : 60_000;
+
+  return rows.map((row) => {
+    const patch: Record<string, unknown> = { ...sharedFields };
+    if (timeChanged) {
+      const rowStartMs = new Date(row.start_time).getTime();
+      if (!Number.isFinite(rowStartMs)) return { id: row.id, patch };
+      const shifted = new Date(rowStartMs + shiftMs);
+      patch.start_time = shifted.toISOString();
+      patch.end_time = new Date(shifted.getTime() + durationMs).toISOString();
+    }
+    return { id: row.id, patch };
+  });
+}
+
+/** Apply later occurrences first so unique (student, start) rows do not collide mid-shift. */
+export function sortSeriesPatchesForApply(
+  patches: Array<{ id: string; patch: Record<string, unknown> }>,
+  rows: RecurringSeriesTimeRow[],
+): Array<{ id: string; patch: Record<string, unknown> }> {
+  const startById = new Map(rows.map((row) => [row.id, new Date(row.start_time).getTime()]));
+  return [...patches].sort((a, b) => (startById.get(b.id) ?? 0) - (startById.get(a.id) ?? 0));
+}

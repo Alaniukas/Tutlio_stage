@@ -146,7 +146,7 @@ export default function ProtectedRoute() {
       const orgToken = typeof orgTokenRaw === 'string' ? orgTokenRaw.trim().toUpperCase() : '';
       let linkedToOrg = false;
 
-      if (orgToken && !profile?.organization_id) {
+      if (orgToken) {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.access_token) {
           const claimRes = await fetch('/api/claim-tutor-invite', {

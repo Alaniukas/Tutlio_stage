@@ -12,12 +12,12 @@ export async function getOrgVisibleTutorProfileIds(supabase: any, orgId: string)
     await Promise.all([
       supabase.from('organization_admins').select('user_id').eq('organization_id', orgId),
       supabase.from('students').select('linked_user_id, email, tutor_id').eq('organization_id', orgId),
-      supabase.from('tutor_invites').select('used_by_profile_id').eq('organization_id', orgId),
+      supabase.from('tutor_invites').select('used_by_profile_id, used, invitee_email').eq('organization_id', orgId),
       supabase.from('profiles').select('id, email').eq('organization_id', orgId),
     ]);
 
   const adminIds = new Set<string>((adminUsers || []).map((a: { user_id: string }) => a.user_id));
-  const tutorIdSet = buildOrgTutorIdSet(linkedStudents, inviteData);
+  const tutorIdSet = buildOrgTutorIdSet(linkedStudents, inviteData, profileRows || []);
   return filterConfirmedOrgTutors(
     (profileRows || []) as Array<{ id: string; email?: string | null }>,
     adminIds,

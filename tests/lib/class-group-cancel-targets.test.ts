@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   classGroupCancelTargets,
+  classGroupOccurrenceSessionIds,
   mergeSchoolClassGroupSessions,
   usesClassGroupCancelFlow,
 } from '@/lib/schoolClassGroupSessions';
@@ -13,6 +14,34 @@ const rows = [
 ];
 
 describe('classGroupCancelTargets', () => {
+  it('also cancels leftover completed siblings of a group slot', () => {
+    expect(
+      classGroupCancelTargets(
+        [
+          { id: 'a', student_id: 's1', status: 'completed' },
+          { id: 'b', student_id: 's2', status: 'cancelled' },
+          { id: 'c', student_id: 's3', status: 'active' },
+        ],
+        'whole_occurrence',
+        null,
+        { includeCompleted: true },
+      ).map((r) => r.id),
+    ).toEqual(['a', 'c']);
+  });
+
+  it('leaves completed siblings alone unless includeCompleted is set', () => {
+    expect(
+      classGroupCancelTargets(
+        [
+          { id: 'a', student_id: 's1', status: 'completed' },
+          { id: 'b', student_id: 's2', status: 'cancelled' },
+          { id: 'c', student_id: 's3', status: 'active' },
+        ],
+        'whole_occurrence',
+      ).map((r) => r.id),
+    ).toEqual(['c']);
+  });
+
   it('cancels every remaining active member of the slot', () => {
     expect(classGroupCancelTargets(rows, 'whole_occurrence').map((r) => r.student_id)).toEqual([
       'lukrecija',
@@ -52,5 +81,16 @@ describe('classGroupCancelTargets', () => {
     expect(usesClassGroupCancelFlow({ isClassGroupSession: true })).toBe(true);
     expect(usesClassGroupCancelFlow({ classGroupId: 'g1' })).toBe(true);
     expect(usesClassGroupCancelFlow({})).toBe(false);
+  });
+
+  it('edits every real sibling id, never the merged calendar row', () => {
+    expect(
+      classGroupOccurrenceSessionIds([
+        { id: 'classgroup_g1_1' },
+        { id: 'a' },
+        { id: 'b' },
+        { id: 'a' },
+      ]),
+    ).toEqual(['a', 'b']);
   });
 });

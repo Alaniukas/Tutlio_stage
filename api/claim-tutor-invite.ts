@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { tutorInviteClaimDecision } from '../src/lib/tutorInviteClaim.js';
 
 type SubjectPreset = {
   name: string;
@@ -60,7 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: invite, error: inviteErr } = await supabase
       .from('tutor_invites')
-      .select('id, organization_id, used, used_by_profile_id, subjects_preset, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, teaching_notes')
+      .select('id, organization_id, used, used_by_profile_id, invitee_email, subjects_preset, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, teaching_notes')
       .eq('token', token)
       .maybeSingle();
 
@@ -68,7 +69,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'Invite not found' });
     }
 
-    if (invite.used && invite.used_by_profile_id && invite.used_by_profile_id !== user.id) {
+    const claim = tutorInviteClaimDecision(invite, { id: user.id, email: user.email });
+    if (claim.conflict) {
       return res.status(409).json({ error: 'Invite already used' });
     }
 
@@ -114,11 +116,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    if (!invite.used) {
+    if (claim.shouldLink) {
       await supabase
         .from('tutor_invites')
         .update({ used: true, used_by_profile_id: user.id })
         .eq('id', invite.id);
+    }
+
+    const siblingEmail = String(invite.invitee_email || user.email || '').trim().toLowerCase();
+    if (siblingEmail) {
+      await supabase
+        .from('tutor_invites')
+        .update({ used: true, used_by_profile_id: user.id })
+        .eq('organization_id', invite.organization_id)
+        .eq('used', false)
+        .eq('invitee_email', siblingEmail)
+        .neq('id', invite.id);
     }
 
     const presets = Array.isArray(invite.subjects_preset) ? (invite.subjects_preset as SubjectPreset[]) : [];
