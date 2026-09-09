@@ -104,12 +104,17 @@ const API_ENTRIES = readdirSync(path.join(ROOT, 'api'))
   .map((name) => `api/${name}`)
   .sort();
 
+/** Eager dictionaries imported by api/_lib/i18n.ts and ssr-i18n.ts. */
+const EMAIL_SSR_LOCALE_FILES = [
+  'lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no', 'nl',
+].map((code) => `src/lib/i18n/${code}.ts`);
+
 describe('API functions are loadable as Node ESM on Vercel', () => {
   it('finds the API entries', () => {
     expect(API_ENTRIES.length).toBeGreaterThan(50);
   });
 
-  it('has no extension-less or alias runtime imports anywhere in an API import graph', () => {
+  it('has no extension-less or alias runtime imports anywhere in an API import graph', { timeout: 20_000 }, () => {
     const offences = API_ENTRIES.flatMap(auditEntry);
     const byFile = new Map<string, { specifier: string; reason: string; entries: Set<string> }>();
     for (const o of offences) {
@@ -135,5 +140,20 @@ describe('API functions are loadable as Node ESM on Vercel', () => {
     expect(source).toMatch(/from ['"]\.\/i18n\/locales\.js['"]/);
     const unresolved = resolveRelative(fixtureFile, './i18n/does-not-exist.js');
     expect(unresolved).toBeNull();
+  });
+
+  it('catches the 2026-09-09 send-email outage shape (locale dict without .js)', { timeout: 20_000 }, () => {
+    const ltFile = path.join(ROOT, 'src', 'lib', 'i18n', 'lt.ts');
+    const enFile = path.join(ROOT, 'src', 'lib', 'i18n', 'en.ts');
+    for (const file of [ltFile, enFile]) {
+      const source = stripComments(readFileSync(file, 'utf8'));
+      expect(source, rel(file)).toMatch(/from ['"]\.\/familyCatalogTrialCopy\.js['"]/);
+      expect(source, rel(file)).not.toMatch(/from ['"]\.\/familyCatalogTrialCopy['"]/);
+    }
+    const offences = EMAIL_SSR_LOCALE_FILES.flatMap(auditEntry);
+    expect(
+      offences,
+      offences.map((o) => `${o.file} -> ${o.specifier}`).join('\n'),
+    ).toEqual([]);
   });
 });

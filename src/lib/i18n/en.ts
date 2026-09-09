@@ -1,4 +1,4 @@
-import { familyCatalogTrialCopy } from './familyCatalogTrialCopy';
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 
 export const en: Record<string, string> = {
   ...familyCatalogTrialCopy.en,
