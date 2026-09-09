@@ -71,6 +71,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       locale,
     }),
     hide_powered_by: proKlase || moksloVaisiai || features.hide_powered_by === true,
-    logo_on_dark: moksloVaisiai,
+    logo_on_dark: false,
   });
 }

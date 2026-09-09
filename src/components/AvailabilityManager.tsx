@@ -27,6 +27,7 @@ interface AvailabilitySlot {
   is_recurring: boolean;
   specific_date: string | null;
   end_date: string | null;
+  start_date?: string | null;
   subject_ids: string[];
   public_bookable?: boolean;
 }
@@ -90,6 +91,7 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
   const [dayOfWeek, setDayOfWeek] = useState<string>('1');
   const [recurringStart, setRecurringStart] = useState('09:00');
   const [recurringEnd, setRecurringEnd] = useState('17:00');
+  const [recurringStartDate, setRecurringStartDate] = useState<string>('');
   const [recurringEndDate, setRecurringEndDate] = useState<string>('');
 
   const [specificDate, setSpecificDate] = useState('');
@@ -101,6 +103,7 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [editStart, setEditStart] = useState('');
   const [editEnd, setEditEnd] = useState('');
+  const [editStartDate, setEditStartDate] = useState('');
   const [editEndDate, setEditEndDate] = useState('');
   const [editPublicBookable, setEditPublicBookable] = useState(false);
 
@@ -207,6 +210,7 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
         start_time: recurringStart,
         end_time: recurringEnd,
         is_recurring: true,
+        start_date: recurringStartDate || null,
         end_date: recurringEndDate || null,
         subject_ids: [],
         public_bookable: createPublicBookable,
@@ -346,6 +350,7 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
     setEditingSlotId(slot.id);
     setEditStart(slot.start_time.slice(0, 5));
     setEditEnd(slot.end_time.slice(0, 5));
+    setEditStartDate(slot.start_date || '');
     setEditEndDate(slot.end_date || '');
     setEditPublicBookable(Boolean(slot.public_bookable));
   };
@@ -413,6 +418,7 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
     const { error } = await supabase.from('availability').update({
       start_time: editStart,
       end_time: editEnd,
+      start_date: editStartDate || null,
       end_date: editEndDate || null,
       public_bookable: editPublicBookable,
     }).eq('id', slotId);
@@ -485,6 +491,16 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
               </div>
 
               <div className="space-y-2">
+                <Label>{t('avail.validFrom')}</Label>
+                <DateInput
+                  value={recurringStartDate}
+                  onChange={(e) => setRecurringStartDate(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <p className="text-xs text-gray-400">{t('avail.validFromHint')}</p>
+              </div>
+
+              <div className="space-y-2">
                 <Label>{t('avail.validUntil')}</Label>
                 <DateInput
                   value={recurringEndDate}
@@ -550,6 +566,14 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
                               <span className="text-xs text-gray-500 font-medium mt-1">{t('avail.to')}</span>
                               <TimeSpinner value={editEnd} onChange={setEditEnd} minuteStep={1} />
                             </div>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-gray-500">{t('avail.validFrom')}</label>
+                            <DateInput
+                              value={editStartDate}
+                              onChange={(e) => setEditStartDate(e.target.value)}
+                              className="w-full rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            />
                           </div>
                           <div className="space-y-1">
                             <label className="text-xs text-gray-500">{t('avail.validUntil')}</label>

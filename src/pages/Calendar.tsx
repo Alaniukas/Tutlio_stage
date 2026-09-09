@@ -372,6 +372,7 @@ export default function CalendarPage() {
   const [freeTimeDays, setFreeTimeDays] = useState<number[]>([]);
   const [freeTimeSameTimes, setFreeTimeSameTimes] = useState(true);
   const [freeTimeDayTimes, setFreeTimeDayTimes] = useState<Record<number, DayTime>>({});
+  const [freeTimeStartDate, setFreeTimeStartDate] = useState('');
   const [freeTimeUntilMode, setFreeTimeUntilMode] = useState<FreeTimeUntilMode>('weeks');
   const [freeTimeUntilDate, setFreeTimeUntilDate] = useState('');
   const [freeTimeWeeks, setFreeTimeWeeks] = useState(8);
@@ -1254,6 +1255,7 @@ export default function CalendarPage() {
     setSlotChoiceStep('choice');
     setFreeTimeRepeat(false);
     setFreeTimeSameTimes(true);
+    setFreeTimeStartDate(format(start, 'yyyy-MM-dd'));
     setFreeTimeUntilMode('weeks');
     setFreeTimeUntilDate('');
     setFreeTimeWeeks(8);
@@ -1322,17 +1324,18 @@ export default function CalendarPage() {
           return;
         }
       }
+      const ruleStartDate = (freeTimeStartDate || specificDate).trim();
       const endDate = resolveFreeTimeEndDate({
         mode: freeTimeUntilMode,
         untilDate: freeTimeUntilDate,
         weeks: freeTimeWeeks,
-        fromDate: specificDate,
+        fromDate: ruleStartDate,
       });
       if (!endDate) {
         setToastMessage({ message: t('cal.freeTimeNeedUntil'), type: 'error' });
         return;
       }
-      if (endDate < specificDate) {
+      if (endDate < ruleStartDate) {
         setToastMessage({ message: t('cal.freeTimeNeedUntil'), type: 'error' });
         return;
       }
@@ -1346,7 +1349,7 @@ export default function CalendarPage() {
           .eq('is_recurring', true)
           .in('day_of_week', freeTimeDays);
 
-        const stillValid = (existingRecurring || []).filter((s) => !s.end_date || s.end_date >= specificDate);
+        const stillValid = (existingRecurring || []).filter((s) => !s.end_date || s.end_date >= ruleStartDate);
         const hasOverlap = freeTimeDays.some((day) => {
           const times = freeTimeSameTimes
             ? { start: specificStart, end: specificEnd }
@@ -1367,6 +1370,7 @@ export default function CalendarPage() {
           defaultStart: specificStart,
           defaultEnd: specificEnd,
           dayTimes: freeTimeDayTimes,
+          startDate: ruleStartDate,
           endDate,
         });
         const { error } = await supabase.from('availability').insert(rows);
@@ -6407,6 +6411,15 @@ export default function CalendarPage() {
                   </div>
 
                   <div className="space-y-2">
+                    <p className="text-sm font-medium text-gray-800">{t('cal.freeTimeFrom')}</p>
+                    <DateInput
+                      value={freeTimeStartDate}
+                      onChange={(e) => setFreeTimeStartDate(e.target.value)}
+                    />
+                    <p className="text-xs text-gray-500">{t('cal.freeTimeFromHint')}</p>
+                  </div>
+
+                  <div className="space-y-2">
                     <p className="text-sm font-medium text-gray-800">{t('cal.freeTimeUntil')}</p>
                     <div className="grid grid-cols-2 gap-2">
                       <button
@@ -6445,7 +6458,7 @@ export default function CalendarPage() {
                     ) : (
                       <DateInput
                         value={freeTimeUntilDate}
-                        min={pendingSlot ? format(pendingSlot.start, 'yyyy-MM-dd') : undefined}
+                        min={freeTimeStartDate || (pendingSlot ? format(pendingSlot.start, 'yyyy-MM-dd') : undefined)}
                         onChange={(e) => setFreeTimeUntilDate(e.target.value)}
                       />
                     )}

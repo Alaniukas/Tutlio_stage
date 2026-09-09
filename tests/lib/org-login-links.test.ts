@@ -30,7 +30,7 @@ describe('org login links', () => {
     const mv = optimisticBrandingForSlug('mokslovaisiai');
     expect(mv?.name).toBe('Mokslo vaisiai');
     expect(mv?.brand_color).toBe('#124410');
-    expect(mv?.logo_on_dark).toBe(true);
+    expect(mv?.logo_on_dark ?? false).toBe(false);
     expect(mv?.hide_powered_by).toBe(true);
     expect(mv?.logo_url).toContain('mokslo-vaisiai');
   });

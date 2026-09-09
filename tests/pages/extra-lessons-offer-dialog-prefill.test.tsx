@@ -53,7 +53,7 @@ describe('ExtraLessonsOfferDialog Laisvi vaikai prefill', () => {
     expect(screen.getByText('Papildomų užsiėmimų sutartis')).toBeTruthy();
   });
 
-  it('prefills group slots and keeps 6 EUR when a group is selected', async () => {
+  it('does not show class group picker for Laisvi vaikai', async () => {
     render(
       <ExtraLessonsOfferDialog
         open
@@ -72,7 +72,42 @@ describe('ExtraLessonsOfferDialog Laisvi vaikai prefill', () => {
       />,
     );
 
-    const groupSelect = screen.getAllByRole('combobox')[2];
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Google Meet')).toBeTruthy();
+    });
+    expect(screen.queryByText('Grupė')).toBeNull();
+    expect(screen.queryByText('Dėstomas dalykas')).toBeNull();
+  });
+
+  it('prefills group slots and keeps 6 EUR when a group is selected (Demo Mokykla)', async () => {
+    render(
+      <ExtraLessonsOfferDialog
+        open
+        onOpenChange={() => {}}
+        organizationId={DEMO_MOKYKLA_ORG_ID}
+        students={[{ id: 's1', full_name: 'Emilija Bar', payer_email: 'a@test.lt' }]}
+        groups={[{
+          id: 'g1',
+          name: 'lietuvių kalba',
+          platform: 'Google Meet',
+          duration_minutes: 45,
+          school_year_end: '2027-06-15',
+          slots: [{ weekday: 2, start_time: '16:00', end_time: '16:45' }],
+        }]}
+        onCreated={() => {}}
+      />,
+    );
+
+    const typeSelect = screen.getAllByRole('combobox').find((el) => {
+      const options = Array.from((el as HTMLSelectElement).options || []);
+      return options.some((o) => o.textContent === 'Grupinė');
+    }) as HTMLSelectElement;
+    fireEvent.change(typeSelect, { target: { value: 'group' } });
+
+    const groupSelect = screen.getAllByRole('combobox').find((el) => {
+      const options = Array.from((el as HTMLSelectElement).options || []);
+      return options.some((o) => o.value === 'g1');
+    }) as HTMLSelectElement;
     fireEvent.change(groupSelect, { target: { value: 'g1' } });
 
     await waitFor(() => {

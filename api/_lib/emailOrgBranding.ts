@@ -146,7 +146,7 @@ export function resolveEmailOrgBranding(
           ? org.brand_color_secondary.trim()
           : undefined,
       hidePoweredBy,
-      logoOnDark: moksloVaisiai,
+      logoOnDark: false,
     };
   }
 

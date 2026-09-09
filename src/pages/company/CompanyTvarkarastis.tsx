@@ -39,6 +39,21 @@ import { assertTutorSlotsFree, runOrgAdminCreateSession } from '@/pages/company/
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { planRecurringSeriesPatches, sortSeriesPatchesForApply } from '@/lib/recurringSessions';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
+
+function recurringAvailDateRangeLabel(
+  startDate: string,
+  endDate: string,
+  translate: (key: string, opts?: Record<string, string>) => string,
+): string {
+  const parts: string[] = [];
+  if (startDate.trim()) {
+    parts.push(translate('compSch.recurringAvailStartDatePart', { date: startDate.trim() }));
+  }
+  if (endDate.trim()) {
+    parts.push(translate('compSch.recurringAvailEndDatePart', { date: endDate.trim() }));
+  }
+  return parts.join(' ');
+}
 import { authHeaders } from '@/lib/apiHelpers';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
@@ -470,6 +485,7 @@ export default function CompanyTvarkarastis() {
   const [availEditEnd, setAvailEditEnd] = useState('');
   const [availEditDayOfWeek, setAvailEditDayOfWeek] = useState('1');
   const [availEditSpecificDate, setAvailEditSpecificDate] = useState('');
+  const [availEditStartDate, setAvailEditStartDate] = useState('');
   const [availEditEndDate, setAvailEditEndDate] = useState('');
   // The selector is no longer shown, but preserve legacy restrictions when editing old rows.
   const [availEditSubjectIds, setAvailEditSubjectIds] = useState<string[]>([]);
@@ -481,6 +497,7 @@ export default function CompanyTvarkarastis() {
   const [createAvailIsRecurring, setCreateAvailIsRecurring] = useState(true);
   const [createAvailDayOfWeek, setCreateAvailDayOfWeek] = useState('1');
   const [createAvailSpecificDate, setCreateAvailSpecificDate] = useState('');
+  const [createAvailStartDate, setCreateAvailStartDate] = useState('');
   const [createAvailEndDate, setCreateAvailEndDate] = useState('');
   const [createAvailStart, setCreateAvailStart] = useState('09:00');
   const [createAvailEnd, setCreateAvailEnd] = useState('11:00');
@@ -1607,6 +1624,7 @@ export default function CompanyTvarkarastis() {
         setAvailEditEnd(avail.end_time);
         setAvailEditDayOfWeek(String(avail.day_of_week ?? 1));
         setAvailEditSpecificDate(avail.specific_date || '');
+        setAvailEditStartDate(String(avail.start_date || ''));
         setAvailEditEndDate(String(avail.end_date || ''));
         setAvailEditSubjectIds(avail.subject_ids || []);
         setCreateFromAvailOpen(false);
@@ -2190,11 +2208,13 @@ export default function CompanyTvarkarastis() {
         payload.is_recurring = true;
         payload.day_of_week = parseInt(availEditDayOfWeek, 10);
         payload.specific_date = null;
+        payload.start_date = availEditStartDate || null;
         payload.end_date = availEditEndDate || null;
       } else {
         payload.is_recurring = false;
         payload.day_of_week = null;
         payload.specific_date = availEditSpecificDate || null;
+        payload.start_date = null;
         payload.end_date = null;
       }
 
@@ -2206,7 +2226,7 @@ export default function CompanyTvarkarastis() {
       if (!error && availUpd && availUpd.length > 0) {
         const timeRange = `${normalizeTimeHMS(availEditStart).slice(0, 5)}–${normalizeTimeHMS(availEditEnd).slice(0, 5)}`;
         const schedHtml = editingAvailability.is_recurring
-          ? t('compSch.recurringAvailHtml', { weekday: weekdayLongFromDow(parseInt(availEditDayOfWeek, 10), dateFnsLocale), timeRange, dateRange: availEditEndDate ? t('compSch.recurringAvailEndDatePart', { date: availEditEndDate }) : '' })
+          ? t('compSch.recurringAvailHtml', { weekday: weekdayLongFromDow(parseInt(availEditDayOfWeek, 10), dateFnsLocale), timeRange, dateRange: recurringAvailDateRangeLabel(availEditStartDate, availEditEndDate, t) })
           : t('compSch.oneTimeAvailHtml', { date: availEditSpecificDate || '', timeRange });
         void emailOrgTutorAvailabilityNotice(editingAvailability.tutor_id, 'updated', schedHtml);
         setIsAvailabilityEditOpen(false);
@@ -2236,17 +2256,19 @@ export default function CompanyTvarkarastis() {
       if (createAvailIsRecurring) {
         payload.day_of_week = parseInt(createAvailDayOfWeek, 10);
         payload.specific_date = null;
+        payload.start_date = createAvailStartDate || null;
         payload.end_date = createAvailEndDate || null;
       } else {
         payload.day_of_week = null;
         payload.specific_date = createAvailSpecificDate || null;
+        payload.start_date = null;
         payload.end_date = null;
       }
       const { error } = await supabase.from('availability').insert(payload);
       if (error) throw new Error(error.message);
       const timeRangeCr = `${createAvailStart.slice(0, 5)}–${createAvailEnd.slice(0, 5)}`;
       const schedHtmlCr = createAvailIsRecurring
-        ? t('compSch.recurringAvailHtml', { weekday: weekdayLongFromDow(parseInt(createAvailDayOfWeek, 10), dateFnsLocale), timeRange: timeRangeCr, dateRange: createAvailEndDate ? t('compSch.recurringAvailEndDatePart', { date: createAvailEndDate }) : '' })
+        ? t('compSch.recurringAvailHtml', { weekday: weekdayLongFromDow(parseInt(createAvailDayOfWeek, 10), dateFnsLocale), timeRange: timeRangeCr, dateRange: recurringAvailDateRangeLabel(createAvailStartDate, createAvailEndDate, t) })
         : t('compSch.oneTimeAvailHtml', { date: createAvailSpecificDate || '', timeRange: timeRangeCr });
       void emailOrgTutorAvailabilityNotice(createAvailTutorId, 'created', schedHtmlCr);
       setIsCreateAvailabilityOpen(false);
@@ -4384,6 +4406,14 @@ export default function CompanyTvarkarastis() {
                   </Select>
                 </div>
                 <div className="space-y-1.5">
+                  <Label>{t('compSch.repeatsFromOptional')}</Label>
+                  <DateInput
+                    value={availEditStartDate}
+                    onChange={(e) => setAvailEditStartDate(e.target.value)}
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-1.5">
                   <Label>{t('compSch.repeatsUntilOptional')}</Label>
                   <DateInput
                     value={availEditEndDate}
@@ -4635,7 +4665,7 @@ export default function CompanyTvarkarastis() {
             </div>
 
             {createAvailIsRecurring ? (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-3">
                 <div className="space-y-1.5">
                   <Label>{t('compSch.weekday')}</Label>
                   <Select value={createAvailDayOfWeek} onValueChange={setCreateAvailDayOfWeek}>
@@ -4649,9 +4679,15 @@ export default function CompanyTvarkarastis() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>{t('compSch.repeatsUntil')}</Label>
-                  <DateInput value={createAvailEndDate} onChange={(e) => setCreateAvailEndDate(e.target.value)} className="rounded-xl" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>{t('compSch.repeatsFrom')}</Label>
+                    <DateInput value={createAvailStartDate} onChange={(e) => setCreateAvailStartDate(e.target.value)} className="rounded-xl" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>{t('compSch.repeatsUntil')}</Label>
+                    <DateInput value={createAvailEndDate} onChange={(e) => setCreateAvailEndDate(e.target.value)} className="rounded-xl" />
+                  </div>
                 </div>
               </div>
             ) : (

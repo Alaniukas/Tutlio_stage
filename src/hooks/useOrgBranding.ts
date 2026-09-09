@@ -88,7 +88,6 @@ export function optimisticBrandingForSlug(slug: string | null): OrgBranding | nu
       brand_color_secondary: MOKSLO_VAISIAI_BRAND_COLOR_SECONDARY,
       entity_type: 'company',
       hide_powered_by: true,
-      logo_on_dark: true,
     };
   }
   if (!isProKlaseOrg(key)) return null;

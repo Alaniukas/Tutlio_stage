@@ -48,7 +48,7 @@ describe('resolveEmailOrgBranding', () => {
     expect(resolved.emailSenderName).toBe('Mokslo vaisiai sistema');
     expect(resolved.emailTeamSignature).toBe('Mokslo vaisių komanda');
     expect(resolved.branding?.hidePoweredBy).toBe(true);
-    expect(resolved.branding?.logoOnDark).toBe(true);
+    expect(resolved.branding?.logoOnDark).toBe(false);
     expect(resolved.emailFooterPoweredBy).toBeUndefined();
     expect(resolved.emailContactEmail).toBe('info@mokslovaisiai.lt');
   });
