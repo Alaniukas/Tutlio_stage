@@ -53,8 +53,9 @@ import {
 import { buildSchoolContractExportRows, schoolContractsExportFilename } from '@/lib/schoolContractsExport';
 import { downloadSchoolContractsXlsx } from '@/lib/schoolContractsXlsxExport';
 import { fetchOrganizationRow } from '@/lib/orgLookup';
-import ExtraLessonsOfferDialog from '@/components/company/ExtraLessonsOfferDialog';
+import ExtraLessonsOfferDialog, { type ExtraLessonsTaughtSubject } from '@/components/company/ExtraLessonsOfferDialog';
 import { isExtraLessonsContractKind } from '@/lib/extraLessonsContract';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 
 interface Student {
   id: string;
@@ -243,8 +244,13 @@ export default function CompanyContracts() {
   const [classGroups, setClassGroups] = useState<Array<{
     id: string;
     name: string;
+    tutor_name?: string | null;
+    platform?: string | null;
+    duration_minutes?: number | null;
+    school_year_end?: string | null;
     slots?: { weekday: number; start_time: string; end_time: string }[];
   }>>([]);
+  const [extraIndividualSubjects, setExtraIndividualSubjects] = useState<ExtraLessonsTaughtSubject[]>([]);
   const [isTemplateDragActive, setIsTemplateDragActive] = useState(false);
   const templateFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -1671,8 +1677,8 @@ export default function CompanyContracts() {
     reload();
   };
 
-  const openContractFile = async (urlOrPath?: string | null) => {
-    if (!urlOrPath?.trim()) {
+  const openContractFile = async (urlOrPath?: string | null, contractId?: string | null) => {
+    if (!urlOrPath?.trim() && !contractId?.trim()) {
       setToast({ message: tr('school.toastFileOpenFail'), type: 'error' });
       return;
     }
@@ -1680,7 +1686,10 @@ export default function CompanyContracts() {
       const res = await fetch('/api/school-contract-file-url', {
         method: 'POST',
         headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: urlOrPath }),
+        body: JSON.stringify({
+          path: urlOrPath?.trim() || undefined,
+          contractId: contractId?.trim() || undefined,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && typeof data?.signedUrl === 'string') {
@@ -1934,14 +1943,53 @@ export default function CompanyContracts() {
                     onClick={async () => {
                       try {
                         const headers = await authHeaders();
-                        const res = await fetch('/api/school-class-groups', { headers });
-                        const data = await res.json();
-                        if (res.ok) {
-                          setClassGroups((data.groups || []).map((g: {
+                        const groupsRes = await fetch('/api/school-class-groups', { headers });
+                        const groupsData = await groupsRes.json();
+                        if (groupsRes.ok) {
+                          setClassGroups((groupsData.groups || []).map((g: {
                             id: string;
                             name: string;
+                            platform?: string | null;
+                            duration_minutes?: number | null;
+                            school_year_end?: string | null;
+                            tutor?: { full_name?: string | null } | null;
                             slots?: { weekday: number; start_time: string; end_time: string }[];
-                          }) => ({ id: g.id, name: g.name, slots: g.slots || [] })));
+                          }) => ({
+                            id: g.id,
+                            name: g.name,
+                            platform: g.platform,
+                            duration_minutes: g.duration_minutes,
+                            school_year_end: g.school_year_end,
+                            tutor_name: g.tutor?.full_name || null,
+                            slots: (g.slots || []).map((s) => ({
+                              weekday: Number(s.weekday),
+                              start_time: String(s.start_time).slice(0, 5),
+                              end_time: String(s.end_time || '').slice(0, 5),
+                            })),
+                          })));
+                        }
+                        if (orgId) {
+                          const tutorList = await getOrgVisibleTutors(supabase as any, orgId, 'id, full_name');
+                          if (tutorList.length > 0) {
+                            const { data: subjectsData } = await supabase
+                              .from('subjects')
+                              .select('id, name, price, duration_minutes, tutor_id, is_group')
+                              .in('tutor_id', tutorList.map((t) => t.id))
+                              .order('name');
+                            setExtraIndividualSubjects(
+                              (subjectsData || [])
+                                .filter((s) => !s.is_group)
+                                .map((s) => ({
+                                  id: s.id,
+                                  name: s.name,
+                                  duration_minutes: s.duration_minutes,
+                                  price: s.price,
+                                  tutor_name: tutorList.find((t) => t.id === s.tutor_id)?.full_name || null,
+                                })),
+                            );
+                          } else {
+                            setExtraIndividualSubjects([]);
+                          }
                         }
                       } catch { /* ignore */ }
                       setExtraOfferOpen(true);
@@ -2166,23 +2214,21 @@ export default function CompanyContracts() {
                         </p>
                       )}
                       {(() => {
-                        const extraFallback = isExtraLessonsContractKind(c.kind) && orgId
-                          ? schoolContractPdfStoragePath({
-                              organizationId: orgId,
-                              contractId: c.id,
-                              contractNumber: c.contract_number,
-                            })
-                          : null;
-                        const currentPdf = currentContractPdfPath(c) || extraFallback;
+                        const currentPdf = currentContractPdfPath(c);
+                        const canOpenExtraPdf = isExtraLessonsContractKind(c.kind) && Boolean(c.id);
                         const schoolSignedPdf = (c.signatures || []).find((s) => s.role === 'school' && s.status === 'signed' && s.signed_pdf_path)?.signed_pdf_path;
                         const parentScan = c.signed_contract_url && c.signed_contract_url !== currentPdf ? c.signed_contract_url : null;
                         return (
                           <>
-                            {currentPdf && (
+                            {(currentPdf || canOpenExtraPdf) && (
                               <p className={`text-xs mt-1 ${schoolSignedPdf ? 'text-emerald-700' : 'text-indigo-700'}`}>
                                 {schoolSignedPdf ? 'Naujausia pasirašyta versija' : 'Naujausia sutarties versija'}
                                 {' '}({c.student?.full_name || 'mokinys'}):{' '}
-                                <button type="button" className="underline" onClick={() => openContractFile(currentPdf)}>
+                                <button
+                                  type="button"
+                                  className="underline"
+                                  onClick={() => openContractFile(currentPdf, c.id)}
+                                >
                                   Atidaryti failą
                                 </button>
                               </p>
@@ -2190,7 +2236,7 @@ export default function CompanyContracts() {
                             {parentScan && (
                               <p className="text-xs text-gray-500 mt-1">
                                 Įkelta tėvų kopija (be naujausio mokyklos parašo):{' '}
-                                <button type="button" className="underline" onClick={() => openContractFile(parentScan)}>
+                                <button type="button" className="underline" onClick={() => openContractFile(parentScan, c.id)}>
                                   Atidaryti originalą
                                 </button>
                               </p>
@@ -3030,6 +3076,7 @@ export default function CompanyContracts() {
         organizationId={orgId}
         students={students}
         groups={classGroups}
+        individualSubjects={extraIndividualSubjects}
         onCreated={(info) => {
           const mail = info.emailTo ? ` ${info.emailTo}` : '';
           if (info.emailSent) {

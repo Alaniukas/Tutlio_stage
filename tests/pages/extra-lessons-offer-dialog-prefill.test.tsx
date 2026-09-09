@@ -53,7 +53,7 @@ describe('ExtraLessonsOfferDialog Laisvi vaikai prefill', () => {
     expect(screen.getByText('Papildomų užsiėmimų sutartis')).toBeTruthy();
   });
 
-  it('does not show class group picker for Laisvi vaikai', async () => {
+  it('shows class group picker for Laisvi vaikai when grupinė is selected', async () => {
     render(
       <ExtraLessonsOfferDialog
         open
@@ -76,7 +76,13 @@ describe('ExtraLessonsOfferDialog Laisvi vaikai prefill', () => {
       expect(screen.getByDisplayValue('Google Meet')).toBeTruthy();
     });
     expect(screen.queryByText('Grupė')).toBeNull();
-    expect(screen.queryByText('Dėstomas dalykas')).toBeNull();
+
+    const typeSelect = screen.getAllByRole('combobox').find((el) => {
+      const options = Array.from((el as HTMLSelectElement).options || []);
+      return options.some((o) => o.textContent === 'Grupinė');
+    }) as HTMLSelectElement;
+    fireEvent.change(typeSelect, { target: { value: 'group' } });
+    expect(screen.getByText('Grupė')).toBeTruthy();
   });
 
   it('prefills group slots and keeps 6 EUR when a group is selected (Demo Mokykla)', async () => {

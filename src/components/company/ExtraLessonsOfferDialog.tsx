@@ -13,7 +13,6 @@ import {
 } from '@/lib/extraLessonsContract';
 import { countExtraLessonsInFirstMonth } from '@/lib/extraLessonsMonthlyCount';
 import {
-  isLaisviVaikaiOrg,
   laisviVaikaiExtraUnitPriceEur,
   LAISVI_VAIKIAI_EXTRA_DEFAULT_END_DATE,
   LAISVI_VAIKIAI_EXTRA_DURATION_MINUTES,
@@ -119,7 +118,6 @@ export default function ExtraLessonsOfferDialog(props: {
   }) => void;
 }) {
   const styledPrefill = usesLaisviStyleExtraLessonsPrefill(props.organizationId);
-  const hideGroupAndSubjectPickers = isLaisviVaikaiOrg(props.organizationId);
   const openDefaults = laisviOpenDefaults(props.organizationId);
   const [studentId, setStudentId] = useState('');
   const [serviceName, setServiceName] = useState('');
@@ -316,9 +314,7 @@ export default function ExtraLessonsOfferDialog(props: {
           <DialogTitle>Papildomų užsiėmimų sutartis</DialogTitle>
         </DialogHeader>
         <p className="text-xs text-gray-500">
-          {hideGroupAndSubjectPickers
-            ? 'Privaloma: mokinys ir užsiėmimo kaina. Paslaugos pavadinimą, grafiką, datas ir kiekius galite palikti tuščius — tėvai juos užpildys priimdami sutartį.'
-            : 'Privaloma: mokinys ir užsiėmimo kaina. Grupinei sutarčiai rinkitės klasės grupę, individualiai — dėstomą dalyką. Grafiką, datas ir kiekius galite palikti tuščius — tėvai juos užpildys priimdami sutartį.'}
+          Privaloma: mokinys ir užsiėmimo kaina. Grupinei sutarčiai rinkitės klasės grupę, individualiai — dėstomą dalyką. Grafiką, datas ir kiekius galite palikti tuščius — tėvai juos užpildys priimdami sutartį.
         </p>
         <div className="space-y-3">
           {error && <p className="text-sm text-red-600">{error}</p>}
@@ -366,7 +362,7 @@ export default function ExtraLessonsOfferDialog(props: {
               <option value="individual">Individuali</option>
             </select>
           </div>
-          {!hideGroupAndSubjectPickers && serviceType === 'group' && (
+          {serviceType === 'group' && (
             <div>
               <Label>Grupė</Label>
               <select className="w-full border rounded-md h-9 px-2 text-sm" value={groupId} onChange={(e) => applyGroupSelection(e.target.value)}>
@@ -377,7 +373,7 @@ export default function ExtraLessonsOfferDialog(props: {
               </select>
             </div>
           )}
-          {!hideGroupAndSubjectPickers && serviceType === 'individual' && (
+          {serviceType === 'individual' && (
             <div>
               <Label>Dėstomas dalykas</Label>
               <select className="w-full border rounded-md h-9 px-2 text-sm" value={subjectId} onChange={(e) => applySubjectSelection(e.target.value)}>

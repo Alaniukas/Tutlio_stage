@@ -113,6 +113,7 @@ const SupportWidget = lazy(() => import('@/components/support/SupportWidget'));
 import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
 import ThemeColorManager from '@/hooks/useThemeColor';
 import LocaleRouteSync from '@/components/LocaleRouteSync';
+import { Analytics } from '@vercel/analytics/react';
 
 /** New routes start at the top; in-page scrolling remains owned by the page. */
 function ScrollToTopOnRouteChange() {
@@ -472,6 +473,7 @@ export default function App({ basename }: { basename: string }) {
       <Suspense fallback={null}>
         <SupportWidget />
       </Suspense>
+      <Analytics />
     </Router>
   );
 }
