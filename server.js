@@ -33,7 +33,7 @@ app.use((err, req, res, next) => {
   return next(err);
 });
 
-const SERVICE_VERSION = '2.2.0';
+const SERVICE_VERSION = '2.2.1';
 const worker = createWorker();
 let lastProbe = null;
 let restarting = false;
@@ -249,8 +249,29 @@ function checkConvertApiKey(req) {
   return { allowed: true };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** LibreOffice can return before contract.pdf is fully written (fresh UserInstallation). */
+async function waitForPdf(outputPath, timeoutMs = 45000) {
+  const started = Date.now();
+  let lastErr = null;
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const pdf = await fs.readFile(outputPath);
+      if (pdf.length > 0 && pdf.subarray(0, 5).toString() === '%PDF-') return pdf;
+    } catch (error) {
+      lastErr = error;
+    }
+    await sleep(250);
+  }
+  throw lastErr || new Error(`Timed out waiting for ${outputPath}`);
+}
+
 async function runLibreOfficeOnce(docxBytes) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tutlio-docx-'));
+  const outputPath = path.join(workDir, 'contract.pdf');
   try {
     const inputPath = path.join(workDir, 'contract.docx');
     await fs.writeFile(inputPath, docxBytes);
@@ -258,11 +279,18 @@ async function runLibreOfficeOnce(docxBytes) {
       '-env:UserInstallation=' + pathToFileURL(path.join(workDir, 'profile')).href,
       '--headless', '--nologo', '--nodefault', '--nofirststartwizard', '--norestore',
       '--convert-to', 'pdf', '--outdir', workDir, inputPath,
-    ], { env: { ...process.env, HOME: workDir, TMPDIR: workDir,
-      SAL_USE_VCLPLUGIN: 'gen', OMP_NUM_THREADS: '1', OPENBLAS_NUM_THREADS: '1' } });
-    const pdf = await fs.readFile(path.join(workDir, 'contract.pdf'));
-    if (pdf.subarray(0, 5).toString() !== '%PDF-') throw new Error('Invalid PDF output');
-    return pdf;
+    ], {
+      timeoutMs: 120000,
+      env: { ...process.env, HOME: workDir, TMPDIR: workDir,
+        SAL_USE_VCLPLUGIN: 'gen', OMP_NUM_THREADS: '1', OPENBLAS_NUM_THREADS: '1' },
+    });
+    return await waitForPdf(outputPath);
+  } catch (error) {
+    const listing = await fs.readdir(workDir).catch(() => []);
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `convert failed: ${detail}${listing.length ? ` (dir: ${listing.join(', ')})` : ''}`,
+    );
   } finally {
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -270,8 +298,19 @@ async function runLibreOfficeOnce(docxBytes) {
 
 async function convertWithLibreOffice(docxBuffer) {
   const prepared = safePrepareDocxForLibreOffice(docxBuffer);
-  const pdf = await runLibreOfficeOnce(prepared.buffer);
-  return { pdf, meta: prepared.meta };
+  try {
+    const pdf = await runLibreOfficeOnce(prepared.buffer);
+    return { pdf, meta: prepared.meta };
+  } catch (firstError) {
+    const original = Buffer.from(docxBuffer);
+    if (original.equals(Buffer.from(prepared.buffer))) throw firstError;
+    console.error(
+      '[docx-converter] prepared DOCX failed, retrying original bytes:',
+      firstError instanceof Error ? firstError.message : firstError,
+    );
+    const pdf = await runLibreOfficeOnce(original);
+    return { pdf, meta: { ...prepared.meta, retriedOriginal: true } };
+  }
 }
 
 async function probeConversion() {
