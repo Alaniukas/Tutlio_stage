@@ -139,10 +139,12 @@ import {
   calendarSessionTopicSuffix,
   calendarTitleForSession,
   classGroupParticipantsForModal,
+  classGroupCancelTargets,
   isMergedClassGroupSession,
   mergeSchoolClassGroupSessions,
   type MergedClassGroupSession,
 } from '@/lib/schoolClassGroupSessions';
+import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
 import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
 import type { SchoolClassGroupRecord } from '@/lib/schoolClassGroups';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
@@ -380,6 +382,8 @@ export default function CalendarPage() {
       setIsEditingSession(false);
       setGroupEditChoice(null);
       setGroupCancelChoice(null);
+      setClassGroupCancelScope('whole_occurrence');
+      setClassGroupCancelStudentId('');
       setEventModalNotice(null);
       setIsClassGroupSession(false);
       setClassGroupParticipants([]);
@@ -519,6 +523,8 @@ export default function CalendarPage() {
   // Group edit/cancel choice states
   const [groupEditChoice, setGroupEditChoice] = useState<'single' | 'all_future' | null>(null);
   const [groupCancelChoice, setGroupCancelChoice] = useState<'single' | 'all_future' | null>(null);
+  const [classGroupCancelScope, setClassGroupCancelScope] = useState<'one_student' | 'whole_occurrence'>('whole_occurrence');
+  const [classGroupCancelStudentId, setClassGroupCancelStudentId] = useState('');
 
   useEffect(() => {
     if (!ctxUser) return;
@@ -2928,7 +2934,15 @@ export default function CalendarPage() {
 
     // Step 1: Show cancel button (first click)
     if (cancelConfirmId !== selectedEvent.id) {
-      // For recurring or group sessions, ask whether to cancel one or all future
+      if (isClassGroupSession) {
+        const firstActive = selectedGroupSessions.find((s) => s.status === 'active');
+        setClassGroupCancelScope('whole_occurrence');
+        setClassGroupCancelStudentId(firstActive?.student_id || selectedEvent.student_id || '');
+        setCancelConfirmId(selectedEvent.id);
+        setCancellationReason('');
+        return;
+      }
+      // For recurring or (non class-group) group sessions, ask whether to cancel one or all future
       if ((isGroupSession || selectedEvent.recurring_session_id) && !groupCancelChoice) {
         setGroupCancelChoice('single'); // Open the choice dialog
         return;
@@ -2940,6 +2954,7 @@ export default function CalendarPage() {
 
     // Step 2: Validate cancellation reason
     if (cancellationReason.trim().length < 5) return;
+    if (isClassGroupSession && classGroupCancelScope === 'one_student' && !classGroupCancelStudentId) return;
 
     setSaving(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -2948,7 +2963,45 @@ export default function CalendarPage() {
     try {
       let cancelSucceeded = false;
 
-      if (groupCancelChoice === 'all_future' && (isGroupSession || selectedEvent.recurring_session_id)) {
+      if (isClassGroupSession) {
+        const targets = classGroupCancelTargets(
+          selectedGroupSessions,
+          classGroupCancelScope,
+          classGroupCancelStudentId,
+        );
+        if (targets.length === 0) {
+          setToastMessage({ message: t('cal.errorCancelling'), type: 'error' });
+        } else {
+          let successCount = 0;
+          for (const session of targets) {
+            const { data: studentData } = await supabase
+              .from('students')
+              .select('email, full_name')
+              .eq('id', session.student_id)
+              .maybeSingle();
+            const { success } = await cancelSessionAndFillWaitlist({
+              sessionId: session.id,
+              tutorId: user?.id || '',
+              reason: cancellationReason.trim(),
+              cancelledBy: 'tutor',
+              studentName: studentData?.full_name || session.student?.full_name || '',
+              tutorName: tutorProfile?.full_name || '',
+              studentEmail: studentData?.email || null,
+              tutorEmail: tutorProfile?.email || null,
+              leaveFreeTime: false,
+            });
+            if (success) successCount++;
+          }
+          if (successCount > 0) {
+            cancelSucceeded = true;
+            if (successCount > 1) {
+              alert(t('cal.cancelledCount', { count: String(successCount) }));
+            }
+          } else {
+            setToastMessage({ message: t('cal.errorCancelling'), type: 'error' });
+          }
+        }
+      } else if (groupCancelChoice === 'all_future' && (isGroupSession || selectedEvent.recurring_session_id)) {
         // Cancel all future sessions in the same recurring/group scope
         let futureQuery = supabase
           .from('sessions')
@@ -3023,6 +3076,8 @@ export default function CalendarPage() {
         setCancellationReason('');
         setLeaveFreeTimeOnCancel(false);
         setGroupCancelChoice(null);
+        setClassGroupCancelScope('whole_occurrence');
+        setClassGroupCancelStudentId('');
         fetchData();
         // Update Google Calendar – remove cancelled session and update free time blocks
         try {
@@ -5441,7 +5496,7 @@ export default function CalendarPage() {
                 )}
               </div>
 
-              {selectedEvent?.meeting_link && (
+              {cancelConfirmId !== selectedEvent?.id && selectedEvent?.meeting_link && (
                 <a
                   href={normalizeUrl(selectedEvent.meeting_link) || undefined}
                   target="_blank"
@@ -5462,6 +5517,7 @@ export default function CalendarPage() {
                   {t('cal.joinVideoCall')}
                 </a>
               )}
+              {cancelConfirmId !== selectedEvent?.id && (
               <WhiteboardButton
                 roomId={(selectedEvent as any)?.whiteboard_room_id}
                 sessionStatus={selectedEvent?.status}
@@ -5473,7 +5529,8 @@ export default function CalendarPage() {
                       : null
                 }
               />
-              {selectedEvent && (
+              )}
+              {cancelConfirmId !== selectedEvent?.id && selectedEvent && (
                 <SessionFiles
                   sessionId={selectedEvent.id}
                   role="tutor"
@@ -5486,19 +5543,32 @@ export default function CalendarPage() {
           {/* Cancellation reason textarea */}
           {cancelConfirmId === selectedEvent?.id && (
             <div className="space-y-2 pt-2 border-t border-gray-100">
+              {isClassGroupSession && (
+                <ClassGroupCancelScopeFields
+                  radioName="classGroupCancelScope"
+                  scope={classGroupCancelScope}
+                  onScopeChange={setClassGroupCancelScope}
+                  studentId={classGroupCancelStudentId}
+                  onStudentIdChange={setClassGroupCancelStudentId}
+                  students={selectedGroupSessions.filter((s) => s.status === 'active').map((s) => ({
+                    student_id: s.student_id,
+                    name: s.student?.full_name || s.student_id,
+                  }))}
+                />
+              )}
               <label className="text-sm font-semibold text-gray-700">{t('cal.cancellationReasonLabel')}</label>
               <textarea
                 value={cancellationReason}
                 onChange={(e) => setCancellationReason(e.target.value)}
                 placeholder={t('cal.cancellationPlaceholder')}
                 className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-red-200 focus:border-red-300 outline-none"
-                rows={3}
+                rows={isClassGroupSession ? 2 : 3}
                 autoFocus
               />
               {cancellationReason.length > 0 && cancellationReason.trim().length < 5 && (
                 <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(cancellationReason.trim().length) })}</p>
               )}
-              {!hideProKlaseOrgTutorFreeTime && (
+              {!hideProKlaseOrgTutorFreeTime && !isClassGroupSession && (
               <label className="flex items-start gap-2 cursor-pointer pt-1">
                 <Checkbox
                   checked={leaveFreeTimeOnCancel}
@@ -5508,10 +5578,10 @@ export default function CalendarPage() {
               </label>
               )}
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); }} className="rounded-xl flex-1">
+                <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); setClassGroupCancelScope('whole_occurrence'); }} className="rounded-xl flex-1">
                   {t('cal.cancelBtn')}
                 </Button>
-                <Button variant="destructive" size="sm" onClick={handleCancelSession} disabled={saving || cancellationReason.trim().length < 5} className="rounded-xl flex-1 gap-2">
+                <Button variant="destructive" size="sm" onClick={handleCancelSession} disabled={saving || cancellationReason.trim().length < 5 || (isClassGroupSession && classGroupCancelScope === 'one_student' && !classGroupCancelStudentId)} className="rounded-xl flex-1 gap-2">
                   {saving ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : null}
                   {t('cal.confirmCancellation')}
                 </Button>

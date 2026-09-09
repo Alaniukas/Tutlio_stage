@@ -506,6 +506,12 @@ function sessionCancelledParent(d: any, locale: Locale) {
   const headerSub = d.cancelledBy === 'student'
     ? t(locale, 'em.cancelParentHeaderSub')
     : t(locale, 'em.cancelHeaderSub', { by });
+  const schoolFlow = d.schoolFlow === true;
+  const portalCta = schoolFlow
+    ? ''
+    : `<div style="text-align:center; margin-top: 24px;">
+          ${outlookEmailButton(`${appUrl}/parent/calendar`, t(locale, 'em.btnBackToSystem'), '#e5e7eb', { textColor: '#374151', fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+        </div>`;
   return {
     subject: t(locale, 'em.cancelParentSub', { date: d.date, time: d.time }),
     html: wrap(`
@@ -515,9 +521,7 @@ function sessionCancelledParent(d: any, locale: Locale) {
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.cancelParentBody', { student: d.studentName, tutor: d.tutorName })}</p>
         <div class="info-card" style="background:#fef2f2; border-color:#fecaca;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time, !d.reason)}</table></div>
         ${d.reason ? `<div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:12px; padding:16px; margin:16px 0;"><p style="color:#9a3412; font-size:13px; font-weight:600; margin:0 0 4px;">${t(locale, 'em.cancelReason')}</p><p style="color:#c2410c; font-size:14px; margin:0; line-height:1.5;">${d.reason}</p></div>` : ''}
-        <div style="text-align:center; margin-top: 24px;">
-          ${outlookEmailButton(`${appUrl}/student/sessions`, t(locale, 'em.btnBackToSystem'), '#e5e7eb', { textColor: '#374151', fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
-        </div>
+        ${portalCta}
       </div>${footerFor(locale)}`, locale),
   };
 }

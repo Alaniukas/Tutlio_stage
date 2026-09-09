@@ -171,6 +171,29 @@ export function orgScheduleSessionTitle(
   return `${name} - ${tutor}`;
 }
 
+export type ClassGroupCancelScope = 'one_student' | 'whole_occurrence';
+
+/** Merged class-group events must not use the recurring "this vs all future" dialog. */
+export function usesClassGroupCancelFlow(opts: {
+  isClassGroupSession?: boolean;
+  classGroupId?: string | null;
+}): boolean {
+  return Boolean(opts.isClassGroupSession || String(opts.classGroupId || '').trim());
+}
+
+/** Active sibling rows for a class-group slot: one child vs every member at this time. */
+export function classGroupCancelTargets<T extends { student_id: string; status: string }>(
+  sessions: T[],
+  scope: ClassGroupCancelScope,
+  studentId?: string | null,
+): T[] {
+  const active = sessions.filter((row) => row.status === 'active');
+  if (scope === 'whole_occurrence') return active;
+  const sid = String(studentId || '').trim();
+  if (!sid) return [];
+  return active.filter((row) => row.student_id === sid);
+}
+
 export function classGroupParticipantsForModal<T extends ClassGroupSessionRow>(
   merged: MergedClassGroupSession<T>,
 ): Array<ClassGroupMemberDisplay & { session: T | null }> {

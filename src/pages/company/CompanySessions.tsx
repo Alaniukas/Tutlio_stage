@@ -47,6 +47,8 @@ import {
   type OrgSubjectForDefaults,
 } from '@/lib/orgSessionSubjectDefaults';
 import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
+import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
+import { classGroupCancelTargets, usesClassGroupCancelFlow } from '@/lib/schoolClassGroupSessions';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 
 interface Session {
@@ -174,6 +176,10 @@ export default function CompanySessions() {
   const [cancelMode, setCancelMode] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
   const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
+  const [classGroupCancelScope, setClassGroupCancelScope] = useState<'one_student' | 'whole_occurrence'>('whole_occurrence');
+  const [classGroupCancelStudentId, setClassGroupCancelStudentId] = useState('');
+  const [classGroupCancelRows, setClassGroupCancelRows] = useState<Session[]>([]);
+  const [classGroupCancelLoading, setClassGroupCancelLoading] = useState(false);
   const [cancellingSession, setCancellingSession] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editTopic, setEditTopic] = useState('');
@@ -397,29 +403,48 @@ export default function CompanySessions() {
   const selectedSessionAttendanceFlagged =
     !!selectedSession && isAttendanceFlagged(selectedSession);
 
+  const isClassGroupCancel = usesClassGroupCancelFlow({ classGroupId: selectedSession?.class_group_id });
+
   const handleCancelSession = async () => {
     if (!selectedSession || cancellationReason.trim().length < 5) return;
+    if (isClassGroupCancel && (classGroupCancelLoading || (classGroupCancelScope === 'one_student' && !classGroupCancelStudentId))) return;
     setCancellingSession(true);
     try {
-      const { success, error } = await cancelSessionAndFillWaitlist({
-        sessionId: selectedSession.id,
-        tutorId: selectedSession.tutor_id,
-        reason: cancellationReason.trim(),
-        cancelledBy: 'tutor',
-        studentName: selectedSession.student_name,
-        tutorName: selectedSession.tutor_name,
-        studentEmail: null,
-        tutorEmail: null,
-        leaveFreeTime: leaveFreeTimeOnCancel,
-      });
-      if (success) {
+      const pool = classGroupCancelRows.length > 0 ? classGroupCancelRows : [selectedSession];
+      const targets = isClassGroupCancel
+        ? classGroupCancelTargets(pool, classGroupCancelScope, classGroupCancelStudentId)
+        : [selectedSession];
+      if (targets.length === 0) {
+        alert(t('compSch.errorCancelling', { msg: t('cal.errorCancelling') }));
+        return;
+      }
+      let successCount = 0;
+      let lastError: string | undefined;
+      for (const row of targets) {
+        const { success, error } = await cancelSessionAndFillWaitlist({
+          sessionId: row.id,
+          tutorId: row.tutor_id,
+          reason: cancellationReason.trim(),
+          cancelledBy: 'tutor',
+          studentName: row.student_name,
+          tutorName: row.tutor_name,
+          studentEmail: null,
+          tutorEmail: null,
+          leaveFreeTime: isClassGroupCancel ? false : leaveFreeTimeOnCancel,
+        });
+        if (success) successCount++;
+        else lastError = error;
+      }
+      if (successCount > 0) {
         setSelectedSession(null);
         setCancelMode(false);
         setCancellationReason('');
         setLeaveFreeTimeOnCancel(false);
+        setClassGroupCancelRows([]);
+        setClassGroupCancelScope('whole_occurrence');
         loadData();
       } else {
-        alert(error || t('compSch.errorCancelling', { msg: '' }));
+        alert(lastError || t('compSch.errorCancelling', { msg: '' }));
       }
     } finally {
       setCancellingSession(false);
@@ -567,6 +592,9 @@ export default function CompanySessions() {
       setSelectedSession(session);
       setCancelMode(false);
       setCancellationReason('');
+      setClassGroupCancelRows([]);
+      setClassGroupCancelScope('whole_occurrence');
+      setClassGroupCancelStudentId(session.student_id);
       setEditMode(false);
       setDeleteRecurringOpen(false);
       setGroupEditChoice('single');
@@ -1238,12 +1266,26 @@ export default function CompanySessions() {
 
                   {cancelMode && (
                     <div className="space-y-2 bg-red-50 rounded-xl p-3">
+                      {isClassGroupCancel && (
+                        <ClassGroupCancelScopeFields
+                          radioName="sessionsClassGroupCancelScope"
+                          scope={classGroupCancelScope}
+                          onScopeChange={setClassGroupCancelScope}
+                          studentId={classGroupCancelStudentId}
+                          onStudentIdChange={setClassGroupCancelStudentId}
+                          students={classGroupCancelRows.filter((s) => s.status === 'active').map((s) => ({
+                            student_id: s.student_id,
+                            name: s.student_name,
+                          }))}
+                        />
+                      )}
                       <Input
                         placeholder={t('compSess.cancelReasonPlaceholder')}
                         value={cancellationReason}
                         onChange={e => setCancellationReason(e.target.value)}
                         className="rounded-lg"
                       />
+                      {!isClassGroupCancel && (
                       <label className="flex items-start gap-2 cursor-pointer">
                         <Checkbox
                           checked={leaveFreeTimeOnCancel}
@@ -1251,6 +1293,7 @@ export default function CompanySessions() {
                         />
                         <span className="text-sm text-gray-700 leading-snug">{t('dash.leaveFreeTime')}</span>
                       </label>
+                      )}
                       <div className="flex gap-2">
                         <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setCancelMode(false)}>
                           {t('compSess.close')}
@@ -1258,7 +1301,7 @@ export default function CompanySessions() {
                         <Button
                           variant="destructive"
                           className="flex-1 rounded-xl"
-                          disabled={cancellingSession || cancellationReason.trim().length < 5}
+                          disabled={cancellingSession || classGroupCancelLoading || cancellationReason.trim().length < 5 || (isClassGroupCancel && classGroupCancelScope === 'one_student' && !classGroupCancelStudentId)}
                           onClick={handleCancelSession}
                         >
                           <>
@@ -1301,7 +1344,30 @@ export default function CompanySessions() {
                             <Pencil className="w-4 h-4 mr-2" />
                             {t('compSess.editLesson')}
                           </Button>
-                          <Button variant="outline" className="w-full rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => setCancelMode(true)}>
+                          <Button variant="outline" className="w-full rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => {
+                            setClassGroupCancelScope(selectedSession.class_group_id ? 'whole_occurrence' : 'one_student');
+                            setClassGroupCancelStudentId(selectedSession.student_id);
+                            setCancelMode(true);
+                            if (selectedSession.class_group_id) {
+                              const groupId = selectedSession.class_group_id;
+                              const start = selectedSession.start_time;
+                              setClassGroupCancelLoading(true);
+                              setClassGroupCancelRows([selectedSession]);
+                              void (async () => {
+                                const { data } = await supabase
+                                  .from('sessions')
+                                  .select(ORG_SESSION_DETAIL_SELECT)
+                                  .eq('class_group_id', groupId)
+                                  .eq('start_time', start);
+                                const mapped = (data || []).map((row: any) => mapOrgSessionRow(row, tutors));
+                                setClassGroupCancelRows(mapped.length > 0 ? mapped : [selectedSession]);
+                                setClassGroupCancelLoading(false);
+                              })();
+                            } else {
+                              setClassGroupCancelRows([]);
+                              setClassGroupCancelLoading(false);
+                            }
+                          }}>
                             <Ban className="w-4 h-4 mr-2" />
                             {t('compSess.cancelLesson')}
                           </Button>

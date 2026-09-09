@@ -64,11 +64,13 @@ import {
   buildClassGroupMetaMap,
   calendarTitleForSession,
   classGroupParticipantsForModal,
+  classGroupCancelTargets,
   isMergedClassGroupSession,
   mergeSchoolClassGroupSessions,
   orgScheduleSessionTitle,
   type MergedClassGroupSession,
 } from '@/lib/schoolClassGroupSessions';
+import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
 import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
 import { formatStudentPickerLabel, pickStudentsForOrgTutorPicker } from '@/lib/orgStudentIdentity';
 import { displayStudentGrade } from '@/lib/studentGrade';
@@ -441,6 +443,8 @@ export default function CompanyTvarkarastis() {
   const [editStatus, setEditStatus] = useState<'active' | 'completed' | 'cancelled' | 'no_show'>('active');
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
+  const [classGroupCancelScope, setClassGroupCancelScope] = useState<'one_student' | 'whole_occurrence'>('whole_occurrence');
+  const [classGroupCancelStudentId, setClassGroupCancelStudentId] = useState('');
   const [cancelReasonCode, setCancelReasonCode] = useState<'admin' | 'tutor_no_show'>('admin');
   const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
   const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
@@ -1852,6 +1856,7 @@ export default function CompanyTvarkarastis() {
 
   const handleCancelSession = async () => {
     if (!selectedEvent || cancellationReason.trim().length < 3) return;
+    if (isClassGroupSession && classGroupCancelScope === 'one_student' && !classGroupCancelStudentId) return;
     setSaving(true);
     try {
       const tutorId = selectedEvent.tutor_id;
@@ -1860,24 +1865,40 @@ export default function CompanyTvarkarastis() {
         return;
       }
 
-      const { success, error } = await cancelSessionAndFillWaitlist({
-        sessionId: selectedEvent.id,
-        tutorId,
-        reason: cancellationReason.trim(),
-        cancelledBy: 'tutor',
-        studentName: selectedEvent.student?.full_name || '',
-        tutorName: selectedEvent.tutor?.full_name || '',
-        studentEmail: null,
-        tutorEmail: null,
-        leaveFreeTime: leaveFreeTimeOnCancel,
-        cancellationReasonCode: isProKlaseOrg(organizationId) ? cancelReasonCode : undefined,
-      });
+      const targets = isClassGroupSession
+        ? classGroupCancelTargets(selectedGroupSessions, classGroupCancelScope, classGroupCancelStudentId)
+        : [selectedEvent];
+      if (targets.length === 0) {
+        alert(t('compSch.errorCancelling', { msg: t('cal.errorCancelling') }));
+        return;
+      }
 
-      if (success) {
+      let successCount = 0;
+      let lastError: string | undefined;
+      for (const row of targets) {
+        const { success, error } = await cancelSessionAndFillWaitlist({
+          sessionId: row.id,
+          tutorId: row.tutor_id || tutorId,
+          reason: cancellationReason.trim(),
+          cancelledBy: 'tutor',
+          studentName: row.student?.full_name || '',
+          tutorName: selectedEvent.tutor?.full_name || '',
+          studentEmail: null,
+          tutorEmail: null,
+          leaveFreeTime: isClassGroupSession ? false : leaveFreeTimeOnCancel,
+          cancellationReasonCode: isProKlaseOrg(organizationId) ? cancelReasonCode : undefined,
+        });
+        if (success) successCount++;
+        else lastError = error;
+      }
+
+      if (successCount > 0) {
         setCancelConfirmOpen(false);
         setIsEventDetailOpen(false);
         setCancellationReason('');
         setLeaveFreeTimeOnCancel(false);
+        setClassGroupCancelScope('whole_occurrence');
+        setClassGroupCancelStudentId('');
         fetchData();
         try {
           await fetch('/api/google-calendar-sync', {
@@ -1889,7 +1910,7 @@ export default function CompanyTvarkarastis() {
           console.error('Google Calendar sync after org cancel:', err);
         }
       } else {
-        alert(t('compSch.errorCancelling', { msg: error || t('compSch.errorGeneric', { msg: '' }) }));
+        alert(t('compSch.errorCancelling', { msg: lastError || t('compSch.errorGeneric', { msg: '' }) }));
       }
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
@@ -3447,6 +3468,8 @@ export default function CompanyTvarkarastis() {
           setClassGroupParticipants([]);
           setCancelConfirmOpen(false);
           setCancellationReason('');
+          setClassGroupCancelScope('whole_occurrence');
+          setClassGroupCancelStudentId('');
           setIsDeleteRecurringDialogOpen(false);
         }
       }}>
@@ -3692,6 +3715,19 @@ export default function CompanyTvarkarastis() {
 
               {cancelConfirmOpen && (
                 <div className="space-y-2 bg-red-50 rounded-xl p-3 border border-red-200">
+                  {isClassGroupSession && (
+                    <ClassGroupCancelScopeFields
+                      radioName="orgClassGroupCancelScope"
+                      scope={classGroupCancelScope}
+                      onScopeChange={setClassGroupCancelScope}
+                      studentId={classGroupCancelStudentId}
+                      onStudentIdChange={setClassGroupCancelStudentId}
+                      students={selectedGroupSessions.filter((s) => s.status === 'active').map((s) => ({
+                        student_id: s.student_id,
+                        name: s.student?.full_name || s.student_id,
+                      }))}
+                    />
+                  )}
                   <p className="text-sm font-semibold text-red-800">{t('compSch.cancellationReasonRequired')}</p>
                   <Input
                     value={cancellationReason}
@@ -3708,6 +3744,7 @@ export default function CompanyTvarkarastis() {
                       Korepetitorius neatvyko (klientas nemoka, −30 € korep.)
                     </label>
                   )}
+                  {!isClassGroupSession && (
                   <label className="flex items-start gap-2 cursor-pointer">
                     <Checkbox
                       checked={leaveFreeTimeOnCancel}
@@ -3715,16 +3752,33 @@ export default function CompanyTvarkarastis() {
                     />
                     <span className="text-sm text-gray-700 leading-snug">{t('dash.leaveFreeTime')}</span>
                   </label>
+                  )}
                   <div className="flex gap-2">
                     <Button size="sm" variant="outline" className="flex-1 rounded-xl" onClick={() => { setCancelConfirmOpen(false); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); }}>
                       {t('compSch.back')}
                     </Button>
                     <Button size="sm" variant="destructive" className="flex-1 rounded-xl" onClick={handleCancelSession}
-                      disabled={saving || cancellationReason.trim().length < 3}>
+                      disabled={saving || cancellationReason.trim().length < 3 || (isClassGroupSession && classGroupCancelScope === 'one_student' && !classGroupCancelStudentId)}>
                       {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('compSch.confirmCancellation')}
                     </Button>
                   </div>
                 </div>
+              )}
+
+              {canView && isSchoolOrgView && selectedEvent.status === 'active' && !cancelConfirmOpen && (
+                <Button
+                  variant="outline"
+                  className="w-full rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                  onClick={() => {
+                    const firstActive = selectedGroupSessions.find((s) => s.status === 'active');
+                    setClassGroupCancelScope(isClassGroupSession ? 'whole_occurrence' : 'one_student');
+                    setClassGroupCancelStudentId(firstActive?.student_id || selectedEvent.student_id || '');
+                    setCancelConfirmOpen(true);
+                  }}
+                >
+                  <Ban className="w-4 h-4 mr-2" />
+                  {t('compSess.cancelLesson')}
+                </Button>
               )}
 
               {canView && selectedEvent.status !== 'cancelled' && !cancelConfirmOpen && !isSchoolOrgView && !isSchoolBilledSession(selectedEvent) && (
@@ -3795,7 +3849,12 @@ export default function CompanyTvarkarastis() {
                         <Pencil className="w-4 h-4 mr-2" />
                         {t('compSess.editLesson')}
                       </Button>
-                      <Button variant="outline" className="w-full rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => setCancelConfirmOpen(true)}>
+                      <Button variant="outline" className="w-full rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => {
+                        const firstActive = selectedGroupSessions.find((s) => s.status === 'active');
+                        setClassGroupCancelScope(isClassGroupSession ? 'whole_occurrence' : 'one_student');
+                        setClassGroupCancelStudentId(firstActive?.student_id || selectedEvent.student_id || '');
+                        setCancelConfirmOpen(true);
+                      }}>
                         <Ban className="w-4 h-4 mr-2" />
                         {t('compSess.cancelLesson')}
                       </Button>

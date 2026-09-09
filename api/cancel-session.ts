@@ -13,6 +13,7 @@ import { lt } from 'date-fns/locale';
 import { deleteSessionFromGoogle, syncSessionToGoogle } from './_lib/google-calendar.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { canStudentSideCancelSession, canTutorSideCancelSession } from './_lib/cancel-session-access.js';
+import { collectCancellationNotifyRecipients } from './_lib/cancelSessionNotify.js';
 import { isProKlaseOrg, isWaitlistHiddenForOrg } from './_lib/marketMoney.js';
 import { releaseSessionSlotAsAvailability } from './_lib/release-session-availability.js';
 import { PRO_KLASE_TUTOR_NO_SHOW_PENALTY_EUR } from './_lib/proKlaseTutorPay.js';
@@ -82,9 +83,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         /** Pro Klasė: tutor_no_show | admin | ... */
         cancellationReasonCode?: string;
     };
-
-    const normEmail = (e: string | null | undefined) =>
-        (e || '').trim().toLowerCase();
 
     if (!sessionId || !tutorId) {
         return res.status(400).json({ error: 'Missing sessionId or tutorId' });
@@ -337,7 +335,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const [{ data: studentRow }, { data: tutorRow }] = await Promise.all([
         supabase
             .from('students')
-            .select('email, payer_email, payment_model')
+            .select('email, payer_email, parent_secondary_email, payment_model, organization_id')
             .eq('id', session.student_id)
             .maybeSingle(),
         supabase
@@ -346,11 +344,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .eq('id', session.tutor_id || tutorId)
             .maybeSingle(),
     ]);
-    const orgId = (tutorRow as any)?.organization_id || null;
+    const studentOrgId = (studentRow as { organization_id?: string | null } | null)?.organization_id || null;
+    const orgId = studentOrgId || (tutorRow as any)?.organization_id || null;
+    let schoolFlow = false;
+    if (orgId) {
+        const { data: orgRow } = await supabase
+            .from('organizations')
+            .select('entity_type')
+            .eq('id', orgId)
+            .maybeSingle();
+        schoolFlow = String((orgRow as { entity_type?: string } | null)?.entity_type || '').toLowerCase() === 'school';
+    }
     const paymentModelEarly = studentRow?.payment_model || 'per_lesson';
     const resolvedTutorEmail = tutorEmail || tutorRow?.email || null;
     const resolvedStudentEmail = studentEmail || studentRow?.email || null;
     const resolvedPayerEmail = payerEmail || studentRow?.payer_email || null;
+    const resolvedSecondaryEmail = (studentRow as { parent_secondary_email?: string | null } | null)?.parent_secondary_email || null;
 
     // If there's a pending credit/refund choice (per_lesson, paid, student cancel),
     // hide automatic refund wording from student email — the UI handles selection
@@ -376,45 +385,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const hideStudentRefund = willHavePendingPenalty || willHaveEarlyRefundChoice;
 
     const cancellationEmailTasks: Promise<unknown>[] = [];
-    if (resolvedTutorEmail && (cancelledBy === 'student' || cancelledBy === 'tutor')) {
+    const notifyRecipients = collectCancellationNotifyRecipients({
+        tutorEmail: resolvedTutorEmail,
+        studentEmail: resolvedStudentEmail,
+        payerEmail: resolvedPayerEmail,
+        parentSecondaryEmail: resolvedSecondaryEmail,
+    });
+    const orgPayload = orgId ? { organizationId: orgId } : {};
+    for (const recipient of notifyRecipients) {
+        if (recipient.kind === 'parent') {
+            cancellationEmailTasks.push(
+                sendEmailWithTimeout({
+                    type: 'session_cancelled_parent',
+                    to: recipient.email,
+                    data: {
+                        studentName,
+                        tutorName,
+                        date: emailDate,
+                        time: emailTime,
+                        cancelledBy,
+                        reason: reasonTrimmed,
+                        locale: 'lt',
+                        ...(schoolFlow ? { schoolFlow: true } : {}),
+                        ...orgPayload,
+                    },
+                }),
+            );
+            continue;
+        }
         cancellationEmailTasks.push(
             sendEmailWithTimeout({
                 type: 'session_cancelled',
-                to: resolvedTutorEmail,
-                data: {
-                    studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason: reasonTrimmed,
-                    hideRefund: cancelledBy === 'student',
-                    locale: 'lt',
-                    ...(orgId ? { organizationId: orgId } : {}),
-                },
-            })
-        );
-    }
-    if (resolvedStudentEmail) {
-        cancellationEmailTasks.push(
-            sendEmailWithTimeout({
-                type: 'session_cancelled',
-                to: resolvedStudentEmail,
-                data: {
-                    studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason: reasonTrimmed,
-                    isPaid: hideStudentRefund ? false : isPaid,
-                    sessionPrice: hideStudentRefund ? null : sessionPrice,
-                    locale: 'lt',
-                    ...(orgId ? { organizationId: orgId } : {}),
-                },
-            })
-        );
-    }
-
-    const payerTrim = (resolvedPayerEmail || '').trim();
-    const shouldNotifyPayer =
-        payerTrim &&
-        normEmail(payerTrim) !== normEmail(resolvedStudentEmail);
-    if (shouldNotifyPayer) {
-        cancellationEmailTasks.push(
-            sendEmailWithTimeout({
-                type: 'session_cancelled_parent',
-                to: payerTrim,
+                to: recipient.email,
                 data: {
                     studentName,
                     tutorName,
@@ -422,10 +424,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     time: emailTime,
                     cancelledBy,
                     reason: reasonTrimmed,
+                    hideRefund: recipient.kind === 'tutor' && cancelledBy === 'student',
+                    isPaid: recipient.kind === 'student' && !hideStudentRefund ? isPaid : false,
+                    sessionPrice: recipient.kind === 'student' && !hideStudentRefund ? sessionPrice : null,
                     locale: 'lt',
-                    ...(orgId ? { organizationId: orgId } : {}),
+                    ...orgPayload,
                 },
-            })
+            }),
         );
     }
 
