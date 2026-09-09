@@ -502,10 +502,14 @@ function sessionCancelled(d: any, locale: Locale) {
 
 function sessionCancelledParent(d: any, locale: Locale) {
   const appUrl = getAppUrl();
+  const by = d.cancelledBy === 'student' ? t(locale, 'em.cancelByStudent') : t(locale, 'em.cancelByTutor');
+  const headerSub = d.cancelledBy === 'student'
+    ? t(locale, 'em.cancelParentHeaderSub')
+    : t(locale, 'em.cancelHeaderSub', { by });
   return {
     subject: t(locale, 'em.cancelParentSub', { date: d.date, time: d.time }),
     html: wrap(`
-      <div class="header" style="${headerInlineStyle('#ef4444', '#f97316')}"><h1>${t(locale, 'em.cancelHeader')}</h1><p>${t(locale, 'em.cancelParentHeaderSub')}</p></div>
+      <div class="header" style="${headerInlineStyle('#ef4444', '#f97316')}"><h1>${t(locale, 'em.cancelHeader')}</h1><p>${headerSub}</p></div>
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiPlain')}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.cancelParentBody', { student: d.studentName, tutor: d.tutorName })}</p>

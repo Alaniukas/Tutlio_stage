@@ -407,11 +407,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const payerTrim = (resolvedPayerEmail || '').trim();
-    if (
-        cancelledBy === 'student' &&
+    const shouldNotifyPayer =
         payerTrim &&
-        normEmail(payerTrim) !== normEmail(resolvedStudentEmail)
-    ) {
+        normEmail(payerTrim) !== normEmail(resolvedStudentEmail);
+    if (shouldNotifyPayer) {
         cancellationEmailTasks.push(
             sendEmailWithTimeout({
                 type: 'session_cancelled_parent',
