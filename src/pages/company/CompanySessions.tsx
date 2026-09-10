@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { SessionStatCards } from '@/components/SessionStatCards';
 import { calculateSessionStats, calculateOrgSessionListStats } from '@/lib/session-stats';
@@ -8,7 +8,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { planRecurringSeriesPatches, sortSeriesPatchesForApply } from '@/lib/recurringSessions';
 import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
 import { Checkbox } from '@/components/ui/checkbox';
-import { format } from 'date-fns';
+import { format as dateFnsFormat } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import type { OrganizationDynamicPricingRule } from '@/lib/organizationDynamicPricing';
@@ -56,6 +56,10 @@ import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
 import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
 import { classGroupCancelTargets, classGroupOccurrenceSessionIds, sessionStatusCanCancel, usesClassGroupCancelFlow } from '@/lib/schoolClassGroupSessions';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { defaultStatsDateRange } from '@/lib/statsDateRange';
+import { schoolCalendarInstant, schoolDate } from '@/lib/schoolTime';
+import { fetchAllRows } from '@/lib/fetchAllRows';
+import { schoolMeetingCounts, schoolStudentAttendance } from '@/lib/schoolSessionMonitoring';
 
 interface Session {
   id: string;
@@ -85,6 +89,8 @@ interface Session {
   student_admin_comment_visible_to_tutor?: boolean;
   tutor_joined_at?: string | null;
   student_joined_at?: string | null;
+  status_confirmed_at?: string | null;
+  no_show_reason?: string | null;
 }
 
 interface Subject extends OrgSubjectForDefaults {
@@ -138,6 +144,8 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
     student_admin_comment_visible_to_tutor: row.student?.admin_comment_visible_to_tutor ?? false,
     tutor_joined_at: row.tutor_joined_at ?? null,
     student_joined_at: row.student_joined_at ?? null,
+    status_confirmed_at: row.status_confirmed_at ?? null,
+    no_show_reason: row.no_show_reason ?? null,
   };
 }
 
@@ -146,6 +154,8 @@ export default function CompanySessions() {
   const { fmt } = useMarketMoney();
   const entityType = useOrgEntityType();
   const isSchoolOrgView = entityType === 'school';
+  const format: typeof dateFnsFormat = (date, pattern, options) =>
+    dateFnsFormat(isSchoolOrgView ? schoolDate(date) : date, pattern, options);
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
@@ -166,6 +176,8 @@ export default function CompanySessions() {
   );
 
   const sc = getCached<any>('company_sessions');
+  const loadRequest = useRef(0);
+  const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(!sc);
   const [sessions, setSessions] = useState<Session[]>(sc?.sessions ?? []);
   const [tutors, setTutors] = useState<OrgTutorRow[]>(sc?.tutors ?? []);
@@ -173,9 +185,9 @@ export default function CompanySessions() {
   const [filterStatus, setFilterStatus] = useState('');
   const [search, setSearch] = useState('');
   const [sortNewest, setSortNewest] = useState(true);
-  const [filterStartDate, setFilterStartDate] = useState<Date | null>(null);
-  const [filterEndDate, setFilterEndDate] = useState<Date | null>(null);
-  const [isFilterActive, setIsFilterActive] = useState(false);
+  const [filterStartDate, setFilterStartDate] = useState<Date | null>(() => isSchoolOrgView ? defaultStatsDateRange().start : null);
+  const [filterEndDate, setFilterEndDate] = useState<Date | null>(() => isSchoolOrgView ? defaultStatsDateRange().end : null);
+  const [isFilterActive, setIsFilterActive] = useState(isSchoolOrgView);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [markingNoShow, setMarkingNoShow] = useState(false);
   const [noShowDialogOpen, setNoShowDialogOpen] = useState(false);
@@ -226,7 +238,7 @@ export default function CompanySessions() {
   const [filterStudent, setFilterStudent] = useState('');
 
   useEffect(() => {
-    if (!getCached('company_sessions')) loadData();
+    void loadData();
   }, []);
 
   useEffect(() => {
@@ -302,8 +314,15 @@ export default function CompanySessions() {
     ],
   );
 
-  const loadData = async () => {
+  const loadData = async (
+    range = {
+      start: isFilterActive ? filterStartDate : null,
+      end: isFilterActive ? filterEndDate : null,
+    },
+  ) => {
+    const request = ++loadRequest.current;
     if (!getCached('company_sessions')) setLoading(true);
+    setLoadError('');
     try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -365,25 +384,40 @@ export default function CompanySessions() {
       })),
     );
 
-    if (tutorList.length === 0) return;
+    if (tutorList.length === 0) {
+      if (request === loadRequest.current) setSessions([]);
+      return;
+    }
 
-    const threeMonthsAgo = new Date();
-    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    const sessionsData = await fetchAllRows<any>((from, to) => {
+      let query = supabase.from('sessions').select(ORG_SESSION_DETAIL_SELECT).in('tutor_id', tutorIds);
+      if (range.start) {
+        const start = isSchoolOrgView ? schoolCalendarInstant(range.start) : new Date(range.start);
+        start.setHours(0, 0, 0, 0);
+        query = query.gte('start_time', start.toISOString());
+      } else if (!isSchoolOrgView) {
+        const threeMonthsAgo = new Date();
+        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+        query = query.gte('start_time', threeMonthsAgo.toISOString());
+      }
+      if (range.end) {
+        const end = isSchoolOrgView ? schoolCalendarInstant(range.end) : new Date(range.end);
+        end.setHours(23, 59, 59, 999);
+        query = query.lte('start_time', end.toISOString());
+      }
+      return query.order('start_time', { ascending: false }).order('id').range(from, to);
+    });
 
-    const { data: sessionsData } = await supabase
-      .from('sessions')
-      .select(ORG_SESSION_DETAIL_SELECT)
-      .in('tutor_id', tutorIds)
-      .gte('start_time', threeMonthsAgo.toISOString())
-      .order('start_time', { ascending: false })
-      .limit(2000);
+    const enriched: Session[] = sessionsData.map((s: any) => mapOrgSessionRow(s, tutorList));
 
-    const enriched: Session[] = (sessionsData || []).map((s: any) => mapOrgSessionRow(s, tutorList));
-
+    if (request !== loadRequest.current) return;
     setSessions(enriched);
     setCache('company_sessions', { sessions: enriched, tutors: tutorList, students: studentsResult.data || [] });
+    } catch (error) {
+      if (request !== loadRequest.current) return;
+      setLoadError(error instanceof Error ? error.message : 'Nepavyko įkelti užsiėmimų.');
     } finally {
-      setLoading(false);
+      if (request === loadRequest.current) setLoading(false);
     }
   };
 
@@ -784,12 +818,12 @@ export default function CompanySessions() {
       if (isFilterActive) {
         const when = new Date(s.start_time);
         if (filterStartDate) {
-          const start = new Date(filterStartDate);
+          const start = isSchoolOrgView ? schoolCalendarInstant(filterStartDate) : new Date(filterStartDate);
           start.setHours(0, 0, 0, 0);
           if (when < start) return false;
         }
         if (filterEndDate) {
-          const end = new Date(filterEndDate);
+          const end = isSchoolOrgView ? schoolCalendarInstant(filterEndDate) : new Date(filterEndDate);
           end.setHours(23, 59, 59, 999);
           if (when > end) return false;
         }
@@ -810,7 +844,7 @@ export default function CompanySessions() {
     return sortNewest
       ? list.sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
       : list.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
-  }, [sessions, filterTutor, filterStatus, studentIdSetForFilter, search, isFilterActive, filterStartDate, filterEndDate, sortNewest]);
+  }, [sessions, filterTutor, filterStatus, studentIdSetForFilter, search, isFilterActive, filterStartDate, filterEndDate, sortNewest, isSchoolOrgView]);
 
   if (loading) {
     return (
@@ -850,11 +884,23 @@ export default function CompanySessions() {
               onStartDateChange={setFilterStartDate}
               onEndDateChange={setFilterEndDate}
               onClear={() => {
-                setFilterStartDate(null);
-                setFilterEndDate(null);
-                setIsFilterActive(false);
+                if (isSchoolOrgView) {
+                  const nextRange = defaultStatsDateRange();
+                  setFilterStartDate(nextRange.start);
+                  setFilterEndDate(nextRange.end);
+                  setIsFilterActive(true);
+                  void loadData(nextRange);
+                } else {
+                  setFilterStartDate(null);
+                  setFilterEndDate(null);
+                  setIsFilterActive(false);
+                  void loadData({ start: null, end: null });
+                }
               }}
-              onSearch={() => setIsFilterActive(true)}
+              onSearch={() => {
+                setIsFilterActive(true);
+                void loadData({ start: filterStartDate, end: filterEndDate });
+              }}
             />
           </div>
           <div className="relative flex-1 min-w-0 w-full sm:min-w-[180px]">
@@ -919,8 +965,19 @@ export default function CompanySessions() {
           </div>
         </div>
 
+        {loadError ? (
+          <div role="alert" className="rounded-xl bg-red-50 p-4 text-red-700">
+            {loadError}
+            <Button variant="outline" className="ml-3" onClick={() => void loadData()}>
+              Bandyti dar kartą
+            </Button>
+          </div>
+        ) : null}
+
+        {isSchoolOrgView && !loadError ? <SchoolSessionMonitoring sessions={filtered} /> : null}
+
         {/* Stats */}
-        {filtered.length > 0 && (() => {
+        {!isSchoolOrgView && filtered.length > 0 && (() => {
           const stats = isLaisviVaikai
             ? calculateOrgSessionListStats(filtered as any)
             : calculateSessionStats(filtered as any, null, null);
@@ -1304,6 +1361,14 @@ export default function CompanySessions() {
                     </p>
                   </div>
 
+                  {selectedSession.status === 'no_show' ? (
+                    <p className="text-sm text-amber-700">
+                      {selectedSession.no_show_reason === 'missed_join'
+                        ? 'Mokinys neprisijungė per nustatytą laiką.'
+                        : selectedSession.no_show_reason || 'Pažymėtas mokinio neatvykimas.'}
+                    </p>
+                  ) : null}
+
                   {selectedSession.cancellation_reason && (
                     <div>
                       <Label className="text-xs text-gray-500">{t('compSess.cancellationReason')}</Label>
@@ -1562,5 +1627,82 @@ export default function CompanySessions() {
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+function SchoolSessionMonitoring({ sessions }: { sessions: Session[] }) {
+  const counts = schoolMeetingCounts(sessions);
+  const students = schoolStudentAttendance(sessions);
+  const reasons = new Map<string, number>();
+
+  for (const session of sessions) {
+    if (session.status !== 'cancelled' && session.status !== 'no_show') continue;
+    const reason = session.status === 'cancelled'
+      ? session.cancellation_reason || 'Atšaukta, priežastis nenurodyta'
+      : session.no_show_reason === 'missed_join'
+        ? 'Mokinys neprisijungė per nustatytą laiką'
+        : session.no_show_reason || 'Pažymėtas mokinio neatvykimas';
+    reasons.set(reason, (reasons.get(reason) || 0) + 1);
+  }
+
+  const summary = [
+    { label: 'Įvyko', count: counts.completed },
+    { label: 'Mokinių neatvykimai', count: students.reduce((sum, student) => sum + student.noShow, 0) },
+    { label: 'Atšaukta', count: counts.cancelled },
+    { label: 'Aktyvūs', count: counts.active },
+  ];
+
+  return (
+    <section className="space-y-3" aria-label="Užsiėmimų stebėsena">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {summary.map(({ label, count }) => (
+          <div key={label} className="rounded-xl border bg-white p-4">
+            <div className="text-2xl font-semibold">{count}</div>
+            <div className="text-sm text-gray-600">{label}</div>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-gray-500">
+        Grupinis užsiėmimas skaičiuojamas vieną kartą. Mokinių neatvykimai skaičiuojami atskirai kiekvienam vaikui.
+      </p>
+      {reasons.size > 0 ? (
+        <details className="rounded-xl border bg-white p-4">
+          <summary className="cursor-pointer font-medium">Neįvykimo priežastys (mokinių įrašai)</summary>
+          <ul className="mt-3 space-y-1 text-sm">
+            {[...reasons].map(([reason, count]) => <li key={reason}>{reason}: <strong>{count}</strong></li>)}
+          </ul>
+        </details>
+      ) : null}
+      <details className="rounded-xl border bg-white p-4">
+        <summary className="cursor-pointer font-medium">Vaikų lankomumas ({students.length})</summary>
+        <p className="my-3 text-xs text-gray-500">
+          Pagal pasirinktus filtrus. Dalyvavimas fiksuojamas pagal prisijungimo nuorodos paspaudimą arba
+          mokytojo ar administratoriaus patvirtintą įvykimą. Vien automatiškai įvykusiu pažymėtas
+          užsiėmimas lankomumo nepatvirtina.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr>
+                {['Mokinys', 'Dalyvavo', 'Neatvyko', 'Atšaukta', 'Nepatvirtinta'].map(label => (
+                  <th key={label} className="p-2">{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {students.map(student => (
+                <tr key={student.id} className="border-t">
+                  <td className="p-2">{student.name}</td>
+                  <td className="p-2">{student.joined}</td>
+                  <td className="p-2">{student.noShow}</td>
+                  <td className="p-2">{student.cancelled}</td>
+                  <td className="p-2">{student.unconfirmed}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>
   );
 }

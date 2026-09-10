@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { companyStatsCacheKey, getCached, setCache } from '@/lib/dataCache';
 import { TrendingUp, Award, AlertTriangle, Wallet, BookOpen } from 'lucide-react';
@@ -33,6 +33,10 @@ import {
   normalizeStatsDateRange,
   statsDateRangeKey,
 } from '@/lib/statsDateRange';
+import { schoolCalendarInstant } from '@/lib/schoolTime';
+import { fetchAllRows } from '@/lib/fetchAllRows';
+import { loadSchoolStatsRevenue } from '@/lib/schoolStatsRevenue';
+import { schoolMeetingCounts, schoolMeetings } from '@/lib/schoolSessionMonitoring';
 
 interface TutorStat {
   id: string;
@@ -54,7 +58,7 @@ export default function CompanyStats() {
   const cancellationBreakdown = (
     stat: Pick<TutorStat, 'totalCancelled' | 'cancelledByTutor' | 'cancelledByStudent' | 'cancelledByAdmin'>,
   ) =>
-    formatCancellationBreakdown(stat, (role, count) => {
+    isSchool ? String(stat.totalCancelled) : formatCancellationBreakdown(stat, (role, count) => {
       if (role === 'tutor') return t('stats.cancellationPartTutor', { count });
       if (role === 'student') return t('stats.cancellationPartStudent', { count });
       return t('stats.cancellationPartAdmin', { count });
@@ -66,12 +70,15 @@ export default function CompanyStats() {
   const initialCacheKey = initialOrgId ? companyStatsCacheKey(initialOrgId) : null;
   const [appliedRange, setAppliedRange] = useState<{ start: Date; end: Date } | null>(null);
   const stCache = !appliedRange && initialCacheKey ? getCached<any>(initialCacheKey) : null;
+  const loadRequest = useRef(0);
+  const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(!stCache);
   const [tutorStats, setTutorStats] = useState<TutorStat[]>(stCache?.tutorStats ?? []);
   const [totalEarnings, setTotalEarnings] = useState(stCache?.totalEarnings ?? 0);
   const [totalCompanyCommission, setTotalCompanyCommission] = useState(stCache?.totalCompanyCommission ?? 0);
   const [totalNetEarnings, setTotalNetEarnings] = useState(stCache?.totalNetEarnings ?? 0);
   const [totalSessions, setTotalSessions] = useState(stCache?.totalSessions ?? 0);
+  const [totalNoShows, setTotalNoShows] = useState(0);
   const [totalCancelled, setTotalCancelled] = useState(stCache?.totalCancelled ?? 0);
   const [filterStartDate, setFilterStartDate] = useState<Date | null>(null);
   const [filterEndDate, setFilterEndDate] = useState<Date | null>(null);
@@ -80,12 +87,21 @@ export default function CompanyStats() {
 
   useEffect(() => {
     loadData(effectiveRange, !appliedRange);
-  }, [rangeKey, showFinanceTotals, appliedRange]);
+  }, [rangeKey, showFinanceTotals, appliedRange, isSchool]);
 
   const loadData = async (range: { start: Date; end: Date }, cacheResult: boolean) => {
+    const request = ++loadRequest.current;
     setLoading(true);
+    setLoadError('');
     try {
-    const { startIso, endIso } = normalizeStatsDateRange(range.start, range.end);
+    const start = isSchool ? schoolCalendarInstant(range.start) : range.start;
+    const end = isSchool ? schoolCalendarInstant(range.end) : range.end;
+    const { startIso, endIso } = isSchool
+      ? {
+          startIso: new Date(new Date(start).setHours(0, 0, 0, 0)).toISOString(),
+          endIso: new Date(new Date(end).setHours(23, 59, 59, 999)).toISOString(),
+        }
+      : normalizeStatsDateRange(start, end);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
@@ -102,20 +118,34 @@ export default function CompanyStats() {
       'id, full_name, email, company_commission_percent, company_commission_by_subject',
     );
 
-    if (tutorList.length === 0) { setLoading(false); return; }
-
     const tutorIds = tutorList.map(t => t.id);
+    let schoolDefaultRate = 0;
+    if (isSchool) {
+      const { data: org, error } = await supabase
+        .from('organizations')
+        .select('default_company_commission_percent')
+        .eq('id', adminRow.organization_id)
+        .maybeSingle();
+      if (error) throw error;
+      schoolDefaultRate = Number(org?.default_company_commission_percent) || 0;
+    }
 
-    let query = supabase
+    const sessionQuery = () => supabase
       .from('sessions')
-      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subject_id, subjects(is_trial)')
+      .select('id, class_group_id, start_time, tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subject_id, subjects(is_trial, is_group)')
       .in('tutor_id', tutorIds)
       .gte('start_time', startIso)
       .lte('start_time', endIso);
 
-    const { data: sessions } = await query.limit(3000);
-    const allSessions = sessions || [];
-    const proKlase = isProKlaseOrg(adminRow.organization_id);
+    const [allSessions, schoolReceived] = await Promise.all([
+      tutorIds.length
+        ? fetchAllRows<any>((from, to) => sessionQuery().order('start_time').order('id').range(from, to))
+        : Promise.resolve([]),
+      isSchool && showFinanceTotals
+        ? loadSchoolStatsRevenue(supabase, adminRow.organization_id, startIso, endIso)
+        : Promise.resolve(0),
+    ]);
+    const proKlase = !isSchool && isProKlaseOrg(adminRow.organization_id);
     const proKlaseFeeProfile = proKlase ? orgFeeProfile(adminRow.organization_id) : null;
 
     let packagesByTutor = new Map<string, number>();
@@ -139,8 +169,9 @@ export default function CompanyStats() {
 
     const stats: TutorStat[] = tutorList.map(tutor => {
       const tutorSessions = allSessions.filter(s => s.tutor_id === tutor.id);
-      const cancellation = countCancellationAttribution(tutorSessions);
-      const tutorPayPerSession = (tutor as any).company_commission_percent || 0;
+      const meetingRows = isSchool ? schoolMeetings(tutorSessions) : tutorSessions;
+      const cancellation = countCancellationAttribution(meetingRows);
+      const tutorPayPerSession = (tutor as any).company_commission_percent ?? schoolDefaultRate;
 
       if (proKlase) {
         const mapped: ProKlaseAdminSession[] = tutorSessions.map((s: any) => ({
@@ -171,20 +202,20 @@ export default function CompanyStats() {
         };
       }
 
-      const conducted = filterConductedOrgSessions(tutorSessions);
-      const earnings = conducted.reduce((sum, s) => sum + (Number((s as any).price) || 0), 0);
+      const conducted = filterConductedOrgSessions(meetingRows);
+      const earnings = isSchool ? 0 : conducted.reduce((sum, s) => sum + (Number((s as any).price) || 0), 0);
       const netEarnings = sumOrgTutorLessonsPayEur(
         conducted as Array<{ subject_id?: string | null; price?: number | null }>,
         tutorPayPerSession,
         (tutor as any).company_commission_by_subject,
         adminRow.organization_id,
       );
-      const companyCommission = Math.round((earnings - netEarnings) * 100) / 100;
+      const companyCommission = isSchool ? 0 : Math.round((earnings - netEarnings) * 100) / 100;
 
       return {
         id: tutor.id,
         full_name: tutor.full_name,
-        completedSessions: countConductedOrgSessions(conducted),
+        completedSessions: isSchool ? schoolMeetingCounts(tutorSessions).completed : countConductedOrgSessions(conducted),
         cancelledByTutor: cancellation.cancelledByTutor,
         cancelledByStudent: cancellation.cancelledByStudent,
         cancelledByAdmin: cancellation.cancelledByAdmin,
@@ -195,15 +226,17 @@ export default function CompanyStats() {
       };
     });
 
-    const sorted = showFinanceTotals
+    const sorted = showFinanceTotals && !isSchool
       ? stats.sort((a, b) => b.earnings - a.earnings)
       : stats.sort((a, b) => b.completedSessions - a.completedSessions);
-    const te = stats.reduce((sum, s) => sum + s.earnings, 0);
+    const te = isSchool ? schoolReceived : stats.reduce((sum, s) => sum + s.earnings, 0);
     const tcc = stats.reduce((sum, s) => sum + s.companyCommission, 0);
     const tne = stats.reduce((sum, s) => sum + s.netEarnings, 0);
     const ts = stats.reduce((sum, s) => sum + s.completedSessions, 0);
     const tcn = stats.reduce((sum, s) => sum + s.totalCancelled, 0);
 
+    if (request !== loadRequest.current) return;
+    setTotalNoShows(allSessions.filter(s => s.status === 'no_show').length);
     setTutorStats(sorted);
     setTotalEarnings(te);
     setTotalCompanyCommission(tcc);
@@ -217,18 +250,32 @@ export default function CompanyStats() {
         totalNetEarnings: tne, totalSessions: ts, totalCancelled: tcn,
       });
     }
+    } catch (error) {
+      if (request !== loadRequest.current) return;
+      setLoadError(error instanceof Error ? error.message : 'Nepavyko įkelti statistikos.');
     } finally {
-      setLoading(false);
+      if (request === loadRequest.current) setLoading(false);
     }
   };
 
-  const topEarner = showFinanceTotals ? tutorStats[0] : null;
+  const topEarner = showFinanceTotals && !isSchool ? tutorStats[0] : null;
   const mostCancellations = [...tutorStats].sort(
     (a, b) => countUserInitiatedCancellations(b) - countUserInitiatedCancellations(a),
   )[0];
   const mostCancellationsCount = mostCancellations
     ? countUserInitiatedCancellations(mostCancellations)
     : 0;
+
+  if (loadError) {
+    return (
+      <div role="alert" className="p-4 text-red-700">
+        {loadError}
+        <button className="ml-3 underline" onClick={() => void loadData(effectiveRange, !appliedRange)}>
+          Bandyti dar kartą
+        </button>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -279,10 +326,10 @@ export default function CompanyStats() {
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">{fmt(totalEarnings)}</p>
-              <p className="text-xs text-gray-500">{t('compStats.totalRevenue')}</p>
+              <p className="text-xs text-gray-500">{isSchool ? 'Gautos sutarčių įmokos' : t('compStats.totalRevenue')}</p>
             </div>
           </div>
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center gap-4">
+          {!isSchool ? <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center gap-4">
             <div className="w-11 h-11 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
               <TrendingUp className="w-5 h-5 text-amber-600" />
             </div>
@@ -290,14 +337,14 @@ export default function CompanyStats() {
               <p className="text-2xl font-bold text-amber-900">{fmt(totalCompanyCommission)}</p>
               <p className="text-xs text-gray-500">{t('compStats.companyShare')}</p>
             </div>
-          </div>
+          </div> : null}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center gap-4">
             <div className="w-11 h-11 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
               <Wallet className="w-5 h-5 text-blue-600" />
             </div>
             <div>
               <p className="text-2xl font-bold text-blue-900">{fmt(totalNetEarnings)}</p>
-              <p className="text-xs text-gray-500">{staffShareLabel}</p>
+              <p className="text-xs text-gray-500">{isSchool ? 'Priskaičiuotas mokytojų atlygis' : staffShareLabel}</p>
             </div>
           </div>
             </>
@@ -311,7 +358,7 @@ export default function CompanyStats() {
               <p className="text-xs text-gray-500">{t('compStats.lessonsCompleted')}</p>
             </div>
           </div>
-          {!showFinanceTotals ? (
+          {!showFinanceTotals || isSchool ? (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center gap-4">
             <div className="w-11 h-11 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0">
               <AlertTriangle className="w-5 h-5 text-red-600" />
@@ -324,8 +371,26 @@ export default function CompanyStats() {
           ) : null}
         </div>
 
+        {isSchool ? (
+          <div className="rounded-xl border bg-white p-4 text-sm">
+            <p>Mokinių neatvykimai: <strong>{totalNoShows}</strong></p>
+            <p className="mt-2 text-gray-500">
+              Užsiėmimai ir mokytojų atlygis skaičiuojami pagal užsiėmimo datą, grupėms vieną kartą.
+              Neatvykimai skaičiuojami pagal mokinį. Pagal esamą atlygio taisyklę mokinio neatvykimas
+              apmokamas mokytojui, bet nelaikomas pravestu užsiėmimu.
+            </p>
+            {showFinanceTotals ? (
+              <p className="mt-2 text-gray-500">
+                Gautos sutarčių įmokos apima apmokėtas metinių sutarčių įmokas ir mėnesines papildomų
+                užsiėmimų sąskaitas pagal apmokėjimo datą. Jos nepriskiriamos konkrečiam mokytojui ir
+                nėra už šio laikotarpio užsiėmimus uždirbtų pajamų ar pelno rodiklis.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         {/* Highlights */}
-        {tutorStats.length > 1 && (
+        {!isSchool && tutorStats.length > 1 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {showFinanceTotals && topEarner && topEarner.earnings > 0 && (
               <div className="bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 rounded-2xl p-5 flex items-center gap-4">
@@ -389,10 +454,10 @@ export default function CompanyStats() {
                       </div>
                       {showFinanceTotals ? (
                       <div className="text-right flex-shrink-0">
-                        <p className="text-sm font-semibold text-gray-900">{fmt(stat.earnings)}</p>
-                        <p className="text-[11px] text-amber-700">
+                        <p className="text-sm font-semibold text-gray-900">{fmt(isSchool ? stat.netEarnings : stat.earnings)}</p>
+                        {!isSchool ? <p className="text-[11px] text-amber-700">
                           {t('compStats.companyAmount', { amount: stat.companyCommission.toFixed(2) })}
-                        </p>
+                        </p> : null}
                         <p className="text-[11px] text-green-700">
                           {t('compStats.tutorAmount', { amount: stat.netEarnings.toFixed(2) })}
                         </p>
@@ -412,8 +477,8 @@ export default function CompanyStats() {
                     <th className="text-right px-5 py-3">{t('compStats.lessons')}</th>
                     {showFinanceTotals ? (
                       <>
-                    <th className="text-right px-5 py-3">{t('compStats.totalRevenue')}</th>
-                    <th className="text-right px-5 py-3">{t('compStats.companyShare')}</th>
+                    {!isSchool ? <th className="text-right px-5 py-3">{t('compStats.totalRevenue')}</th> : null}
+                    {!isSchool ? <th className="text-right px-5 py-3">{t('compStats.companyShare')}</th> : null}
                     <th className="text-right px-5 py-3">{t('compStats.tutorColumn')}</th>
                       </>
                     ) : null}
@@ -439,10 +504,10 @@ export default function CompanyStats() {
                       <td className="px-5 py-3 text-right font-semibold text-gray-900">{stat.completedSessions}</td>
                       {showFinanceTotals ? (
                         <>
-                      <td className="px-5 py-3 text-right font-semibold text-gray-700">{fmt(stat.earnings)}</td>
-                      <td className="px-5 py-3 text-right font-semibold text-amber-700">
+                      {!isSchool ? <td className="px-5 py-3 text-right font-semibold text-gray-700">{fmt(stat.earnings)}</td> : null}
+                      {!isSchool ? <td className="px-5 py-3 text-right font-semibold text-amber-700">
                         {fmt(stat.companyCommission)}
-                      </td>
+                      </td> : null}
                       <td className="px-5 py-3 text-right font-semibold text-green-700">{fmt(stat.netEarnings)}</td>
                         </>
                       ) : null}

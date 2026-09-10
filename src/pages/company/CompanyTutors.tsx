@@ -37,6 +37,9 @@ import {
   countConductedOrgSessions,
   filterConductedOrgSessions,
 } from '@/lib/orgTutorConductedSessions';
+import { schoolDate } from '@/lib/schoolTime';
+import { fetchAllRows } from '@/lib/fetchAllRows';
+import { schoolMeetingCounts, schoolMeetings } from '@/lib/schoolSessionMonitoring';
 import { sumProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
 import { authHeaders } from '@/lib/apiHelpers';
 import { isPlMarket } from '@/lib/market';
@@ -1025,25 +1028,28 @@ export default function CompanyTutors() {
     const { data: subjects } = await supabase.from('subjects').select('*').eq('tutor_id', tutor.id);
 
     // OPTIMIZED: Limit sessions query to last year for stats
-    const oneYearAgo = new Date();
+    const oneYearAgo = isSchoolView ? schoolDate() : new Date();
     oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+    if (isSchoolView) oneYearAgo.setHours(0, 0, 0, 0);
 
-    const { data: sessions } = await supabase
+    const sessions = await fetchAllRows<any>((from, to) => supabase
       .from('sessions')
-      .select('price, status, subject_id, is_complimentary, subjects(is_trial)')
+      .select('id, tutor_id, class_group_id, start_time, price, status, subject_id, is_complimentary, subjects(is_trial, is_group)')
       .eq('tutor_id', tutor.id)
       .in('status', ['completed', 'no_show'])
       .gte('start_time', oneYearAgo.toISOString())
       .lte('end_time', new Date().toISOString())
-      .limit(1000);
+      .order('start_time')
+      .order('id')
+      .range(from, to));
 
     const { data: tspData } = await supabase
       .from('tutor_subject_prices')
       .select('*')
       .eq('tutor_id', tutor.id);
 
-    const conducted = filterConductedOrgSessions(sessions || []);
-    const sessionCount = countConductedOrgSessions(conducted);
+    const conducted = filterConductedOrgSessions(isSchoolView ? schoolMeetings(sessions) : sessions);
+    const sessionCount = isSchoolView ? schoolMeetingCounts(sessions).completed : countConductedOrgSessions(conducted);
     const tutorRate = tutor.company_commission_percent ?? orgDefaults.company_commission_percent;
     const earnings = isProKlaseAdmin
       ? sumProKlasePayBreakdown(conducted as any[], tutorRate).totalEur
