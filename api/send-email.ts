@@ -9,6 +9,7 @@ if (typeof process !== 'undefined' && process.env.TUTLIO_DEV_API_LOCAL === '1') 
 
 import type { VercelRequest, VercelResponse } from './types';
 import { t, isValidLocale, localizedFromEmail, type Locale } from './_lib/i18n.js';
+import { preloadExtraLocaleDict } from './_lib/loadExtraLocaleDict.js';
 import { isMoksloVaisiaiOrg, isProKlaseOrg } from './_lib/marketMoney.js';
 import {
   applyOrgBrandingToHtml,
@@ -3464,6 +3465,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const client = url && key ? createClient(url, key, supabaseServiceRoleClientOptions()) : null;
       locale = await notificationLocale(client, to, bodyLocale, organizationLocale);
     }
+
+    // Newer locale dictionaries stay out of the serverless cold-start bundle.
+    // Load the selected one before synchronous template helpers call t(), so
+    // email rendering never silently falls back to English in ESM runtimes.
+    await preloadExtraLocaleDict(locale);
 
     // Patch the email HTML post-generation to inject org branding into the wrap() header
     function applyBranding(result: { subject: string; html: string }): { subject: string; html: string } {

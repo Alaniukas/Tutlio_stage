@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { lt } from '../../src/lib/i18n/lt';
@@ -13,7 +14,9 @@ import { CHROME, chromeFor, formatShortDay } from '../../src/lib/publicPage';
 import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone } from '../../src/lib/utils';
 
-const deferredPrefixes = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('sl');
+
+const deferredPrefixes = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferredPrefixes.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 // These form errors now describe the existing international validator and use
@@ -45,7 +48,8 @@ beforeAll(async () => { await loadLocaleDict('sl'); });
 
 describe('Slovenian tutor and business localization', () => {
   it('explicitly covers the tutor/business scope and keeps deferred modules in English', () => {
-    expect(Object.keys(slOverrides).sort()).toEqual(expectedKeys.sort());
+    expect(expectedKeys.filter((key) => !(key in slOverrides))).toEqual([]);
+    expect(Object.keys(slOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(sl).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !sl[key])).toEqual([]);
     for (const key of Object.keys(en).filter((key) => deferredPrefixes.has(key.split('.')[0]))) {

@@ -5144,7 +5144,7 @@ export const thOverrides: Record<string, string> = {
   "compStu.studentAddedWithLessonsFull": "เพิ่มนักเรียนแล้ว: วางแผนไว้ {total} คาบ (ราคาเต็มทั้งหมด)",
   "compStu.studentAddedLessonFailed": "เพิ่มนักเรียนแล้ว แต่จองคาบเรียนไม่สำเร็จ",
   "compTut.payBySubject": "ค่าตอบแทนตามวิชา",
-  "compTut.payBySubjectHint": "เว้นว่างไว้เพื่อใช้อัตราเริ่มต้น ใช้ช่องนี้เมื่อค่าตอบแทนต่างกันตามวิชา เช่น ระดับมัธยมต้นกับมัธยมปลาย",
+  "compTut.payBySubjectHint": "เว้นว่างไว้เพื่อใช้อัตราเริ่มต้น ใช้ช่องนี้เมื่อค่าตอบแทนต่างกันตามวิชา เช่น ถึงเกรด 10 เทียบกับเกรด 10–12",
   "companyDash.paymentFollowups": "การติดตามการชำระเงิน",
   "orgFinance.payUsesSubjectRates": "ค่าตอบแทนคำนวณตามวิชา อัตราเริ่มต้น: {amount} € ต่อคาบ",
   "stats.cancellationPartStudent": "นักเรียน: {count}",

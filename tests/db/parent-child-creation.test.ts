@@ -12,6 +12,7 @@ it('adds a child and parent link atomically and rejects repeated creation', asyn
       CREATE TABLE students(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),full_name text,email text,organization_id uuid,
         tutor_id uuid,parent_user_id uuid,invite_code text UNIQUE,payment_payer text,payer_name text,payer_email text,enrollment_status text,detached_at timestamptz);
       CREATE TABLE parent_students(parent_id uuid REFERENCES parent_profiles,student_id uuid REFERENCES students,PRIMARY KEY(parent_id,student_id));`);
+    await db.exec(readFileSync('supabase/migrations/20260909012000_atomic_parent_child_creation.sql', 'utf8'));
     await db.exec(readFileSync('supabase/migrations/20260910173000_atomic_parent_child_creation.sql', 'utf8'));
     await db.query("insert into parent_profiles values ($1,$2,'Parent','parent@example.test');", [id(1), id(3)]);
     await db.query("insert into students(id,full_name,organization_id,tutor_id) values ($1,'First Child',$2,$3)", [id(2), id(10), id(20)]);

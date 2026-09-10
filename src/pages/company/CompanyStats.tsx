@@ -1,7 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { companyStatsCacheKey, getCached, setCache } from '@/lib/dataCache';
-import { TrendingUp, Award, AlertTriangle, Wallet, BookOpen } from 'lucide-react';
+import {
+  TrendingUp,
+  Award,
+  AlertTriangle,
+  Wallet,
+  BookOpen,
+  CalendarClock,
+  CheckCircle2,
+  CircleAlert,
+  UserCheck,
+  UserX,
+} from 'lucide-react';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { useStaffLabels } from '@/hooks/useStaffLabels';
 import { useTranslation } from '@/lib/i18n';
@@ -35,13 +46,22 @@ import {
 } from '@/lib/statsDateRange';
 import { schoolCalendarInstant } from '@/lib/schoolTime';
 import { fetchAllRows } from '@/lib/fetchAllRows';
-import { loadSchoolStatsRevenue } from '@/lib/schoolStatsRevenue';
-import { schoolMeetingCounts, schoolMeetings } from '@/lib/schoolSessionMonitoring';
+import {
+  schoolActivitySummary,
+  type SchoolActivitySummary,
+} from '@/lib/schoolSessionMonitoring';
 
 interface TutorStat {
   id: string;
   full_name: string;
+  scheduledSessions: number;
   completedSessions: number;
+  upcomingSessions: number;
+  noShowMeetings: number;
+  attendanceJoined: number;
+  attendanceAbsent: number;
+  attendanceUnconfirmed: number;
+  attendanceRate: number | null;
   cancelledByTutor: number;
   cancelledByStudent: number;
   cancelledByAdmin: number;
@@ -50,6 +70,20 @@ interface TutorStat {
   companyCommission: number;
   netEarnings: number;
 }
+
+const EMPTY_SCHOOL_ACTIVITY: SchoolActivitySummary = {
+  scheduled: 0,
+  completed: 0,
+  upcoming: 0,
+  noShowMeetings: 0,
+  cancelled: 0,
+  awaitingOutcome: 0,
+  attendedStudents: 0,
+  absentStudents: 0,
+  unconfirmedStudents: 0,
+  confirmedAttendance: 0,
+  attendanceRate: null,
+};
 
 export default function CompanyStats() {
   const { t } = useTranslation();
@@ -78,8 +112,10 @@ export default function CompanyStats() {
   const [totalCompanyCommission, setTotalCompanyCommission] = useState(stCache?.totalCompanyCommission ?? 0);
   const [totalNetEarnings, setTotalNetEarnings] = useState(stCache?.totalNetEarnings ?? 0);
   const [totalSessions, setTotalSessions] = useState(stCache?.totalSessions ?? 0);
-  const [totalNoShows, setTotalNoShows] = useState(0);
   const [totalCancelled, setTotalCancelled] = useState(stCache?.totalCancelled ?? 0);
+  const [schoolActivity, setSchoolActivity] = useState<SchoolActivitySummary>(
+    stCache?.schoolActivity ?? EMPTY_SCHOOL_ACTIVITY,
+  );
   const [filterStartDate, setFilterStartDate] = useState<Date | null>(null);
   const [filterEndDate, setFilterEndDate] = useState<Date | null>(null);
   const effectiveRange = appliedRange ?? defaultStatsDateRange();
@@ -119,32 +155,16 @@ export default function CompanyStats() {
     );
 
     const tutorIds = tutorList.map(t => t.id);
-    let schoolDefaultRate = 0;
-    if (isSchool) {
-      const { data: org, error } = await supabase
-        .from('organizations')
-        .select('default_company_commission_percent')
-        .eq('id', adminRow.organization_id)
-        .maybeSingle();
-      if (error) throw error;
-      schoolDefaultRate = Number(org?.default_company_commission_percent) || 0;
-    }
-
     const sessionQuery = () => supabase
       .from('sessions')
-      .select('id, class_group_id, start_time, tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subject_id, subjects(is_trial, is_group)')
+      .select('id, class_group_id, start_time, end_time, tutor_id, student_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subject_id, student_joined_at, status_confirmed_at, subjects(is_trial, is_group)')
       .in('tutor_id', tutorIds)
       .gte('start_time', startIso)
       .lte('start_time', endIso);
 
-    const [allSessions, schoolReceived] = await Promise.all([
-      tutorIds.length
-        ? fetchAllRows<any>((from, to) => sessionQuery().order('start_time').order('id').range(from, to))
-        : Promise.resolve([]),
-      isSchool && showFinanceTotals
-        ? loadSchoolStatsRevenue(supabase, adminRow.organization_id, startIso, endIso)
-        : Promise.resolve(0),
-    ]);
+    const allSessions = tutorIds.length
+      ? await fetchAllRows<any>((from, to) => sessionQuery().order('start_time').order('id').range(from, to))
+      : [];
     const proKlase = !isSchool && isProKlaseOrg(adminRow.organization_id);
     const proKlaseFeeProfile = proKlase ? orgFeeProfile(adminRow.organization_id) : null;
 
@@ -169,9 +189,31 @@ export default function CompanyStats() {
 
     const stats: TutorStat[] = tutorList.map(tutor => {
       const tutorSessions = allSessions.filter(s => s.tutor_id === tutor.id);
-      const meetingRows = isSchool ? schoolMeetings(tutorSessions) : tutorSessions;
-      const cancellation = countCancellationAttribution(meetingRows);
-      const tutorPayPerSession = (tutor as any).company_commission_percent ?? schoolDefaultRate;
+      if (isSchool) {
+        const activity = schoolActivitySummary(tutorSessions);
+        return {
+          id: tutor.id,
+          full_name: tutor.full_name,
+          scheduledSessions: activity.scheduled,
+          completedSessions: activity.completed,
+          upcomingSessions: activity.upcoming,
+          noShowMeetings: activity.noShowMeetings,
+          attendanceJoined: activity.attendedStudents,
+          attendanceAbsent: activity.absentStudents,
+          attendanceUnconfirmed: activity.unconfirmedStudents,
+          attendanceRate: activity.attendanceRate,
+          cancelledByTutor: 0,
+          cancelledByStudent: 0,
+          cancelledByAdmin: 0,
+          totalCancelled: activity.cancelled,
+          earnings: 0,
+          companyCommission: 0,
+          netEarnings: 0,
+        };
+      }
+
+      const cancellation = countCancellationAttribution(tutorSessions);
+      const tutorPayPerSession = (tutor as any).company_commission_percent ?? 0;
 
       if (proKlase) {
         const mapped: ProKlaseAdminSession[] = tutorSessions.map((s: any) => ({
@@ -191,7 +233,14 @@ export default function CompanyStats() {
         return {
           id: tutor.id,
           full_name: tutor.full_name,
+          scheduledSessions: tutorSessions.filter(s => s.status !== 'cancelled').length,
           completedSessions,
+          upcomingSessions: 0,
+          noShowMeetings: 0,
+          attendanceJoined: 0,
+          attendanceAbsent: 0,
+          attendanceUnconfirmed: 0,
+          attendanceRate: null,
           cancelledByTutor: cancellation.cancelledByTutor,
           cancelledByStudent: cancellation.cancelledByStudent,
           cancelledByAdmin: cancellation.cancelledByAdmin,
@@ -202,20 +251,27 @@ export default function CompanyStats() {
         };
       }
 
-      const conducted = filterConductedOrgSessions(meetingRows);
-      const earnings = isSchool ? 0 : conducted.reduce((sum, s) => sum + (Number((s as any).price) || 0), 0);
+      const conducted = filterConductedOrgSessions(tutorSessions);
+      const earnings = conducted.reduce((sum, s) => sum + (Number((s as any).price) || 0), 0);
       const netEarnings = sumOrgTutorLessonsPayEur(
         conducted as Array<{ subject_id?: string | null; price?: number | null }>,
         tutorPayPerSession,
         (tutor as any).company_commission_by_subject,
         adminRow.organization_id,
       );
-      const companyCommission = isSchool ? 0 : Math.round((earnings - netEarnings) * 100) / 100;
+      const companyCommission = Math.round((earnings - netEarnings) * 100) / 100;
 
       return {
         id: tutor.id,
         full_name: tutor.full_name,
-        completedSessions: isSchool ? schoolMeetingCounts(tutorSessions).completed : countConductedOrgSessions(conducted),
+        scheduledSessions: tutorSessions.filter(s => s.status !== 'cancelled').length,
+        completedSessions: countConductedOrgSessions(conducted),
+        upcomingSessions: 0,
+        noShowMeetings: 0,
+        attendanceJoined: 0,
+        attendanceAbsent: 0,
+        attendanceUnconfirmed: 0,
+        attendanceRate: null,
         cancelledByTutor: cancellation.cancelledByTutor,
         cancelledByStudent: cancellation.cancelledByStudent,
         cancelledByAdmin: cancellation.cancelledByAdmin,
@@ -229,14 +285,15 @@ export default function CompanyStats() {
     const sorted = showFinanceTotals && !isSchool
       ? stats.sort((a, b) => b.earnings - a.earnings)
       : stats.sort((a, b) => b.completedSessions - a.completedSessions);
-    const te = isSchool ? schoolReceived : stats.reduce((sum, s) => sum + s.earnings, 0);
+    const schoolSummary = isSchool ? schoolActivitySummary(allSessions) : EMPTY_SCHOOL_ACTIVITY;
+    const te = stats.reduce((sum, s) => sum + s.earnings, 0);
     const tcc = stats.reduce((sum, s) => sum + s.companyCommission, 0);
     const tne = stats.reduce((sum, s) => sum + s.netEarnings, 0);
-    const ts = stats.reduce((sum, s) => sum + s.completedSessions, 0);
-    const tcn = stats.reduce((sum, s) => sum + s.totalCancelled, 0);
+    const ts = isSchool ? schoolSummary.completed : stats.reduce((sum, s) => sum + s.completedSessions, 0);
+    const tcn = isSchool ? schoolSummary.cancelled : stats.reduce((sum, s) => sum + s.totalCancelled, 0);
 
     if (request !== loadRequest.current) return;
-    setTotalNoShows(allSessions.filter(s => s.status === 'no_show').length);
+    setSchoolActivity(schoolSummary);
     setTutorStats(sorted);
     setTotalEarnings(te);
     setTotalCompanyCommission(tcc);
@@ -247,7 +304,7 @@ export default function CompanyStats() {
     if (cacheResult) {
       setCache(companyStatsCacheKey(adminRow.organization_id), {
         tutorStats: sorted, totalEarnings: te, totalCompanyCommission: tcc,
-        totalNetEarnings: tne, totalSessions: ts, totalCancelled: tcn,
+        totalNetEarnings: tne, totalSessions: ts, totalCancelled: tcn, schoolActivity: schoolSummary,
       });
     }
     } catch (error) {
@@ -284,6 +341,25 @@ export default function CompanyStats() {
           <div className="w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
         </div>
       </>
+    );
+  }
+
+  if (isSchool) {
+    return (
+      <SchoolActivityStatsView
+        activity={schoolActivity}
+        tutorStats={tutorStats}
+        filterStartDate={filterStartDate}
+        filterEndDate={filterEndDate}
+        onStartDateChange={setFilterStartDate}
+        onEndDateChange={setFilterEndDate}
+        onApplyRange={(start, end) => setAppliedRange({ start, end })}
+        onClear={() => {
+          setFilterStartDate(null);
+          setFilterEndDate(null);
+          setAppliedRange(null);
+        }}
+      />
     );
   }
 
@@ -370,24 +446,6 @@ export default function CompanyStats() {
           </div>
           ) : null}
         </div>
-
-        {isSchool ? (
-          <div className="rounded-xl border bg-white p-4 text-sm">
-            <p>Mokinių neatvykimai: <strong>{totalNoShows}</strong></p>
-            <p className="mt-2 text-gray-500">
-              Užsiėmimai ir mokytojų atlygis skaičiuojami pagal užsiėmimo datą, grupėms vieną kartą.
-              Neatvykimai skaičiuojami pagal mokinį. Pagal esamą atlygio taisyklę mokinio neatvykimas
-              apmokamas mokytojui, bet nelaikomas pravestu užsiėmimu.
-            </p>
-            {showFinanceTotals ? (
-              <p className="mt-2 text-gray-500">
-                Gautos sutarčių įmokos apima apmokėtas metinių sutarčių įmokas ir mėnesines papildomų
-                užsiėmimų sąskaitas pagal apmokėjimo datą. Jos nepriskiriamos konkrečiam mokytojui ir
-                nėra už šio laikotarpio užsiėmimus uždirbtų pajamų ar pelno rodiklis.
-              </p>
-            ) : null}
-          </div>
-        ) : null}
 
         {/* Highlights */}
         {!isSchool && tutorStats.length > 1 && (
@@ -524,5 +582,194 @@ export default function CompanyStats() {
         </div>
       </div>
     </>
+  );
+}
+
+function SchoolActivityStatsView({
+  activity,
+  tutorStats,
+  filterStartDate,
+  filterEndDate,
+  onStartDateChange,
+  onEndDateChange,
+  onApplyRange,
+  onClear,
+}: {
+  activity: SchoolActivitySummary;
+  tutorStats: TutorStat[];
+  filterStartDate: Date | null;
+  filterEndDate: Date | null;
+  onStartDateChange: (date: Date | null) => void;
+  onEndDateChange: (date: Date | null) => void;
+  onApplyRange: (start: Date, end: Date) => void;
+  onClear: () => void;
+}) {
+  const { t } = useTranslation();
+  const cards = [
+    {
+      label: t('schoolStats.scheduled'),
+      value: activity.scheduled,
+      sub: t('schoolStats.meetingsOnce'),
+      icon: CalendarClock,
+      tone: 'bg-indigo-100 text-indigo-700',
+    },
+    {
+      label: t('schoolStats.completed'),
+      value: activity.completed,
+      sub: t('schoolStats.confirmedHeld'),
+      icon: CheckCircle2,
+      tone: 'bg-emerald-100 text-emerald-700',
+    },
+    {
+      label: t('schoolStats.attendance'),
+      value: activity.attendanceRate === null ? '–' : `${activity.attendanceRate}%`,
+      sub: t('schoolStats.confirmedRatio', {
+        attended: activity.attendedStudents,
+        confirmed: activity.confirmedAttendance,
+      }),
+      icon: UserCheck,
+      tone: 'bg-cyan-100 text-cyan-700',
+    },
+    {
+      label: t('schoolStats.absentChildren'),
+      value: activity.absentStudents,
+      sub: t('schoolStats.childRecords'),
+      icon: UserX,
+      tone: 'bg-rose-100 text-rose-700',
+    },
+    {
+      label: t('schoolStats.cancelled'),
+      value: activity.cancelled,
+      sub: t('schoolStats.meetingsOnce'),
+      icon: AlertTriangle,
+      tone: 'bg-gray-100 text-gray-700',
+    },
+    {
+      label: t('schoolStats.unconfirmed'),
+      value: activity.unconfirmedStudents,
+      sub: t('schoolStats.reviewAttendance'),
+      icon: CircleAlert,
+      tone: 'bg-amber-100 text-amber-700',
+    },
+  ];
+
+  return (
+    <div className="mx-auto max-w-6xl space-y-6 px-1 sm:px-0">
+      <header>
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900">{t('compStats.pageTitle')}</h1>
+        <p className="mt-1 text-sm text-gray-500">{t('schoolStats.subtitle')}</p>
+      </header>
+
+      <DateRangeFilter
+        className="space-y-3 border-gray-100 bg-white/80 p-4 shadow-sm sm:p-5"
+        startDate={filterStartDate}
+        endDate={filterEndDate}
+        onStartDateChange={onStartDateChange}
+        onEndDateChange={onEndDateChange}
+        onApplyRange={onApplyRange}
+        onSearch={() => {
+          if (filterStartDate && filterEndDate) onApplyRange(filterStartDate, filterEndDate);
+        }}
+        onClear={onClear}
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {cards.map(({ label, value, sub, icon: Icon, tone }) => (
+          <div key={label} className="flex min-w-0 items-center gap-4 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${tone}`}>
+              <Icon className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-2xl font-bold text-gray-900">{value}</p>
+              <p className="text-xs font-medium leading-4 text-gray-600">{label}</p>
+              <p className="mt-0.5 text-xs leading-4 text-gray-400">{sub}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-sm leading-6 text-blue-900">
+        {t('schoolStats.methodExplanation')}
+      </div>
+
+      <section className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <div className="border-b border-gray-100 px-5 py-4">
+          <h2 className="font-semibold text-gray-900">{t('schoolStats.byTeacher')}</h2>
+          <p className="mt-0.5 text-xs text-gray-500">{t('schoolStats.byTeacherHint')}</p>
+        </div>
+        {tutorStats.length === 0 ? (
+          <div className="p-8 text-center text-sm text-gray-400">{t('compStats.dataEmpty')}</div>
+        ) : (
+          <>
+            <div className="divide-y divide-gray-100 md:hidden">
+              {tutorStats.map(stat => (
+                <div key={stat.id} className="space-y-3 p-4">
+                  <p className="font-semibold text-gray-900">{stat.full_name}</p>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <SchoolTeacherMetric label={t('schoolStats.scheduledShort')} value={stat.scheduledSessions} />
+                    <SchoolTeacherMetric label={t('schoolStats.completedShort')} value={stat.completedSessions} />
+                    <SchoolTeacherMetric label={t('schoolStats.attendanceShort')} value={stat.attendanceRate === null ? '–' : `${stat.attendanceRate}%`} />
+                    <SchoolTeacherMetric label={t('schoolStats.absentShort')} value={stat.attendanceAbsent} tone="text-rose-700" />
+                    <SchoolTeacherMetric label={t('schoolStats.cancelledShort')} value={stat.totalCancelled} />
+                    <SchoolTeacherMetric label={t('schoolStats.unconfirmedShort')} value={stat.attendanceUnconfirmed} tone="text-amber-700" />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <th className="px-5 py-3 text-left">{t('role.staffSchool')}</th>
+                    <th className="px-4 py-3 text-right">{t('schoolStats.scheduledShort')}</th>
+                    <th className="px-4 py-3 text-right">{t('schoolStats.completedShort')}</th>
+                    <th className="px-4 py-3 text-right">{t('schoolStats.attendanceShort')}</th>
+                    <th className="px-4 py-3 text-right">{t('schoolStats.absentShort')}</th>
+                    <th className="px-4 py-3 text-right">{t('schoolStats.cancelledShort')}</th>
+                    <th className="px-5 py-3 text-right">{t('schoolStats.unconfirmedShort')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {tutorStats.map(stat => (
+                    <tr key={stat.id} className="hover:bg-gray-50/60">
+                      <td className="px-5 py-3 font-medium text-gray-900">{stat.full_name}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-gray-800">{stat.scheduledSessions}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-emerald-700">{stat.completedSessions}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-cyan-700">
+                        {stat.attendanceRate === null ? '–' : `${stat.attendanceRate}%`}
+                        <span className="ml-1 text-xs font-normal text-gray-400">
+                          ({stat.attendanceJoined}/{stat.attendanceJoined + stat.attendanceAbsent})
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-rose-700">{stat.attendanceAbsent}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{stat.totalCancelled}</td>
+                      <td className="px-5 py-3 text-right font-semibold text-amber-700">{stat.attendanceUnconfirmed}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function SchoolTeacherMetric({
+  label,
+  value,
+  tone = 'text-gray-900',
+}: {
+  label: string;
+  value: string | number;
+  tone?: string;
+}) {
+  return (
+    <div className="rounded-xl bg-gray-50 p-2">
+      <p className={`font-semibold ${tone}`}>{value}</p>
+      <p className="mt-0.5 text-[11px] text-gray-500">{label}</p>
+    </div>
   );
 }

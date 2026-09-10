@@ -10,7 +10,7 @@ it('refuses ambiguous, archived, placeholder and parent-owned contact matches in
       CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql AS $$ SELECT '{"email":"child@example.test"}'::jsonb $$;
       CREATE TABLE students(id uuid,linked_user_id uuid,full_name text,email text,detached_at timestamptz);
       CREATE TABLE parent_profiles(user_id uuid); CREATE TABLE organization_admins(user_id uuid);`);
-    await db.exec(readFileSync('supabase/migrations/20260910172000_unambiguous_student_email_link.sql', 'utf8'));
+    await db.exec(readFileSync('supabase/migrations/20260909010000_unambiguous_student_email_link.sql', 'utf8'));
     const lookup = async () => (await db.query("select * from get_student_by_email_for_linking('child@example.test')")).rows;
     await db.exec("insert into students values ('00000000-0000-4000-8000-000000000002',null,'Kotryna','child@example.test',null)");
     expect(await lookup()).toHaveLength(1);

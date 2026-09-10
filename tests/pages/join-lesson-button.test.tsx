@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import JoinLessonButton, { joinOpensAtLabel } from '@/components/JoinLessonButton';
+import { enrichSessionMeetingLink } from '@/lib/meetingLink';
 
 vi.mock('@/lib/joinTracking', () => ({ recordJoinClick: vi.fn() }));
 
@@ -30,6 +31,26 @@ describe('JoinLessonButton', () => {
     const link = screen.getByRole('link', { name: 'Prisijungti' });
     expect(link.getAttribute('href')).toBe('https://meet.google.com/abc-defg-hij');
     expect(link.getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('shows the tutor personal link to the student when the session has no stored link', () => {
+    const studentSession = enrichSessionMeetingLink(
+      {
+        ...session(new Date('2026-09-07T10:20:00+03:00')),
+        meeting_link: null,
+      },
+      { tutorPersonalLink: 'meet.google.com/tutor-room' },
+    );
+
+    render(
+      <JoinLessonButton session={studentSession}>
+        Prisijungti
+      </JoinLessonButton>,
+    );
+
+    expect(screen.getByRole('link', { name: 'Prisijungti' }).getAttribute('href')).toBe(
+      'https://meet.google.com/tutor-room',
+    );
   });
 
   it('stays inert for a lesson on another day and says when it opens', () => {

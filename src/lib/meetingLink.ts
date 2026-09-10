@@ -2,6 +2,19 @@
  * Lesson join link priority for org tutors: tutor personal link overrides subject default.
  * Student-specific link still wins when explicitly set on the student record.
  */
+export function normalizeMeetingLinkValue(value: string | null | undefined): string | null {
+  const trimmed = String(value || '').trim();
+  return trimmed || null;
+}
+
+/** Compare the requested value with the row returned by PostgREST after update. */
+export function meetingLinkWasPersisted(
+  requested: string | null | undefined,
+  persisted: string | null | undefined,
+): boolean {
+  return normalizeMeetingLinkValue(requested) === normalizeMeetingLinkValue(persisted);
+}
+
 export function resolveLessonMeetingLink(opts: {
   subjectLink?: string | null;
   tutorPersonalLink?: string | null;

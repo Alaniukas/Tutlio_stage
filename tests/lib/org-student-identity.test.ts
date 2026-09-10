@@ -28,6 +28,24 @@ describe('orgStudentIdentity', () => {
     ).toBe('e:org1:child@example.com:ona');
   });
 
+  it('groups partial duplicate rows by payer email and child name', () => {
+    const linked = {
+      id: 'linked',
+      organization_id: 'org1',
+      full_name: 'Marija Bukataja',
+      email: 'child@example.test',
+      payer_email: 'parent@example.test',
+      linked_user_id: 'student-user',
+    };
+    const duplicate = {
+      id: 'duplicate',
+      organization_id: 'org1',
+      full_name: 'Marija Bukataja',
+      payer_email: 'parent@example.test',
+    };
+    expect(orgStudentIdentityGroupKey(linked)).toBe(orgStudentIdentityGroupKey(duplicate));
+  });
+
   it('falls back to row id when no link or email', () => {
     expect(orgStudentIdentityGroupKey({ id: 'row-99' })).toBe('s:row-99');
   });

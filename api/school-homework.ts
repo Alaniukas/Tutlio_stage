@@ -309,7 +309,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .maybeSingle();
     if (!session) return res.status(404).json({ error: 'Pamoka nerasta' });
     const memberGroupIds = await loadMemberGroupIds(supabase, studentId);
-    if (!sessionAllowedForStudent(session as SessionRow, memberGroupIds)) {
+    if (!sessionAllowedForStudent(session as unknown as SessionRow, memberGroupIds)) {
       return res.status(403).json({ error: 'Nuoroda negalioja' });
     }
 

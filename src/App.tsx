@@ -68,6 +68,7 @@ const AdminPanel = lazy(() => import('@/pages/AdminPanel'));
 const CompanyLogin = lazy(() => import('@/pages/CompanyLogin'));
 const CompanyLayout = lazy(() => import('@/components/CompanyLayout'));
 const CompanyDashboard = lazy(() => import('@/pages/company/CompanyDashboard'));
+const SchoolDashboard = lazy(() => import('@/pages/company/SchoolDashboard'));
 const CompanyTutors = lazy(() => import('@/pages/company/CompanyTutors'));
 const CompanyStudents = lazy(() => import('@/pages/company/CompanyStudents'));
 const CompanyWaitlist = lazy(() => import('@/pages/company/CompanyWaitlist'));
@@ -449,7 +450,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/team" element={<OrgPermissionRoute permission="team.view" editPermission="team.edit"><CompanyTeam /></OrgPermissionRoute>} />
             <Route path="/company/groups" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyClassGroups /></OrgPermissionRoute>} />
 
-            <Route path="/school" element={<OrgPermissionRoute permission="dashboard.view"><CompanyDashboard /></OrgPermissionRoute>} />
+            <Route path="/school" element={<OrgPermissionRoute permission="dashboard.view"><SchoolDashboard /></OrgPermissionRoute>} />
             <Route path="/school/tutors" element={<OrgPermissionRoute permission="tutors.view" editPermission="tutors.edit"><CompanyTutors /></OrgPermissionRoute>} />
             <Route path="/school/students" element={<OrgPermissionRoute permission="students.view" editPermission="students.edit"><CompanyStudents /></OrgPermissionRoute>} />
             <Route path="/school/waitlist" element={<OrgPermissionRoute permission="students.view" editPermission="students.edit"><CompanyWaitlist /></OrgPermissionRoute>} />

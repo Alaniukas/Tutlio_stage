@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,7 +30,7 @@ import {
   type TutorSeesContactMode,
   type StudentSeesTutorContactMode,
 } from '@/lib/orgContactVisibility';
-import { getCached, setCache } from '@/lib/dataCache';
+import { getCached, invalidateCache, setCache } from '@/lib/dataCache';
 import { LOCALE_NAMES, type Locale } from '@/lib/i18n/core';
 import { selectableLocales } from '@/lib/i18n/localeRelease';
 import { cn } from '@/lib/utils';
@@ -41,6 +41,10 @@ import { isProKlaseOrg } from '@/lib/marketMoney';
 import { parseOrgTrialPolicy } from '@/lib/orgTrialPolicy';
 import { Checkbox } from '@/components/ui/checkbox';
 import { parseEmailOptOutList, toggleEmailOptOut, type EmailOptOutKey } from '@/lib/emailNotificationOptOut';
+import {
+  resolveDefaultTutorPayForSave,
+  tutorIdsUsingPreviousDefaultPay,
+} from '@/lib/orgTutorDefaultPay';
 
 type TrialCommentMode = 'student_and_parent' | 'internal_only';
 
@@ -99,6 +103,7 @@ export default function CompanySettings() {
   const [saving, setSaving] = useState(false);
   const [orgId, setOrgId] = useState<string | null>(sc?.orgId ?? null);
   const [settings, setSettings] = useState(sc?.settings ?? { ...DEFAULT_SETTINGS });
+  const defaultTutorPayEditedRef = useRef(false);
   const [lessonEditScope, setLessonEditScope] = useState<OrgLessonEditScope>(
     sc?.lessonEditScope ?? { ...EMPTY_ORG_LESSON_SCOPE }
   );
@@ -155,10 +160,10 @@ export default function CompanySettings() {
   const [adminEmailOptOut, setAdminEmailOptOut] = useState<EmailOptOutKey[]>([]);
   const [orgLocale, setOrgLocale] = useState<string>(sc?.orgLocale ?? '');
 
-  useEffect(() => { if (!getCached('company_settings')) fetchSettings(); }, []);
+  useEffect(() => { void fetchSettings({ silent: Boolean(sc) }); }, []);
 
-  const fetchSettings = async () => {
-    if (!getCached('company_settings')) setLoading(true);
+  const fetchSettings = async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       setLoading(false);
@@ -269,7 +274,12 @@ export default function CompanySettings() {
       setContactEmail(nextContactEmail);
       setPublicName(nextPublicName);
       setOrgLocale(typeof (orgData as any)?.preferred_locale === 'string' ? (orgData as any).preferred_locale : '');
-      setSettings(nextSettings);
+      setSettings((current: typeof DEFAULT_SETTINGS) => ({
+        ...nextSettings,
+        company_commission_percent: defaultTutorPayEditedRef.current
+          ? current.company_commission_percent
+          : nextSettings.company_commission_percent,
+      }));
       setLessonEditScope(nextLessonEditScope);
     }
 
@@ -734,14 +744,28 @@ export default function CompanySettings() {
     // Merge onto the freshest features JSONB, not the (possibly cached) mount
     // snapshot — flags toggled elsewhere (e.g. AdminPanel) must survive a save.
     let baseFeatures: Record<string, unknown> = orgFeaturesSnapshot;
-    const { data: freshOrg } = await supabase
+    let previousDefaultTutorPay = settings.company_commission_percent;
+    const { data: freshOrg, error: freshOrgError } = await supabase
       .from('organizations')
-      .select('features')
+      .select('features, default_company_commission_percent')
       .eq('id', orgId)
       .single();
+    if (freshOrgError || !freshOrg) {
+      setToastMessage({ message: t('compSet.errorSaving'), type: 'error' });
+      setSaving(false);
+      return;
+    }
     if (freshOrg?.features && typeof freshOrg.features === 'object' && !Array.isArray(freshOrg.features)) {
       baseFeatures = freshOrg.features as Record<string, unknown>;
     }
+    if (freshOrg && Number.isFinite(Number(freshOrg.default_company_commission_percent))) {
+      previousDefaultTutorPay = Number(freshOrg.default_company_commission_percent);
+    }
+    const nextDefaultTutorPay = resolveDefaultTutorPayForSave(
+      settings.company_commission_percent,
+      previousDefaultTutorPay,
+      defaultTutorPayEditedRef.current,
+    );
 
     const mergedFeatures: Record<string, unknown> = {
       ...baseFeatures,
@@ -768,7 +792,7 @@ export default function CompanySettings() {
       admin_email_opt_out: adminEmailOptOut,
     };
 
-    const { error } = await supabase
+    const { data: savedOrg, error } = await supabase
       .from('organizations')
       .update({
         default_cancellation_hours: settings.cancellation_hours,
@@ -777,19 +801,23 @@ export default function CompanySettings() {
         default_reminder_tutor_hours: settings.reminder_tutor_hours,
         default_break_between_lessons: settings.break_between_lessons,
         default_min_booking_hours: settings.min_booking_hours,
-        default_company_commission_percent: settings.company_commission_percent,
+        default_company_commission_percent: nextDefaultTutorPay,
         org_tutor_lesson_edit: lessonEditScope,
         org_tutors_can_edit_lesson_settings: anyLessonEdit,
         features: mergedFeatures,
         preferred_locale: orgLocale || null,
       })
-      .eq('id', orgId);
+      .eq('id', orgId)
+      .select('id, default_company_commission_percent')
+      .single();
 
-    if (!error) {
+    const defaultPayPersisted = savedOrg
+      && Number(savedOrg.default_company_commission_percent) === nextDefaultTutorPay;
+    if (!error && defaultPayPersisted) {
       setOrgFeaturesSnapshot(mergedFeatures);
     }
 
-    if (error) {
+    if (error || !defaultPayPersisted) {
       setToastMessage({ message: t('compSet.errorSaving'), type: 'error' });
       setSaving(false);
       return;
@@ -798,9 +826,10 @@ export default function CompanySettings() {
     const tutorRows = await getOrgVisibleTutors(
       supabase as any,
       orgId,
-      'id, email',
+      'id, email, company_commission_percent',
     );
     const tutorIds = tutorRows.map((p) => p.id);
+    const tutorIdsFollowingDefault = tutorIdsUsingPreviousDefaultPay(tutorRows, previousDefaultTutorPay);
 
     if (tutorIds.length > 0) {
       const { error: tutorsUpdateError } = await supabase
@@ -812,7 +841,6 @@ export default function CompanySettings() {
           reminder_tutor_hours: settings.reminder_tutor_hours,
           break_between_lessons: settings.break_between_lessons,
           min_booking_hours: settings.min_booking_hours,
-          company_commission_percent: settings.company_commission_percent,
           enable_manual_student_payments: enableManualStudentPayments,
         })
         .in('id', tutorIds);
@@ -822,6 +850,22 @@ export default function CompanySettings() {
           message: t('compSet.savedButTutorsFailed'),
           type: 'error',
         });
+        setSaving(false);
+        return;
+      }
+    }
+
+    if (
+      nextDefaultTutorPay !== previousDefaultTutorPay
+      && tutorIdsFollowingDefault.length > 0
+    ) {
+      const { error: tutorPayUpdateError } = await supabase
+        .from('profiles')
+        .update({ company_commission_percent: nextDefaultTutorPay })
+        .in('id', tutorIdsFollowingDefault);
+
+      if (tutorPayUpdateError) {
+        setToastMessage({ message: t('compSet.savedButTutorsFailed'), type: 'error' });
         setSaving(false);
         return;
       }
@@ -843,7 +887,7 @@ export default function CompanySettings() {
         reminder_tutor_hours: settings.reminder_tutor_hours,
         break_between_lessons: settings.break_between_lessons,
         min_booking_hours: settings.min_booking_hours,
-        company_commission_percent: settings.company_commission_percent,
+        company_commission_percent: nextDefaultTutorPay,
       },
       lessonEditScope,
       orgFeaturesSnapshot: mergedFeatures,
@@ -868,7 +912,13 @@ export default function CompanySettings() {
       orgTutors,
       subjects,
     });
+    invalidateCache('company_tutors');
 
+    defaultTutorPayEditedRef.current = false;
+    setSettings((current: typeof DEFAULT_SETTINGS) => ({
+      ...current,
+      company_commission_percent: nextDefaultTutorPay,
+    }));
     setSaving(false);
   };
 
@@ -1542,8 +1592,12 @@ export default function CompanySettings() {
                   <Input
                     type="number"
                     min={0}
+                    step={0.5}
                     value={settings.company_commission_percent}
-                    onChange={(e) => setSettings({ ...settings, company_commission_percent: parseInt(e.target.value) || 0 })}
+                    onChange={(e) => {
+                      defaultTutorPayEditedRef.current = true;
+                      setSettings({ ...settings, company_commission_percent: Number(e.target.value) || 0 });
+                    }}
                     className="rounded-xl w-32"
                   />
                   <span className="text-sm text-gray-500">{t('compSet.eurPerLesson')}</span>

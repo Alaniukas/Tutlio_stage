@@ -1,9 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
   enrichSessionMeetingLink,
+  meetingLinkWasPersisted,
+  normalizeMeetingLinkValue,
   resolveLessonMeetingLink,
   resolveSessionMeetingLink,
 } from '../../src/lib/meetingLink';
+
+describe('meeting-link persistence', () => {
+  it('normalizes whitespace and empty database values', () => {
+    expect(normalizeMeetingLinkValue('  https://meet.example/room  ')).toBe('https://meet.example/room');
+    expect(normalizeMeetingLinkValue('   ')).toBeNull();
+    expect(meetingLinkWasPersisted('', null)).toBe(true);
+  });
+
+  it('rejects a stale value returned after an update', () => {
+    expect(meetingLinkWasPersisted('https://meet.example/new', 'https://meet.example/old')).toBe(false);
+  });
+});
 
 describe('resolveSessionMeetingLink', () => {
   it('keeps explicit session link', () => {

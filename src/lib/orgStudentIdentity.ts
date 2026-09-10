@@ -10,6 +10,7 @@ export type OrgStudentIdentityRow = {
   organization_id?: string | null;
   full_name?: string | null;
   grade?: string | null;
+  payer_email?: string | null;
 };
 
 /** Extra contact fields for org admin student pickers (schedule, waitlist, …). */
@@ -32,6 +33,11 @@ function normalizeStudentIdentityName(fullName: string | null | undefined): stri
  */
 export function orgStudentIdentityGroupKey(student: OrgStudentIdentityRow): string {
   const name = normalizeStudentIdentityName(student.full_name);
+  const payerEmail = String(student.payer_email ?? '').trim().toLowerCase();
+  if (payerEmail && name) {
+    const org = student.organization_id ?? 'no-org';
+    return `p:${org}:${payerEmail}:${name}`;
+  }
   if (student.linked_user_id) return `u:${student.linked_user_id}:${name}`;
   const email = String(student.email ?? '').trim().toLowerCase();
   if (email) {

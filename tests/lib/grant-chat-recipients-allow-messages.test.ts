@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const grantMigration = readFileSync(
-  resolve(process.cwd(), 'supabase/migrations/20260907123000_grant_chat_recipients_allow_messages.sql'),
+  resolve(process.cwd(), 'supabase/migrations/20260907123727_grant_chat_recipients_allow_messages.sql'),
   'utf8',
 ).replace(/\r\n/g, '\n');
 
@@ -20,8 +20,8 @@ describe('grant chat_recipients_allow_messages', () => {
     expect(grantMigration).toContain(
       'GRANT EXECUTE ON FUNCTION private.chat_recipients_allow_messages(uuid) TO authenticated, service_role;',
     );
-    expect(grantMigration).toContain(
-      'REVOKE ALL ON FUNCTION private.chat_recipients_allow_messages(uuid) FROM PUBLIC, anon;',
+    expect(seatsMigration).toContain(
+      'REVOKE ALL ON FUNCTION private.chat_recipients_allow_messages(uuid) FROM PUBLIC;',
     );
   });
 

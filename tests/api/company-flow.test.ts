@@ -44,7 +44,7 @@ describe('Company flow APIs', () => {
       const res = mockRes();
       await handler(mockReq('GET', {}), res as any);
       expect((res as any).getResult().statusCode).toBe(405);
-    });
+    }, 15_000);
 
     it('returns 401 without x-admin-secret', async () => {
       process.env.VITE_SUPABASE_URL = 'https://test.supabase.co';

@@ -5062,9 +5062,7 @@ export const itOverrides: Record<string, string> = {
   "support.contact.back": "Torna all'assistenza IA",
 };
 
-export const it: Record<string, string> = {
-  ...en,
-  ...itOverrides,
+Object.assign(itOverrides, {
   'nav.forAgencies': 'Agenzie di tutor',
   "compStu.inviteParentFirst": "Prima il genitore",
   "compStu.inviteParentFirstHint": "Viene inviato solo l'invito al portale del genitore. Sarà lui ad aggiungere in seguito il figlio e i dati dell'account.",
@@ -5128,6 +5126,7 @@ export const it: Record<string, string> = {
   "compStu.schoolYear": "Anno scolastico",
   "compStu.municipality": "Comune",
   "compStu.debtYes": "Sì",
+  "compStu.debtNo": "No",
   "compStu.hasDebtBadge": "Debito",
   "compStu.markAsLeft": "Segna come ritirato",
   "compStu.leaveStudentTitle": "Segna lo studente come ritirato",
@@ -5147,7 +5146,7 @@ export const it: Record<string, string> = {
   "compStu.studentAddedWithLessonsFull": "Studente aggiunto: {total} lezioni programmate (tutte a prezzo pieno).",
   "compStu.studentAddedLessonFailed": "Studente aggiunto, ma non è stato possibile riservare la lezione.",
   "compTut.payBySubject": "Compenso per materia",
-  "compTut.payBySubjectHint": "Lascia vuoto per usare la tariffa predefinita. Utile quando il compenso cambia in base alla materia, ad esempio fino alla terza media rispetto alle superiori.",
+  "compTut.payBySubjectHint": "Lascia vuoto per usare la tariffa predefinita. Utile quando il compenso cambia in base alla materia, ad esempio fino alla classe 10 rispetto alle classi 10–12.",
   "companyDash.paymentFollowups": "Solleciti di pagamento",
   "orgFinance.payUsesSubjectRates": "Il compenso è calcolato per materia. Tariffa predefinita: {amount} € a lezione.",
   "stats.cancellationPartStudent": "studente: {count}",
@@ -5373,9 +5372,12 @@ export const it: Record<string, string> = {
   "compStu.pkgEditTotal": "Totale dopo la modifica: {amount}",
   "stuPay.pendingLessonsTitle": "Lezioni",
   "stuPay.lessonFallback": "Lezione",
+  "role.staff": "Tutor",
   "role.staffPlural": "Tutor",
   "role.staffSchool": "Insegnante",
   "role.staffSchoolPlural": "Insegnanti",
+  "stats.cancellationPartTutor": "tutor: {count}",
+  "stats.cancellationPartAdmin": "amministratore: {count}",
   "role.student": "Studente",
   "companyNav.groups": "Gruppi",
   "companyNav.recordings": "Registrazioni",
@@ -5565,4 +5567,6 @@ export const it: Record<string, string> = {
   "compare.customChip2": "Regole di compenso",
   "compare.customChip3": "Link di accettazione per i genitori",
   "compare.customChip4": "Portali con il tuo marchio",
-};
+});
+
+export const it: Record<string, string> = { ...en, ...itOverrides };

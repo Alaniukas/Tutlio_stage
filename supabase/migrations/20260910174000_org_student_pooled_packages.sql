@@ -5,9 +5,9 @@ ALTER TABLE public.lesson_packages
   ADD COLUMN IF NOT EXISTS pool_email_claimed_at timestamptz,
   ADD COLUMN IF NOT EXISTS pool_email_sent_at timestamptz;
 
--- Preview tokens and quoted session ids are server-only fulfillment state. Keeping
--- them outside lesson_packages prevents existing row policies from exposing a
--- child's sibling tutor rows or schedule identifiers through direct table reads.
+-- Preview tokens and quoted session ids are server-only fulfillment state. New
+-- writes live in this private table; the restrictive policy below also protects
+-- rows created by the already-applied legacy migration.
 CREATE TABLE IF NOT EXISTS public.pooled_package_quotes (
   package_id uuid PRIMARY KEY REFERENCES public.lesson_packages(id) ON DELETE CASCADE,
   preview_token text NOT NULL,
@@ -16,6 +16,17 @@ CREATE TABLE IF NOT EXISTS public.pooled_package_quotes (
 );
 ALTER TABLE public.pooled_package_quotes ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.pooled_package_quotes FROM PUBLIC, anon, authenticated;
+
+-- Preserve pending checkouts created before quote state moved off the package
+-- row. The legacy columns remain as a recoverable copy but become unreachable to
+-- authenticated direct reads once pooled_package_direct_read_guard is installed.
+INSERT INTO public.pooled_package_quotes(package_id, preview_token, session_ids, created_at)
+SELECT id, pool_preview_token, pool_session_ids, created_at
+FROM public.lesson_packages
+WHERE pool_organization_id IS NOT NULL
+  AND pool_preview_token IS NOT NULL
+  AND pool_session_ids IS NOT NULL
+ON CONFLICT (package_id) DO NOTHING;
 CREATE UNIQUE INDEX IF NOT EXISTS lesson_packages_pool_month_unique
   ON public.lesson_packages(pool_organization_id, pool_identity_key, billing_period_end)
   WHERE pool_organization_id IS NOT NULL AND payment_status <> 'cancelled';
@@ -213,11 +224,22 @@ CREATE TRIGGER apply_paid_pooled_package AFTER UPDATE OF paid ON public.lesson_p
 FOR EACH ROW EXECUTE FUNCTION public.apply_paid_pooled_package();
 
 DROP POLICY IF EXISTS pooled_package_member_read ON public.lesson_packages;
+DROP POLICY IF EXISTS pooled_package_direct_read_guard ON public.lesson_packages;
+CREATE POLICY pooled_package_direct_read_guard ON public.lesson_packages
+  AS RESTRICTIVE FOR SELECT TO authenticated
+  USING (pool_organization_id IS NULL);
 
 -- The definer function returns a fixed safe projection and performs its own
 -- caller check. No lesson_packages policy is added, so direct reads cannot leak
 -- internal pooled identity or quote state to another tutor pairing.
-CREATE OR REPLACE FUNCTION public.get_pooled_packages_for_student(p_student_id uuid)
+-- PostgreSQL cannot change a function's return shape with CREATE OR REPLACE.
+-- Preserve the historical implementation under an inaccessible audit name so
+-- dependent object OIDs remain valid while callers resolve to the safe version.
+ALTER FUNCTION public.get_pooled_packages_for_student(uuid)
+  RENAME TO get_pooled_packages_for_student_legacy_20260908;
+REVOKE ALL ON FUNCTION public.get_pooled_packages_for_student_legacy_20260908(uuid)
+  FROM PUBLIC, anon, authenticated, service_role;
+CREATE FUNCTION public.get_pooled_packages_for_student(p_student_id uuid)
 RETURNS TABLE (
   id uuid,
   tutor_id uuid,

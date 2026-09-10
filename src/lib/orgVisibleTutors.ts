@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { inviteEmailsMatch, type OrgTutorInviteLink } from './tutorInviteClaim';
+import { inviteEmailsMatch, type OrgTutorInviteLink } from './tutorInviteClaim.js';
 
 export type OrgTutorRow = {
   id: string;
@@ -16,6 +16,7 @@ export type OrgTutorRow = {
   company_commission_percent?: number | null;
   company_commission_by_subject?: Record<string, number> | null;
   personal_meeting_link?: string | null;
+  teaching_notes?: string | null;
 };
 
 /**

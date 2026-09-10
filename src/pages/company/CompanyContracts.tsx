@@ -108,6 +108,15 @@ interface Contract {
   additional_fee_purpose?: string | null;
   kind?: 'annual' | 'extra_lessons' | null;
   accepted_at?: string | null;
+  unit_price_eur?: number | null;
+  order_snapshot?: {
+    service_name?: string | null;
+    service_type?: 'group' | 'individual' | string | null;
+    schedule_label?: string | null;
+    group_name?: string | null;
+    tutor_name?: string | null;
+  } | null;
+  class_group?: { name?: string | null; tutor?: { full_name?: string | null } | null } | null;
   signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null; manually_marked_at?: string | null; signed_pdf_path?: string | null }[];
   installments?: { installment_number: number; amount: number; due_date: string | null; payment_status: string | null }[];
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null; media_publicity_consent?: string | null };
@@ -2194,7 +2203,17 @@ export default function CompanyContracts() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs text-gray-400 tabular-nums">{contractIdx + 1}.</span>
-                        <p className="font-semibold text-gray-900">{c.student?.full_name || '—'}</p>
+                        <p className="font-semibold text-gray-900">
+                          {isExtraLessonsContractKind(c.kind)
+                            ? [
+                                c.student?.full_name || '—',
+                                c.order_snapshot?.service_name,
+                                c.order_snapshot?.service_type === 'group'
+                                  ? 'grupinis užsiėmimas'
+                                  : 'individualus užsiėmimas',
+                              ].filter(Boolean).join(' – ')
+                            : c.student?.full_name || '—'}
+                        </p>
                         {c.kind === 'extra_lessons' && (
                           <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium bg-teal-50 text-teal-800">
                             {tr('school.extra.kindBadge')}
@@ -2204,7 +2223,8 @@ export default function CompanyContracts() {
                       </div>
                       <p className="text-sm text-gray-500 mt-1">
                         {c.contract_number && <span className="mr-3">Sutarties Nr. {c.contract_number}</span>}
-                        {tr('school.annualFee')} <span className="font-medium text-gray-700">&euro;{Number(c.annual_fee).toFixed(2)}</span>
+                        {isExtraLessonsContractKind(c.kind) ? tr('school.extra.monthlyFee') : tr('school.annualFee')}{' '}
+                        <span className="font-medium text-gray-700">&euro;{Number(c.annual_fee).toFixed(2)}</span>
                         {Number(c.additional_fee_amount || 0) > 0 && (
                           <span className="ml-3 text-gray-600">
                             + Papildomas: <span className="font-medium text-gray-700">&euro;{Number(c.additional_fee_amount).toFixed(2)}</span>
@@ -2214,6 +2234,21 @@ export default function CompanyContracts() {
                         {c.sent_at && <span className="ml-3">{tr('school.sent')} {new Date(c.sent_at).toLocaleDateString('lt-LT')}</span>}
                         {c.signed_at && <span className="ml-3">{tr('school.signed')} {new Date(c.signed_at).toLocaleDateString('lt-LT')}</span>}
                       </p>
+                      {isExtraLessonsContractKind(c.kind) && (
+                        <p className="mt-1 text-xs text-gray-500">
+                          {(c.order_snapshot?.tutor_name || c.class_group?.tutor?.full_name) && (
+                            <span className="mr-3">
+                              {tr('school.extra.teacherLabel')} {c.order_snapshot?.tutor_name || c.class_group?.tutor?.full_name}
+                            </span>
+                          )}
+                          {(c.order_snapshot?.group_name || c.class_group?.name) && (
+                            <span className="mr-3">
+                              {tr('school.extra.groupLabel')} {c.order_snapshot?.group_name || c.class_group?.name}
+                            </span>
+                          )}
+                          {c.order_snapshot?.schedule_label || null}
+                        </p>
+                      )}
                       {(c.installments || []).length > 0 && (
                         <p className="text-xs text-gray-500 mt-1">
                           <span className="font-medium text-gray-600">{tr('school.installmentsLabel')}</span>{' '}

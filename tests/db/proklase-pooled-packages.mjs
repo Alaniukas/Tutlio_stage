@@ -37,7 +37,21 @@ try {
       payment_status text, price numeric DEFAULT 29, lesson_package_id uuid REFERENCES lesson_packages(id),
       is_complimentary boolean DEFAULT false, is_makeup boolean DEFAULT false, is_late_cancelled boolean DEFAULT false);
   `);
+  await db.exec(await readFile(new URL('../../supabase/migrations/20260908170000_org_student_pooled_packages.sql', import.meta.url), 'utf8'));
+  await db.query(`INSERT INTO organizations(id) VALUES($1)`, [id(999)]);
+  await db.query(`INSERT INTO lesson_packages(
+      id,tutor_id,student_id,total_lessons,available_lessons,reserved_lessons,completed_lessons,
+      price_per_lesson,total_price,paid,payment_status,active,billing_period_start,billing_period_end,
+      pool_organization_id,pool_identity_key,pool_student_ids,pool_preview_token,pool_session_ids
+    ) VALUES($1,$2,$3,1,1,0,0,27,27,false,'pending',true,'2099-08-01','2099-08-31',$4,'legacy',$5,$6,$7)`,
+    [id(998),id(997),id(996),id(999),[id(996)],'legacy-preview',[id(995)]]);
   await db.exec(await readFile(new URL('../../supabase/migrations/20260910174000_org_student_pooled_packages.sql', import.meta.url), 'utf8'));
+  assert.deepEqual((await db.query(`SELECT preview_token,session_ids FROM pooled_package_quotes WHERE package_id=$1`, [id(998)])).rows[0],
+    {preview_token:'legacy-preview',session_ids:[id(995)]}, 'legacy checkout state must move to the private quote table');
+  assert.equal((await db.query(`SELECT count(*)::int AS count FROM pg_policies
+    WHERE schemaname='public' AND tablename='lesson_packages'
+      AND policyname='pooled_package_direct_read_guard' AND permissive='RESTRICTIVE'`)).rows[0].count, 1,
+    'a restrictive policy must block authenticated direct reads of legacy pooled rows');
   await db.query('INSERT INTO organizations VALUES ($1),($2)', [proOrgId, id(2)]);
   await db.query('INSERT INTO profiles VALUES ($1,$3),($2,$3),($4,$5)', [id(10), id(11), proOrgId, id(12), id(2)]);
   for (const [student, tutor, org, user, name] of [[20,10,proOrgId,50,'Same Child'],[21,11,proOrgId,50,'Same Child'],[22,10,proOrgId,51,'Different Child'],[23,12,id(2),50,'Same Child']]) {

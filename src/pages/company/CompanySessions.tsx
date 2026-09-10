@@ -59,7 +59,11 @@ import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { defaultStatsDateRange } from '@/lib/statsDateRange';
 import { schoolCalendarInstant, schoolDate } from '@/lib/schoolTime';
 import { fetchAllRows } from '@/lib/fetchAllRows';
-import { schoolMeetingCounts, schoolStudentAttendance } from '@/lib/schoolSessionMonitoring';
+import {
+  schoolActivitySummary,
+  schoolMeetingOccurrences,
+  schoolStudentAttendance,
+} from '@/lib/schoolSessionMonitoring';
 
 interface Session {
   id: string;
@@ -1631,78 +1635,157 @@ export default function CompanySessions() {
 }
 
 function SchoolSessionMonitoring({ sessions }: { sessions: Session[] }) {
-  const counts = schoolMeetingCounts(sessions);
+  const { t } = useTranslation();
+  const activity = schoolActivitySummary(sessions);
   const students = schoolStudentAttendance(sessions);
+  const attendanceRows = students.map(student => {
+    const confirmed = student.joined + student.noShow;
+    return {
+      ...student,
+      confirmed,
+      rate: confirmed > 0 ? Math.round((student.joined / confirmed) * 100) : null,
+    };
+  });
   const reasons = new Map<string, number>();
 
-  for (const session of sessions) {
-    if (session.status !== 'cancelled' && session.status !== 'no_show') continue;
-    const reason = session.status === 'cancelled'
-      ? session.cancellation_reason || 'Atšaukta, priežastis nenurodyta'
-      : session.no_show_reason === 'missed_join'
-        ? 'Mokinys neprisijungė per nustatytą laiką'
-        : session.no_show_reason || 'Pažymėtas mokinio neatvykimas';
-    reasons.set(reason, (reasons.get(reason) || 0) + 1);
+  for (const occurrence of schoolMeetingOccurrences(sessions)) {
+    if (occurrence.row.status === 'cancelled') {
+      const reason = occurrence.row.cancellation_reason || t('schoolDash.cancelledWithoutReason');
+      reasons.set(reason, (reasons.get(reason) || 0) + 1);
+    }
+    for (const session of occurrence.rows) {
+      if (session.status !== 'no_show') continue;
+      const reason = session.no_show_reason === 'missed_join'
+        ? t('schoolDash.missedJoinReason')
+        : session.no_show_reason || t('schoolDash.markedNoShowReason');
+      reasons.set(reason, (reasons.get(reason) || 0) + 1);
+    }
   }
 
   const summary = [
-    { label: 'Įvyko', count: counts.completed },
-    { label: 'Mokinių neatvykimai', count: students.reduce((sum, student) => sum + student.noShow, 0) },
-    { label: 'Atšaukta', count: counts.cancelled },
-    { label: 'Aktyvūs', count: counts.active },
+    { label: t('companyDash.planned'), count: activity.scheduled, tone: 'text-indigo-700 bg-indigo-50' },
+    { label: t('schoolDash.completed'), count: activity.completed, tone: 'text-emerald-700 bg-emerald-50' },
+    { label: t('schoolDash.upcoming'), count: activity.upcoming, tone: 'text-blue-700 bg-blue-50' },
+    { label: t('schoolDash.absentChildren'), count: activity.absentStudents, tone: 'text-rose-700 bg-rose-50' },
+    { label: t('schoolDash.cancelled'), count: activity.cancelled, tone: 'text-gray-700 bg-gray-50' },
+    { label: t('schoolDash.unconfirmedAttendance'), count: activity.unconfirmedStudents, tone: 'text-amber-700 bg-amber-50' },
   ];
 
   return (
-    <section className="space-y-3" aria-label="Užsiėmimų stebėsena">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {summary.map(({ label, count }) => (
-          <div key={label} className="rounded-xl border bg-white p-4">
+    <section className="space-y-4" aria-label={t('schoolDash.monitoringAria')}>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {summary.map(({ label, count, tone }) => (
+          <div key={label} className={`rounded-xl border p-4 ${tone}`}>
             <div className="text-2xl font-semibold">{count}</div>
-            <div className="text-sm text-gray-600">{label}</div>
+            <div className="text-sm">{label}</div>
           </div>
         ))}
       </div>
       <p className="text-xs text-gray-500">
-        Grupinis užsiėmimas skaičiuojamas vieną kartą. Mokinių neatvykimai skaičiuojami atskirai kiekvienam vaikui.
+        {t('schoolDash.attendanceExplanation')}
       </p>
       {reasons.size > 0 ? (
         <details className="rounded-xl border bg-white p-4">
-          <summary className="cursor-pointer font-medium">Neįvykimo priežastys (mokinių įrašai)</summary>
+          <summary className="cursor-pointer font-medium">{t('schoolDash.failureReasons')}</summary>
           <ul className="mt-3 space-y-1 text-sm">
             {[...reasons].map(([reason, count]) => <li key={reason}>{reason}: <strong>{count}</strong></li>)}
           </ul>
         </details>
       ) : null}
-      <details className="rounded-xl border bg-white p-4">
-        <summary className="cursor-pointer font-medium">Vaikų lankomumas ({students.length})</summary>
-        <p className="my-3 text-xs text-gray-500">
-          Pagal pasirinktus filtrus. Dalyvavimas fiksuojamas pagal prisijungimo nuorodos paspaudimą arba
-          mokytojo ar administratoriaus patvirtintą įvykimą. Vien automatiškai įvykusiu pažymėtas
-          užsiėmimas lankomumo nepatvirtina.
+      <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <div className="flex flex-col gap-1 border-b border-gray-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-semibold text-gray-900">{t('schoolStats.attendance')}</h2>
+            <p className="mt-0.5 text-xs text-gray-500">
+              {t('schoolDash.studentAttendanceSummary', {
+                count: students.length,
+                rate: activity.attendanceRate === null ? '–' : `${activity.attendanceRate}%`,
+              })}
+            </p>
+          </div>
+          <div className="text-xs text-gray-500">
+            {t('schoolDash.attendanceTotals', {
+              attended: activity.attendedStudents,
+              absent: activity.absentStudents,
+            })}
+          </div>
+        </div>
+        <p className="px-4 pt-3 text-xs text-gray-500">
+          {t('schoolDash.filteredAttendanceExplanation')}
         </p>
-        <div className="overflow-x-auto">
+        <div className="space-y-3 px-4 pb-4 pt-3 sm:hidden">
+          {attendanceRows.length === 0 ? (
+            <p className="p-6 text-center text-sm text-gray-400">{t('schoolDash.noAttendanceData')}</p>
+          ) : attendanceRows.map(student => (
+            <div key={student.id} className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
+              <p className="font-medium text-gray-900">{student.name}</p>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <SchoolAttendanceMetric
+                  label={t('schoolDash.attendance')}
+                  value={`${student.joined}/${student.confirmed}${student.rate === null ? '' : ` (${student.rate}%)`}`}
+                  tone="text-emerald-700"
+                />
+                <SchoolAttendanceMetric label={t('schoolDash.absentShort')} value={student.noShow} tone="text-rose-700" />
+                <SchoolAttendanceMetric label={t('schoolDash.cancelled')} value={student.cancelled} />
+                <SchoolAttendanceMetric label={t('schoolDash.unconfirmedShort')} value={student.unconfirmed} tone="text-amber-700" />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="hidden max-h-[32rem] overflow-auto px-4 pb-4 pt-3 sm:block">
           <table className="w-full text-left text-sm">
-            <thead>
-              <tr>
-                {['Mokinys', 'Dalyvavo', 'Neatvyko', 'Atšaukta', 'Nepatvirtinta'].map(label => (
-                  <th key={label} className="p-2">{label}</th>
+            <thead className="sticky top-0 bg-white">
+              <tr className="border-b text-xs uppercase tracking-wide text-gray-500">
+                {[
+                  t('common.student'),
+                  t('schoolDash.attendance'),
+                  t('schoolDash.absentShort'),
+                  t('schoolDash.cancelled'),
+                  t('schoolDash.unconfirmedShort'),
+                ].map(label => (
+                  <th key={label} className="p-2 font-semibold">{label}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {students.map(student => (
-                <tr key={student.id} className="border-t">
-                  <td className="p-2">{student.name}</td>
-                  <td className="p-2">{student.joined}</td>
-                  <td className="p-2">{student.noShow}</td>
-                  <td className="p-2">{student.cancelled}</td>
-                  <td className="p-2">{student.unconfirmed}</td>
-                </tr>
-              ))}
+              {attendanceRows.length === 0 ? (
+                <tr><td colSpan={5} className="p-8 text-center text-gray-400">{t('schoolDash.noAttendanceData')}</td></tr>
+              ) : attendanceRows.map(student => {
+                return (
+                  <tr key={student.id} className="border-b border-gray-50 last:border-0">
+                    <td className="p-2 font-medium text-gray-900">{student.name}</td>
+                    <td className="p-2">
+                      <span className="font-semibold text-emerald-700">{student.joined}</span>
+                      <span className="text-gray-400"> / {student.confirmed}</span>
+                      {student.rate !== null ? <span className="ml-1 text-xs text-gray-500">({student.rate}%)</span> : null}
+                    </td>
+                    <td className="p-2 font-medium text-rose-700">{student.noShow}</td>
+                    <td className="p-2 text-gray-700">{student.cancelled}</td>
+                    <td className="p-2 font-medium text-amber-700">{student.unconfirmed}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
-      </details>
+      </div>
     </section>
+  );
+}
+
+function SchoolAttendanceMetric({
+  label,
+  value,
+  tone = 'text-gray-800',
+}: {
+  label: string;
+  value: string | number;
+  tone?: string;
+}) {
+  return (
+    <div className="rounded-lg bg-white p-2">
+      <p className={`font-semibold ${tone}`}>{value}</p>
+      <p className="mt-0.5 text-gray-500">{label}</p>
+    </div>
   );
 }

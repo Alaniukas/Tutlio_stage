@@ -5143,7 +5143,7 @@ export const jaOverrides: Record<string, string> = {
   "compStu.studentAddedWithLessonsFull": "受講者を追加しました: レッスン{total}回を予定（すべて通常料金）。",
   "compStu.studentAddedLessonFailed": "受講者は追加しましたが、レッスンを予約できませんでした。",
   "compTut.payBySubject": "科目別の報酬",
-  "compTut.payBySubjectHint": "既定の単価を使う場合は空欄にしてください。科目によって報酬が変わるとき（例: 中学生と高校生）に使います。",
+  "compTut.payBySubjectHint": "既定の単価を使う場合は空欄にしてください。科目によって報酬が変わるとき（例: 10年生までと10–12年生）に使います。",
   "companyDash.paymentFollowups": "支払いのフォローアップ",
   "orgFinance.payUsesSubjectRates": "報酬は科目ごとに計算されます。既定の単価: 1レッスンあたり {amount} €。",
   "stats.cancellationPartStudent": "受講者: {count}",

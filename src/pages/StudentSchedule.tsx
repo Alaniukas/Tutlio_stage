@@ -8,6 +8,7 @@ import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { startPerlasPayment } from '@/lib/perlasPay';
 import { dedupeAsync } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
+import { enrichSessionMeetingLink } from '@/lib/meetingLink';
 import { format, addDays, getDay, startOfWeek, parse, addHours, isBefore, isAfter, parseISO, differenceInHours, startOfMonth, endOfMonth, startOfDay, endOfDay } from 'date-fns';
 import { lt } from 'date-fns/locale';
 import { useTranslation } from '@/lib/i18n';
@@ -974,6 +975,20 @@ export default function StudentSchedule() {
                 supabase,
                 (sessionsRes.data || []) as Record<string, unknown>[],
             );
+            const tutorMeetingLinkForSessions =
+                (tutorProfile.data as { personal_meeting_link?: string | null } | null)?.personal_meeting_link;
+            const studentMeetingLinkForSessions =
+                (st as { personal_meeting_link?: string | null }).personal_meeting_link;
+            const subjectMeetingLinksById = new Map(
+                (subs.data || []).map((subject) => [subject.id, { meeting_link: subject.meeting_link }]),
+            );
+            mySessionsData = mySessionsData.map((session) =>
+                enrichSessionMeetingLink(session, {
+                    tutorPersonalLink: tutorMeetingLinkForSessions,
+                    studentPersonalLink: studentMeetingLinkForSessions,
+                    subjectsById: subjectMeetingLinksById,
+                }),
+            );
         }
 
         setExistingSessions(mySessionsData);
@@ -989,7 +1004,16 @@ export default function StudentSchedule() {
         setTimeout(() => {
             const monthStart = startOfMonth(new Date());
             const monthEnd = endOfMonth(new Date());
-            void fetchDateRange(monthStart, monthEnd, { studentId: st.id, tutorId: st.tutor_id });
+            void fetchDateRange(monthStart, monthEnd, {
+                studentId: st.id,
+                tutorId: st.tutor_id,
+                tutorPersonalLink:
+                    (tutorProfile.data as { personal_meeting_link?: string | null } | null)?.personal_meeting_link,
+                studentPersonalLink: (st as { personal_meeting_link?: string | null }).personal_meeting_link,
+                subjectLinksById: new Map(
+                    (subs.data || []).map((subject) => [subject.id, { meeting_link: subject.meeting_link }]),
+                ),
+            });
         }, 500);
 
         // Defer occupied-slots API so the calendar can paint before the extra round-trip.
@@ -1017,7 +1041,13 @@ export default function StudentSchedule() {
     const fetchDateRange = async (
         startDate: Date,
         endDate: Date,
-        scope?: { studentId?: string; tutorId?: string },
+        scope?: {
+            studentId?: string;
+            tutorId?: string;
+            tutorPersonalLink?: string | null;
+            studentPersonalLink?: string | null;
+            subjectLinksById?: ReadonlyMap<string, { meeting_link?: string | null }>;
+        },
     ) => {
         // Don't fetch if already loaded
         if (isRangeLoaded(startDate, endDate)) {
@@ -1053,6 +1083,16 @@ export default function StudentSchedule() {
                 myNewSessions = await enrichScheduleSessionsWithSubjects(
                     supabase,
                     (sessionsRes.data || []) as Record<string, unknown>[],
+                );
+                const subjectLinksById =
+                    scope?.subjectLinksById ??
+                    new Map(subjects.map((subject) => [subject.id, { meeting_link: subject.meeting_link }]));
+                myNewSessions = myNewSessions.map((session) =>
+                    enrichSessionMeetingLink(session, {
+                        tutorPersonalLink: scope?.tutorPersonalLink ?? tutorPersonalMeetingLink,
+                        studentPersonalLink: scope?.studentPersonalLink ?? studentPersonalMeetingLink,
+                        subjectsById: subjectLinksById,
+                    }),
                 );
             }
             // If tutor is frozen by org license, don't reveal their busy slots to the student.

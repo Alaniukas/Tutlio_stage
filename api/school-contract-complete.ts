@@ -214,7 +214,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select('full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent')
     .eq('id', (contract as any).student_id)
     .maybeSingle();
-  const st = studentRow || {};
+  const st = (studentRow || {}) as Record<string, unknown>;
   const orgEntityType = String((contract as any)?.organizations?.entity_type || '').trim().toLowerCase();
   const isSchoolOrg = orgEntityType === 'school';
   const existingConsent = String((contract as any)?.media_publicity_consent || '').trim();
@@ -574,7 +574,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       date: new Date().toLocaleDateString('lt-LT'),
       pdfUrl: pdfViewUrl || undefined,
     });
-    if (!emailResult.ok) {
+    if (emailResult.ok === false) {
       console.error('[school-contract-complete] follow-up email failed:', emailResult.error);
     }
   }

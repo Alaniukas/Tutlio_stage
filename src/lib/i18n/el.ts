@@ -5061,9 +5061,7 @@ export const elOverrides: Record<string, string> = {
   "support.contact.back": "Επιστροφή στην υποστήριξη AI"
 };
 
-export const el: Record<string, string> = {
-  ...en,
-  ...elOverrides,
+Object.assign(elOverrides, {
   'nav.forAgencies': 'Γραφεία ιδιαιτέρων',
   "compStu.inviteParentFirst": "Πρώτα ο γονέας",
   "compStu.inviteParentFirstHint": "Στέλνεται μόνο η πρόσκληση για την πύλη γονέα. Ο γονέας θα προσθέσει αργότερα το παιδί και τα στοιχεία του λογαριασμού.",
@@ -5148,7 +5146,7 @@ export const el: Record<string, string> = {
   "compStu.studentAddedWithLessonsFull": "Ο μαθητής προστέθηκε: προγραμματίστηκαν {total} μαθήματα (όλα σε κανονική τιμή).",
   "compStu.studentAddedLessonFailed": "Ο μαθητής προστέθηκε, αλλά δεν ήταν δυνατή η κράτηση του μαθήματος.",
   "compTut.payBySubject": "Αμοιβή ανά μάθημα",
-  "compTut.payBySubjectHint": "Αφήστε το κενό για να ισχύσει η προεπιλεγμένη χρέωση. Χρησιμοποιήστε το όταν η αμοιβή διαφέρει ανά αντικείμενο, π.χ. γυμνάσιο σε σχέση με λύκειο.",
+  "compTut.payBySubjectHint": "Αφήστε το κενό για να ισχύσει η προεπιλεγμένη χρέωση. Χρησιμοποιήστε το όταν η αμοιβή διαφέρει ανά αντικείμενο, π.χ. έως τη 10η τάξη σε σχέση με τις τάξεις 10–12.",
   "companyDash.paymentFollowups": "Υπενθυμίσεις πληρωμών",
   "orgFinance.payUsesSubjectRates": "Η αμοιβή υπολογίζεται ανά αντικείμενο. Προεπιλεγμένη χρέωση: {amount} € ανά μάθημα.",
   "stats.cancellationPartStudent": "μαθητής: {count}",
@@ -5568,4 +5566,6 @@ export const el: Record<string, string> = {
   "compare.customChip2": "Κανόνες αμοιβής",
   "compare.customChip3": "Σύνδεσμοι αποδοχής για γονείς",
   "compare.customChip4": "Πύλες με τη δική σας ταυτότητα",
-};
+});
+
+export const el: Record<string, string> = { ...en, ...elOverrides };

@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { format, parse, formatDistanceStrict, formatRelative } from 'date-fns';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
@@ -13,7 +14,9 @@ import { CHROME, chromeFor, formatShortDay } from '../../src/lib/publicPage';
 import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 import { formatLocalizedPhone, validateLocalizedPhone, getLocalizedPhonePlaceholder } from '../../src/lib/utils';
 
-const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('fil');
+
+const deferred = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 // Existing non-LT validation already accepts international numbers. These six
 // source messages incorrectly require +370; the Filipino copy reflects reality.
@@ -28,7 +31,8 @@ beforeAll(async () => { await loadLocaleDict('fil'); });
 
 describe('Filipino tutor and business localization', () => {
   it('explicitly covers all in-scope keys and leaves other product dictionaries unchanged', () => {
-    expect(Object.keys(filOverrides).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in filOverrides))).toEqual([]);
+    expect(Object.keys(filOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(fil).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !fil[key])).toEqual([]);
     for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) expect(fil[key]).toBe(en[key]);

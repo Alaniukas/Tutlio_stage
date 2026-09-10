@@ -5062,9 +5062,7 @@ export const esMxOverrides: Record<string, string> = {
   "support.contact.back": "Volver a la asistencia con IA"
 };
 
-export const esMx: Record<string, string> = {
-  ...en,
-  ...esMxOverrides,
+Object.assign(esMxOverrides, {
   'nav.forAgencies': 'Agencias de clases particulares',
   "compStu.inviteParentFirst": "Primero el padre o la madre",
   "compStu.inviteParentFirstHint": "Solo se envía la invitación al portal para padres. Ellos agregarán después al hijo/a y los datos de la cuenta.",
@@ -5129,6 +5127,7 @@ export const esMx: Record<string, string> = {
   "compStu.schoolYear": "Ciclo escolar",
   "compStu.municipality": "Municipio",
   "compStu.debtYes": "Sí",
+  "compStu.debtNo": "No",
   "compStu.hasDebtBadge": "Adeudo",
   "compStu.markAsLeft": "Marcar como baja",
   "compStu.leaveStudentTitle": "Marcar al alumno como baja",
@@ -5148,7 +5147,7 @@ export const esMx: Record<string, string> = {
   "compStu.studentAddedWithLessonsFull": "Alumno agregado: {total} clases programadas (todas a precio normal).",
   "compStu.studentAddedLessonFailed": "Se agregó al alumno, pero no se pudo reservar la clase.",
   "compTut.payBySubject": "Pago por materia",
-  "compTut.payBySubjectHint": "Déjelo vacío para usar la tarifa predeterminada. Úselo cuando el pago cambie según la materia, por ejemplo secundaria frente a preparatoria.",
+  "compTut.payBySubjectHint": "Déjelo vacío para usar la tarifa predeterminada. Úselo cuando el pago cambie según la materia, por ejemplo hasta 10.º frente a 10.º–12.º.",
   "companyDash.paymentFollowups": "Recordatorios de pago",
   "orgFinance.payUsesSubjectRates": "El pago se calcula por materia. Tarifa predeterminada: {amount} € por clase.",
   "stats.cancellationPartStudent": "alumno: {count}",
@@ -5400,7 +5399,10 @@ export const esMx: Record<string, string> = {
   "landing.custom.cta": "Cuéntenos cómo trabaja",
   "landing.custom.soloTitle": "¿Le falta algo?",
   "landing.custom.soloNote": "Con frecuencia desarrollamos funciones para clientes específicos: desde una regla de pago hasta un flujo de trabajo completo. Díganos qué le ahorraría tiempo.",
+  "role.staff": "Tutor",
   "role.staffPlural": "Tutores",
+  "stats.cancellationPartTutor": "tutor: {count}",
+  "stats.cancellationPartAdmin": "administrador: {count}",
   "compare.hub.badge": "Comparación",
   "compare.hub.title": "Tutlio frente a otros programas para administrar clases particulares",
   "compare.hub.subtitle": "Comparaciones honestas, punto por punto, con las herramientas que más consideran los profesores particulares y los centros de regularización. Cuando la competencia les acomoda mejor, lo decimos.",
@@ -5565,4 +5567,6 @@ export const esMx: Record<string, string> = {
   "compare.customChip2": "Reglas de pago",
   "compare.customChip3": "Ligas de aceptación para padres de familia",
   "compare.customChip4": "Portales con tu marca",
-};
+});
+
+export const esMx: Record<string, string> = { ...en, ...esMxOverrides };

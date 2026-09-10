@@ -43,6 +43,8 @@ import { schoolMeetingCounts, schoolMeetings } from '@/lib/schoolSessionMonitori
 import { sumProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
 import { authHeaders } from '@/lib/apiHelpers';
 import { isPlMarket } from '@/lib/market';
+import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
+import { meetingLinkWasPersisted } from '@/lib/meetingLink';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -126,20 +128,6 @@ const COLORS = [
 function generateToken(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-}
-
-/** Dark pill next to tutor/invite name — matches the admin “klasių pastaba” mock. */
-function TeachingNotesBadge({ notes }: { notes?: string | null }) {
-  const text = String(notes || '').trim();
-  if (!text) return null;
-  return (
-    <span
-      className="shrink-0 text-[11px] font-medium text-white bg-slate-700 px-2 py-0.5 rounded-full max-w-[16rem] truncate"
-      title={text}
-    >
-      {text}
-    </span>
-  );
 }
 
 // ─── SubjectPresetList – shared in both invite types ─────────────────────────
@@ -538,6 +526,7 @@ export default function CompanyTutors() {
   const [editBreakBetween, setEditBreakBetween] = useState(0);
   const [editMinBooking, setEditMinBooking] = useState(1);
   const [editCommissionPercent, setEditCommissionPercent] = useState(0);
+  const [tutorSaveError, setTutorSaveError] = useState<string | null>(null);
   const [editSubjectPay, setEditSubjectPay] = useState<Record<string, string>>({});
   const [editMeetingLink, setEditMeetingLink] = useState('');
   const [tutorInvoiceProfile, setTutorInvoiceProfile] = useState<Record<string, string | null> | null>(null);
@@ -1067,6 +1056,7 @@ export default function CompanyTutors() {
     setEditName(tutor.full_name);
     setEditPhone(tutor.phone || '');
     setEditTeachingNotes(tutor.teaching_notes || '');
+    setTutorSaveError(null);
     setShowAddSubject(false);
     setNewSubjectName('');
     setAddSubjectCatalogPick('');
@@ -1111,29 +1101,49 @@ export default function CompanyTutors() {
   const handleSaveTutor = async () => {
     if (!selectedTutor) return;
     setSavingTutor(true);
+    setTutorSaveError(null);
     const personalLink = editMeetingLink.trim() || null;
-    await supabase.from('profiles').update({ 
-      full_name: editName, 
-      phone: editPhone,
-      cancellation_hours: editCancellationHours,
-      cancellation_fee_percent: editCancellationFee,
-      reminder_student_hours: editReminderStudent,
-      reminder_tutor_hours: editReminderTutor,
-      break_between_lessons: editBreakBetween,
-      min_booking_hours: editMinBooking,
-      company_commission_percent: editCommissionPercent,
-      ...(isManoKorepetitoriusAdmin
-        ? { company_commission_by_subject: compactTutorPayBySubject(editSubjectPay) }
-        : {}),
-      personal_meeting_link: personalLink,
-      teaching_notes: editTeachingNotes.trim() || null,
-    }).eq('id', selectedTutor.id);
-    if (personalLink) {
-      await backfillTutorMeetingLinks(supabase, selectedTutor.id, personalLink);
+    try {
+      const { data: updatedRows, error } = await supabase.from('profiles').update({
+        full_name: editName,
+        phone: editPhone,
+        cancellation_hours: editCancellationHours,
+        cancellation_fee_percent: editCancellationFee,
+        reminder_student_hours: editReminderStudent,
+        reminder_tutor_hours: editReminderTutor,
+        break_between_lessons: editBreakBetween,
+        min_booking_hours: editMinBooking,
+        company_commission_percent: editCommissionPercent,
+        ...(isManoKorepetitoriusAdmin
+          ? { company_commission_by_subject: compactTutorPayBySubject(editSubjectPay) }
+          : {}),
+        personal_meeting_link: personalLink,
+        teaching_notes: editTeachingNotes.trim() || null,
+      })
+        .eq('id', selectedTutor.id)
+        .select('id, company_commission_percent, personal_meeting_link');
+
+      const savedRow = updatedRows?.[0];
+      if (
+        error
+        || !savedRow
+        || Number(savedRow.company_commission_percent) !== editCommissionPercent
+        || !meetingLinkWasPersisted(personalLink, savedRow.personal_meeting_link)
+      ) {
+        throw error || new Error('Tutor profile update was not persisted');
+      }
+
+      if (personalLink) {
+        await backfillTutorMeetingLinks(supabase, selectedTutor.id, personalLink);
+      }
+      await loadData();
+      setTutorModalOpen(false);
+    } catch (error) {
+      console.error('[CompanyTutors] tutor save failed:', error);
+      setTutorSaveError(t('common.saveFailed'));
+    } finally {
+      setSavingTutor(false);
     }
-    await loadData();
-    setTutorModalOpen(false);
-    setSavingTutor(false);
   };
 
   const handleArchiveTutor = async () => {
@@ -1418,7 +1428,7 @@ export default function CompanyTutors() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 truncate">{tutor.full_name}</p>
-                      <TeachingNotesBadge notes={tutor.teaching_notes} />
+                      <TutorTeachingNotesBadge notes={tutor.teaching_notes} />
                     </div>
                     <p className="text-xs text-gray-500 truncate">{tutor.email}</p>
                   </div>
@@ -1484,7 +1494,7 @@ export default function CompanyTutors() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                         <p className="text-sm font-semibold text-gray-800 truncate">{invite.invitee_name || invite.invitee_email}</p>
-                        <TeachingNotesBadge notes={invite.teaching_notes} />
+                        <TutorTeachingNotesBadge notes={invite.teaching_notes} />
                       </div>
                       <p className="text-xs text-gray-400">{invite.invitee_email} · {format(new Date(invite.created_at), 'd MMM yyyy', { locale: dateFnsLocale })}</p>
                       {invite.token && (
@@ -1653,6 +1663,8 @@ export default function CompanyTutors() {
                       <Label className="text-xs font-medium text-gray-600">{t('compTut.commission')}</Label>
                       <Input
                         type="number"
+                        min={0}
+                        step={0.5}
                         value={inviteCommissionPercent}
                         onChange={e => setInviteCommissionPercent(Number(e.target.value) || 0)}
                         className="rounded-xl w-32"
@@ -2082,6 +2094,12 @@ export default function CompanyTutors() {
               </div>
             </div>
           )}
+
+          {tutorSaveError ? (
+            <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {tutorSaveError}
+            </p>
+          ) : null}
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setTutorModalOpen(false)}>{t('compTut.cancelBtn')}</Button>

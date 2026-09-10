@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { schoolMeetingCounts, schoolStudentAttendance } from '../../src/lib/schoolSessionMonitoring';
+import {
+  schoolActivitySummary,
+  schoolMeetingCounts,
+  schoolMeetingOccurrences,
+  schoolStudentAttendance,
+} from '../../src/lib/schoolSessionMonitoring';
 import { fetchAllRows } from '../../src/lib/fetchAllRows';
 import { schoolDate, schoolCalendarWallDate, schoolCalendarInstant } from '../../src/lib/schoolTime';
 import { format, addDays } from 'date-fns';
@@ -46,6 +51,56 @@ describe('school monitoring', () => {
       { ...group, student_id: 'a', status: 'cancelled' },
     ];
     expect(schoolStudentAttendance(rows)[0]).toMatchObject({ joined: 2, unconfirmed: 1, noShow: 1, cancelled: 1 });
+  });
+  it('separates meeting totals from child attendance totals', () => {
+    const now = new Date('2026-09-10T12:00:00Z');
+    const rows = [
+      { ...group, id: '1', student_id: 'a', status: 'completed', status_confirmed_at: '2026-09-08T12:00:00Z', start_time: '2026-09-08T10:00:00Z', end_time: '2026-09-08T11:00:00Z' },
+      { ...group, id: '2', student_id: 'b', status: 'no_show', start_time: '2026-09-08T10:00:00Z', end_time: '2026-09-08T11:00:00Z' },
+      { ...group, id: '3', student_id: 'a', status: 'active', start_time: '2026-09-12T10:00:00Z', end_time: '2026-09-12T11:00:00Z' },
+      { ...group, id: '4', student_id: 'b', status: 'active', start_time: '2026-09-12T10:00:00Z', end_time: '2026-09-12T11:00:00Z' },
+      { ...group, id: '5', student_id: 'a', status: 'cancelled', start_time: '2026-09-09T10:00:00Z', end_time: '2026-09-09T11:00:00Z' },
+      { ...group, id: '6', student_id: 'b', status: 'cancelled', start_time: '2026-09-09T10:00:00Z', end_time: '2026-09-09T11:00:00Z' },
+    ];
+    expect(schoolMeetingOccurrences(rows)).toHaveLength(3);
+    expect(schoolActivitySummary(rows, now)).toEqual({
+      scheduled: 2,
+      completed: 1,
+      upcoming: 1,
+      noShowMeetings: 0,
+      cancelled: 1,
+      awaitingOutcome: 0,
+      attendedStudents: 1,
+      absentStudents: 1,
+      unconfirmedStudents: 0,
+      confirmedAttendance: 2,
+      attendanceRate: 50,
+    });
+  });
+  it('marks ended active meetings and their child rows as awaiting confirmation', () => {
+    const now = new Date('2026-09-10T12:00:00Z');
+    const rows = [
+      { ...group, id: '1', student_id: 'a', status: 'active', start_time: '2026-09-10T09:00:00Z', end_time: '2026-09-10T10:00:00Z' },
+      { ...group, id: '2', student_id: 'b', status: 'active', start_time: '2026-09-10T09:00:00Z', end_time: '2026-09-10T10:00:00Z' },
+    ];
+    expect(schoolActivitySummary(rows, now)).toMatchObject({
+      scheduled: 1,
+      upcoming: 0,
+      awaitingOutcome: 1,
+      unconfirmedStudents: 2,
+      attendanceRate: null,
+    });
+  });
+  it('does not request attendance confirmation before an activity has ended', () => {
+    const now = new Date('2026-09-10T09:30:00Z');
+    expect(schoolStudentAttendance([{
+      ...group,
+      id: 'ongoing',
+      student_id: 'a',
+      status: 'active',
+      start_time: '2026-09-10T09:00:00Z',
+      end_time: '2026-09-10T10:00:00Z',
+    }], now)[0]).toMatchObject({ unconfirmed: 0 });
   });
   it('reads beyond server page caps and does not silently swallow errors', async () => {
     const source = Array.from({ length: 1307 }, (_, id) => ({ id }));

@@ -1,8 +1,9 @@
 export type MvProvisionAccountPayload = {
   email: string;
-  password: string;
+  password?: string;
   userId: string;
   created: boolean;
+  reused?: boolean;
   emailSent: boolean;
   emailError?: string;
   activationUrl: string;
@@ -11,6 +12,7 @@ export type MvProvisionAccountPayload = {
 
 export type MvProvisionRequestBody = {
   studentId: string;
+  studentIds?: string[];
   parentName?: string;
   parentEmail?: string;
   studentFullName?: string;
@@ -47,9 +49,10 @@ export function credentialsFromProvisionResponse(json: MvProvisionApiResponse): 
 
 export function provisionEmailsSent(view: MvProvisionCredentialsView | null): boolean {
   if (!view) return false;
-  const parentOk = view.parent ? view.parent.emailSent !== false : true;
-  const studentOk = view.student ? view.student.emailSent !== false : true;
-  return parentOk && studentOk;
+  const newlyCreated = [view.parent, view.student].filter(
+    (account): account is MvProvisionAccountPayload => Boolean(account?.created),
+  );
+  return newlyCreated.length > 0 && newlyCreated.every((account) => account.emailSent);
 }
 
 export async function postMvProvisionFamilyAccounts(

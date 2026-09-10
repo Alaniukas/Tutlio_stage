@@ -188,7 +188,7 @@ export default function MvProvisionDialog({
                 />
                 {!studentEmail.trim() && (
                   <p className="text-[11px] text-gray-500">
-                    {t('compStu.provisionSendStudentTo')}: {previewTargets.studentTo || '—'}
+                    {t('compStu.provisionStudentUsernameHint', { email: previewTargets.studentTo || '—' })}
                   </p>
                 )}
               </div>

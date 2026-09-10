@@ -5144,7 +5144,7 @@ export const koOverrides: Record<string, string> = {
   "compStu.studentAddedWithLessonsFull": "학생을 추가했습니다: 수업 {total}회 예약(모두 정가).",
   "compStu.studentAddedLessonFailed": "학생은 추가되었지만 수업을 예약하지 못했습니다.",
   "compTut.payBySubject": "과목별 보수",
-  "compTut.payBySubjectHint": "기본 요율을 쓰려면 비워 두세요. 과목에 따라 보수가 다를 때 사용합니다(예: 중학생과 고등학생).",
+  "compTut.payBySubjectHint": "기본 요율을 쓰려면 비워 두세요. 과목에 따라 보수가 다를 때 사용합니다(예: 10학년 이하와 10–12학년).",
   "companyDash.paymentFollowups": "결제 안내 알림",
   "orgFinance.payUsesSubjectRates": "보수는 과목별로 계산됩니다. 기본 요율: 수업당 {amount} €.",
   "stats.cancellationPartStudent": "학생: {count}",

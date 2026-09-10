@@ -12,7 +12,7 @@ import { internalApiOrigin } from './_lib/extraLessonsContractShared.js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 import { orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
 import { isPendingChildName } from './_lib/pendingChildName.js';
-import { findExistingParentChild } from '../src/lib/parentChildIdentity.js';
+import { dedupeParentChildren, findExistingParentChild } from '../src/lib/parentChildIdentity.js';
 
 function generateStudentInviteCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -84,12 +84,12 @@ export async function loadParentContext(sb: ReturnType<typeof serviceClient>, us
     .filter((s): s is Record<string, unknown> => Boolean(s?.id) && !s.detached_at);
 
   const linkedIds = new Set(fromLinks.map((s) => String(s.id)));
-  const children = [
+  const children = dedupeParentChildren([
     ...fromLinks,
     ...(directChildren || []).filter(
       (s) => Boolean(s?.id) && !s.detached_at && !linkedIds.has(String(s.id)),
     ),
-  ];
+  ]);
 
   return { parent, children };
 }

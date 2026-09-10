@@ -74,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const orgIds = [...new Set((students || []).map((s) => s.organization_id).filter(Boolean))];
       for (const oid of orgIds) {
         const gate = await assertOrgConsultationsEnabled(supabase, oid);
-        if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+        if (gate.ok === false) return res.status(gate.status).json({ error: gate.error });
       }
 
       const eligible: string[] = [];
@@ -148,7 +148,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!organizationId) return res.status(400).json({ error: 'Trūksta organization_id.' });
     const gate = await assertOrgConsultationsEnabled(supabase, organizationId);
-    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    if (gate.ok === false) return res.status(gate.status).json({ error: gate.error });
 
     const isAdmin = await isOrgAdminForOrg(supabase, userId, organizationId);
     const schoolYear = String(req.query?.school_year || consultationSchoolYear() || '');
@@ -192,7 +192,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .maybeSingle();
     if (!student) return res.status(404).json({ error: 'Mokinys nerastas.' });
     const gate = await assertOrgConsultationsEnabled(supabase, student.organization_id);
-    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    if (gate.ok === false) return res.status(gate.status).json({ error: gate.error });
     if (!isConsultationSeason()) return res.status(400).json({ error: 'Konsultacijos nevyksta liepos–rugpjūčio mėn.' });
     if (!(await studentHasSignedAnnualContract(supabase, studentId))) {
       return res.status(403).json({ error: 'Reikia pasirašytos metinės sutarties.' });
@@ -219,7 +219,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           payer_name: student.payer_name,
           payer_email: student.payer_email,
           payer_phone: student.payer_phone,
-          ...(b.contact_snapshot || {}),
+          ...(b.contact_snapshot && typeof b.contact_snapshot === 'object'
+            ? b.contact_snapshot as Record<string, unknown>
+            : {}),
         },
         status: 'submitted',
         school_year: schoolYear,
@@ -234,7 +236,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'propose') {
     const organizationId = String(b.organization_id || '');
     const gate = await assertOrgConsultationsEnabled(supabase, organizationId);
-    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    if (gate.ok === false) return res.status(gate.status).json({ error: gate.error });
 
     const isAdmin = await isOrgAdminForOrg(supabase, userId, organizationId);
     const tutorId = String(b.tutor_id || userId);
@@ -386,7 +388,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'book_help') {
     const organizationId = String(b.organization_id || '');
     const gate = await assertOrgConsultationsEnabled(supabase, organizationId);
-    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    if (gate.ok === false) return res.status(gate.status).json({ error: gate.error });
     if (!isConsultationSeason()) return res.status(400).json({ error: 'Konsultacijos nevyksta liepos–rugpjūčio mėn.' });
 
     const studentId = String(b.student_id || '');

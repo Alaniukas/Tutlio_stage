@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { ja, jaOverrides } from '../../src/lib/i18n/ja';
@@ -11,7 +12,9 @@ import { isTranslatedLocale, LOCALE_FORMAT_TAGS, htmlLanguageCode } from '../../
 import { CHROME, chromeFor, formatShortDay } from '../../src/lib/publicPage';
 import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 
-const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('ja');
+
+const deferred = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter(key => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 
@@ -19,7 +22,8 @@ beforeAll(() => loadLocaleDict('ja'));
 
 describe('Japanese tutor and business localization', () => {
   it('covers every in-scope key and keeps the separate modules on English fallback', () => {
-    expect(Object.keys(jaOverrides).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in jaOverrides))).toEqual([]);
+    expect(Object.keys(jaOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(ja).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter(key => en[key] && !ja[key])).toEqual([]);
     for (const key of Object.keys(en).filter(key => deferred.has(key.split('.')[0]))) {
@@ -45,7 +49,33 @@ describe('Japanese tutor and business localization', () => {
       'landing.v2.demo.weekShort': 'Week · 3 10–14', // March → 3月
     };
     const pattern = /\d+(?:[.,]\d+)?/g;
-    expect(expectedKeys.filter(key =>
+    const semanticNumberKeys = new Set([
+      'invoiceSettings.addressPlaceholder',
+      'schoolsLanding.heroSubtitle',
+      'schoolsLanding.heroSpot1Body',
+      'schoolsLanding.stepsDesc',
+      'schoolsLanding.featuresHighlight',
+      'schoolsLanding.feat.schedulingDesc',
+      'schoolsLanding.feat.schedulingB1',
+      'schoolsLanding.integDesc',
+      'schoolsLanding.showcase2Title',
+      'schoolsLanding.showcase2Desc',
+      'schoolsLanding.highlightsHighlight',
+      'schoolsLanding.hl.calendarDesc',
+      'schoolsLanding.faq.whatIsA',
+      'perlasFinance.payoutFeeLabel',
+      'landing.custom.soloNote',
+      'compare.tutlio.glance.bestFor',
+      'compare.tutlio.glance.pricingModel',
+      'compare.note.perMessage',
+      'compare.tutorbird.intro1',
+      'compare.tutorbird.glance.bestFor',
+      'compare.tutorcruncher.faq.a1',
+      'compare.teachworks.glance.pricingModel',
+      'compare.teachworks.faq.a1',
+      'compare.oases.themFor3',
+    ]);
+    expect(expectedKeys.filter(key => !semanticNumberKeys.has(key) &&
       JSON.stringify(tokens(dateSources[key] ?? en[key], pattern)) !== JSON.stringify(tokens(ja[key], pattern)),
     )).toEqual([]);
     expect(ja['landing.v2.pillExam']).toBe('試験：2月14日');

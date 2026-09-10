@@ -67,7 +67,7 @@ export async function isOrgAdminForOrg(
   organizationId: string,
 ): Promise<boolean> {
   const access = await getOrgAdminAccessByUserId(supabase, userId);
-  return access.some((a) => a.organization_id === organizationId);
+  return access?.organizationId === organizationId;
 }
 
 export async function studentHasSignedAnnualContract(

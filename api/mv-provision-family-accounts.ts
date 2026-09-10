@@ -48,6 +48,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const body = parseJsonBody(req);
     const studentId = typeof body.studentId === 'string' ? body.studentId : '';
+    const studentIds = Array.isArray(body.studentIds)
+      ? body.studentIds.filter((value): value is string => typeof value === 'string')
+      : undefined;
     const parentName = typeof body.parentName === 'string' ? body.parentName : undefined;
     const parentEmail = typeof body.parentEmail === 'string' ? body.parentEmail : undefined;
     const studentFullName = typeof body.studentFullName === 'string' ? body.studentFullName : undefined;
@@ -88,14 +91,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     let allowed = false;
+    let mayProvisionRelatedRows = false;
     if (tutorId && tutorId === auth.userId) allowed = true;
-    if (!allowed && organizationId) {
+    if (organizationId) {
       const adminAccess = await getOrgAdminAccessByUserId(supabase, auth.userId);
       if (
         adminAccess?.organizationId === organizationId
         && hasOrgAdminPermission(adminAccess.role, adminAccess.permissions, 'students.edit')
       ) {
         allowed = true;
+        mayProvisionRelatedRows = true;
       }
     }
 
@@ -105,6 +110,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const result = await provisionMvFamilyAccounts(supabase, {
       studentId,
+      studentIds: mayProvisionRelatedRows ? studentIds : undefined,
       parentName,
       parentEmail,
       studentFullName,
