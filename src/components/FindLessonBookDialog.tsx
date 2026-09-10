@@ -28,6 +28,7 @@ import { parseOrgTrialPolicy, shouldAutoMarkNextLessonTrial, countTrialsFromHist
 import { isMoksloVaisiaiOrg } from '@/lib/marketMoney';
 import { ASSIGN_STUDENT_FREE_SLOT_DIALOG_CONTENT_CLASS } from '@/components/AssignStudentFreeSlotDialog';
 import RecurrenceFields, { type RecurrenceFrequency } from '@/components/RecurrenceFields';
+import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
 
 /** A free availability window picked from FindTutorModal, to be narrowed to a lesson slot. */
 export interface FindLessonBookPick {

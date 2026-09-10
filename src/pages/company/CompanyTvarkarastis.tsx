@@ -94,7 +94,12 @@ import {
 } from '@/lib/schoolClassGroupSessions';
 import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
 import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
-import { formatStudentPickerLabel, pickStudentsForOrgTutorPicker } from '@/lib/orgStudentIdentity';
+import {
+  formatOrgStudentPickerLabel,
+  matchesOrgStudentPickerSearch,
+  ORG_STUDENT_PICKER_SELECT,
+  pickStudentsForOrgTutorPicker,
+} from '@/lib/orgStudentIdentity';
 import { displayStudentGrade } from '@/lib/studentGrade';
 import { Button } from '@/components/ui/button';
 import {
@@ -749,7 +754,7 @@ export default function CompanyTvarkarastis() {
 
       // Visi org mokiniai (legacy rows may lack organization_id but have tutor_id in org)
       const studentSelect =
-        'id, full_name, tutor_id, email, personal_meeting_link, grade, pricing_lessons_per_week, linked_user_id, organization_id';
+        `${ORG_STUDENT_PICKER_SELECT}, personal_meeting_link, pricing_lessons_per_week`;
       let studentsData: Student[] = [];
       if (organizationId && tutorIds.length > 0) {
         const [byTutorRes, byOrgRes] = await Promise.all([
@@ -3259,7 +3264,7 @@ export default function CompanyTvarkarastis() {
                               disabled={!createStudentIds.includes(student.id) && createStudentIds.length >= maxSt}
                               className="rounded border-gray-300 text-indigo-600"
                             />
-                            <span className="text-sm">{formatStudentPickerLabel(student.full_name, student.grade)}</span>
+                            <span className="text-sm">{formatOrgStudentPickerLabel(student)}</span>
                           </label>
                         ))
                       )}
@@ -3287,9 +3292,7 @@ export default function CompanyTvarkarastis() {
                       </div>
                       {(() => {
                         const visible = createStudentSearch
-                          ? list.filter((s) =>
-                              (s.full_name || '').toLowerCase().includes(createStudentSearch.trim().toLowerCase()),
-                            )
+                          ? list.filter((s) => matchesOrgStudentPickerSearch(s, createStudentSearch))
                           : list;
                         if (visible.length === 0) {
                           return (
@@ -3298,7 +3301,7 @@ export default function CompanyTvarkarastis() {
                         }
                         return visible.map((student) => (
                           <SelectItem key={student.id} value={student.id}>
-                            {formatStudentPickerLabel(student.full_name, student.grade)}
+                            {formatOrgStudentPickerLabel(student)}
                           </SelectItem>
                         ));
                       })()}
@@ -3717,7 +3720,7 @@ export default function CompanyTvarkarastis() {
                           }));
                       const siblingStatuses = participantRows
                         .map((row) => row.session?.status)
-                        .filter((status): status is string => Boolean(status));
+                        .filter((status): status is NonNullable<typeof status> => Boolean(status));
                       return participantRows.map((participant) => {
                       const displayStatus = classGroupParticipantStatusForDisplay(
                         participant.session?.status,
@@ -4262,7 +4265,7 @@ export default function CompanyTvarkarastis() {
                       {sortStudentsByFullName(pickStudentsForOrgTutorPicker(students, editTutorId)).map(
                         (s) => (
                           <SelectItem key={s.id} value={s.id}>
-                            {formatStudentPickerLabel(s.full_name, s.grade)}
+                            {formatOrgStudentPickerLabel(s)}
                           </SelectItem>
                         ),
                       )}
@@ -4560,7 +4563,7 @@ export default function CompanyTvarkarastis() {
                                     else setCreateFromAvailStudentIds(prev => prev.filter(id => id !== s.id));
                                   }}
                                 />
-                                <span>{formatStudentPickerLabel(s.full_name, s.grade)}</span>
+                                <span>{formatOrgStudentPickerLabel(s)}</span>
                               </label>
                             ))}
                         </div>
@@ -4577,7 +4580,7 @@ export default function CompanyTvarkarastis() {
                               pickStudentsForOrgTutorPicker(students, editingAvailability?.tutor_id),
                             ).map(s => (
                                 <SelectItem key={s.id} value={s.id}>
-                                  {formatStudentPickerLabel(s.full_name, s.grade)}
+                                  {formatOrgStudentPickerLabel(s)}
                                 </SelectItem>
                               ))}
                           </SelectContent>

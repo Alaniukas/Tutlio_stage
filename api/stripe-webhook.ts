@@ -925,23 +925,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     }).catch(e => console.error('[stripe-webhook] Error sending lesson payment email:', e));
                                 }
 
-                                if (tutor?.email) {
-                                    const tutorPayload = isOrgTutor(tutor.organization_id)
-                                        ? {
-                                            type: 'lesson_confirmed_tutor',
-                                            to: tutor.email,
-                                            data: {
-                                                studentName: student.full_name,
-                                                tutorName: tutor.full_name || 'Korepetitorius',
-                                                date: dateStr,
-                                                time: timeStr,
-                                                subject: (dbSession as any).topic,
-                                                sessionId: dbSession.id,
-                                                meetingLink: (dbSession as any).meeting_link || '',
-                                                organizationId: tutor.organization_id,
-                                            },
-                                        }
-                                        : {
+                                // Org tutors already received booking_notification at reservation — no payment email.
+                                if (tutor?.email && !isOrgTutor(tutor.organization_id)) {
+                                    await fetch(sendEmailUrl, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                                        body: JSON.stringify({
                                             type: 'payment_received_tutor',
                                             to: tutor.email,
                                             data: {
@@ -953,11 +942,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                                 price: (dbSession as any).price,
                                                 ...(tutor.organization_id ? { organizationId: tutor.organization_id } : {}),
                                             },
-                                        };
-                                    await fetch(sendEmailUrl, {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-                                        body: JSON.stringify(tutorPayload),
+                                        }),
                                     }).catch(e => console.error('[stripe-webhook] Error sending tutor email:', e));
                                 }
 

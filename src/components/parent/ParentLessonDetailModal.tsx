@@ -46,7 +46,7 @@ export type ParentTutorContactPolicy = {
   orgIsSchool?: boolean;
   /** Custom per-org fee deal (e.g. Proklasė); charged on top even for school orgs. */
   orgFeeProfile?: OrgFeeProfile | null;
-  /** Service provider shown in the fee breakdown (org name when tutor belongs to one). */
+  /** Service provider label (org name when tutor belongs to one). */
   providerName?: string | null;
   /** Org feature disable_student_reschedule_cancel — self-service moves/cancels go through administration. */
   studentActionsDisabled?: boolean;
@@ -109,10 +109,8 @@ export function ParentLessonDetailModal({
 
   const orgIsSchool = !!tutorPolicy?.orgIsSchool;
   const orgFee = tutorPolicy?.orgFeeProfile ?? null;
-  const providerName =
-    tutorPolicy?.providerName || tutorPolicy?.tutorName || t('studentDash.tutorLabel');
 
-  const { fmt, formatLessonCharge, lessonBreakdown, isPl } = useMarketMoney();
+  const { fmt, formatLessonCharge, isPl } = useMarketMoney();
   const [stripeLoading, setStripeLoading] = useState(false);
   const [perlasLoading, setPerlasLoading] = useState(false);
 
@@ -265,7 +263,9 @@ export function ParentLessonDetailModal({
                 {t('studentDash.priceLabel')}
               </p>
               <p className="font-bold text-gray-900">
-                {session.price != null ? fmt(session.price) : '–'}
+                {session.price != null
+                  ? formatLessonCharge(Number(session.price), orgIsSchool, orgFee)
+                  : '–'}
               </p>
             </div>
             <div className="bg-gray-50 rounded-xl p-4 text-center border border-gray-100 flex flex-col items-center justify-center">
@@ -368,25 +368,6 @@ export function ParentLessonDetailModal({
             !session.paid &&
             isAfter(new Date(session.end_time), now) && (
               <div className="space-y-2">
-                {session.price != null && (!orgIsSchool || orgFee) && (() => {
-                  const b = lessonBreakdown(Number(session.price), orgFee);
-                  return (
-                    <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-sm space-y-1.5">
-                      <div className="flex items-start justify-between gap-3 text-gray-700">
-                        <span>{t('parent.feeBreakdownTeaching', { provider: providerName })}</span>
-                        <span className="font-semibold whitespace-nowrap">{fmt(b.base)}</span>
-                      </div>
-                      <div className="flex items-start justify-between gap-3 text-gray-700">
-                        <span>{t('parent.feeBreakdownPlatform')}</span>
-                        <span className="font-semibold whitespace-nowrap">{fmt(b.fee)}</span>
-                      </div>
-                      <div className="flex items-start justify-between gap-3 pt-1.5 border-t border-gray-200 font-bold text-gray-900">
-                        <span>{t('parent.feeBreakdownTotal')}</span>
-                        <span className="whitespace-nowrap">{fmt(b.total)}</span>
-                      </div>
-                    </div>
-                  );
-                })()}
                 <button
                   type="button"
                   disabled={stripeLoading}

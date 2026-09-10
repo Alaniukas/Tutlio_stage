@@ -50,6 +50,7 @@ import {
     tutorDashboardSessionsDeduped,
     tutorDashboardOrgPackDeduped,
     tutorPreloadProfileDeduped,
+    tutorSidebarProfileDeduped,
     tutorRecentPaidLessonsDeduped,
     tutorRecentPaidPackagesDeduped,
     tutorRecentPaidInvoicesDeduped,
@@ -238,11 +239,22 @@ export default function DashboardPage() {
     }, [searchParams, setSearchParams]);
 
     useEffect(() => {
+        if (ctxProfile) {
+            setOrgTutorFallback(!!ctxProfile.organization_id);
+            return;
+        }
+        if (!ctxUser) return;
+        void tutorSidebarProfileDeduped(ctxUser.id).then(({ data }) => {
+            setOrgTutorFallback(data ? !!data.organization_id : false);
+        });
+    }, [ctxUser?.id, ctxProfile?.organization_id]);
+
+    useEffect(() => {
         if (location.pathname !== '/dashboard') return;
         if (!ctxUser) return;
         void fetchData();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [location.pathname, ctxUser?.id]);
+    }, [location.pathname, ctxUser?.id, ctxProfile?.id]);
 
     useEffect(() => {
         if (!loading && tutorName) {
@@ -297,7 +309,18 @@ export default function DashboardPage() {
             (ctxProfile as typeof ctxProfile & Record<string, unknown> | null) ??
             (await tutorPreloadProfileDeduped(user.id)).data;
         if (!profileData) {
-            return;
+            const { data: sidebarProfile } = await tutorSidebarProfileDeduped(user.id);
+            if (sidebarProfile) {
+                profileData = {
+                    full_name: sidebarProfile.full_name,
+                    organization_id: sidebarProfile.organization_id,
+                } as typeof profileData;
+                setOrgTutorFallback(!!sidebarProfile.organization_id);
+            } else {
+                setOrgTutorFallback(false);
+                setToastMessage({ message: t('common.error'), type: 'error' });
+                return;
+            }
         }
         const { data: paySync } = await tutorCalendarFallbackProfileDeduped(user.id);
         if (paySync) {

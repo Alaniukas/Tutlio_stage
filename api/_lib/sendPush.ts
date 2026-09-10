@@ -61,6 +61,16 @@ const PUSH_ELIGIBLE: Record<string, (data: any, locale: string) => PushPayload |
     url: '/dashboard',
     tag: `booking-notif-${d.date}-${d.time}`,
   }),
+  mv_first_lesson_planned_tutor: (d, _locale) => ({
+    title: t('lt', 'push.mv_first_lesson_planned_tutor.title'),
+    body: t('lt', 'push.mv_first_lesson_planned_tutor.body', {
+      studentName: d.studentName,
+      date: d.date,
+      time: d.time,
+    }),
+    url: '/dashboard',
+    tag: `mv-first-lesson-${d.date}-${d.time}`,
+  }),
   session_cancelled: (d, locale) => ({
     title: t(locale, 'push.session_cancelled.title'),
     body: t(locale, 'push.session_cancelled.body', {

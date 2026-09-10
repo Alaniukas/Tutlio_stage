@@ -157,7 +157,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             const { data: studentRow } = await supabase
                 .from('students')
-                .select('linked_user_id')
+                .select('linked_user_id, parent_user_id')
                 .eq('id', existingSession.student_id)
                 .maybeSingle();
 
@@ -175,7 +175,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             // Fallback if embed shape differs — direct parent_profiles + parent_students lookup
-            if (!canStudentSideCancelSession(userId, studentRow?.linked_user_id, parentUserIds)) {
+            if (!canStudentSideCancelSession(
+                userId,
+                studentRow?.linked_user_id,
+                parentUserIds,
+                studentRow?.parent_user_id,
+            )) {
                 const { data: parentProfile } = await supabase
                     .from('parent_profiles')
                     .select('id')

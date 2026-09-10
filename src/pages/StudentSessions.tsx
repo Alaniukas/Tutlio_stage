@@ -1804,12 +1804,15 @@ export default function StudentSessions() {
                             {seesPaymentAmounts && (
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                     <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('stuSess.price')}</p>
-                                    <p className="font-bold text-gray-900">{fmt(selectedSession?.price)}</p>
-                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && perLessonPayAllowedForSession(selectedSession) && !manualPaymentsOnly && (
-                                        <p className="text-[11px] text-gray-500 mt-1 leading-snug">
-                                            {t('stuSess.stripeChargeNote', { amount: formatLessonCharge(selectedSession.price, tutorOrgIsSchool, tutorOrgFeeProfile) })}
-                                        </p>
-                                    )}
+                                    <p className="font-bold text-gray-900">
+                                        {selectedSession?.price != null &&
+                                        selectedSession.status === 'active' &&
+                                        !selectedSession.paid &&
+                                        perLessonPayAllowedForSession(selectedSession) &&
+                                        !manualPaymentsOnly
+                                            ? formatLessonCharge(selectedSession.price, tutorOrgIsSchool, tutorOrgFeeProfile)
+                                            : fmt(selectedSession?.price)}
+                                    </p>
                                 </div>
                             )}
                             <div className={`bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center ${seesPaymentAmounts ? '' : 'sm:col-span-2'}`}>

@@ -11,6 +11,7 @@ import {
 import { internalApiOrigin } from './_lib/extraLessonsContractShared.js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 import { orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
+import { isPendingChildName } from './_lib/pendingChildName.js';
 
 function generateStudentInviteCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -63,19 +64,31 @@ async function loadParentContext(sb: ReturnType<typeof serviceClient>, userId: s
     .maybeSingle();
   if (!parent?.id) return null;
 
-  const { data: links } = await sb
-    .from('parent_students')
-    .select(
-      'student_id, students(id, full_name, email, phone, payer_email, payer_name, organization_id, linked_user_id, tutor_id, invite_code, deletion_requested_at, enrollment_status)',
-    )
-    .eq('parent_id', parent.id);
+  const studentCols =
+    'id, full_name, email, phone, payer_email, payer_name, organization_id, linked_user_id, tutor_id, invite_code, deletion_requested_at, enrollment_status';
 
-  const children = (links || [])
+  const [{ data: links }, { data: directChildren }] = await Promise.all([
+    sb
+      .from('parent_students')
+      .select(`student_id, students(${studentCols})`)
+      .eq('parent_id', parent.id),
+    sb.from('students').select(studentCols).eq('parent_user_id', userId),
+  ]);
+
+  const fromLinks = (links || [])
     .map((row: { students?: unknown }) => {
       const raw = row.students as Record<string, unknown> | Record<string, unknown>[] | null;
       return (Array.isArray(raw) ? raw[0] : raw) || null;
     })
     .filter((s): s is Record<string, unknown> => Boolean(s?.id));
+
+  const linkedIds = new Set(fromLinks.map((s) => String(s.id)));
+  const children = [
+    ...fromLinks,
+    ...(directChildren || []).filter(
+      (s): s is Record<string, unknown> => Boolean(s?.id) && !linkedIds.has(String(s.id)),
+    ),
+  ];
 
   return { parent, children };
 }
@@ -347,6 +360,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const studentId = String(body.studentId || '').trim();
   const child = mvChildren.find((c) => String(c.id) === studentId);
   if (!child) return json(res, 404, { error: 'Student not found' });
+
+  if (action === 'updateName') {
+    const fullName = String(body.fullName || '').trim();
+    if (fullName.length < 2) return json(res, 400, { error: 'fullName is required' });
+    if (isPendingChildName(fullName)) return json(res, 400, { error: 'invalid_name' });
+    const { error: updErr } = await sb.from('students').update({ full_name: fullName }).eq('id', studentId);
+    if (updErr) return json(res, 500, { error: 'Failed to update name' });
+    return json(res, 200, { success: true, fullName });
+  }
 
   if (action === 'invite') {
     const email = String(body.email || child.email || '').trim().toLowerCase();

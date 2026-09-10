@@ -11,6 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { format } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import type { OrganizationDynamicPricingRule } from '@/lib/organizationDynamicPricing';
 import { CalendarDays, Search, ChevronDown, ListOrdered, UserX, XCircle, CheckCircle, Pencil, Ban, Loader2, MessageSquare, Trash2, Gift } from 'lucide-react';
 import { defaultNoShowWhenForNow, buildNoShowSessionPatch } from '@/lib/noShowWhen';
 import { Input } from '@/components/ui/input';
@@ -37,7 +38,11 @@ import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { isAttendanceFlagged } from '@/lib/attendance';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
-import { orgStudentIdentityGroupKey, pickStudentsForOrgTutorPicker } from '@/lib/orgStudentIdentity';
+import {
+  formatOrgStudentPickerLabel,
+  orgStudentIdentityGroupKey,
+  pickStudentsForOrgTutorPicker,
+} from '@/lib/orgStudentIdentity';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { useHideWaitlist } from '@/hooks/useHideWaitlist';
@@ -323,7 +328,7 @@ export default function CompanySessions() {
     const [studentsResult, subjectsResult, pricingResult, tspResult, dynamicResult] = await Promise.all([
       supabase
         .from('students')
-        .select('id, full_name, tutor_id, linked_user_id, email, organization_id, personal_meeting_link, grade, pricing_lessons_per_week')
+        .select('id, full_name, tutor_id, linked_user_id, email, organization_id, personal_meeting_link, grade, pricing_lessons_per_week, payer_name, payer_email')
         .eq('organization_id', adminRow.organization_id)
         .order('full_name'),
       supabase
@@ -1148,7 +1153,7 @@ export default function CompanySessions() {
                         <SelectContent>
                           {sortStudentsByFullName(pickStudentsForOrgTutorPicker(students, editTutorId)).map(
                             (s) => (
-                              <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                              <SelectItem key={s.id} value={s.id}>{formatOrgStudentPickerLabel(s)}</SelectItem>
                             ),
                           )}
                         </SelectContent>

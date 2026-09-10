@@ -40,7 +40,7 @@ import { ORG_TUTOR_FILTER_SCROLL_CLASS } from '@/lib/orgUi';
 import { isProKlaseOrg } from '@/lib/marketMoney';
 import { parseOrgTrialPolicy } from '@/lib/orgTrialPolicy';
 import { Checkbox } from '@/components/ui/checkbox';
-import { parseEmailOptOutList, toggleEmailOptOut } from '@/lib/emailNotificationOptOut';
+import { parseEmailOptOutList, toggleEmailOptOut, type EmailOptOutKey } from '@/lib/emailNotificationOptOut';
 
 type TrialCommentMode = 'student_and_parent' | 'internal_only';
 
@@ -152,7 +152,7 @@ export default function CompanySettings() {
   // Optional address shown to parents (e.g. contract emails) for questions; empty falls back to the org email.
   const [contactEmail, setContactEmail] = useState<string>(sc?.contactEmail ?? '');
   const [publicName, setPublicName] = useState<string>(sc?.publicName ?? '');
-  const [adminEmailOptOut, setAdminEmailOptOut] = useState<string[]>([]);
+  const [adminEmailOptOut, setAdminEmailOptOut] = useState<EmailOptOutKey[]>([]);
   const [orgLocale, setOrgLocale] = useState<string>(sc?.orgLocale ?? '');
 
   useEffect(() => { if (!getCached('company_settings')) fetchSettings(); }, []);

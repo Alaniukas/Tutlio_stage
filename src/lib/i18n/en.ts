@@ -4397,6 +4397,7 @@ export const en: Record<string, string> = {
   'parent.children': 'My children',
   'parent.noChildren': 'No children linked to your account yet.',
   'parent.pendingChildName': 'Pending registration',
+  'parent.editPendingChildNameHint': 'Enter your child\'s full name — a temporary label is shown until you save it.',
   'parent.childrenAccountsTitle': 'Children accounts',
   'parent.childrenAccountsDesc': 'Add a child without email — invoices and updates go to you. Invite a student portal account later if needed.',
   'parent.addChildTitle': 'Add a child',

@@ -731,14 +731,28 @@ export function parentFullNameForUserDeduped(userId: string) {
   });
 }
 
+const PARENT_STUDENT_LINK_SELECT =
+  'id, full_name, tutor_id, linked_user_id, organization_id, profiles:tutor_id(full_name)';
+
 export function parentStudentLinksDeduped(userId: string) {
-  return dedupeAsync(`parent_student_links:${userId}`, () =>
-    supabase
-      .from('parent_students')
-      .select(
-        'student_id, students(id, full_name, tutor_id, linked_user_id, organization_id, profiles:tutor_id(full_name))',
-      ),
-  );
+  return dedupeAsync(`parent_student_links:${userId}`, async () => {
+    const [linksRes, directRes] = await Promise.all([
+      supabase
+        .from('parent_students')
+        .select(`student_id, students(${PARENT_STUDENT_LINK_SELECT})`),
+      supabase.from('students').select(PARENT_STUDENT_LINK_SELECT).eq('parent_user_id', userId),
+    ]);
+    if (linksRes.error) return linksRes;
+    const linked = linksRes.data ?? [];
+    const directStudents = (directRes.data ?? []).filter((s) => s?.id);
+    const linkedIds = new Set(
+      linked.map((row) => String((row as { student_id?: string }).student_id ?? '')).filter(Boolean),
+    );
+    const syntheticLinks = directStudents
+      .filter((s) => !linkedIds.has(String(s.id)))
+      .map((s) => ({ student_id: s.id, students: s }));
+    return { ...linksRes, data: [...linked, ...syntheticLinks] };
+  });
 }
 
 export async function preloadParentData() {

@@ -10,6 +10,7 @@ import { buildPlatformPath } from '@/lib/platform';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
 import { authHeaders } from '@/lib/apiHelpers';
 import { isMoksloVaisiaiOrg } from '@/lib/marketMoney';
+import { isPendingChildName } from '@/lib/pendingChildName';
 
 export default function StudentSettings() {
     const { t, locale } = useTranslation();
@@ -48,6 +49,8 @@ export default function StudentSettings() {
     /** Mokėtojo pasirinkimas nustatymuose („aš“ / „tėvai“), kol nepakviesta tėvų paskyra. */
     const [desiredPayer, setDesiredPayer] = useState<'self' | 'parent'>('self');
     const [savingPayerSelf, setSavingPayerSelf] = useState(false);
+    /** Loaded from DB — stays true while parent/student must replace a placeholder name. */
+    const [nameEntryRequired, setNameEntryRequired] = useState(false);
 
     useEffect(() => {
         if (!ctxUser) return;
@@ -90,6 +93,7 @@ export default function StudentSettings() {
         if (data) {
             setStudentId(data.id);
             setStudentName(data.full_name || '');
+            setNameEntryRequired(isPendingChildName(data.full_name));
             setPhone(data.phone || '');
             setAge(data.age?.toString() || '');
             setGrade(data.grade || '');
@@ -239,16 +243,36 @@ export default function StudentSettings() {
         }
     };
 
+    const nameDraftTrimmed = studentName.trim();
+
     const saveProfile = async () => {
         setSaving(true);
         setError(null);
+        if (nameEntryRequired && nameDraftTrimmed.length < 2) {
+            setError(t('parent.editPendingChildNameHint'));
+            setSaving(false);
+            return;
+        }
         if (phone && !validateLocalizedPhone(phone, locale)) {
             setError(t('studentSettings.phoneFormatError'));
             setSaving(false);
             return;
         }
-        const { error: e1 } = await supabase.from('students').update({ phone, age: age ? parseInt(age) : null, grade }).eq('id', studentId);
+        const profilePatch: { phone: string; age: number | null; grade: string; full_name?: string } = {
+            phone,
+            age: age ? parseInt(age) : null,
+            grade,
+        };
+        if (nameEntryRequired && nameDraftTrimmed.length >= 2 && !isPendingChildName(nameDraftTrimmed)) {
+            profilePatch.full_name = nameDraftTrimmed;
+        }
+        const { error: e1 } = await supabase.from('students').update(profilePatch).eq('id', studentId);
         if (e1) { setError(t('studentSettings.profileSaveError')); setSaving(false); return; }
+        if (profilePatch.full_name) {
+            setStudentName(profilePatch.full_name);
+            setNameEntryRequired(false);
+            void supabase.auth.updateUser({ data: { full_name: profilePatch.full_name } });
+        }
         setSuccessProfile(true);
         setTimeout(() => setSuccessProfile(false), 3000);
         setSaving(false);
@@ -300,7 +324,19 @@ export default function StudentSettings() {
                     <div className="space-y-3">
                         <div>
                             <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('common.name')}</label>
-                            <p className="px-4 py-3 bg-gray-50 rounded-2xl text-sm text-gray-700 font-medium">{studentName}</p>
+                            {nameEntryRequired ? (
+                                <>
+                                    <p className="text-xs text-amber-800 mb-2">{t('parent.editPendingChildNameHint')}</p>
+                                    <input
+                                        type="text"
+                                        value={studentName}
+                                        onChange={(e) => setStudentName(e.target.value)}
+                                        className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-transparent"
+                                    />
+                                </>
+                            ) : (
+                                <p className="px-4 py-3 bg-gray-50 rounded-2xl text-sm text-gray-700 font-medium">{studentName}</p>
+                            )}
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('common.email')}</label>

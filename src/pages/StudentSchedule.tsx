@@ -21,6 +21,7 @@ import WhiteboardButton from '@/components/WhiteboardButton';
 import SessionFiles from '@/components/SessionFiles';
 import { useSearchParams, useNavigate, useMatch } from 'react-router-dom';
 import { sendEmail } from '@/lib/email';
+import { notifyTutorAfterLessonBooked } from '@/lib/mvTutorSessionNotify';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
 import {
     defaultSessionPaymentStatusForStudent,
@@ -612,10 +613,14 @@ export default function StudentSchedule() {
                 .select('student_id, students(full_name)')
                 .eq('parent_id', parentProfileId);
             const options: ParentChildOption[] = (links ?? [])
-                .map((row: { student_id?: string; students?: { full_name?: string } | null }) => ({
-                    id: String(row.student_id ?? ''),
-                    fullName: String(row.students?.full_name ?? '').trim(),
-                }))
+                .map((row) => {
+                    const student = row.students as { full_name?: string } | { full_name?: string }[] | null | undefined;
+                    const fullName = Array.isArray(student) ? student[0]?.full_name : student?.full_name;
+                    return {
+                        id: String(row.student_id ?? ''),
+                        fullName: String(fullName ?? '').trim(),
+                    };
+                })
                 .filter((p) => p.id);
             options.sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }));
             if (options.length === 0) {
@@ -1504,21 +1509,20 @@ export default function StudentSchedule() {
             (async () => {
                 if (tutorProfile?.email) {
                     const organizationTutor = Boolean(tutorProfile.organization_id);
-                    sendEmail({
-                        type: 'booking_notification',
-                        to: tutorProfile.email,
-                        data: {
-                            studentName: studentName || 'Mokinys',
-                            tutorName: tutorProfile.full_name || '',
-                            date: format(selectedTime, 'yyyy-MM-dd'),
-                            time: format(selectedTime, 'HH:mm'),
-                            paymentStatus: usesPackage ? 'paid' : 'pending',
-                            organizationTutor,
-                            /** @deprecated Prefer organizationTutor — kept for older API payloads. */
-                            hidePaymentStatus: organizationTutor,
-                            sessionId: sessionData.id,
-                        },
-                    });
+                    void notifyTutorAfterLessonBooked({
+                        supabase,
+                        tutorId,
+                        tutorEmail: tutorProfile.email,
+                        tutorName: tutorProfile.full_name || '',
+                        organizationId: tutorProfile.organization_id,
+                        studentId,
+                        studentName: studentName || '',
+                        sessionId: sessionData.id,
+                        date: format(selectedTime, 'yyyy-MM-dd'),
+                        time: format(selectedTime, 'HH:mm'),
+                        paymentStatus: usesPackage ? 'paid' : 'pending',
+                        organizationTutor,
+                    }).catch((err) => console.error('[StudentSchedule] tutor notify', err));
                 }
 
                 if (studentEmail) {
@@ -2423,9 +2427,21 @@ export default function StudentSchedule() {
                                 <div className="grid grid-cols-2 gap-3 text-sm">
                                     <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                         <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('studentDash.priceLabel')}</p>
-                                        <p className="font-bold text-gray-900">{fmt(mySessionData?.price)}</p>
+                                        <p className="font-bold text-gray-900">
+                                            {mySessionData?.price != null && mySessionData.status === 'active' && !mySessionData.paid
+                                                ? (() => {
+                                                    const { creditApplied, remaining } = lessonCreditBreakdown(mySessionData.price);
+                                                    if (remaining > 0 && !tutorSoloManualPayments) {
+                                                        return formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile);
+                                                    }
+                                                    if (remaining <= 0) return fmt(0);
+                                                    return fmt(mySessionData.price);
+                                                })()
+                                                : fmt(mySessionData?.price)}
+                                        </p>
                                         {mySessionData?.status === 'active' && !mySessionData.paid && mySessionData.price != null && (() => {
                                             const { creditApplied, remaining } = lessonCreditBreakdown(mySessionData.price);
+                                            if (creditApplied <= 0 && remaining > 0) return null;
                                             return (
                                                 <div className="text-[11px] text-gray-500 mt-1 leading-snug space-y-0.5">
                                                     {creditApplied > 0 && (
@@ -2433,19 +2449,12 @@ export default function StudentSchedule() {
                                                             {t('stuSched.creditRowApplied')}: {fmt(creditApplied)}
                                                         </p>
                                                     )}
-                                                    <p>
-                                                        {remaining > 0 ? (
-                                                            tutorSoloManualPayments ? (
-                                                                t('stuSched.manualPayNoStripeNote')
-                                                            ) : (
-                                                                t('stuSched.cardTotal', {
-                                                                    amount: formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile),
-                                                                })
-                                                            )
-                                                        ) : (
-                                                            t('stuSched.creditCoversFullLesson')
-                                                        )}
-                                                    </p>
+                                                    {remaining <= 0 && (
+                                                        <p>{t('stuSched.creditCoversFullLesson')}</p>
+                                                    )}
+                                                    {remaining > 0 && tutorSoloManualPayments && (
+                                                        <p>{t('stuSched.manualPayNoStripeNote')}</p>
+                                                    )}
                                                 </div>
                                             );
                                         })()}
@@ -2613,16 +2622,15 @@ export default function StudentSchedule() {
                                     const { creditApplied, remaining } = lessonCreditBreakdown(pendingPaymentSession.price);
                                     return (
                                         <>
-                                            <p><span className="font-medium">{t('studentDash.priceLabel')}:</span> {fmt(pendingPaymentSession.price)}</p>
+                                            <p>
+                                                <span className="font-medium">{t('studentDash.priceLabel')}:</span>{' '}
+                                                {remaining > 0 && !manualPaymentInBookingModal
+                                                    ? formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile)
+                                                    : fmt(pendingPaymentSession.price)}
+                                            </p>
                                             {creditApplied > 0 && (
                                                 <p className="text-emerald-700 font-medium">
                                                     {t('stuSched.creditRowApplied')}: {fmt(creditApplied)}
-                                                </p>
-                                            )}
-                                            {remaining > 0 && !manualPaymentInBookingModal && (
-                                                <p>
-                                                    <span className="font-medium">{t('stuSched.cardPayTotal')}</span>{' '}
-                                                    {formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile)}
                                                 </p>
                                             )}
                                             {remaining > 0 && manualPaymentInBookingModal && (

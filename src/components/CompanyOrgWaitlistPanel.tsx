@@ -35,7 +35,11 @@ import { useTranslation } from '@/lib/i18n';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
-import { formatStudentPickerLabel, pickStudentsForOrgTutorPicker } from '@/lib/orgStudentIdentity';
+import {
+  formatOrgStudentPickerLabel,
+  ORG_STUDENT_PICKER_SELECT,
+  pickStudentsForOrgTutorPicker,
+} from '@/lib/orgStudentIdentity';
 
 export type OrgTutorOption = {
   id: string;
@@ -168,7 +172,7 @@ export default function CompanyOrgWaitlistPanel({
       setStudents([]);
       return;
     }
-    const studentSelect = 'id, full_name, email, tutor_id, grade, linked_user_id, organization_id';
+    const studentSelect = ORG_STUDENT_PICKER_SELECT;
     let rows: StudentRow[] = [];
     if (organizationId && tutorIds.length > 0) {
       const [byTutorRes, byOrgRes] = await Promise.all([
@@ -382,7 +386,7 @@ export default function CompanyOrgWaitlistPanel({
             <SelectContent>
               {studentsForTutor.map((s) => (
                 <SelectItem key={s.id} value={s.id}>
-                  {formatStudentPickerLabel(s.full_name, s.grade)}
+                  {formatOrgStudentPickerLabel(s)}
                 </SelectItem>
               ))}
             </SelectContent>

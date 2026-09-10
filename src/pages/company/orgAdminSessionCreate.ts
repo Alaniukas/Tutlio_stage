@@ -5,6 +5,11 @@ import {
 } from '@/lib/recurringSessions';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendEmail } from '@/lib/email';
+import { isMoksloVaisiaiOrg } from '@/lib/marketMoney';
+import {
+  countNonCancelledSessionsForPair,
+  isFirstLessonForStudentTutorPair,
+} from '@/lib/mvFirstLessonPlanned';
 import { authHeaders } from '@/lib/apiHelpers';
 import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
 import { defaultSessionPaymentStatusForStudent } from '@/lib/studentPaymentModel';
@@ -194,8 +199,6 @@ async function notifyAfterOrgAdminSessionsCreated(
     .eq('id', tutorId)
     .single();
 
-  const orgIdPayload = (tutorProfile as any)?.organization_id ? { organizationId: (tutorProfile as any).organization_id } : {};
-
   const studentIds = [...new Set(sessionsForNotify.map(s => s.student_id))];
   const { data: studentRows } = await supabase
     .from('students')
@@ -214,20 +217,57 @@ async function notifyAfterOrgAdminSessionsCreated(
     .map(id => studentById.get(id)?.full_name)
     .filter(Boolean) as string[];
   const tutorStudentLabel = studentNames.length === 1 ? studentNames[0]! : studentNames.join(', ');
+  const tutorOrgId = (tutorProfile as any)?.organization_id as string | null | undefined;
+  const orgIdPayload = tutorOrgId ? { organizationId: tutorOrgId } : {};
+  const isMvOrg = isMoksloVaisiaiOrg(tutorOrgId);
 
   if (tutorProfile?.email) {
-    void sendEmail({
-      type: 'booking_notification',
-      to: tutorProfile.email,
-      data: {
-        scheduledByOrgAdmin: true,
-        studentName: tutorStudentLabel,
-        tutorName: tutorProfile.full_name || '',
-        date: format(tutorStart, 'yyyy-MM-dd'),
-        time: format(tutorStart, 'HH:mm'),
-        ...((tutorProfile as any).organization_id ? { organizationId: (tutorProfile as any).organization_id } : {}),
-      },
-    }).catch(err => console.error('[OrgSchedule] tutor notify', err));
+    if (isMvOrg) {
+      for (const studentId of studentIds) {
+        const batchCount = sessionsForNotify.filter((s) => s.student_id === studentId).length;
+        try {
+          const totalCount = await countNonCancelledSessionsForPair(supabase, studentId, tutorId);
+          if (!isFirstLessonForStudentTutorPair(totalCount, batchCount)) continue;
+
+          const st = studentById.get(studentId);
+          const studentSessions = sessionsForNotify.filter((s) => s.student_id === studentId);
+          const earliest = studentSessions.reduce(
+            (min, s) => (new Date(s.start_time) < new Date(min.start_time) ? s : min),
+            studentSessions[0],
+          );
+          const lessonStart = new Date(earliest.start_time);
+
+          void sendEmail({
+            type: 'mv_first_lesson_planned_tutor',
+            to: tutorProfile.email,
+            data: {
+              scheduledByOrgAdmin: true,
+              studentName: st?.full_name || '',
+              tutorName: tutorProfile.full_name || '',
+              date: format(lessonStart, 'yyyy-MM-dd'),
+              time: format(lessonStart, 'HH:mm'),
+              sessionId: earliest.id,
+              ...orgIdPayload,
+            },
+          }).catch((err) => console.error('[OrgSchedule] MV first lesson notify', err));
+        } catch (err) {
+          console.error('[OrgSchedule] MV first lesson check', err);
+        }
+      }
+    } else {
+      void sendEmail({
+        type: 'booking_notification',
+        to: tutorProfile.email,
+        data: {
+          scheduledByOrgAdmin: true,
+          studentName: tutorStudentLabel,
+          tutorName: tutorProfile.full_name || '',
+          date: format(tutorStart, 'yyyy-MM-dd'),
+          time: format(tutorStart, 'HH:mm'),
+          ...orgIdPayload,
+        },
+      }).catch(err => console.error('[OrgSchedule] tutor notify', err));
+    }
   }
 
   if (isRecurring) {

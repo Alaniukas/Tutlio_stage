@@ -311,24 +311,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }
             }
 
-            if (tutor?.email) {
+            // Org tutors already received booking_notification at reservation — no payment email.
+            if (tutor?.email && !isOrgTutor(tutorProfile?.organization_id)) {
                 try {
-                    const tutorPayload = isOrgTutor(tutorProfile?.organization_id)
-                        ? {
-                            type: 'lesson_confirmed_tutor',
-                            to: tutor.email,
-                            data: {
-                                studentName: student.full_name,
-                                tutorName: tutor.full_name || 'Korepetitorius',
-                                date: dateStr,
-                                time: timeStr,
-                                subject: sessionData.topic,
-                                sessionId: sessionData.id,
-                                meetingLink: (sessionData as { meeting_link?: string | null }).meeting_link || '',
-                                organizationId: tutorProfile.organization_id,
-                            }
-                        }
-                        : {
+                    await fetch(sendEmailUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                        body: JSON.stringify({
                             type: 'payment_received_tutor',
                             to: tutor.email,
                             data: {
@@ -339,12 +328,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                 subject: sessionData.topic,
                                 price: sessionData.price,
                                 ...(tutorProfile?.organization_id ? { organizationId: tutorProfile.organization_id } : {}),
-                            }
-                        };
-                    await fetch(sendEmailUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-                        body: JSON.stringify(tutorPayload)
+                            },
+                        }),
                     });
                 } catch (e) {
                     console.error('[confirm-stripe-payment] Failed to send tutor email', e);

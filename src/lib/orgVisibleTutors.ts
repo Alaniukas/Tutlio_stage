@@ -98,7 +98,7 @@ export async function getOrgVisibleTutors(
   const relationshipTutorIds = buildOrgTutorIdSet(
     linkedStudents,
     inviteData,
-    (profileRows || []) as Array<{ id: string; email?: string | null }>,
+    (profileRows || []) as unknown as Array<{ id: string; email?: string | null }>,
   );
   const rpcTutorIds =
     !visibleTutorIds.error && (adminUsers || []).length > 0

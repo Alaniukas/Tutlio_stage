@@ -5,6 +5,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { verifyPerlasToken } from './_lib/perlasFinance.js';
+import { isOrgTutor } from './_lib/isOrgTutor.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://www.tutlio.lt';
 
@@ -187,7 +188,7 @@ async function handlePaymentCallback(decoded: Record<string, unknown>, supabase:
     }
   }
 
-  if (tutor?.email) {
+  if (tutor?.email && !isOrgTutor(tutor.organization_id)) {
     try {
       await fetch(sendEmailUrl, {
         method: 'POST',

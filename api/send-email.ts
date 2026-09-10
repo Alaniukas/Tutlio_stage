@@ -9,7 +9,7 @@ if (typeof process !== 'undefined' && process.env.TUTLIO_DEV_API_LOCAL === '1') 
 
 import type { VercelRequest, VercelResponse } from './types';
 import { t, isValidLocale, localizedFromEmail, type Locale } from './_lib/i18n.js';
-import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from './_lib/marketMoney.js';
 import {
   applyOrgBrandingToHtml,
   resolveEmailOrgBranding,
@@ -38,6 +38,7 @@ import { canonicalOriginForOrgLocale } from './_lib/public-origin.js';
 import { schoolInstallmentPaymentBreakdown } from './_lib/schoolBookingInvite.js';
 import { studentRegistrationAlreadyActive } from './_lib/registrationInviteGate.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { sanitizeStudentNameForEmail } from './_lib/pendingChildName.js';
 import { hasOrgAdminPermission, type OrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 
@@ -438,8 +439,32 @@ function bookingConfirmation(d: any, locale: Locale) {
   };
 }
 
+/** MV-only tutor email — always Lithuanian regardless of tutor locale. */
+function mvFirstLessonPlannedTutor(d: any, _locale: Locale) {
+  const locale: Locale = 'lt';
+  const appUrl = getAppUrl();
+  const studentName = sanitizeStudentNameForEmail(d.studentName, 'Mokinys');
+  const byAdmin = d.scheduledByOrgAdmin === true;
+  return {
+    subject: t(locale, 'em.mvFirstLessonPlannedSubEmail', { student: studentName, date: d.date }),
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#124410', '#5C2B02')}"><h1>${t(locale, 'em.mvFirstLessonPlannedHeader')}</h1><p>${byAdmin ? t(locale, 'em.mvFirstLessonPlannedSubAdmin') : t(locale, 'em.mvFirstLessonPlannedSub')}</p></div>
+      <div class="body">
+        <p class="greeting">${t(locale, 'em.hiName', { name: d.tutorName })}</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">${byAdmin
+          ? t(locale, 'em.mvFirstLessonPlannedBodyAdmin', { student: studentName })
+          : t(locale, 'em.mvFirstLessonPlannedBody', { student: studentName })}</p>
+        ${table(td(t(locale, 'em.labelStudent'), studentName) + td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time, false))}
+        <div style="text-align:center; margin-top: 24px;">
+          ${outlookEmailButton(`${appUrl}/dashboard?lang=${locale}`, t(locale, 'em.btnViewCalendar'), '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+        </div>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
 function bookingNotification(d: any, locale: Locale) {
   const appUrl = getAppUrl();
+  const studentName = sanitizeStudentNameForEmail(d.studentName, locale === 'en' ? 'Student' : 'Mokinys');
   const localizedPaymentStatus =
     d.paymentStatus === 'paid' ? t(locale, 'em.statusPaid') :
     d.paymentStatus === 'pending' ? t(locale, 'em.statusPending') :
@@ -448,10 +473,10 @@ function bookingNotification(d: any, locale: Locale) {
   const isOrgSchoolTutorBooking = !!(d.organizationTutor || d.hidePaymentStatus);
 
   const statusParagraph = d.scheduledByOrgAdmin
-    ? `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.bookingNotifAdminBody', { student: d.studentName })}</p>`
+    ? `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.bookingNotifAdminBody', { student: studentName })}</p>`
     : isOrgSchoolTutorBooking
-      ? `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.bookingNotifOrgTutorBody', { student: d.studentName })}</p>`
-      : `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.bookingNotifWithStatus', { student: d.studentName, status: localizedPaymentStatus })}</p>`;
+      ? `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.bookingNotifOrgTutorBody', { student: studentName })}</p>`
+      : `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.bookingNotifWithStatus', { student: studentName, status: localizedPaymentStatus })}</p>`;
 
   const headerSub = d.scheduledByOrgAdmin
     ? t(locale, 'em.bookingNotifAdminSub')
@@ -460,14 +485,14 @@ function bookingNotification(d: any, locale: Locale) {
       : t(locale, 'em.bookingNotifStudentSub');
   return {
     subject: d.scheduledByOrgAdmin
-      ? t(locale, 'em.bookingNotifSubAdmin', { student: d.studentName, date: d.date })
-      : t(locale, 'em.bookingNotifSub', { student: d.studentName, date: d.date }),
+      ? t(locale, 'em.bookingNotifSubAdmin', { student: studentName, date: d.date })
+      : t(locale, 'em.bookingNotifSub', { student: studentName, date: d.date }),
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#6366f1', '#8b5cf6')}"><h1>${t(locale, 'em.bookingNotifHeader')}</h1><p>${headerSub}</p></div>
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiName', { name: d.tutorName })}</p>
         ${statusParagraph}
-        ${table(td(t(locale, 'em.labelStudent'), d.studentName) + td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time, false))}
+        ${table(td(t(locale, 'em.labelStudent'), studentName) + td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time, false))}
         <div style="text-align:center; margin-top: 24px;">
           ${outlookEmailButton(`${appUrl}/dashboard?lang=${locale}`, t(locale, 'em.btnViewCalendar'), '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
         </div>
@@ -3001,6 +3026,7 @@ function isAuthorizedRequest(req: VercelRequest): boolean {
 const USER_TRIGGERABLE_EMAIL_TYPES = new Set([
   'booking_confirmation',
   'booking_notification',
+  'mv_first_lesson_planned_tutor',
   'org_tutor_availability_notice',
   'session_cancelled',
   'session_reminder',
@@ -3198,6 +3224,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       null;
     const orgIdForBrandingLookup = orgIdFromPayload || (await resolveOrganizationIdFromAuthBearer(req));
 
+    if (type === 'booking_notification' && isMoksloVaisiaiOrg(orgIdForBrandingLookup)) {
+      return res.status(200).json({ success: true, skipped: true, reason: 'mv_no_booking_notification' });
+    }
+
+    if (type === 'mv_first_lesson_planned_tutor' && !isMoksloVaisiaiOrg(orgIdForBrandingLookup)) {
+      return res.status(200).json({ success: true, skipped: true, reason: 'mv_first_lesson_mv_only' });
+    }
+
     if (type === 'invite_email') {
       const toEmail = Array.isArray(to) ? String(to[0] || '') : String(to || '');
       const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
@@ -3212,6 +3246,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     function tutorStudentAssigned(d: any, locale: Locale) {
       const copy = TUTOR_NOTIFICATION_COPY[locale];
+      const studentLabel = sanitizeStudentNameForEmail(
+        d.studentName,
+        locale === 'en' ? 'Student' : 'Mokinys',
+      );
       const hasEmail = d.studentEmail && String(d.studentEmail).trim() !== '';
       const hasPhone = d.studentPhone && String(d.studentPhone).trim() !== '';
       const contactRows = [
@@ -3230,7 +3268,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <div class="body">
             <p class="greeting">${d.tutorName ? t(locale, 'em.hiNameNoEmoji', { name: esc(d.tutorName) }) : t(locale, 'em.hi')}</p>
             <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-              ${copy.assignmentBody.replace('{student}', () => esc(d.studentName || ''))}
+              ${copy.assignmentBody.replace('{student}', () => esc(studentLabel))}
             </p>
             ${contactBlock}
           </div>${footerFor(locale)}`, locale),
@@ -3444,6 +3482,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     switch (type) {
       case 'booking_confirmation': emailContent = bookingConfirmation(data, locale); break;
       case 'booking_notification': emailContent = bookingNotification(data, locale); break;
+      case 'mv_first_lesson_planned_tutor': emailContent = mvFirstLessonPlannedTutor(data, locale); break;
       case 'session_cancelled': emailContent = sessionCancelled(data, locale); break;
       case 'session_cancelled_parent': emailContent = sessionCancelledParent(data, locale); break;
       case 'session_student_no_show': emailContent = sessionStudentNoShowPayer(data, locale); break;

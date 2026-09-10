@@ -141,7 +141,11 @@ import { formatLocalYmd, monthlyPackagePeriodFrom } from '@/lib/monthlyPackagePl
 import { canEditPendingPackage } from '@/lib/pendingPackageEdit';
 import { displayStudentGrade, normalizeStudentGrade1to12, proKlaseGradeSelectValue } from '@/lib/studentGrade';
 import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
-import { orgStudentIdentityGroupKey } from '@/lib/orgStudentIdentity';
+import {
+  matchesOrgStudentPickerSearch,
+  orgStudentDisplayName,
+  orgStudentIdentityGroupKey,
+} from '@/lib/orgStudentIdentity';
 
 interface Student {
   id: string;
@@ -746,7 +750,7 @@ export default function CompanyStudents() {
     );
     if (normalizedSearch) {
       groups = groups.filter((g) =>
-        g.rows.some((r) => String(r.full_name || '').toLowerCase().includes(normalizedSearch)),
+        g.rows.some((r) => matchesOrgStudentPickerSearch(r, normalizedSearch)),
       );
     }
     if (gradeFilter !== 'all') {
@@ -1934,7 +1938,7 @@ export default function CompanyStudents() {
           ...(tutorId ? { tutor_id: tutorId } : {}),
           full_name:
             !isSchoolView && isMvOrg && newStudent.invite_target === 'parent'
-              ? t('parent.pendingChildName')
+              ? ''
               : newStudent.full_name.trim(),
           email: newStudent.email?.trim() || null,
           phone: newStudent.phone?.trim() || null,
@@ -3998,7 +4002,8 @@ export default function CompanyStudents() {
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0 flex-wrap">
                             <p className="font-semibold text-gray-900 truncate">
-                              <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span> {student.full_name}
+                              <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span>{' '}
+                              {orgStudentDisplayName(student)}
                             </p>
                             {displayStudentGrade(student.grade) && (
                               <span className="inline-flex items-center text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg border border-indigo-200 font-semibold flex-shrink-0">
@@ -4140,7 +4145,8 @@ export default function CompanyStudents() {
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <p className="font-semibold text-gray-900 truncate">
-                                  <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span> {student.full_name}
+                                  <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span>{' '}
+                                  {orgStudentDisplayName(student)}
                                 </p>
                                 {displayStudentGrade(student.grade) && (
                                   <span className="inline-flex items-center text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg border border-indigo-200 font-semibold">

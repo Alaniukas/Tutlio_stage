@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   calendarStudentTitlePart,
+  formatOrgStudentPickerLabel,
   formatStudentPickerLabel,
+  matchesOrgStudentPickerSearch,
+  orgStudentDisplayName,
   orgStudentIdentityGroupKey,
   pickStudentsForOrgTutorPicker,
   sameOrgStudentIdentity,
@@ -72,6 +75,40 @@ describe('orgStudentIdentity', () => {
   it('shows grade in picker label when set', () => {
     expect(formatStudentPickerLabel('Jonas', '5 klasė')).toBe('Jonas (5 klasė)');
     expect(formatStudentPickerLabel('Jonas', null)).toBe('Jonas');
+  });
+
+  it('keeps real student name in picker label', () => {
+    expect(
+      formatOrgStudentPickerLabel({
+        id: 's1',
+        full_name: 'Paulius Tolvaišas',
+        grade: '8 klasė',
+      }),
+    ).toBe('Paulius Tolvaišas (8 klasė)');
+  });
+
+  it('shows payer hint for pending registration placeholder', () => {
+    expect(
+      orgStudentDisplayName({
+        id: 's1',
+        full_name: 'Laukiama registracijos',
+        payer_name: 'Eglė Tolvaišienė',
+        payer_email: 'eglegiedr@gmail.com',
+      }),
+    ).toBe('Laukiama registracijos · Eglė Tolvaišienė');
+  });
+
+  it('matches picker search by payer name and email', () => {
+    const student = {
+      id: 's1',
+      full_name: 'Laukiama registracijos',
+      payer_name: 'Eglė Tolvaišienė',
+      payer_email: 'eglegiedr@gmail.com',
+      grade: '8 klasė',
+    };
+    expect(matchesOrgStudentPickerSearch(student, 'tolvaiš')).toBe(true);
+    expect(matchesOrgStudentPickerSearch(student, 'eglegiedr')).toBe(true);
+    expect(matchesOrgStudentPickerSearch(student, 'paulius')).toBe(false);
   });
 
   it('builds calendar title part with grade', () => {
