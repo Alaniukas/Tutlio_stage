@@ -13,35 +13,29 @@ export default function AboutUs() {
       <LandingNavbar />
 
       <main className="flex-1 pt-[60px] md:pt-[72px]">
-        {/* Hero */}
-        <section className="relative overflow-hidden bg-white">
-          <div className="absolute top-[10%] left-1/2 -translate-x-1/2 w-[700px] h-[400px] bg-white/40 rounded-full blur-[100px] pointer-events-none" />
-          <div className="relative z-10 max-w-[1200px] mx-auto px-6 pt-16 pb-20 text-center">
-            <h1 className="font-display text-[2.25rem] sm:text-[3rem] lg:text-[3.5rem] font-bold text-gray-900 tracking-tight leading-[1.1] mb-5">
-              {t('about.title')}
-            </h1>
-            <p className="text-[15px] lg:text-base text-gray-500 max-w-lg mx-auto leading-relaxed">
-              {t('about.subtitle')}
-            </p>
-          </div>
-        </section>
-
-        {/* Mission */}
-        <section className="max-w-[1200px] mx-auto px-6 py-20">
-          <div className="flex flex-col md:flex-row items-center gap-12 lg:gap-20">
-            <div className="flex-1 space-y-5">
-              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-[12px] font-semibold uppercase tracking-wider">
-                {t('about.missionBadge')}
-              </span>
-              <h2 className="font-display text-2xl sm:text-3xl font-bold text-gray-900">{t('about.missionTitle')}</h2>
-              <p className="text-[15px] text-gray-500 leading-relaxed">{t('about.missionDesc1')}</p>
-              <p className="text-[15px] text-gray-500 leading-relaxed">{t('about.missionDesc2')}</p>
+        {/* Introduction */}
+        <section className="max-w-[1200px] mx-auto px-6 py-16 sm:py-20 lg:py-24">
+          <div className="grid items-center gap-10 md:grid-cols-2 lg:gap-20">
+            <div className="max-w-xl">
+              <h1 className="font-display text-[2.25rem] sm:text-[3rem] lg:text-[3.5rem] font-bold text-gray-900 tracking-tight leading-[1.1] mb-5">
+                {t('about.title')}
+              </h1>
+              <p className="text-[15px] lg:text-base text-gray-500 leading-relaxed mb-8">
+                {t('about.subtitle')}
+              </p>
+              <h2 className="font-display text-2xl sm:text-3xl font-bold text-gray-900 mb-4">
+                {t('about.missionTitle')}
+              </h2>
+              <div className="space-y-4">
+                <p className="text-[15px] text-gray-500 leading-relaxed">{t('about.missionDesc1')}</p>
+                <p className="text-[15px] text-gray-500 leading-relaxed">{t('about.missionDesc2')}</p>
+              </div>
             </div>
-            <div className="flex-1 w-full">
+            <div className="w-full">
               <img
                 src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=800&q=80"
                 alt={t('about.missionImgAlt')}
-                className="rounded-2xl shadow-lg w-full object-cover aspect-[4/3]"
+                className="w-full rounded-2xl object-cover aspect-[4/3]"
                 loading="lazy"
               />
             </div>
