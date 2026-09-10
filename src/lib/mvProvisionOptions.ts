@@ -27,6 +27,7 @@ function pickNotifyEmail(override: string | null | undefined, fallback: string):
 export function resolveMvNotifyTargets(input: MvProvisionDeliveryInput): MvProvisionNotifyTargets {
   const parentAccount = normalizeEmail(input.parentAccountEmail);
   const studentAccount = normalizeEmail(input.studentAccountEmail);
+  const studentFallback = studentAccount || parentAccount;
   const delivery: MvEmailDelivery = input.emailDelivery === 'parent_both' ? 'parent_both' : 'separate';
 
   if (delivery === 'parent_both') {
@@ -36,7 +37,7 @@ export function resolveMvNotifyTargets(input: MvProvisionDeliveryInput): MvProvi
 
   return {
     parentTo: pickNotifyEmail(input.parentNotifyEmail, parentAccount),
-    studentTo: pickNotifyEmail(input.studentNotifyEmail, studentAccount),
+    studentTo: pickNotifyEmail(input.studentNotifyEmail, studentFallback),
   };
 }
 

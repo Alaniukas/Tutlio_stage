@@ -6,6 +6,13 @@ import { supportTranslations } from './supportTranslations.js';
 
 export const no: Record<string, string> = {
   'parent.childAlreadyExists': 'Barnet finnes allerede i listen. Bruk barnets eksisterende kort for å opprette kontoen.',
+  'login.emailOrUsername': 'E-post eller elevens brukernavn',
+  'login.studentUsername': 'Elevens brukernavn',
+  'login.resetIdentifierDesc': 'Skriv inn e-post eller elevens brukernavn. For barn uten e-post sendes lenken til foresatte.',
+  'login.childResetSent': 'Hvis elevkontoen er aktiv, er en lenke for å tilbakestille passordet sendt til foresatte.',
+  'package.refreshPreview': "Oppdater beregningen",
+  'package.pooledPaymentHint': "Betaleren får én pakke med en oversikt over timene og én betalingslenke. Klippene deles mellom elevens lærere.",
+  'compStu.packageCreatedEmailNotSent': "Pakken er opprettet, men e-postleveringen er ikke bekreftet. Bruk funksjonen for å sende pakkens e-post på nytt.",
   'common.reloadPage': "Last siden på nytt",
   'common.reloadPageWarning': "Hvis du laster siden på nytt, går ulagrede endringer tapt. Vil du fortsette?",
   ...familyCatalogTrialCopy.no,

@@ -6,6 +6,13 @@ import { supportTranslations } from './supportTranslations.js';
 
 export const fi: Record<string, string> = {
   'parent.childAlreadyExists': 'Lapsi on jo luettelossasi. Luo tili lapsen nykyisen kortin kautta.',
+  'login.emailOrUsername': 'Sähköposti tai oppilaan käyttäjätunnus',
+  'login.studentUsername': 'Oppilaan käyttäjätunnus',
+  'login.resetIdentifierDesc': 'Anna sähköposti tai oppilaan käyttäjätunnus. Jos lapsella ei ole sähköpostia, linkki lähetetään huoltajalle.',
+  'login.childResetSent': 'Jos oppilaan tili on aktiivinen, salasanan palautuslinkki on lähetetty huoltajalle.',
+  'package.refreshPreview': "Päivitä laskelma",
+  'package.pooledPaymentHint': "Maksaja saa yhden paketin, jossa on tuntierittely ja yksi maksulinkki. Tuntikrediitit ovat yhteisiä oppilaan kaikille opettajille.",
+  'compStu.packageCreatedEmailNotSent': "Paketti on luotu, mutta sähköpostin toimitusta ei vahvistettu. Lähetä paketin sähköposti uudelleen.",
   'common.reloadPage': "Lataa sivu uudelleen",
   'common.reloadPageWarning': "Sivun lataaminen uudelleen poistaa tallentamattomat muutokset. Jatketaanko?",
   ...familyCatalogTrialCopy.fi,

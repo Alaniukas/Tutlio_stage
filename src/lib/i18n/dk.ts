@@ -121,6 +121,13 @@ const DK_DPA_HTML = [
 
 export const dk: Record<string, string> = {
   'parent.childAlreadyExists': 'Barnet er allerede på listen. Brug barnets eksisterende kort til at oprette kontoen.',
+  'login.emailOrUsername': 'E-mail eller elevens brugernavn',
+  'login.studentUsername': 'Elevens brugernavn',
+  'login.resetIdentifierDesc': 'Indtast e-mail eller elevens brugernavn. For børn uden e-mail sendes linket til forælderen.',
+  'login.childResetSent': 'Hvis elevkontoen er aktiv, er et link til nulstilling af adgangskoden sendt til forælderen.',
+  'package.refreshPreview': "Opdater beregning",
+  'package.pooledPaymentHint': "Betaleren modtager én pakke med en oversigt over lektionerne og ét betalingslink. Klippene deles mellem elevens undervisere.",
+  'compStu.packageCreatedEmailNotSent': "Pakken er oprettet, men levering af e-mailen er ikke bekræftet. Brug funktionen til at sende pakkens e-mail igen.",
   'common.reloadPage': "Genindlæs siden",
   'common.reloadPageWarning': "Hvis du genindlæser siden, går ændringer, der ikke er gemt, tabt. Vil du fortsætte?",
   ...familyCatalogTrialCopy.dk,

@@ -30,6 +30,19 @@ describe('resolveMvNotifyTargets', () => {
     });
   });
 
+  it('routes a username student activation to the parent by default', () => {
+    expect(
+      resolveMvNotifyTargets({
+        emailDelivery: 'separate',
+        parentAccountEmail: 'parent@example.com',
+        studentAccountEmail: '',
+      }),
+    ).toEqual({
+      parentTo: 'parent@example.com',
+      studentTo: 'parent@example.com',
+    });
+  });
+
   it('sends both activation emails to parent inbox when parent_both', () => {
     expect(
       resolveMvNotifyTargets({

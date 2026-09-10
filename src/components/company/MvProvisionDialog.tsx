@@ -97,7 +97,11 @@ export default function MvProvisionDialog({
 
   const canSubmit =
     (createParent ? parentName.trim() && parentEmail.trim().includes('@') : true) &&
-    (createStudent ? studentFullName.trim() && studentEmail.trim().includes('@') : true) &&
+    (createStudent
+      ? studentFullName.trim()
+        && (!studentEmail.trim() || studentEmail.trim().includes('@'))
+        && previewTargets.studentTo.includes('@')
+      : true) &&
     (createParent && createStudent
       ? parentEmail.trim().toLowerCase() !== studentEmail.trim().toLowerCase()
       : true) &&
@@ -182,6 +186,11 @@ export default function MvProvisionDialog({
                   className="rounded-xl"
                   placeholder="mokinys@example.com"
                 />
+                {!studentEmail.trim() && (
+                  <p className="text-[11px] text-gray-500">
+                    {t('compStu.provisionSendStudentTo')}: {previewTargets.studentTo || '—'}
+                  </p>
+                )}
               </div>
             </div>
           )}

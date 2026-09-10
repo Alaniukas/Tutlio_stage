@@ -12,6 +12,13 @@ const seLegalTranslations: Record<string, string> = {
 
 export const se: Record<string, string> = {
   'parent.childAlreadyExists': 'Barnet finns redan i listan. Använd barnets befintliga kort för att skapa kontot.',
+  'login.emailOrUsername': 'E-post eller elevens användarnamn',
+  'login.studentUsername': 'Elevens användarnamn',
+  'login.resetIdentifierDesc': 'Ange e-post eller elevens användarnamn. För barn utan e-post skickas länken till vårdnadshavaren.',
+  'login.childResetSent': 'Om elevkontot är aktivt har en länk för att återställa lösenordet skickats till vårdnadshavaren.',
+  'package.refreshPreview': "Uppdatera beräkningen",
+  'package.pooledPaymentHint': "Betalaren får ett paket med en lektionsfördelning och en betalningslänk. Krediterna delas mellan elevens lärare.",
+  'compStu.packageCreatedEmailNotSent': "Paketet har skapats, men e-postleveransen har inte bekräftats. Använd funktionen för att skicka paketets e-post igen.",
   'common.reloadPage': "Ladda om sidan",
   'common.reloadPageWarning': "Om du laddar om sidan går osparade ändringar förlorade. Vill du fortsätta?",
   ...familyCatalogTrialCopy.se,

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { randomBytes } from 'node:crypto';
 import { isAuthEmailAlreadyRegistered } from './findAuthUserByEmail.js';
 import { generateTempPassword } from './generateTempPassword.js';
 import { isMoksloVaisiaiOrg } from './marketMoney.js';
@@ -10,6 +11,7 @@ import {
   type MvActivationRole,
 } from './mvAccountActivationToken.js';
 import { resolveMvNotifyTargets, type MvEmailDelivery } from '../../src/lib/mvProvisionOptions.js';
+import { loginIdentifierToEmail } from '../../src/lib/studentLoginIdentity.js';
 
 export type MvProvisionScope = 'auto' | 'both' | 'parent' | 'student';
 
@@ -29,6 +31,7 @@ export type MvProvisionInput = {
 };
 
 export type MvProvisionAccountResult = {
+  /** User-facing email address or generated student username. */
   email: string;
   password: string;
   userId: string;
@@ -55,6 +58,9 @@ export async function ensureMvAuthUser(
     role: MvActivationRole;
     fullName: string;
     studentId?: string;
+    organizationId?: string | null;
+    studentLoginName?: string | null;
+    studentContactEmail?: string | null;
   },
 ): Promise<{ userId: string; created: boolean } | { error: string; code?: string }> {
   const email = opts.email.trim().toLowerCase();
@@ -62,15 +68,23 @@ export async function ensureMvAuthUser(
     role: opts.role,
     full_name: opts.fullName.trim(),
   };
-  if (opts.role === 'student' && opts.studentId) {
+  // Username accounts must not expose their internal alias to the legacy
+  // auth trigger. They are linked explicitly after user creation below.
+  if (opts.role === 'student' && opts.studentId && !opts.studentLoginName) {
     metadata.student_id = opts.studentId;
   }
+
+  const appMetadata: Record<string, unknown> = {};
+  if (opts.organizationId) appMetadata.provisioned_by_organization = opts.organizationId;
+  if (opts.studentLoginName) appMetadata.student_login_name = opts.studentLoginName;
+  if (opts.studentContactEmail) appMetadata.student_contact_email = opts.studentContactEmail;
 
   const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
     email,
     password: opts.password,
     email_confirm: true,
     user_metadata: metadata,
+    app_metadata: appMetadata,
   });
 
   if (!authErr && authData.user) {
@@ -162,6 +176,7 @@ async function sendActivationEmail(opts: {
   recipientName: string;
   studentName: string;
   accountEmail: string;
+  accountIdentifier?: string;
   tempPassword: string;
   studentId: string;
   appOrigin: string;
@@ -172,7 +187,7 @@ async function sendActivationEmail(opts: {
   const token = buildMvAccountActivationToken({
     studentId: opts.studentId,
     role: opts.role,
-    email: opts.accountEmail,
+    email: opts.accountIdentifier || opts.accountEmail,
   });
   const activationUrl = buildMvAccountActivationUrl(opts.appOrigin, token);
   const emailResult = await sendMvAccountActivationEmail(opts.to, {
@@ -180,6 +195,7 @@ async function sendActivationEmail(opts: {
     recipientName: opts.recipientName,
     studentName: opts.studentName,
     accountEmail: opts.accountEmail,
+    accountIdentifier: opts.accountIdentifier,
     tempPassword: opts.tempPassword,
     activationUrl,
     orgName: opts.orgName,
@@ -220,7 +236,7 @@ export async function provisionMvFamilyAccounts(
   const studentEmail = (input.studentEmail || (student.email as string | null) || '').trim().toLowerCase();
 
   const needsParent = !student.parent_user_id && validEmail(parentEmail);
-  const needsStudent = !student.linked_user_id && validEmail(studentEmail);
+  const needsStudent = !student.linked_user_id;
 
   let doParent = scope === 'parent' || scope === 'both';
   let doStudent = scope === 'student' || scope === 'both';
@@ -239,13 +255,10 @@ export async function provisionMvFamilyAccounts(
   if (doParent && !parentName) {
     return { ok: false, status: 400, error: 'Parent name is required', code: 'parent_name_required' };
   }
-  if (doStudent && !validEmail(studentEmail)) {
-    return { ok: false, status: 400, error: 'Student email is required', code: 'student_email_invalid' };
-  }
   if (doStudent && !studentFullName) {
     return { ok: false, status: 400, error: 'Student name is required', code: 'student_name_required' };
   }
-  if (doParent && doStudent && parentEmail === studentEmail) {
+  if (doParent && doStudent && validEmail(studentEmail) && parentEmail === studentEmail) {
     return { ok: false, status: 400, error: 'Parent and student emails must differ', code: 'emails_must_differ' };
   }
 
@@ -275,6 +288,15 @@ export async function provisionMvFamilyAccounts(
     bothNotifyEmail: input.bothNotifyEmail,
   });
 
+  if (doStudent && !validEmail(studentEmail) && !validEmail(notifyTargets.studentTo)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'A parent or notification email is required for a student username account',
+      code: 'student_contact_email_invalid',
+    };
+  }
+
   const result: { parent?: MvProvisionAccountResult; student?: MvProvisionAccountResult } = {};
 
   if (doParent) {
@@ -284,16 +306,19 @@ export async function provisionMvFamilyAccounts(
       password: parentPassword,
       role: 'parent',
       fullName: parentName,
+      organizationId,
     });
     if ('error' in parentAuth) {
       return { ok: false, status: 400, error: parentAuth.error, code: parentAuth.code };
     }
     if (tutorId && tutorId === parentAuth.userId) {
+      if (parentAuth.created) await supabase.auth.admin.deleteUser(parentAuth.userId);
       return { ok: false, status: 400, error: 'Parent email matches assigned tutor account', code: 'parent_is_tutor' };
     }
     try {
       await linkParentToStudent(supabase, parentAuth.userId, parentName, parentEmail, studentId);
     } catch (e: unknown) {
+      if (parentAuth.created) await supabase.auth.admin.deleteUser(parentAuth.userId);
       const message = e instanceof Error ? e.message : String(e);
       return { ok: false, status: 500, error: message, code: 'link_parent_failed' };
     }
@@ -325,17 +350,27 @@ export async function provisionMvFamilyAccounts(
 
   if (doStudent) {
     const studentPassword = generateTempPassword();
+    const studentLoginName = validEmail(studentEmail)
+      ? null
+      : `mv-${randomBytes(8).toString('hex')}`;
+    const studentAuthEmail = studentLoginName
+      ? loginIdentifierToEmail(studentLoginName)
+      : studentEmail;
     const studentAuth = await ensureMvAuthUser(supabase, {
-      email: studentEmail,
+      email: studentAuthEmail,
       password: studentPassword,
       role: 'student',
       fullName: studentFullName,
       studentId,
+      organizationId,
+      studentLoginName,
+      studentContactEmail: studentLoginName ? notifyTargets.studentTo : null,
     });
     if ('error' in studentAuth) {
       return { ok: false, status: 400, error: studentAuth.error, code: studentAuth.code };
     }
     if (tutorId && tutorId === studentAuth.userId) {
+      if (studentAuth.created) await supabase.auth.admin.deleteUser(studentAuth.userId);
       return {
         ok: false,
         status: 400,
@@ -344,9 +379,20 @@ export async function provisionMvFamilyAccounts(
       };
     }
 
+    const { error: profileErr } = await supabase.from('profiles').upsert({
+      id: studentAuth.userId,
+      email: studentLoginName ? null : studentEmail,
+      full_name: studentFullName,
+      organization_id: null,
+    }, { onConflict: 'id' });
+    if (profileErr) {
+      if (studentAuth.created) await supabase.auth.admin.deleteUser(studentAuth.userId);
+      return { ok: false, status: 500, error: profileErr.message, code: 'student_profile_failed' };
+    }
+
     const studentUpdate: Record<string, unknown> = {
       full_name: studentFullName,
-      email: studentEmail,
+      email: studentLoginName ? null : studentEmail,
       linked_user_id: studentAuth.userId,
     };
     if (doParent || student.parent_user_id) {
@@ -359,6 +405,7 @@ export async function provisionMvFamilyAccounts(
 
     const { error: linkErr } = await supabase.from('students').update(studentUpdate).eq('id', studentId);
     if (linkErr) {
+      if (studentAuth.created) await supabase.auth.admin.deleteUser(studentAuth.userId);
       return { ok: false, status: 500, error: linkErr.message, code: 'link_student_failed' };
     }
 
@@ -370,7 +417,8 @@ export async function provisionMvFamilyAccounts(
       to: studentNotifyTo,
       recipientName: studentRecipientName,
       studentName: studentFullName,
-      accountEmail: studentEmail,
+      accountEmail: studentAuthEmail,
+      accountIdentifier: studentLoginName || studentEmail,
       tempPassword: studentPassword,
       studentId,
       appOrigin,
@@ -379,7 +427,7 @@ export async function provisionMvFamilyAccounts(
       locale: emailLocale,
     });
     result.student = {
-      email: studentEmail,
+      email: studentLoginName || studentEmail,
       password: studentPassword,
       userId: studentAuth.userId,
       created: studentAuth.created,

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Loader2, CheckCircle2 } from 'lucide-react';
+import { isStudentLoginName } from '@/lib/studentLoginIdentity';
 
 type Preview = {
   role: 'parent' | 'student';
@@ -109,7 +110,9 @@ export default function MvAccountActivate() {
                 : t('mvActivate.studentDesc', { student: preview.studentName })}
             </p>
             <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-700">
-              <span className="text-gray-500">{t('mvActivate.accountEmail')}: </span>
+              <span className="text-gray-500">
+                {t(isStudentLoginName(preview.email) ? 'login.studentUsername' : 'mvActivate.accountEmail')}: {' '}
+              </span>
               <strong>{preview.email}</strong>
             </div>
             {done ? (

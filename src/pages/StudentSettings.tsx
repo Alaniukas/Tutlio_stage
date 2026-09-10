@@ -61,7 +61,7 @@ export default function StudentSettings() {
     const fetchData = async () => {
         if (!ctxUser) return;
         const user = ctxUser;
-        setEmail(user.email || '');
+        setEmail(user.app_metadata?.student_login_name || user.email || '');
 
         const selectedStudentId = typeof window !== 'undefined'
             ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY)
@@ -339,7 +339,9 @@ export default function StudentSettings() {
                             )}
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('common.email')}</label>
+                            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">
+                                {t(ctxUser?.app_metadata?.student_login_name ? 'login.studentUsername' : 'common.email')}
+                            </label>
                             <p className="px-4 py-3 bg-gray-50 rounded-2xl text-sm text-gray-700 font-medium">{email}</p>
                         </div>
                         <div>

@@ -6,6 +6,13 @@ import { supportTranslations } from './supportTranslations.js';
 
 export const es: Record<string, string> = {
   'parent.childAlreadyExists': 'Este menor ya está en tu lista. Usa su ficha existente para crear su cuenta.',
+  'login.emailOrUsername': 'Correo o usuario del alumno',
+  'login.studentUsername': 'Usuario del alumno',
+  'login.resetIdentifierDesc': 'Introduce tu correo o usuario del alumno. Si el menor no tiene correo, el enlace se envía al progenitor.',
+  'login.childResetSent': 'Si la cuenta del alumno está activa, se ha enviado al progenitor un enlace para restablecer la contraseña.',
+  'package.refreshPreview': "Actualizar cálculo",
+  'package.pooledPaymentHint': "El pagador recibe un solo paquete con el desglose de clases y un único enlace de pago. Los créditos se comparten entre los profesores del alumno.",
+  'compStu.packageCreatedEmailNotSent': "Paquete creado, pero no se confirmó la entrega del correo. Utiliza la opción de reenviar el correo del paquete.",
   'common.reloadPage': "Recargar la página",
   'common.reloadPageWarning': "Al recargar se perderán los cambios sin guardar. ¿Continuar?",
   ...familyCatalogTrialCopy.es,

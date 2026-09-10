@@ -54,6 +54,7 @@ export type MvAccountActivationEmailData = {
   recipientName?: string | null;
   studentName: string;
   accountEmail: string;
+  accountIdentifier?: string;
   tempPassword: string;
   activationUrl: string;
   orgName?: string | null;
@@ -106,8 +107,8 @@ export async function sendMvAccountActivationEmail(
         <p style="color:#4b5563;font-size:14px;line-height:1.6;margin:0 0 8px;">${bodyIntro}</p>
         <p style="color:#374151;font-size:14px;font-weight:600;margin:20px 0 8px;">${accountLabel}</p>
         <div class="cred-box">
-          <p class="cred-label">${t(locale, 'em.mvFamilyAccountsEmailLabel')}</p>
-          <p class="cred-value">${data.accountEmail}</p>
+          <p class="cred-label">${t(locale, data.accountIdentifier && !data.accountIdentifier.includes('@') ? 'login.studentUsername' : 'em.mvFamilyAccountsEmailLabel')}</p>
+          <p class="cred-value">${data.accountIdentifier || data.accountEmail}</p>
           <p class="cred-label">${t(locale, 'em.mvFamilyAccountsPassword')}</p>
           <p class="cred-value" style="font-family:monospace;font-size:16px;">${data.tempPassword}</p>
         </div>

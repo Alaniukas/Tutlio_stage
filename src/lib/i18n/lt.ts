@@ -2,6 +2,13 @@ import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 
 export const lt: Record<string, string> = {
   'parent.childAlreadyExists': 'Šis vaikas jau yra jūsų sąraše. Naujo įrašo kurti nereikia. Jo paskyrą galite sukurti esamoje vaiko kortelėje.',
+  'login.emailOrUsername': 'El. paštas arba mokinio prisijungimo vardas',
+  'login.resetIdentifierDesc': 'Įveskite el. paštą arba mokinio prisijungimo vardą. Jei vaikas neturi el. pašto, atkūrimo nuorodą gaus tėvai.',
+  'login.studentUsername': 'Mokinio prisijungimo vardas',
+  'login.childResetSent': 'Jei mokinio paskyra aktyvi, slaptažodžio atkūrimo nuoroda išsiųsta tėvų el. paštu.',
+  'compStu.packageCreatedEmailNotSent': 'Paketas sukurtas, bet laiško išsiuntimas nepatvirtintas. Paketo veiksmuose pasirinkite pakartotinį laiško siuntimą.',
+  'package.refreshPreview': 'Atnaujinti skaičiavimą',
+  'package.pooledPaymentHint': 'Mokėtojas gaus vieną paketą su pamokų išklotine ir vieną mokėjimo nuorodą. Kreditai bendri visiems mokinio korepetitoriams.',
   ...familyCatalogTrialCopy.lt,
   'common.reloadPage': "Įkelti puslapį iš naujo",
   'common.reloadPageWarning': "Įkėlus puslapį iš naujo, neišsaugoti pakeitimai bus prarasti. Tęsti?",

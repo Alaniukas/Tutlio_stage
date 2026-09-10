@@ -6,6 +6,13 @@ import { supportTranslations } from './supportTranslations.js';
 
 export const ee: Record<string, string> = {
   'parent.childAlreadyExists': 'See laps on juba nimekirjas. Konto loomiseks kasutage olemasolevat lapse kaarti.',
+  'login.emailOrUsername': 'E-post või õpilase kasutajanimi',
+  'login.studentUsername': 'Õpilase kasutajanimi',
+  'login.resetIdentifierDesc': 'Sisestage e-post või õpilase kasutajanimi. E-postita lapse puhul saadetakse link vanemale.',
+  'login.childResetSent': 'Kui õpilase konto on aktiivne, saadeti parooli lähtestamise link vanemale.',
+  'package.refreshPreview': "Värskenda arvutust",
+  'package.pooledPaymentHint': "Maksja saab ühe paketi tundide jaotuse ja ühe makselingiga. Krediite saab kasutada õpilase kõigi juhendajate tundides.",
+  'compStu.packageCreatedEmailNotSent': "Pakett on loodud, kuid e-kirja kohaletoimetamine pole kinnitatud. Kasutage paketi e-kirja uuesti saatmise toimingut.",
   'common.reloadPage': "Laadi leht uuesti",
   'common.reloadPageWarning': "Lehe uuesti laadimisel lähevad salvestamata muudatused kaotsi. Kas jätkata?",
   ...familyCatalogTrialCopy.ee,

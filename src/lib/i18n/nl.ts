@@ -7,6 +7,13 @@ import { nlQuiz } from './nlQuiz.js';
 
 export const nl: Record<string, string> = {
   'parent.childAlreadyExists': 'Dit kind staat al in je lijst. Gebruik de bestaande kindkaart om het account aan te maken.',
+  'login.emailOrUsername': 'E-mail of leerlinggebruikersnaam',
+  'login.studentUsername': 'Leerlinggebruikersnaam',
+  'login.resetIdentifierDesc': 'Voer je e-mail of leerlinggebruikersnaam in. Voor kinderen zonder e-mail gaat de link naar de ouder.',
+  'login.childResetSent': 'Als het leerlingaccount actief is, is een link om het wachtwoord te herstellen naar de ouder gestuurd.',
+  'package.refreshPreview': "Berekening vernieuwen",
+  'package.pooledPaymentHint': "De betaler ontvangt één pakket met een lesoverzicht en één betaallink. De lestegoeden worden gedeeld tussen de docenten van de leerling.",
+  'compStu.packageCreatedEmailNotSent': "Pakket aangemaakt, maar de bezorging van de e-mail is niet bevestigd. Gebruik de optie om de pakketmail opnieuw te versturen.",
   'common.reloadPage': "Pagina opnieuw laden",
   'common.reloadPageWarning': "Als je de pagina opnieuw laadt, gaan niet-opgeslagen wijzigingen verloren. Doorgaan?",
   ...familyCatalogTrialCopy.nl,

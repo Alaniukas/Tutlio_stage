@@ -8,6 +8,13 @@
  */
 export const DRAFT_LOCALE_ALANO_FALLBACK_KEYS = new Set<string>([
   'parent.childAlreadyExists',
+  'login.emailOrUsername',
+  'login.resetIdentifierDesc',
+  'login.studentUsername',
+  'login.childResetSent',
+  'package.refreshPreview',
+  'package.pooledPaymentHint',
+  'compStu.packageCreatedEmailNotSent',
   'auth.proklasePrivacyPolicy',
   'auth.proklaseTermsOfService',
   'auth.showPassword',

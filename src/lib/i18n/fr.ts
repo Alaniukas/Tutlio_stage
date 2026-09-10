@@ -6,6 +6,13 @@ import { supportTranslations } from './supportTranslations.js';
 
 export const fr: Record<string, string> = {
   'parent.childAlreadyExists': "Cet enfant figure déjà dans votre liste. Utilisez sa fiche existante pour créer son compte.",
+  'login.emailOrUsername': 'E-mail ou identifiant élève',
+  'login.studentUsername': 'Identifiant élève',
+  'login.resetIdentifierDesc': "Saisissez votre e-mail ou identifiant élève. Pour un enfant sans e-mail, le lien est envoyé au parent.",
+  'login.childResetSent': "Si le compte élève est actif, un lien de réinitialisation du mot de passe a été envoyé au parent.",
+  'package.refreshPreview': "Actualiser le calcul",
+  'package.pooledPaymentHint': "Le payeur reçoit un seul forfait avec le détail des cours et un seul lien de paiement. Les crédits sont partagés entre les enseignants de l’élève.",
+  'compStu.packageCreatedEmailNotSent': "Forfait créé, mais la livraison du courriel n’a pas été confirmée. Utilisez l’action de renvoi du courriel du forfait.",
   'common.reloadPage': "Recharger la page",
   'common.reloadPageWarning': "Le rechargement entraînera la perte des modifications non enregistrées. Continuer ?",
   ...familyCatalogTrialCopy.fr,

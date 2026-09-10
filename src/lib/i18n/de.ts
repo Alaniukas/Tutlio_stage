@@ -6,6 +6,13 @@ import { supportTranslations } from './supportTranslations.js';
 
 export const de: Record<string, string> = {
   'parent.childAlreadyExists': 'Dieses Kind steht bereits in deiner Liste. Erstelle sein Konto über den bestehenden Eintrag.',
+  'login.emailOrUsername': 'E-Mail oder Schülerbenutzername',
+  'login.studentUsername': 'Schülerbenutzername',
+  'login.resetIdentifierDesc': 'Gib deine E-Mail oder den Schülerbenutzernamen ein. Bei Kindern ohne E-Mail erhält ein Elternteil den Link.',
+  'login.childResetSent': 'Wenn das Schülerkonto aktiv ist, wurde ein Link zum Zurücksetzen des Passworts an den Elternteil gesendet.',
+  'package.refreshPreview': "Berechnung aktualisieren",
+  'package.pooledPaymentHint': "Die zahlende Person erhält ein Paket mit einer Aufschlüsselung der Stunden und einem Zahlungslink. Das Guthaben gilt für alle Lehrkräfte des Schülers.",
+  'compStu.packageCreatedEmailNotSent': "Paket erstellt, aber die Zustellung der E-Mail wurde nicht bestätigt. Senden Sie die Paket-E-Mail erneut.",
   'common.reloadPage': "Seite neu laden",
   'common.reloadPageWarning': "Beim Neuladen gehen ungespeicherte Änderungen verloren. Fortfahren?",
   ...familyCatalogTrialCopy.de,

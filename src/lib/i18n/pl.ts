@@ -5,6 +5,13 @@ import { schoolTeacherContractTranslationsPl } from './schoolTeacherContractTran
 
 export const pl: Record<string, string> = {
   'parent.childAlreadyExists': 'To dziecko jest już na Twojej liście. Nie twórz kolejnego wpisu. Konto możesz utworzyć w istniejącej karcie dziecka.',
+  'login.emailOrUsername': 'E-mail lub login ucznia',
+  'login.resetIdentifierDesc': 'Wpisz e-mail lub login ucznia. Jeśli dziecko nie ma e-maila, link do resetowania otrzyma rodzic.',
+  'login.studentUsername': 'Login ucznia',
+  'login.childResetSent': 'Jeśli konto ucznia jest aktywne, link do resetowania hasła został wysłany na adres e-mail rodzica.',
+  'package.refreshPreview': 'Odśwież obliczenia',
+  'package.pooledPaymentHint': 'Płatnik otrzyma jeden pakiet z zestawieniem lekcji i jeden link do płatności. Kredyty są wspólne dla wszystkich korepetytorów ucznia.',
+  'compStu.packageCreatedEmailNotSent': 'Pakiet utworzony, ale wysłanie wiadomości nie zostało potwierdzone. Użyj opcji ponownego wysłania wiadomości przy pakiecie.',
   'common.reloadPage': "Odśwież stronę",
   'common.reloadPageWarning': "Odświeżenie strony spowoduje utratę niezapisanych zmian. Kontynuować?",
   ...familyCatalogTrialCopy.pl,

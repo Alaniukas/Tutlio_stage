@@ -1831,15 +1831,6 @@ export default function CompanyStudents() {
       !isSchoolView &&
       isMvOrg &&
       newStudent.invite_target === 'provision' &&
-      !newStudent.email.trim()
-    ) {
-      setToastMessage({ message: t('compStu.provisionStudentEmailRequired'), type: 'error' });
-      return;
-    }
-    if (
-      !isSchoolView &&
-      isMvOrg &&
-      newStudent.invite_target === 'provision' &&
       !newStudent.payer_name.trim()
     ) {
       setToastMessage({ message: t('compStu.parentInviteNameRequired'), type: 'error' });
@@ -1858,6 +1849,7 @@ export default function CompanyStudents() {
       !isSchoolView &&
       isMvOrg &&
       newStudent.invite_target === 'provision' &&
+      newStudent.email.trim() &&
       newStudent.payer_email.trim().toLowerCase() === newStudent.email.trim().toLowerCase()
     ) {
       setToastMessage({ message: t('compStu.provisionEmailsMustDiffer'), type: 'error' });
@@ -3113,14 +3105,13 @@ export default function CompanyStudents() {
 
                   <div className="grid sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>{provisionAccounts ? t('compStu.emailLabel') + ' *' : t('compStu.emailLabel')}</Label>
+                    <Label>{t('compStu.emailLabel')}</Label>
                     <Input
                       type="email"
                       value={newStudent.email}
                       onChange={(e) => setNewStudent({ ...newStudent, email: e.target.value })}
                       placeholder="jonas@example.com"
                       className="rounded-xl"
-                      required={provisionAccounts}
                     />
                   </div>
 

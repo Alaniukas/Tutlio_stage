@@ -7,6 +7,12 @@ import { createClient } from '@supabase/supabase-js';
 import { findAuthUserByEmail } from './_lib/findAuthUserByEmail.js';
 import { isAllowedRedirectUrl, publicOriginFromRequest } from './_lib/public-origin.js';
 import { resolveAuthEmailLocale } from '../src/lib/auth-locale.js';
+import {
+  isStudentLoginName,
+  loginIdentifierToEmail,
+  studentLoginNameFromEmail,
+} from '../src/lib/studentLoginIdentity.js';
+import { sendStudentUsernameRecovery } from './_lib/studentUsernameRecovery.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -40,6 +46,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    if (isStudentLoginName(email) || studentLoginNameFromEmail(email)) {
+      // Unknown, inactive, throttled and valid usernames deliberately return the same response.
+      try {
+        await sendStudentUsernameRecovery(admin, loginIdentifierToEmail(email), redirectTo);
+      } catch {
+        console.error('[request-password-reset] Username recovery could not be sent');
+      }
+      return res.status(200).json({ success: true });
+    }
     const publicClient = createClient(supabaseUrl, anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });

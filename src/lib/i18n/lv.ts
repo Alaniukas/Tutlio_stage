@@ -6,6 +6,13 @@ import { supportTranslations } from './supportTranslations.js';
 
 export const lv: Record<string, string> = {
   'parent.childAlreadyExists': 'Šis bērns jau ir sarakstā. Konta izveidei izmantojiet esošo bērna kartīti.',
+  'login.emailOrUsername': 'E-pasts vai skolēna lietotājvārds',
+  'login.studentUsername': 'Skolēna lietotājvārds',
+  'login.resetIdentifierDesc': 'Ievadiet e-pastu vai skolēna lietotājvārdu. Ja bērnam nav e-pasta, saiti saņems vecāks.',
+  'login.childResetSent': 'Ja skolēna konts ir aktīvs, paroles atjaunošanas saite ir nosūtīta vecākam.',
+  'package.refreshPreview': "Atjaunot aprēķinu",
+  'package.pooledPaymentHint': "Maksātājs saņem vienu paketi ar nodarbību sadalījumu un vienu maksājuma saiti. Kredīti ir kopīgi visiem skolēna pasniedzējiem.",
+  'compStu.packageCreatedEmailNotSent': "Pakete izveidota, taču e-pasta piegāde nav apstiprināta. Izmantojiet paketes e-pasta atkārtotas nosūtīšanas darbību.",
   'common.reloadPage': "Pārlādēt lapu",
   'common.reloadPageWarning': "Pārlādējot lapu, nesaglabātās izmaiņas tiks zaudētas. Vai turpināt?",
   ...familyCatalogTrialCopy.lv,

@@ -2,6 +2,13 @@ import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 
 export const en: Record<string, string> = {
   'parent.childAlreadyExists': 'This child is already in your list. You do not need another entry. Use the existing child card to create their account.',
+  'login.emailOrUsername': 'Email or student username',
+  'login.resetIdentifierDesc': 'Enter your email or student username. For children without email, the reset link is sent to their parent.',
+  'login.studentUsername': 'Student username',
+  'login.childResetSent': 'If the student account is active, a password reset link has been sent to the parent’s email.',
+  'compStu.packageCreatedEmailNotSent': 'Package created, but email delivery was not confirmed. Use the package resend email action.',
+  'package.refreshPreview': 'Refresh calculation',
+  'package.pooledPaymentHint': 'The payer receives one package with a lesson breakdown and one payment link. Credits are shared across the student’s tutors.',
   ...familyCatalogTrialCopy.en,
   'common.reloadPage': "Reload page",
   'common.reloadPageWarning': "Reloading will discard unsaved changes. Continue?",

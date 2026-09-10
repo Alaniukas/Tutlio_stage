@@ -13,7 +13,7 @@ function validEmail(value?: string | null): boolean {
 }
 
 export function mvNeedsStudentAccount(row: MvStudentAccountRow): boolean {
-  return !row.linked_user_id && validEmail(row.email);
+  return !row.linked_user_id;
 }
 
 export function mvNeedsParentAccount(row: MvStudentAccountRow): boolean {

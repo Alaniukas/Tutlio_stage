@@ -7,6 +7,7 @@ import {
 import { findAuthUserByEmail } from './_lib/findAuthUserByEmail.js';
 import { isMoksloVaisiaiOrg } from './_lib/marketMoney.js';
 import { orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
+import { loginIdentifierToEmail } from '../src/lib/studentLoginIdentity.js';
 
 function parseJsonBody(req: VercelRequest): Record<string, unknown> {
   const raw = req.body;
@@ -47,7 +48,7 @@ async function loadPreview(
     return { status: 400 as const, body: { error: 'Invalid or expired link', code: verified.reason } };
   }
 
-  const { studentId, role, email } = verified.payload;
+  const { studentId, role, email: loginIdentifier } = verified.payload;
   const { data: student } = await supabase
     .from('students')
     .select('id, full_name, organization_id, parent_user_id, linked_user_id')
@@ -75,12 +76,16 @@ async function loadPreview(
     orgLocale = typeof orgRow?.preferred_locale === 'string' ? orgRow.preferred_locale : null;
   }
 
-  const authUser = await findAuthUserByEmail(supabase, email);
+  const authUser = await findAuthUserByEmail(supabase, loginIdentifierToEmail(loginIdentifier));
   if (!authUser?.id) {
     return { status: 404 as const, body: { error: 'Account not found', code: 'account_not_found' } };
   }
 
-  const meta = (authUser.user_metadata || {}) as Record<string, unknown>;
+  const { data: authData, error: authError } = await supabase.auth.admin.getUserById(authUser.id);
+  if (authError || !authData.user) {
+    return { status: 404 as const, body: { error: 'Account not found', code: 'account_not_found' } };
+  }
+  const meta = (authData.user.user_metadata || {}) as Record<string, unknown>;
   const alreadyActivated = Boolean(meta.mv_account_activated_at);
 
   const origin = orgAwareOrigin(orgLocale, appOrigin);
@@ -89,12 +94,13 @@ async function loadPreview(
     body: {
       success: true,
       role,
-      email,
+      email: loginIdentifier,
       studentName: student.full_name || '',
       orgName,
       alreadyActivated,
-      loginUrl: buildMvLoginUrl(origin, email, role),
+      loginUrl: buildMvLoginUrl(origin, loginIdentifier, role),
     },
+    authUserId: authUser.id,
   };
 }
 
@@ -114,8 +120,13 @@ async function activateAccount(
   };
 
   if (!alreadyActivated) {
-    const authUser = await findAuthUserByEmail(supabase, email);
-    if (!authUser?.id) {
+    const authUserId = preview.authUserId;
+    if (!authUserId) {
+      return { status: 404 as const, body: { error: 'Account not found', code: 'account_not_found' } };
+    }
+    const { data: authData, error: authError } = await supabase.auth.admin.getUserById(authUserId);
+    const authUser = authData.user;
+    if (authError || !authUser) {
       return { status: 404 as const, body: { error: 'Account not found', code: 'account_not_found' } };
     }
     const now = new Date().toISOString();
