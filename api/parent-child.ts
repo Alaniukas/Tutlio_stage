@@ -12,6 +12,7 @@ import { internalApiOrigin } from './_lib/extraLessonsContractShared.js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 import { orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
 import { isPendingChildName } from './_lib/pendingChildName.js';
+import { findExistingParentChild } from '../src/lib/parentChildIdentity.js';
 
 function generateStudentInviteCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -56,7 +57,7 @@ function parseJsonBody(req: VercelRequest): Record<string, unknown> {
   return {};
 }
 
-async function loadParentContext(sb: ReturnType<typeof serviceClient>, userId: string) {
+export async function loadParentContext(sb: ReturnType<typeof serviceClient>, userId: string) {
   const { data: parent } = await sb
     .from('parent_profiles')
     .select('id, full_name, email')
@@ -65,7 +66,7 @@ async function loadParentContext(sb: ReturnType<typeof serviceClient>, userId: s
   if (!parent?.id) return null;
 
   const studentCols =
-    'id, full_name, email, phone, payer_email, payer_name, organization_id, linked_user_id, tutor_id, invite_code, deletion_requested_at, enrollment_status';
+    'id, full_name, email, phone, payer_email, payer_name, organization_id, linked_user_id, tutor_id, invite_code, deletion_requested_at, enrollment_status, detached_at';
 
   const [{ data: links }, { data: directChildren }] = await Promise.all([
     sb
@@ -80,13 +81,13 @@ async function loadParentContext(sb: ReturnType<typeof serviceClient>, userId: s
       const raw = row.students as Record<string, unknown> | Record<string, unknown>[] | null;
       return (Array.isArray(raw) ? raw[0] : raw) || null;
     })
-    .filter((s): s is Record<string, unknown> => Boolean(s?.id));
+    .filter((s): s is Record<string, unknown> => Boolean(s?.id) && !s.detached_at);
 
   const linkedIds = new Set(fromLinks.map((s) => String(s.id)));
   const children = [
     ...fromLinks,
     ...(directChildren || []).filter(
-      (s): s is Record<string, unknown> => Boolean(s?.id) && !linkedIds.has(String(s.id)),
+      (s) => Boolean(s?.id) && !s.detached_at && !linkedIds.has(String(s.id)),
     ),
   ];
 
@@ -309,6 +310,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const email = String(body.email || '').trim().toLowerCase();
     if (!fullName) return json(res, 400, { error: 'fullName is required' });
     if (email && !looksLikeEmail(email)) return json(res, 400, { error: 'invalid_email' });
+    const existingChild = findExistingParentChild(mvChildren, fullName);
+    if (existingChild) return json(res, 409, { error: 'child_already_exists', studentId: existingChild.id });
 
     const template = mvChildren[0];
     const organizationId =
@@ -316,39 +319,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       (await resolveTutorOrg(sb, (template.tutor_id as string | null) ?? null)).tutorOrganizationId;
     if (!organizationId) return json(res, 400, { error: 'Missing organization' });
 
-    let inviteCode = generateStudentInviteCode();
     let inserted: Record<string, unknown> | null = null;
     for (let attempt = 0; attempt < 8; attempt++) {
-      const ins = await sb
-        .from('students')
-        .insert({
-          full_name: fullName,
-          email: email || null,
-          organization_id: organizationId,
-          tutor_id: (template.tutor_id as string | null) ?? null,
-          invite_code: inviteCode,
-          payment_payer: 'parent',
-          payer_name: ctx.parent.full_name || template.payer_name || null,
-          payer_email: ctx.parent.email || template.payer_email || null,
-          enrollment_status: 'active',
-        })
-        .select(
-          'id, full_name, email, phone, payer_email, payer_name, organization_id, linked_user_id, tutor_id, invite_code, deletion_requested_at',
-        )
-        .maybeSingle();
-      if (!ins.error && ins.data) {
-        inserted = ins.data as Record<string, unknown>;
-        break;
+      const inviteCode = generateStudentInviteCode();
+      const { data, error: addError } = await sb.rpc('add_parent_child_once', {
+        p_parent_id: ctx.parent.id,
+        p_template_id: template.id,
+        p_full_name: fullName,
+        p_email: email,
+        p_invite_code: inviteCode,
+      });
+      if (addError) {
+        if (addError.code === '23505') continue;
+        console.error('[parent-child] atomic add', addError.code);
+        return json(res, 500, { error: 'Failed to add child' });
       }
-      inviteCode = generateStudentInviteCode();
+      const result = data?.[0];
+      if (!result?.student_id) return json(res, 500, { error: 'Failed to add child' });
+      if (!result.created) {
+        return json(res, 409, { error: 'child_already_exists', studentId: result.student_id });
+      }
+      inserted = {
+        ...template,
+        id: result.student_id,
+        full_name: fullName,
+        email: email || null,
+        organization_id: organizationId,
+        invite_code: inviteCode,
+        linked_user_id: null,
+      };
+      break;
     }
     if (!inserted) return json(res, 500, { error: 'Failed to add child' });
-
-    const { error: linkErr } = await sb.from('parent_students').upsert(
-      { parent_id: ctx.parent.id, student_id: inserted.id },
-      { onConflict: 'parent_id,student_id' },
-    );
-    if (linkErr) console.error('[parent-child] parent_students', linkErr);
 
     if (email) {
       const sent = await sendStudentInvite(req, sb, inserted, email);
@@ -371,6 +373,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (action === 'invite') {
+    if (child.linked_user_id) return json(res, 409, { error: 'Student account already linked' });
     const email = String(body.email || child.email || '').trim().toLowerCase();
     if (!email || !looksLikeEmail(email)) return json(res, 400, { error: 'invalid_email' });
     if (String(child.email || '').trim().toLowerCase() !== email) {

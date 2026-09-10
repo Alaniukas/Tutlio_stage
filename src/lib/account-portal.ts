@@ -91,19 +91,25 @@ export async function resolveAccountPortals(
   const orgAdmin = Boolean(orgAdminRow);
   // Organization administration seats are intentionally single-role accounts.
   // Their profile row stores display/locale data, not a tutor entitlement.
-  const tutor = profileQualifiesForTutorPortal(profileResult?.data, student, orgAdmin);
-  if (!student && options?.linkStudentByEmail && email) {
+  if (!student && !parent && !orgAdmin && options?.linkStudentByEmail && email) {
     try {
       const { data: linkRows, error: rpcError } = await supabase.rpc('get_student_by_email_for_linking', {
         p_email: email,
       });
       if (!rpcError) {
-        const linkRow = linkRows?.[0];
+        const linkRow = linkRows?.length === 1 ? linkRows[0] : null;
         if (linkRow) {
           if (!linkRow.linked_user_id) {
-            await supabase.from('students').update({ linked_user_id: userId }).eq('id', linkRow.id);
+            const { data: linked, error: linkError } = await supabase
+              .from('students')
+              .update({ linked_user_id: userId })
+              .eq('id', linkRow.id)
+              .is('linked_user_id', null)
+              .select('id');
+            student = !linkError && linked?.some((row: { id: string }) => row.id === linkRow.id) === true;
+          } else if (linkRow.linked_user_id === userId) {
+            student = true;
           }
-          student = true;
         }
       }
     } catch {
@@ -111,6 +117,7 @@ export async function resolveAccountPortals(
     }
   }
 
+  const tutor = profileQualifiesForTutorPortal(profileResult?.data, student, orgAdmin);
   return { orgAdmin, parent, student, tutor };
 }
 

@@ -7,6 +7,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { insertParentInviteAndSendEmail } from './_lib/parentInvite.js';
 import { inviteEmailLocale, orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
+import { studentRegistrationDetails } from './_lib/studentRegistrationDetails.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -51,11 +52,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: student, error: studentErr } = await supabase
       .from('students')
-      .select('id, tutor_id, email, linked_user_id, organization_id')
+      .select('id, tutor_id, email, linked_user_id, organization_id, detached_at, full_name, phone, age, grade, subject_id, payment_payer, payer_name, payer_email, payer_phone, accepted_privacy_policy_at, accepted_terms_at')
       .eq('id', studentId)
       .maybeSingle();
 
-    if (studentErr || !student) {
+    if (studentErr || !student || student.detached_at) {
       return res.status(404).json({ error: 'Student record not found' });
     }
 
@@ -102,6 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    const preservedDetails = studentRegistrationDetails(req.body || {}, student);
     const signupPayload = {
       full_name: fullName,
       role: 'student',
@@ -117,6 +119,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       payer_phone: payerType === 'parent' ? payerPhone : null,
       accepted_privacy_policy_at: acceptedAt || null,
       accepted_terms_at: acceptedAt || null,
+      ...preservedDetails,
     };
 
     let authUserId: string | null = null;
@@ -131,32 +134,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (authError || !authData.user) {
       const msg = authError?.message || '';
       const alreadyRegistered =
-        /already registered|already been registered|duplicate/i.test(msg);
-      if (alreadyRegistered) {
-        let existing: { id: string } | undefined;
-        for (let page = 1; page <= 20 && !existing; page++) {
-          const { data: { users }, error: listErr } = await supabase.auth.admin.listUsers({
-            page,
-            perPage: 100,
-          });
-          if (listErr || !users?.length) break;
-          existing = users.find(
-            (u: { email?: string }) =>
-              (u.email || '').trim().toLowerCase() === submittedEmail,
-          );
-          if (users.length < 100) break;
-        }
-        if (existing?.id) {
-          authUserId = existing.id;
-          const { error: pwErr } = await supabase.auth.admin.updateUserById(existing.id, {
-            password,
-            user_metadata: signupPayload,
-          });
-          if (pwErr) {
-            console.warn('[register-student] could not update password for existing user:', pwErr.message);
-          }
-        }
-      }
+        /already registered|already been registered|duplicate/i.test(msg) || authError?.code === 'email_exists';
       if (!authUserId) {
         return res.status(400).json({
           error: alreadyRegistered
@@ -192,7 +170,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       payer_phone: payerType === 'parent' ? payerPhone : null,
       accepted_privacy_policy_at: acceptedAt || null,
       accepted_terms_at: acceptedAt || null,
-    }).eq('id', studentId);
+      ...preservedDetails,
+    }).eq('id', studentId)
+      .is('detached_at', null)
+      .or(`linked_user_id.is.null,linked_user_id.eq.${authUserId}`);
 
     if (linkErr) {
       console.error('[register-student] failed to link student row:', linkErr);

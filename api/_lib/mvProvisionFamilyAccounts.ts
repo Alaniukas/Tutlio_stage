@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { findAuthUserByEmail, isAuthEmailAlreadyRegistered } from './findAuthUserByEmail.js';
+import { isAuthEmailAlreadyRegistered } from './findAuthUserByEmail.js';
 import { generateTempPassword } from './generateTempPassword.js';
 import { isMoksloVaisiaiOrg } from './marketMoney.js';
 import { sendMvAccountActivationEmail } from './sendMvFamilyAccountsEmail.js';
@@ -47,7 +47,7 @@ export type MvProvisionResult =
     }
   | { ok: false; status: number; error: string; code?: string };
 
-async function ensureAuthUser(
+export async function ensureMvAuthUser(
   supabase: SupabaseClient,
   opts: {
     email: string;
@@ -55,7 +55,6 @@ async function ensureAuthUser(
     role: MvActivationRole;
     fullName: string;
     studentId?: string;
-    resetPassword?: boolean;
   },
 ): Promise<{ userId: string; created: boolean } | { error: string; code?: string }> {
   const email = opts.email.trim().toLowerCase();
@@ -84,22 +83,9 @@ async function ensureAuthUser(
     return { error: msg || 'Failed to create user', code: 'create_user_failed' };
   }
 
-  const existing = await findAuthUserByEmail(supabase, email);
-  if (!existing?.id) {
-    return { error: 'Email already registered', code: 'email_already_registered' };
-  }
-
-  if (opts.resetPassword !== false) {
-    const { error: pwErr } = await supabase.auth.admin.updateUserById(existing.id, {
-      password: opts.password,
-      user_metadata: metadata,
-    });
-    if (pwErr) {
-      return { error: pwErr.message, code: 'update_password_failed' };
-    }
-  }
-
-  return { userId: existing.id, created: false };
+  // A provisioning retry must never reset, relabel, or attach an existing
+  // account solely because an administrator entered the same email address.
+  return { error: 'Email already registered', code: 'email_already_registered' };
 }
 
 async function linkParentToStudent(
@@ -293,7 +279,7 @@ export async function provisionMvFamilyAccounts(
 
   if (doParent) {
     const parentPassword = generateTempPassword();
-    const parentAuth = await ensureAuthUser(supabase, {
+    const parentAuth = await ensureMvAuthUser(supabase, {
       email: parentEmail,
       password: parentPassword,
       role: 'parent',
@@ -339,7 +325,7 @@ export async function provisionMvFamilyAccounts(
 
   if (doStudent) {
     const studentPassword = generateTempPassword();
-    const studentAuth = await ensureAuthUser(supabase, {
+    const studentAuth = await ensureMvAuthUser(supabase, {
       email: studentEmail,
       password: studentPassword,
       role: 'student',
