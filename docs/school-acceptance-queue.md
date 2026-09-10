@@ -6,7 +6,7 @@ The public page restores pending state on reload and polls a token-authorized st
 
 ## Deployment order
 
-1. Apply `20260908230000_school_acceptance_jobs.sql` to the target database. This creates two service-role-only tables and three restricted RPCs; it does not enqueue or sign historical contracts.
+1. Apply `20260910171000_school_acceptance_jobs.sql` to the target database. This creates two service-role-only tables and three restricted RPCs; it does not enqueue or sign historical contracts.
 2. Deploy the converter reliability release and verify real DOCX conversion and fonts using anonymous QA templates.
 3. Deploy the API, frontend and `vercel.json` together. Confirm the existing `CRON_SECRET` is configured and `/api/process-school-acceptances` runs every minute. Its function budget is 120 seconds; one job is claimed per invocation (about 60 jobs/hour without additional authenticated invocations).
 4. In Demo only, submit once while the converter is unavailable, reload the page, then restore the converter. Confirm exactly one job, the original timestamp/hash, one final contract, consumed token, and confirmation/invitation delivery. No real customer signatures should be created as a deployment test.
