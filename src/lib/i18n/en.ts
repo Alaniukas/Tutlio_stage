@@ -3722,6 +3722,8 @@ export const en: Record<string, string> = {
   'stuSched.saving': 'Please wait...',
   'stuSched.selectFreeTime': 'Select free time',
   'stuSched.selectSubject': 'Select subject',
+  'stuSched.noBookableSubjects': 'No subjects available to book',
+  'stuSched.noBookableSubjectsHint': 'Trial lessons appear only after an administrator sends you an offer. If you expected other subjects, contact the organization.',
   'stuSched.selectSubjectFirst': 'Select subject first',
   'stuSched.selectTime': 'Select time',
   'stuSched.selectTimeFirst': 'Select time first',

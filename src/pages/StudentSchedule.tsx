@@ -895,18 +895,17 @@ export default function StudentSchedule() {
             });
         }
 
-        // org_student: show trial subject only after trial offer/package is actually sent.
+        // org_student: show trial subject only after trial offer/package is actually sent
+        // (pending unpaid packages count — create-trial-package starts paid=false, active=false).
         const isOrgStudentFlow = !!(tutorProfile.data as any)?.organization_id;
         if (isOrgStudentFlow) {
             const trialSubjectIds = finalSubjects.filter((s: any) => s.is_trial === true).map((s) => s.id);
             if (trialSubjectIds.length > 0) {
                 const { data: trialPackages } = await supabase
                     .from('lesson_packages')
-                    .select('id, subject_id, paid, active')
+                    .select('id, subject_id')
                     .eq('student_id', st.id)
                     .in('subject_id', trialSubjectIds)
-                    .eq('paid', true)
-                    .eq('active', true)
                     .order('created_at', { ascending: false })
                     .limit(20);
                 const sentTrialSubjectIds = new Set((trialPackages || []).map((p: any) => p.subject_id));
@@ -2045,6 +2044,13 @@ export default function StudentSchedule() {
                         </div>
 
                         <div className="p-6 bg-white">
+                            {!selectedEvent?.occupied && subjects.length === 0 && (
+                                <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                                    <p className="font-semibold">{t('stuSched.noBookableSubjects')}</p>
+                                    <p className="mt-1 text-xs text-amber-700">{t('stuSched.noBookableSubjectsHint')}</p>
+                                </div>
+                            )}
+
                             {!selectedEvent?.occupied && subjects.length > 0 && (
                                 <div className="mb-5">
                                     <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">{t('stuSched.selectSubject')}</p>
@@ -2218,11 +2224,13 @@ export default function StudentSchedule() {
                                 </>
                             ) : (
                                 <div className="bg-gray-50 rounded-2xl p-4 mb-4 border border-gray-100 text-sm text-gray-600 font-medium">
-                                    {!selectedSubjectId
-                                        ? t('stuSched.selectSubjectFirst')
-                                        : !selectedTime
-                                            ? t('stuSched.selectTimeFirst')
-                                            : t('stuSched.confirmSelection')}
+                                    {subjects.length === 0
+                                        ? t('parent.bookingNoSubjects')
+                                        : !selectedSubjectId
+                                            ? t('stuSched.selectSubjectFirst')
+                                            : !selectedTime
+                                                ? t('stuSched.selectTimeFirst')
+                                                : t('stuSched.confirmSelection')}
                                 </div>
                             )}
 

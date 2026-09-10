@@ -2507,6 +2507,8 @@ export const fr: Record<string, string> = {
   'stu.recentCompleted': 'Cours récents',
   'stuSched.bookLesson': 'Réserver un cours',
   'stuSched.selectSubject': 'Sélectionner une matière',
+  'stuSched.noBookableSubjects': 'Aucune matière disponible à réserver',
+  'stuSched.noBookableSubjectsHint': 'Les cours d\'essai n\'apparaissent qu\'après l\'envoi d\'une offre par l\'administrateur. Si vous attendiez d\'autres matières, contactez l\'organisation.',
   'stuSched.selectTime': 'Sélectionner l\'horaire',
   'stuSched.selectFreeTime': 'Sélectionner un créneau libre',
   'stuSched.confirm': 'Confirmer',

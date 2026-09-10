@@ -3772,6 +3772,8 @@ export const se: Record<string, string> = {
   'stuSched.saving': 'Vänta...',
   'stuSched.selectFreeTime': 'Välj en ledig tid för lektionen eller ställ dig i kö.',
   'stuSched.selectSubject': 'Välj ämne',
+  'stuSched.noBookableSubjects': 'Inga bokningsbara ämnen',
+  'stuSched.noBookableSubjectsHint': 'Provpass visas först efter att en administratör skickat ett erbjudande. Om du förväntade dig andra ämnen, kontakta organisationen.',
   'stuSched.selectSubjectFirst': 'Välj först ett ämne i listan ovan.',
   'stuSched.selectTime': 'Välj tid',
   'stuSched.selectTimeFirst': 'Välj en tid som passar dig.',

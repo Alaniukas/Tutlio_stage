@@ -1495,6 +1495,8 @@ export const de: Record<string, string> = {
   'stu.selectSubject': 'Fach auswählen',
   'stuSched.bookLesson': 'Stunde buchen',
   'stuSched.selectSubject': 'Fach auswählen',
+  'stuSched.noBookableSubjects': 'Keine buchbaren Fächer',
+  'stuSched.noBookableSubjectsHint': 'Probestunden erscheinen erst, nachdem ein Administrator ein Angebot gesendet hat. Wenn Sie andere Fächer erwartet haben, wenden Sie sich an die Organisation.',
   'stuSched.selectTime': 'Uhrzeit auswählen',
   'stuSched.confirm': 'Bestätigen',
   'stuSched.lessonBooked': 'Stunde gebucht',

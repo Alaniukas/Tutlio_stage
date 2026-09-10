@@ -3783,6 +3783,8 @@ export const dk: Record<string, string> = {
   'stuSched.saving': 'Vent venligst...',
   'stuSched.selectFreeTime': 'Vælg ledig tid',
   'stuSched.selectSubject': 'Vælg fag',
+  'stuSched.noBookableSubjects': 'Ingen fag kan bookes',
+  'stuSched.noBookableSubjectsHint': 'Prøvetimer vises først, når en administrator har sendt et tilbud. Hvis du forventede andre fag, kontakt organisationen.',
   'stuSched.selectSubjectFirst': 'Vælg fag først',
   'stuSched.selectTime': 'Vælg tidspunkt',
   'stuSched.selectTimeFirst': 'Vælg tidspunkt først',

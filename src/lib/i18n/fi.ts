@@ -3794,6 +3794,8 @@ export const fi: Record<string, string> = {
   'stuSched.saving': 'Odota hetki...',
   'stuSched.selectFreeTime': 'Valitse vapaa aika',
   'stuSched.selectSubject': 'Valitse oppiaine',
+  'stuSched.noBookableSubjects': 'Ei varattavia oppiaineita',
+  'stuSched.noBookableSubjectsHint': 'Kokeilutunnit näkyvät vasta, kun ylläpitäjä lähettää tarjouksen. Jos odotit muita oppiaineita, ota yhteyttä organisaatioon.',
   'stuSched.selectSubjectFirst': 'Valitse oppiaine ensin',
   'stuSched.selectTime': 'Valitse aika',
   'stuSched.selectTimeFirst': 'Valitse aika ensin',

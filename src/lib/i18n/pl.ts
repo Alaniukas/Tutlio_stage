@@ -3603,6 +3603,8 @@ export const pl: Record<string, string> = {
   'stuSched.saving': 'Proszę czekać...',
   'stuSched.selectFreeTime': 'Wybierz wolny termin',
   'stuSched.selectSubject': 'Wybierz przedmiot',
+  'stuSched.noBookableSubjects': 'Brak przedmiotów do rezerwacji',
+  'stuSched.noBookableSubjectsHint': 'Lekcje próbne są widoczne dopiero po wysłaniu oferty przez administratora. Jeśli spodziewałeś się innych przedmiotów, skontaktuj się z organizacją.',
   'stuSched.selectSubjectFirst': 'Najpierw wybierz przedmiot',
   'stuSched.selectTime': 'Wybierz godzinę',
   'stuSched.selectTimeFirst': 'Najpierw wybierz godzinę',

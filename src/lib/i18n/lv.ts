@@ -2481,6 +2481,8 @@ export const lv: Record<string, string> = {
   'stuSched.saving': 'Lūdzu, uzgaidiet...',
   'stuSched.selectFreeTime': 'Izvēlēties brīvu laiku',
   'stuSched.selectSubject': 'Izvēlēties priekšmetu',
+  'stuSched.noBookableSubjects': 'Nav pieejamu priekšmetu rezervācijai',
+  'stuSched.noBookableSubjectsHint': 'Izmēģinājuma nodarbības parādās tikai pēc tam, kad administrators nosūta piedāvājumu. Ja gaidījāt citus priekšmetus, sazinieties ar organizāciju.',
   'stuSched.selectSubjectFirst': 'Vispirms izvēlieties priekšmetu',
   'stuSched.selectTime': 'Izvēlēties laiku',
   'stuSched.selectTimeFirst': 'Vispirms izvēlieties laiku',

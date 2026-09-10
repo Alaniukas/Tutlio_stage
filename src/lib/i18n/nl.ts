@@ -3646,6 +3646,8 @@ export const nl: Record<string, string> = {
   "stuSched.saving": "Even geduld…",
   "stuSched.selectFreeTime": "Kies een beschikbaar tijdstip voor je les of schrijf je in op de wachtlijst.",
   "stuSched.selectSubject": "Selecteer vak",
+  "stuSched.noBookableSubjects": "Geen vakken om te boeken",
+  "stuSched.noBookableSubjectsHint": "Proeflessen verschijnen pas nadat een beheerder een aanbod heeft verstuurd. Als u andere vakken verwachtte, neem contact op met de organisatie.",
   "stuSched.selectSubjectFirst": "Selecteer eerst het vak",
   "stuSched.selectTime": "Selecteer tijd",
   "stuSched.selectTimeFirst": "Selecteer eerst de tijd",

@@ -1599,6 +1599,8 @@ export const es: Record<string, string> = {
   'stu.selectSubject': 'Seleccionar asignatura',
   'stuSched.bookLesson': 'Reservar clase',
   'stuSched.selectSubject': 'Seleccionar asignatura',
+  'stuSched.noBookableSubjects': 'No hay asignaturas disponibles para reservar',
+  'stuSched.noBookableSubjectsHint': 'Las clases de prueba solo aparecen después de que un administrador envíe una oferta. Si esperaba otras asignaturas, contacte con la organización.',
   'stuSched.selectTime': 'Seleccionar hora',
   'stuSched.confirm': 'Confirmar',
   'stuSched.lessonBooked': 'Clase reservada',

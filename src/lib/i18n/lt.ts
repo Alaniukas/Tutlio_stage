@@ -3722,6 +3722,8 @@ export const lt: Record<string, string> = {
   'stuSched.saving': 'Prašome palaukti...',
   'stuSched.selectFreeTime': 'Pasirinkite laisvą laiką pamokai arba stokite į eilę',
   'stuSched.selectSubject': 'Pasirinkite dalyką',
+  'stuSched.noBookableSubjects': 'Nėra dalykų, kuriuos galite rezervuoti',
+  'stuSched.noBookableSubjectsHint': 'Bandomosios pamokos tampa matomos tik po to, kai administratorius jas pasiūlo. Jei turėtų būti kitų dalykų, susisiekite su mokyklos komanda.',
   'stuSched.selectSubjectFirst': 'Prašome pasirinkti Dalyką iš sąrašo viršuje.',
   'stuSched.selectTime': 'Pasirinkite laiką',
   'stuSched.selectTimeFirst': 'Prašome pasirinkti patogų laiką.',

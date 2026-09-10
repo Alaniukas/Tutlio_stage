@@ -1435,6 +1435,8 @@ export const ee: Record<string, string> = {
   'stuSched.noTutorAssignedDesc': 'Teie õppekorraldaja pole veel õpetajat määranud. Kui õpetaja määratakse, näete siin oma graafikut.',
   'stuSched.reservationFailed': 'Tunni broneerimine ebaõnnestus.',
   'stuSched.selectSubject': 'Vali aine',
+  'stuSched.noBookableSubjects': 'Broneeritavaid aineid pole',
+  'stuSched.noBookableSubjectsHint': 'Proovitunnid ilmuvad alles pärast seda, kui administraator saadab pakkumise. Kui ootasite teisi aineid, võtke ühendust organisatsiooniga.',
   'stuSched.selectTime': 'Vali aeg',
   'stuSched.today': 'Täna',
   'stuSched.viewAll': 'Vaata kõiki tunde',

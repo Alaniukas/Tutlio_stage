@@ -211,6 +211,18 @@ async function main() {
     .eq('id', TUTOR_ID);
   if (tutorProfileErr) throw new Error(`profiles min_booking_hours: ${tutorProfileErr.message}`);
 
+  // Non-trial bookable subject for parent calendar QA (finance seed also upserts this).
+  const SUBJECT_MATH = 'c1b00000-7e57-4000-8000-000000000011';
+  await upsert(supabase, 'subjects', {
+    id: SUBJECT_MATH,
+    tutor_id: TUTOR_ID,
+    name: 'Matematika',
+    price: 25,
+    duration_minutes: 60,
+    is_trial: false,
+    color: '#6366f1',
+  });
+
   // Recurring tutor availability so parent can test /parent/calendar booking.
   const recurringSlots = [
     { id: 'c1b00000-7e57-4000-8000-000000000041', day_of_week: 1, start_time: '09:00:00', end_time: '20:00:00' },
