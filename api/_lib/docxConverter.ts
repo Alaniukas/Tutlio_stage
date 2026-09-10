@@ -33,28 +33,64 @@ function sofficeCandidates(): string[] {
   ];
 }
 
+const DOCX_CONVERTER_TIMEOUT_MS = Number(process.env.DOCX_CONVERTER_TIMEOUT_MS || 180000);
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchDocxConverterOnce(base: string, key: string, docxBuffer: Buffer): Promise<Buffer> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DOCX_CONVERTER_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${base}/convert-docx-to-pdf`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({ fileBase64: docxBuffer.toString('base64') }),
+      signal: controller.signal,
+    });
+    const json = (await res.json().catch(() => ({}))) as { pdfBase64?: string; error?: string };
+    if (!res.ok) {
+      const detail = typeof json?.error === 'string' ? json.error : `HTTP ${res.status}`;
+      const err = new Error(detail) as Error & { status?: number; retryable?: boolean };
+      err.status = res.status;
+      err.retryable = res.status === 503 || res.status === 429;
+      throw err;
+    }
+    const b64 = typeof json.pdfBase64 === 'string' ? json.pdfBase64 : '';
+    if (!b64) throw new Error('Remote converter returned no pdfBase64');
+    return Buffer.from(b64, 'base64');
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Remote DOCX converter timed out after ${DOCX_CONVERTER_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function convertWithDocxConverterService(docxBuffer: Buffer): Promise<Buffer> {
   const base = normalizeDocxConverterBaseUrl(process.env.DOCX_CONVERTER_URL || '');
   const key = (process.env.DOCX_CONVERTER_API_KEY || '').trim();
   if (!base || !key) {
     throw new Error('DOCX_CONVERTER_URL and DOCX_CONVERTER_API_KEY are not both set');
   }
-  const res = await fetch(`${base}/convert-docx-to-pdf`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify({ fileBase64: docxBuffer.toString('base64') }),
-  });
-  const json = (await res.json().catch(() => ({}))) as { pdfBase64?: string; error?: string };
-  if (!res.ok) {
-    const detail = typeof json?.error === 'string' ? json.error : `HTTP ${res.status}`;
-    throw new Error(detail);
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await fetchDocxConverterOnce(base, key, docxBuffer);
+    } catch (error) {
+      lastError = error;
+      const retryable = Boolean((error as { retryable?: boolean })?.retryable);
+      if (!retryable || attempt === 1) break;
+      await sleep(5000);
+    }
   }
-  const b64 = typeof json.pdfBase64 === 'string' ? json.pdfBase64 : '';
-  if (!b64) throw new Error('Remote converter returned no pdfBase64');
-  return Buffer.from(b64, 'base64');
+  throw lastError instanceof Error ? lastError : new Error('Remote DOCX converter failed');
 }
 
 export async function convertWithLibreOffice(docxBuffer: Buffer): Promise<Buffer> {

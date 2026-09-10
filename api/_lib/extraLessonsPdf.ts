@@ -112,7 +112,7 @@ export async function renderAndStoreExtraLessonsPdf(
       const templateBytes = readFileSync(resolveExtraLessonsBundledDocxPath());
       pdfBytes = new Uint8Array(await withTimeout(
         renderDocxTemplateBufferToPdfBuffer({ templateBytes, payload }),
-        35000,
+        130000,
       ));
     } catch (e) {
       const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
@@ -138,7 +138,7 @@ export async function renderAndStoreExtraLessonsPdf(
         }
         pdfBytes = await withTimeout(
           createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload }),
-          35000,
+          130000,
         );
       } catch (e) {
         const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
@@ -194,7 +194,7 @@ async function annexPdfFromFilledDocx(params: {
     submitNote: extraLessonsWithdrawalFormSubmitNote(schoolEmail),
   });
   if (annexDocx) {
-    return new Uint8Array(await withTimeout(convertDocxBufferToPdfWithFallbacks(annexDocx), 20000));
+    return new Uint8Array(await withTimeout(convertDocxBufferToPdfWithFallbacks(annexDocx), 90000));
   }
   return createSimpleContractPdf({
     contractNumber: '',

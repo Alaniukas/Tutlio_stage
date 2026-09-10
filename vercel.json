@@ -91,17 +91,20 @@
             "maxDuration": 60
         },
         "api/school-contract-complete.ts": {
-            "maxDuration": 60
+            "maxDuration": 120
         },
         "api/school-contract-render-docx-pdf.ts": {
-            "maxDuration": 60
+            "maxDuration": 120
+        },
+        "api/convert-docx-to-pdf.ts": {
+            "maxDuration": 120
         },
         "api/extra-lessons-contract-offer.ts": {
-            "maxDuration": 60,
+            "maxDuration": 120,
             "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
         },
         "api/extra-lessons-contract-accept.ts": {
-            "maxDuration": 60,
+            "maxDuration": 120,
             "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
         },
         "api/extra-lessons-contract-withdraw.ts": {
