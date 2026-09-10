@@ -334,7 +334,9 @@ export default function Login() {
   useEffect(() => {
     setLastPortal('regular');
     const saved = loadSavedLoginForm();
-    if (saved.email) setEmail(saved.email);
+    const emailFromUrl = (searchParams.get('email') || '').trim();
+    if (emailFromUrl) setEmail(emailFromUrl);
+    else if (saved.email) setEmail(saved.email);
     if (saved.password) setPassword(saved.password);
     setRememberMeState(saved.rememberMe);
     // Deep-link from reminder emails / org website buttons: open the matching portal login form.
@@ -355,7 +357,10 @@ export default function Login() {
     ) {
       setRole('tutor');
     }
-  }, [nextPath, loginPortalParam]);
+  }, [nextPath, loginPortalParam, searchParams]);
+
+  const mvActivatedBanner =
+    searchParams.get('mvActivated') === '1' ? t('login.mvActivatedHint') : null;
 
   useEffect(() => {
     const code = searchParams.get('auth_error');
@@ -761,6 +766,12 @@ export default function Login() {
             <div className="flex items-start gap-2 text-sm text-amber-100 bg-amber-800/40 border border-amber-700/50 rounded-xl px-3 py-2.5 mb-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <span>{authHashBanner}</span>
+            </div>
+          )}
+          {mvActivatedBanner && (
+            <div className="flex items-start gap-2 text-sm text-emerald-100 bg-emerald-900/40 border border-emerald-700/50 rounded-xl px-3 py-2.5 mb-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span>{mvActivatedBanner}</span>
             </div>
           )}
 

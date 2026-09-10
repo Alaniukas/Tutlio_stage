@@ -98,6 +98,7 @@ import {
 import { defaultLessonRange, lessonFitsAvailabilityWindow, appendUniqueBySlotKey, availabilitySlotKey } from '@/lib/pickedAvailabilityTime';
 import { orgCanonicalOrigin } from '@/lib/orgPublicOrigin';
 import {
+  shouldProvisionAccountsOnCreate,
   shouldSendParentInviteOnCreate,
   shouldSendStudentInviteEmail,
   type OrgStudentInviteTarget,
@@ -118,6 +119,18 @@ import { useUser } from '@/contexts/UserContext';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { proKlaseOrgAdminContext, proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { isProKlaseOrg, isMoksloVaisiaiOrg } from '@/lib/marketMoney';
+import {
+  credentialsFromProvisionResponse,
+  postMvProvisionFamilyAccounts,
+  provisionEmailsSent,
+  type MvProvisionCredentialsView,
+} from '@/lib/mvProvisionApi';
+import {
+  defaultMvProvisionDelivery,
+  type MvEmailDelivery,
+} from '@/lib/mvProvisionOptions';
+import MvProvisionDialog, { type MvProvisionDialogSubmit } from '@/components/company/MvProvisionDialog';
+import { mvNeedsAnyAccountProvisioning } from '@/lib/mvStudentAccountStatus';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import {
   parseStudentGrade,
@@ -165,6 +178,7 @@ interface Student {
   payment_model?: string | null;
   payment_payer?: 'self' | 'parent' | string | null;
   linked_user_id?: string | null;
+  parent_user_id?: string | null;
   created_at: string;
   admin_comment?: string | null;
   admin_comment_visible_to_tutor?: boolean;
@@ -401,10 +415,22 @@ export default function CompanyStudents() {
     child_birth_date: '',
     tutor_ids: [] as string[],
     // Flexible invitations (req 7): who to invite on create when enabled.
-    invite_target: (isMoksloVaisiaiOrg(membership?.organizationId) ? 'parent' : 'student') as OrgStudentInviteTarget,
+    invite_target: (isMoksloVaisiaiOrg(membership?.organizationId) ? 'provision' : 'student') as OrgStudentInviteTarget,
     payment_payer: isMoksloVaisiaiOrg(membership?.organizationId) ? 'parent' : 'self',
   });
   const parentFirstInvite = isMvOrg && !isSchoolView && newStudent.invite_target === 'parent';
+  const provisionAccounts = isMvOrg && !isSchoolView && newStudent.invite_target === 'provision';
+  const [provisionCredentialsOpen, setProvisionCredentialsOpen] = useState(false);
+  const [provisionCredentials, setProvisionCredentials] = useState<MvProvisionCredentialsView | null>(null);
+  const [mvProvisionDialogOpen, setMvProvisionDialogOpen] = useState(false);
+  const [mvProvisionDialogStudent, setMvProvisionDialogStudent] = useState<Student | null>(null);
+  const [mvCreateProvisionDelivery, setMvCreateProvisionDelivery] = useState<MvEmailDelivery>(
+    defaultMvProvisionDelivery().emailDelivery,
+  );
+  const [mvCreateParentNotifyEmail, setMvCreateParentNotifyEmail] = useState('');
+  const [mvCreateStudentNotifyEmail, setMvCreateStudentNotifyEmail] = useState('');
+  const [mvCreateBothNotifyEmail, setMvCreateBothNotifyEmail] = useState('');
+  const [provisioningExistingStudent, setProvisioningExistingStudent] = useState(false);
   const [tutorSubjects, setTutorSubjects] = useState<SubjectOption[]>([]);
   const [selectedSubjectForInvite, setSelectedSubjectForInvite] = useState('');
   const [useIndividualPrice, setUseIndividualPrice] = useState(false);
@@ -1788,6 +1814,51 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.parentInviteEmailRequired'), type: 'error' });
       return;
     }
+    if (
+      !isSchoolView &&
+      isMvOrg &&
+      newStudent.invite_target === 'provision' &&
+      !newStudent.full_name.trim()
+    ) {
+      setToastMessage({ message: t('compStu.fullNameRequired'), type: 'error' });
+      return;
+    }
+    if (
+      !isSchoolView &&
+      isMvOrg &&
+      newStudent.invite_target === 'provision' &&
+      !newStudent.email.trim()
+    ) {
+      setToastMessage({ message: t('compStu.provisionStudentEmailRequired'), type: 'error' });
+      return;
+    }
+    if (
+      !isSchoolView &&
+      isMvOrg &&
+      newStudent.invite_target === 'provision' &&
+      !newStudent.payer_name.trim()
+    ) {
+      setToastMessage({ message: t('compStu.parentInviteNameRequired'), type: 'error' });
+      return;
+    }
+    if (
+      !isSchoolView &&
+      isMvOrg &&
+      newStudent.invite_target === 'provision' &&
+      !newStudent.payer_email.trim()
+    ) {
+      setToastMessage({ message: t('compStu.parentInviteEmailRequired'), type: 'error' });
+      return;
+    }
+    if (
+      !isSchoolView &&
+      isMvOrg &&
+      newStudent.invite_target === 'provision' &&
+      newStudent.payer_email.trim().toLowerCase() === newStudent.email.trim().toLowerCase()
+    ) {
+      setToastMessage({ message: t('compStu.provisionEmailsMustDiffer'), type: 'error' });
+      return;
+    }
 
     for (const item of addStudentPickedLessons) {
       const windowStart = new Date(item.pick.startIso);
@@ -1864,7 +1935,7 @@ export default function CompanyStudents() {
           full_name:
             !isSchoolView && isMvOrg && newStudent.invite_target === 'parent'
               ? t('parent.pendingChildName')
-              : newStudent.full_name,
+              : newStudent.full_name.trim(),
           email: newStudent.email?.trim() || null,
           phone: newStudent.phone?.trim() || null,
           grade: (normalizeStudentGrade1to12(newStudent.grade) ?? newStudent.grade) || null,
@@ -2067,6 +2138,46 @@ export default function CompanyStudents() {
       }
     }
 
+    let provisionOk = true;
+    let provisionPayload: typeof provisionCredentials = null;
+    if (
+      shouldProvisionAccountsOnCreate(newStudent.invite_target) &&
+      !isSchoolView &&
+      inserted.length > 0
+    ) {
+      const row = inserted[0]!;
+      try {
+        const provisionResult = await postMvProvisionFamilyAccounts(
+          {
+            studentId: row.id,
+            parentName: newStudent.payer_name.trim(),
+            parentEmail: newStudent.payer_email.trim(),
+            studentFullName: newStudent.full_name.trim(),
+            studentEmail: newStudent.email.trim(),
+            locale: orgPreferredLocale || locale,
+            scope: 'both',
+            emailDelivery: mvCreateProvisionDelivery,
+            parentNotifyEmail: mvCreateParentNotifyEmail.trim() || undefined,
+            studentNotifyEmail: mvCreateStudentNotifyEmail.trim() || undefined,
+            bothNotifyEmail: mvCreateBothNotifyEmail.trim() || undefined,
+          },
+          authHeaders,
+        );
+        if (!provisionResult.ok) {
+          provisionOk = false;
+          setToastMessage({
+            message: provisionResult.json.error || t('compStu.provisionFailed'),
+            type: 'error',
+          });
+        } else {
+          provisionPayload = credentialsFromProvisionResponse(provisionResult.json);
+        }
+      } catch {
+        provisionOk = false;
+        setToastMessage({ message: t('compStu.provisionFailed'), type: 'error' });
+      }
+    }
+
     // Notify assigned tutors about new student
     if (orgId && inserted.length > 0) {
       const { data: orgRow } = await supabase.from('organizations').select('features').eq('id', orgId).single();
@@ -2095,16 +2206,25 @@ export default function CompanyStudents() {
           )
         : null;
 
+    const provisionFlow = shouldProvisionAccountsOnCreate(newStudent.invite_target) && !isSchoolView;
     const toastType: 'success' | 'error' =
-      (shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk) || lessonCreateFailed ? 'error' : 'success';
+      (shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk) ||
+      lessonCreateFailed ||
+      (provisionFlow && !provisionOk)
+        ? 'error'
+        : 'success';
     const toastMessage =
-      shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
+      provisionFlow && !provisionOk
+        ? t('compStu.provisionFailed')
+        : shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
         ? t('compStu.emailSendFailed')
         : lessonCreateFailed
           ? t('compStu.studentAddedLessonFailed')
           : inviteSkippedExisting
             ? t('compStu.inviteSkippedAlreadyRegistered')
-            : newStudent.invite_target === 'parent'
+            : provisionFlow && provisionOk
+              ? t('compStu.provisionSuccess')
+              : newStudent.invite_target === 'parent'
               ? t('compStu.parentInvitedFirst')
               : plannedSummary && plannedSummary.totalLessons > 0
               ? plannedSummary.trialLessons > 0
@@ -2117,10 +2237,16 @@ export default function CompanyStudents() {
                   })
               : t('compStu.studentAdded');
 
-    setToastMessage({
-      message: toastMessage,
-      type: toastType,
-    });
+    if (!(provisionFlow && !provisionOk)) {
+      setToastMessage({
+        message: toastMessage,
+        type: toastType,
+      });
+    }
+    if (provisionFlow && provisionOk && provisionPayload) {
+      setProvisionCredentials(provisionPayload);
+      setProvisionCredentialsOpen(true);
+    }
     setIsDialogOpen(false);
     setAddStudentFirstLessonIsTrial(false);
     setAddStudentPickedLessons([]);
@@ -2147,9 +2273,14 @@ export default function CompanyStudents() {
       student_city: '',
       child_birth_date: '',
       tutor_ids: [],
-      invite_target: isMvOrg ? 'parent' : 'student',
+      invite_target: isMvOrg ? 'provision' : 'student',
       payment_payer: isMvOrg ? 'parent' : 'self',
     });
+    const provisionDefaults = defaultMvProvisionDelivery();
+    setMvCreateProvisionDelivery(provisionDefaults.emailDelivery);
+    setMvCreateParentNotifyEmail(provisionDefaults.parentNotifyEmail);
+    setMvCreateStudentNotifyEmail(provisionDefaults.studentNotifyEmail);
+    setMvCreateBothNotifyEmail(provisionDefaults.bothNotifyEmail);
     setSelectedSubjectForInvite('');
     setUseIndividualPrice(false);
     setCustomPrice('');
@@ -2603,6 +2734,61 @@ export default function CompanyStudents() {
     if (!ok) setToastMessage({ message: t('compStu.contractOpenFail'), type: 'error' });
   };
 
+  const openMvProvisionDialog = (student: Student) => {
+    setMvProvisionDialogStudent(student);
+    setMvProvisionDialogOpen(true);
+  };
+
+  const provisionMvAccountsForStudent = async (
+    student: Student,
+    payload: MvProvisionDialogSubmit,
+    showCredentials: boolean,
+  ): Promise<boolean> => {
+    setProvisioningExistingStudent(true);
+    try {
+      const provisionResult = await postMvProvisionFamilyAccounts(
+        {
+          studentId: student.id,
+          parentName: payload.parentName,
+          parentEmail: payload.parentEmail,
+          studentFullName: payload.studentFullName,
+          studentEmail: payload.studentEmail,
+          locale: orgPreferredLocale || locale,
+          scope: payload.scope,
+          emailDelivery: payload.emailDelivery,
+          parentNotifyEmail: payload.parentNotifyEmail,
+          studentNotifyEmail: payload.studentNotifyEmail,
+          bothNotifyEmail: payload.bothNotifyEmail,
+        },
+        authHeaders,
+      );
+      if (!provisionResult.ok) {
+        setToastMessage({
+          message: provisionResult.json.error || t('compStu.provisionFailed'),
+          type: 'error',
+        });
+        return false;
+      }
+      const credentials = credentialsFromProvisionResponse(provisionResult.json);
+      setToastMessage({ message: t('compStu.provisionSuccess'), type: 'success' });
+      setMvProvisionDialogOpen(false);
+      if (showCredentials && credentials) {
+        setProvisionCredentials(credentials);
+        setProvisionCredentialsOpen(true);
+      }
+      void fetchData();
+      if (selectedStudent?.id === student.id) {
+        setModalSessionsRefreshKey((k) => k + 1);
+      }
+      return true;
+    } catch {
+      setToastMessage({ message: t('compStu.provisionFailed'), type: 'error' });
+      return false;
+    } finally {
+      setProvisioningExistingStudent(false);
+    }
+  };
+
   const sendParentPortalInvites = async (studentId: string, showToast: boolean) => {
     setSendingParentInvites(true);
     try {
@@ -2923,13 +3109,14 @@ export default function CompanyStudents() {
 
                   <div className="grid sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>{t('compStu.emailLabel')}</Label>
+                    <Label>{provisionAccounts ? t('compStu.emailLabel') + ' *' : t('compStu.emailLabel')}</Label>
                     <Input
                       type="email"
                       value={newStudent.email}
                       onChange={(e) => setNewStudent({ ...newStudent, email: e.target.value })}
                       placeholder="jonas@example.com"
                       className="rounded-xl"
+                      required={provisionAccounts}
                     />
                   </div>
 
@@ -3091,28 +3278,111 @@ export default function CompanyStudents() {
                             {t('compStu.inviteStudentAndParent')}
                           </Button>
                           {isMvOrg && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant={newStudent.invite_target === 'parent' ? 'default' : 'outline'}
-                              className="rounded-xl text-xs"
-                              onClick={() => {
-                                setAddStudentPickedLessons([]);
-                                setNewStudent({
-                                  ...newStudent,
-                                  invite_target: 'parent',
-                                  payment_payer: 'parent',
-                                  full_name: '',
-                                  email: '',
-                                  phone: '',
-                                  grade: '',
-                                });
-                              }}
-                            >
-                              {t('compStu.inviteParentFirst')}
-                            </Button>
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={newStudent.invite_target === 'provision' ? 'default' : 'outline'}
+                                className="rounded-xl text-xs"
+                                onClick={() => {
+                                  setNewStudent({
+                                    ...newStudent,
+                                    invite_target: 'provision',
+                                    payment_payer: 'parent',
+                                  });
+                                }}
+                              >
+                                {t('compStu.provisionAccounts')}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={newStudent.invite_target === 'parent' ? 'default' : 'outline'}
+                                className="rounded-xl text-xs"
+                                onClick={() => {
+                                  setAddStudentPickedLessons([]);
+                                  setNewStudent({
+                                    ...newStudent,
+                                    invite_target: 'parent',
+                                    payment_payer: 'parent',
+                                    full_name: '',
+                                    email: '',
+                                    phone: '',
+                                    grade: '',
+                                  });
+                                }}
+                              >
+                                {t('compStu.inviteParentFirst')}
+                              </Button>
+                            </>
                           )}
                         </div>
+                        {isMvOrg && newStudent.invite_target === 'provision' && (
+                          <>
+                            <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2.5 text-sm font-medium text-emerald-900">
+                              {t('compStu.provisionAccountsNotice')}
+                            </div>
+                            <p className="text-[11px] text-gray-500">{t('compStu.provisionAccountsHint')}</p>
+                            <div className="space-y-2 pt-1">
+                              <Label>{t('compStu.provisionDeliveryLabel')}</Label>
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={mvCreateProvisionDelivery === 'separate' ? 'default' : 'outline'}
+                                  className="rounded-xl text-xs"
+                                  onClick={() => setMvCreateProvisionDelivery('separate')}
+                                >
+                                  {t('compStu.provisionDeliverySeparate')}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={mvCreateProvisionDelivery === 'parent_both' ? 'default' : 'outline'}
+                                  className="rounded-xl text-xs"
+                                  onClick={() => setMvCreateProvisionDelivery('parent_both')}
+                                >
+                                  {t('compStu.provisionDeliveryParentBoth')}
+                                </Button>
+                              </div>
+                            </div>
+                            {mvCreateProvisionDelivery === 'separate' ? (
+                              <div className="grid sm:grid-cols-2 gap-3">
+                                <div className="space-y-2">
+                                  <Label>{t('compStu.provisionSendParentTo')}</Label>
+                                  <Input
+                                    type="email"
+                                    value={mvCreateParentNotifyEmail}
+                                    onChange={(e) => setMvCreateParentNotifyEmail(e.target.value)}
+                                    placeholder={newStudent.payer_email || t('compStu.provisionNotifyDefaultHint')}
+                                    className="rounded-xl"
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>{t('compStu.provisionSendStudentTo')}</Label>
+                                  <Input
+                                    type="email"
+                                    value={mvCreateStudentNotifyEmail}
+                                    onChange={(e) => setMvCreateStudentNotifyEmail(e.target.value)}
+                                    placeholder={newStudent.email || t('compStu.provisionNotifyDefaultHint')}
+                                    className="rounded-xl"
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <Label>{t('compStu.provisionSendBothTo')}</Label>
+                                <Input
+                                  type="email"
+                                  value={mvCreateBothNotifyEmail}
+                                  onChange={(e) => setMvCreateBothNotifyEmail(e.target.value)}
+                                  placeholder={newStudent.payer_email || t('compStu.provisionNotifyDefaultHint')}
+                                  className="rounded-xl"
+                                />
+                              </div>
+                            )}
+                          </>
+                        )}
                         {isMvOrg && newStudent.invite_target === 'parent' && (
                           <>
                             <div className="rounded-xl border border-violet-100 bg-violet-50/80 px-3 py-2.5 text-sm font-medium text-violet-900">
@@ -4528,7 +4798,19 @@ export default function CompanyStudents() {
                           </Button>
                         );
                       })()}
-                      {(selectedStudent.payer_email || selectedStudent.parent_secondary_email) && (
+                      {isMvOrg && selectedStudent && mvNeedsAnyAccountProvisioning(selectedStudent) && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="default"
+                          className="h-7 px-2.5 text-[11px] bg-emerald-700 hover:bg-emerald-800"
+                          disabled={provisioningExistingStudent}
+                          onClick={() => openMvProvisionDialog(selectedStudent)}
+                        >
+                          {provisioningExistingStudent ? t('common.loading') : t('compStu.provisionAccountsExisting')}
+                        </Button>
+                      )}
+                      {!isMvOrg && (selectedStudent.payer_email || selectedStudent.parent_secondary_email) && (
                         <Button
                           type="button"
                           size="sm"
@@ -5956,6 +6238,91 @@ export default function CompanyStudents() {
                 onClick={() => void exportStudentsXlsx()}
               >
                 {exportingStudents ? <Loader2 className="w-4 h-4 animate-spin" /> : t('compStu.exportDownload')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {mvProvisionDialogStudent && (
+          <MvProvisionDialog
+            open={mvProvisionDialogOpen}
+            onOpenChange={(open) => {
+              setMvProvisionDialogOpen(open);
+              if (!open) setMvProvisionDialogStudent(null);
+            }}
+            student={mvProvisionDialogStudent}
+            loading={provisioningExistingStudent}
+            onSubmit={(payload) =>
+              void provisionMvAccountsForStudent(mvProvisionDialogStudent, payload, true)
+            }
+          />
+        )}
+
+        <Dialog open={provisionCredentialsOpen} onOpenChange={setProvisionCredentialsOpen}>
+          <DialogContent className="sm:max-w-lg rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>{t('compStu.provisionCredentialsTitle')}</DialogTitle>
+              <DialogDescription>{t('compStu.provisionCredentialsDesc')}</DialogDescription>
+            </DialogHeader>
+            {provisionCredentials && (
+              <div className="space-y-4 py-2">
+                {provisionEmailsSent(provisionCredentials) && (
+                  <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">
+                    {t('compStu.provisionEmailsSent')}
+                  </p>
+                )}
+                {provisionCredentials.parent && (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      {t('compStu.provisionParentAccount')}
+                    </p>
+                    <p className="text-sm text-gray-700">{provisionCredentials.parent.email}</p>
+                    <p className="font-mono text-base font-semibold text-gray-900">{provisionCredentials.parent.password}</p>
+                    {provisionCredentials.parent.notifyEmail && (
+                      <p className="text-[11px] text-gray-500">
+                        {t('compStu.provisionSentTo', { email: provisionCredentials.parent.notifyEmail })}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {provisionCredentials.student && (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      {t('compStu.provisionStudentAccount')}
+                    </p>
+                    <p className="text-sm text-gray-700">{provisionCredentials.student.email}</p>
+                    <p className="font-mono text-base font-semibold text-gray-900">{provisionCredentials.student.password}</p>
+                    {provisionCredentials.student.notifyEmail && (
+                      <p className="text-[11px] text-gray-500">
+                        {t('compStu.provisionSentTo', { email: provisionCredentials.student.notifyEmail })}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => {
+                  if (!provisionCredentials) return;
+                  const lines: string[] = [];
+                  if (provisionCredentials.parent) {
+                    lines.push(t('compStu.provisionParentAccount'), provisionCredentials.parent.email, provisionCredentials.parent.password, '');
+                  }
+                  if (provisionCredentials.student) {
+                    lines.push(t('compStu.provisionStudentAccount'), provisionCredentials.student.email, provisionCredentials.student.password);
+                  }
+                  void navigator.clipboard.writeText(lines.join('\n').trim());
+                  setToastMessage({ message: t('compStu.provisionCopied'), type: 'success' });
+                }}
+              >
+                {t('compStu.provisionCopyAll')}
+              </Button>
+              <Button type="button" className="rounded-xl" onClick={() => setProvisionCredentialsOpen(false)}>
+                {t('common.close')}
               </Button>
             </DialogFooter>
           </DialogContent>

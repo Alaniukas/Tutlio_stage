@@ -100,6 +100,7 @@ const ParentSettings = lazy(() => import('@/pages/ParentSettings'));
 const ParentRegister = lazy(() => import('@/pages/ParentRegister'));
 const SchoolContractComplete = lazy(() => import('@/pages/SchoolContractComplete'));
 const SchoolExtraLessonsAccept = lazy(() => import('@/pages/SchoolExtraLessonsAccept'));
+const MvAccountActivate = lazy(() => import('@/pages/MvAccountActivate'));
 const SchoolHomework = lazy(() => import('@/pages/SchoolHomework'));
 const StripeSuccess = lazy(() => import('@/pages/StripeSuccess'));
 const EnterpriseSuccess = lazy(() => import('@/pages/EnterpriseSuccess'));
@@ -334,6 +335,8 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/:locale/book/:inviteCode" element={<StudentOnboarding />} />
         <Route path="/parent-register" element={<ParentRegister />} />
         <Route path="/:locale/parent-register" element={<ParentRegister />} />
+        <Route path="/mv-account-activate" element={<MvAccountActivate />} />
+        <Route path="/:locale/mv-account-activate" element={<MvAccountActivate />} />
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
         <Route path="/school-extra-lessons-accept" element={<SchoolExtraLessonsAccept />} />
         <Route path="/school-homework" element={<SchoolHomework />} />
