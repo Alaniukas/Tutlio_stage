@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SchoolExtraLessonsAccept from '../../src/pages/SchoolExtraLessonsAccept';
@@ -57,6 +57,30 @@ describe('SchoolExtraLessonsAccept', () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('shows durable pending state after submit and finishes when the worker finalizes', async () => {
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return { ok: true, status: 202, json: async () => ({ ok: true, pending: true }) };
+      if (_url.includes('status=1')) return { ok: true, json: async () => ({ ok: true, alreadyAccepted: true, pdfUrl: 'https://example.com/final.pdf' }) };
+      return { ok: true, text: async () => JSON.stringify(preview) };
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=test']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+    await screen.findByRole('checkbox');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+    await screen.findByRole('heading', { name: 'Patvirtinimas išsaugotas' });
+    expect(screen.queryByRole('heading', { name: 'Sutartis sudaryta' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Užsakymas su prievole sumokėti' })).toBeNull();
+    await screen.findByRole('heading', { name: 'Sutartis sudaryta' }, { timeout: 4500 });
+  });
+
+  it('restores the pending screen on page reload', async () => {
+    fetchMock.mockResolvedValue({ ok: true, text: async () => JSON.stringify({ ...preview, pending: true, needsAttention: true }) });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=test']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+    await screen.findByRole('heading', { name: 'Patvirtinimas išsaugotas' });
+    expect(screen.getByText(/Dokumento paruošimas užtruko/)).toBeTruthy();
+    expect(screen.queryByRole('checkbox')).toBeNull();
   });
 
   it('shows a PDF preview and Sutinku/Nesutinku choices for the parent', async () => {

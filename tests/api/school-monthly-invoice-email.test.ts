@@ -91,7 +91,7 @@ describe('sendSchoolMonthlyInvoiceEmail', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (url: string, init: any) => {
       calls.push({ url, body: JSON.parse(init.body) });
-      return { ok: true, status: 200 } as Response;
+      return { ok: true, status: 200, json: async () => ({ success: true, sent: true, id: 'email-1' }) } as Response;
     }) as any;
     try {
       const db = fakeSupabase({ status: 'pending' });
@@ -103,7 +103,8 @@ describe('sendSchoolMonthlyInvoiceEmail', () => {
       expect(calls[0].url).toBe('http://127.0.0.1:3002/api/send-email');
       expect(calls[0].body.type).toBe('school_monthly_invoice');
       expect(calls[0].body.to).toBe('parent@example.com');
-      expect(db.updates[0]).toHaveProperty('invoice_email_sent_at');
+      expect(calls[0].body.idempotencyKey).toBe('school-monthly-invoice/inv-1');
+      expect(db.updates).toHaveLength(0); // send-email owns the durable provider + invoice stamps.
     } finally {
       globalThis.fetch = originalFetch;
     }

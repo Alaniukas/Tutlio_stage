@@ -83,7 +83,7 @@ export async function sendFirstLessonInvite(
   supabase: SupabaseClient,
   req: VercelRequest,
   input: FirstLessonInviteInput,
-  deps: { fetchImpl?: typeof fetch; now?: Date } = {},
+  deps: { fetchImpl?: typeof fetch; now?: Date; acceptanceJobId?: string } = {},
 ): Promise<FirstLessonInviteResult> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const now = deps.now ?? new Date();
@@ -160,11 +160,15 @@ export async function sendFirstLessonInvite(
   try {
     const resp = await fetchImpl(`${internalApiOrigin(req)}/api/send-email`, {
       method: 'POST',
+      signal: AbortSignal.timeout(20000),
       headers: {
         'Content-Type': 'application/json',
         'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '',
       },
-      body: JSON.stringify({ type: 'school_extra_first_lesson_invite', to, data }),
+      body: JSON.stringify({ type: 'school_extra_first_lesson_invite', to,
+        data: { ...data, ...(deps.acceptanceJobId ? { acceptanceJobId: deps.acceptanceJobId } : {}) },
+        ...(deps.acceptanceJobId ? { idempotencyKey: `school-acceptance/${deps.acceptanceJobId}/invite` } : {}),
+      }),
     });
     if (!resp.ok) return { sent: false, sessionId: session?.id ?? null, serviceStartYmd, reason: `send-email ${resp.status}` };
   } catch (e) {

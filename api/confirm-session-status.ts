@@ -66,7 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: session } = await supabase
       .from('sessions')
-      .select('id, tutor_id, student_id, status, start_time, end_time, lesson_package_id, subject_id')
+      .select('id, tutor_id, student_id, status, start_time, end_time, lesson_package_id, subject_id, status_confirmed_at')
       .eq('id', sessionId)
       .maybeSingle();
     if (!session) return json(res, 404, { error: 'Session not found' });
@@ -106,11 +106,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    if (session.status !== 'active') {
+    const sessionEnd = Date.parse(session.end_time || '');
+    if (!Number.isFinite(sessionEnd) || sessionEnd > Date.now()) {
+      return json(res, 409, { error: 'lesson_not_ended' });
+    }
+
+    // An explicit school attestation can confirm an older auto-finalized outcome.
+    // It never changes that outcome or repeats package/payment side effects.
+    const evidenceOnly = session.status !== 'active' && req.body?.confirmExisting === true
+      && status === session.status && ['completed', 'no_show'].includes(status);
+    if (session.status !== 'active' && !evidenceOnly) {
       return json(res, 409, { error: 'already_finalized', currentStatus: session.status });
     }
-    if (new Date(session.end_time).getTime() > Date.now()) {
-      return json(res, 409, { error: 'lesson_not_ended' });
+    if (evidenceOnly) {
+      const { data: tutor } = await supabase.from('profiles').select('organization_id').eq('id', session.tutor_id).maybeSingle();
+      const { data: org } = await supabase.from('organizations').select('entity_type').eq('id', tutor?.organization_id || '').maybeSingle();
+      if (org?.entity_type !== 'school') return json(res, 409, { error: 'already_finalized', currentStatus: session.status });
+      if (session.status_confirmed_at) return json(res, 200, { success: true, sessionId, status, alreadyConfirmed: true, statusConfirmedAt: session.status_confirmed_at });
     }
 
     const nowIso = new Date().toISOString();
@@ -119,35 +131,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       status_confirmed_at: nowIso,
       status_confirmed_by: userId,
     };
-    if (status === 'completed') {
+    if (!evidenceOnly && status === 'completed') {
       patch.completed_late = late;
       patch.no_show_when = null;
-    } else if (status === 'no_show') {
+    } else if (!evidenceOnly && status === 'no_show') {
       const when = String(req.body?.noShowWhen || 'after_lesson');
       patch.no_show_when = NO_SHOW_WHEN.has(when) ? when : 'after_lesson';
     } else if (status === 'cancelled') {
       patch.cancelled_by = 'tutor';
     }
 
-    const { error: updateErr } = await supabase.from('sessions').update(patch).eq('id', sessionId);
+    let update = supabase.from('sessions').update(patch).eq('id', sessionId).eq('status', session.status);
+    if (evidenceOnly) update = update.is('status_confirmed_at', null);
+    const { data: updated, error: updateErr } = await update.select('id').maybeSingle();
     if (updateErr) {
       return json(res, 500, { error: 'Update failed', details: updateErr.message });
+    }
+    if (!updated) {
+      // PostgREST can reapply the pre-update filter to its returned rows.
+      // Verify this exact write before treating an empty representation as a race.
+      const { data: saved, error: readError } = await supabase.from('sessions')
+        .select('status,status_confirmed_at,status_confirmed_by').eq('id', sessionId).maybeSingle();
+      if (readError) return json(res, 500, { error: 'Confirmation verification failed' });
+      if (saved?.status !== status || saved?.status_confirmed_by !== userId
+          || Date.parse(saved?.status_confirmed_at || '') !== Date.parse(nowIso)) {
+        return json(res, 409, { error: 'session_changed_retry' });
+      }
     }
 
     // Package counters: occurred lessons (completed / no_show) consume the reserved
     // lesson; a post-end cancellation returns it to the package.
     try {
-      if (status === 'cancelled') {
+      if (evidenceOnly) {
+        // This is an attestation of existing history, not a new status transition.
+      } else if (status === 'cancelled') {
         await returnPackageCounterToAvailable(supabase, session as any);
       } else {
         await movePackageCountersToCompleted(supabase, [session as any]);
       }
-      await deleteSessionWaitlists(supabase, [sessionId]);
+      if (!evidenceOnly) await deleteSessionWaitlists(supabase, [sessionId]);
     } catch (sideErr) {
       console.error('[confirm-session-status] side effects failed:', sideErr);
     }
 
-    if (session.tutor_id) {
+    if (session.tutor_id && !evidenceOnly) {
       syncSessionToGoogle(sessionId, session.tutor_id).catch(() => {});
     }
 

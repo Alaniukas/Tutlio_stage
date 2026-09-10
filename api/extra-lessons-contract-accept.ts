@@ -13,14 +13,13 @@ import {
   validateExtraLessonsOrder,
   type ExtraLessonsOrderSnapshot,
 } from '../src/lib/extraLessonsContract.js';
-import { renderAndStoreExtraLessonsPdf, renderExtraLessonsAnnexPdf, signSchoolContractPdf } from './_lib/extraLessonsPdf.js';
+import { freezeExtraLessonsPdfSource, renderAndStoreExtraLessonsPdf, renderExtraLessonsAnnexPdf, signSchoolContractPdf } from './_lib/extraLessonsPdf.js';
 import { verifyRequestAuth } from './_lib/auth.js';
-import { sendFirstLessonInvite } from './_lib/extraLessonsFirstLessonInvite.js';
+import { acceptanceJobStatus, getAcceptanceJob } from './_lib/schoolAcceptanceJobs.js';
 import {
   extraLessonsPayloadForContract,
   extraLessonsTemplateSource,
   fillExtraLessonsBody,
-  internalApiOrigin,
   loadExtraLessonsContractByToken,
   serviceSupabase,
   snapshotFromRow,
@@ -40,6 +39,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(status).json({ error: loaded.error });
   }
   const { contract, tokenRow } = loaded as any;
+  let job;
+  try { job = await getAcceptanceJob(supabase, contract.id); }
+  catch { return res.status(503).json({ error: 'Nepavyko patikrinti sutarties būsenos. Bandykite dar kartą.' }); }
+  if (req.method === 'GET' && req.query?.status === '1') {
+    const status = job ? acceptanceJobStatus(job) : { ok: true, pending: false, alreadyAccepted: Boolean(contract.accepted_at) };
+    return res.status(200).json({ ...status, pdfUrl: contract.accepted_at ? await signSchoolContractPdf(supabase, contract.signed_contract_url || contract.pdf_url) : null });
+  }
+  if (req.method === 'POST' && job) return res.status(job.finalized_at ? 200 : 202).json(acceptanceJobStatus(job));
   let order = snapshotFromRow(contract);
   if (!order) return res.status(500).json({ error: 'Missing order snapshot' });
 
@@ -54,7 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       || (!contract.start_within_14_status && contract.start_within_14_days === true)
     : true;
 
-  async function renderPreviewPdf(payload: Record<string, string>, filled: string): Promise<string | null> {
+  async function renderPreviewPdf(payload: Record<string, string>, filled: string, persist = true): Promise<string | null> {
     try {
       const rendered = await renderAndStoreExtraLessonsPdf(supabase, {
         contract,
@@ -64,8 +71,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         extraLessonsPayload: payload,
       });
       if (rendered.uploadedPath) {
-        await supabase.from('school_contracts').update({ pdf_url: rendered.uploadedPath }).eq('id', contract.id);
-        contract.pdf_url = rendered.uploadedPath;
+        if (persist) {
+          const { error } = await supabase.from('school_contracts').update({ pdf_url: rendered.uploadedPath })
+            .eq('id', contract.id).is('accepted_at', null);
+          if (error) throw error;
+          contract.pdf_url = rendered.uploadedPath;
+        }
         return signSchoolContractPdf(supabase, rendered.uploadedPath);
       }
     } catch (e) {
@@ -95,7 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const orgFeatures = (org.features || {}) as Record<string, unknown>;
     const recordingsEnabled = orgFeatures.school_lesson_recordings === true;
     payload.start_within_14_label = startWithin14Label(start14.status);
-    payload.recording_consent_label = recordingsEnabled ? '—' : 'NETAIKOMA';
+    payload.recording_consent_label = recordingsEnabled ? 'TAIP' : 'NETAIKOMA';
     payload.sutikimo_su_salygomis_busena = contract.accepted_at ? 'TAIP' : '—';
     const filled = fillExtraLessonsBody({
       templateBody,
@@ -110,14 +121,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (contract.accepted_at || opts.alreadyAccepted) {
       pdfUrl = await signSchoolContractPdf(supabase, contract.signed_contract_url || contract.pdf_url);
     } else {
-      pdfUrl = await renderPreviewPdf(payload, filled);
-      if (!pdfUrl) {
-        pdfUrl = await signSchoolContractPdf(supabase, contract.pdf_url);
-      }
+      // Unsaved form previews must never replace the stored offer or a signed PDF.
+      if (!opts.forceRender) pdfUrl = await signSchoolContractPdf(supabase, contract.pdf_url);
+      if (!pdfUrl && !job) pdfUrl = await renderPreviewPdf(payload, filled, !opts.forceRender);
     }
 
     return {
       ok: true,
+      pending: Boolean(job && !job.finalized_at),
+      needsAttention: Boolean(job && job.attempts >= 10),
       contractId: contract.id,
       contractNumber: contract.contract_number,
       revisionLabel: order.revision_label,
@@ -169,7 +181,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const orgFeatures = (org.features || {}) as Record<string, unknown>;
       const recordingsEnabled = orgFeatures.school_lesson_recordings === true;
       payload.start_within_14_label = startWithin14Label(start14.status);
-      payload.recording_consent_label = recordingsEnabled ? '—' : 'NETAIKOMA';
+      payload.recording_consent_label = recordingsEnabled ? 'TAIP' : 'NETAIKOMA';
       payload.sutikimo_su_salygomis_busena = contract.accepted_at ? 'TAIP' : '—';
       const filled = fillExtraLessonsBody({
         templateBody,
@@ -299,118 +311,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     confirmationSentLabel: payload.el_pastas_ir_issiuntimo_data_laikas,
   });
 
-  let rendered: Awaited<ReturnType<typeof renderAndStoreExtraLessonsPdf>>;
   try {
-    rendered = await renderAndStoreExtraLessonsPdf(supabase, {
-      contract,
-      student: st,
-      filledBody: frozenBody,
-      indicativeMonthlyEur: order.indicative_monthly_eur,
-      extraLessonsPayload: payload,
+    const source = await freezeExtraLessonsPdfSource(supabase, {
+      contract, student: st, filledBody: frozenBody,
+      indicativeMonthlyEur: order.indicative_monthly_eur, extraLessonsPayload: payload,
     });
-  } catch (e) {
-    console.error('[extra-lessons-contract-accept] pdf', (e as Error).message);
-    return res.status(503).json({
-      error: 'Nepavyko suformuoti sutarties pagal įkeltą DOCX šabloną. Sutartis dar nepatvirtinta - bandykite dar kartą.',
-      code: 'contract_pdf_generation_failed',
-    });
-  }
-  if (!rendered.uploadedPath || !rendered.pdfBase64) {
-    return res.status(503).json({
-      error: 'Nepavyko išsaugoti galutinio sutarties PDF. Sutartis dar nepatvirtinta - bandykite dar kartą.',
-      code: 'contract_pdf_generation_failed',
-    });
-  }
-  const pdfPath = rendered.uploadedPath;
-  const pdfBase64 = rendered.pdfBase64;
-
-  const { error: updErr } = await supabase.from('school_contracts').update({
-    accepted_at: acceptedAt.toISOString(),
-    accepted_terms: true,
-    start_within_14_days: startWithin14,
-    start_within_14_status: resolved14.status,
-    start_within_14_shown_text: resolved14.shownText,
-    start_within_14_chosen_at: acceptedAt.toISOString(),
-    accepted_by_user_id: acceptedByUserId,
-    recording_consent: recordingConsent,
-    document_sha256: documentSha256,
-    filled_body: frozenBody,
-    order_snapshot: order,
-    revision_label: order.revision_label,
-    base_lessons_per_month: order.base_lessons_per_month,
-    unit_price_eur: order.unit_price_eur,
-    annual_fee: order.indicative_monthly_eur,
-    pdf_url: pdfPath,
-    signed_contract_url: pdfPath,
-    signing_status: 'signed',
-    signed_at: acceptedAt.toISOString(),
-  }).eq('id', contract.id);
-  if (updErr) return res.status(500).json({ error: updErr.message });
-
-  if (tokenRow?.id) {
-    await supabase.from('school_contract_completion_tokens')
-      .update({ used_at: acceptedAt.toISOString() })
-      .eq('id', tokenRow.id);
-  }
-
-  const origin = internalApiOrigin(req);
-  const to = String(st.payer_email || '').trim();
-  if (to) {
-    await fetch(`${origin}/api/send-email`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '',
-      },
-      body: JSON.stringify({
-        type: 'school_contract_extra_accepted',
-        to,
-        data: {
-          organizationId: contract.organization_id,
-          schoolName: org.name,
-          studentName: st.full_name,
-          parentName: st.payer_name,
-          contractNumber: contract.contract_number,
-          sha256: documentSha256,
-          acceptedAt: acceptedAtLabel,
+    const { data: job, error } = await supabase.rpc('enqueue_school_acceptance', {
+      p_contract_id: contract.id, p_token_id: tokenRow.id,
+      p_payload: {
+        source,
+        acceptance: {
+          accepted_at: acceptedAt.toISOString(),
+          accepted_terms: true,
+          start_within_14_days: startWithin14,
+          start_within_14_status: resolved14.status,
+          start_within_14_shown_text: resolved14.shownText,
+          start_within_14_chosen_at: acceptedAt.toISOString(),
+          accepted_by_user_id: acceptedByUserId,
+          recording_consent: recordingConsent,
+          document_sha256: documentSha256,
+          filled_body: frozenBody,
+          order_snapshot: order,
+          revision_label: order.revision_label,
+          base_lessons_per_month: order.base_lessons_per_month,
+          unit_price_eur: order.unit_price_eur,
+          annual_fee: order.indicative_monthly_eur,
+          signing_status: 'signed',
+          signed_at: acceptedAt.toISOString(),
         },
-        attachments: pdfBase64
-          ? [{ filename: `sutartis-${contract.contract_number || contract.id}.pdf`, content: pdfBase64 }]
-          : undefined,
-      }),
-    }).catch((err) => console.error('[extra-lessons-contract-accept] email', err));
-  }
-
-  // Schema step 2: the confirmed contract comes back → invite to the nearest
-  // lesson (join link + homework page), still without any account.
-  let firstLessonInvite: Awaited<ReturnType<typeof sendFirstLessonInvite>> | null = null;
-  try {
-    firstLessonInvite = await sendFirstLessonInvite(supabase, req, {
-      contractId: contract.id,
-      contractNumber: contract.contract_number || null,
-      organizationId: contract.organization_id,
-      schoolName: org.name || null,
-      studentId: String(st.id || contract.student_id),
-      studentName: st.full_name || null,
-      parentName: st.payer_name || null,
-      payerEmail: st.payer_email || null,
-      order,
-      acceptedAtIso: acceptedAt.toISOString(),
-      startWithin14Status: resolved14.status,
-      classGroupId: contract.class_group_id || null,
+        confirmation: {
+          to: String(st.payer_email || '').trim(),
+          data: { organizationId: contract.organization_id, schoolName: org.name,
+            studentName: st.full_name, parentName: st.payer_name, contractNumber: contract.contract_number,
+            sha256: documentSha256, acceptedAt: acceptedAtLabel },
+        },
+        invite: {
+          contractId: contract.id, contractNumber: contract.contract_number || null,
+          organizationId: contract.organization_id, schoolName: org.name || null,
+          studentId: String(st.id || contract.student_id), studentName: st.full_name || null,
+          parentName: st.payer_name || null, payerEmail: st.payer_email || null,
+          order, acceptedAtIso: acceptedAt.toISOString(), startWithin14Status: resolved14.status,
+          classGroupId: contract.class_group_id || null,
+        },
+      },
     });
-  } catch (err) {
-    console.error('[extra-lessons-contract-accept] first lesson invite', err);
+    if (error || !job) throw error || new Error('Queue insert failed');
+    return res.status(202).json(acceptanceJobStatus(job));
+  } catch (error) {
+    console.error('[extra-lessons-contract-accept] enqueue failed', (error as Error).message);
+    return res.status(503).json({ error: 'Nepavyko išsaugoti patvirtinimo. Bandykite dar kartą.', code: 'acceptance_not_saved' });
   }
-
-  const signedPdfUrl = pdfPath ? await signSchoolContractPdf(supabase, pdfPath) : null;
-
-  return res.status(200).json({
-    ok: true,
-    contractId: contract.id,
-    document_sha256: documentSha256,
-    accepted_at: acceptedAt.toISOString(),
-    pdfUrl: signedPdfUrl,
-    firstLessonInvite,
-  });
 }

@@ -29,6 +29,8 @@ type Preview = {
   schoolEmail?: string | null;
   schoolPhone?: string | null;
   alreadyAccepted?: boolean;
+  pending?: boolean;
+  needsAttention?: boolean;
   withdrawn?: boolean;
   extraEndKind?: string | null;
   pdfUrl?: string | null;
@@ -83,6 +85,8 @@ export default function SchoolExtraLessonsAccept() {
   const [startWithin14, setStartWithin14] = useState(true);
   const [recordingConsent, setRecordingConsent] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [needsAttention, setNeedsAttention] = useState(false);
   const [done, setDone] = useState<{ sha256: string; acceptedAt?: string } | null>(null);
   const [withdrawn, setWithdrawn] = useState(false);
   const [endKind, setEndKind] = useState<string | null>(null);
@@ -99,6 +103,8 @@ export default function SchoolExtraLessonsAccept() {
   const [slots, setSlots] = useState<ExtraLessonsScheduleSlot[]>([]);
 
   const applyPreview = (data: Preview) => {
+    setPending(Boolean(data.pending));
+    setNeedsAttention(Boolean(data.needsAttention));
     setPreview(data);
     const o = data.order;
     setServiceName(o?.service_name || '');
@@ -119,6 +125,35 @@ export default function SchoolExtraLessonsAccept() {
       setEndKind(data.extraEndKind || null);
     }
   };
+
+  useEffect(() => {
+    if (!pending || !token) return;
+    const ctrl = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/extra-lessons-contract-accept?token=${encodeURIComponent(token)}&status=1`, { signal: ctrl.signal });
+        if (!response.ok) throw new Error('status unavailable');
+        const data = await response.json();
+        if (ctrl.signal.aborted) return;
+        setNeedsAttention(Boolean(data.needsAttention));
+        setError(null);
+        if (data.alreadyAccepted) {
+          setPending(false);
+          setDone({ sha256: data.document_sha256 || '', acceptedAt: data.accepted_at });
+          setPreview((previous) => previous ? { ...previous, pdfUrl: data.pdfUrl } : previous);
+          return;
+        }
+      } catch {
+        if (!ctrl.signal.aborted) {
+          setError('Šiuo metu nepavyksta patikrinti būsenos. Išsaugotas patvirtinimas bus apdorotas automatiškai.');
+        }
+      }
+      if (!ctrl.signal.aborted) timer = setTimeout(poll, 5000);
+    };
+    timer = setTimeout(poll, 3000);
+    return () => { ctrl.abort(); clearTimeout(timer); };
+  }, [pending, token]);
 
   useEffect(() => {
     if (!token) {
@@ -213,7 +248,7 @@ export default function SchoolExtraLessonsAccept() {
   }), [serviceName, serviceType, platform, duration, startDate, endDate, baseLessons, slots]);
 
   useEffect(() => {
-    if (!token || !preview || done) return;
+    if (!token || !preview || done || pending) return;
     if (!needsParentFields.any) return;
     if (skipNextPreviewRefresh.current) {
       skipNextPreviewRefresh.current = false;
@@ -246,11 +281,11 @@ export default function SchoolExtraLessonsAccept() {
       }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [token, orderPatch.service_name, orderPatch.service_type, orderPatch.platform, orderPatch.duration_minutes, orderPatch.start_date, orderPatch.end_date, orderPatch.schedule_label, orderPatch.base_lessons_per_month]);
+  }, [token, pending, orderPatch.service_name, orderPatch.service_type, orderPatch.platform, orderPatch.duration_minutes, orderPatch.start_date, orderPatch.end_date, orderPatch.schedule_label, orderPatch.base_lessons_per_month]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!acceptedTerms) return;
+    if (!acceptedTerms || pending || submitting) return;
     if (preview?.recordingsEnabled && recordingConsent === null) {
       setError('Pasirinkite, ar sutinkate su užsiėmimų įrašymu.');
       return;
@@ -280,7 +315,12 @@ export default function SchoolExtraLessonsAccept() {
         setSubmitting(false);
         return;
       }
-      setDone({ sha256: data.document_sha256 || '', acceptedAt: data.accepted_at });
+      if (data.pending) {
+        setPending(true);
+        setNeedsAttention(Boolean(data.needsAttention));
+      } else {
+        setDone({ sha256: data.document_sha256 || '', acceptedAt: data.accepted_at });
+      }
       if (data.pdfUrl) {
         setPreview((prev) => (prev ? { ...prev, pdfUrl: data.pdfUrl } : prev));
       }
@@ -308,6 +348,28 @@ export default function SchoolExtraLessonsAccept() {
     );
   }
   if (!preview) return null;
+
+  if (pending) {
+    return (
+      <PageShell centered>
+        <Card className="space-y-4">
+          <BrandMark />
+          <h1 className="text-2xl font-bold text-gray-900">Patvirtinimas išsaugotas</h1>
+          <p role="status" className="text-sm text-gray-600">
+            Ruošiame galutinį sutarties PDF. Galite uždaryti šį puslapį - darbą tęsime automatiškai.
+            Kai dokumentas bus paruoštas, užbaigsime sutartį ir išsiųsime kopiją el. paštu.
+            Pakartotinai patvirtinti nereikia.
+          </p>
+          {needsAttention && (
+            <p className="text-sm text-amber-700">
+              Dokumento paruošimas užtruko. Jūsų patvirtinimas išsaugotas. Dėl skubios pagalbos kreipkitės į mokyklą{preview.schoolEmail ? `: ${preview.schoolEmail}` : '.'}
+            </p>
+          )}
+          {error && <p className="text-sm text-amber-700">{error}</p>}
+        </Card>
+      </PageShell>
+    );
+  }
 
   const viewAnnex = params.get('view') === 'annex';
   if (viewAnnex) {

@@ -49,17 +49,31 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   }
 }
 
-export function resolveExtraLessonsBundledDocxPath(): string {
+export function extraLessonsBundledDocxCandidates(): string[] {
   const here = typeof __dirname !== 'undefined'
     ? __dirname
     : dirname(fileURLToPath(import.meta.url));
-  const candidates = [
+  return [
     join(here, 'templates', 'extra-lessons-laisvi-vaikai.docx'),
     join(process.cwd(), 'api/_lib/templates/extra-lessons-laisvi-vaikai.docx'),
     join(process.cwd(), 'docs/legal/extra-lessons-laisvi-vaikai.docx'),
     join(here, '../../docs/legal/extra-lessons-laisvi-vaikai.docx'),
+    join(here, '../templates/extra-lessons-laisvi-vaikai.docx'),
   ];
+}
+
+export function resolveExtraLessonsBundledDocxPath(): string {
+  const candidates = extraLessonsBundledDocxCandidates();
   return candidates.find((p) => existsSync(p)) || candidates[0];
+}
+
+export function readBundledExtraLessonsDocx(): Buffer {
+  const candidates = extraLessonsBundledDocxCandidates();
+  const found = candidates.find((p) => existsSync(p));
+  if (!found) {
+    throw new Error(`Bundled extra-lessons DOCX nerastas. Bandytos vietos: ${candidates.join('; ')}`);
+  }
+  return readFileSync(found);
 }
 
 function extraLessonsDocxPayload(params: {
@@ -80,6 +94,41 @@ function extraLessonsDocxPayload(params: {
     student: params.student,
     extraLessonsPayload: params.extraLessonsPayload,
   });
+}
+
+/** Freeze filled source bytes before queuing; retries never reload a mutable template. */
+export async function freezeExtraLessonsPdfSource(
+  supabase: SupabaseClient,
+  params: Parameters<typeof renderAndStoreExtraLessonsPdf>[1],
+): Promise<{ kind: 'docx' | 'pdf'; base64: string }> {
+  const payload = extraLessonsDocxPayload({ ...params, contractNumber: params.contract.contract_number });
+  let templateBytes: Buffer | null = null;
+  if (usesBundledExtraLessonsDocx(params.contract.organization_id)) {
+    templateBytes = readBundledExtraLessonsDocx();
+  } else if (params.contract.template_id) {
+    const { data, error } = await supabase.from('school_contract_templates').select('pdf_url')
+      .eq('id', params.contract.template_id).maybeSingle();
+    if (error) throw error;
+    const path = extractSchoolContractStoragePath(String(data?.pdf_url || ''));
+    if (path.toLowerCase().endsWith('.docx')) {
+      const downloaded = await supabase.storage.from(BUCKET).download(path);
+      if (downloaded.error || !downloaded.data) throw new Error('Nepavyko įkelti sutarties šablono');
+      templateBytes = Buffer.from(await downloaded.data.arrayBuffer());
+    }
+  }
+  if (templateBytes) {
+    const bytes = fillDocxTemplateBuffer({ templateBytes, payload });
+    if (bytes.length > 5 * 1024 * 1024) throw new Error('Sutarties šablonas viršija 5 MB ribą');
+    return { kind: 'docx', base64: bytes.toString('base64') };
+  }
+  const pdf = await createSimpleContractPdf({
+    contractNumber: String(params.contract.contract_number || ''), studentName: String(params.student.full_name || ''),
+    parentName: String(params.student.payer_name || ''), parentEmail: String(params.student.payer_email || ''),
+    parentPhone: String(params.student.payer_phone || ''), parentPersonalCode: '', childBirthDate: '', address: '',
+    annualFee: params.indicativeMonthlyEur, body: params.filledBody,
+    title: 'Nuotoliniu papildomu pamoku paslaugu sutartis', feeLabel: 'Orientacine menesio kaina',
+  });
+  return { kind: 'pdf', base64: Buffer.from(pdf).toString('base64') };
 }
 
 /** Extra-lessons: bundled Laisvi vaikai DOCX for Demo/Laisvi; other orgs use their extra DOCX. */

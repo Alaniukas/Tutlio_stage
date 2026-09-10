@@ -40,6 +40,8 @@ import { studentRegistrationAlreadyActive } from './_lib/registrationInviteGate.
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { sanitizeStudentNameForEmail } from './_lib/pendingChildName.js';
 import { hasOrgAdminPermission, type OrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { deliverAcceptanceOnce, validAcceptanceDeliveryKey } from './_lib/schoolAcceptanceDelivery.js';
+import { deliverSchoolMonthlyInvoiceOnce, schoolMonthlyInvoiceIdempotencyKey } from './_lib/schoolMonthlyInvoiceDelivery.js';
 
 
 function randomToken() {
@@ -3177,6 +3179,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const { type, to, data: rawData, locale: bodyLocale } = req.body;
+    const requestedIdempotencyKey = req.body?.idempotencyKey;
+    const acceptanceDelivery = validAcceptanceDeliveryKey(type, rawData?.acceptanceJobId, requestedIdempotencyKey);
+    const invoiceDelivery = type === 'school_monthly_invoice' && typeof rawData?.invoiceId === 'string'
+      && requestedIdempotencyKey === schoolMonthlyInvoiceIdempotencyKey(rawData.invoiceId);
+    if (requestedIdempotencyKey !== undefined && (!isInternalRequest(req) || (!acceptanceDelivery && !invoiceDelivery))) {
+      return res.status(403).json({ error: 'Invalid internal delivery key' });
+    }
+    if (type === 'school_monthly_invoice' && !requestedIdempotencyKey) {
+      return res.status(400).json({ error: 'Invoice delivery requires an idempotency key' });
+    }
     if (!type || !to) {
       return res.status(400).json({ error: 'Missing required fields: type, to' });
     }
@@ -3591,6 +3603,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         filename: a.filename || 'document.pdf',
         content: Buffer.from(a.content, 'base64'),
       }));
+    }
+
+    if (type === 'school_monthly_invoice') {
+      const delivery = await deliverSchoolMonthlyInvoiceOnce({
+        supabase: createClient(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, supabaseServiceRoleClientOptions()),
+        invoiceId: rawData.invoiceId,
+        organizationId: String(rawData.organizationId || ''),
+        payload: { from: emailPayload.from, to: Array.isArray(emailPayload.to) ? emailPayload.to : [emailPayload.to], subject: emailPayload.subject, html: emailContent.html },
+        send: async (payload, idempotencyKey) => {
+          const response = await resend.emails.send(payload, { idempotencyKey });
+          return { id: response.data?.id, error: response.error?.message };
+        },
+      });
+      if (delivery.reason) return res.status(503).json({ error: delivery.reason });
+      return res.status(200).json({ success: true, ...delivery });
+    }
+
+    if (acceptanceDelivery) {
+      const delivery = await deliverAcceptanceOnce({
+        db: createClient(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, supabaseServiceRoleClientOptions()),
+        jobId: rawData.acceptanceJobId,
+        organizationId: String(rawData.organizationId || ''),
+        key: requestedIdempotencyKey,
+        payload: { ...emailPayload, attachments: Array.isArray(rawAttachments) ? rawAttachments : undefined },
+        send: async (frozen, idempotencyKey) => {
+          const response = await resend.emails.send({ ...frozen,
+            attachments: frozen.attachments?.map((a: any) => ({ filename: a.filename, content: Buffer.from(a.content, 'base64') })),
+          }, { idempotencyKey });
+          return { id: response.data?.id, error: response.error?.message };
+        },
+      });
+      if (delivery.error) return res.status(503).json({ error: delivery.error });
+      return res.status(200).json({ success: true, ...delivery });
     }
 
     const { data: result, error } = await resend.emails.send(emailPayload);
