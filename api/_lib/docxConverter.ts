@@ -62,7 +62,11 @@ async function fetchDocxConverterOnce(base: string, key: string, docxBuffer: Buf
     }
     const b64 = typeof json.pdfBase64 === 'string' ? json.pdfBase64 : '';
     if (!b64) throw new Error('Remote converter returned no pdfBase64');
-    return Buffer.from(b64, 'base64');
+    const pdf = Buffer.from(b64, 'base64');
+    if (pdf.subarray(0, 5).toString() !== '%PDF-') {
+      throw new Error('Remote converter returned an invalid PDF');
+    }
+    return pdf;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error(`Remote DOCX converter timed out after ${DOCX_CONVERTER_TIMEOUT_MS}ms`);

@@ -11,6 +11,7 @@ const seLegalTranslations: Record<string, string> = {
 };
 
 export const se: Record<string, string> = {
+  'parent.childAlreadyExists': 'Barnet finns redan i listan. Använd barnets befintliga kort för att skapa kontot.',
   'common.reloadPage': "Ladda om sidan",
   'common.reloadPageWarning': "Om du laddar om sidan går osparade ändringar förlorade. Vill du fortsätta?",
   ...familyCatalogTrialCopy.se,

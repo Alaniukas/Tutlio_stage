@@ -1,6 +1,7 @@
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 
 export const lt: Record<string, string> = {
+  'parent.childAlreadyExists': 'Šis vaikas jau yra jūsų sąraše. Naujo įrašo kurti nereikia. Jo paskyrą galite sukurti esamoje vaiko kortelėje.',
   ...familyCatalogTrialCopy.lt,
   'common.reloadPage': "Įkelti puslapį iš naujo",
   'common.reloadPageWarning': "Įkėlus puslapį iš naujo, neišsaugoti pakeitimai bus prarasti. Tęsti?",

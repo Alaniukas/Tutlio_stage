@@ -1,3 +1,4 @@
+import { matchesSchoolConsent, type SchoolConsentFilter } from '@/lib/schoolConsentFilter';
 import { useRef, useState, useEffect } from 'react';
 import mammoth from 'mammoth';
 import { supabase } from '@/lib/supabase';
@@ -102,6 +103,7 @@ interface Contract {
   signed_uploaded_at?: string | null;
   completion_submitted_at?: string | null;
   media_publicity_consent?: string | null;
+  recording_consent?: boolean | null;
   additional_fee_amount?: number | null;
   additional_fee_purpose?: string | null;
   kind?: 'annual' | 'extra_lessons' | null;
@@ -275,6 +277,7 @@ export default function CompanyContracts() {
 
   const [tab, setTab] = useState<'contracts' | 'templates'>('contracts');
 
+  const [consentFilter, setConsentFilter] = useState<SchoolConsentFilter>('all');
   // Contract list filter (schools accumulate many contracts — no more scrolling).
   const [contractFilter, setContractFilter] = useState<SchoolContractFilter | 'unsigned'>('all');
   const [contractKindFilter, setContractKindFilter] = useState<SchoolContractKindFilter>('all');
@@ -1867,6 +1870,7 @@ export default function CompanyContracts() {
   const contractFilterCounts = countContractsByFilter(contracts, isSchoolView, { eSignEnabled });
   const visibleContracts = contracts.filter((c) => {
     if (isSchoolView) {
+      if (!matchesSchoolConsent(consentFilter, c)) return false;
       if (!matchesContractFilter(contractFilter as SchoolContractFilter, c, isSchoolView, { eSignEnabled })) return false;
       if (!matchesContractKindFilter(contractKindFilter, c.kind)) return false;
     } else {
@@ -2085,9 +2089,21 @@ export default function CompanyContracts() {
             </div>
           ) : (
             <>
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
                 {isSchoolView ? (
                   <>
+                  <Select value={consentFilter} onValueChange={(value) => setConsentFilter(value as SchoolConsentFilter)}>
+                    <SelectTrigger className="w-full sm:w-64 rounded-xl" aria-label="Atvaizdo sutikimas">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Visi atvaizdo sutikimai</SelectItem>
+                      <SelectItem value="disagree">Atvaizdas: nesutinka</SelectItem>
+                      <SelectItem value="agree">Atvaizdas: sutinka</SelectItem>
+                      <SelectItem value="missing">Atvaizdas: neatsakyta</SelectItem>
+                      <SelectItem value="recording_declined">Pamokų įrašymas: nesutinka</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Select
                     value={contractKindFilter}
                     onValueChange={(v) => setContractKindFilter(v as SchoolContractKindFilter)}
@@ -2109,7 +2125,7 @@ export default function CompanyContracts() {
                     value={contractFilter as SchoolContractFilter}
                     onValueChange={(v) => setContractFilter(v as SchoolContractFilter)}
                   >
-                    <SelectTrigger className="w-full sm:w-[min(100%,320px)] rounded-xl border-gray-200 bg-white">
+                    <SelectTrigger aria-label="Sutarties būsena" className="w-full sm:w-[min(100%,320px)] rounded-xl border-gray-200 bg-white">
                       <SelectValue placeholder={tr('school.filterContractsLabel')} />
                     </SelectTrigger>
                     <SelectContent>

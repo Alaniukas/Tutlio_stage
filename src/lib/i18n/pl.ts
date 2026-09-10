@@ -4,6 +4,7 @@ import { schoolInstructionsTranslationsPl } from './schoolInstructionsTranslatio
 import { schoolTeacherContractTranslationsPl } from './schoolTeacherContractTranslations.js';
 
 export const pl: Record<string, string> = {
+  'parent.childAlreadyExists': 'To dziecko jest już na Twojej liście. Nie twórz kolejnego wpisu. Konto możesz utworzyć w istniejącej karcie dziecka.',
   'common.reloadPage': "Odśwież stronę",
   'common.reloadPageWarning': "Odświeżenie strony spowoduje utratę niezapisanych zmian. Kontynuować?",
   ...familyCatalogTrialCopy.pl,

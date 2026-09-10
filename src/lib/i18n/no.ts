@@ -5,6 +5,7 @@ import { schoolTeacherContractTranslationsNo } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const no: Record<string, string> = {
+  'parent.childAlreadyExists': 'Barnet finnes allerede i listen. Bruk barnets eksisterende kort for å opprette kontoen.',
   'common.reloadPage': "Last siden på nytt",
   'common.reloadPageWarning': "Hvis du laster siden på nytt, går ulagrede endringer tapt. Vil du fortsette?",
   ...familyCatalogTrialCopy.no,

@@ -5,6 +5,7 @@ import { schoolTeacherContractTranslationsEe } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const ee: Record<string, string> = {
+  'parent.childAlreadyExists': 'See laps on juba nimekirjas. Konto loomiseks kasutage olemasolevat lapse kaarti.',
   'common.reloadPage': "Laadi leht uuesti",
   'common.reloadPageWarning': "Lehe uuesti laadimisel lähevad salvestamata muudatused kaotsi. Kas jätkata?",
   ...familyCatalogTrialCopy.ee,

@@ -230,7 +230,12 @@ export default function ParentSettings() {
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(t('parent.addChildFailed'));
+        const duplicate = body?.error === 'child_already_exists';
+        setError(t(duplicate ? 'parent.childAlreadyExists' : 'parent.addChildFailed'));
+        if (duplicate) {
+          await loadMvChildren();
+          if (body.studentId) setInviteOpenIds((prev) => ({ ...prev, [body.studentId]: true }));
+        }
         return;
       }
       setAddChildName('');

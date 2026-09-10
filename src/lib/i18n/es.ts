@@ -5,6 +5,7 @@ import { schoolTeacherContractTranslationsEs } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const es: Record<string, string> = {
+  'parent.childAlreadyExists': 'Este menor ya está en tu lista. Usa su ficha existente para crear su cuenta.',
   'common.reloadPage': "Recargar la página",
   'common.reloadPageWarning': "Al recargar se perderán los cambios sin guardar. ¿Continuar?",
   ...familyCatalogTrialCopy.es,

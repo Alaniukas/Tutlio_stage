@@ -6,6 +6,7 @@ import { supportTranslations } from './supportTranslations.js';
 import { nlQuiz } from './nlQuiz.js';
 
 export const nl: Record<string, string> = {
+  'parent.childAlreadyExists': 'Dit kind staat al in je lijst. Gebruik de bestaande kindkaart om het account aan te maken.',
   'common.reloadPage': "Pagina opnieuw laden",
   'common.reloadPageWarning': "Als je de pagina opnieuw laadt, gaan niet-opgeslagen wijzigingen verloren. Doorgaan?",
   ...familyCatalogTrialCopy.nl,

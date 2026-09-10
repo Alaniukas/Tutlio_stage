@@ -1,6 +1,7 @@
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 
 export const en: Record<string, string> = {
+  'parent.childAlreadyExists': 'This child is already in your list. You do not need another entry. Use the existing child card to create their account.',
   ...familyCatalogTrialCopy.en,
   'common.reloadPage': "Reload page",
   'common.reloadPageWarning': "Reloading will discard unsaved changes. Continue?",

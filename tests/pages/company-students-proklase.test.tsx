@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import CompanyStudents from '@/pages/company/CompanyStudents';
@@ -131,5 +131,43 @@ describe('CompanyStudents Pro Klasė list', () => {
 
     expect(screen.queryByPlaceholderText('Asmens kodas')).toBeNull();
     expect(screen.queryByPlaceholderText(/adresas/i)).toBeNull();
+  });
+
+  it('does not mark a failed meeting-link write as saved and requests the persisted value', async () => {
+    const updates = vi.fn();
+    const selections = vi.fn();
+    testState.from.mockImplementation(() => {
+      let writing = false;
+      const query: any = new Proxy({}, {
+        get: (_target, prop) => {
+          if (prop === 'then') {
+            return (resolve: (value: unknown) => void) => resolve(writing
+              ? { data: null, error: { message: 'denied' } }
+              : { data: [], error: null, count: 0 });
+          }
+          return (...args: unknown[]) => {
+            if (prop === 'update') {
+              writing = true;
+              updates(...args);
+            }
+            if (prop === 'select' && writing) selections(...args);
+            return query;
+          };
+        },
+      });
+      return query;
+    });
+
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
+    const input = screen.getByPlaceholderText('https://meet.google.com/...');
+    fireEvent.change(input, { target: { value: 'https://meet.google.com/test-link' } });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(screen.getByText('Klaida.')).toBeTruthy());
+    expect(selections).toHaveBeenCalledWith('personal_meeting_link');
+    expect((input as HTMLInputElement).value).toBe('');
+    fireEvent.blur(input);
+    await waitFor(() => expect(updates).toHaveBeenCalledOnce());
   });
 });

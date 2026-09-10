@@ -5107,15 +5107,32 @@ export default function CompanyStudents() {
                     <h4 className="font-semibold text-gray-900 text-sm mb-2">{t('compStu.personalMeetingLink')}</h4>
                     <div className="flex gap-2">
                       <input
+                        key={selectedStudent.id}
                         type="url"
                         className="flex-1 rounded-xl border border-gray-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
                         placeholder="https://meet.google.com/..."
                         defaultValue={selectedStudent.personal_meeting_link || ''}
                         onBlur={async (e) => {
-                          const val = e.target.value.trim() || null;
-                          if (val === (selectedStudent.personal_meeting_link || null)) return;
-                          await supabase.from('students').update({ personal_meeting_link: val }).eq('id', selectedStudent.id);
-                          setSelectedStudent(s => s ? { ...s, personal_meeting_link: val } : null);
+                          const input = e.currentTarget;
+                          const previousValue = selectedStudent.personal_meeting_link || '';
+                          const val = input.value.trim() || null;
+                          if (val === (previousValue || null)) return;
+                          const studentId = selectedStudent.id;
+                          try {
+                            const { data, error } = await supabase
+                              .from('students')
+                              .update({ personal_meeting_link: val })
+                              .eq('id', studentId)
+                              .select('personal_meeting_link')
+                              .single();
+                            if (error || !data) throw error || new Error('Student link was not saved');
+                            setSelectedStudent((student) => student?.id === studentId
+                              ? { ...student, personal_meeting_link: data.personal_meeting_link }
+                              : student);
+                          } catch {
+                            input.value = previousValue;
+                            setToastMessage({ message: t('common.error'), type: 'error' });
+                          }
                         }}
                       />
                     </div>

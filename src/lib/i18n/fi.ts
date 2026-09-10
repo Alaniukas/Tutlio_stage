@@ -5,6 +5,7 @@ import { schoolTeacherContractTranslationsFi } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const fi: Record<string, string> = {
+  'parent.childAlreadyExists': 'Lapsi on jo luettelossasi. Luo tili lapsen nykyisen kortin kautta.',
   'common.reloadPage': "Lataa sivu uudelleen",
   'common.reloadPageWarning': "Sivun lataaminen uudelleen poistaa tallentamattomat muutokset. Jatketaanko?",
   ...familyCatalogTrialCopy.fi,

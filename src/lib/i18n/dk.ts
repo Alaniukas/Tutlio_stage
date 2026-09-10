@@ -120,6 +120,7 @@ const DK_DPA_HTML = [
 ].join('');
 
 export const dk: Record<string, string> = {
+  'parent.childAlreadyExists': 'Barnet er allerede på listen. Brug barnets eksisterende kort til at oprette kontoen.',
   'common.reloadPage': "Genindlæs siden",
   'common.reloadPageWarning': "Hvis du genindlæser siden, går ændringer, der ikke er gemt, tabt. Vil du fortsætte?",
   ...familyCatalogTrialCopy.dk,

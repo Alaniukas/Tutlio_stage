@@ -5,6 +5,7 @@ import { schoolTeacherContractTranslationsDe } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const de: Record<string, string> = {
+  'parent.childAlreadyExists': 'Dieses Kind steht bereits in deiner Liste. Erstelle sein Konto über den bestehenden Eintrag.',
   'common.reloadPage': "Seite neu laden",
   'common.reloadPageWarning': "Beim Neuladen gehen ungespeicherte Änderungen verloren. Fortfahren?",
   ...familyCatalogTrialCopy.de,

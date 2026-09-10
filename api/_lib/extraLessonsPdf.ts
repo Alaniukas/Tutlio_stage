@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'fs';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -217,7 +218,7 @@ export async function renderAndStoreExtraLessonsPdf(
     organizationId: String(params.contract.organization_id),
     contractId: String(params.contract.id),
     contractNumber: params.contract.contract_number ?? null,
-  });
+  }).replace(/\.pdf$/, `-${createHash('sha256').update(pdfBytes).digest('hex')}.pdf`);
   const { error: uploadErr } = await supabase.storage.from(BUCKET).upload(path, Buffer.from(pdfBytes), {
     cacheControl: '3600',
     upsert: true,

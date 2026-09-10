@@ -5,6 +5,7 @@ import { schoolTeacherContractTranslationsLv } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const lv: Record<string, string> = {
+  'parent.childAlreadyExists': 'Šis bērns jau ir sarakstā. Konta izveidei izmantojiet esošo bērna kartīti.',
   'common.reloadPage': "Pārlādēt lapu",
   'common.reloadPageWarning': "Pārlādējot lapu, nesaglabātās izmaiņas tiks zaudētas. Vai turpināt?",
   ...familyCatalogTrialCopy.lv,
