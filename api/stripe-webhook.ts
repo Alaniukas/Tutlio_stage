@@ -427,7 +427,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     .eq('id', packageId)
                     .eq('paid', false)
                     .select(
-                        'id, tutor_id, total_lessons, available_lessons, total_price, payment_method, manual_sales_invoice_id, paid_at, students(full_name, email, payer_email, payer_name), subject:subjects(name), lesson_package_items(subject_id, total_lessons, price_per_lesson, position, subjects!inner(name))'
+                        'id, tutor_id, total_lessons, available_lessons, total_price, payment_method, manual_sales_invoice_id, paid_at, pool_organization_id, students(full_name, email, payer_email, payer_name), subject:subjects(name), lesson_package_items(subject_id, total_lessons, price_per_lesson, position, subjects!inner(name))'
                     )
                     .maybeSingle();
 
@@ -454,7 +454,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         .eq('id', (updatedPackage as any).tutor_id)
                         .maybeSingle();
 
-                    const orgName = await getOrgName(supabase, tutor?.organization_id);
+                    const packageOrganizationId = (updatedPackage as any).pool_organization_id || tutor?.organization_id || null;
+                    const orgName = await getOrgName(supabase, packageOrganizationId);
                     const providerName = orgName || tutor?.full_name || 'Korepetitorius';
                     const packageGrossEur = session.amount_total != null ? session.amount_total / 100 : null;
                     const packageBaseEur = metadataBaseEur(session.metadata) ?? Number(updatedPackage.total_price);
@@ -464,7 +465,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         sourceId: packageId,
                         baseAmountEur: packageBaseEur,
                         grossAmountEur: packageGrossEur,
-                        organizationId: tutor?.organization_id ?? null,
+                        organizationId: packageOrganizationId,
                         tutorId: (updatedPackage as any).tutor_id ?? null,
                         stripeCheckoutSessionId: session.id,
                     });
@@ -509,7 +510,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     baseTotalEur: packageBaseEur,
                                     ...(packageGrossEur != null ? { totalChargedEur: packageGrossEur } : {}),
                                     items: webhookEmailItems,
-                                    ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
+                                    ...(packageOrganizationId ? { organizationId: packageOrganizationId } : {}),
                                 },
                             }),
                         }).catch(e => console.error('[stripe-webhook] Error sending package success email:', e));

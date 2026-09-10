@@ -147,6 +147,18 @@ import {
   orgStudentIdentityGroupKey,
 } from '@/lib/orgStudentIdentity';
 
+type MonthlyStudentPackagePreview = {
+  items: Array<{ subjectId: string; subjectName: string; totalLessons: number }>;
+  totalLessons: number;
+  pricePerLesson: number;
+  totalPrice: number;
+  lessonsPerWeek: number;
+  periodStart: string;
+  periodEnd: string;
+  nextGenerationDate: string;
+  previewToken: string;
+};
+
 interface Student {
   id: string;
   tutor_id: string | null;
@@ -516,14 +528,18 @@ export default function CompanyStudents() {
   const [packageSubjects, setPackageSubjects] = useState<any[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(false);
   const [sendPackageOpen, setSendPackageOpen] = useState(false);
+  const [monthlyPreview, setMonthlyPreview] = useState<MonthlyStudentPackagePreview | null>(null);
+  const [monthlyPreviewError, setMonthlyPreviewError] = useState('');
+  const [monthlyPreviewLoading, setMonthlyPreviewLoading] = useState(false);
+  const [monthlyPreviewRefresh, setMonthlyPreviewRefresh] = useState(0);
+  const [monthlyPeriodStart, setMonthlyPeriodStart] = useState(
+    () => `${formatLocalYmd(new Date()).slice(0, 7)}-01`,
+  );
   const [pkgItems, setPkgItems] = useState<PackageEditorItem[]>([]);
   const [pkgIndividualPricing, setPkgIndividualPricing] = useState<Record<string, number>>({});
   const [pkgExpiresAt, setPkgExpiresAt] = useState('');
   const [pkgSending, setPkgSending] = useState(false);
   const [pkgAttachSalesInvoice, setPkgAttachSalesInvoice] = useState(true);
-  const [pkgGrade, setPkgGrade] = useState(1);
-  const [pkgLessonsPerWeek, setPkgLessonsPerWeek] = useState(1);
-  const [pkgDynamicPricingRules, setPkgDynamicPricingRules] = useState<OrganizationDynamicPricingRule[]>([]);
   // Optional pre-booked package times (req 3, gated by package_reservation_flow)
   const [pkgReserveSlots, setPkgReserveSlots] = useState<Array<{ subjectId: string; startIso: string; endIso: string }>>([]);
   const [pkgSlotSubjectId, setPkgSlotSubjectId] = useState('');
@@ -596,11 +612,14 @@ export default function CompanyStudents() {
     enable_prepaid_packages: false,
   });
 
-  const monthlyPackageMode = proKlaseAdminUi && hasFeature('monthly_packages');
-  const monthlyPackagePeriod = useMemo(
-    () => monthlyPackagePeriodFrom(formatLocalYmd(new Date()), pkgLessonsPerWeek),
-    [pkgLessonsPerWeek],
+  const selectedStudentGroupIds = useMemo(
+    () => selectedStudentGroup.length > 0
+      ? selectedStudentGroup.map((row) => row.id)
+      : selectedStudent ? [selectedStudent.id] : [],
+    [selectedStudent?.id, selectedStudentGroup],
   );
+
+  const monthlyPackageMode = proKlaseAdminUi && hasFeature('monthly_packages');
   const classGroupsEnabled = isSchoolView && !orgFeaturesLoading && hasFeature('school_class_groups');
 
   useEffect(() => {
@@ -682,7 +701,7 @@ export default function CompanyStudents() {
         const { data: pricingRes } = await supabase
           .from('student_individual_pricing')
           .select('id, price, duration_minutes, cancellation_hours, cancellation_fee_percent, subject:subjects(id, name, color, duration_minutes)')
-          .eq('student_id', selectedStudent.id)
+          .in('student_id', monthlyPackageMode ? selectedStudentGroupIds : [selectedStudent.id])
           .eq('tutor_id', selectedStudent.tutor_id)
           .order('created_at', { ascending: false });
 
@@ -696,7 +715,13 @@ export default function CompanyStudents() {
     return () => {
       cancelled = true;
     };
-  }, [selectedStudent?.id, selectedStudent?.tutor_id, isStudentModalOpen]);
+  }, [
+    selectedStudent?.id,
+    selectedStudent?.tutor_id,
+    isStudentModalOpen,
+    monthlyPackageMode,
+    selectedStudentGroupIds,
+  ]);
 
   const showPaymentModelUi = isSchoolView || (!orgFeaturesLoading && hasFeature('per_student_payment_override'));
 
@@ -939,11 +964,8 @@ export default function CompanyStudents() {
           lessons_per_week: Number(rule.lessons_per_week),
           price: Number(rule.price),
         }));
-        setPkgDynamicPricingRules(dynamicRules);
         const initialGrade = parseStudentGrade(selectedStudent.grade) ?? 1;
         const initialFrequency = Math.max(1, Number(selectedStudent.pricing_lessons_per_week) || 1);
-        setPkgGrade(initialGrade);
-        setPkgLessonsPerWeek(initialFrequency);
         const first = subjRes.data?.[0];
         if (first) {
           const initialPrice = resolveOrganizationLessonPrice({
@@ -953,10 +975,9 @@ export default function CompanyStudents() {
             individualPrice: pricingMap[first.id],
             fallbackPrice: Number(first.price ?? 0),
           });
-          const period = monthlyPackagePeriodFrom(formatLocalYmd(new Date()), initialFrequency);
           setPkgItems([{
             subjectId: first.id,
-            totalLessons: monthlyPackageMode ? period.totalLessons : 5,
+            totalLessons: monthlyPackageMode ? 0 : 5,
             pricePerLesson: initialPrice,
           }]);
         } else {
@@ -966,7 +987,7 @@ export default function CompanyStudents() {
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedStudent, isStudentModalOpen, orgId, monthlyPackageMode, packagesRefreshKey]);
+  }, [selectedStudent, isStudentModalOpen, orgId, monthlyPackageMode, packagesRefreshKey, selectedStudentGroupIds]);
 
   // Auto (post-trial) monthly package plans across the identity group.
   useEffect(() => {
@@ -974,15 +995,12 @@ export default function CompanyStudents() {
       setStudentAutoPlans([]);
       return;
     }
-    const groupIds = selectedStudentGroup.length > 0
-      ? selectedStudentGroup.map((row) => row.id)
-      : [selectedStudent.id];
     let cancelled = false;
     (async () => {
       const { data } = await supabase
         .from('recurring_monthly_package_plans')
         .select('id, tutor_id, student_id, next_generation_date, payment_method, auto_from_schedule, active, tutor:profiles!recurring_monthly_package_plans_tutor_id_fkey(full_name)')
-        .in('student_id', groupIds)
+        .in('student_id', selectedStudentGroupIds)
         .eq('active', true)
         .eq('auto_from_schedule', true);
       if (!cancelled) {
@@ -995,39 +1013,51 @@ export default function CompanyStudents() {
       }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedStudent?.id, isStudentModalOpen, selectedStudentGroup.length, modalSessionsRefreshKey]);
+  }, [selectedStudent?.id, isStudentModalOpen, selectedStudentGroupIds, modalSessionsRefreshKey]);
 
   useEffect(() => {
-    if (!monthlyPackageMode || !sendPackageOpen || pkgItems.length === 0) return;
-    const current = pkgItems[0];
-    const subject = packageSubjects.find((row: any) => row.id === current.subjectId);
-    if (!subject) return;
-    const price = resolveOrganizationLessonPrice({
-      rules: pkgDynamicPricingRules,
-      student: { grade: String(pkgGrade), pricing_lessons_per_week: pkgLessonsPerWeek },
-      lessonsPerWeek: pkgLessonsPerWeek,
-      individualPrice: pkgIndividualPricing[current.subjectId],
-      fallbackPrice: Number(subject.price ?? 0),
-    });
-    setPkgItems((items) => {
-      const item = items[0];
-      if (!item) return items;
-      if (item.totalLessons === monthlyPackagePeriod.totalLessons && item.pricePerLesson === price && items.length === 1) {
-        return items;
+    setMonthlyPreview(null);
+    setMonthlyPreviewError('');
+    if (!monthlyPackageMode || !selectedStudent || !isStudentModalOpen || !sendPackageOpen) {
+      setMonthlyPreviewLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setMonthlyPreviewLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch('/api/create-monthly-student-package', {
+          method: 'POST',
+          headers: await authHeaders(),
+          signal: controller.signal,
+          body: JSON.stringify({
+            studentId: selectedStudent.id,
+            preview: true,
+            periodStart: monthlyPeriodStart,
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || t('common.error'));
+        if (!controller.signal.aborted) setMonthlyPreview(result);
+      } catch (previewError) {
+        if (!controller.signal.aborted) {
+          setMonthlyPreviewError(previewError instanceof Error ? previewError.message : t('common.error'));
+        }
+      } finally {
+        if (!controller.signal.aborted) setMonthlyPreviewLoading(false);
       }
-      return [{ ...item, totalLessons: monthlyPackagePeriod.totalLessons, pricePerLesson: price }];
-    });
+    })();
+    return () => controller.abort();
   }, [
     monthlyPackageMode,
+    selectedStudent?.id,
+    isStudentModalOpen,
     sendPackageOpen,
-    pkgGrade,
-    pkgLessonsPerWeek,
-    pkgDynamicPricingRules,
-    pkgIndividualPricing,
-    packageSubjects,
-    monthlyPackagePeriod.totalLessons,
-    pkgItems[0]?.subjectId,
+    monthlyPeriodStart,
+    monthlyPreviewRefresh,
+    modalSessionsRefreshKey,
+    t,
   ]);
 
   useEffect(() => {
@@ -1389,7 +1419,44 @@ export default function CompanyStudents() {
     };
   }, [newStudent.tutor_ids]);
 
+  const handleSaveMonthlyPackage = async () => {
+    if (!selectedStudent || !monthlyPreview?.previewToken || !monthlyPreview.totalLessons
+      || monthlyPreviewLoading || monthlyPreviewError) return;
+    setPkgSending(true);
+    try {
+      const response = await fetch('/api/create-monthly-student-package', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          studentId: selectedStudent.id,
+          preview: false,
+          previewToken: monthlyPreview.previewToken,
+          periodStart: monthlyPreview.periodStart,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setMonthlyPreview(null);
+        setMonthlyPreviewRefresh((value) => value + 1);
+        throw new Error(result.error || t('compStu.errorSendingPackage'));
+      }
+      setSendPackageOpen(false);
+      setPackagesRefreshKey((value) => value + 1);
+      setToastMessage(result.emailSent === true
+        ? { message: t('compStu.packageSent', { name: selectedStudent.full_name }), type: 'success' }
+        : { message: t('compStu.packageCreatedEmailNotSent'), type: 'error' });
+    } catch (saveError) {
+      setToastMessage({
+        message: saveError instanceof Error ? saveError.message : t('common.error'),
+        type: 'error',
+      });
+    } finally {
+      setPkgSending(false);
+    }
+  };
+
   const handleSendPackage = async () => {
+    if (monthlyPackageMode) return handleSaveMonthlyPackage();
     if (!selectedStudent || pkgItems.length === 0) return;
     // Local validation (same rules as SendPackageModal)
     const seen = new Set<string>();
@@ -1424,17 +1491,7 @@ export default function CompanyStudents() {
             totalLessons: it.totalLessons,
             pricePerLesson: it.pricePerLesson,
           })),
-          ...(monthlyPackageMode
-            ? {
-              expiresAt: monthlyPackagePeriod.periodEnd,
-              monthlyPlan: {
-                grade: pkgGrade,
-                lessonsPerWeek: pkgLessonsPerWeek,
-                periodStart: monthlyPackagePeriod.periodStart,
-                periodEnd: monthlyPackagePeriod.periodEnd,
-              },
-            }
-            : pkgExpiresAt ? { expiresAt: pkgExpiresAt } : {}),
+          ...(pkgExpiresAt ? { expiresAt: pkgExpiresAt } : {}),
           ...(!orgUsesManualPackages ? { attachSalesInvoice: pkgAttachSalesInvoice } : {}),
           ...(pkFeat('package_reservation_flow') && pkgReserveSlots.length > 0
             ? { slots: pkgReserveSlots }
@@ -1594,7 +1651,7 @@ export default function CompanyStudents() {
     setEditingPackage(pkg);
     setEditPeriodStart(firstOfMonth);
     setEditLessons(Math.max(1, Number(pkg.total_lessons) || 1));
-    setEditLessonsPerWeek(Math.max(1, Number(selectedStudent?.pricing_lessons_per_week) || pkgLessonsPerWeek || 1));
+    setEditLessonsPerWeek(Math.max(1, Number(selectedStudent?.pricing_lessons_per_week) || 1));
   };
 
   const handleSaveEditedPackage = async () => {
@@ -2571,46 +2628,8 @@ export default function CompanyStudents() {
     setToastMessage({ message: t('dynamicPricing.studentGradeSaved'), type: 'success' });
   };
 
-  /**
-   * Item 9 (dynamic pricing): contracted lessons-per-week the admin decides.
-   * 'auto' recomputes from the recurring schedule; a number pins it manually.
-   * The RPC also re-prices upcoming unpaid lessons to the matching tier.
-   */
-  const persistStudentPricingFrequency = async (
-    studentIds: string[],
-    lessonsPerWeek: number,
-    options?: { silent?: boolean },
-  ) => {
-    let effective: number | null = lessonsPerWeek;
-    for (const id of studentIds) {
-      const { data, error } = await supabase.rpc('set_student_pricing_frequency', {
-        p_student_id: id,
-        p_lessons_per_week: lessonsPerWeek,
-      });
-      if (error) {
-        if (!options?.silent) {
-          setToastMessage({ message: t('common.error'), type: 'error' });
-        }
-        return false;
-      }
-      if (selectedStudent && id === selectedStudent.id) effective = (data as number | null) ?? lessonsPerWeek;
-    }
-    const patch = { pricing_lessons_per_week: effective, pricing_lessons_per_week_is_manual: true };
-    if (selectedStudent && studentIds.includes(selectedStudent.id)) {
-      setSelectedStudent((current) => (current ? { ...current, ...patch } : current));
-    }
-    setSelectedStudentGroup((current) =>
-      current.map((row) => (studentIds.includes(row.id) ? { ...row, ...patch } : row)),
-    );
-    setStudents((current) =>
-      current.map((row) => (studentIds.includes(row.id) ? { ...row, ...patch } : row)),
-    );
-    if (!options?.silent) {
-      setToastMessage({ message: t('dynamicPricing.frequencySaved'), type: 'success' });
-    }
-    return true;
-  };
-
+  // 'auto' recomputes from the recurring schedule; a number pins it manually.
+  // The existing RPC also re-prices upcoming unpaid lessons to the matching tier.
   const handleUpdateStudentFrequency = async (value: string) => {
     if (!selectedStudent) return;
     const ids = selectedStudentGroup.length > 0
@@ -2635,14 +2654,6 @@ export default function CompanyStudents() {
     setSelectedStudentGroup((current) => current.map((row) => ({ ...row, ...patch })));
     setStudents((current) => current.map((row) => (ids.includes(row.id) ? { ...row, ...patch } : row)));
     setToastMessage({ message: t('dynamicPricing.frequencySaved'), type: 'success' });
-  };
-
-  const handlePkgLessonsPerWeekChange = (value: string) => {
-    const next = Number(value);
-    if (!Number.isFinite(next) || next < 1) return;
-    setPkgLessonsPerWeek(next);
-    if (!selectedStudent) return;
-    void persistStudentPricingFrequency([selectedStudent.id], next, { silent: true });
   };
 
   const handleDetachStudent = async (id: string) => {
@@ -5450,73 +5461,53 @@ export default function CompanyStudents() {
                     <div className="mb-4 p-4 bg-violet-50 border border-violet-200 rounded-xl space-y-3">
                       <p className="text-xs font-semibold text-violet-800">{t('compStu.sendPackageTitle')}</p>
                       {monthlyPackageMode ? (
-                        <div className="space-y-3 rounded-xl border border-violet-200 bg-white/70 p-3">
-                          <div className="space-y-1">
-                            <Label className="text-[11px] text-violet-900">{t('package.itemSubject')}</Label>
-                            <Select
-                              value={pkgItems[0]?.subjectId || undefined}
-                              onValueChange={(subjectId) => {
-                                const subject = packageSubjects.find((row: any) => row.id === subjectId);
-                                const price = resolveOrganizationLessonPrice({
-                                  rules: pkgDynamicPricingRules,
-                                  student: { grade: String(pkgGrade), pricing_lessons_per_week: pkgLessonsPerWeek },
-                                  lessonsPerWeek: pkgLessonsPerWeek,
-                                  individualPrice: pkgIndividualPricing[subjectId],
-                                  fallbackPrice: Number(subject?.price ?? 0),
-                                });
-                                setPkgItems([{
-                                  subjectId,
-                                  totalLessons: monthlyPackagePeriod.totalLessons,
-                                  pricePerLesson: price,
-                                }]);
-                              }}
-                            >
-                              <SelectTrigger className="h-9 rounded-lg text-xs">
-                                <SelectValue placeholder={t('package.selectSubject')} />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {packageSubjects.map((subject: any) => (
-                                  <SelectItem key={subject.id} value={subject.id}>{subject.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="space-y-1">
-                              <Label className="text-[11px] text-violet-900">{t('package.studentGrade')}</Label>
-                              <Select value={String(pkgGrade)} onValueChange={(value) => setPkgGrade(Number(value))}>
-                                <SelectTrigger className="h-9 rounded-lg text-xs"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  {Array.from({ length: 12 }, (_, index) => index + 1).map((grade) => (
-                                    <SelectItem key={grade} value={String(grade)}>{t('package.gradeValue', { grade })}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-[11px] text-violet-900">{t('package.weeklyFrequency')}</Label>
-                              <Select value={String(pkgLessonsPerWeek)} onValueChange={handlePkgLessonsPerWeekChange}>
-                                <SelectTrigger className="h-9 rounded-lg text-xs"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  {[1, 2, 3, 4, 5].map((count) => (
-                                    <SelectItem key={count} value={String(count)}>{t('findLesson.lessonsPerWeek', { count })}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          <div className="rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-800">
-                            <p className="font-medium">
-                              {t('package.monthlyCalculation', {
-                                from: monthlyPackagePeriod.periodStart,
-                                to: monthlyPackagePeriod.periodEnd,
-                                lessons: monthlyPackagePeriod.totalLessons,
-                              })}
-                            </p>
-                            <p className="mt-1 text-[11px] text-violet-600">
-                              {t('package.monthlyAutoRenewHint', { date: monthlyPackagePeriod.nextGenerationDate })}
-                            </p>
-                          </div>
+                        <div className="space-y-2 rounded-xl border border-violet-200 bg-white/70 p-3" aria-live="polite">
+                          <Label htmlFor="monthly-package-month">{t('compStu.pkgEditMonth')}</Label>
+                          <Select value={monthlyPeriodStart} onValueChange={setMonthlyPeriodStart} disabled={pkgSending}>
+                            <SelectTrigger id="monthly-package-month"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {monthOptionStarts.map((start) => (
+                                <SelectItem key={start} value={start}>{start.slice(0, 7)}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {monthlyPreviewLoading ? <p className="text-xs">{t('common.loading')}</p> : null}
+                          {monthlyPreviewError ? <p role="alert" className="text-xs text-red-700">{monthlyPreviewError}</p> : null}
+                          {monthlyPreview ? (
+                            <>
+                              <p className="text-xs">
+                                {t('package.monthlyCalculation', {
+                                  from: monthlyPreview.periodStart,
+                                  to: monthlyPreview.periodEnd,
+                                  lessons: monthlyPreview.totalLessons,
+                                })}
+                              </p>
+                              <p className="text-xs">
+                                {t('package.weeklyFrequency')}: {monthlyPreview.lessonsPerWeek}
+                              </p>
+                              {monthlyPreview.items.map((item) => (
+                                <p className="text-xs" key={item.subjectId}>
+                                  {item.subjectName}: {item.totalLessons} × {fmt(monthlyPreview.pricePerLesson)} ={' '}
+                                  {fmt(item.totalLessons * monthlyPreview.pricePerLesson)}
+                                </p>
+                              ))}
+                              <p className="text-xs font-semibold">
+                                {t('package.totalToPay')}: {fmt(monthlyPreview.totalPrice)}
+                              </p>
+                              <p className="text-[11px] text-violet-600">
+                                {t('package.monthlyAutoRenewHint', { date: monthlyPreview.nextGenerationDate })}
+                              </p>
+                            </>
+                          ) : null}
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={monthlyPreviewLoading || pkgSending}
+                            onClick={() => setMonthlyPreviewRefresh((value) => value + 1)}
+                          >
+                            {t('package.refreshPreview')}
+                          </Button>
                         </div>
                       ) : (
                         <PackageItemsEditor
@@ -5528,7 +5519,7 @@ export default function CompanyStudents() {
                           onChange={setPkgItems}
                         />
                       )}
-                      {!orgFeaturesLoading && proKlaseAdminUi && hasFeature('package_reservation_flow') && (
+                      {!monthlyPackageMode && !orgFeaturesLoading && proKlaseAdminUi && hasFeature('package_reservation_flow') && (
                         <div className="space-y-2 border-t border-violet-200 pt-3">
                           <p className="text-xs font-semibold text-violet-800">{t('package.reserveTimesTitle')}</p>
                           <p className="text-[11px] text-violet-600">{t('package.reserveTimesHint')}</p>
@@ -5628,13 +5619,15 @@ export default function CompanyStudents() {
                         {monthlyPackageMode && (
                           <div className="col-span-3">
                             <Button size="sm" className="h-9 w-full rounded-lg bg-violet-600 text-xs hover:bg-violet-700"
-                              onClick={handleSendPackage} disabled={pkgSending || pkgItems.length === 0 || orgFeaturesLoading}>
+                              onClick={handleSendPackage}
+                              disabled={pkgSending || monthlyPreviewLoading || !monthlyPreview?.previewToken
+                                || !monthlyPreview.totalLessons || !!monthlyPreviewError || orgFeaturesLoading}>
                               {pkgSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t('compStu.sendBtn')}
                             </Button>
                           </div>
                         )}
                       </div>
-                      {!orgUsesManualPackages && (
+                      {!monthlyPackageMode && !orgUsesManualPackages && (
                       <label className="flex items-start gap-2 cursor-pointer text-xs text-violet-900">
                         <input
                           type="checkbox"
@@ -5650,9 +5643,13 @@ export default function CompanyStudents() {
                       )}
                       {!monthlyPackageMode && <p className="text-[11px] text-violet-500">{t('package.validUntilHint')}</p>}
                       <p className="text-xs text-violet-600">
-                        {orgUsesManualPackages ? t('compStu.manualPackageSendHint') : t('compStu.stripePaymentHint')}
+                        {monthlyPackageMode
+                          ? t('package.pooledPaymentHint')
+                          : orgUsesManualPackages
+                            ? t('compStu.manualPackageSendHint')
+                            : t('compStu.stripePaymentHint')}
                       </p>
-                      {pkgItems.length > 0 && pkgItems.some((it) => it.totalLessons > 0) && (
+                      {!monthlyPackageMode && pkgItems.length > 0 && pkgItems.some((it) => it.totalLessons > 0) && (
                         <p className="text-xs font-medium text-violet-800">
                           {t('package.totalAcrossSubjects')}: {pkgItems.reduce((acc, it) => acc + (Number(it.totalLessons) || 0), 0)}
                           {' · '}
@@ -5708,7 +5705,7 @@ export default function CompanyStudents() {
                               <span className="font-medium text-gray-800">
                                 {isMulti
                                   ? items.map((it: any) => it.subjects?.name).filter(Boolean).join(', ')
-                                  : (pkg.subject?.name || '—')}
+                                  : (pkg.subject?.name || items[0]?.subjects?.name || '—')}
                               </span>
                               {(pkg.subject?.is_trial || items.some((it: any) => it.subjects?.is_trial)) && (
                                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800">
@@ -5734,7 +5731,7 @@ export default function CompanyStudents() {
                             </span>
                             {pkg.payment_status === 'pending' && !pkg.paid && (
                               <>
-                                {canEditPendingPackage(pkg) && (
+                                {!pkg.pool_organization_id && canEditPendingPackage(pkg) && (
                                   <Button
                                     type="button"
                                     size="sm"

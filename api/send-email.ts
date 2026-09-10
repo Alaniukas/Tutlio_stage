@@ -42,6 +42,7 @@ import { sanitizeStudentNameForEmail } from './_lib/pendingChildName.js';
 import { hasOrgAdminPermission, type OrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { deliverAcceptanceOnce, validAcceptanceDeliveryKey } from './_lib/schoolAcceptanceDelivery.js';
 import { deliverSchoolMonthlyInvoiceOnce, schoolMonthlyInvoiceIdempotencyKey } from './_lib/schoolMonthlyInvoiceDelivery.js';
+import { pooledPackageEmailIdempotencyKey } from './_lib/sendPendingPackageEmail.js';
 
 
 function randomToken() {
@@ -3183,7 +3184,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const acceptanceDelivery = validAcceptanceDeliveryKey(type, rawData?.acceptanceJobId, requestedIdempotencyKey);
     const invoiceDelivery = type === 'school_monthly_invoice' && typeof rawData?.invoiceId === 'string'
       && requestedIdempotencyKey === schoolMonthlyInvoiceIdempotencyKey(rawData.invoiceId);
-    if (requestedIdempotencyKey !== undefined && (!isInternalRequest(req) || (!acceptanceDelivery && !invoiceDelivery))) {
+    const pooledPackageDelivery = type === 'prepaid_package_request'
+      && rawData?.pooledPackage === true
+      && typeof rawData?.packageId === 'string'
+      && requestedIdempotencyKey === pooledPackageEmailIdempotencyKey(rawData.packageId);
+    if (requestedIdempotencyKey !== undefined
+      && (!isInternalRequest(req) || (!acceptanceDelivery && !invoiceDelivery && !pooledPackageDelivery))) {
       return res.status(403).json({ error: 'Invalid internal delivery key' });
     }
     if (type === 'school_monthly_invoice' && !requestedIdempotencyKey) {
@@ -3638,7 +3644,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ success: true, ...delivery });
     }
 
-    const { data: result, error } = await resend.emails.send(emailPayload);
+    const { data: result, error } = pooledPackageDelivery
+      ? await resend.emails.send(emailPayload, { idempotencyKey: requestedIdempotencyKey })
+      : await resend.emails.send(emailPayload);
 
     if (error) {
       console.error('[send-email] Resend error:', error);

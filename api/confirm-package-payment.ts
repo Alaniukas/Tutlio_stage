@@ -141,7 +141,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sourceId: packageId,
         baseAmountEur: metadataBaseEur(checkout.metadata) ?? Number(finalPackage.total_price),
         grossAmountEur: checkout.amount_total != null ? checkout.amount_total / 100 : null,
-        organizationId: (tutorRow as { organization_id?: string | null } | null)?.organization_id ?? null,
+        organizationId: finalPackage.pool_organization_id
+          ?? (tutorRow as { organization_id?: string | null } | null)?.organization_id
+          ?? null,
         tutorId: finalPackage.tutor_id ?? null,
         stripeCheckoutSessionId: checkout.id,
       });

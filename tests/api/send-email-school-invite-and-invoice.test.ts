@@ -2,6 +2,16 @@
 // account: the post-acceptance invitation and the month-end invoice.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../api/_lib/schoolMonthlyInvoiceDelivery.js', () => ({
+  schoolMonthlyInvoiceIdempotencyKey: (invoiceId: string) => `school-monthly-invoice/${invoiceId}`,
+  deliverSchoolMonthlyInvoiceOnce: async (params: any) => {
+    const outcome = await params.send(params.payload, `school-monthly-invoice/${params.invoiceId}`);
+    return outcome.error ? { sent: false, reason: outcome.error } : { sent: true, id: outcome.id };
+  },
+}));
+
+import { schoolMonthlyInvoiceIdempotencyKey } from '../../api/_lib/schoolMonthlyInvoiceDelivery.js';
+
 const { sendMock, pushMock } = vi.hoisted(() => ({
   sendMock: vi.fn(),
   pushMock: vi.fn().mockResolvedValue(undefined),
@@ -31,9 +41,18 @@ function mockRes() {
 async function sendEmail(type: string, data: Record<string, unknown>) {
   const { default: handler } = await import('../../api/send-email');
   const res = mockRes();
+  const invoiceId = 'invoice-email-test';
   await handler({
     method: 'POST',
-    body: { type, to: 'parent@example.com', data, locale: 'lt' },
+    body: {
+      type,
+      to: 'parent@example.com',
+      data: type === 'school_monthly_invoice' ? { ...data, invoiceId } : data,
+      locale: 'lt',
+      ...(type === 'school_monthly_invoice'
+        ? { idempotencyKey: schoolMonthlyInvoiceIdempotencyKey(invoiceId) }
+        : {}),
+    },
     headers: { 'content-type': 'application/json', 'x-internal-key': 'service-key-test' },
     query: {},
   } as any, res as any);
@@ -50,6 +69,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.RESEND_API_KEY = 'test-resend-key';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-key-test';
+  process.env.VITE_SUPABASE_URL = 'https://example.supabase.co';
   sendMock.mockResolvedValue({ data: { id: 'email-1' }, error: null });
 });
 

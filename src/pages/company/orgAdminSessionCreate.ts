@@ -12,6 +12,7 @@ import {
 } from '@/lib/mvFirstLessonPlanned';
 import { authHeaders } from '@/lib/apiHelpers';
 import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
+import { packageCoversLessonDate } from '@/lib/pooledPackageBookingWindow';
 import { defaultSessionPaymentStatusForStudent } from '@/lib/studentPaymentModel';
 import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
 import {
@@ -701,6 +702,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       available_lessons: number;
       reserved_lessons: number;
       item_id: string;
+      pool_organization_id?: string | null;
+      billing_period_start?: string | null;
+      billing_period_end?: string | null;
       item_available_lessons: number;
       item_reserved_lessons: number;
     };
@@ -712,6 +716,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
         if (match) {
           packagesByStudent.set(sid, {
             id: match.pkg.id,
+            pool_organization_id: match.pkg.pool_organization_id,
+            billing_period_start: match.pkg.billing_period_start,
+            billing_period_end: match.pkg.billing_period_end,
             available_lessons: match.pkg.available_lessons,
             reserved_lessons: match.pkg.reserved_lessons,
             item_id: match.item.id,
@@ -742,7 +749,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           if (pkg) {
             const used = packagesUsage.get(pkg.id) || 0;
             const remaining = Math.min(pkg.available_lessons, pkg.item_available_lessons) - used;
-            if (remaining > 0) {
+            if (remaining > 0 && packageCoversLessonDate(pkg, current)) {
               lessonPackageId = pkg.id;
               sessionPaid = true;
               sessionPaymentStatus = 'confirmed';
@@ -829,7 +836,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
 
     for (const [pkgId, usedCount] of packagesUsage.entries()) {
       const pkg = Array.from(packagesByStudent.values()).find((x) => x.id === pkgId);
-      if (!pkg || usedCount <= 0) continue;
+      if (!pkg || pkg.pool_organization_id || usedCount <= 0) continue;
       const { error: itemErr } = await supabase
         .from('lesson_package_items')
         .update({
@@ -878,6 +885,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     available_lessons: number;
     reserved_lessons: number;
     item_id: string;
+    pool_organization_id?: string | null;
+    billing_period_start?: string | null;
+    billing_period_end?: string | null;
     item_available_lessons: number;
     item_reserved_lessons: number;
   }> = [];
@@ -892,14 +902,21 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     let lessonPackageId: string | null = null;
 
     if (!createIsMakeup && !createIsPaid && createSubjectId) {
-      const match = await findActivePackageForBooking(supabase, { studentId, subjectId: createSubjectId });
+      const match = await findActivePackageForBooking(supabase, {
+        studentId,
+        subjectId: createSubjectId,
+        startIso: startDate.toISOString(),
+      });
       if (match) {
         const { pkg, item } = match;
         lessonPackageId = pkg.id;
         sessionPaid = true;
         sessionPaymentStatus = 'confirmed';
-        packagesToUpdate.push({
+        if (!pkg.pool_organization_id) packagesToUpdate.push({
           id: pkg.id,
+          pool_organization_id: pkg.pool_organization_id,
+          billing_period_start: pkg.billing_period_start,
+          billing_period_end: pkg.billing_period_end,
           available_lessons: pkg.available_lessons - 1,
           reserved_lessons: pkg.reserved_lessons + 1,
           item_id: item.id,

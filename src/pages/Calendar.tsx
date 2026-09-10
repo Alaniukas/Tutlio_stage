@@ -52,6 +52,7 @@ import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
 import { authHeaders } from '@/lib/apiHelpers';
 import { autoCloseBillingBatchIfAllPaid } from '@/lib/autoCloseBillingBatch';
 import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
+import { packageCoversLessonDate } from '@/lib/pooledPackageBookingWindow';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -1838,6 +1839,9 @@ export default function CalendarPage() {
         available_lessons: number;
         reserved_lessons: number;
         item_id: string;
+        pool_organization_id?: string | null;
+        billing_period_start?: string | null;
+        billing_period_end?: string | null;
         item_available_lessons: number;
         item_reserved_lessons: number;
       }>();
@@ -1848,6 +1852,9 @@ export default function CalendarPage() {
           if (match) {
             packagesByStudent.set(sid, {
               id: match.pkg.id,
+              pool_organization_id: match.pkg.pool_organization_id,
+              billing_period_start: match.pkg.billing_period_start,
+              billing_period_end: match.pkg.billing_period_end,
               available_lessons: match.pkg.available_lessons,
               reserved_lessons: match.pkg.reserved_lessons,
               item_id: match.item.id,
@@ -1882,7 +1889,7 @@ export default function CalendarPage() {
               const used = packagesUsage.get(pkg.id) || 0;
               const remaining = Math.min(pkg.available_lessons, pkg.item_available_lessons) - used;
 
-              if (remaining > 0) {
+              if (remaining > 0 && packageCoversLessonDate(pkg, current)) {
                 lessonPackageId = pkg.id;
                 sessionPaid = true;
                 sessionPaymentStatus = 'confirmed';
@@ -1975,7 +1982,7 @@ export default function CalendarPage() {
         if (packagesUsage.size > 0) {
           for (const [pkgId, usedCount] of packagesUsage.entries()) {
             const pkg = Array.from(packagesByStudent.values()).find(p => p.id === pkgId);
-            if (pkg && usedCount > 0) {
+            if (pkg && !pkg.pool_organization_id && usedCount > 0) {
               const { error: itemErr } = await supabase
                 .from('lesson_package_items')
                 .update({
@@ -2238,6 +2245,9 @@ export default function CalendarPage() {
         available_lessons: number;
         reserved_lessons: number;
         item_id: string;
+        pool_organization_id?: string | null;
+        billing_period_start?: string | null;
+        billing_period_end?: string | null;
         item_available_lessons: number;
         item_reserved_lessons: number;
         studentId: string;
@@ -2253,15 +2263,22 @@ export default function CalendarPage() {
         let lessonPackageId = null;
 
         if (!createIsTrial && !isPaid && sessionSubjectId) {
-          const match = await findActivePackageForBooking(supabase, { studentId, subjectId: sessionSubjectId });
+          const match = await findActivePackageForBooking(supabase, {
+            studentId,
+            subjectId: sessionSubjectId,
+            startIso: startDate.toISOString(),
+          });
           if (match) {
             const { pkg, item } = match;
             lessonPackageId = pkg.id;
             sessionPaid = true;
             sessionPaymentStatus = 'confirmed';
 
-            packagesToUpdate.push({
+            if (!pkg.pool_organization_id) packagesToUpdate.push({
               id: pkg.id,
+              pool_organization_id: pkg.pool_organization_id,
+              billing_period_start: pkg.billing_period_start,
+              billing_period_end: pkg.billing_period_end,
               available_lessons: pkg.available_lessons - 1,
               reserved_lessons: pkg.reserved_lessons + 1,
               item_id: item.id,
@@ -2716,36 +2733,42 @@ export default function CalendarPage() {
         let lessonPackageId = null;
 
         if (assignSubjectId) {
-          const match = await findActivePackageForBooking(supabase, { studentId, subjectId: assignSubjectId });
+          const match = await findActivePackageForBooking(supabase, {
+            studentId,
+            subjectId: assignSubjectId,
+            startIso: startDateTime,
+          });
           if (match) {
             const { pkg, item } = match;
             lessonPackageId = pkg.id;
             sessionPaid = true;
             sessionPaymentStatus = 'confirmed';
 
-            // Decrement item first, then parent aggregate
-            const { error: itemErr } = await supabase
-              .from('lesson_package_items')
-              .update({
-                available_lessons: item.available_lessons - 1,
-                reserved_lessons: item.reserved_lessons + 1,
-              })
-              .eq('id', item.id);
-            if (itemErr) {
-              console.error('Error updating lesson package item:', itemErr);
-            } else {
-              const { error: pkgError } = await supabase
-                .from('lesson_packages')
+            if (!pkg.pool_organization_id) {
+              // Legacy packages still use their existing explicit counters.
+              const { error: itemErr } = await supabase
+                .from('lesson_package_items')
                 .update({
-                  available_lessons: pkg.available_lessons - 1,
-                  reserved_lessons: pkg.reserved_lessons + 1,
+                  available_lessons: item.available_lessons - 1,
+                  reserved_lessons: item.reserved_lessons + 1,
                 })
-                .eq('id', pkg.id);
-
-              if (pkgError) {
-                console.error('Error updating lesson package:', pkgError);
+                .eq('id', item.id);
+              if (itemErr) {
+                console.error('Error updating lesson package item:', itemErr);
               } else {
-                console.log(`[Calendar] Auto-deducted 1 lesson from package ${pkg.id} item ${item.id} for student ${studentId}`);
+                const { error: pkgError } = await supabase
+                  .from('lesson_packages')
+                  .update({
+                    available_lessons: pkg.available_lessons - 1,
+                    reserved_lessons: pkg.reserved_lessons + 1,
+                  })
+                  .eq('id', pkg.id);
+
+                if (pkgError) {
+                  console.error('Error updating lesson package:', pkgError);
+                } else {
+                  console.log(`[Calendar] Auto-deducted 1 lesson from package ${pkg.id} item ${item.id} for student ${studentId}`);
+                }
               }
             }
           }

@@ -40,6 +40,7 @@ import {
     type ParentChildOption,
 } from '@/lib/parentActiveChild';
 import { fetchStudentActiveLessonPackagesDeduped } from '@/lib/studentLessonPackagesLight';
+import { packageCoversLessonDate } from '@/lib/pooledPackageBookingWindow';
 import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 import { tutorUsesManualStudentPayments, trimManualPaymentBankDetails } from '@/lib/subscription';
@@ -89,6 +90,9 @@ interface LessonPackageItemSummary {
 
 interface LessonPackageSummary {
     id: string;
+    pool_organization_id?: string | null;
+    billing_period_start?: string | null;
+    billing_period_end?: string | null;
     /** Denormalized "primary" subject from lesson_packages.subject_id (legacy single-subject reads). */
     subject_id: string;
     available_lessons: number;
@@ -945,6 +949,9 @@ export default function StudentSchedule() {
             pkgDeduped.map(
                 (p): LessonPackageSummary => ({
                     id: p.id,
+                    pool_organization_id: p.pool_organization_id,
+                    billing_period_start: p.billing_period_start,
+                    billing_period_end: p.billing_period_end,
                     subject_id: p.subject_id || '',
                     available_lessons: Number(p.available_lessons || 0),
                     reserved_lessons: Number(p.reserved_lessons || 0),
@@ -1317,6 +1324,9 @@ export default function StudentSchedule() {
         // Falls back to the legacy subject_id field when a package has no items rows yet.
         const activePackage = activePackages.find((pkg) => {
             if (pkg.available_lessons <= 0) return false;
+            if (pkg.pool_organization_id) {
+                return selectedSubject?.is_trial !== true && packageCoversLessonDate(pkg, selectedTime);
+            }
             if (pkg.items.length > 0) {
                 return pkg.items.some(
                     (it) => it.subject_id === selectedSubjectId && it.available_lessons > 0,
@@ -1451,7 +1461,7 @@ export default function StudentSchedule() {
                 .eq('id', tutorId)
                 .single();
 
-            if (usesPackage && activePackage) {
+            if (usesPackage && activePackage && !activePackage.pool_organization_id) {
                 try {
                     const reserveRes = await fetch('/api/reserve-package-lesson', {
                         method: 'POST',
