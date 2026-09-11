@@ -13,6 +13,11 @@ import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.j
 import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import {
+    directChargeOptions,
+    expireConnectCheckoutSession,
+    retrieveConnectCheckoutSessionWithScope,
+} from './_lib/stripeDirectCharge.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -127,9 +132,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 3. Try to reuse existing Stripe session if still open
         if (pkg.stripe_checkout_session_id) {
             try {
-                const existing = await stripe.checkout.sessions.retrieve(pkg.stripe_checkout_session_id);
-                if (existing.status === 'open' && existing.url) {
+                const existingLookup = await retrieveConnectCheckoutSessionWithScope(
+                    stripe,
+                    pkg.stripe_checkout_session_id,
+                    stripeAccountId,
+                );
+                const existing = existingLookup.session;
+                if (existingLookup.stripeAccount === stripeAccountId && existing.status === 'open' && existing.url) {
                     return res.redirect(303, existing.url);
+                }
+                if (existing.status === 'open') {
+                    await expireConnectCheckoutSession(
+                        stripe,
+                        pkg.stripe_checkout_session_id,
+                        existingLookup.stripeAccount,
+                    ).catch(() => {});
                 }
             } catch {
                 // expired or invalid — create new below
@@ -168,35 +185,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
+                customer_creation: 'always',
                 payment_method_types: ['card'],
-                line_items: itemLineItems,
+                line_items: [
+                    ...itemLineItems,
+                    {
+                        price_data: {
+                            currency,
+                            product_data: {
+                                name: 'Platformos administravimo mokestis',
+                                description: 'Paslaugos teikėjas: MB „Tutlio“',
+                            },
+                            unit_amount: applicationFeeCents,
+                        },
+                        quantity: 1,
+                    },
+                ],
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
-                    transfer_data: { destination: stripeAccountId! },
                     metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
                 },
                 metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
-                success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}`,
+                success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId!)}`,
                 cancel_url: `${appOrigin}/package-cancelled`,
-            }, { idempotencyKey: `package-checkout:${packageId}:${pkg.stripe_checkout_session_id || 'initial'}` });
+            }, directChargeOptions(
+                stripeAccountId!,
+                `package-checkout:${packageId}:${pkg.stripe_checkout_session_id || 'initial'}`,
+            ));
         } else {
             const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
+                customer_creation: 'always',
                 payment_method_types: ['card'],
                 line_items: [
                     ...itemLineItems,
                     { price_data: { currency, product_data: { name: 'Platformos administravimo mokestis', description: 'Paslaugos teikėjas: MB „Tutlio“' }, unit_amount: feesCents }, quantity: 1 },
                 ],
                 payment_intent_data: {
-                    transfer_data: { destination: stripeAccountId!, amount: baseCents },
+                    application_fee_amount: feesCents,
                     metadata: metadataBase,
                 },
                 metadata: { ...metadataBase, ...checkoutBaseMetadata(basePriceEur, market) },
-                success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}`,
+                success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId!)}`,
                 cancel_url: `${appOrigin}/package-cancelled`,
-            }, { idempotencyKey: `package-checkout:${packageId}:${pkg.stripe_checkout_session_id || 'initial'}` });
+            }, directChargeOptions(
+                stripeAccountId!,
+                `package-checkout:${packageId}:${pkg.stripe_checkout_session_id || 'initial'}`,
+            ));
         }
 
         // 6. Update package with new checkout session ID

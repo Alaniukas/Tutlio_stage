@@ -174,7 +174,7 @@ Maršrutas `/school/recordings` ir lentelės **paliktos**, bet produktas paslėp
 
 - [ ] Šoninėje **nėra** **Įrašai**.
 - [ ] Extra-lessons accept: **nėra** įrašų checkbox (Demo `school_lesson_recordings: false`).
-- Vėliau įjungti: Demo flag `true` + `SCHOOL_LESSON_RECORDINGS_NAV_READY = true` `CompanyLayout`.
+- Vėliau įjungti Demo QA: Demo flag `true`, pritaikyti `school_recording_drive_folders` migraciją ir sukonfigūruoti serverio Drive service-account env.
 
 
 
@@ -397,7 +397,7 @@ Sąrašas eina per `parent_profiles.user_id` → `parent_students` **ir** `stude
 | --------------------------------- | ---------------------------------------------------------------------------------------- |
 | Demo login neveikia               | `.env.local` ne tas Supabase projektas                                                   |
 | Nėra Grupės                       | `school_class_groups`; perseedinti legal/extra QA                                        |
-| Yra **Įrašai** meniu              | parked — turi nebūti; `SCHOOL_LESSON_RECORDINGS_NAV_READY` + Demo flag `false`           |
+| Yra **Įrašai** meniu              | Demo flag `school_lesson_recordings` yra `false`, todėl Demo aplinkoje meniu turi nebūti |
 | Accept 500 dėl stulpelio          | 14 d. migracija                                                                          |
 | Token already used                | naujas offer iš UI                                                                       |
 | Laiškas su `localhost` kitame PC  | atidaryk savo `localhost:3000` su tuo pačiu token **arba** pakeisk `APP_URL` ir persiųsk |

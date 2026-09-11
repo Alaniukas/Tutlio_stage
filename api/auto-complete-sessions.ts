@@ -16,23 +16,23 @@ import {
   partitionByStatusConfirmation,
   movePackageCountersToCompleted,
 } from './_lib/sessionStatusConfirmation.js';
-import { orgHasJoinNoShow, shouldMarkStudentNoShowFromMissedJoin } from '../src/lib/schoolJoinNoShow.js';
+import { orgHasJoinNoShow, shouldReviewStudentAttendanceFromMissingJoin } from '../src/lib/schoolJoinNoShow.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-async function partitionJoinNoShow<T extends { id: string; tutor_id?: string | null; start_time?: string; end_time?: string | null; status?: string | null; meeting_link?: string | null; student_joined_at?: string | null; tutor_joined_at?: string | null }>(
+async function partitionAttendanceReview<T extends { id: string; tutor_id?: string | null; start_time?: string; end_time?: string | null; status?: string | null; meeting_link?: string | null; student_joined_at?: string | null; tutor_joined_at?: string | null }>(
   sb: typeof supabase,
   sessions: T[],
-): Promise<{ autoCompletable: T[]; skippedJoinNoShow: T[] }> {
+): Promise<{ autoCompletable: T[]; awaitingAttendanceReview: T[] }> {
   const tutorIds = [...new Set(sessions.map((s) => s.tutor_id).filter(Boolean))] as string[];
-  if (!tutorIds.length) return { autoCompletable: sessions, skippedJoinNoShow: [] };
+  if (!tutorIds.length) return { autoCompletable: sessions, awaitingAttendanceReview: [] };
   const { data: tutors } = await sb.from('profiles').select('id, organization_id').in('id', tutorIds);
   const orgByTutor = new Map((tutors || []).map((t) => [t.id, t.organization_id]));
   const orgIds = [...new Set([...orgByTutor.values()].filter(Boolean))] as string[];
-  if (!orgIds.length) return { autoCompletable: sessions, skippedJoinNoShow: [] };
+  if (!orgIds.length) return { autoCompletable: sessions, awaitingAttendanceReview: [] };
   const { data: orgs } = await sb.from('organizations').select('id, features').in('id', orgIds);
   const flagged = new Set(
     (orgs || [])
@@ -40,17 +40,17 @@ async function partitionJoinNoShow<T extends { id: string; tutor_id?: string | n
       .map((o) => o.id),
   );
   const autoCompletable: T[] = [];
-  const skippedJoinNoShow: T[] = [];
+  const awaitingAttendanceReview: T[] = [];
   const now = new Date();
   for (const s of sessions) {
     const orgId = s.tutor_id ? orgByTutor.get(s.tutor_id) : null;
-    if (orgId && flagged.has(orgId) && shouldMarkStudentNoShowFromMissedJoin(s as any, now)) {
-      skippedJoinNoShow.push(s);
+    if (orgId && flagged.has(orgId) && shouldReviewStudentAttendanceFromMissingJoin(s as any, now)) {
+      awaitingAttendanceReview.push(s);
     } else {
       autoCompletable.push(s);
     }
   }
-  return { autoCompletable, skippedJoinNoShow };
+  return { autoCompletable, awaitingAttendanceReview };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -89,20 +89,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Orgs with tutor_lesson_status_confirmation: their lessons stay 'active'
     // until the tutor explicitly confirms the outcome (/api/confirm-session-status).
-    const { autoCompletable: afterJoinNoShow, skippedJoinNoShow } = await partitionJoinNoShow(
+    const { autoCompletable: afterAttendanceReview, awaitingAttendanceReview } = await partitionAttendanceReview(
       supabase,
       sessions as any[],
     );
     const { autoCompletable, awaitingConfirmation } = await partitionByStatusConfirmation(
       supabase,
-      afterJoinNoShow as any[],
+      afterAttendanceReview as any[],
     );
     if (autoCompletable.length === 0) {
       return res.status(200).json({
         success: true,
         updated: 0,
         awaitingTutorConfirmation: awaitingConfirmation.length,
-        skippedJoinNoShow: skippedJoinNoShow.length,
+        awaitingAttendanceReview: awaitingAttendanceReview.length,
       });
     }
     const completableSessions = autoCompletable as any[];
@@ -174,7 +174,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       success: true,
       updated: idsToComplete.length,
       awaitingTutorConfirmation: awaitingConfirmation.length,
-      skippedJoinNoShow: skippedJoinNoShow.length,
+      awaitingAttendanceReview: awaitingAttendanceReview.length,
       packagesUpdated,
       waitlistEntriesRemoved: (waitlistDeleted || 0) + (oldWaitlistDeleted || 0)
     });

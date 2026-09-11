@@ -147,13 +147,14 @@ export function orgBaseFromPayerChargedTotal(
 
 export function customerTotal(
   baseAmount: number,
-  market: TutlioMarket = 'default',
+  _market: TutlioMarket = 'default',
   feeProfile?: OrgFeeProfile | null,
 ): number {
   if (feeProfile) return baseAmount + orgProfileFee(baseAmount, feeProfile);
-  const platformFee = baseAmount * MARKET_FEES.platformPercent;
-  const fixed = stripeFixedFee(market);
-  return (baseAmount + platformFee + fixed) / (1 - MARKET_FEES.stripePercent);
+  // Direct charges make the connected account responsible for Stripe's
+  // processing fees. The payer therefore covers only Tutlio's platform fee on
+  // top of the provider's base price.
+  return baseAmount + baseAmount * MARKET_FEES.platformPercent;
 }
 
 export function lessonCheckoutBreakdownCents(
@@ -169,14 +170,17 @@ export function lessonCheckoutBreakdownCents(
 
 export function schoolInstallmentCheckoutCents(
   amount: number,
-  market: TutlioMarket = 'default',
+  _market: TutlioMarket = 'default',
 ): { chargeCents: number; transferToSchoolCents: number } {
+  // With a direct charge Stripe debits its processing fee from the connected
+  // school. Tutlio's fee is added on top, then collected as an application fee.
   const tutlioFee = amount * MARKET_FEES.schoolTutlioPercent;
-  const stripeEstimate = amount * MARKET_FEES.stripePercent + stripeFixedFee(market);
-  const schoolNet = amount - tutlioFee - stripeEstimate;
+  const baseCents = Math.round(amount * 100);
   return {
-    chargeCents: Math.round(amount * 100),
-    transferToSchoolCents: Math.max(0, Math.round(schoolNet * 100)),
+    chargeCents: baseCents + Math.round(tutlioFee * 100),
+    // Kept for call-site compatibility: under direct charges this is the
+    // school's amount before Stripe deducts its own processing fee.
+    transferToSchoolCents: baseCents,
   };
 }
 

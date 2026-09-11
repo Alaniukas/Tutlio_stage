@@ -370,6 +370,7 @@ export default function StudentSessions() {
 
         const checkoutSessionId = params.get('session_id');
         const billingBatchId = params.get('billing_batch_id');
+        const stripeAccountId = params.get('stripe_account');
 
         setInvoicePaidSuccessOpen(true);
         setInvoicePaidSuccessLoading(true);
@@ -412,7 +413,7 @@ export default function StudentSessions() {
                 const response = await fetch('/api/confirm-monthly-invoice-payment', {
                     method: 'POST',
                     headers: await authHeaders(),
-                    body: JSON.stringify({ checkoutSessionId, billingBatchId }),
+                    body: JSON.stringify({ checkoutSessionId, billingBatchId, stripeAccountId }),
                 });
                 return response;
             })()

@@ -9,6 +9,8 @@ import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClie
 import { isJoinRole, verifyJoinToken } from './_lib/joinLink.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { isWithinJoinClickWindow } from '../src/lib/attendance.js';
+import { shouldRestoreAutomaticNoShowOnJoin } from '../src/lib/schoolJoinNoShow.js';
+import { removeGeneratedNoShowTutorComment } from '../src/lib/noShowWhen.js';
 import { resolveSessionMeetingLinkFromDb } from './_lib/sessionMeetingLink.js';
 
 function getSupabase() {
@@ -43,7 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { data: session } = await supabase
       .from('sessions')
-      .select('id, tutor_id, start_time, end_time, status, meeting_link, tutor_joined_at, student_joined_at')
+      .select('id, tutor_id, start_time, end_time, status, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, no_show_reason, tutor_comment')
       .eq('id', sid)
       .maybeSingle();
 
@@ -66,9 +68,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .neq('status', 'cancelled')
             .is('tutor_joined_at', null);
         } else {
+          const restoreAutomaticNoShow = shouldRestoreAutomaticNoShowOnJoin(session);
           await supabase
             .from('sessions')
-            .update({ student_joined_at: now.toISOString() })
+            .update({
+              student_joined_at: now.toISOString(),
+              ...(restoreAutomaticNoShow
+                ? {
+                    status: 'active',
+                    no_show_reason: null,
+                    no_show_when: null,
+                    tutor_comment: removeGeneratedNoShowTutorComment(session.tutor_comment),
+                  }
+                : {}),
+            })
             .eq('id', session.id)
             .is('student_joined_at', null);
         }

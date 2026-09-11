@@ -1,5 +1,6 @@
 /**
- * Client pays: lesson price + platform % + estimated Stripe processing fee.
+ * Client pays the lesson price plus Tutlio's platform fee. Stripe processing
+ * fees are charged directly to the connected account.
  * On tutlio.pl amounts and Stripe charges are PLN; elsewhere EUR.
  */
 import type { TutlioMarket } from './market.js';

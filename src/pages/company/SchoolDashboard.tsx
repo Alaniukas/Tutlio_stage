@@ -19,9 +19,9 @@ import { useDismissibleDashboardItemIds } from '@/hooks/useDismissibleDashboardI
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { authHeaders } from '@/lib/apiHelpers';
 import { deriveAttendance, isAttendanceFlagged } from '@/lib/attendance';
+import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useTranslation } from '@/lib/i18n';
-import { buildNoShowSessionPatch, defaultNoShowWhenForNow } from '@/lib/noShowWhen';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import {
   isSchoolParentConfirmationPending,
@@ -292,21 +292,26 @@ export default function SchoolDashboard() {
     if (!noShowTarget) return;
     const sessionId = noShowTarget.id;
     setMarkingNoShow(true);
-    const when = defaultNoShowWhenForNow(
-      new Date(noShowTarget.start_time),
-      new Date(noShowTarget.end_time),
-    );
-    const patch = buildNoShowSessionPatch(when, noShowTarget.tutor_comment);
-    const { error } = await supabase.from('sessions').update(patch).eq('id', sessionId);
-    setMarkingNoShow(false);
-    if (error) return;
-    setNoShowTarget(null);
-    void loadData();
-    void fetch('/api/notify-session-no-show', {
-      method: 'POST',
-      headers: await authHeaders(),
-      body: JSON.stringify({ sessionId }),
-    }).catch(() => {});
+    try {
+      await confirmSessionOutcome({
+        sessionId,
+        currentStatus: noShowTarget.status,
+        status: 'no_show',
+        startTime: noShowTarget.start_time,
+        endTime: noShowTarget.end_time,
+      });
+      setNoShowTarget(null);
+      void loadData();
+      void fetch('/api/notify-session-no-show', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ sessionId }),
+      }).catch(() => {});
+    } catch (error) {
+      alert(t('cal.confirmStatusError', { msg: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setMarkingNoShow(false);
+    }
   };
 
   if (loading || accessLoading) {

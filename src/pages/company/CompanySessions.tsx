@@ -56,14 +56,18 @@ import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
 import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
 import { classGroupCancelTargets, classGroupOccurrenceSessionIds, sessionStatusCanCancel, usesClassGroupCancelFlow } from '@/lib/schoolClassGroupSessions';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { defaultStatsDateRange } from '@/lib/statsDateRange';
 import { schoolCalendarInstant, schoolDate } from '@/lib/schoolTime';
 import { fetchAllRows } from '@/lib/fetchAllRows';
+import { canDeleteIndividualOrgSession } from '@/lib/orgSessionDeletion';
 import {
   schoolActivitySummary,
   schoolMeetingOccurrences,
   schoolStudentAttendance,
 } from '@/lib/schoolSessionMonitoring';
+import { isUnconfirmedAutomaticNoShow } from '@/lib/schoolJoinNoShow';
+import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 
 interface Session {
   id: string;
@@ -153,9 +157,15 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
   };
 }
 
+function sessionStatusForDisplay(session: Session, isSchool: boolean): string {
+  return isSchool && isUnconfirmedAutomaticNoShow(session) ? 'active' : session.status;
+}
+
 export default function CompanySessions() {
   const { t, locale, dateFnsLocale } = useTranslation();
   const { fmt } = useMarketMoney();
+  const { can: canOrgAdmin } = useOrgAdminAccess();
+  const canEditSessions = canOrgAdmin('sessions.edit');
   const entityType = useOrgEntityType();
   const isSchoolOrgView = entityType === 'school';
   const format: typeof dateFnsFormat = (date, pattern, options) =>
@@ -221,7 +231,9 @@ export default function CompanySessions() {
   const [togglingPaid, setTogglingPaid] = useState(false);
   const [togglingComplimentary, setTogglingComplimentary] = useState(false);
   const [organizationId, setOrganizationId] = useState<string | null>(cachedOrgId);
+  const isProKlase = isProKlaseOrg(organizationId);
   const isLaisviVaikai = isLaisviVaikaiOrg(organizationId);
+  const supportsManualAttendance = isSchoolOrgView || isProKlase;
   const [deletingSession, setDeletingSession] = useState(false);
   const [deleteRecurringOpen, setDeleteRecurringOpen] = useState(false);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -429,14 +441,24 @@ export default function CompanySessions() {
     if (!selectedSession) return;
     const sessionId = selectedSession.id;
     setMarkingNoShow(true);
-    const when = defaultNoShowWhenForNow(new Date(selectedSession.start_time), new Date(selectedSession.end_time));
-    const patch = buildNoShowSessionPatch(when, selectedSession.tutor_comment);
-    const { error } = await supabase.from('sessions').update(patch).eq('id', sessionId);
-    setMarkingNoShow(false);
-    if (!error) {
+    try {
+      if (supportsManualAttendance) {
+        await confirmSessionOutcome({
+          sessionId,
+          currentStatus: selectedSession.status,
+          status: 'no_show',
+          startTime: selectedSession.start_time,
+          endTime: selectedSession.end_time,
+        });
+      } else {
+        const when = defaultNoShowWhenForNow(new Date(selectedSession.start_time), new Date(selectedSession.end_time));
+        const patch = buildNoShowSessionPatch(when, selectedSession.tutor_comment);
+        const { error } = await supabase.from('sessions').update(patch).eq('id', sessionId);
+        if (error) throw error;
+      }
       setNoShowDialogOpen(false);
       setSelectedSession(null);
-      loadData();
+      void loadData();
       void (async () => {
         await fetch('/api/notify-session-no-show', {
           method: 'POST',
@@ -444,11 +466,47 @@ export default function CompanySessions() {
           body: JSON.stringify({ sessionId }),
         });
       })().catch(() => {});
+    } catch (error) {
+      alert(t('cal.confirmStatusError', { msg: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setMarkingNoShow(false);
+    }
+  };
+
+  const handleMarkStudentAttended = async () => {
+    if (!selectedSession || !supportsManualAttendance) return;
+    setMarkingNoShow(true);
+    try {
+      await confirmSessionOutcome({
+        sessionId: selectedSession.id,
+        currentStatus: selectedSession.status,
+        status: 'completed',
+        startTime: selectedSession.start_time,
+        endTime: selectedSession.end_time,
+      });
+      setSelectedSession(null);
+      void loadData();
+    } catch (error) {
+      alert(t('cal.confirmStatusError', { msg: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setMarkingNoShow(false);
     }
   };
 
   const selectedSessionAttendanceFlagged =
     !!selectedSession && isAttendanceFlagged(selectedSession);
+  const selectedSessionEnded = Boolean(
+    selectedSession && Date.parse(selectedSession.end_time) <= Date.now(),
+  );
+  const canDeleteSelectedSession = canDeleteIndividualOrgSession(
+    selectedSession
+      ? {
+          classGroupId: selectedSession.class_group_id,
+          isGroupLesson: selectedSession.subject_is_group,
+        }
+      : null,
+    canEditSessions,
+  );
 
   const isClassGroupCancel = usesClassGroupCancelFlow({ classGroupId: selectedSession?.class_group_id });
 
@@ -984,7 +1042,7 @@ export default function CompanySessions() {
         {!isSchoolOrgView && filtered.length > 0 && (() => {
           const stats = isLaisviVaikai
             ? calculateOrgSessionListStats(filtered as any)
-            : calculateSessionStats(filtered as any, null, null);
+            : calculateSessionStats(filtered as any, null, null, { requireExplicitNoShow: isProKlase });
           return (
             <SessionStatCards
               totalUpcoming={isLaisviVaikai ? (stats as { totalUpcoming?: number }).totalUpcoming : undefined}
@@ -1031,16 +1089,17 @@ export default function CompanySessions() {
                         {format(new Date(session.start_time), 'd MMM yyyy', { locale: dateFnsLocale })}{' '}
                         · {format(new Date(session.start_time), 'HH:mm')}–{format(new Date(session.end_time), 'HH:mm')}
                       </p>
-                      <AttendanceBadge session={session} className="mt-1.5" />
+                      <AttendanceBadge session={session} className="mt-1.5" manualConfirmationRequired={supportsManualAttendance} />
                     </div>
                     <div className="flex flex-col items-end gap-2 flex-shrink-0">
                       <div className="scale-90 origin-top-right">
                         <StatusBadge
-                          status={session.status}
+                          status={sessionStatusForDisplay(session, isSchoolOrgView)}
                           paymentStatus={session.payment_status ?? undefined}
                           paid={session.paid}
                           isComplimentary={session.is_complimentary === true}
                           endTime={session.end_time}
+                          pendingConfirmation={supportsManualAttendance}
                         />
                       </div>
                       <span
@@ -1103,13 +1162,14 @@ export default function CompanySessions() {
                     <td className="px-4 py-3">
                       <div className="flex flex-col items-start gap-1">
                         <StatusBadge
-                          status={session.status}
+                          status={sessionStatusForDisplay(session, isSchoolOrgView)}
                           paymentStatus={session.payment_status ?? undefined}
                           paid={session.paid}
                           isComplimentary={session.is_complimentary === true}
                           endTime={session.end_time}
+                          pendingConfirmation={supportsManualAttendance}
                         />
-                        <AttendanceBadge session={session} />
+                        <AttendanceBadge session={session} manualConfirmationRequired={supportsManualAttendance} />
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -1339,13 +1399,14 @@ export default function CompanySessions() {
                       <Label className="text-xs text-gray-500">{t('compSess.labelStatus')}</Label>
                       <div className="mt-1 flex flex-col items-start gap-1">
                         <StatusBadge
-                          status={selectedSession.status}
+                          status={sessionStatusForDisplay(selectedSession, isSchoolOrgView)}
                           paymentStatus={selectedSession.payment_status ?? undefined}
                           paid={selectedSession.paid}
                           isComplimentary={selectedSession.is_complimentary === true}
                           endTime={selectedSession.end_time}
+                          pendingConfirmation={supportsManualAttendance}
                         />
-                        <AttendanceBadge session={selectedSession} />
+                        <AttendanceBadge session={selectedSession} manualConfirmationRequired={supportsManualAttendance} />
                       </div>
                     </div>
                     <div>
@@ -1479,7 +1540,12 @@ export default function CompanySessions() {
                     </div>
                   )}
 
-                  {!cancelMode && (selectedSession.status === 'active' || selectedSession.status === 'completed') && (
+                  {!cancelMode && (
+                    selectedSession.status === 'active'
+                    || selectedSession.status === 'completed'
+                    || (supportsManualAttendance && selectedSession.status === 'no_show')
+                    || canDeleteSelectedSession
+                  ) && (
                     <div className="space-y-2 pt-1">
                       {selectedSession.status === 'active' && !isSchoolOrgView && !isSchoolBilledSession(selectedSession) && (
                         <Button
@@ -1492,7 +1558,7 @@ export default function CompanySessions() {
                           {selectedSession.paid ? t('compSess.markUnpaid') : t('compSess.markPaid')}
                         </Button>
                       )}
-                      {isProKlaseOrg(organizationId) && (selectedSession.status === 'active' || selectedSession.status === 'completed') && (
+                      {isProKlase && (selectedSession.status === 'active' || selectedSession.status === 'completed') && (
                         <Button
                           variant="outline"
                           className="w-full rounded-xl border-sky-200 text-sky-700 hover:bg-sky-50"
@@ -1545,8 +1611,25 @@ export default function CompanySessions() {
                           </Button>
                       )}
 
-                      {selectedSessionAttendanceFlagged &&
-                        (selectedSession.status === 'active' || selectedSession.status === 'completed') && (
+                      {supportsManualAttendance && selectedSessionEnded && (
+                        selectedSession.status !== 'completed' || !selectedSession.status_confirmed_at
+                      ) && (
+                        <Button
+                          variant="outline"
+                          className="w-full border-emerald-200 text-emerald-800 hover:bg-emerald-50 rounded-xl"
+                          disabled={markingNoShow}
+                          onClick={() => void handleMarkStudentAttended()}
+                        >
+                          <CheckCircle className="w-4 h-4 mr-2" />
+                          {t('compSess.markAttended')}
+                        </Button>
+                      )}
+
+                      {(
+                        (supportsManualAttendance && selectedSessionEnded && selectedSession.status !== 'no_show')
+                        || (!supportsManualAttendance && selectedSessionAttendanceFlagged
+                          && (selectedSession.status === 'active' || selectedSession.status === 'completed'))
+                      ) && (
                         <Button
                           variant="outline"
                           className="w-full border-rose-200 text-rose-800 hover:bg-rose-50 rounded-xl"
@@ -1561,15 +1644,17 @@ export default function CompanySessions() {
                         </Button>
                       )}
 
-                      <Button
-                        variant="outline"
-                        className="w-full rounded-xl border-red-200 text-red-700 hover:bg-red-50"
-                        disabled={deletingSession}
-                        onClick={() => void handleHardDeleteCompanySession()}
-                      >
-                        {deletingSession ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
-                        {t('cal.deleteSession')}
-                      </Button>
+                      {canDeleteSelectedSession && (
+                        <Button
+                          variant="outline"
+                          className="w-full rounded-xl border-red-200 text-red-700 hover:bg-red-50"
+                          disabled={deletingSession}
+                          onClick={() => void handleHardDeleteCompanySession()}
+                        >
+                          {deletingSession ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                          {t('cal.deleteSession')}
+                        </Button>
+                      )}
                     </div>
                   )}
                 </>
@@ -1654,7 +1739,7 @@ function SchoolSessionMonitoring({ sessions }: { sessions: Session[] }) {
       reasons.set(reason, (reasons.get(reason) || 0) + 1);
     }
     for (const session of occurrence.rows) {
-      if (session.status !== 'no_show') continue;
+      if (session.status !== 'no_show' || isUnconfirmedAutomaticNoShow(session)) continue;
       const reason = session.no_show_reason === 'missed_join'
         ? t('schoolDash.missedJoinReason')
         : session.no_show_reason || t('schoolDash.markedNoShowReason');

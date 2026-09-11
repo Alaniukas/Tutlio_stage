@@ -4,9 +4,33 @@ import {
   buildTutorRegisterInviteUrl,
   defaultLocaleForOrigin,
   inviteEmailLocale,
+  publicOriginFromRequest,
 } from '../../api/_lib/public-origin.js';
 
 describe('invite public URLs', () => {
+  it.each([
+    'tutlio.lt',
+    'www.tutlio.lt',
+    'tutlio.pl',
+    'www.tutlio.pl',
+    'tutlio.com',
+    'www.tutlio.com',
+  ])('preserves the incoming production domain for Checkout redirects: %s', (host) => {
+    expect(publicOriginFromRequest({
+      headers: { host, 'x-forwarded-proto': 'https' },
+    } as any)).toBe(`https://${host}`);
+  });
+
+  it('prefers the Vercel forwarded host when building Checkout redirects', () => {
+    expect(publicOriginFromRequest({
+      headers: {
+        host: 'internal.vercel.app',
+        'x-forwarded-host': 'www.tutlio.pl',
+        'x-forwarded-proto': 'https',
+      },
+    } as any)).toBe('https://www.tutlio.pl');
+  });
+
   it('defaults tutlio.com to EN without path prefix', () => {
     expect(defaultLocaleForOrigin('https://www.tutlio.com')).toBe('en');
     const url = buildPublicAppUrl('https://www.tutlio.com', '/parent-register', {

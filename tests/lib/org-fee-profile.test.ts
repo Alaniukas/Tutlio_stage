@@ -47,10 +47,9 @@ describe('Proklasė tiered fee — customerTotal', () => {
     expect(customerTotal(100, 'default', p)).toBeCloseTo(102.10, 5); // 100 + (2.00 + 0.10)
   });
 
-  it('leaves the standard market model untouched when no profile is given', () => {
-    // (base + 2% + €0.25) / (1 - 1.5%)
-    expect(customerTotal(20, 'default')).toBeCloseTo((20 + 0.4 + 0.25) / 0.985, 6);
-    expect(customerTotal(20, 'default', null)).toBeCloseTo((20 + 0.4 + 0.25) / 0.985, 6);
+  it('adds only the platform fee when no custom profile is given', () => {
+    expect(customerTotal(20, 'default')).toBeCloseTo(20.4, 6);
+    expect(customerTotal(20, 'default', null)).toBeCloseTo(20.4, 6);
   });
 
   it('strips Tutlio add-on from Stripe gross so org stats keep the lesson base', () => {

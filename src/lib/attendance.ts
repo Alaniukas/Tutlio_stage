@@ -20,6 +20,8 @@ export interface AttendanceSessionLike {
   status?: string | null;
   tutor_joined_at?: string | null;
   student_joined_at?: string | null;
+  /** Set only when a tutor or administrator explicitly confirmed the outcome. */
+  status_confirmed_at?: string | null;
 }
 
 export interface AttendanceInfo {
@@ -29,6 +31,8 @@ export interface AttendanceInfo {
   student: AttendanceSideStatus;
   /** True when grace passed and at least one side did not join within 10 min of start. */
   flagged: boolean;
+  /** Completed outcome explicitly confirmed by a tutor or administrator. */
+  confirmedManually: boolean;
 }
 
 /** Whether a join click at `now` should be recorded for this lesson. */
@@ -82,7 +86,14 @@ export function deriveAttendance(
   const startMs = Date.parse(session.start_time);
   const nowMs = now.getTime();
   if (session.status === 'cancelled' || !Number.isFinite(startMs)) {
-    return { applicable: false, tutor: 'pending', student: 'pending', flagged: false };
+    return { applicable: false, tutor: 'pending', student: 'pending', flagged: false, confirmedManually: false };
+  }
+
+  // A confirmed completed outcome is authoritative attendance evidence. A
+  // missing Tutlio redirect click must not relabel it as an absence: Pro Klasė
+  // lessons are often opened from an external meeting link.
+  if (session.status === 'completed' && session.status_confirmed_at) {
+    return { applicable: true, tutor: 'joined', student: 'joined', flagged: false, confirmedManually: true };
   }
 
   const tutor = sideStatus(session.tutor_joined_at, startMs, nowMs);
@@ -90,5 +101,5 @@ export function deriveAttendance(
   const applicable = nowMs > startMs + ATTENDANCE_GRACE_MS;
   const flagged = applicable && (tutor !== 'joined' || student !== 'joined');
 
-  return { applicable, tutor, student, flagged };
+  return { applicable, tutor, student, flagged, confirmedManually: false };
 }

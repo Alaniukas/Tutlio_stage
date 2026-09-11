@@ -17,6 +17,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { startPerlasPayment } from '@/lib/perlasPay';
 import { format, isAfter } from 'date-fns';
 import type { NavigateFunction } from 'react-router-dom';
+import { isSessionCommentVisibleToParent } from '@/lib/sessionCommentDelivery';
 import type { Locale } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import {
@@ -67,6 +68,7 @@ export type ParentLessonModalSession = {
   whiteboard_room_id?: string | null;
   tutor_comment?: string | null;
   show_comment_to_student?: boolean;
+  show_comment_to_parent?: boolean;
   isGroupSubject?: boolean;
   classGroupName?: string | null;
   classGroupMemberNames?: string[];
@@ -281,7 +283,7 @@ export function ParentLessonDetailModal({
             </div>
           </div>
 
-          {session.show_comment_to_student && session.tutor_comment && (
+          {isSessionCommentVisibleToParent(session) && session.tutor_comment && (
             <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
               <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider mb-1">
                 {t('studentDash.tutorComment')}

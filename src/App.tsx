@@ -369,6 +369,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/groups" element={<TutorClassGroupsPage />} />
+          <Route path="/recordings" element={<CompanyLessonRecordings />} />
           <Route path="/students" element={<StudentsPage />} />
           <Route path="/waitlist" element={<WaitlistPage />} />
           <Route path="/messages" element={<Messages />} />
@@ -388,6 +389,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/student" element={<StudentDashboard />} />
           <Route path="/student/schedule" element={<RequireStudentBooking><StudentSchedule /></RequireStudentBooking>} />
           <Route path="/student/sessions" element={<StudentSessions />} />
+          <Route path="/student/recordings" element={<CompanyLessonRecordings />} />
           <Route path="/student/messages" element={<StudentMessages />} />
           <Route path="/student/waitlist" element={<RequireStudentBooking><StudentWaitlist /></RequireStudentBooking>} />
           <Route path="/student/payments" element={<RequireStudentPayments><StudentPayments /></RequireStudentPayments>} />
@@ -403,6 +405,7 @@ export default function App({ basename }: { basename: string }) {
               StudentSchedule detects parent mode via studentId in the URL. */}
           <Route path="/parent/calendar" element={<StudentSchedule />} />
           <Route path="/parent/lessons" element={<StudentSessions />} />
+          <Route path="/parent/recordings" element={<CompanyLessonRecordings />} />
           {/* Legacy child routes – redirect everything booking-related to the parent calendar. */}
           <Route
             path="/parent/child/:studentId/schedule"

@@ -120,6 +120,20 @@ describe('CompanyStudents Mokslo Vaisiai pre-activation scheduling', () => {
     expect(modal.getAttribute('data-frequency')).toBe('true');
   });
 
+  it('lets an admin add siblings to the same parent account', () => {
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti mokinį' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
+
+    expect(screen.getByText('Vaikas Nr. 1')).toBeTruthy();
+    expect(screen.getByText('Vaikas Nr. 2')).toBeTruthy();
+    expect(screen.getAllByText('Vardas ir pavardė *')).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pašalinti' }));
+    expect(screen.queryByText('Vaikas Nr. 2')).toBeNull();
+  });
+
   it('lets an admin book recurring lessons from an unactivated student card without a Pro Klasė flag', () => {
     render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
 

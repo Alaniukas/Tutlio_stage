@@ -105,6 +105,27 @@ describe('deriveAttendance', () => {
     expect(info.flagged).toBe(false);
   });
 
+  it('does not turn an explicitly confirmed completed lesson into a false no-show warning', () => {
+    const info = deriveAttendance(
+      {
+        start_time: START,
+        end_time: END,
+        status: 'completed',
+        tutor_joined_at: null,
+        student_joined_at: null,
+        status_confirmed_at: iso(60),
+      },
+      at(90),
+    );
+    expect(info).toMatchObject({
+      applicable: true,
+      tutor: 'joined',
+      student: 'joined',
+      flagged: false,
+      confirmedManually: true,
+    });
+  });
+
   it('uses the exported grace constant (10 min)', () => {
     expect(ATTENDANCE_GRACE_MS).toBe(10 * 60 * 1000);
   });
@@ -157,5 +178,15 @@ describe('isAttendanceFlagged', () => {
     };
     expect(isAttendanceFlagged({ ...base, status: 'cancelled' }, at(30))).toBe(false);
     expect(isAttendanceFlagged({ ...base, status: 'no_show' }, at(30))).toBe(false);
+  });
+
+  it('is false for a manually confirmed completed lesson even without join clicks', () => {
+    expect(isAttendanceFlagged({
+      start_time: START,
+      end_time: END,
+      status: 'completed',
+      status_confirmed_at: iso(60),
+      meeting_link: 'https://meet.example.com/x',
+    }, at(90))).toBe(false);
   });
 });

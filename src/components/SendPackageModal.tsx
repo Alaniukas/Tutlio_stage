@@ -23,13 +23,10 @@ interface SendPackageModalProps {
   tutorId?: string;
 }
 
-const STRIPE_FEE_PERCENT = 0.015;
-const STRIPE_FEE_FIXED_EUR = 0.25;
 const PLATFORM_FEE_PERCENT = 0.02;
 
 function calcTotalWithFees(basePriceEur: number): number {
-  const platformFee = basePriceEur * PLATFORM_FEE_PERCENT;
-  return (basePriceEur + platformFee + STRIPE_FEE_FIXED_EUR) / (1 - STRIPE_FEE_PERCENT);
+  return basePriceEur * (1 + PLATFORM_FEE_PERCENT);
 }
 
 export default function SendPackageModal({
@@ -307,8 +304,7 @@ export default function SendPackageModal({
                         </PopoverTrigger>
                         <PopoverContent aria-label={t('package.totalToPay')} className="w-64 max-w-[calc(100vw-2rem)] rounded-lg border-violet-200 bg-white p-2.5 text-start text-xs font-medium text-gray-700">
                           {t('package.tooltipTutor', { amount: formatEur(totals.basePriceEur) })}<br />
-                          {t('package.tooltipPlatform', { amount: formatEur(totals.basePriceEur * PLATFORM_FEE_PERCENT) })}<br />
-                          {t('package.tooltipStripe', { amount: formatEur(totals.totalWithFees - totals.basePriceEur - (totals.basePriceEur * PLATFORM_FEE_PERCENT)) })}
+                          {t('package.tooltipPlatform', { amount: formatEur(totals.basePriceEur * PLATFORM_FEE_PERCENT) })}
                         </PopoverContent>
                       </Popover>
                     </span>

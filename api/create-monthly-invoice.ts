@@ -10,6 +10,7 @@ import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.j
 import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { directChargeOptions } from './_lib/stripeDirectCharge.js';
 import {
     tutorUsesManualStudentPayments,
     trimManualPaymentBankDetails,
@@ -23,8 +24,6 @@ const supabase = createClient(
     process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
 function getEnv(name: string): string | null {
     const v = process.env[name];
@@ -365,6 +364,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     checkoutSession = await stripe.checkout.sessions.create({
                         mode: 'payment',
                         customer_email: payerEmail,
+                        customer_creation: 'always',
                         payment_method_types: ['card'],
                         line_items: [
                             {
@@ -381,9 +381,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         ],
                         payment_intent_data: {
                             application_fee_amount: applicationFeeCents,
-                            transfer_data: {
-                                destination: stripeAccountId as string,
-                            },
                             metadata: {
                                 tutlio_billing_batch_id: billingBatch.id,
                                 tutor_id: tutorId,
@@ -395,10 +392,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             tutor_id: tutorId,
                             tutlio_school_org_absorbed: 'true',
                         },
-                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}`,
+                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId as string)}`,
                         cancel_url: `${appOrigin}/student/sessions`,
-                    });
-                    payerCheckoutTotalEur = totalLessonPrice;
+                    }, directChargeOptions(stripeAccountId as string));
+                    payerCheckoutTotalEur = chargeCents / 100;
                 } else if (stripeAccountId) {
                     let baseCents = 0;
                     let feesCents = 0;
@@ -414,10 +411,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             feesCents += b.feesCents;
                         }
                     }
-                    const transferToConnectedCents = baseCents;
                     checkoutSession = await stripe.checkout.sessions.create({
                         mode: 'payment',
                         customer_email: payerEmail,
+                        customer_creation: 'always',
                         payment_method_types: ['card'],
                         line_items: [
                             {
@@ -444,10 +441,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             },
                         ],
                         payment_intent_data: {
-                            transfer_data: {
-                                destination: stripeAccountId,
-                                amount: transferToConnectedCents,
-                            },
+                            application_fee_amount: feesCents,
                             metadata: {
                                 tutlio_billing_batch_id: billingBatch.id,
                                 tutor_id: tutorId,
@@ -458,9 +452,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             tutor_id: tutorId,
                             ...checkoutBaseMetadata(baseCents / 100, market),
                         },
-                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}`,
+                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId)}`,
                         cancel_url: `${appOrigin}/student/sessions`,
-                    });
+                    }, directChargeOptions(stripeAccountId));
                     payerCheckoutTotalEur = (baseCents + feesCents) / 100;
                 } else {
                     throw new Error('[create-monthly-invoice] Missing Stripe account for checkout');
@@ -613,7 +607,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                               paymentDeadline: deadlineStr,
                               manualPaymentInstructions: true,
                               bankDetails: tutorManualBankDetails || undefined,
-                              paymentLink: `${APP_URL}/student/sessions`,
+                              paymentLink: `${appOrigin}/student/sessions`,
                               ...(invoiceOrgId ? { organizationId: invoiceOrgId } : {}),
                           }
                         : {

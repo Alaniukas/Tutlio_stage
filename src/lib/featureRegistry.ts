@@ -525,9 +525,9 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     name: 'Pamokų įrašai (Drive) ir grupių prieiga',
     nameEn: 'Lesson recordings (Drive) and group access',
     description:
-      'Google Meet įrašai iš Drive gali būti priskirti pamokai. Mokytojas ar administratorius parenka, kurios klasės grupės mato įrašą. Reikia Google Workspace ir Drive API raktų.',
+      'Kiekvienai klasei priskiriamas privatus Google Drive aplankas. Jo įrašus per Tutlio mato tik tos grupės mokytojas, mokiniai, tėvai ir įgalioti administratoriai. Reikia serverio Google service-account prieigos.',
     descriptionEn:
-      'Google Meet recordings from Drive can be attached to a lesson. The teacher or admin chooses which class groups may view it. Requires Google Workspace and Drive API credentials.',
+      'Each class gets a private Google Drive folder. Its recordings are streamed through Tutlio only to that group’s teacher, students, parents, and authorized administrators. Requires server-side Google service-account access.',
     category: 'integrations',
     defaultValue: false,
     requiresSetup: true,

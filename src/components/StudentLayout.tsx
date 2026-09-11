@@ -6,7 +6,7 @@ import {
     fetchStudentActiveLessonPackagesDeduped,
     fetchSubjectNamesByIds,
 } from '@/lib/studentLessonPackagesLight';
-import { LayoutDashboard, BookOpen, CalendarDays, Clock, Settings, Info, Mail, HelpCircle, MessageSquare, CreditCard } from 'lucide-react';
+import { LayoutDashboard, BookOpen, CalendarDays, Clock, Settings, Info, Mail, HelpCircle, MessageSquare, CreditCard, Video } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
 import PwaInstallPrompt from '@/components/PwaInstallPrompt';
@@ -89,7 +89,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     );
 
     /** Org portal flags — resolved pre-mount by StudentPolicyProvider, so the nav is correct on first paint. */
-    const { resolved, bookingDisabled, paymentsPageEnabled, organizationId, waitlistHidden } = useStudentPolicy();
+    const { resolved, bookingDisabled, paymentsPageEnabled, lessonRecordingsEnabled, organizationId, waitlistHidden } = useStudentPolicy();
     // Students of a school org read "mokytojas" / "užsiėmimas" like their parents and teachers.
     useSchoolTerminology(useOrgTerminologyMode(organizationId));
 
@@ -123,6 +123,9 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     const navItems = [
         { href: '/student', label: t('studentNav.home'), icon: LayoutDashboard },
         { href: '/student/sessions', label: t('studentNav.sessions'), icon: BookOpen },
+        ...(lessonRecordingsEnabled
+            ? [{ href: '/student/recordings', label: t('companyNav.recordings'), icon: Video }]
+            : []),
         { href: '/student/schedule', label: t('studentNav.book'), icon: CalendarDays },
         { href: '/student/messages', label: t('studentNav.messages'), icon: MessageSquare },
         { href: '/student/waitlist', label: t('studentNav.queue'), icon: Clock },
@@ -136,7 +139,15 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
         return true;
     });
     const navGridClass =
-        navItems.length <= 4 ? 'grid-cols-4' : navItems.length === 5 ? 'grid-cols-5' : 'grid-cols-6';
+        navItems.length <= 4
+            ? 'grid-cols-4'
+            : navItems.length === 5
+                ? 'grid-cols-5'
+                : navItems.length === 6
+                    ? 'grid-cols-6'
+                    : navItems.length === 7
+                        ? 'grid-cols-7'
+                        : 'grid-cols-8';
 
     useEffect(() => {
         const load = async () => {

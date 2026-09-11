@@ -5,6 +5,9 @@ import { en } from './en.js';
  * Review scope and release limits: docs/ROMANIAN_LOCALIZATION_REVIEW.md.
  */
 export const roOverrides: Record<string, string> = {
+  'compSess.markAttended': 'Elevul a participat',
+  'att.confirmedManually': 'Prezență confirmată',
+  'att.unconfirmed': 'Prezență neconfirmată',
   'common.reloadPage': "Reîncarcă pagina",
   'common.reloadPageWarning': "Reîncărcarea paginii va pierde modificările nesalvate. Continui?",
 
@@ -1601,6 +1604,7 @@ export const roOverrides: Record<string, string> = {
   "dash.commentSavedNoEmail": "Comentariul a fost salvat, dar e-mailul către elev nu a putut fi trimis.",
   "dash.commentSavedNoStudentEmail": "Comentariul a fost salvat. E-mailul nu a fost trimis — elevul nu are adresă de e-mail.",
   "dash.commentShowStudent": "Arată elevului (se trimite un e-mail după salvare)",
+  "dash.commentShowParent": "Arată părinților (se trimite un e-mail după salvare)",
   "dash.completed": "Încheiată",
   "dash.confirmCancel": "Confirmă anularea",
   "dash.end": "Sfârșit",
@@ -1656,6 +1660,8 @@ export const roOverrides: Record<string, string> = {
   "dash.pendingPayments": "În așteptare",
   "dash.commentVisibleNow": "Vizibil momentan:",
   "dash.visibleToStudent": "(Pentru elev)",
+  "dash.visibleToParent": "(Pentru părinți)",
+  "dash.visibleToStudentAndParent": "(Pentru elev și părinți)",
   "dash.visibleOnlyYou": "(Doar pentru tine)",
   "dash.minChars": "Cel puțin {min} caractere ({current}/{min})",
   "dash.noCancelledLessons": "Nu există lecții anulate",
@@ -2817,7 +2823,7 @@ export const roOverrides: Record<string, string> = {
   "package.lessonUnit1": "lecție",
   "package.lessonUnit2to9": "lecții",
   "package.lessonUnit10plus": "lecții",
-  "package.includingFeesNote": "(inclusiv taxele platformei și de procesare a plății)",
+  "package.includingFeesNote": "(include taxa platformei)",
   "package.requestTimeout": "Cererea a durat prea mult. Verifică conexiunea și încearcă din nou.",
   "package.packageSent": "Pachetul a fost trimis!",
   "package.payerLabel": "Plătitor",
@@ -2912,7 +2918,7 @@ export const roOverrides: Record<string, string> = {
   "pricing.saveTwentyFivePercent": "Economisește 25% cu facturarea anuală",
   "pricing.manualPayments": "Doar plăți manuale",
   "pricing.noCommission": "Fără comision al platformei",
-  "pricing.studentFeeNote": "Prețul afișat nu include taxa de plată. Elevul plătește o taxă suplimentară la finalizarea plății: 3.5% + €0.25.",
+  "pricing.studentFeeNote": "Prețul afișat nu include taxa platformei. Elevul plătește o taxă suplimentară de 2% la finalizarea plății.",
   "pricing.createAccountFirst": "Creează mai întâi un cont - apoi poți alege un plan și încerca gratuit timp de 7 zile",
   "pricing.faq.cancelA": "Da! Poți anula oricând abonamentul din setări. Dacă anulezi, abonamentul rămâne activ până la sfârșitul perioadei curente - nu pierzi nimic.",
   "pricing.faq.cancelQ": "Pot anula abonamentul oricând?",

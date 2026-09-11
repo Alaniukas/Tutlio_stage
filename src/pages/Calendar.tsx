@@ -129,11 +129,15 @@ import { enrichSessionMeetingLink, resolveLessonMeetingLink } from '@/lib/meetin
 import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
-import { isLaisviVaikaiOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { isLaisviVaikaiOrg, isManoKorepetitoriusOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
 import { resolveOrCreateTrialSubject } from '@/pages/company/orgAdminSessionCreate';
 import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
-import { calendarSessionTitlePrefix, getCalendarSessionEventStyle } from '@/lib/calendarSessionEventStyle';
+import {
+  calendarSessionTitlePrefix,
+  getCalendarSessionEventStyle,
+  MOKSLO_VAISIAI_CALENDAR_COLORS,
+} from '@/lib/calendarSessionEventStyle';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import {
   buildClassGroupMetaMap,
@@ -154,6 +158,7 @@ import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
 import type { SchoolClassGroupRecord } from '@/lib/schoolClassGroups';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
+import { sessionCommentDeliveryNeeded, sessionCommentDeliveryRecipients } from '@/lib/sessionCommentDelivery';
 import Toast from '@/components/Toast';
 import { dedupeAsync } from '@/lib/dataCache';
 import {
@@ -197,7 +202,7 @@ const localizer = dateFnsLocalizer({
 });
 
 const CALENDAR_SESSION_COLUMNS =
-  '*, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade, admin_comment, admin_comment_visible_to_tutor)';
+  '*, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, parent_secondary_email, payer_phone, grade, admin_comment, admin_comment_visible_to_tutor)';
 
 interface Session {
   id: string;
@@ -216,6 +221,7 @@ interface Session {
   payment_status?: string;
   tutor_comment?: string;
   show_comment_to_student?: boolean;
+  show_comment_to_parent?: boolean;
   hidden_from_calendar?: boolean;
   subject_id?: string;
   subjects?: { name?: string | null; is_trial?: boolean } | null;
@@ -226,6 +232,9 @@ interface Session {
   available_spots?: number | null;
   recurring_session_id?: string | null;
   class_group_id?: string | null;
+  status_confirmed_at?: string | null;
+  no_show_reason?: string | null;
+  no_show_when?: string | null;
   _isClassGroup?: boolean;
   _classGroupId?: string;
   _classGroupName?: string;
@@ -236,6 +245,7 @@ interface Session {
     email?: string;
     phone?: string;
     payer_email?: string;
+    parent_secondary_email?: string;
     payer_phone?: string;
     grade?: string;
   };
@@ -249,6 +259,7 @@ interface Student {
   linked_user_id?: string | null;
   payment_payer?: string | null;
   payer_email?: string | null;
+  parent_secondary_email?: string | null;
   payment_model?: string | null;
 }
 
@@ -314,14 +325,20 @@ export default function CalendarPage() {
   const orgPolicy = useOrgTutorPolicy();
   const licenseFrozen = orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && !orgPolicy.hasActiveLicense;
   const { contactVisibility, hasFeature: hasOrgFeature, entityType: orgEntityType, organizationId, loading: orgFeaturesLoading } = useOrgFeatures();
+  const { user: ctxUser, profile: ctxProfile } = useUser();
+  const isSchoolTutor = orgEntityType === 'school';
   const showClassGroups = !!organizationId && !orgFeaturesLoading && hasOrgFeature('school_class_groups');
   const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, orgEntityType, hasOrgFeature, 'monthly_packages', orgFeaturesLoading);
-  const { user: ctxUser, profile: ctxProfile } = useUser();
   // Org feature: ended lessons are not auto-completed — the tutor must confirm the outcome.
   const requiresStatusConfirmation =
     hasOrgFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(ctxProfile?.organization_id);
-  const showTutorTrialToggle =
-    orgPolicy.isOrgTutor && !orgFeaturesLoading && isMoksloVaisiaiOrg(organizationId);
+  const isMoksloVaisiaiCalendar =
+    orgPolicy.isOrgTutor &&
+    !orgFeaturesLoading &&
+    (isMoksloVaisiaiOrg(organizationId) || isMoksloVaisiaiOrg(ctxProfile?.organization_id));
+  const showTutorTrialToggle = isMoksloVaisiaiCalendar;
+  const canChooseParentComment =
+    isManoKorepetitoriusOrg(organizationId) || isManoKorepetitoriusOrg(ctxProfile?.organization_id);
   const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
   const isLaisviVaikai = isLaisviVaikaiOrg(organizationId) || isLaisviVaikaiOrg(ctxProfile?.organization_id);
   const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
@@ -450,6 +467,7 @@ export default function CalendarPage() {
   const [newSessionId, setNewSessionId] = useState<string | null>(null);
   const [newTutorComment, setNewTutorComment] = useState('');
   const [newShowCommentToStudent, setNewShowCommentToStudent] = useState(false);
+  const [newShowCommentToParent, setNewShowCommentToParent] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
   const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
   const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
@@ -478,12 +496,14 @@ export default function CalendarPage() {
   const [editPrice, setEditPrice] = useState(0);
   const [editTutorComment, setEditTutorComment] = useState('');
   const [editShowCommentToStudent, setEditShowCommentToStudent] = useState(false);
+  const [editShowCommentToParent, setEditShowCommentToParent] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
 
   // View-mode comment (visible when opening session without "Redaguoti")
   const [viewCommentText, setViewCommentText] = useState('');
   const [trialCommentHint, setTrialCommentHint] = useState<'none' | 'optional' | 'required'>('none');
   const [viewShowToStudent, setViewShowToStudent] = useState(false);
+  const [viewShowToParent, setViewShowToParent] = useState(false);
   const [forceTrialCommentVisibility, setForceTrialCommentVisibility] = useState(false);
   const [viewCommentSaving, setViewCommentSaving] = useState(false);
 
@@ -601,6 +621,7 @@ export default function CalendarPage() {
     if (!selectedEvent) return;
     setViewCommentText(selectedEvent.tutor_comment ?? '');
     setViewShowToStudent(selectedEvent.show_comment_to_student ?? false);
+    setViewShowToParent(selectedEvent.show_comment_to_parent ?? false);
     setForceTrialCommentVisibility(false);
     setTrialCommentHint('none');
 
@@ -624,6 +645,7 @@ export default function CalendarPage() {
       if (!cancelled && shouldForce) {
         setForceTrialCommentVisibility(true);
         setViewShowToStudent(true);
+        setViewShowToParent(true);
       }
       if (!cancelled && isTrial) {
         const policy = parseOrgTrialPolicy(featObj);
@@ -1262,6 +1284,7 @@ export default function CalendarPage() {
       setPrice(25);
       setNewTutorComment('');
       setNewShowCommentToStudent(false);
+      setNewShowCommentToParent(false);
       setIsRecurring(false);
       setCreateIsTrial(false);
       setRecurringEndDate('');
@@ -1303,6 +1326,7 @@ export default function CalendarPage() {
     setPrice(25);
     setNewTutorComment('');
     setNewShowCommentToStudent(false);
+    setNewShowCommentToParent(false);
     setIsRecurring(false);
     setCreateIsTrial(false);
     setRecurringEndDate('');
@@ -1501,7 +1525,9 @@ export default function CalendarPage() {
       setClassGroupParticipants(classGroupParticipantsForModal(event as MergedClassGroupSession<Session>));
       const displayRow = (isLaisviVaikai
         ? pickClassGroupOccurrenceSession(event._classGroupSessions)
-        : event._classGroupSessions[0]) ?? event._classGroupSessions[0] ?? event;
+        : event._classGroupSessions.find((row: Session) => row.status === event.status))
+        ?? event._classGroupSessions[0]
+        ?? event;
       setSelectedEvent({
         ...displayRow,
         topic: event._classGroupName || displayRow.topic,
@@ -1923,6 +1949,7 @@ export default function CalendarPage() {
             lesson_package_id: lessonPackageId,
             tutor_comment: newTutorComment || null,
             show_comment_to_student: newShowCommentToStudent,
+            show_comment_to_parent: canChooseParentComment && newShowCommentToParent,
             recurring_session_id: template.id,
             available_spots: subject?.is_group ? subject.max_students : null,
           });
@@ -2050,7 +2077,7 @@ export default function CalendarPage() {
           for (const [studentId, studentSessionList] of Array.from(allStudentSessions)) {
             const { data: studentData } = await supabase
               .from('students')
-              .select('full_name, email, linked_user_id, payment_payer, payer_email, payer_name, payment_model')
+              .select('full_name, email, linked_user_id, payment_payer, payer_email, parent_secondary_email, payer_name, payment_model')
               .eq('id', studentId)
               .single();
 
@@ -2185,10 +2212,17 @@ export default function CalendarPage() {
             }
 
             // 3) Comment email
-            if (newShowCommentToStudent && newTutorComment && studentNotifyTo) {
+            const commentRecipients = sessionCommentDeliveryRecipients({
+              nextComment: newTutorComment,
+              showToStudent: newShowCommentToStudent,
+              showToParent: canChooseParentComment && newShowCommentToParent,
+              studentEmail: studentNotifyTo,
+              parentEmails: [studentData.payer_email, studentData.parent_secondary_email],
+            });
+            if (commentRecipients.length > 0) {
               sendEmail({
                 type: 'session_comment_added',
-                to: studentNotifyTo,
+                to: commentRecipients,
                 data: {
                   studentName: studentData.full_name,
                   tutorName: tutorProfile?.full_name || '',
@@ -2309,6 +2343,7 @@ export default function CalendarPage() {
           lesson_package_id: lessonPackageId,
           tutor_comment: newTutorComment || null,
           show_comment_to_student: newShowCommentToStudent,
+          show_comment_to_parent: canChooseParentComment && newShowCommentToParent,
           available_spots: subject?.is_group ? subject.max_students : null,
         });
       }
@@ -2401,7 +2436,7 @@ export default function CalendarPage() {
         for (const session of created || []) {
           const { data: studentData } = await supabase
             .from('students')
-            .select('full_name, email, linked_user_id, payment_payer, payer_email, payment_model')
+            .select('full_name, email, linked_user_id, payment_payer, payer_email, parent_secondary_email, payment_model')
             .eq('id', session.student_id)
             .single();
 
@@ -2520,11 +2555,17 @@ export default function CalendarPage() {
             });
           }
 
-          // Send comment email to student if "show to student" was checked
-          if (newShowCommentToStudent && newTutorComment && studentBookingTo) {
+          const commentRecipients = sessionCommentDeliveryRecipients({
+            nextComment: newTutorComment,
+            showToStudent: newShowCommentToStudent,
+            showToParent: canChooseParentComment && newShowCommentToParent,
+            studentEmail: studentBookingTo,
+            parentEmails: [studentData?.payer_email, studentData?.parent_secondary_email],
+          });
+          if (commentRecipients.length > 0) {
             sendEmail({
               type: 'session_comment_added',
-              to: studentBookingTo,
+              to: commentRecipients,
               data: {
                 studentName: studentData!.full_name || '',
                 tutorName: tutorProfile?.full_name || '',
@@ -2576,77 +2617,80 @@ export default function CalendarPage() {
     setViewCommentSaving(true);
     const { data: tutorProfile } = await supabase.from('profiles').select('full_name, organization_id').eq('id', (await supabase.auth.getUser()).data.user?.id).single();
     const effectiveShowToStudent = forceTrialCommentVisibility ? true : viewShowToStudent;
+    const effectiveShowToParent = forceTrialCommentVisibility
+      ? true
+      : canChooseParentComment
+        ? viewShowToParent
+        : Boolean(selectedEvent.show_comment_to_parent);
     const { error } = await supabase
       .from('sessions')
       .update({
         tutor_comment: viewCommentText.trim() || null,
         show_comment_to_student: effectiveShowToStudent,
+        show_comment_to_parent: effectiveShowToParent,
       })
       .eq('id', selectedEvent.id);
     if (!error) {
-      const updated = { ...selectedEvent, tutor_comment: viewCommentText.trim() || null, show_comment_to_student: effectiveShowToStudent };
+      const updated = {
+        ...selectedEvent,
+        tutor_comment: viewCommentText.trim() || null,
+        show_comment_to_student: effectiveShowToStudent,
+        show_comment_to_parent: effectiveShowToParent,
+      };
       setSessions((prev) => prev.map((s) => (s.id === selectedEvent.id ? { ...s, ...updated } : s)));
       setSelectedEvent(updated);
-      if (effectiveShowToStudent && viewCommentText.trim()) {
-        const alreadySent = selectedEvent.show_comment_to_student && selectedEvent.tutor_comment === viewCommentText.trim();
-        if (!alreadySent) {
-          let studentEmail: string | undefined = selectedEvent.student?.email;
-          let payerEmail: string | null = null;
-          if (selectedEvent.student_id) {
-            const { data: studentRow } = await supabase
-              .from('students')
-              .select('email, payer_email, full_name, linked_user_id, organization_id, tutor_id')
-              .eq('id', selectedEvent.student_id)
-              .single();
-            payerEmail = (studentRow?.payer_email || null) as any;
-            const resolved = await resolveStudentNotificationEmail(studentRow);
-            if (resolved) studentEmail = resolved;
-            if (studentRow && !updated.student) {
-              updated.student = { full_name: studentRow.full_name, email: studentRow.email ?? undefined };
-            }
-          } else if (selectedEvent.student) {
-            const resolved = await resolveStudentNotificationEmail({
-              email: selectedEvent.student.email,
-              linked_user_id: null,
-            });
-            if (resolved) studentEmail = resolved;
+      if ((effectiveShowToStudent || effectiveShowToParent) && viewCommentText.trim()) {
+        let studentEmail: string | undefined = selectedEvent.student?.email;
+        let payerEmail = selectedEvent.student?.payer_email || null;
+        let secondaryParentEmail = selectedEvent.student?.parent_secondary_email || null;
+        if (selectedEvent.student_id) {
+          const { data: studentRow } = await supabase
+            .from('students')
+            .select('email, payer_email, parent_secondary_email, full_name, linked_user_id, organization_id, tutor_id')
+            .eq('id', selectedEvent.student_id)
+            .single();
+          payerEmail = studentRow?.payer_email || payerEmail;
+          secondaryParentEmail = studentRow?.parent_secondary_email || secondaryParentEmail;
+          const resolved = await resolveStudentNotificationEmail(studentRow);
+          if (resolved) studentEmail = resolved;
+          if (studentRow && !updated.student) {
+            updated.student = { full_name: studentRow.full_name, email: studentRow.email ?? undefined };
           }
-          if (studentEmail) {
-            let to: string | string[] = studentEmail;
-            try {
-              const orgId = (tutorProfile as any)?.organization_id as string | null | undefined;
-              const subjectId = (selectedEvent as any)?.subject_id as string | null | undefined;
-              if (orgId && subjectId && payerEmail && payerEmail.trim().length > 0 && payerEmail.trim() !== studentEmail.trim()) {
-                const [{ data: orgRow }, { data: subjRow }] = await Promise.all([
-                  supabase.from('organizations').select('features').eq('id', orgId).maybeSingle(),
-                  supabase.from('subjects').select('is_trial').eq('id', subjectId).maybeSingle(),
-                ]);
-                const feat = (orgRow as any)?.features;
-                const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
-                const mode = featObj['trial_lesson_comment_mode'];
-                const sendToParent = mode === 'student_and_parent' && (subjRow as any)?.is_trial === true;
-                if (sendToParent) to = [studentEmail, payerEmail.trim()];
-              }
-            } catch {
-              /* ignore parent email decision errors */
-            }
-            const orgIdComment = (tutorProfile as any)?.organization_id as string | undefined;
-            const ok = await sendEmail({
-              type: 'session_comment_added',
-              to,
-              data: {
-                studentName: updated.student?.full_name || selectedEvent.student?.full_name || '',
-                tutorName: tutorProfile?.full_name || '',
-                date: format(selectedEvent.start_time, 'yyyy-MM-dd'),
-                time: format(selectedEvent.start_time, 'HH:mm'),
-                comment: viewCommentText.trim(),
-                ...(orgIdComment ? { organizationId: orgIdComment } : {}),
-              },
-            }).catch((err) => { console.error('Error sending comment email:', err); return false; });
-            if (!ok) alert(t('cal.commentSavedEmailFailed'));
-          } else {
-            alert(t('cal.commentSavedNoEmail'));
-          }
+        } else if (selectedEvent.student) {
+          const resolved = await resolveStudentNotificationEmail({
+            email: selectedEvent.student.email,
+            linked_user_id: null,
+          });
+          if (resolved) studentEmail = resolved;
+        }
+        const delivery = {
+          nextComment: viewCommentText,
+          previousComment: selectedEvent.tutor_comment,
+          showToStudent: effectiveShowToStudent,
+          showToParent: effectiveShowToParent,
+          previousShowToStudent: selectedEvent.show_comment_to_student,
+          previousShowToParent: selectedEvent.show_comment_to_parent,
+          studentEmail,
+          parentEmails: [payerEmail, secondaryParentEmail],
+        };
+        const recipients = sessionCommentDeliveryRecipients(delivery);
+        if (recipients.length > 0) {
+          const orgIdComment = (tutorProfile as any)?.organization_id as string | undefined;
+          const ok = await sendEmail({
+            type: 'session_comment_added',
+            to: recipients,
+            data: {
+              studentName: updated.student?.full_name || selectedEvent.student?.full_name || '',
+              tutorName: tutorProfile?.full_name || '',
+              date: format(selectedEvent.start_time, 'yyyy-MM-dd'),
+              time: format(selectedEvent.start_time, 'HH:mm'),
+              comment: viewCommentText.trim(),
+              ...(orgIdComment ? { organizationId: orgIdComment } : {}),
+            },
+          }).catch((err) => { console.error('Error sending comment email:', err); return false; });
+          if (!ok) alert(t('cal.commentSavedEmailFailed'));
+        } else if (sessionCommentDeliveryNeeded(delivery)) {
+          alert(t('cal.commentSavedNoEmail'));
         }
       }
     }
@@ -3421,6 +3465,9 @@ export default function CalendarPage() {
         meeting_link: editMeetingLink,
         tutor_comment: editTutorComment || null,
         show_comment_to_student: editShowCommentToStudent,
+        show_comment_to_parent: canChooseParentComment
+          ? editShowCommentToParent
+          : Boolean(selectedEvent.show_comment_to_parent),
         ...(!orgPolicy.hideMoney ? { price: Number.isFinite(Number(editPrice)) ? Number(editPrice) : 0 } : {}),
       };
 
@@ -3546,22 +3593,36 @@ export default function CalendarPage() {
       }
 
       if (!error) {
-        // Send comment email if checkbox is checked AND it wasn't already checked/sent
-        if (editShowCommentToStudent && !isClassGroupSession && editTutorComment && (editTutorComment !== selectedEvent.tutor_comment || (!selectedEvent.show_comment_to_student && editShowCommentToStudent))) {
+        if ((editShowCommentToStudent || editSessionPayload.show_comment_to_parent) && !isClassGroupSession && editTutorComment) {
           let studentEmail: string | undefined = selectedEvent?.student?.email;
+          let payerEmail = selectedEvent?.student?.payer_email || null;
+          let secondaryParentEmail = selectedEvent?.student?.parent_secondary_email || null;
           if (selectedEvent?.student_id) {
             const { data: studentRow } = await supabase
               .from('students')
-              .select('email, full_name, linked_user_id')
+              .select('email, payer_email, parent_secondary_email, full_name, linked_user_id')
               .eq('id', selectedEvent.student_id)
               .single();
             const resolved = await resolveStudentNotificationEmail(studentRow);
             if (resolved) studentEmail = resolved;
+            payerEmail = studentRow?.payer_email || payerEmail;
+            secondaryParentEmail = studentRow?.parent_secondary_email || secondaryParentEmail;
           }
-          if (studentEmail) {
+          const delivery = {
+            nextComment: editTutorComment,
+            previousComment: selectedEvent.tutor_comment,
+            showToStudent: editShowCommentToStudent,
+            showToParent: editSessionPayload.show_comment_to_parent,
+            previousShowToStudent: selectedEvent.show_comment_to_student,
+            previousShowToParent: selectedEvent.show_comment_to_parent,
+            studentEmail,
+            parentEmails: [payerEmail, secondaryParentEmail],
+          };
+          const recipients = sessionCommentDeliveryRecipients(delivery);
+          if (recipients.length > 0) {
             const ok = await sendEmail({
               type: 'session_comment_added',
-              to: studentEmail,
+              to: recipients,
               data: {
                 studentName: selectedEvent?.student?.full_name || '',
                 tutorName: tutorProfile?.full_name || '',
@@ -3572,7 +3633,7 @@ export default function CalendarPage() {
               },
             }).catch((err) => { console.error('Error sending comment email:', err); return false; });
             if (!ok) alert(t('cal.commentSavedEmailFailed2'));
-          } else {
+          } else if (sessionCommentDeliveryNeeded(delivery)) {
             alert(t('cal.commentSavedNoEmail'));
           }
         }
@@ -3644,6 +3705,7 @@ export default function CalendarPage() {
           meeting_link: editMeetingLink,
           tutor_comment: editTutorComment || null,
           show_comment_to_student: editShowCommentToStudent,
+          show_comment_to_parent: editSessionPayload.show_comment_to_parent,
           ...(!orgPolicy.hideMoney
             ? { price: Number.isFinite(Number(editPrice)) ? Number(editPrice) : 0 }
             : {}),
@@ -3679,6 +3741,7 @@ export default function CalendarPage() {
         setSelectedGroupSessions((prev) => prev.map(applySavedFieldsToSession));
         setViewCommentText(editTutorComment || '');
         setViewShowToStudent(editShowCommentToStudent);
+        setViewShowToParent(editSessionPayload.show_comment_to_parent);
 
         setIsEditingSession(false);
         setGroupEditChoice(null);
@@ -3772,6 +3835,7 @@ export default function CalendarPage() {
       setEditPrice(Number(selectedEvent.price ?? 0) || 0);
       setEditTutorComment(selectedEvent.tutor_comment || '');
       setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
+      setEditShowCommentToParent(selectedEvent.show_comment_to_parent || false);
       setRescheduleReason('');
       setRescheduleRequestedBy('');
       setIsEditingSession(true);
@@ -3795,6 +3859,7 @@ export default function CalendarPage() {
     setEditPrice(Number(selectedEvent.price ?? 0) || 0);
     setEditTutorComment(selectedEvent.tutor_comment || '');
     setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
+    setEditShowCommentToParent(selectedEvent.show_comment_to_parent || false);
     setRescheduleReason('');
     setRescheduleRequestedBy('');
     setIsEditingSession(true);
@@ -3929,11 +3994,13 @@ export default function CalendarPage() {
     session: Session,
     status: 'completed' | 'no_show' | 'cancelled',
     late = false,
+    options?: { keepModalOpen?: boolean },
   ) => {
     if (status === 'no_show' && !window.confirm(t('dash.confirmNoShowPrompt'))) return;
     if (status === 'cancelled' && !window.confirm(t('cal.confirmStatusCancelPrompt'))) return;
     setNoShowSavingId(session.id);
     try {
+      const existingOutcome = session.status === 'completed' || session.status === 'no_show';
       const resp = await fetch('/api/confirm-session-status', {
         method: 'POST',
         headers: await authHeaders(),
@@ -3944,6 +4011,8 @@ export default function CalendarPage() {
           ...(status === 'no_show'
             ? { noShowWhen: defaultNoShowWhenForNow(new Date(session.start_time), new Date(session.end_time)) }
             : {}),
+          ...(existingOutcome && session.status === status ? { confirmExisting: true } : {}),
+          ...(existingOutcome && session.status !== status ? { correctExisting: true } : {}),
         }),
       });
       const json = await resp.json().catch(() => ({} as Record<string, unknown>));
@@ -3954,23 +4023,36 @@ export default function CalendarPage() {
         });
         return;
       }
-      setSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, status } : s)));
-      setSelectedEvent((prev) => (prev && prev.id === session.id ? { ...prev, status } : prev));
+      const confirmedAt = typeof (json as any).statusConfirmedAt === 'string'
+        ? (json as any).statusConfirmedAt
+        : new Date().toISOString();
+      const updateOutcome = (row: Session): Session => row.id === session.id
+        ? {
+            ...row,
+            status,
+            status_confirmed_at: confirmedAt,
+            no_show_reason: status === 'completed' ? null : row.no_show_reason,
+            no_show_when: status === 'completed' ? null : row.no_show_when,
+          }
+        : row;
+      setSessions((prev) => prev.map(updateOutcome));
+      setSelectedGroupSessions((prev) => prev.map(updateOutcome));
+      setSelectedEvent((prev) => prev ? updateOutcome(prev) : prev);
       const needsProKlaseComment =
         hideProKlaseOrgTutorCancel && (status === 'completed' || status === 'no_show');
       const hasComment = Boolean(
         viewCommentText.trim() || session.tutor_comment?.trim(),
       );
-      if (!needsProKlaseComment || hasComment) {
-        setIsEventModalOpen(false);
-      } else {
+      if (needsProKlaseComment && !hasComment) {
         setToastMessage({
           message: t('dash.lessonCommentMissing'),
           type: 'warning',
         });
+      } else if (!options?.keepModalOpen) {
+        setIsEventModalOpen(false);
       }
       fetchData({ silent: true });
-      if (status === 'no_show') {
+      if (status === 'no_show' && !(session.status === 'no_show' && session.status_confirmed_at)) {
         void (async () => {
           await fetch('/api/notify-session-no-show', {
             method: 'POST',
@@ -4307,6 +4389,7 @@ export default function CalendarPage() {
       cancellationReasonCode: showProKlaseCalendarFeatures ? event.cancellation_reason_code : undefined,
       isMovedLesson,
       isOrgTutor: orgPolicy.isOrgTutor || isSchoolBilledSession(event),
+      useMoksloVaisiaiPalette: isMoksloVaisiaiCalendar,
       defaultColor: subj?.color || '#6366f1',
     });
 
@@ -4739,9 +4822,22 @@ export default function CalendarPage() {
         </div>
         {[
           { color: '#6366f1', label: t('cal.legendReserved') },
-          { color: '#10b981', label: t('cal.legendCompleted') },
+          {
+            color: isMoksloVaisiaiCalendar
+              ? MOKSLO_VAISIAI_CALENDAR_COLORS.completedBackground
+              : '#10b981',
+            label: t('cal.legendCompleted'),
+          },
           { color: '#ca8a04', label: t('cal.legendUnpaidOccurred') },
-          { color: '#a855f7', label: t('cal.legendTrial'), border: '2px solid #7e22ce' },
+          {
+            color: isMoksloVaisiaiCalendar
+              ? MOKSLO_VAISIAI_CALENDAR_COLORS.trialBackground
+              : '#a855f7',
+            label: t('cal.legendTrial'),
+            border: isMoksloVaisiaiCalendar
+              ? `2px solid ${MOKSLO_VAISIAI_CALENDAR_COLORS.trialBorder}`
+              : '2px solid #7e22ce',
+          },
           ...(showProKlaseCalendarFeatures
             ? [
                 { color: '#8b5cf6', label: t('cal.legendMakeup'), border: '2px solid #6d28d9' },
@@ -5056,6 +5152,17 @@ export default function CalendarPage() {
                 />
                 <span className="text-sm text-gray-700">{t('cal.showToStudent')}</span>
               </label>
+              {canChooseParentComment && (
+                <label className="flex items-center gap-2 cursor-pointer mt-1">
+                  <input
+                    type="checkbox"
+                    checked={newShowCommentToParent}
+                    onChange={(e) => setNewShowCommentToParent(e.target.checked)}
+                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-700">{t('dash.commentShowParent')}</span>
+                </label>
+              )}
             </div>
 
             {/* Recurring toggle */}
@@ -5241,6 +5348,19 @@ export default function CalendarPage() {
                   />
                   <span className="text-sm text-gray-700">{t('cal.showToStudent')}</span>
                 </label>
+                {canChooseParentComment && (
+                  <label className="flex items-start gap-2 cursor-pointer min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={editShowCommentToParent}
+                      onChange={(e) => setEditShowCommentToParent(e.target.checked)}
+                      className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 flex-shrink-0"
+                    />
+                    <span className="text-sm text-gray-700 min-w-0 break-words">
+                      {t('dash.commentShowParent')}
+                    </span>
+                  </label>
+                )}
               </div>
               <div className="flex gap-2 pt-2">
                 <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setIsEditingSession(false)}>{t('cal.cancelEdit')}</Button>
@@ -5305,7 +5425,7 @@ export default function CalendarPage() {
                       }
                       if (!session) return null;
                       return (
-                      <div key={session.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                      <div key={session.id} className="flex flex-wrap items-center gap-3 p-3 bg-gray-50 rounded-lg">
                         <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
                           {session.student?.full_name?.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
                         </div>
@@ -5328,6 +5448,60 @@ export default function CalendarPage() {
                           {(() => {
                             const rowEnd = new Date(session.end_time);
                             const rowFuture = isAfter(rowEnd, new Date());
+                            if (
+                              isSchoolTutor
+                              && !rowFuture
+                              && ['active', 'completed', 'no_show'].includes(session.status)
+                            ) {
+                              return (
+                                <div className="flex flex-wrap justify-end gap-1">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    aria-pressed={session.status === 'completed'}
+                                    className={cn(
+                                      'h-8 px-2 text-xs',
+                                      session.status === 'completed'
+                                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                        : 'border-gray-200 text-gray-700',
+                                    )}
+                                    disabled={noShowSavingId === session.id || saving}
+                                    onClick={() => void handleConfirmSessionStatus(
+                                      session,
+                                      'completed',
+                                      false,
+                                      { keepModalOpen: true },
+                                    )}
+                                  >
+                                    <CheckCircle className="mr-1 h-3.5 w-3.5" />
+                                    {t('compSess.markAttended')}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    aria-pressed={session.status === 'no_show'}
+                                    className={cn(
+                                      'h-8 px-2 text-xs',
+                                      session.status === 'no_show'
+                                        ? 'border-rose-300 bg-rose-50 text-rose-800'
+                                        : 'border-gray-200 text-gray-700',
+                                    )}
+                                    disabled={noShowSavingId === session.id || saving}
+                                    onClick={() => void handleConfirmSessionStatus(
+                                      session,
+                                      'no_show',
+                                      false,
+                                      { keepModalOpen: true },
+                                    )}
+                                  >
+                                    <UserX className="mr-1 h-3.5 w-3.5" />
+                                    {t('compSess.markNoShow')}
+                                  </Button>
+                                </div>
+                              );
+                            }
                             if (session.status === 'no_show') {
                               return rowFuture ? (
                                 <Button
@@ -5587,6 +5761,19 @@ export default function CalendarPage() {
                       : t('cal.showToStudentCheckbox')}
                   </span>
                 </label>
+                {canChooseParentComment && !forceTrialCommentVisibility && (
+                  <label className="flex items-start gap-2 cursor-pointer min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={viewShowToParent}
+                      onChange={(e) => setViewShowToParent(e.target.checked)}
+                      className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 flex-shrink-0"
+                    />
+                    <span className="text-sm text-gray-700 min-w-0 break-words">
+                      {t('dash.commentShowParent')}
+                    </span>
+                  </label>
+                )}
                 <Button
                   size="sm"
                   onClick={handleSaveViewComment}
@@ -5596,9 +5783,16 @@ export default function CalendarPage() {
                   {viewCommentSaving ? t('cal.savingComment') : t('cal.saveComment')}
                 </Button>
                 {selectedEvent?.tutor_comment && (
-                  <div className={`mt-2 p-3 rounded-lg text-sm border ${selectedEvent.show_comment_to_student ? 'bg-indigo-50 border-indigo-100 text-indigo-800' : 'bg-gray-50 border-gray-100 text-gray-700'}`}>
+                  <div className={`mt-2 p-3 rounded-lg text-sm border ${selectedEvent.show_comment_to_student || selectedEvent.show_comment_to_parent ? 'bg-indigo-50 border-indigo-100 text-indigo-800' : 'bg-gray-50 border-gray-100 text-gray-700'}`}>
                     <span className="font-semibold block mb-1">
-                      {t('dash.commentVisibleNow')} {selectedEvent.show_comment_to_student ? t('dash.visibleToStudent') : t('dash.visibleOnlyYou')}
+                      {t('dash.commentVisibleNow')}{' '}
+                      {selectedEvent.show_comment_to_student && selectedEvent.show_comment_to_parent
+                        ? t('dash.visibleToStudentAndParent')
+                        : selectedEvent.show_comment_to_parent
+                          ? t('dash.visibleToParent')
+                          : selectedEvent.show_comment_to_student
+                            ? t('dash.visibleToStudent')
+                            : t('dash.visibleOnlyYou')}
                     </span>
                     <div className="whitespace-pre-wrap">{selectedEvent.tutor_comment}</div>
                   </div>
@@ -5731,7 +5925,7 @@ export default function CalendarPage() {
                 </Button>
               </div>
             )}
-            {requiresStatusConfirmation &&
+            {!isSchoolTutor && requiresStatusConfirmation &&
               !isGroupSession &&
               selectedEvent?.status === 'active' &&
               isAfter(new Date(), selectedEvent.end_time) && (
@@ -5785,6 +5979,49 @@ export default function CalendarPage() {
                   </div>
                 </div>
               )}
+            {isSchoolTutor &&
+              !isGroupSession &&
+              selectedEvent &&
+              ['active', 'completed', 'no_show'].includes(selectedEvent.status) &&
+              !isAfter(selectedEvent.end_time, new Date()) && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3 space-y-2">
+                  <p className="text-sm font-semibold text-indigo-950">{t('schoolDash.awaitingOutcome')}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      aria-pressed={selectedEvent.status === 'completed'}
+                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'completed')}
+                      disabled={noShowSavingId === selectedEvent.id}
+                      className={cn(
+                        'rounded-xl',
+                        selectedEvent.status === 'completed'
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                          : 'border-gray-200 text-gray-700',
+                      )}
+                    >
+                      <CheckCircle className="mr-1 h-4 w-4" />
+                      {t('compSess.markAttended')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      aria-pressed={selectedEvent.status === 'no_show'}
+                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'no_show')}
+                      disabled={noShowSavingId === selectedEvent.id}
+                      className={cn(
+                        'rounded-xl',
+                        selectedEvent.status === 'no_show'
+                          ? 'border-rose-300 bg-rose-50 text-rose-800'
+                          : 'border-gray-200 text-gray-700',
+                      )}
+                    >
+                      <UserX className="mr-1 h-4 w-4" />
+                      {t('compSess.markNoShow')}
+                    </Button>
+                  </div>
+                </div>
+              )}
             {selectedEvent?.status === 'active' && (
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -5833,7 +6070,7 @@ export default function CalendarPage() {
                     {t('cal.completed')}
                   </Button>
                 )}
-                {!isGroupSession && selectedEvent && (
+                {!isSchoolTutor && !isGroupSession && selectedEvent && (
                   <Button
                     variant="outline"
                     onClick={() => {
@@ -5852,7 +6089,7 @@ export default function CalendarPage() {
                 )}
               </div>
             )}
-            {!isGroupSession &&
+            {!isSchoolTutor && !isGroupSession &&
               selectedEvent &&
               (selectedEvent.status === 'completed' || selectedEvent.status === 'no_show') && (
                 <div className="flex flex-wrap gap-2">
@@ -6197,6 +6434,7 @@ export default function CalendarPage() {
                   setEditPrice(Number(selectedEvent.price ?? 0) || 0);
                   setEditTutorComment(selectedEvent.tutor_comment || '');
                   setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
+                  setEditShowCommentToParent(selectedEvent.show_comment_to_parent || false);
                   setRescheduleReason('');
                   setRescheduleRequestedBy('');
                   setIsEditingSession(true);

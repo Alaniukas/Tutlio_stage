@@ -96,6 +96,56 @@ describe('schoolClassGroupSessions', () => {
     expect(calendarTitleForSession(row, 'Unknown')).toBe('LT 5 kl.');
   });
 
+  it('shows a mixed-attendance class as completed instead of inheriting one child no-show', () => {
+    const meta = buildClassGroupMetaMap(groups);
+    const rows = [
+      {
+        id: 'absent-first',
+        student_id: 's1',
+        class_group_id: 'g1',
+        start_time: start,
+        end_time: end,
+        status: 'no_show',
+      },
+      {
+        id: 'attended',
+        student_id: 's2',
+        class_group_id: 'g1',
+        start_time: start,
+        end_time: end,
+        status: 'completed',
+      },
+      {
+        id: 'awaiting-confirmation',
+        student_id: 's3',
+        class_group_id: 'g1',
+        start_time: start,
+        end_time: end,
+        status: 'active',
+      },
+    ];
+
+    expect(mergeSchoolClassGroupSessions(rows, meta)[0].status).toBe('completed');
+    expect(mergeSchoolClassGroupSessions(rows, meta, { preferCancelledOccurrence: true })[0].status).toBe('completed');
+  });
+
+  it('shows legacy automatic missed-join rows as awaiting confirmation', () => {
+    const meta = buildClassGroupMetaMap(groups);
+    const rows = [{
+      id: 'legacy-auto-no-show',
+      student_id: 's1',
+      class_group_id: 'g1',
+      start_time: start,
+      end_time: end,
+      status: 'no_show',
+      no_show_reason: 'missed_join',
+      status_confirmed_at: null,
+    }];
+
+    expect(mergeSchoolClassGroupSessions(rows, meta)[0].status).toBe('active');
+    expect(mergeSchoolClassGroupSessions(rows, meta, { preferCancelledOccurrence: true })[0].status).toBe('active');
+  });
+
   it('lists all enrolled members for modal, with session when present', () => {
     const meta = buildClassGroupMetaMap(groups);
     const merged = mergeSchoolClassGroupSessions(

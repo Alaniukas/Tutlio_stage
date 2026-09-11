@@ -14,6 +14,7 @@ export default function PackagePaymentSuccess() {
 
   useEffect(() => {
     const sessionId = searchParams.get('session_id');
+    const stripeAccountId = searchParams.get('stripe_account');
     if (import.meta.env.DEV && searchParams.get('preview') === '1') {
       setSummary({
         availableLessons: 0,
@@ -33,7 +34,7 @@ export default function PackagePaymentSuccess() {
         const res = await fetch('/api/confirm-package-payment', {
           method: 'POST',
           headers: await authHeaders(),
-          body: JSON.stringify({ sessionId }),
+          body: JSON.stringify({ sessionId, stripeAccountId }),
         });
         const json = await res.json();
         if (!res.ok || !json?.success) {

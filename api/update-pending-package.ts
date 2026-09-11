@@ -13,6 +13,10 @@ import { endOfMonthIso } from './_lib/packageMonth.js';
 import { pendingPackageEditDenial, expireOpenCheckoutSession } from '../src/lib/pendingPackageEdit.js';
 import { sendPendingPackagePaymentEmail } from './_lib/sendPendingPackageEmail.js';
 import { waitUntil } from '@vercel/functions';
+import {
+  expireConnectCheckoutSession,
+  resolveTutorStripeAccount,
+} from './_lib/stripeDirectCharge.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -170,12 +174,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const appOrigin = publicOriginFromRequest(req);
     const requestOrigin = req.headers.origin ? String(req.headers.origin) : null;
     const sendEmailUrl = `${(requestOrigin || appOrigin).replace(/\/$/, '')}/api/send-email`;
+    const stripeAccountId = await resolveTutorStripeAccount(supabase, pkg.tutor_id, organizationId);
     const background = (async () => {
       try {
         if (pkg.payment_method !== 'manual' && checkoutSessionId && stripeSecret) {
           const stripe = new Stripe(stripeSecret, { apiVersion: '2023-10-16' as any });
           await expireOpenCheckoutSession(
-            (id) => stripe.checkout.sessions.expire(id),
+            (id) => expireConnectCheckoutSession(stripe, id, stripeAccountId),
             checkoutSessionId,
           );
         }

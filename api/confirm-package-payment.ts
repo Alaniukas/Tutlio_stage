@@ -7,6 +7,10 @@ import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedg
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { sendTrialReservationConfirmedNotifications } from './_lib/trialReservation.js';
 import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
+import {
+  resolveTutorStripeAccount,
+  retrieveConnectCheckoutSession,
+} from './_lib/stripeDirectCharge.js';
 
 function getStripe() {
   return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
@@ -27,13 +31,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // No JWT required: after Stripe redirect the browser often has not restored Supabase session yet
   // (race), and the payer may not have a Tutlio account. Trust Stripe session_id + secret key.
   try {
-    const { sessionId } = req.body as { sessionId?: string };
+    const { sessionId, stripeAccountId } = req.body as { sessionId?: string; stripeAccountId?: string | null };
     if (!sessionId) return res.status(400).json({ error: 'sessionId is required' });
+    if (stripeAccountId && !/^acct_/i.test(stripeAccountId)) {
+      return res.status(400).json({ error: 'Invalid Stripe account identifier' });
+    }
 
     const stripe = getStripe();
     const supabase = getSupabase();
 
-    const checkout = await stripe.checkout.sessions.retrieve(sessionId);
+    const checkout = await retrieveConnectCheckoutSession(stripe, sessionId, stripeAccountId);
     if (checkout.payment_status !== 'paid') {
       return res.status(400).json({ error: 'Payment not yet confirmed' });
     }
@@ -49,6 +56,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (packageFetchErr || !existingPackage) {
       return res.status(404).json({ error: 'Paketas nerastas', details: packageFetchErr?.message });
+    }
+
+    const expectedStripeAccountId = await resolveTutorStripeAccount(
+      supabase,
+      (existingPackage as any).tutor_id,
+      (existingPackage as any).pool_organization_id,
+    );
+    if (stripeAccountId && expectedStripeAccountId !== stripeAccountId) {
+      return res.status(400).json({ error: 'Checkout session does not belong to this payment account' });
+    }
+    if ((existingPackage as any).stripe_checkout_session_id
+      && (existingPackage as any).stripe_checkout_session_id !== sessionId) {
+      return res.status(400).json({ error: 'Checkout session does not belong to this package' });
     }
 
     // Idempotent: if already paid/active, don't re-update; still return success

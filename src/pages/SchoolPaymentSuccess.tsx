@@ -14,6 +14,7 @@ export default function SchoolPaymentSuccess() {
   /** Monthly extra-lessons invoice paid from the emailed link (no account). */
   const monthlyInvoiceId = params.get('monthly') || '';
   const sessionId = params.get('session_id') || '';
+  const stripeAccountId = params.get('stripe_account') || '';
 
   useEffect(() => {
     if (cancelled) {
@@ -43,8 +44,8 @@ export default function SchoolPaymentSuccess() {
           ? '/api/confirm-school-monthly-invoice-payment'
           : free ? '/api/confirm-school-installment-free' : '/api/confirm-school-installment-payment';
         const payload = monthlyInvoiceId
-          ? { invoiceId: monthlyInvoiceId, sessionId }
-          : free ? { installmentId } : { installmentId, sessionId };
+          ? { invoiceId: monthlyInvoiceId, sessionId, stripeAccountId }
+          : free ? { installmentId } : { installmentId, sessionId, stripeAccountId };
         const resp = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -66,7 +67,7 @@ export default function SchoolPaymentSuccess() {
       }
     })();
     return () => { mounted = false; };
-  }, [cancelled, success, free, installmentId, monthlyInvoiceId, sessionId]);
+  }, [cancelled, success, free, installmentId, monthlyInvoiceId, sessionId, stripeAccountId]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-emerald-50 flex items-center justify-center p-4">

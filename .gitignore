@@ -11,6 +11,8 @@ coverage/
 Tutlio-main-compare/
 .env*.local
 .gosign-keys/
+service-account*.json
+server-account*.json
 tmp/
 scripts/_*.mjs
 preview-*.html

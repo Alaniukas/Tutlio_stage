@@ -128,6 +128,7 @@ import {
   credentialsFromProvisionResponse,
   postMvProvisionFamilyAccounts,
   provisionEmailsSent,
+  studentAccountsFromCredentials,
   type MvProvisionCredentialsView,
 } from '@/lib/mvProvisionApi';
 import {
@@ -226,6 +227,35 @@ type AddStudentLessonPick = {
   lessonStartIso: string;
   lessonEndIso: string;
 };
+
+type MvAdditionalChildDraft = {
+  id: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  grade: string;
+  tutor_ids: string[];
+};
+
+type InsertedStudentRow = {
+  id: string;
+  tutor_id: string | null;
+  invite_code: string;
+};
+
+let mvAdditionalChildSequence = 0;
+
+function createMvAdditionalChildDraft(tutorIds: string[] = []): MvAdditionalChildDraft {
+  mvAdditionalChildSequence += 1;
+  return {
+    id: `mv-additional-child-${mvAdditionalChildSequence}`,
+    full_name: '',
+    email: '',
+    phone: '',
+    grade: '',
+    tutor_ids: [...tutorIds],
+  };
+}
 
 function lessonPickKey(item: AddStudentLessonPick): string {
   return availabilitySlotKey(item.pick);
@@ -449,6 +479,7 @@ export default function CompanyStudents() {
     invite_target: (isMoksloVaisiaiOrg(membership?.organizationId) ? 'provision' : 'student') as OrgStudentInviteTarget,
     payment_payer: isMoksloVaisiaiOrg(membership?.organizationId) ? 'parent' : 'self',
   });
+  const [mvAdditionalChildren, setMvAdditionalChildren] = useState<MvAdditionalChildDraft[]>([]);
   const parentFirstInvite = isMvOrg && !isSchoolView && newStudent.invite_target === 'parent';
   const provisionAccounts = isMvOrg && !isSchoolView && newStudent.invite_target === 'provision';
   const [provisionCredentialsOpen, setProvisionCredentialsOpen] = useState(false);
@@ -1943,6 +1974,36 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.provisionEmailsMustDiffer'), type: 'error' });
       return;
     }
+    if (provisionAccounts) {
+      const childEmails = [newStudent.email, ...mvAdditionalChildren.map((child) => child.email)]
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean);
+      if (new Set(childEmails).size !== childEmails.length) {
+        setToastMessage({ message: t('compStu.additionalChildEmailsMustDiffer'), type: 'error' });
+        return;
+      }
+      for (let index = 0; index < mvAdditionalChildren.length; index += 1) {
+        const child = mvAdditionalChildren[index]!;
+        if (!child.full_name.trim()) {
+          setToastMessage({
+            message: t('compStu.additionalChildNameRequired', { number: String(index + 2) }),
+            type: 'error',
+          });
+          return;
+        }
+        if (child.phone.trim() && !validateLocalizedPhone(child.phone, locale)) {
+          setToastMessage({ message: t('compStu.phoneFormat'), type: 'error' });
+          return;
+        }
+        if (
+          child.email.trim() &&
+          child.email.trim().toLowerCase() === newStudent.payer_email.trim().toLowerCase()
+        ) {
+          setToastMessage({ message: t('compStu.provisionEmailsMustDiffer'), type: 'error' });
+          return;
+        }
+      }
+    }
 
     for (const item of addStudentPickedLessons) {
       const windowStart = new Date(item.pick.startIso);
@@ -1978,20 +2039,30 @@ export default function CompanyStudents() {
       }
     }
 
-    if (effectiveOrgId && newStudent.email?.trim()) {
+    if (effectiveOrgId) {
       const orgTutors = await getOrgVisibleTutors(supabase, effectiveOrgId, 'id, email, full_name');
-      const conflict = findOrgTutorEmailConflict(newStudent.email, orgTutors);
-      if (conflict) {
-        setToastMessage({
-          message: t('compStu.emailMatchesOrgTutor', { name: conflict.tutorName }),
-          type: 'error',
-        });
-        return;
+      const studentEmails = provisionAccounts
+        ? [newStudent.email, ...mvAdditionalChildren.map((child) => child.email)]
+        : [newStudent.email];
+      for (const email of studentEmails) {
+        if (!email.trim()) continue;
+        const conflict = findOrgTutorEmailConflict(email, orgTutors);
+        if (conflict) {
+          setToastMessage({
+            message: t('compStu.emailMatchesOrgTutor', { name: conflict.tutorName }),
+            type: 'error',
+          });
+          return;
+        }
       }
     }
 
     setSaving(true);
-    const inserted: { id: string; tutor_id: string | null; invite_code: string }[] = [];
+    const inserted: InsertedStudentRow[] = [];
+    const additionalInsertedChildren: Array<{
+      child: MvAdditionalChildDraft;
+      rows: InsertedStudentRow[];
+    }> = [];
     const primaryParent = {
       name: newStudent.payer_name.trim(),
       email: newStudent.payer_email.trim(),
@@ -2064,6 +2135,45 @@ export default function CompanyStudents() {
         return;
       }
       inserted.push(row as any);
+    }
+
+    if (provisionAccounts) {
+      for (const child of mvAdditionalChildren) {
+        const rows: InsertedStudentRow[] = [];
+        const childTutorIds = child.tutor_ids.length > 0 ? child.tutor_ids : [null];
+        for (const tutorId of childTutorIds) {
+          const inviteCode = generateInviteCode();
+          const { data: row, error } = await supabase
+            .from('students')
+            .insert({
+              ...(tutorId ? { tutor_id: tutorId } : {}),
+              full_name: child.full_name.trim(),
+              email: child.email.trim() || null,
+              phone: child.phone.trim() || null,
+              grade: (normalizeStudentGrade1to12(child.grade) ?? child.grade) || null,
+              school_year: null,
+              enrollment_status: 'active',
+              municipality: null,
+              payer_name: primaryParent.name || null,
+              payer_email: primaryParent.email || null,
+              payer_phone: primaryParent.phone || null,
+              contact_parent: 'primary',
+              invite_code: inviteCode,
+              payment_payer: 'parent',
+              ...(effectiveOrgId ? { organization_id: effectiveOrgId } : {}),
+            })
+            .select('id, tutor_id, invite_code')
+            .single();
+          if (error || !row) {
+            console.error('Error adding additional child:', error);
+            setToastMessage({ message: t('common.error'), type: 'error' });
+            setSaving(false);
+            return;
+          }
+          rows.push(row as InsertedStudentRow);
+        }
+        additionalInsertedChildren.push({ child, rows });
+      }
     }
 
     let lessonCreateFailed = false;
@@ -2225,39 +2335,70 @@ export default function CompanyStudents() {
     }
 
     let provisionOk = true;
-    let provisionPayload: typeof provisionCredentials = null;
+    let provisionPayload: MvProvisionCredentialsView | null = null;
     if (
       shouldProvisionAccountsOnCreate(newStudent.invite_target) &&
       !isSchoolView &&
       inserted.length > 0
     ) {
-      const row = inserted[0]!;
       try {
-        const provisionResult = await postMvProvisionFamilyAccounts(
+        const childrenToProvision = [
           {
-            studentId: row.id,
-            studentIds: inserted.map((item) => item.id),
-            parentName: newStudent.payer_name.trim(),
-            parentEmail: newStudent.payer_email.trim(),
-            studentFullName: newStudent.full_name.trim(),
-            studentEmail: newStudent.email.trim(),
-            locale: orgPreferredLocale || locale,
-            scope: 'both',
-            emailDelivery: mvCreateProvisionDelivery,
-            parentNotifyEmail: mvCreateParentNotifyEmail.trim() || undefined,
-            studentNotifyEmail: mvCreateStudentNotifyEmail.trim() || undefined,
-            bothNotifyEmail: mvCreateBothNotifyEmail.trim() || undefined,
+            fullName: newStudent.full_name.trim(),
+            email: newStudent.email.trim(),
+            rows: inserted,
           },
-          authHeaders,
-        );
-        if (!provisionResult.ok) {
-          provisionOk = false;
-          setToastMessage({
-            message: provisionResult.json.error || t('compStu.provisionFailed'),
-            type: 'error',
-          });
-        } else {
-          provisionPayload = credentialsFromProvisionResponse(provisionResult.json);
+          ...additionalInsertedChildren.map(({ child, rows }) => ({
+            fullName: child.full_name.trim(),
+            email: child.email.trim(),
+            rows,
+          })),
+        ];
+        for (const child of childrenToProvision) {
+          const row = child.rows[0]!;
+          const provisionResult = await postMvProvisionFamilyAccounts(
+            {
+              studentId: row.id,
+              studentIds: child.rows.map((item) => item.id),
+              parentName: newStudent.payer_name.trim(),
+              parentEmail: newStudent.payer_email.trim(),
+              studentFullName: child.fullName,
+              studentEmail: child.email,
+              locale: orgPreferredLocale || locale,
+              scope: 'both',
+              emailDelivery: mvCreateProvisionDelivery,
+              parentNotifyEmail: mvCreateParentNotifyEmail.trim() || undefined,
+              studentNotifyEmail:
+                mvAdditionalChildren.length === 0
+                  ? mvCreateStudentNotifyEmail.trim() || undefined
+                  : undefined,
+              bothNotifyEmail: mvCreateBothNotifyEmail.trim() || undefined,
+            },
+            authHeaders,
+          );
+          if (!provisionResult.ok) {
+            provisionOk = false;
+            setToastMessage({
+              message: provisionResult.json.error || t('compStu.provisionFailed'),
+              type: 'error',
+            });
+            break;
+          }
+          const credentials = credentialsFromProvisionResponse(provisionResult.json);
+          if (credentials) {
+            const students = [
+              ...studentAccountsFromCredentials(provisionPayload),
+              ...studentAccountsFromCredentials(credentials),
+            ].filter(
+              (account, index, all) =>
+                all.findIndex((candidate) => candidate.userId === account.userId) === index,
+            );
+            provisionPayload = {
+              parent: provisionPayload?.parent || credentials.parent,
+              student: students[0],
+              students,
+            };
+          }
         }
       } catch {
         provisionOk = false;
@@ -2270,17 +2411,31 @@ export default function CompanyStudents() {
       const { data: orgRow } = await supabase.from('organizations').select('features').eq('id', orgId).single();
       const feat = orgRow?.features as Record<string, unknown> | null;
       if (feat?.notify_tutors_on_student_assign) {
-        const contactPayload = pickStudentContactsForTutorEmail(newStudent, feat);
-        for (const row of inserted) {
-          if (!row.tutor_id) continue;
-          const { data: tutorProfile } = await supabase.from('profiles').select('email, full_name').eq('id', row.tutor_id).single();
-          if (tutorProfile?.email) {
-            void sendEmail({
-              type: 'tutor_student_assigned',
-              to: tutorProfile.email,
-              locale,
-              data: { tutorName: tutorProfile.full_name, studentName: newStudent.full_name, ...contactPayload, ...(orgId ? { organizationId: orgId } : {}) },
-            });
+        const createdChildren = [
+          { child: newStudent, rows: inserted },
+          ...additionalInsertedChildren,
+        ];
+        for (const { child, rows } of createdChildren) {
+          const contactPayload = pickStudentContactsForTutorEmail(
+            {
+              email: child.email,
+              phone: child.phone,
+              payer_email: newStudent.payer_email,
+              payer_phone: newStudent.payer_phone,
+            },
+            feat,
+          );
+          for (const row of rows) {
+            if (!row.tutor_id) continue;
+            const { data: tutorProfile } = await supabase.from('profiles').select('email, full_name').eq('id', row.tutor_id).single();
+            if (tutorProfile?.email) {
+              void sendEmail({
+                type: 'tutor_student_assigned',
+                to: tutorProfile.email,
+                locale,
+                data: { tutorName: tutorProfile.full_name, studentName: child.full_name, ...contactPayload, organizationId: orgId },
+              });
+            }
           }
         }
       }
@@ -2305,25 +2460,25 @@ export default function CompanyStudents() {
       provisionFlow && !provisionOk
         ? t('compStu.provisionFailed')
         : shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
-        ? t('compStu.emailSendFailed')
-        : lessonCreateFailed
-          ? t('compStu.studentAddedLessonFailed')
-          : inviteSkippedExisting
-            ? t('compStu.inviteSkippedAlreadyRegistered')
-            : provisionFlow && provisionOk
-              ? t('compStu.provisionSuccess')
+          ? t('compStu.emailSendFailed')
+          : lessonCreateFailed
+            ? t('compStu.studentAddedLessonFailed')
+            : inviteSkippedExisting
+              ? t('compStu.inviteSkippedAlreadyRegistered')
+              : provisionFlow && provisionOk
+              ? t(mvAdditionalChildren.length > 0 ? 'compStu.provisionFamilySuccess' : 'compStu.provisionSuccess')
               : newStudent.invite_target === 'parent'
-              ? t('compStu.parentInvitedFirst')
-              : plannedSummary && plannedSummary.totalLessons > 0
-              ? plannedSummary.trialLessons > 0
-                ? t('compStu.studentAddedWithLessonsTrial', {
-                    total: plannedSummary.totalLessons,
-                    regular: plannedSummary.regularLessons,
-                  })
-                : t('compStu.studentAddedWithLessonsFull', {
-                    total: plannedSummary.totalLessons,
-                  })
-              : t('compStu.studentAdded');
+                ? t('compStu.parentInvitedFirst')
+                : plannedSummary && plannedSummary.totalLessons > 0
+                  ? plannedSummary.trialLessons > 0
+                    ? t('compStu.studentAddedWithLessonsTrial', {
+                        total: plannedSummary.totalLessons,
+                        regular: plannedSummary.regularLessons,
+                      })
+                    : t('compStu.studentAddedWithLessonsFull', {
+                        total: plannedSummary.totalLessons,
+                      })
+                  : t('compStu.studentAdded');
 
     if (!(provisionFlow && !provisionOk)) {
       setToastMessage({
@@ -2331,13 +2486,14 @@ export default function CompanyStudents() {
         type: toastType,
       });
     }
-    if (provisionFlow && provisionOk && provisionPayload) {
+    if (provisionFlow && provisionPayload) {
       setProvisionCredentials(provisionPayload);
       setProvisionCredentialsOpen(true);
     }
     setIsDialogOpen(false);
     setAddStudentFirstLessonIsTrial(false);
     setAddStudentPickedLessons([]);
+    setMvAdditionalChildren([]);
     setNewStudent({
       full_name: '',
       email: '',
@@ -2957,6 +3113,7 @@ export default function CompanyStudents() {
                   setIsDialogOpen(open);
                   if (!open) {
                     setAddStudentPickedLessons([]);
+                    setMvAdditionalChildren([]);
                   }
                 }}
               >
@@ -3147,6 +3304,11 @@ export default function CompanyStudents() {
 
                   {!parentFirstInvite && (
                   <>
+                  {provisionAccounts && mvAdditionalChildren.length > 0 && (
+                    <p className="text-sm font-semibold text-gray-800">
+                      {t('compStu.childNumber', { number: '1' })}
+                    </p>
+                  )}
                   <div className="space-y-2">
                     <Label>{t('compStu.fullNameRequired')}</Label>
                     <Input
@@ -3277,6 +3439,168 @@ export default function CompanyStudents() {
                     </div>
                   )}
                   </div>
+
+                  {provisionAccounts && (
+                    <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">
+                          {t('compStu.additionalChildrenTitle')}
+                        </p>
+                        <p className="mt-0.5 text-xs text-gray-500">
+                          {t('compStu.additionalChildrenHint')}
+                        </p>
+                      </div>
+                      {mvAdditionalChildren.map((child, index) => (
+                        <div key={child.id} className="space-y-3 rounded-xl border border-gray-200 bg-white p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-semibold text-gray-800">
+                              {t('compStu.childNumber', { number: String(index + 2) })}
+                            </p>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 rounded-lg px-2 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+                              onClick={() => {
+                                setMvAdditionalChildren((current) =>
+                                  current.filter((item) => item.id !== child.id),
+                                );
+                              }}
+                            >
+                              <Trash2 className="mr-1 h-3.5 w-3.5" />
+                              {t('compStu.removeBtn')}
+                            </Button>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>{t('compStu.fullNameRequired')}</Label>
+                            <Input
+                              value={child.full_name}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setMvAdditionalChildren((current) =>
+                                  current.map((item) =>
+                                    item.id === child.id ? { ...item, full_name: value } : item,
+                                  ),
+                                );
+                              }}
+                              placeholder={t('compStu.namePlaceholder')}
+                              className="rounded-xl"
+                              required
+                            />
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label>{t('compStu.emailLabel')}</Label>
+                              <Input
+                                type="email"
+                                value={child.email}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  setMvAdditionalChildren((current) =>
+                                    current.map((item) =>
+                                      item.id === child.id ? { ...item, email: value } : item,
+                                    ),
+                                  );
+                                }}
+                                placeholder="jonas@example.com"
+                                className="rounded-xl"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>{t('compStu.phoneLabel')}</Label>
+                              <Input
+                                value={child.phone}
+                                onChange={(e) => {
+                                  const value = formatLocalizedPhone(e.target.value, locale);
+                                  setMvAdditionalChildren((current) =>
+                                    current.map((item) =>
+                                      item.id === child.id ? { ...item, phone: value } : item,
+                                    ),
+                                  );
+                                }}
+                                placeholder={getLocalizedPhonePlaceholder(locale)}
+                                className="rounded-xl"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>{t('studentSettings.grade')}</Label>
+                              <Select
+                                value={proKlaseGradeSelectValue(child.grade)}
+                                onValueChange={(value) => {
+                                  setMvAdditionalChildren((current) =>
+                                    current.map((item) =>
+                                      item.id === child.id
+                                        ? { ...item, grade: value === 'unset' ? '' : value }
+                                        : item,
+                                    ),
+                                  );
+                                }}
+                              >
+                                <SelectTrigger className="rounded-xl">
+                                  <SelectValue placeholder={t('dynamicPricing.gradeUnset')} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="unset">{t('dynamicPricing.gradeUnset')}</SelectItem>
+                                  {Array.from({ length: 12 }, (_, gradeIndex) => `${gradeIndex + 1} klasė`).map((grade) => (
+                                    <SelectItem key={grade} value={grade}>{grade}</SelectItem>
+                                  ))}
+                                  <SelectItem value="Studentas">{t('lessonSet.gradeUniversity')}</SelectItem>
+                                  <SelectItem value="Kita">{t('onboard.gradeOther')}</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>{t('compStu.additionalChildTutors')}</Label>
+                              <div className={cn('rounded-xl border border-gray-200 p-2 space-y-1', ORG_TUTOR_FILTER_SCROLL_CLASS)}>
+                                {tutors.map((tutor) => {
+                                  const checked = child.tutor_ids.includes(tutor.id);
+                                  return (
+                                    <label key={tutor.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-xs hover:bg-gray-50">
+                                      <Checkbox
+                                        checked={checked}
+                                        onChange={(e) => {
+                                          const isChecked = e.target.checked;
+                                          setMvAdditionalChildren((current) =>
+                                            current.map((item) => {
+                                              if (item.id !== child.id) return item;
+                                              return {
+                                                ...item,
+                                                tutor_ids: isChecked
+                                                  ? [...item.tutor_ids, tutor.id]
+                                                  : item.tutor_ids.filter((id) => id !== tutor.id),
+                                              };
+                                            }),
+                                          );
+                                        }}
+                                      />
+                                      <span className="truncate">{tutor.full_name}</span>
+                                    </label>
+                                  );
+                                })}
+                                {tutors.length === 0 && (
+                                  <p className="px-2 py-1 text-[11px] text-gray-400">{t('compStu.noTutorsFound')}</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                        onClick={() => {
+                          setMvAdditionalChildren((current) => [
+                            ...current,
+                            createMvAdditionalChildDraft(newStudent.tutor_ids),
+                          ]);
+                        }}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        {t('compStu.addAnotherChild')}
+                      </Button>
+                    </div>
+                  )}
                   </>
                   )}
 
@@ -3314,7 +3638,10 @@ export default function CompanyStudents() {
                             size="sm"
                             variant={newStudent.invite_target === 'student' ? 'default' : 'outline'}
                             className="rounded-xl text-xs"
-                            onClick={() => setNewStudent({ ...newStudent, invite_target: 'student' })}
+                            onClick={() => {
+                              setMvAdditionalChildren([]);
+                              setNewStudent({ ...newStudent, invite_target: 'student' });
+                            }}
                           >
                             {t('compStu.inviteStudentOnly')}
                           </Button>
@@ -3323,7 +3650,10 @@ export default function CompanyStudents() {
                             size="sm"
                             variant={newStudent.invite_target === 'both' ? 'default' : 'outline'}
                             className="rounded-xl text-xs"
-                            onClick={() => setNewStudent({ ...newStudent, invite_target: 'both' })}
+                            onClick={() => {
+                              setMvAdditionalChildren([]);
+                              setNewStudent({ ...newStudent, invite_target: 'both' });
+                            }}
                           >
                             {t('compStu.inviteStudentAndParent')}
                           </Button>
@@ -3351,6 +3681,7 @@ export default function CompanyStudents() {
                                 className="rounded-xl text-xs"
                                 onClick={() => {
                                   setAddStudentPickedLessons([]);
+                                  setMvAdditionalChildren([]);
                                   setNewStudent({
                                     ...newStudent,
                                     invite_target: 'parent',
@@ -3408,16 +3739,22 @@ export default function CompanyStudents() {
                                     className="rounded-xl"
                                   />
                                 </div>
-                                <div className="space-y-2">
-                                  <Label>{t('compStu.provisionSendStudentTo')}</Label>
-                                  <Input
-                                    type="email"
-                                    value={mvCreateStudentNotifyEmail}
-                                    onChange={(e) => setMvCreateStudentNotifyEmail(e.target.value)}
-                                    placeholder={newStudent.email || t('compStu.provisionNotifyDefaultHint')}
-                                    className="rounded-xl"
-                                  />
-                                </div>
+                                {mvAdditionalChildren.length === 0 ? (
+                                  <div className="space-y-2">
+                                    <Label>{t('compStu.provisionSendStudentTo')}</Label>
+                                    <Input
+                                      type="email"
+                                      value={mvCreateStudentNotifyEmail}
+                                      onChange={(e) => setMvCreateStudentNotifyEmail(e.target.value)}
+                                      placeholder={newStudent.email || t('compStu.provisionNotifyDefaultHint')}
+                                      className="rounded-xl"
+                                    />
+                                  </div>
+                                ) : (
+                                  <p className="self-end rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+                                    {t('compStu.provisionChildrenDeliveryHint')}
+                                  </p>
+                                )}
                               </div>
                             ) : (
                               <div className="space-y-2">
@@ -6361,24 +6698,26 @@ export default function CompanyStudents() {
                     )}
                   </div>
                 )}
-                {provisionCredentials.student && (
-                  <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 space-y-2">
+                {studentAccountsFromCredentials(provisionCredentials).map((studentAccount, index, accounts) => (
+                  <div key={studentAccount.userId} className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 space-y-2">
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      {t('compStu.provisionStudentAccount')}
+                      {accounts.length > 1
+                        ? t('compStu.provisionStudentAccountNumber', { number: String(index + 1) })
+                        : t('compStu.provisionStudentAccount')}
                     </p>
-                    <p className="text-sm text-gray-700">{provisionCredentials.student.email}</p>
-                    {provisionCredentials.student.password ? (
-                      <p className="font-mono text-base font-semibold text-gray-900">{provisionCredentials.student.password}</p>
+                    <p className="text-sm text-gray-700">{studentAccount.email}</p>
+                    {studentAccount.password ? (
+                      <p className="font-mono text-base font-semibold text-gray-900">{studentAccount.password}</p>
                     ) : (
                       <p className="text-sm font-medium text-emerald-700">{t('compStu.provisionExistingLinked')}</p>
                     )}
-                    {provisionCredentials.student.emailSent && provisionCredentials.student.notifyEmail && (
+                    {studentAccount.emailSent && studentAccount.notifyEmail && (
                       <p className="text-[11px] text-gray-500">
-                        {t('compStu.provisionSentTo', { email: provisionCredentials.student.notifyEmail })}
+                        {t('compStu.provisionSentTo', { email: studentAccount.notifyEmail })}
                       </p>
                     )}
                   </div>
-                )}
+                ))}
               </div>
             )}
             <DialogFooter>
@@ -6397,13 +6736,16 @@ export default function CompanyStudents() {
                       '',
                     );
                   }
-                  if (provisionCredentials.student) {
+                  studentAccountsFromCredentials(provisionCredentials).forEach((studentAccount, index, accounts) => {
                     lines.push(
-                      t('compStu.provisionStudentAccount'),
-                      provisionCredentials.student.email,
-                      provisionCredentials.student.password || t('compStu.provisionExistingLinked'),
+                      accounts.length > 1
+                        ? t('compStu.provisionStudentAccountNumber', { number: String(index + 1) })
+                        : t('compStu.provisionStudentAccount'),
+                      studentAccount.email,
+                      studentAccount.password || t('compStu.provisionExistingLinked'),
+                      '',
                     );
-                  }
+                  });
                   void navigator.clipboard.writeText(lines.join('\n').trim());
                   setToastMessage({ message: t('compStu.provisionCopied'), type: 'success' });
                 }}

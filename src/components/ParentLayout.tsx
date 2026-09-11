@@ -9,6 +9,7 @@ import {
   BookOpen,
   Settings,
   ScrollText,
+  Video,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
@@ -29,7 +30,7 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
   const { t } = useTranslation();
   const location = useLocation();
   const chatUnreadTotal = useTotalChatUnread();
-  const { hasSchoolOrg, terminology } = useParentSchoolOrg();
+  const { hasSchoolOrg, lessonRecordingsEnabled, terminology } = useParentSchoolOrg();
   // School parents read "mokytojas" / "užsiėmimas" everywhere in the portal.
   useSchoolTerminology(terminology);
   const [activeChildId, setActiveChildId] = useState(() => getParentActiveChildId());
@@ -58,6 +59,14 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
           label: t('parent.sessionsTitle') || 'Pamokos',
           icon: BookOpen,
         },
+        ...(lessonRecordingsEnabled
+          ? [{
+              href: `/parent/recordings${childQs}`,
+              path: '/parent/recordings',
+              label: t('companyNav.recordings'),
+              icon: Video,
+            }]
+          : []),
         { href: '/parent/messages', path: '/parent/messages', label: t('parent.messages'), icon: MessageSquare, badge: 'chat' as const },
         ...(hasSchoolOrg
           ? [{ href: '/parent/contracts', path: '/parent/contracts', label: t('parent.contracts'), icon: ScrollText }]
@@ -67,7 +76,7 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
       ];
       return items;
     },
-    [t, hasSchoolOrg, activeChildId],
+    [t, hasSchoolOrg, lessonRecordingsEnabled, activeChildId],
   );
 
   return (
@@ -90,7 +99,7 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
         className="fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-sm border-t border-gray-100 z-50 shadow-[0_-4px_20px_-8px_rgba(0,0,0,0.08)] max-w-[100vw] overflow-x-hidden"
         style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
       >
-        <div className={`grid gap-0 px-0.5 sm:px-1 pt-2 pb-1 ${hasSchoolOrg ? 'grid-cols-7' : 'grid-cols-6'}`}>
+        <div className={`grid gap-0 px-0.5 sm:px-1 pt-2 pb-1 ${navItems.length >= 8 ? 'grid-cols-8' : hasSchoolOrg ? 'grid-cols-7' : 'grid-cols-6'}`}>
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = location.pathname === item.path;

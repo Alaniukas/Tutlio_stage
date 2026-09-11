@@ -29,6 +29,7 @@ import { deriveAttendance, isAttendanceFlagged } from '@/lib/attendance';
 import { buildNoShowSessionPatch, defaultNoShowWhenForNow } from '@/lib/noShowWhen';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
+import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 
 interface StatCard {
   label: string;
@@ -61,6 +62,7 @@ interface OrgSessionRow {
   meeting_link?: string | null;
   tutor_joined_at?: string | null;
   student_joined_at?: string | null;
+  status_confirmed_at?: string | null;
   tutor_comment?: string | null;
   student?: { full_name: string } | null;
 }
@@ -81,10 +83,14 @@ interface RecentOrgPayment {
 const DASH_CACHE_KEY = 'company_dashboard';
 
 function attendanceAttentionSummary(
-  session: Pick<OrgSessionRow, 'start_time' | 'end_time' | 'status' | 'tutor_joined_at' | 'student_joined_at' | 'meeting_link'>,
+  session: Pick<OrgSessionRow, 'start_time' | 'end_time' | 'status' | 'tutor_joined_at' | 'student_joined_at' | 'status_confirmed_at' | 'meeting_link'>,
   t: (key: string, params?: Record<string, string>) => string,
+  manualConfirmationRequired = false,
 ): string {
   const info = deriveAttendance(session);
+  if (manualConfirmationRequired && !session.status_confirmed_at && info.flagged) {
+    return t('att.unconfirmed');
+  }
   const time = (iso: string | null | undefined) =>
     iso ? new Date(iso).toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' }) : '';
   const issues: string[] = [];
@@ -289,7 +295,7 @@ export default function CompanyDashboard() {
 
       const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, meeting_link, tutor_joined_at, student_joined_at, tutor_comment, student:students(full_name)')
+      .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, tutor_comment, student:students(full_name)')
       .in('tutor_id', tutorIds)
       .order('start_time', { ascending: true })
       .limit(800);
@@ -635,19 +641,30 @@ export default function CompanyDashboard() {
 
   const visibleCompanyAttention = attentionList.filter((s) => !dismissedCompanyAttentionIds.has(s.id));
   const visibleCompanyPayments = recentPayments.filter((p) => !dismissedCompanyPaymentIds.has(p.id));
+  const isProKlaseAdmin = isProKlaseOrg(orgIdForDismiss);
 
   const handleConfirmNoShow = async () => {
     if (!noShowTarget) return;
     const sessionId = noShowTarget.id;
     setMarkingNoShow(true);
-    const when = defaultNoShowWhenForNow(
-      new Date(noShowTarget.start_time),
-      new Date(noShowTarget.end_time),
-    );
-    const patch = buildNoShowSessionPatch(when, noShowTarget.tutor_comment);
-    const { error } = await supabase.from('sessions').update(patch).eq('id', sessionId);
-    setMarkingNoShow(false);
-    if (!error) {
+    try {
+      if (isProKlaseAdmin) {
+        await confirmSessionOutcome({
+          sessionId,
+          currentStatus: noShowTarget.status,
+          status: 'no_show',
+          startTime: noShowTarget.start_time,
+          endTime: noShowTarget.end_time,
+        });
+      } else {
+        const when = defaultNoShowWhenForNow(
+          new Date(noShowTarget.start_time),
+          new Date(noShowTarget.end_time),
+        );
+        const patch = buildNoShowSessionPatch(when, noShowTarget.tutor_comment);
+        const { error } = await supabase.from('sessions').update(patch).eq('id', sessionId);
+        if (error) throw error;
+      }
       setNoShowTarget(null);
       void loadData();
       void (async () => {
@@ -657,6 +674,29 @@ export default function CompanyDashboard() {
           body: JSON.stringify({ sessionId }),
         });
       })().catch(() => {});
+    } catch (error) {
+      alert(t('cal.confirmStatusError', { msg: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setMarkingNoShow(false);
+    }
+  };
+
+  const handleConfirmAttended = async (session: OrgAttentionRow) => {
+    if (!isProKlaseAdmin) return;
+    setMarkingNoShow(true);
+    try {
+      await confirmSessionOutcome({
+        sessionId: session.id,
+        currentStatus: session.status,
+        status: 'completed',
+        startTime: session.start_time,
+        endTime: session.end_time,
+      });
+      void loadData();
+    } catch (error) {
+      alert(t('cal.confirmStatusError', { msg: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setMarkingNoShow(false);
     }
   };
 
@@ -798,7 +838,13 @@ export default function CompanyDashboard() {
                       >
                         <div
                           className={`w-1 self-stretch min-h-[2.75rem] rounded-full flex-shrink-0 ${
-                            hasAttendanceReason ? 'bg-rose-400' : hasTrialNoPackageReason ? 'bg-red-500' : isPendingConfirm ? 'bg-amber-400' : 'bg-red-400'
+                            hasAttendanceReason
+                              ? (isProKlaseAdmin ? 'bg-amber-400' : 'bg-rose-400')
+                              : hasTrialNoPackageReason
+                                ? 'bg-red-500'
+                                : isPendingConfirm
+                                  ? 'bg-amber-400'
+                                  : 'bg-red-400'
                           }`}
                         />
                         <div
@@ -841,8 +887,8 @@ export default function CompanyDashboard() {
                             {hasAttendanceReason && (
                               <>
                                 {' · '}
-                                <span className="text-rose-600 font-medium">
-                                  {attendanceAttentionSummary(s, t)}
+                                <span className={isProKlaseAdmin ? 'text-amber-700 font-medium' : 'text-rose-600 font-medium'}>
+                                  {attendanceAttentionSummary(s, t, isProKlaseAdmin)}
                                 </span>
                               </>
                             )}
@@ -864,14 +910,31 @@ export default function CompanyDashboard() {
                             )}
                           </p>
                         </div>
-                        {hasAttendanceReason && s.status !== 'no_show' && (
+                        {hasAttendanceReason
+                          && isProKlaseAdmin
+                          && end.getTime() <= Date.now() && (
                           <button
                             type="button"
+                            disabled={markingNoShow}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleConfirmAttended(s);
+                            }}
+                            className="shrink-0 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 px-2 py-1 rounded-lg hover:bg-emerald-50 transition-colors disabled:opacity-50"
+                          >
+                            {t('compSess.markAttended')}
+                          </button>
+                        )}
+                        {hasAttendanceReason && s.status !== 'no_show'
+                          && (!isProKlaseAdmin || end.getTime() <= Date.now()) && (
+                          <button
+                            type="button"
+                            disabled={markingNoShow}
                             onClick={(e) => {
                               e.stopPropagation();
                               setNoShowTarget(s);
                             }}
-                            className="shrink-0 text-[11px] font-semibold text-rose-700 hover:text-rose-800 px-2 py-1 rounded-lg hover:bg-rose-50 transition-colors"
+                            className="shrink-0 text-[11px] font-semibold text-rose-700 hover:text-rose-800 px-2 py-1 rounded-lg hover:bg-rose-50 transition-colors disabled:opacity-50"
                           >
                             {t('companyDash.confirmNoShowShort')}
                           </button>

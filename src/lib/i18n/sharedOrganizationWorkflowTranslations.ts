@@ -4,6 +4,9 @@
  * can override individual strings without blocking a release.
  */
 export const sharedOrganizationWorkflowTranslations: Record<string, string> = {
+  'att.confirmedManually': 'Attendance confirmed',
+  'att.unconfirmed': 'Attendance not confirmed',
+  'compSess.markAttended': 'Student attended',
   'companyNav.team': 'Team & access',
   'companyNav.sectionWork': 'Daily work',
   'companyNav.sectionManage': 'Management',

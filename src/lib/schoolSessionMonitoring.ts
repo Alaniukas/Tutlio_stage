@@ -1,3 +1,5 @@
+import { isUnconfirmedAutomaticNoShow } from './schoolJoinNoShow';
+
 type Row = {
   id?: string;
   class_group_id?: string | null;
@@ -74,8 +76,13 @@ export function schoolMeetingOccurrences<T extends SchoolMeetingRow>(rows: T[]):
   });
 
   return [...groups].map(([key, group]) => {
+    const effectiveGroup = group.map((item) => (
+      isUnconfirmedAutomaticNoShow(item)
+        ? ({ ...item, status: 'active' } as T)
+        : item
+    ));
     const representative = ['completed', 'active', 'no_show', 'cancelled']
-      .map(status => group.find(item => item.status === status)).find(Boolean) || group[0];
+      .map(status => effectiveGroup.find(item => item.status === status)).find(Boolean) || effectiveGroup[0];
     const row = representative.status !== 'cancelled'
       ? representative
       : (() => {
@@ -109,7 +116,7 @@ export function schoolStudentAttendance(rows: Row[], now: Date = new Date()): Sc
     if (!row.student_id) continue;
     const student = students.get(row.student_id) || { id: row.student_id, name: row.student_name || '–', joined: 0, noShow: 0, cancelled: 0, unconfirmed: 0 };
     if (row.status === 'cancelled') student.cancelled++;
-    else if (row.status === 'no_show') student.noShow++;
+    else if (row.status === 'no_show' && !isUnconfirmedAutomaticNoShow(row)) student.noShow++;
     else if (row.student_joined_at || (row.status === 'completed' && row.status_confirmed_at)) student.joined++;
     else {
       const attendanceCutoff = Date.parse(row.end_time || row.start_time || '');

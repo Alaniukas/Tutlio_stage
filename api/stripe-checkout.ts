@@ -19,8 +19,7 @@ import {
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasAnyOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
-
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
+import { directChargeOptions } from './_lib/stripeDirectCharge.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -112,7 +111,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         // 2. Determine which Stripe account to charge (org or individual tutor).
-        /** School-type orgs: payer pays lesson price exactly; fees absorbed via application_fee on Connect. */
+        /** School-type orgs use their 1% Tutlio fee profile. */
         let useSchoolOrgAbsorbedFees = false;
         let stripeAccountId: string | null = null;
         let ownerName = tutor?.full_name || 'Korepetitorius';
@@ -188,7 +187,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ? `Vėlyvo atšaukimo bauda. Paslaugos teikėjas: ${ownerName}`
             : `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}${creditNoteStr}`;
 
-        // 5. Checkout — school org Connect: single line item + application_fee; else legacy two-line payer gross-up.
+        // 5. Checkout directly on the connected account; Tutlio collects an application fee.
         let checkoutSession;
         if (useSchoolOrgAbsorbedFees) {
             const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
@@ -201,6 +200,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
+                customer_creation: 'always',
                 payment_method_types: ['card'],
                 line_items: [
                     {
@@ -217,9 +217,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 ],
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
-                    transfer_data: {
-                        destination: stripeAccountId as string,
-                    },
                     metadata: {
                         tutlio_session_id: sessionId,
                         is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
@@ -233,13 +230,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 },
                 success_url: `${appOrigin}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${appOrigin}/student/sessions`,
-            });
+            }, directChargeOptions(stripeAccountId));
         } else {
             const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
-            const transferToConnectedCents = baseCents;
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
+                customer_creation: 'always',
                 payment_method_types: ['card'],
                 line_items: [
                     {
@@ -266,10 +263,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     },
                 ],
                 payment_intent_data: {
-                    transfer_data: {
-                        destination: stripeAccountId,
-                        amount: transferToConnectedCents,
-                    },
+                    application_fee_amount: feesCents,
                     metadata: {
                         tutlio_session_id: sessionId,
                         is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
@@ -282,7 +276,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 },
                 success_url: `${appOrigin}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${appOrigin}/student/sessions`,
-            });
+            }, directChargeOptions(stripeAccountId));
         }
 
         // 6. Save the Stripe session ID on the lesson

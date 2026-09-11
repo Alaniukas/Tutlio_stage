@@ -74,7 +74,7 @@ describe('Hungarian tutor and business localization', () => {
       expect(hu[key]).toContain('országhívóval');
       expect(hu[key]).not.toContain('+370');
     }
-    expect(hu['pricing.studentFeeNote']).toContain('3,5% + €0,25');
+    expect(hu['pricing.studentFeeNote']).toContain('2% platformdíjat');
   });
 
   it('loads Hungarian through browser, email, SSR, support and platform overrides', () => {

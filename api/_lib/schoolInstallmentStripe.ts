@@ -1,5 +1,6 @@
 /**
- * School org Connect charges: payer pays list amount; Tutlio 1%, Stripe estimate, rest to school.
+ * School direct charges: payer pays list amount + Tutlio 1%; Stripe processing
+ * fees are deducted from the connected school's balance.
  */
 import type { TutlioMarket } from './market.js';
 import {

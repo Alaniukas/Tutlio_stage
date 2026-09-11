@@ -9,6 +9,10 @@ import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
 import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import {
+  resolveTutorStripeAccount,
+  retrieveConnectCheckoutSession,
+} from './_lib/stripeDirectCharge.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -25,12 +29,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const { checkoutSessionId, billingBatchId: billingBatchIdFromBody, manualConfirm } = req.body as {
+    const { checkoutSessionId, billingBatchId: billingBatchIdFromBody, stripeAccountId, manualConfirm } = req.body as {
       checkoutSessionId?: string;
       billingBatchId?: string;
+      stripeAccountId?: string | null;
       /** Tutor marks monthly batch paid off-platform (Sąskaitos); requires batch.tutor_id === auth user */
       manualConfirm?: boolean;
     };
+
+    if (stripeAccountId && !/^acct_/i.test(stripeAccountId)) {
+      return res.status(400).json({ error: 'Invalid Stripe account identifier' });
+    }
 
     let billingBatchId: string | undefined = billingBatchIdFromBody;
 
@@ -88,7 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let stripeCheckout: Stripe.Checkout.Session | null = null;
     if (!manualConfirm && checkoutSessionId) {
       try {
-        const checkoutSession = await stripe.checkout.sessions.retrieve(checkoutSessionId);
+        const checkoutSession = await retrieveConnectCheckoutSession(stripe, checkoutSessionId, stripeAccountId);
 
         // Only proceed when Stripe says it is paid
         console.log('[confirm-monthly-invoice-payment] checkoutSession:', {
@@ -117,6 +126,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (!billingBatchId) return res.status(400).json({ error: 'Missing billingBatchId' });
+
+    if (!manualConfirm && stripeAccountId) {
+      const { data: scopeBatch } = await supabase
+        .from('billing_batches')
+        .select('tutor_id')
+        .eq('id', billingBatchId)
+        .maybeSingle();
+      const expectedStripeAccountId = await resolveTutorStripeAccount(
+        supabase,
+        scopeBatch?.tutor_id,
+      );
+      if (!expectedStripeAccountId || expectedStripeAccountId !== stripeAccountId) {
+        return res.status(400).json({ error: 'Checkout session does not belong to this payment account' });
+      }
+    }
 
     // 2) Idempotently update billing batch: only when transitioning false -> true
     console.log('[confirm-monthly-invoice-payment] Attempting to update billing batch:', billingBatchId);

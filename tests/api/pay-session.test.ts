@@ -3,10 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Mirrors the non-school fee model in api/pay-session.ts so we can assert the
 // exact Stripe `amount_total` (in cents) the endpoint expects for a given price.
 const PLATFORM_FEE_PERCENT = 0.02;
-const STRIPE_FEE_PERCENT = 0.015;
-const STRIPE_FEE_FIXED_EUR = 0.25;
 function expectedTotalCents(priceEur: number): number {
-  const total = (priceEur + priceEur * PLATFORM_FEE_PERCENT + STRIPE_FEE_FIXED_EUR) / (1 - STRIPE_FEE_PERCENT);
+  const total = priceEur + priceEur * PLATFORM_FEE_PERCENT;
   return Math.round(total * 100);
 }
 
@@ -130,13 +128,16 @@ describe('GET /api/pay-session', () => {
     await handler(mockReq('GET', 'sess-1') as any, res as any);
 
     const result = (res as any).getResult();
-    expect(stripeRetrieve).toHaveBeenCalledWith('cs_old');
-    expect(stripeExpire).toHaveBeenCalledWith('cs_old');
+    expect(stripeRetrieve).toHaveBeenCalledWith('cs_old', { stripeAccount: 'acct_individual' });
+    expect(stripeExpire).toHaveBeenCalledWith('cs_old', { stripeAccount: 'acct_individual' });
     expect(stripeCreate).toHaveBeenCalledTimes(1);
 
     // The fresh checkout must charge the up-to-date €50 amount.
     const createArgs = stripeCreate.mock.calls[0][0];
     expect(createArgs.line_items[0].price_data.unit_amount).toBe(Math.round(50 * 100));
+    expect(createArgs.payment_intent_data.application_fee_amount).toBe(100);
+    expect(createArgs.payment_intent_data.transfer_data).toBeUndefined();
+    expect(stripeCreate.mock.calls[0][1]).toEqual({ stripeAccount: 'acct_individual' });
 
     expect(result.redirectStatus).toBe(303);
     expect(result.redirectedTo).toBe('https://checkout.stripe.test/cs_new');

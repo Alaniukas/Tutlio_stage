@@ -48,6 +48,8 @@ type Payload = {
   sessions: HomeworkSession[];
 };
 
+type HomeworkSection = 'past' | 'upcoming';
+
 /** School-only page, Lithuanian copy; base wording is "pamoka", the org flags swap it to "užsiėmimas". */
 const COPY = {
   title: 'Namų darbai ir pamokų medžiaga',
@@ -101,6 +103,7 @@ export default function SchoolHomework() {
   const [loading, setLoading] = useState(true);
   const [busySession, setBusySession] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [section, setSection] = useState<HomeworkSection>('past');
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const now = useJoinClock();
 
@@ -153,6 +156,12 @@ export default function SchoolHomework() {
       past: rows.filter((s) => Date.parse(s.end || s.start) < nowMs).reverse(),
     };
   }, [payload, now]);
+  const visibleSection: HomeworkSection = section === 'past' && past.length === 0
+    ? 'upcoming'
+    : section === 'upcoming' && upcoming.length === 0
+      ? 'past'
+      : section;
+  const visibleSessions = visibleSection === 'past' ? past : upcoming;
 
   async function uploadFor(session: HomeworkSession, e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -352,16 +361,44 @@ export default function SchoolHomework() {
           <p className="text-sm text-gray-500">{tx('none')}</p>
         ) : (
           <>
-            <section className="space-y-3">
-              <h2 className="text-base font-bold text-gray-800">{tx('upcoming')}</h2>
-              {upcoming.length === 0 ? <p className="text-sm text-gray-400">—</p> : upcoming.map((s) => renderSession(s, true))}
+            <div
+              role="tablist"
+              aria-label={tx('title')}
+              className="grid grid-cols-2 gap-2 rounded-2xl border border-gray-100 bg-white p-1.5 shadow-sm"
+            >
+              {(['past', 'upcoming'] as const).map((key) => {
+                const count = key === 'past' ? past.length : upcoming.length;
+                const selected = visibleSection === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    id={`homework-${key}-tab`}
+                    aria-controls={`homework-${key}-panel`}
+                    aria-selected={selected}
+                    disabled={count === 0}
+                    onClick={() => setSection(key)}
+                    className={`rounded-xl px-3 py-2.5 text-sm font-bold transition-colors ${
+                      selected
+                        ? 'bg-violet-600 text-white shadow-sm'
+                        : 'text-gray-600 hover:bg-violet-50 disabled:cursor-not-allowed disabled:text-gray-300'
+                    }`}
+                  >
+                    {tx(key)} <span className="ml-1 opacity-75">({count})</span>
+                  </button>
+                );
+              })}
+            </div>
+            <section
+              role="tabpanel"
+              id={`homework-${visibleSection}-panel`}
+              aria-labelledby={`homework-${visibleSection}-tab`}
+              className="space-y-3"
+            >
+              <h2 className="text-base font-bold text-gray-800">{tx(visibleSection)}</h2>
+              {visibleSessions.map((s) => renderSession(s, visibleSection === 'upcoming'))}
             </section>
-            {past.length > 0 && (
-              <section className="space-y-3">
-                <h2 className="text-base font-bold text-gray-800">{tx('past')}</h2>
-                {past.map((s) => renderSession(s, false))}
-              </section>
-            )}
           </>
         )}
       </div>

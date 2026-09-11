@@ -9,11 +9,12 @@ const CACHE_KEY = 'parent_school_org';
 
 export type ParentSchoolOrgState = {
   hasSchoolOrg: boolean;
+  lessonRecordingsEnabled: boolean;
   /** Union of the school orgs' wording flags; `null` while unresolved or when no school org. */
   terminology: SchoolTerminology | null;
 };
 
-const EMPTY: ParentSchoolOrgState = { hasSchoolOrg: false, terminology: null };
+const EMPTY: ParentSchoolOrgState = { hasSchoolOrg: false, lessonRecordingsEnabled: false, terminology: null };
 
 type OrgRow = { id: string; entity_type: string | null; features: Record<string, unknown> | null };
 
@@ -77,7 +78,11 @@ export function useParentSchoolOrg(): ParentSchoolOrgState {
           (acc, mode) => ({ staff: acc.staff || mode.staff, activity: acc.activity || mode.activity }),
           { staff: false, activity: false },
         );
-      finish({ hasSchoolOrg: true, terminology });
+      finish({
+        hasSchoolOrg: true,
+        lessonRecordingsEnabled: schools.some((school) => school.features?.school_lesson_recordings === true),
+        terminology,
+      });
     })();
     return () => {
       cancelled = true;

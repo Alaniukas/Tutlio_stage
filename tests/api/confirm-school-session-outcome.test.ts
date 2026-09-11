@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const state = vi.hoisted(() => ({ userId: 'admin', admin: null as any, session: null as any, entityType: 'school', writes: [] as any[], conflict: false, emptyRepresentation: false,
+const state = vi.hoisted(() => ({ userId: 'admin', admin: null as any, session: null as any, tutorOrganizationId: 'org', entityType: 'school', writes: [] as any[], conflict: false, emptyRepresentation: false,
   move: vi.fn(), refund: vi.fn(), clearWaitlist: vi.fn(), sync: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
   auth: { getUser: async () => ({ data: { user: state.userId ? { id: state.userId } : null }, error: null }) },
@@ -13,7 +13,7 @@ vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
           state.writes.push(patch); Object.assign(state.session, patch);
           return { data: state.emptyRepresentation ? null : { id: state.session.id }, error: null };
         }
-        return { data: table === 'sessions' ? { ...state.session } : table === 'profiles' ? { organization_id: 'org' } : { entity_type: state.entityType }, error: null };
+        return { data: table === 'sessions' ? { ...state.session } : table === 'profiles' ? { organization_id: state.tutorOrganizationId } : { entity_type: state.entityType }, error: null };
       },
     };
     return query;
@@ -23,6 +23,7 @@ vi.mock('../../api/_lib/orgAdminAccess.js', () => ({ getOrgAdminAccessByUserId: 
 vi.mock('../../api/_lib/google-calendar.js', () => ({ syncSessionToGoogle: state.sync }));
 vi.mock('../../api/_lib/sessionStatusConfirmation.js', () => ({ movePackageCountersToCompleted: state.move, returnPackageCounterToAvailable: state.refund, deleteSessionWaitlists: state.clearWaitlist }));
 import handler from '../../api/confirm-session-status';
+import { PRO_KLASE_ORG_ID } from '../../api/_lib/marketMoney';
 
 async function run(body: Record<string, unknown> = { confirmExisting: true }) {
   const response: any = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
@@ -33,6 +34,7 @@ beforeEach(() => {
   process.env.VITE_SUPABASE_URL = 'https://example.supabase.co'; process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-key';
   state.userId = 'admin'; state.admin = { organizationId: 'org', role: 'admin', permissions: { 'sessions.edit': true } };
   state.session = { id: 'session', tutor_id: 'teacher', status: 'completed', start_time: '2020-01-01T10:00:00Z', end_time: '2020-01-01T11:00:00Z', status_confirmed_at: null };
+  state.tutorOrganizationId = 'org';
   state.entityType = 'school'; state.writes = []; state.conflict = false; state.emptyRepresentation = false;
   state.move.mockClear(); state.refund.mockClear(); state.clearWaitlist.mockClear(); state.sync.mockClear();
 });
@@ -60,13 +62,11 @@ describe('explicit school historical outcome confirmation', () => {
     state.session.status_confirmed_at = null; state.entityType = 'company'; state.writes = [];
     expect((await run()).status).toHaveBeenCalledWith(409); expect(state.writes).toHaveLength(0);
   });
-  it('rejects future or invalid end times and status rewrites', async () => {
+  it('rejects future or invalid end times', async () => {
     for (const end_time of ['2999-01-01T11:00:00Z', null, 'invalid']) {
       state.session.end_time = end_time;
       expect((await run()).status).toHaveBeenCalledWith(409);
     }
-    state.session.end_time = '2020-01-01T11:00:00Z';
-    expect((await run({ confirmExisting: true, status: 'no_show' })).status).toHaveBeenCalledWith(409);
     expect(state.writes).toHaveLength(0);
   });
   it('preserves the first attesting actor and timestamp on repeat confirmation', async () => {
@@ -88,5 +88,77 @@ describe('explicit school historical outcome confirmation', () => {
     state.emptyRepresentation = true; state.session.status = 'active';
     expect((await run({})).status).toHaveBeenCalledWith(200);
     expect(state.move).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets a school admin correct an automatic no-show to attended', async () => {
+    state.session.status = 'no_show';
+    state.session.status_confirmed_at = null;
+    state.session.tutor_comment = '[Neatvykimas] Mokinys neprisijungė.';
+    expect((await run({ correctExisting: true })).status).toHaveBeenCalledWith(200);
+    expect(state.writes[0]).toMatchObject({
+      status: 'completed',
+      no_show_when: null,
+      no_show_reason: null,
+      status_confirmed_by: 'admin',
+    });
+    expect(state.move).toHaveBeenCalledTimes(1);
+    expect(state.clearWaitlist).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets the assigned school teacher correct a confirmed outcome', async () => {
+    state.userId = 'teacher';
+    state.admin = null;
+    state.session.status = 'no_show';
+    state.session.status_confirmed_at = '2020-01-01T12:00:00Z';
+    expect((await run({ correctExisting: true })).status).toHaveBeenCalledWith(200);
+    expect(state.writes[0]).toMatchObject({
+      status: 'completed',
+      status_confirmed_by: 'teacher',
+    });
+    expect(state.move).not.toHaveBeenCalled();
+  });
+
+  it('lets a Pro Klase admin confirm an older completed lesson', async () => {
+    state.tutorOrganizationId = PRO_KLASE_ORG_ID;
+    state.admin = { organizationId: PRO_KLASE_ORG_ID, role: 'admin', permissions: { 'sessions.edit': true } };
+    state.entityType = 'company';
+    expect((await run()).status).toHaveBeenCalledWith(200);
+    expect(state.writes).toEqual([{ status: 'completed', status_confirmed_at: expect.any(String), status_confirmed_by: 'admin' }]);
+    expect(state.move).not.toHaveBeenCalled();
+  });
+
+  it('lets a Pro Klase admin correct no-show to attended without consuming the package twice', async () => {
+    state.tutorOrganizationId = PRO_KLASE_ORG_ID;
+    state.admin = { organizationId: PRO_KLASE_ORG_ID, role: 'admin', permissions: { 'sessions.edit': true } };
+    state.entityType = 'company';
+    state.session.status = 'no_show';
+    state.session.status_confirmed_at = '2020-01-01T12:00:00Z';
+    expect((await run({ correctExisting: true })).status).toHaveBeenCalledWith(200);
+    expect(state.writes[0]).toMatchObject({
+      status: 'completed',
+      no_show_when: null,
+      no_show_reason: null,
+      status_confirmed_by: 'admin',
+    });
+    expect(state.move).not.toHaveBeenCalled();
+    expect(state.refund).not.toHaveBeenCalled();
+  });
+
+  it('settles a legacy unstamped Pro Klase no-show once when it is corrected', async () => {
+    state.tutorOrganizationId = PRO_KLASE_ORG_ID;
+    state.admin = { organizationId: PRO_KLASE_ORG_ID, role: 'admin', permissions: { 'sessions.edit': true } };
+    state.entityType = 'company';
+    state.session.status = 'no_show';
+    state.session.status_confirmed_at = null;
+    expect((await run({ correctExisting: true })).status).toHaveBeenCalledWith(200);
+    expect(state.move).toHaveBeenCalledTimes(1);
+    expect(state.clearWaitlist).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not allow outcome corrections for an ordinary company', async () => {
+    state.entityType = 'company';
+    state.session.status = 'no_show';
+    expect((await run({ correctExisting: true })).status).toHaveBeenCalledWith(409);
+    expect(state.writes).toHaveLength(0);
   });
 });

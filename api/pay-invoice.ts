@@ -15,6 +15,11 @@ import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments
 import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import {
+    directChargeOptions,
+    expireConnectCheckoutSession,
+    retrieveConnectCheckoutSessionWithScope,
+} from './_lib/stripeDirectCharge.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -98,9 +103,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 6. Try to reuse existing Stripe session if still open
         if (batch.stripe_checkout_session_id) {
             try {
-                const existing = await stripe.checkout.sessions.retrieve(batch.stripe_checkout_session_id);
-                if (existing.status === 'open' && existing.url) {
+                const existingLookup = await retrieveConnectCheckoutSessionWithScope(
+                    stripe,
+                    batch.stripe_checkout_session_id,
+                    stripeAccountId,
+                );
+                const existing = existingLookup.session;
+                if (existingLookup.stripeAccount === stripeAccountId && existing.status === 'open' && existing.url) {
                     return res.redirect(303, existing.url);
+                }
+                if (existing.status === 'open') {
+                    await expireConnectCheckoutSession(
+                        stripe,
+                        batch.stripe_checkout_session_id,
+                        existingLookup.stripeAccount,
+                    ).catch(() => {});
                 }
             } catch {
                 // expired or invalid — create a new one below
@@ -130,6 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: batch.payer_email,
+                customer_creation: 'always',
                 payment_method_types: ['card'],
                 line_items: [{
                     price_data: {
@@ -144,13 +162,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }],
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
-                    transfer_data: { destination: stripeAccountId! },
                     metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, tutlio_school_org_absorbed: 'true' },
                 },
                 metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, tutlio_school_org_absorbed: 'true' },
-                success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${batchId}&session_id={CHECKOUT_SESSION_ID}`,
+                success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${batchId}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId!)}`,
                 cancel_url: `${appOrigin}/student/sessions`,
-            });
+            }, directChargeOptions(stripeAccountId!));
         } else {
             let baseCents = 0;
             let feesCents = 0;
@@ -170,6 +187,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: batch.payer_email,
+                customer_creation: 'always',
                 payment_method_types: ['card'],
                 line_items: [
                     {
@@ -196,13 +214,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     },
                 ],
                 payment_intent_data: {
-                    transfer_data: { destination: stripeAccountId!, amount: baseCents },
+                    application_fee_amount: feesCents,
                     metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id },
                 },
                 metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, ...checkoutBaseMetadata(baseCents / 100, market) },
-                success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${batchId}&session_id={CHECKOUT_SESSION_ID}`,
+                success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${batchId}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId!)}`,
                 cancel_url: `${appOrigin}/student/sessions`,
-            });
+            }, directChargeOptions(stripeAccountId!));
         }
 
         // 9. Update billing batch with new session ID

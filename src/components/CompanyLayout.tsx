@@ -43,8 +43,8 @@ import { isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import type { OrgAdminPermission } from '@/lib/orgAdminPermissions';
 
-/** Parked until Drive Meet ingest. Restore: true AND org flag `school_lesson_recordings`. */
-const SCHOOL_LESSON_RECORDINGS_NAV_READY = false;
+/** Drive proxy is ready; the per-organization feature flag remains the rollout switch. */
+const SCHOOL_LESSON_RECORDINGS_NAV_READY = true;
 const SIDEBAR_COLLAPSED_KEY = 'tutlio_org_sidebar_collapsed';
 
 interface CompanyNavItem {

@@ -58,6 +58,7 @@ interface ChildSession {
   cancelled_by?: string | null;
   tutor_comment?: string | null;
   show_comment_to_student?: boolean;
+  show_comment_to_parent?: boolean;
 }
 
 interface InstallmentPayment {
@@ -177,7 +178,7 @@ export default function ParentDashboard() {
         supabase
           .from('sessions')
           .select(
-            'id, student_id, start_time, end_time, status, cancelled_by, topic, paid, payment_status, price, meeting_link, whiteboard_room_id, tutor_comment, show_comment_to_student, subjects(name, is_group)',
+            'id, student_id, start_time, end_time, status, cancelled_by, topic, paid, payment_status, price, meeting_link, whiteboard_room_id, tutor_comment, show_comment_to_student, show_comment_to_parent, subjects(name, is_group)',
           )
           .in('student_id', studentIds)
           .gte('start_time', past.toISOString())
@@ -271,6 +272,7 @@ export default function ParentDashboard() {
           cancelled_by: (s as any).cancelled_by ?? null,
           tutor_comment: (s as any).tutor_comment ?? null,
           show_comment_to_student: !!(s as any).show_comment_to_student,
+          show_comment_to_parent: !!(s as any).show_comment_to_parent,
         });
         byStudent.set((s as any).student_id, arr);
       }

@@ -279,6 +279,15 @@ describe('School contract full flow (API integration)', () => {
     expect(checkoutRes.getResult().statusCode).toBe(303);
     expect(checkoutRes.getResult().headers.Location).toContain('checkout.stripe');
     expect(stripeCheckoutCreate).toHaveBeenCalled();
+    const [checkoutParams, checkoutOptions] = stripeCheckoutCreate.mock.calls[0];
+    expect(checkoutOptions).toEqual({ stripeAccount: flowDb.org.stripe_account_id });
+    expect(checkoutParams.customer_creation).toBe('always');
+    expect(checkoutParams.payment_intent_data.transfer_data).toBeUndefined();
+    expect(checkoutParams.payment_intent_data.application_fee_amount).toBe(300);
+    expect(checkoutParams.line_items.reduce(
+      (sum: number, item: any) => sum + item.price_data.unit_amount * item.quantity,
+      0,
+    )).toBe(30_300);
     expect(flowDb.installments[0].stripe_checkout_session_id).toBe('cs_test_flow');
 
     // 8) Parent pays — confirm installment

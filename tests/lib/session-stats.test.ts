@@ -48,6 +48,16 @@ describe('isStudentNoShowSession', () => {
       status: 'completed',
     }, now)).toBe(false);
   });
+
+  it('treats missing join tracking as a review hint when explicit confirmation is required', () => {
+    const now = new Date('2026-08-31T09:00:00.000Z');
+    expect(isStudentNoShowSession({
+      ...base,
+      start_time: '2026-08-31T08:00:00.000Z',
+      end_time: '2026-08-31T08:45:00.000Z',
+      status: 'completed',
+    }, now, { requireExplicitNoShow: true })).toBe(false);
+  });
 });
 
 describe('countCancellationAttribution', () => {
@@ -91,6 +101,18 @@ describe('calculateSessionStats', () => {
     ], null, null);
 
     expect(stats.totalStudentNoShow).toBe(1);
+    expect(stats.totalSuccessful).toBe(1);
+  });
+
+  it('counts only explicit no-show outcomes for manual-confirmation organizations', () => {
+    const stats = calculateSessionStats([{
+      ...base,
+      start_time: '2026-08-31T08:00:00.000Z',
+      end_time: '2026-08-31T08:45:00.000Z',
+      status: 'completed',
+    }], null, null, { requireExplicitNoShow: true });
+
+    expect(stats.totalStudentNoShow).toBe(0);
     expect(stats.totalSuccessful).toBe(1);
   });
 });

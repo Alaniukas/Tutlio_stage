@@ -21,7 +21,7 @@ import { dedupeParentChildren } from '@/lib/parentChildIdentity';
 
 /** Columns the tutor Dashboard needs (avoid `*` + share one deduped round-trip with Layout preload). */
 const TUTOR_DASH_SESSIONS_SELECT =
-  'id, student_id, subject_id, start_time, end_time, status, paid, price, topic, created_at, meeting_link, whiteboard_room_id, cancellation_reason, payment_status, tutor_comment, show_comment_to_student, is_late_cancelled, cancellation_penalty_amount, penalty_resolution, cancelled_by, no_show_when, credit_applied_amount, lesson_package_id, payment_batch_id, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade)';
+  'id, student_id, subject_id, start_time, end_time, status, paid, price, topic, created_at, meeting_link, whiteboard_room_id, cancellation_reason, payment_status, tutor_comment, show_comment_to_student, show_comment_to_parent, is_late_cancelled, cancellation_penalty_amount, penalty_resolution, cancelled_by, no_show_when, credit_applied_amount, lesson_package_id, payment_batch_id, tutor_joined_at, student_joined_at, status_confirmed_at, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, parent_secondary_email, payer_phone, grade)';
 
 /** Single in-flight tutor dashboard sessions fetch (Layout preload + Dashboard share the same promise). */
 export function tutorDashboardSessionsDeduped(tutorUserId: string) {
@@ -418,6 +418,10 @@ export async function preloadOrgAdminData() {
         status: s.status, price: s.price, topic: s.topic,
         paid: s.paid, payment_status: s.payment_status || null,
         cancellation_reason: s.cancellation_reason,
+        meeting_link: s.meeting_link || null,
+        tutor_joined_at: s.tutor_joined_at || null,
+        student_joined_at: s.student_joined_at || null,
+        status_confirmed_at: s.status_confirmed_at || null,
         tutor_name: tutorList.find((t: any) => t.id === s.tutor_id)?.full_name || '–',
         student_name: s.student?.full_name || '–',
         subject_is_group: s.subjects?.is_group ?? null,
@@ -655,7 +659,7 @@ export async function preloadStudentData() {
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
     const STUDENT_PRELOAD_SESSION_COLS =
-      'id,start_time,end_time,status,paid,price,topic,meeting_link,payment_status,tutor_comment,show_comment_to_student,subject_id';
+      'id,start_time,end_time,status,paid,price,topic,meeting_link,payment_status,tutor_comment,show_comment_to_student,show_comment_to_parent,subject_id';
 
     const [sessionsRes, waitlistRes] = await Promise.all([
       supabase
@@ -814,7 +818,7 @@ export async function preloadParentData() {
       supabase
         .from('sessions')
         .select(
-          'id, student_id, start_time, end_time, status, cancelled_by, topic, paid, payment_status, price, meeting_link, tutor_comment, show_comment_to_student, subjects(name, is_group)',
+          'id, student_id, start_time, end_time, status, cancelled_by, topic, paid, payment_status, price, meeting_link, tutor_comment, show_comment_to_student, show_comment_to_parent, subjects(name, is_group)',
         )
         .in('student_id', studentIds)
         .gte('start_time', past.toISOString())
@@ -863,6 +867,7 @@ export async function preloadParentData() {
         cancelled_by: (s as any).cancelled_by ?? null,
         tutor_comment: (s as any).tutor_comment ?? null,
         show_comment_to_student: !!(s as any).show_comment_to_student,
+        show_comment_to_parent: !!(s as any).show_comment_to_parent,
       });
       byStudent.set((s as any).student_id, arr);
     }

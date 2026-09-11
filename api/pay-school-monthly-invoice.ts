@@ -4,7 +4,7 @@
 // Public endpoint for the "Apmokėti" button in the monthly extra-lessons
 // invoice email. No Tutlio account is needed: the signed token authorizes
 // exactly this invoice. Mirrors api/pay-school-installment.ts (annual
-// contract installments): Stripe Checkout with a Connect transfer to the
+// contract installments): direct Stripe Checkout charge on the connected
 // school, Tutlio fee on top, webhook + success page mark the row paid.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -16,6 +16,11 @@ import { chargeCurrency } from './_lib/marketMoney.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { verifyPublicLinkToken } from './_lib/publicLinkToken.js';
 import { monthLabelLt } from './_lib/schoolMonthlyInvoiceEmail.js';
+import {
+  directChargeOptions,
+  expireConnectCheckoutSession,
+  retrieveConnectCheckoutSessionWithScope,
+} from './_lib/stripeDirectCharge.js';
 
 /** Connect accounts need this API version (matches api/stripe-connect.ts). */
 const STRIPE_API_VERSION = '2026-02-25.clover' as any;
@@ -93,12 +98,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const existingCheckoutId = String((invoice as any).stripe_checkout_session_id || '').trim();
     if (existingCheckoutId) {
       try {
-        const existing = await stripe.checkout.sessions.retrieve(existingCheckoutId);
-        if (existing.status === 'open' && existing.url && existing.amount_total === chargeCents) {
+        const existingLookup = await retrieveConnectCheckoutSessionWithScope(stripe, existingCheckoutId, destinationAcct);
+        const existing = existingLookup.session;
+        if (existingLookup.stripeAccount === destinationAcct
+          && existing.status === 'open'
+          && existing.url
+          && existing.amount_total === chargeCents) {
           return res.redirect(303, existing.url);
         }
         if (existing.status === 'open') {
-          await stripe.checkout.sessions.expire(existingCheckoutId).catch(() => {});
+          await expireConnectCheckoutSession(stripe, existingCheckoutId, existingLookup.stripeAccount).catch(() => {});
         }
       } catch {
         // expired or invalid — create a new one below
@@ -124,6 +133,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       mode: 'payment',
       payment_method_types: ['card'],
       customer_email: student?.payer_email || student?.email || undefined,
+      customer_creation: 'always',
       line_items: [{
         price_data: {
           currency,
@@ -137,13 +147,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }],
       payment_intent_data: {
         application_fee_amount: applicationFeeCents,
-        transfer_data: { destination: destinationAcct },
         metadata,
       },
       metadata,
-      success_url: `${appOrigin}/school-payment-success?success=1&monthly=${invoice.id}&session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${appOrigin}/school-payment-success?success=1&monthly=${invoice.id}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(destinationAcct)}`,
       cancel_url: `${appOrigin}/school-payment-success?cancelled=1&monthly=${invoice.id}`,
-    });
+    }, directChargeOptions(destinationAcct));
 
     // Bookkeeping column may lag behind the migration on a fresh deploy — never block the payer on it.
     await supabase

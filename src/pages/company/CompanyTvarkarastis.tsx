@@ -33,6 +33,7 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 
 import { useTranslation } from '@/lib/i18n';
 import { getCached, setCache } from '@/lib/dataCache';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import { supabase } from '@/lib/supabase';
 import { sendEmail } from '@/lib/email';
 import { assertTutorSlotsFree, runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
@@ -69,7 +70,11 @@ import {
 } from '@/lib/orgTrialPolicy';
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/lib/orgUi';
-import { calendarSessionTitlePrefix, getCalendarSessionEventStyle } from '@/lib/calendarSessionEventStyle';
+import {
+  calendarSessionTitlePrefix,
+  getCalendarSessionEventStyle,
+  MOKSLO_VAISIAI_CALENDAR_COLORS,
+} from '@/lib/calendarSessionEventStyle';
 import {
   classGroupLessonPrefill,
   resolveTutorSubjectForClassGroup,
@@ -165,6 +170,8 @@ import {
   resolveOrgSessionSubjectDefaults,
 } from '@/lib/orgSessionSubjectDefaults';
 import { enrichSessionMeetingLink } from '@/lib/meetingLink';
+import { canDeleteIndividualOrgSession } from '@/lib/orgSessionDeletion';
+import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 
 const locales = { lt, en: enUS };
 const localizer = dateFnsLocalizer({
@@ -231,6 +238,7 @@ interface Session {
   subject_name?: string;
   recurring_session_id?: string | null;
   no_show_when?: string | null;
+  status_confirmed_at?: string | null;
   cancelled_by?: 'tutor' | 'student' | null;
   cancellation_reason_code?: string | null;
   is_makeup?: boolean;
@@ -362,10 +370,11 @@ export default function CompanyTvarkarastis() {
   }), [locale, dateFnsLocale]);
   const { fmt } = useMarketMoney();
   const { loading: featuresLoading, hasFeature, organizationId } = useOrgFeatures();
-  const { isOwner, loading: accessLoading } = useOrgAdminAccess();
+  const { isOwner, can: canOrgAdmin, loading: accessLoading } = useOrgAdminAccess();
   const orgEntityType = useOrgEntityType();
   const isSchoolOrgView = isSchoolOrg(orgEntityType);
   const isProKlase = isProKlaseOrg(organizationId);
+  const supportsManualAttendance = isSchoolOrgView || isProKlase;
   const isMvOrg = isMoksloVaisiaiOrg(organizationId);
   const isLaisviVaikai = isLaisviVaikaiOrg(organizationId);
   const proKlaseAdminUi = proKlaseOrgAdminContext(organizationId, isSchoolOrgView ? 'school' : 'company', featuresLoading);
@@ -376,6 +385,7 @@ export default function CompanyTvarkarastis() {
   // Super-admins (owners) always have the calendar. Other seats still need the org flags.
   const canView = isOwner || hasFeature('org_admin_calendar_view') || hasFeature('org_admin_calendar_full_control');
   const canFullControl = isOwner || hasFeature('org_admin_calendar_full_control');
+  const canEditSessions = canOrgAdmin('sessions.edit');
   const canManageAvailability = isSchoolOrgView ? canFullControl : canView;
   /** Pamokų paieška — visoms įmonėms su kalendoriaus prieiga; Pro Klasė frequency tik su flag'u. */
   const showFindLesson = canView;
@@ -716,14 +726,18 @@ export default function CompanyTvarkarastis() {
       // Fetch sessions for org tutors
       const schedulePast = addDays(new Date(), -90).toISOString();
       const scheduleFuture = addDays(new Date(), 180).toISOString();
-      const { data: sessionsData } = await supabase
-        .from('sessions')
-        .select(TVARKARASTIS_SESSION_SELECT)
-        .in('tutor_id', tutorIds)
-        .not('hidden_from_calendar', 'eq', true)
-        .gte('start_time', schedulePast)
-        .lte('start_time', scheduleFuture)
-        .limit(1000);
+      const sessionsData = tutorIds.length > 0
+        ? await fetchAllRows<any>((from, to) => supabase
+            .from('sessions')
+            .select(TVARKARASTIS_SESSION_SELECT)
+            .in('tutor_id', tutorIds)
+            .not('hidden_from_calendar', 'eq', true)
+            .gte('start_time', schedulePast)
+            .lte('start_time', scheduleFuture)
+            .order('start_time', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, to))
+        : [];
 
       const parsedSessions = (sessionsData || []).map((session: any) => ({
         ...session,
@@ -1584,6 +1598,7 @@ export default function CompanyTvarkarastis() {
       cancellationReasonCode: isProKlase ? session.cancellation_reason_code : undefined,
       isMovedLesson,
       isOrgTutor: isSchoolOrgView || isSchoolBilledSession(session),
+      useMoksloVaisiaiPalette: isMvOrg,
     });
 
     return {
@@ -1676,7 +1691,7 @@ export default function CompanyTvarkarastis() {
         const siblings = base._classGroupSessions || [];
         const displayRow = (isLaisviVaikai
           ? pickClassGroupOccurrenceSession(siblings)
-          : siblings[0]) ?? siblings[0] ?? base;
+          : siblings.find((row) => row.status === base.status)) ?? siblings[0] ?? base;
         setSelectedEvent({
           ...displayRow,
           topic: base._classGroupName || displayRow.topic,
@@ -2074,14 +2089,98 @@ export default function CompanyTvarkarastis() {
   const confirmMarkStudentNoShowSchedule = async (when: NoShowWhen) => {
     if (!selectedEvent) return;
     setNoShowSaving(true);
-    const patch = buildNoShowSessionPatch(when, selectedEvent.tutor_comment);
-    const { error } = await supabase.from('sessions').update(patch).eq('id', selectedEvent.id);
-    if (!error) {
+    try {
+      if (supportsManualAttendance) {
+        await confirmSessionOutcome({
+          sessionId: selectedEvent.id,
+          currentStatus: selectedEvent.status,
+          status: 'no_show',
+          startTime: selectedEvent.start_time,
+          endTime: selectedEvent.end_time,
+        });
+      } else {
+        const patch = buildNoShowSessionPatch(when, selectedEvent.tutor_comment);
+        const { error } = await supabase.from('sessions').update(patch).eq('id', selectedEvent.id);
+        if (error) throw error;
+      }
       setIsEventDetailOpen(false);
       setNoShowDialogOpen(false);
-      fetchData();
+      void fetchData();
+      void fetch('/api/notify-session-no-show', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ sessionId: selectedEvent.id }),
+      }).catch(() => {});
+    } catch (error) {
+      alert(t('cal.confirmStatusError', { msg: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setNoShowSaving(false);
     }
-    setNoShowSaving(false);
+  };
+
+  const handleMarkStudentAttended = async () => {
+    if (!selectedEvent || !supportsManualAttendance) return;
+    setNoShowSaving(true);
+    try {
+      await confirmSessionOutcome({
+        sessionId: selectedEvent.id,
+        currentStatus: selectedEvent.status,
+        status: 'completed',
+        startTime: selectedEvent.start_time,
+        endTime: selectedEvent.end_time,
+      });
+      setIsEventDetailOpen(false);
+      void fetchData();
+    } catch (error) {
+      alert(t('cal.confirmStatusError', { msg: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setNoShowSaving(false);
+    }
+  };
+
+  const handleSetGroupParticipantAttendance = async (
+    session: Session,
+    status: 'completed' | 'no_show',
+  ) => {
+    if (!isSchoolOrgView || !canEditSessions) return;
+    if (status === 'no_show' && !window.confirm(t('dash.confirmNoShowPrompt'))) return;
+    setNoShowSaving(true);
+    try {
+      await confirmSessionOutcome({
+        sessionId: session.id,
+        currentStatus: session.status,
+        status,
+        startTime: session.start_time,
+        endTime: session.end_time,
+      });
+      const confirmedAt = new Date().toISOString();
+      const updateRow = (row: Session): Session => row.id === session.id
+        ? {
+            ...row,
+            status,
+            status_confirmed_at: confirmedAt,
+            no_show_when: status === 'completed' ? null : row.no_show_when,
+          }
+        : row;
+      setSelectedGroupSessions((rows) => rows.map(updateRow));
+      setClassGroupParticipants((participants) => participants.map((participant) => ({
+        ...participant,
+        session: participant.session ? updateRow(participant.session) : null,
+      })));
+      setSelectedEvent((current) => current ? updateRow(current) : current);
+      void fetchData();
+      if (status === 'no_show' && !(session.status === 'no_show' && session.status_confirmed_at)) {
+        void fetch('/api/notify-session-no-show', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({ sessionId: session.id }),
+        }).catch(() => {});
+      }
+    } catch (error) {
+      alert(t('cal.confirmStatusError', { msg: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setNoShowSaving(false);
+    }
   };
 
   const handleClearNoShow = async () => {
@@ -2097,6 +2196,22 @@ export default function CompanyTvarkarastis() {
     }
     setNoShowSaving(false);
   };
+
+  const selectedEventEnded = Boolean(
+    selectedEvent && selectedEvent.end_time.getTime() <= Date.now(),
+  );
+  const selectedEventSubject = selectedEvent?.subject_id
+    ? subjects.find((subject) => subject.id === selectedEvent.subject_id)
+    : undefined;
+  const canDeleteSelectedEvent = canDeleteIndividualOrgSession(
+    selectedEvent
+      ? {
+          classGroupId: selectedEvent.class_group_id,
+          isGroupLesson: isGroupSession || selectedEventSubject?.is_group,
+        }
+      : null,
+    canEditSessions,
+  );
 
   const handleTogglePaid = async () => {
     if (!selectedEvent) return;
@@ -3019,7 +3134,14 @@ export default function CompanyTvarkarastis() {
             <span>{t('compSch.activeLesson')}</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#10b981' }}></div>
+            <div
+              className="w-4 h-4 rounded"
+              style={{
+                backgroundColor: isMvOrg
+                  ? MOKSLO_VAISIAI_CALENDAR_COLORS.completedBackground
+                  : '#10b981',
+              }}
+            />
             <span>{t('compSch.completedLesson')}</span>
           </div>
           <div className="flex items-center gap-2">
@@ -3031,7 +3153,17 @@ export default function CompanyTvarkarastis() {
             <span>{t('compSch.cancelledLesson')}</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#a855f7', border: '2px solid #7e22ce' }}></div>
+            <div
+              className="w-4 h-4 rounded"
+              style={{
+                backgroundColor: isMvOrg
+                  ? MOKSLO_VAISIAI_CALENDAR_COLORS.trialBackground
+                  : '#a855f7',
+                border: isMvOrg
+                  ? `2px solid ${MOKSLO_VAISIAI_CALENDAR_COLORS.trialBorder}`
+                  : '2px solid #7e22ce',
+              }}
+            />
             <span>{t('compSch.trialLegend')}</span>
           </div>
           {isProKlase && (
@@ -3727,8 +3859,16 @@ export default function CompanyTvarkarastis() {
                         siblingStatuses,
                         { coerceCompletedAfterGroupCancel: isLaisviVaikai },
                       );
+                      const participantSession = participant.session;
+                      const canSetAttendance = Boolean(
+                        isSchoolOrgView
+                        && canEditSessions
+                        && participantSession
+                        && participantSession.end_time.getTime() <= Date.now()
+                        && ['active', 'completed', 'no_show'].includes(participantSession.status),
+                      );
                       return (
-                      <div key={participant.student_id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                      <div key={participant.student_id} className="flex flex-wrap items-center gap-3 p-3 bg-gray-50 rounded-lg">
                         <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
                           {String(participant.full_name || '?').split(/\s+/).filter(Boolean).map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
                         </div>
@@ -3751,6 +3891,44 @@ export default function CompanyTvarkarastis() {
                             </p>
                           )}
                         </div>
+                        {canSetAttendance && participantSession ? (
+                          <div className="flex flex-wrap justify-end gap-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              aria-pressed={participantSession.status === 'completed'}
+                              className={cn(
+                                'h-8 px-2 text-xs',
+                                participantSession.status === 'completed'
+                                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                  : 'border-gray-200 text-gray-700',
+                              )}
+                              disabled={noShowSaving}
+                              onClick={() => void handleSetGroupParticipantAttendance(participantSession, 'completed')}
+                            >
+                              <CheckCircle className="mr-1 h-3.5 w-3.5" />
+                              {t('compSess.markAttended')}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              aria-pressed={participantSession.status === 'no_show'}
+                              className={cn(
+                                'h-8 px-2 text-xs',
+                                participantSession.status === 'no_show'
+                                  ? 'border-rose-300 bg-rose-50 text-rose-800'
+                                  : 'border-gray-200 text-gray-700',
+                              )}
+                              disabled={noShowSaving}
+                              onClick={() => void handleSetGroupParticipantAttendance(participantSession, 'no_show')}
+                            >
+                              <UserX className="mr-1 h-3.5 w-3.5" />
+                              {t('compSess.markNoShow')}
+                            </Button>
+                          </div>
+                        ) : null}
                       </div>
                       );
                     });
@@ -4096,7 +4274,33 @@ export default function CompanyTvarkarastis() {
                     </>
                   )}
 
-                  {selectedEvent.status === 'no_show' ? (
+                  {supportsManualAttendance && !isGroupSession && selectedEventEnded && (
+                    selectedEvent.status !== 'completed' || !selectedEvent.status_confirmed_at
+                  ) && (
+                    <Button
+                      variant="outline"
+                      className="w-full rounded-xl border-emerald-200 text-emerald-800 hover:bg-emerald-50"
+                      onClick={() => void handleMarkStudentAttended()}
+                      disabled={saving || noShowSaving}
+                    >
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      {t('compSess.markAttended')}
+                    </Button>
+                  )}
+
+                  {supportsManualAttendance ? (
+                    !isGroupSession && selectedEventEnded && selectedEvent.status !== 'no_show' ? (
+                      <Button
+                        variant="outline"
+                        className="w-full rounded-xl border-rose-200 text-rose-800 hover:bg-rose-50"
+                        onClick={() => setNoShowDialogOpen(true)}
+                        disabled={saving || noShowSaving}
+                      >
+                        <UserX className="w-4 h-4 mr-2" />
+                        {t('compSess.markNoShow')}
+                      </Button>
+                    ) : null
+                  ) : selectedEvent.status === 'no_show' ? (
                     <Button
                       variant="outline"
                       className="w-full rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50"
@@ -4118,7 +4322,7 @@ export default function CompanyTvarkarastis() {
                     </Button>
                   )}
 
-                  {(selectedEvent.status === 'active' || selectedEvent.status === 'completed') && (
+                  {canDeleteSelectedEvent && (
                     <Button
                       variant="outline"
                       className="w-full rounded-xl border-red-200 text-red-700 hover:bg-red-50"
@@ -4130,6 +4334,18 @@ export default function CompanyTvarkarastis() {
                     </Button>
                   )}
                 </div>
+              )}
+
+              {isSchoolOrgView && !cancelConfirmOpen && canDeleteSelectedEvent && (
+                <Button
+                  variant="outline"
+                  className="w-full rounded-xl border-red-200 text-red-700 hover:bg-red-50"
+                  disabled={saving}
+                  onClick={() => void handleHardDeleteScheduleSession()}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  {t('cal.deleteSession')}
+                </Button>
               )}
             </div>
           )}

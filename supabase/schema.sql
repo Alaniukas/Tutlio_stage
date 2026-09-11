@@ -155,6 +155,7 @@ create table if not exists public.sessions (
   cancellation_reason text,
   tutor_comment text,
   show_comment_to_student boolean default false,
+  show_comment_to_parent boolean default false,
   reminder_student_sent boolean default false,
   reminder_tutor_sent boolean default false,
   created_at timestamp with time zone default timezone('utc', now()) not null
@@ -240,6 +241,7 @@ alter table public.sessions add column if not exists meeting_link text;
 alter table public.sessions add column if not exists google_calendar_event_id text;
 alter table public.sessions add column if not exists tutor_comment text;
 alter table public.sessions add column if not exists show_comment_to_student boolean default false;
+alter table public.sessions add column if not exists show_comment_to_parent boolean default false;
 alter table public.sessions add column if not exists no_show_when text
   check (no_show_when is null or no_show_when in ('before_lesson', 'during_lesson', 'after_lesson'));
 

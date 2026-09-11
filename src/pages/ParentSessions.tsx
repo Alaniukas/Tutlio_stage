@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import StatusBadge from '@/components/StatusBadge';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isSelfBookingDisabledForStudent } from '@/lib/studentBookingPolicy';
+import { isSessionCommentVisibleToParent } from '@/lib/sessionCommentDelivery';
 
 interface Session {
   id: string;
@@ -21,6 +22,7 @@ interface Session {
   payment_status?: string | null;
   tutor_comment?: string | null;
   show_comment_to_student?: boolean | null;
+  show_comment_to_parent?: boolean | null;
   cancelled_by?: 'tutor' | 'student' | null;
   no_show_when?: string | null;
   subjects?: { name: string } | null;
@@ -78,7 +80,7 @@ export default function ParentSessions() {
       const { data } = await supabase
         .from('sessions')
         .select(
-          'id, start_time, end_time, status, topic, price, paid, payment_status, tutor_comment, show_comment_to_student, cancelled_by, no_show_when, subjects(name)',
+          'id, start_time, end_time, status, topic, price, paid, payment_status, tutor_comment, show_comment_to_student, show_comment_to_parent, cancelled_by, no_show_when, subjects(name)',
         )
         .eq('student_id', studentId)
         .order('start_time', { ascending: false })
@@ -203,7 +205,7 @@ export default function ParentSessions() {
                 </p>
               )}
 
-              {s.show_comment_to_student && s.tutor_comment?.trim() ? (
+              {isSessionCommentVisibleToParent(s) && s.tutor_comment?.trim() ? (
                 <div className="rounded-lg bg-indigo-50 border border-indigo-100 px-3 py-2">
                   <p className="text-[11px] font-semibold text-indigo-800 uppercase tracking-wide">{t('stuSess.tutorComment')}</p>
                   <p className="text-sm text-indigo-900 whitespace-pre-wrap mt-1">{s.tutor_comment}</p>

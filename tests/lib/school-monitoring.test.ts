@@ -91,6 +91,36 @@ describe('school monitoring', () => {
       attendanceRate: null,
     });
   });
+  it('treats a legacy automatic missed-join outcome as unconfirmed until a person confirms it', () => {
+    const now = new Date('2026-09-10T12:00:00Z');
+    const legacyAutomatic = {
+      ...group,
+      id: 'legacy-auto-no-show',
+      student_id: 'a',
+      status: 'no_show',
+      no_show_reason: 'missed_join',
+      status_confirmed_at: null,
+      start_time: '2026-09-10T09:00:00Z',
+      end_time: '2026-09-10T10:00:00Z',
+    };
+
+    expect(schoolActivitySummary([legacyAutomatic], now)).toMatchObject({
+      noShowMeetings: 0,
+      awaitingOutcome: 1,
+      absentStudents: 0,
+      unconfirmedStudents: 1,
+      attendanceRate: null,
+    });
+    expect(schoolActivitySummary([{
+      ...legacyAutomatic,
+      status_confirmed_at: '2026-09-10T10:05:00Z',
+    }], now)).toMatchObject({
+      noShowMeetings: 1,
+      awaitingOutcome: 0,
+      absentStudents: 1,
+      unconfirmedStudents: 0,
+    });
+  });
   it('does not request attendance confirmation before an activity has ended', () => {
     const now = new Date('2026-09-10T09:30:00Z');
     expect(schoolStudentAttendance([{

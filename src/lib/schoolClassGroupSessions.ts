@@ -1,5 +1,6 @@
 import type { SchoolClassGroupRecord } from './schoolClassGroups';
 import { classGroupCalendarLabel } from './schoolClassGroups.js';
+import { isUnconfirmedAutomaticNoShow } from './schoolJoinNoShow.js';
 
 export type ClassGroupMemberDisplay = {
   student_id: string;
@@ -22,6 +23,8 @@ export type ClassGroupSessionRow = {
   start_time: Date;
   end_time: Date;
   status: string;
+  status_confirmed_at?: string | null;
+  no_show_reason?: string | null;
   paid?: boolean;
   topic?: string | null;
   student?: { full_name?: string; grade?: string | null; email?: string | null } | null;
@@ -123,11 +126,17 @@ export function mergeSchoolClassGroupSessions<T extends ClassGroupSessionRow>(
     const enrichedRows = rows.map((row) => enrichSessionStudent(row, meta.members));
     const display = opts?.preferCancelledOccurrence
       ? (pickClassGroupOccurrenceSession(enrichedRows) ?? first)
-      : first;
+      : (
+          enrichedRows.find((row) => effectiveClassGroupStatus(row) === 'completed')
+          ?? enrichedRows.find((row) => effectiveClassGroupStatus(row) === 'active')
+          ?? enrichedRows.find((row) => effectiveClassGroupStatus(row) === 'no_show')
+          ?? first
+        );
 
     merged.push({
       ...display,
       id: `classgroup_${key}`,
+      status: isUnconfirmedAutomaticNoShow(display) ? 'active' : display.status,
       topic: first.topic && first.topic !== meta.calendarName && first.topic !== meta.name
         ? first.topic
         : null,
@@ -248,13 +257,12 @@ export function normalizeSessionStatus(status: string): string {
   return status === 'canceled' ? 'cancelled' : status;
 }
 
-function isCancelledStatus(status: string): boolean {
-  return normalizeSessionStatus(status) === 'cancelled';
-}
-
-function isOccurredStatus(status: string): boolean {
-  const s = normalizeSessionStatus(status);
-  return s === 'completed' || s === 'no_show';
+function effectiveClassGroupStatus(row: {
+  status: string;
+  status_confirmed_at?: string | null;
+  no_show_reason?: string | null;
+}): string {
+  return isUnconfirmedAutomaticNoShow(row) ? 'active' : normalizeSessionStatus(row.status);
 }
 
 /**
@@ -263,15 +271,27 @@ function isOccurredStatus(status: string): boolean {
  * over cancelled siblings when cancel is a substantial share of the slot
  * (not a single student among a completed class).
  */
-export function pickClassGroupOccurrenceSession<T extends { status: string }>(
+export function pickClassGroupOccurrenceSession<T extends {
+  status: string;
+  status_confirmed_at?: string | null;
+  no_show_reason?: string | null;
+}>(
   rows: T[],
 ): T | undefined {
   if (!rows.length) return undefined;
-  const active = rows.find((row) => normalizeSessionStatus(row.status) === 'active');
-  if (active) return active;
-  const cancelled = rows.filter((row) => isCancelledStatus(row.status));
-  const occurred = rows.filter((row) => isOccurredStatus(row.status));
+  const active = rows.find((row) => effectiveClassGroupStatus(row) === 'active');
+  const cancelled = rows.filter((row) => effectiveClassGroupStatus(row) === 'cancelled');
+  const occurred = rows.filter((row) => {
+    const status = effectiveClassGroupStatus(row);
+    return status === 'completed' || status === 'no_show';
+  });
+  const completed = occurred.find((row) => effectiveClassGroupStatus(row) === 'completed');
+  if (active && !completed) return active;
   if (cancelled.length > 0 && cancelled.length * 2 >= occurred.length) return cancelled[0];
+  // A class happened when at least one child attended. A per-child no-show must
+  // never make the merged calendar card look like the whole class did not run.
+  if (completed) return completed;
+  if (active) return active;
   if (occurred.length) return occurred[0];
   return cancelled[0] ?? rows[0];
 }

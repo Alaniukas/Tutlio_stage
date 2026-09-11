@@ -19,6 +19,8 @@ export interface StudentPortalPolicy {
   actionsDisabled: boolean;
   /** Org feature student_payments_page ("Mokėjimai" portal section). */
   paymentsPageEnabled: boolean;
+  /** School lesson recordings portal section. */
+  lessonRecordingsEnabled: boolean;
   /** Waitlist fully disabled (Pro Klasė / disable_waitlist / booking-off). */
   waitlistHidden: boolean;
 }
@@ -30,6 +32,7 @@ const DEFAULT: StudentPortalPolicy = {
   bookingDisabled: false,
   actionsDisabled: false,
   paymentsPageEnabled: false,
+  lessonRecordingsEnabled: false,
   // Fail closed: hide waitlist until policy resolves (avoids Pro Klasė flash).
   waitlistHidden: true,
 };
@@ -122,6 +125,7 @@ export function StudentPolicyProvider({ children }: { children: ReactNode }) {
           bookingDisabled: entry?.bookingDisabled === true,
           actionsDisabled: entry?.actionsDisabled === true,
           paymentsPageEnabled: entry?.paymentsPageEnabled === true,
+          lessonRecordingsEnabled: entry?.lessonRecordingsEnabled === true,
           waitlistHidden: entry?.waitlistHidden === true,
         };
         setPolicy(next);

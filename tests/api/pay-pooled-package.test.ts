@@ -28,12 +28,17 @@ async function pay() {
   return res;
 }
 describe('pooled package payment', () => {
-  it('creates one checkout with the 4+5 EUR breakdown and one organization destination', async () => {
+  it('creates one direct-charge checkout with the 4+5 EUR breakdown', async () => {
     await pay();
     const [checkout, options] = mock.create.mock.calls[0];
     expect(checkout.line_items.slice(0, 2).map((row: any) => [row.quantity, row.price_data.unit_amount, row.price_data.currency]))
       .toEqual([[4, 2700, 'eur'], [5, 2700, 'eur']]);
-    expect(checkout.payment_intent_data.transfer_data).toEqual({ destination: 'org-account', amount: 24300 });
+    expect(checkout.payment_intent_data.transfer_data).toBeUndefined();
+    expect(checkout.payment_intent_data.application_fee_amount).toBe(496);
+    expect(checkout.customer_creation).toBe('always');
+    expect(options.stripeAccount).toBe('org-account');
+    expect(checkout.success_url).toBe('https://tutlio.pl/package-success?session_id={CHECKOUT_SESSION_ID}&stripe_account=org-account');
+    expect(checkout.cancel_url).toBe('https://tutlio.pl/package-cancelled');
     expect(checkout.metadata.tutlio_package_id).toBe('pool');
     expect(options.idempotencyKey).toBe('package-checkout:pool:initial');
     const orgQuery = mock.from.mock.results[mock.from.mock.calls.findIndex(([table]) => table === 'organizations')].value;

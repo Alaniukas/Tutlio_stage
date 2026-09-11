@@ -21,7 +21,7 @@ beforeAll(async () => { await Promise.all(locales.map(loadLocaleDict)); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('localized package fee disclosure', () => {
-  it.each(locales)('%s exposes all fee amounts by click/keyboard and formats EUR without changing currency', async (locale) => {
+  it.each(locales)('%s exposes the direct-charge platform fee by click/keyboard and formats EUR without changing currency', async (locale) => {
     const fetchMock = vi.fn(() => { throw new Error('No payment requests in a display test'); });
     vi.stubGlobal('fetch', fetchMock);
     render(<MemoryRouter><I18nContext.Provider value={{
@@ -33,10 +33,10 @@ describe('localized package fee disclosure', () => {
     fireEvent.click(trigger);
     const details = screen.getByRole('dialog', { name: t(locale, 'package.totalToPay') });
     const format = (amount: number) => new Intl.NumberFormat(LOCALE_FORMAT_TAGS[locale], { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 }).format(amount);
-    // Five lessons at €25; existing fee arithmetic remains unchanged.
+    // Five lessons at €25; the connected account pays Stripe processing fees.
     await waitFor(() => expect(details.textContent).toContain(t(locale, 'package.tooltipTutor', { amount: format(125) })));
     expect(details.textContent).toContain(t(locale, 'package.tooltipPlatform', { amount: format(2.5) }));
-    expect(details.textContent).toContain(t(locale, 'package.tooltipStripe', { amount: format(2.2) }));
+    expect(details.textContent).not.toContain(t(locale, 'package.tooltipStripe', { amount: format(0) }).split(format(0))[0]);
     fireEvent.keyDown(details, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog', { name: t(locale, 'package.totalToPay') })).toBeNull());
     expect(document.activeElement).toBe(trigger);

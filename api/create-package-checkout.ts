@@ -15,6 +15,7 @@ import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
 import { customerTotalEur } from './_lib/stripeLessonPricing.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { directChargeOptions } from './_lib/stripeDirectCharge.js';
 import {
   normalizePackageItemsInput,
   resolvePackageItems,
@@ -61,8 +62,6 @@ async function postInternalJson(url: string, payload: unknown, timeoutMs = 7000)
         clearTimeout(timeout);
     }
 }
-
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
 /** Same deployment as this handler (Vercel isolates freeze before fire-and-forget fetch completes). */
 function resolveApiUrl(req: VercelRequest, path: '/api/send-email' | '/api/generate-invoice'): string {
@@ -233,8 +232,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 400, { error: 'Stripe paskyra nerasta' });
         }
 
-        // 4. Totals — school org Connect: payer pays package list price only; fees absorbed via application_fee
-        const payerChargedTotalEur = useSchoolOrgAbsorbedFees ? basePriceEur : customerTotalEur(basePriceEur, feeProfile);
+        // 4. Totals — payer covers the provider price plus Tutlio's application fee.
+        const schoolCheckoutBreakdown = useSchoolOrgAbsorbedFees
+            ? schoolInstallmentCheckoutCents(basePriceEur, market)
+            : null;
+        const payerChargedTotalEur = schoolCheckoutBreakdown
+            ? schoolCheckoutBreakdown.chargeCents / 100
+            : customerTotalEur(basePriceEur, feeProfile);
         // Single-subject packages keep `subject_id` populated for legacy reads;
         // multi-subject packages leave it NULL (items table is the source of truth).
         const primarySubjectId = resolvedItems.length === 1 ? resolvedItems[0]!.subjectId : null;
@@ -364,7 +368,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         let checkoutSession: Stripe.Response<Stripe.Checkout.Session>;
         if (useSchoolOrgAbsorbedFees) {
-            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
+            const { chargeCents, transferToSchoolCents } = schoolCheckoutBreakdown!;
             const applicationFeeCents = chargeCents - transferToSchoolCents;
             if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
                 await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
@@ -375,25 +379,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
+                customer_creation: 'always',
                 payment_method_types: ['card'],
-                line_items: itemLineItems,
+                line_items: [
+                    ...itemLineItems,
+                    {
+                        price_data: {
+                            currency,
+                            product_data: {
+                                name: 'Platformos administravimo mokestis',
+                                description: 'Paslaugos teikėjas: MB „Tutlio“',
+                            },
+                            unit_amount: applicationFeeCents,
+                        },
+                        quantity: 1,
+                    },
+                ],
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
-                    transfer_data: {
-                        destination: stripeAccountId,
-                    },
                     metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
                 },
                 metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
-                success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${APP_URL}/package-cancelled`,
-            });
+                success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId)}`,
+                cancel_url: `${appOrigin}/package-cancelled`,
+            }, directChargeOptions(stripeAccountId));
         } else {
             const { baseCents, feesCents: feeCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
-            const tutorTransferCents = baseCents;
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
+                customer_creation: 'always',
                 payment_method_types: ['card'],
                 line_items: [
                     ...itemLineItems,
@@ -410,16 +425,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     },
                 ],
                 payment_intent_data: {
-                    transfer_data: {
-                        destination: stripeAccountId,
-                        amount: tutorTransferCents,
-                    },
+                    application_fee_amount: feeCents,
                     metadata: metadataBase,
                 },
                 metadata: { ...metadataBase, ...checkoutBaseMetadata(basePriceEur, market) },
-                success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${APP_URL}/package-cancelled`,
-            });
+                success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId)}`,
+                cancel_url: `${appOrigin}/package-cancelled`,
+            }, directChargeOptions(stripeAccountId));
         }
 
         // 8. Save Stripe checkout session ID to package
@@ -473,7 +485,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         // 10. Send email to payer with package details, payment link, and optional invoice PDF.
         // Use stable /api/pay-package redirect so the link never expires.
-        const stablePackagePaymentLink = `${APP_URL}/api/pay-package?package=${lessonPackage.id}`;
+        const stablePackagePaymentLink = `${appOrigin}/api/pay-package?package=${lessonPackage.id}`;
         let emailSent = false;
         const toEmail = (customerEmail || '').trim();
         if (toEmail && (checkoutSession.url || checkoutSession.id)) {
