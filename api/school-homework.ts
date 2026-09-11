@@ -145,7 +145,7 @@ async function loadMemberGroupIds(
   return new Set((data || []).map((row: { group_id: string }) => row.group_id).filter(Boolean));
 }
 
-function sessionAllowedForStudent(session: Pick<SessionRow, 'class_group_id'>, memberGroupIds: Set<string>): boolean {
+function sessionAllowedForStudent(session: SessionRow, memberGroupIds: Set<string>): boolean {
   if (!session.class_group_id) return true;
   return memberGroupIds.has(session.class_group_id);
 }
@@ -309,7 +309,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .maybeSingle();
     if (!session) return res.status(404).json({ error: 'Pamoka nerasta' });
     const memberGroupIds = await loadMemberGroupIds(supabase, studentId);
-    if (!sessionAllowedForStudent(session, memberGroupIds)) {
+    if (!sessionAllowedForStudent(session as unknown as SessionRow, memberGroupIds)) {
       return res.status(403).json({ error: 'Nuoroda negalioja' });
     }
 

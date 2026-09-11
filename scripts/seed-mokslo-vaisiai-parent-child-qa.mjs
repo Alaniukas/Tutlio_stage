@@ -204,6 +204,50 @@ async function main() {
   );
   if (invErr) throw new Error(`parent_invites: ${invErr.message}`);
 
+  // Demo tutor: allow same-day parent booking (prod tutors often use 24h+).
+  const { error: tutorProfileErr } = await supabase
+    .from('profiles')
+    .update({ min_booking_hours: 0, break_between_lessons: 0 })
+    .eq('id', TUTOR_ID);
+  if (tutorProfileErr) throw new Error(`profiles min_booking_hours: ${tutorProfileErr.message}`);
+
+  // Non-trial bookable subject for parent calendar QA (finance seed also upserts this).
+  const SUBJECT_MATH = 'c1b00000-7e57-4000-8000-000000000011';
+  await upsert(supabase, 'subjects', {
+    id: SUBJECT_MATH,
+    tutor_id: TUTOR_ID,
+    name: 'Matematika',
+    price: 25,
+    duration_minutes: 60,
+    is_trial: false,
+    color: '#6366f1',
+  });
+
+  // Recurring tutor availability so parent can test /parent/calendar booking.
+  const recurringSlots = [
+    { id: 'c1b00000-7e57-4000-8000-000000000041', day_of_week: 1, start_time: '09:00:00', end_time: '20:00:00' },
+    { id: 'c1b00000-7e57-4000-8000-000000000042', day_of_week: 2, start_time: '09:00:00', end_time: '20:00:00' },
+    { id: 'c1b00000-7e57-4000-8000-000000000043', day_of_week: 3, start_time: '09:00:00', end_time: '20:00:00' },
+    { id: 'c1b00000-7e57-4000-8000-000000000044', day_of_week: 4, start_time: '09:00:00', end_time: '20:00:00' },
+    { id: 'c1b00000-7e57-4000-8000-000000000045', day_of_week: 5, start_time: '09:00:00', end_time: '20:00:00' },
+    { id: 'c1b00000-7e57-4000-8000-000000000047', day_of_week: 6, start_time: '10:00:00', end_time: '16:00:00' },
+  ];
+  for (const slot of recurringSlots) {
+    const { error: availErr } = await supabase.from('availability').upsert(
+      {
+        id: slot.id,
+        tutor_id: TUTOR_ID,
+        day_of_week: slot.day_of_week,
+        start_time: slot.start_time,
+        end_time: slot.end_time,
+        is_recurring: true,
+        specific_date: null,
+      },
+      { onConflict: 'id' },
+    );
+    if (availErr) throw new Error(`availability dow=${slot.day_of_week}: ${availErr.message}`);
+  }
+
   const appUrl = (env.APP_URL || env.VITE_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
 
   console.log('\n═══════════════════════════════════════════════════════════');
@@ -216,6 +260,7 @@ async function main() {
   console.log(`   ${appUrl}/login`);
   console.log(`   ${PARENT_USER.email}`);
   console.log(`   → ${appUrl}/parent/settings — pridėti vaiką / pakviesti / archyvuoti`);
+  console.log(`   → ${appUrl}/parent/calendar?studentId=${REGISTERED_STUDENT.id} — rezervuoti pamoką (Pr-Pn 9–20, Št 10–16, min_booking_hours=0)`);
   console.log('');
   console.log('2) Mokinys (negali trinti paskyros):');
   console.log(`   ${appUrl}/login`);

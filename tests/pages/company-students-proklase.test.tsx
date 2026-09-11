@@ -6,7 +6,6 @@ import { PRO_KLASE_ORG_ID } from '@/lib/marketMoney';
 
 const testState = vi.hoisted(() => ({
   from: vi.fn(),
-  insert: vi.fn(),
   cache: {
     students: [
       {
@@ -97,7 +96,6 @@ describe('CompanyStudents Pro Klasė list', () => {
         {},
         {
           get: (_t, prop) => {
-            if (prop === 'insert') return (payload: unknown) => { testState.insert(payload); return query; };
             if (prop === 'then') return (resolve: (value: unknown) => void) => resolve({ data: [], error: null, count: 0 });
             return () => query;
           },
@@ -121,22 +119,6 @@ describe('CompanyStudents Pro Klasė list', () => {
     expect(screen.getByText('Mokinio informacija')).toBeTruthy();
   });
 
-  it('includes the initial admin comment and visibility in student creation', async () => {
-    render(<MemoryRouter initialEntries={['/company/students']}><CompanyStudents /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Pridėti mokinį' }));
-    fireEvent.change(screen.getByPlaceholderText('Jonas Jonaitis'), { target: { value: 'Naujas Mokinys' } });
-    fireEvent.change(screen.getByLabelText('Administratoriaus komentaras'), { target: { value: '  Aptarti mokymosi tikslus.  ' } });
-    const visibility = screen.getByRole('checkbox', { name: 'Rodyti komentarą korepetitoriui' });
-    expect((visibility as HTMLInputElement).checked).toBe(true);
-    fireEvent.click(visibility);
-    fireEvent.click(screen.getByRole('button', { name: 'Pridėti', exact: true }));
-    await waitFor(() => expect(testState.insert).toHaveBeenCalledWith(expect.objectContaining({
-      full_name: 'Naujas Mokinys',
-      admin_comment: 'Aptarti mokymosi tikslus.',
-      admin_comment_visible_to_tutor: false,
-    })));
-  });
-
   it('does not show school-only personal code fields for company orgs with full_student_edit', () => {
     render(
       <MemoryRouter initialEntries={['/company/students']}>
@@ -149,5 +131,43 @@ describe('CompanyStudents Pro Klasė list', () => {
 
     expect(screen.queryByPlaceholderText('Asmens kodas')).toBeNull();
     expect(screen.queryByPlaceholderText(/adresas/i)).toBeNull();
+  });
+
+  it('does not mark a failed meeting-link write as saved and requests the persisted value', async () => {
+    const updates = vi.fn();
+    const selections = vi.fn();
+    testState.from.mockImplementation(() => {
+      let writing = false;
+      const query: any = new Proxy({}, {
+        get: (_target, prop) => {
+          if (prop === 'then') {
+            return (resolve: (value: unknown) => void) => resolve(writing
+              ? { data: null, error: { message: 'denied' } }
+              : { data: [], error: null, count: 0 });
+          }
+          return (...args: unknown[]) => {
+            if (prop === 'update') {
+              writing = true;
+              updates(...args);
+            }
+            if (prop === 'select' && writing) selections(...args);
+            return query;
+          };
+        },
+      });
+      return query;
+    });
+
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
+    const input = screen.getByPlaceholderText('https://meet.google.com/...');
+    fireEvent.change(input, { target: { value: 'https://meet.google.com/test-link' } });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(screen.getByText('Klaida.')).toBeTruthy());
+    expect(selections).toHaveBeenCalledWith('personal_meeting_link');
+    expect((input as HTMLInputElement).value).toBe('');
+    fireEvent.blur(input);
+    await waitFor(() => expect(updates).toHaveBeenCalledOnce());
   });
 });

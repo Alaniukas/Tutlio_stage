@@ -2,6 +2,16 @@
 // account: the post-acceptance invitation and the month-end invoice.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../api/_lib/schoolMonthlyInvoiceDelivery.js', () => ({
+  schoolMonthlyInvoiceIdempotencyKey: (invoiceId: string) => `school-monthly-invoice/${invoiceId}`,
+  deliverSchoolMonthlyInvoiceOnce: async (params: any) => {
+    const outcome = await params.send(params.payload, `school-monthly-invoice/${params.invoiceId}`);
+    return outcome.error ? { sent: false, reason: outcome.error } : { sent: true, id: outcome.id };
+  },
+}));
+
+import { schoolMonthlyInvoiceIdempotencyKey } from '../../api/_lib/schoolMonthlyInvoiceDelivery.js';
+
 const { sendMock, pushMock } = vi.hoisted(() => ({
   sendMock: vi.fn(),
   pushMock: vi.fn().mockResolvedValue(undefined),
@@ -17,13 +27,6 @@ vi.mock('resend', () => ({
 vi.mock('../../api/_lib/sendPush', () => ({
   sendPushForEmail: pushMock,
 }));
-vi.mock('../../api/_lib/schoolMonthlyInvoiceDelivery', () => ({
-  schoolMonthlyInvoiceIdempotencyKey: (id: string) => `school-monthly-invoice/${id}`,
-  deliverSchoolMonthlyInvoiceOnce: async ({ payload, send, invoiceId }: any) => {
-    const result = await send(payload, `school-monthly-invoice/${invoiceId}`);
-    return { sent: true, id: result.id };
-  },
-}));
 
 function mockRes() {
   const out: { statusCode: number; body: any } = { statusCode: 0, body: null };
@@ -36,12 +39,20 @@ function mockRes() {
 }
 
 async function sendEmail(type: string, data: Record<string, unknown>) {
-  if (type === 'school_monthly_invoice') data = { invoiceId: 'invoice-1', ...data };
   const { default: handler } = await import('../../api/send-email');
   const res = mockRes();
+  const invoiceId = 'invoice-email-test';
   await handler({
     method: 'POST',
-    body: { type, to: 'parent@example.com', data, locale: 'lt', ...(type === 'school_monthly_invoice' ? { idempotencyKey: `school-monthly-invoice/${data.invoiceId}` } : {}) },
+    body: {
+      type,
+      to: 'parent@example.com',
+      data: type === 'school_monthly_invoice' ? { ...data, invoiceId } : data,
+      locale: 'lt',
+      ...(type === 'school_monthly_invoice'
+        ? { idempotencyKey: schoolMonthlyInvoiceIdempotencyKey(invoiceId) }
+        : {}),
+    },
     headers: { 'content-type': 'application/json', 'x-internal-key': 'service-key-test' },
     query: {},
   } as any, res as any);
@@ -79,7 +90,11 @@ describe('school_extra_first_lesson_invite', () => {
       homeworkUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc',
       waitsFor14Days: false,
     });
-    expect(subject).toBe('Kvietimas į pirmą užsiėmimą — Austėja Mockutė, 2026-09-08 16:00');
+    expect(subject).toBe('Kvietimas į užsiėmimą — Austėja Mockutė, 2026-09-08 16:00');
+    expect(html).toContain('Kvietimas į užsiėmimą');
+    expect(html).not.toContain('pirmą užsiėmimą');
+    expect(html).not.toContain('antras');
+    expect(html).toContain('Užsiėmimų nenumeruojame');
     expect(html).toContain('Prisijungti prie užsiėmimo');
     expect(html).toContain('/api/join-session?');
     expect(html).toContain('school-homework?student=s1');
@@ -87,7 +102,7 @@ describe('school_extra_first_lesson_invite', () => {
     expect(html).toContain('QA Legal Matematika');
     expect(html).not.toContain('/parent/');
     expect(html).not.toMatch(/registr/i);
-    expect(html).toContain('paskyros kurti nereikia');
+    expect(html).toContain('Paskyros kurti nereikia');
   });
 
   it('falls back to the planned schedule when no lesson row exists yet and explains the 14-day wait', async () => {
@@ -100,7 +115,7 @@ describe('school_extra_first_lesson_invite', () => {
       waitsFor14Days: true,
       homeworkUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc',
     });
-    expect(subject).toBe('Kvietimas į pirmą užsiėmimą — Austėja Mockutė');
+    expect(subject).toBe('Kvietimas į užsiėmimą — Austėja Mockutė');
     expect(html).toContain('antradienis 16:00–16:45');
     expect(html).toContain('2026-09-19');
     expect(html).toContain('14 dienų');

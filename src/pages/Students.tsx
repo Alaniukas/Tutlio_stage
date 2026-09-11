@@ -1,4 +1,3 @@
-import { StudentConnectionStatus } from '@/components/StudentConnectionStatus';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import Layout from '@/components/Layout';
@@ -86,7 +85,6 @@ interface Student {
   payment_model?: string | null;
   grade?: string;
   linked_user_id?: string | null;
-  parent_students?: { parent_id: string }[];
   admin_comment?: string | null;
   admin_comment_visible_to_tutor?: boolean | null;
   remaining_lessons?: number;
@@ -1650,7 +1648,14 @@ export default function StudentsPage() {
                                     {student.grade}
                                   </span>
                                 )}
-                                <StudentConnectionStatus students={[student]} />
+                                <Badge className={cn(
+                                  "text-xs",
+                                  student.linked_user_id
+                                    ? "bg-green-100 text-green-700"
+                                    : "bg-orange-100 text-orange-700"
+                                )}>
+                                  {student.linked_user_id ? t('stu.connected') : t('stu.notConnected')}
+                                </Badge>
                                 {!orgPolicy.isOrgTutor && student.has_package && (
                                   <span className="inline-flex items-center gap-1 text-xs bg-violet-50 text-violet-700 px-2.5 py-1 rounded-lg border border-violet-200 font-semibold">
                                     <Package className="w-3 h-3" />

@@ -5,9 +5,11 @@
 export function canStudentSideCancelSession(
     userId: string,
     studentLinkedUserId: string | null | undefined,
-    parentUserIdsForStudent: string[]
+    parentUserIdsForStudent: string[],
+    studentParentUserId?: string | null,
 ): boolean {
     if (studentLinkedUserId && studentLinkedUserId === userId) return true;
+    if (studentParentUserId && studentParentUserId === userId) return true;
     return parentUserIdsForStudent.includes(userId);
 }
 

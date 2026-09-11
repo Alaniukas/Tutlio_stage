@@ -33,6 +33,7 @@ describe('calendar free time from slot', () => {
       defaultStart: '10:00',
       defaultEnd: '12:00',
       dayTimes: { 3: { start: '14:00', end: '16:00' } },
+      startDate: '2026-09-01',
       endDate: '2026-10-01',
     });
     expect(rows).toHaveLength(2);
@@ -41,6 +42,7 @@ describe('calendar free time from slot', () => {
       start_time: '10:00',
       end_time: '12:00',
       is_recurring: true,
+      start_date: '2026-09-01',
       end_date: '2026-10-01',
     });
     expect(rows[1]).toMatchObject({

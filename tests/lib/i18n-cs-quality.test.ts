@@ -1,5 +1,5 @@
-import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { format, parse } from 'date-fns';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
@@ -17,7 +17,9 @@ import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPh
 import { getLandingDemoPersonas } from '../../src/components/landing/v2/demoPersonas';
 import { getCaseStudy, getTestimonials, SHOW_PLACEHOLDER_SOCIAL_PROOF } from '../../src/components/landing/v2/socialProof';
 
-const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('cs');
+
+const deferred = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 
@@ -25,12 +27,13 @@ beforeAll(async () => { await loadLocaleDict('cs'); });
 
 describe('Czech tutor and business localization', () => {
   it('explicitly covers the agreed scope while retaining dedicated school/admin/legal fallback', () => {
-    expect(Object.keys(csOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in csOverrides))).toEqual([]);
+    expect(Object.keys(csOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(cs).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !cs[key])).toEqual([]);
     expect(expectedKeys.filter((key) => key.startsWith('quiz.'))).toHaveLength(493);
     for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) {
-      expect(cs[key], key).toBe(csOverrides[key] ?? en[key]);
+      expect(cs[key], key).toBe(en[key]);
     }
   });
 
@@ -147,6 +150,3 @@ describe('Czech tutor and business localization', () => {
     }
   });
 });
-
-// Match server renderers: synchronous translation runs after its lazy preload.
-beforeAll(async () => { await preloadExtraLocaleDict('cs'); });

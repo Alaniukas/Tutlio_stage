@@ -151,7 +151,7 @@ describe('POST /api/stripe-checkout', () => {
         profiles: {
           stripe_account_id: 'acct_individual',
           stripe_onboarding_complete: true,
-          organization_id: null, enable_per_lesson: true,
+          organization_id: null,
           full_name: 'Tutor Name',
         },
       },
@@ -205,7 +205,6 @@ describe('POST /api/stripe-checkout', () => {
         stripe_account_id: null,
         stripe_onboarding_complete: false,
         name: 'Test Org',
-        enable_per_lesson: true,
       },
       error: null,
     });
@@ -271,7 +270,7 @@ describe('POST /api/stripe-checkout', () => {
         profiles: {
           stripe_account_id: 'acct_individual',
           stripe_onboarding_complete: true,
-          organization_id: null, enable_per_lesson: true,
+          organization_id: null,
           full_name: 'Tutor Name',
         },
       },
@@ -308,7 +307,7 @@ describe('POST /api/stripe-checkout', () => {
         profiles: {
           stripe_account_id: 'acct_individual',
           stripe_onboarding_complete: true,
-          organization_id: null, enable_per_lesson: true,
+          organization_id: null,
           full_name: 'Tutor Name',
         },
       },
@@ -356,7 +355,7 @@ describe('POST /api/stripe-checkout', () => {
         profiles: {
           stripe_account_id: 'acct_individual',
           stripe_onboarding_complete: true,
-          organization_id: null, enable_per_lesson: true,
+          organization_id: null,
           full_name: 'Tutor Name',
         },
       },

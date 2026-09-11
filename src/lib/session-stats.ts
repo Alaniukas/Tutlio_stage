@@ -32,6 +32,55 @@ export interface SessionStats {
   cancelledByStudent: number;
 }
 
+export interface OrgSessionListStats extends SessionStats {
+  /** Future `active` rows in the already-filtered list (not dropped as "not yet occurred"). */
+  totalUpcoming: number;
+}
+
+/**
+ * Stats for the org/school sessions page. Unlike calculateSessionStats, future
+ * lessons in the current list still count: upcoming stay planned, cancelled
+ * future still count as cancelled.
+ */
+export function calculateOrgSessionListStats(sessions: Session[]): OrgSessionListStats {
+  const now = new Date();
+  const stats: OrgSessionListStats = {
+    totalSuccessful: 0,
+    totalStudentNoShow: 0,
+    totalCancelled: 0,
+    cancelledByTutor: 0,
+    cancelledByStudent: 0,
+    totalUpcoming: 0,
+  };
+
+  sessions.forEach((session) => {
+    const start = new Date(session.start_time);
+    const end = new Date(session.end_time);
+    const hasEnded = end.getTime() < now.getTime();
+    const isFuture = start.getTime() > now.getTime();
+
+    if (session.status === 'cancelled') {
+      stats.totalCancelled++;
+      if (session.cancelled_by === 'tutor') stats.cancelledByTutor++;
+      else if (session.cancelled_by === 'student') stats.cancelledByStudent++;
+      return;
+    }
+
+    if (isStudentNoShowSession(session, now)) {
+      stats.totalStudentNoShow++;
+      return;
+    }
+
+    if (session.status === 'completed' || (session.status === 'active' && hasEnded)) {
+      stats.totalSuccessful++;
+    } else if (session.status === 'active' && isFuture) {
+      stats.totalUpcoming++;
+    }
+  });
+
+  return stats;
+}
+
 export interface StudentSessionStats extends SessionStats {
   studentId: string;
   studentName: string;

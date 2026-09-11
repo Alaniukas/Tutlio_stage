@@ -1,8 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ createClient: vi.fn(), findUser: vi.fn(), updateUser: vi.fn(), reset: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  createClient: vi.fn(),
+  findUser: vi.fn(),
+  updateUser: vi.fn(),
+  reset: vi.fn(),
+  usernameRecovery: vi.fn(),
+}));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.createClient }));
 vi.mock('../../api/_lib/findAuthUserByEmail', () => ({ findAuthUserByEmail: mocks.findUser }));
+vi.mock('../../api/_lib/studentUsernameRecovery.js', () => ({
+  sendStudentUsernameRecovery: mocks.usernameRecovery,
+}));
 import handler from '../../api/request-password-reset';
 
 function response() {
@@ -10,6 +19,12 @@ function response() {
 }
 function request(locale: unknown, host = 'www.tutlio.com', redirectTo = `https://${host}/auth/callback?next=/reset-password&lang=${locale}`) {
   return { method: 'POST', headers: { host, origin: `https://${host}` }, body: { email: 'example@example.com', locale, redirectTo } } as any;
+}
+
+function usernameRequest() {
+  const req = request('lt', 'tutlio.lt');
+  req.body.email = 'mv-0123456789abcdef';
+  return req;
 }
 
 beforeEach(() => {
@@ -62,5 +77,19 @@ describe('localized password recovery', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({ success: true });
     expect(mocks.updateUser).not.toHaveBeenCalled();
+  });
+
+  it('keeps username recovery enumeration-safe and avoids the public email endpoint', async () => {
+    const req = usernameRequest();
+    const res = response();
+    await handler(req, res as any);
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(mocks.usernameRecovery).toHaveBeenCalledWith(
+      expect.anything(),
+      'mv-0123456789abcdef@student-login.tutlio.invalid',
+      req.body.redirectTo,
+    );
+    expect(mocks.reset).not.toHaveBeenCalled();
+    expect(mocks.findUser).not.toHaveBeenCalled();
   });
 });

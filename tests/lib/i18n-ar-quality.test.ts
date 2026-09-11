@@ -1,5 +1,5 @@
-import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { ar, arOverrides } from '../../src/lib/i18n/ar';
@@ -12,16 +12,18 @@ import { isTranslatedLocale, LOCALE_FORMAT_TAGS, htmlLanguageCode } from '../../
 import { CHROME, chromeFor, formatShortDay } from '../../src/lib/publicPage';
 import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 
-const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('ar');
+
+const deferred = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
-// Arabic dual inflection means two weeks; preserve that numeric meaning.
-const tokens = (value: string, pattern: RegExp) => (value.replace(/^أسبوعان$/, '2 weeks').match(pattern) ?? []).sort();
+const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 
 beforeAll(() => loadLocaleDict('ar'));
 
 describe('Arabic tutor and business copy', () => {
   it('covers every in-scope key explicitly and leaves the source key contract intact', () => {
-    expect(Object.keys(arOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in arOverrides))).toEqual([]);
+    expect(Object.keys(arOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(ar).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !ar[key])).toEqual([]);
   });
@@ -85,7 +87,7 @@ describe('Arabic tutor and business copy', () => {
     expect(getSeoMeta('ar', 'pricing').title).toContain('أسعار');
     expect(isTranslatedLocale('ar')).toBe(false);
     for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) {
-      expect(ar[key], key).toBe(arOverrides[key] ?? en[key]);
+      expect(ar[key]).toBe(en[key]);
     }
   });
 
@@ -101,6 +103,3 @@ describe('Arabic tutor and business copy', () => {
     }
   });
 });
-
-// Match server renderers: synchronous translation runs after its lazy preload.
-beforeAll(async () => { await preloadExtraLocaleDict('ar'); });

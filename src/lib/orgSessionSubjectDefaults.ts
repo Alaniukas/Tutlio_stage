@@ -18,7 +18,6 @@ export type OrgStudentForMeetingLink = {
   personal_meeting_link?: string | null;
   grade?: string | null;
   pricing_lessons_per_week?: number | null;
-  pricing_lessons_per_week_is_manual?: boolean | null;
 };
 
 export type OrgTrialDefaults = {

@@ -1,4 +1,3 @@
-import { ensurePaidTrialPackageInvoice } from './_lib/paidTrialInvoice.js';
 // ─── Vercel Serverless: Confirm Manual Package Payment ────────────────────────
 // POST /api/confirm-manual-payment
 // Body: { packageId: string }
@@ -69,7 +68,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         if (pkg.paid) {
-            await ensurePaidTrialPackageInvoice(supabase, pkg.id);
             // Idempotency: also ensure any pre-created sessions tied to this package are marked paid.
             await supabase
                 .from('sessions')
@@ -194,7 +192,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
         await Promise.allSettled(emailJobs);
 
-        await ensurePaidTrialPackageInvoice(supabase, packageId);
         return res.status(200).json({
             success: true,
             packageId: updated.id,

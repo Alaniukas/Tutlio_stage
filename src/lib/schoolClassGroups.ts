@@ -22,7 +22,6 @@ export type SchoolClassGroupDraft = {
 
 export type SchoolClassGroupMember = {
   student_id: string;
-  schedule_slots?: SchoolClassGroupSlot[] | null;
   student?: { full_name: string; grade?: string | null; email?: string | null } | null;
 };
 
@@ -98,7 +97,6 @@ export function groupClassGroupsByTutor(
 
 export type SchoolClassGroupWrite = SchoolClassGroupDraft & {
   student_ids: string[] | null;
-  member_schedules?: Record<string, SchoolClassGroupSlot[] | null>;
 };
 
 export type ScheduleSlotInput = {
@@ -223,19 +221,7 @@ export function parseClassGroupWriteBody(
       : String(body.meeting_link).trim(),
     slots: normalizeGroupSlots(rawSlots, duration),
     student_ids: Array.isArray(body.student_ids) ? [...new Set(body.student_ids.map(String))] : null,
-    member_schedules: body.member_schedules as SchoolClassGroupWrite['member_schedules'],
   };
-}
-
-/** Reject foreign/nonexistent group times before changing any rows. */
-export function validMemberSchedules(draft: SchoolClassGroupWrite): boolean {
-  if (draft.member_schedules === undefined) return true;
-  if (!draft.member_schedules || typeof draft.member_schedules !== 'object' || Array.isArray(draft.member_schedules)) return false;
-  return Object.entries(draft.member_schedules).every(([id, slots]) =>
-    draft.student_ids?.includes(id) && (slots === null || (Array.isArray(slots) && slots.length > 0 && slots.every(slot =>
-      slot && draft.slots.some(groupSlot => Number(slot.weekday) === groupSlot.weekday && String(slot.start_time).slice(0, 5) === groupSlot.start_time.slice(0, 5)),
-    ))),
-  );
 }
 
 export function classGroupRowFields(draft: SchoolClassGroupDraft): Record<string, unknown> {
@@ -266,7 +252,6 @@ export function groupToWriteDraft(group: SchoolClassGroupRecord): SchoolClassGro
     meeting_link: group.meeting_link ?? null,
     slots: normalizeGroupSlots(group.slots || [], duration),
     student_ids: (group.members || []).map((member) => member.student_id),
-    member_schedules: Object.fromEntries((group.members || []).map(member => [member.student_id, member.schedule_slots ?? null])),
   };
 }
 

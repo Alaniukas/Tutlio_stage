@@ -32,13 +32,28 @@ import type { Locale } from 'date-fns';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 
 import { useTranslation } from '@/lib/i18n';
-import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
+import { getCached, setCache } from '@/lib/dataCache';
 import { supabase } from '@/lib/supabase';
 import { sendEmail } from '@/lib/email';
 import { assertTutorSlotsFree, runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
+import { planRecurringSeriesPatches, sortSeriesPatchesForApply } from '@/lib/recurringSessions';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
-import { subtractSessionsFromAvailability } from '@/lib/calendarAvailabilityBlocks';
+
+function recurringAvailDateRangeLabel(
+  startDate: string,
+  endDate: string,
+  translate: (key: string, opts?: Record<string, string>) => string,
+): string {
+  const parts: string[] = [];
+  if (startDate.trim()) {
+    parts.push(translate('compSch.recurringAvailStartDatePart', { date: startDate.trim() }));
+  }
+  if (endDate.trim()) {
+    parts.push(translate('compSch.recurringAvailEndDatePart', { date: endDate.trim() }));
+  }
+  return parts.join(' ');
+}
 import { authHeaders } from '@/lib/apiHelpers';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
@@ -46,7 +61,7 @@ import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg, proKlaseOrgAdminContext, proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
-import { isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { isLaisviVaikaiOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
 import {
   parseOrgTrialPolicy,
   shouldAutoMarkNextLessonTrial,
@@ -64,14 +79,27 @@ import {
 import {
   buildClassGroupMetaMap,
   calendarTitleForSession,
+  classGroupParticipantStatusForDisplay,
   classGroupParticipantsForModal,
+  classGroupCancelTargets,
+  classGroupOccurrenceSessionIds,
   isMergedClassGroupSession,
+  isUsableCalendarDateRange,
   mergeSchoolClassGroupSessions,
   orgScheduleSessionTitle,
+  pickClassGroupOccurrenceSession,
+  sessionStatusCanCancel,
+  sessionStatusI18nKey,
   type MergedClassGroupSession,
 } from '@/lib/schoolClassGroupSessions';
+import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
 import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
-import { formatStudentPickerLabel, pickStudentsForOrgTutorPicker } from '@/lib/orgStudentIdentity';
+import {
+  formatOrgStudentPickerLabel,
+  matchesOrgStudentPickerSearch,
+  ORG_STUDENT_PICKER_SELECT,
+  pickStudentsForOrgTutorPicker,
+} from '@/lib/orgStudentIdentity';
 import { displayStudentGrade } from '@/lib/studentGrade';
 import { Button } from '@/components/ui/button';
 import {
@@ -136,6 +164,7 @@ import {
   resolveOrgMeetingLink,
   resolveOrgSessionSubjectDefaults,
 } from '@/lib/orgSessionSubjectDefaults';
+import { enrichSessionMeetingLink } from '@/lib/meetingLink';
 
 const locales = { lt, en: enUS };
 const localizer = dateFnsLocalizer({
@@ -322,7 +351,6 @@ interface Student {
   personal_meeting_link?: string | null;
   grade?: string | null;
   pricing_lessons_per_week?: number | null;
-  pricing_lessons_per_week_is_manual?: boolean | null;
   linked_user_id?: string | null;
   organization_id?: string | null;
 }
@@ -334,11 +362,12 @@ export default function CompanyTvarkarastis() {
   }), [locale, dateFnsLocale]);
   const { fmt } = useMarketMoney();
   const { loading: featuresLoading, hasFeature, organizationId } = useOrgFeatures();
-  const { isOwner, can, loading: accessLoading } = useOrgAdminAccess();
+  const { isOwner, loading: accessLoading } = useOrgAdminAccess();
   const orgEntityType = useOrgEntityType();
   const isSchoolOrgView = isSchoolOrg(orgEntityType);
   const isProKlase = isProKlaseOrg(organizationId);
   const isMvOrg = isMoksloVaisiaiOrg(organizationId);
+  const isLaisviVaikai = isLaisviVaikaiOrg(organizationId);
   const proKlaseAdminUi = proKlaseOrgAdminContext(organizationId, isSchoolOrgView ? 'school' : 'company', featuresLoading);
   const pkFeat = (flagId: string) =>
     proKlaseFeatureEnabled(organizationId, isSchoolOrgView ? 'school' : 'company', hasFeature, flagId, featuresLoading);
@@ -441,8 +470,12 @@ export default function CompanyTvarkarastis() {
   const [groupEditChoice, setGroupEditChoice] = useState<'single' | 'all_future'>('single');
   const [editPaid, setEditPaid] = useState(false);
   const [editStatus, setEditStatus] = useState<'active' | 'completed' | 'cancelled' | 'no_show'>('active');
+  const [editTutorComment, setEditTutorComment] = useState('');
+  const [editShowCommentToStudent, setEditShowCommentToStudent] = useState(false);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
+  const [classGroupCancelScope, setClassGroupCancelScope] = useState<'one_student' | 'whole_occurrence'>('whole_occurrence');
+  const [classGroupCancelStudentId, setClassGroupCancelStudentId] = useState('');
   const [cancelReasonCode, setCancelReasonCode] = useState<'admin' | 'tutor_no_show'>('admin');
   const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
   const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
@@ -458,6 +491,7 @@ export default function CompanyTvarkarastis() {
   const [availEditEnd, setAvailEditEnd] = useState('');
   const [availEditDayOfWeek, setAvailEditDayOfWeek] = useState('1');
   const [availEditSpecificDate, setAvailEditSpecificDate] = useState('');
+  const [availEditStartDate, setAvailEditStartDate] = useState('');
   const [availEditEndDate, setAvailEditEndDate] = useState('');
   // The selector is no longer shown, but preserve legacy restrictions when editing old rows.
   const [availEditSubjectIds, setAvailEditSubjectIds] = useState<string[]>([]);
@@ -469,6 +503,7 @@ export default function CompanyTvarkarastis() {
   const [createAvailIsRecurring, setCreateAvailIsRecurring] = useState(true);
   const [createAvailDayOfWeek, setCreateAvailDayOfWeek] = useState('1');
   const [createAvailSpecificDate, setCreateAvailSpecificDate] = useState('');
+  const [createAvailStartDate, setCreateAvailStartDate] = useState('');
   const [createAvailEndDate, setCreateAvailEndDate] = useState('');
   const [createAvailStart, setCreateAvailStart] = useState('09:00');
   const [createAvailEnd, setCreateAvailEnd] = useState('11:00');
@@ -695,7 +730,6 @@ export default function CompanyTvarkarastis() {
         start_time: new Date(session.start_time),
         end_time: new Date(session.end_time),
       }));
-      setSessions(parsedSessions);
 
       // Fetch availability for org tutors
       const tutorNameById = new Map(filteredTutors.map((t: any) => [t.id, t.full_name || '']));
@@ -720,7 +754,7 @@ export default function CompanyTvarkarastis() {
 
       // Visi org mokiniai (legacy rows may lack organization_id but have tutor_id in org)
       const studentSelect =
-        'id, full_name, tutor_id, email, personal_meeting_link, grade, pricing_lessons_per_week, pricing_lessons_per_week_is_manual, linked_user_id, organization_id';
+        `${ORG_STUDENT_PICKER_SELECT}, personal_meeting_link, pricing_lessons_per_week`;
       let studentsData: Student[] = [];
       if (organizationId && tutorIds.length > 0) {
         const [byTutorRes, byOrgRes] = await Promise.all([
@@ -759,6 +793,23 @@ export default function CompanyTvarkarastis() {
       }
 
       setStudents(studentsData);
+
+      const tutorLinksById = new Map(
+        filteredTutors.map((t: { id: string; personal_meeting_link?: string | null }) => [
+          t.id,
+          t.personal_meeting_link,
+        ]),
+      );
+      const studentsById = new Map(studentsData.map((s) => [s.id, s]));
+      const subjectsById = new Map((subjectsData || []).map((s: { id: string; meeting_link?: string | null }) => [s.id, s]));
+      const enrichedSessions = parsedSessions.map((session) =>
+        enrichSessionMeetingLink(session, {
+          tutorPersonalLink: tutorLinksById.get(session.tutor_id),
+          studentsById,
+          subjectsById,
+        }),
+      );
+      setSessions(enrichedSessions);
 
       const { data: pricingData } = await supabase
         .from('student_individual_pricing')
@@ -806,7 +857,7 @@ export default function CompanyTvarkarastis() {
 
       setCache('company_tvarkarastis', {
         orgTutors: filteredTutors,
-        sessions: parsedSessions,
+        sessions: enrichedSessions,
         availability: mappedAvailability,
         subjects: subjectsData || [],
         students: studentsData || [],
@@ -855,8 +906,10 @@ export default function CompanyTvarkarastis() {
   const classGroupMeta = useMemo(() => buildClassGroupMetaMap(classGroups), [classGroups]);
 
   const mergedCalendarSessions = useMemo(() => {
-    return mergeSchoolClassGroupSessions(filteredSessions, classGroupMeta) as Session[];
-  }, [filteredSessions, classGroupMeta]);
+    return mergeSchoolClassGroupSessions(filteredSessions, classGroupMeta, {
+      preferCancelledOccurrence: isLaisviVaikai,
+    }) as Session[];
+  }, [filteredSessions, classGroupMeta, isLaisviVaikai]);
 
   const filteredAvailability = useMemo(() => {
     let filtered = availability;
@@ -885,9 +938,9 @@ export default function CompanyTvarkarastis() {
           const [startHour, startMin] = avail.start_time.split(':');
           const [endHour, endMin] = avail.end_time.split(':');
           const blockStart = new Date(d);
-          blockStart.setHours(parseInt(startHour), parseInt(startMin), 0, 0);
+          blockStart.setHours(parseInt(startHour), parseInt(startMin), 0);
           const blockEnd = new Date(d);
-          blockEnd.setHours(parseInt(endHour), parseInt(endMin), 0, 0);
+          blockEnd.setHours(parseInt(endHour), parseInt(endMin), 0);
 
           blocks.push({
             id: `avail-${avail.id}-${d.toISOString()}`,
@@ -905,9 +958,9 @@ export default function CompanyTvarkarastis() {
         const [startHour, startMin] = avail.start_time.split(':');
         const [endHour, endMin] = avail.end_time.split(':');
         const blockStart = new Date(specificDate);
-        blockStart.setHours(parseInt(startHour), parseInt(startMin), 0, 0);
+        blockStart.setHours(parseInt(startHour), parseInt(startMin), 0);
         const blockEnd = new Date(specificDate);
-        blockEnd.setHours(parseInt(endHour), parseInt(endMin), 0, 0);
+        blockEnd.setHours(parseInt(endHour), parseInt(endMin), 0);
 
         blocks.push({
           id: `avail-${avail.id}`,
@@ -921,9 +974,8 @@ export default function CompanyTvarkarastis() {
       }
     });
 
-    // Subject/display filters must not make occupied time appear available.
-    return subtractSessionsFromAvailability(blocks, sessions);
-  }, [filteredAvailability, currentDate, showOnlySessions, sessions]);
+    return blocks;
+  }, [filteredAvailability, currentDate, showOnlySessions]);
 
   /** Trial (bandomoji) lessons get a distinct highlight in the calendar. */
   const trialSubjectIds = useMemo(
@@ -945,7 +997,9 @@ export default function CompanyTvarkarastis() {
 
     // Add sessions (colored by status)
     if (!showOnlyAvailability) {
-      events.push(...mergedCalendarSessions.map(session => ({
+      events.push(...mergedCalendarSessions.filter((session) =>
+        isUsableCalendarDateRange(session.start_time, session.end_time),
+      ).map(session => ({
         id: session.id,
         title: `${calendarSessionTitlePrefix({
           isTrial: !!session.subject_id && trialSubjectIds.has(session.subject_id),
@@ -965,8 +1019,8 @@ export default function CompanyTvarkarastis() {
       })));
     }
 
-    return events;
-  }, [mergedCalendarSessions, availabilityBlocks, showOnlySessions, showOnlyAvailability, trialSubjectIds, isProKlase, t]);
+    return events.filter((ev) => isUsableCalendarDateRange(ev.start, ev.end));
+  }, [mergedCalendarSessions, availabilityBlocks, showOnlySessions, showOnlyAvailability, trialSubjectIds, isProKlase, isSchoolOrgView, t]);
 
   const filteredOrgTutorsForList = useMemo(() => {
     const q = tutorSearchQuery.trim().toLowerCase();
@@ -1008,6 +1062,7 @@ export default function CompanyTvarkarastis() {
     }
 
     const relevant = calendarEvents.filter(ev => {
+      if (!isUsableCalendarDateRange(ev.start, ev.end)) return false;
       const s = ev.start instanceof Date ? ev.start : new Date(ev.start);
       const e = ev.end instanceof Date ? ev.end : new Date(ev.end);
       return s.getTime() < rangeEnd.getTime() && e.getTime() > rangeStart.getTime();
@@ -1023,10 +1078,14 @@ export default function CompanyTvarkarastis() {
     relevant.forEach((ev) => {
       const s = ev.start instanceof Date ? ev.start : new Date(ev.start);
       const e = ev.end instanceof Date ? ev.end : new Date(ev.end);
+      if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) return;
       minH = Math.min(minH, s.getHours());
       const eH = e.getHours() + (e.getMinutes() > 0 ? 1 : 0);
       maxH = Math.max(maxH, eH);
     });
+    if (!Number.isFinite(minH) || !Number.isFinite(maxH) || minH > maxH) {
+      return { min: defaultMin, max: defaultMax, scrollToTime: defaultScroll };
+    }
 
     const floorH = Math.min(minH, 7);
     const ceilH = Math.max(maxH, 21);
@@ -1587,6 +1646,7 @@ export default function CompanyTvarkarastis() {
         setAvailEditEnd(avail.end_time);
         setAvailEditDayOfWeek(String(avail.day_of_week ?? 1));
         setAvailEditSpecificDate(avail.specific_date || '');
+        setAvailEditStartDate(String(avail.start_date || ''));
         setAvailEditEndDate(String(avail.end_date || ''));
         setAvailEditSubjectIds(avail.subject_ids || []);
         setCreateFromAvailOpen(false);
@@ -1613,9 +1673,13 @@ export default function CompanyTvarkarastis() {
         setIsClassGroupSession(true);
         setSelectedGroupSessions(base._classGroupSessions);
         setClassGroupParticipants(classGroupParticipantsForModal(base as MergedClassGroupSession<Session>));
+        const siblings = base._classGroupSessions || [];
+        const displayRow = (isLaisviVaikai
+          ? pickClassGroupOccurrenceSession(siblings)
+          : siblings[0]) ?? siblings[0] ?? base;
         setSelectedEvent({
-          ...base._classGroupSessions[0],
-          topic: base._classGroupName || base._classGroupSessions[0].topic,
+          ...displayRow,
+          topic: base._classGroupName || displayRow.topic,
           tutor: base.tutor,
         });
       } else {
@@ -1661,6 +1725,45 @@ export default function CompanyTvarkarastis() {
     }
   };
 
+  const beginSessionEdit = (session: Session) => {
+    const start = session.start_time instanceof Date ? session.start_time : new Date(session.start_time);
+    const end = session.end_time instanceof Date ? session.end_time : new Date(session.end_time);
+    const durMs = Number.isFinite(end.getTime()) && Number.isFinite(start.getTime())
+      ? end.getTime() - start.getTime()
+      : 60 * 60 * 1000;
+    const groupName = String((session as Session & { _classGroupName?: string })._classGroupName || '');
+    const siblingTopic = selectedGroupSessions
+      .map((row) => String(row.topic || '').trim())
+      .find((topic) => topic && topic !== groupName);
+    setEditStartTime(Number.isNaN(start.getTime()) ? '' : format(start, "yyyy-MM-dd'T'HH:mm"));
+    setEditDurationMinutes(Math.max(15, Math.round(durMs / 60000) || 60));
+    setEditTopic(isClassGroupSession ? (siblingTopic || '') : (session.topic || ''));
+    const tutorRow = orgTutors.find((t) => t.id === session.tutor_id);
+    setEditMeetingLink(
+      selectedGroupSessions.find((row) => row.meeting_link)?.meeting_link
+      || session.meeting_link
+      || resolveOrgMeetingLink(
+        subjects.find((s) => s.id === session.subject_id)?.meeting_link,
+        session.student_id,
+        tutorRow?.personal_meeting_link,
+        students,
+      )
+      || '',
+    );
+    setEditPrice(Number(session.price) || 0);
+    setEditSubjectId(session.subject_id || '');
+    setEditStudentId(session.student_id);
+    setEditTutorId(session.tutor_id);
+    setEditPaid(Boolean(session.paid));
+    setEditStatus((session.status as typeof editStatus) || 'active');
+    setEditTutorComment(session.tutor_comment || '');
+    setEditShowCommentToStudent(Boolean(session.show_comment_to_student));
+    setGroupEditChoice('single');
+    setRescheduleReason('');
+    setRescheduleRequestedBy('');
+    setIsEditingSession(true);
+  };
+
   const handleSaveSession = async () => {
     if (!selectedEvent) return;
     setSaving(true);
@@ -1702,34 +1805,82 @@ export default function CompanyTvarkarastis() {
       }
 
       const paidChanged = editPaid !== selectedEvent.paid;
+      const classGroupIds = isClassGroupSession
+        ? classGroupOccurrenceSessionIds(selectedGroupSessions)
+        : [];
+      const seriesFields: Record<string, any> = isClassGroupSession
+        ? {
+            topic: editTopic || null,
+            meeting_link: editMeetingLink || null,
+            price: editPrice,
+            tutor_comment: editTutorComment || null,
+            show_comment_to_student: editShowCommentToStudent,
+            ...(editSubjectId ? { subject_id: editSubjectId } : {}),
+          }
+        : {
+            topic: editTopic || null,
+            meeting_link: editMeetingLink || null,
+            price: editPrice,
+            subject_id: editSubjectId || null,
+            student_id: editStudentId || selectedEvent.student_id,
+            tutor_id: editTutorId || selectedEvent.tutor_id,
+            paid: editPaid,
+            ...(paidChanged ? { payment_status: editPaid ? 'paid' : 'pending' } : {}),
+            status: editStatus,
+            tutor_comment: editTutorComment || null,
+            show_comment_to_student: editShowCommentToStudent,
+          };
       const payload: Record<string, any> = {
         start_time: newStart.toISOString(),
         end_time: newEnd.toISOString(),
-        topic: editTopic || null,
-        meeting_link: editMeetingLink || null,
-        price: editPrice,
-        subject_id: editSubjectId || null,
-        student_id: editStudentId || selectedEvent.student_id,
-        tutor_id: editTutorId || selectedEvent.tutor_id,
-        paid: editPaid,
-        ...(paidChanged ? { payment_status: editPaid ? 'paid' : 'pending' } : {}),
-        status: editStatus,
+        ...seriesFields,
       };
 
-      const newTutorId = payload.tutor_id as string;
-      if (newTutorId !== selectedEvent.tutor_id) {
+      const newTutorId = payload.tutor_id as string | undefined;
+      if (newTutorId && newTutorId !== selectedEvent.tutor_id) {
         await assertTutorLicensed(newTutorId);
       }
 
-      if (groupEditChoice === 'all_future' && selectedEvent.recurring_session_id) {
+      if (isClassGroupSession) {
+        if (!classGroupIds.length) {
+          throw new Error(t('compSch.saveFailedPermissionsOrRecords'));
+        }
         const { data, error } = await supabase
           .from('sessions')
           .update(payload)
-          .eq('recurring_session_id', selectedEvent.recurring_session_id)
-          .gte('start_time', selectedEvent.start_time.toISOString())
+          .in('id', classGroupIds)
           .select('id');
         if (error) throw new Error(error.message);
-        if (!data?.length) throw new Error(t('compSch.saveFailedPermissionsOrRecords'));
+        if (!data?.length) throw new Error(t('compSch.saveFailedPermissions'));
+      } else if (groupEditChoice === 'all_future' && selectedEvent.recurring_session_id) {
+        const { data: futureRows, error: futureErr } = await supabase
+          .from('sessions')
+          .select('id, start_time, end_time')
+          .eq('recurring_session_id', selectedEvent.recurring_session_id)
+          .gte('start_time', selectedEvent.start_time.toISOString());
+        if (futureErr) throw new Error(futureErr.message);
+        const rows = futureRows || [];
+        if (!rows.length) throw new Error(t('compSch.saveFailedPermissionsOrRecords'));
+        const patches = sortSeriesPatchesForApply(
+          planRecurringSeriesPatches(
+            rows,
+            {
+              id: selectedEvent.id,
+              start_time: selectedEvent.start_time,
+              end_time: selectedEvent.end_time,
+            },
+            { start: newStart, end: newEnd },
+            seriesFields,
+          ),
+          rows,
+        );
+        const updatedIds: string[] = [];
+        for (const { id, patch } of patches) {
+          const { data, error } = await supabase.from('sessions').update(patch).eq('id', id).select('id');
+          if (error) throw new Error(error.message);
+          if (data?.[0]?.id) updatedIds.push(data[0].id);
+        }
+        if (!updatedIds.length) throw new Error(t('compSch.saveFailedPermissionsOrRecords'));
         if (startChangedForReason) {
           await supabase
             .from('sessions')
@@ -1737,7 +1888,7 @@ export default function CompanyTvarkarastis() {
               reschedule_reason: rescheduleReason.trim(),
               reschedule_requested_by: rescheduleRequestedBy || null,
             })
-            .in('id', data.map((row: { id: string }) => row.id))
+            .in('id', updatedIds)
             .then(({ error: reschedErr }) => {
               if (reschedErr) console.warn('[OrgSchedule] reschedule tracking columns not available:', reschedErr.message);
             });
@@ -1752,7 +1903,7 @@ export default function CompanyTvarkarastis() {
         if (!data?.length) throw new Error(t('compSch.saveFailedPermissions'));
       }
 
-      if (timeChangedForMove && isSingleEdit) {
+      if (timeChangedForMove && isSingleEdit && !isClassGroupSession) {
         await supabase
           .from('sessions')
           .update({
@@ -1776,7 +1927,7 @@ export default function CompanyTvarkarastis() {
       const timeChanged =
         truncMin(oldStart) !== truncMin(newStart) || truncMin(oldEnd) !== truncMin(newEnd);
 
-      if (timeChanged && leaveFreeTimeOnReschedule) {
+      if (timeChanged && leaveFreeTimeOnReschedule && !isClassGroupSession) {
         await releaseSessionSlotViaApi({
           tutorId: (payload.tutor_id as string) || selectedEvent.tutor_id,
           startTime: oldStart.toISOString(),
@@ -1786,7 +1937,7 @@ export default function CompanyTvarkarastis() {
         setLeaveFreeTimeOnReschedule(false);
       }
 
-      if (timeChanged) {
+      if (timeChanged && !isClassGroupSession) {
         const tutorId = payload.tutor_id as string;
         const studentId = payload.student_id as string;
         const { data: tutorRow } = await supabase
@@ -1855,6 +2006,7 @@ export default function CompanyTvarkarastis() {
 
   const handleCancelSession = async () => {
     if (!selectedEvent || cancellationReason.trim().length < 3) return;
+    if (isClassGroupSession && classGroupCancelScope === 'one_student' && !classGroupCancelStudentId) return;
     setSaving(true);
     try {
       const tutorId = selectedEvent.tutor_id;
@@ -1863,24 +2015,42 @@ export default function CompanyTvarkarastis() {
         return;
       }
 
-      const { success, error } = await cancelSessionAndFillWaitlist({
-        sessionId: selectedEvent.id,
-        tutorId,
-        reason: cancellationReason.trim(),
-        cancelledBy: 'tutor',
-        studentName: selectedEvent.student?.full_name || '',
-        tutorName: selectedEvent.tutor?.full_name || '',
-        studentEmail: null,
-        tutorEmail: null,
-        leaveFreeTime: leaveFreeTimeOnCancel,
-        cancellationReasonCode: isProKlaseOrg(organizationId) ? cancelReasonCode : undefined,
-      });
+      const targets = isClassGroupSession
+        ? classGroupCancelTargets(selectedGroupSessions, classGroupCancelScope, classGroupCancelStudentId, {
+            includeCompleted: isLaisviVaikai,
+          })
+        : [selectedEvent];
+      if (targets.length === 0) {
+        alert(t('compSch.errorCancelling', { msg: t('cal.errorCancelling') }));
+        return;
+      }
 
-      if (success) {
+      let successCount = 0;
+      let lastError: string | undefined;
+      for (const row of targets) {
+        const { success, error } = await cancelSessionAndFillWaitlist({
+          sessionId: row.id,
+          tutorId: row.tutor_id || tutorId,
+          reason: cancellationReason.trim(),
+          cancelledBy: 'tutor',
+          studentName: row.student?.full_name || '',
+          tutorName: selectedEvent.tutor?.full_name || '',
+          studentEmail: null,
+          tutorEmail: null,
+          leaveFreeTime: isClassGroupSession ? false : leaveFreeTimeOnCancel,
+          cancellationReasonCode: isProKlaseOrg(organizationId) ? cancelReasonCode : undefined,
+        });
+        if (success) successCount++;
+        else lastError = error;
+      }
+
+      if (successCount > 0) {
         setCancelConfirmOpen(false);
         setIsEventDetailOpen(false);
         setCancellationReason('');
         setLeaveFreeTimeOnCancel(false);
+        setClassGroupCancelScope('whole_occurrence');
+        setClassGroupCancelStudentId('');
         fetchData();
         try {
           await fetch('/api/google-calendar-sync', {
@@ -1892,7 +2062,7 @@ export default function CompanyTvarkarastis() {
           console.error('Google Calendar sync after org cancel:', err);
         }
       } else {
-        alert(t('compSch.errorCancelling', { msg: error || t('compSch.errorGeneric', { msg: '' }) }));
+        alert(t('compSch.errorCancelling', { msg: lastError || t('compSch.errorGeneric', { msg: '' }) }));
       }
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
@@ -2035,10 +2205,6 @@ export default function CompanyTvarkarastis() {
 
     try {
       await hardDeleteScheduleSession(targetSessionId, deleteScope);
-      invalidateCache('company_tvarkarastis');
-      invalidateCache('company_sessions');
-      invalidateCache('company_dashboard');
-      invalidateCache('tutor_dashboard');
       fetchData();
     } catch (e: any) {
       alert(e?.message || t('cal.deleteFailed'));
@@ -2071,11 +2237,13 @@ export default function CompanyTvarkarastis() {
         payload.is_recurring = true;
         payload.day_of_week = parseInt(availEditDayOfWeek, 10);
         payload.specific_date = null;
+        payload.start_date = availEditStartDate || null;
         payload.end_date = availEditEndDate || null;
       } else {
         payload.is_recurring = false;
         payload.day_of_week = null;
         payload.specific_date = availEditSpecificDate || null;
+        payload.start_date = null;
         payload.end_date = null;
       }
 
@@ -2087,7 +2255,7 @@ export default function CompanyTvarkarastis() {
       if (!error && availUpd && availUpd.length > 0) {
         const timeRange = `${normalizeTimeHMS(availEditStart).slice(0, 5)}–${normalizeTimeHMS(availEditEnd).slice(0, 5)}`;
         const schedHtml = editingAvailability.is_recurring
-          ? t('compSch.recurringAvailHtml', { weekday: weekdayLongFromDow(parseInt(availEditDayOfWeek, 10), dateFnsLocale), timeRange, dateRange: availEditEndDate ? t('compSch.recurringAvailEndDatePart', { date: availEditEndDate }) : '' })
+          ? t('compSch.recurringAvailHtml', { weekday: weekdayLongFromDow(parseInt(availEditDayOfWeek, 10), dateFnsLocale), timeRange, dateRange: recurringAvailDateRangeLabel(availEditStartDate, availEditEndDate, t) })
           : t('compSch.oneTimeAvailHtml', { date: availEditSpecificDate || '', timeRange });
         void emailOrgTutorAvailabilityNotice(editingAvailability.tutor_id, 'updated', schedHtml);
         setIsAvailabilityEditOpen(false);
@@ -2117,17 +2285,19 @@ export default function CompanyTvarkarastis() {
       if (createAvailIsRecurring) {
         payload.day_of_week = parseInt(createAvailDayOfWeek, 10);
         payload.specific_date = null;
+        payload.start_date = createAvailStartDate || null;
         payload.end_date = createAvailEndDate || null;
       } else {
         payload.day_of_week = null;
         payload.specific_date = createAvailSpecificDate || null;
+        payload.start_date = null;
         payload.end_date = null;
       }
       const { error } = await supabase.from('availability').insert(payload);
       if (error) throw new Error(error.message);
       const timeRangeCr = `${createAvailStart.slice(0, 5)}–${createAvailEnd.slice(0, 5)}`;
       const schedHtmlCr = createAvailIsRecurring
-        ? t('compSch.recurringAvailHtml', { weekday: weekdayLongFromDow(parseInt(createAvailDayOfWeek, 10), dateFnsLocale), timeRange: timeRangeCr, dateRange: createAvailEndDate ? t('compSch.recurringAvailEndDatePart', { date: createAvailEndDate }) : '' })
+        ? t('compSch.recurringAvailHtml', { weekday: weekdayLongFromDow(parseInt(createAvailDayOfWeek, 10), dateFnsLocale), timeRange: timeRangeCr, dateRange: recurringAvailDateRangeLabel(createAvailStartDate, createAvailEndDate, t) })
         : t('compSch.oneTimeAvailHtml', { date: createAvailSpecificDate || '', timeRange: timeRangeCr });
       void emailOrgTutorAvailabilityNotice(createAvailTutorId, 'created', schedHtmlCr);
       setIsCreateAvailabilityOpen(false);
@@ -2519,6 +2689,17 @@ export default function CompanyTvarkarastis() {
   const goCalendarToday = () => {
     setCurrentDate(new Date());
   };
+
+  const schoolLessonCanCancel = Boolean(
+    selectedEvent &&
+      canView &&
+      isSchoolOrgView &&
+      (isLaisviVaikai
+        ? (isClassGroupSession
+            ? selectedGroupSessions.some((s) => sessionStatusCanCancel(s.status))
+            : sessionStatusCanCancel(selectedEvent.status))
+        : selectedEvent.status === 'active'),
+  );
 
   // Check if feature is enabled
   if (featuresLoading || accessLoading) {
@@ -3083,7 +3264,7 @@ export default function CompanyTvarkarastis() {
                               disabled={!createStudentIds.includes(student.id) && createStudentIds.length >= maxSt}
                               className="rounded border-gray-300 text-indigo-600"
                             />
-                            <span className="text-sm">{formatStudentPickerLabel(student.full_name, student.grade)}</span>
+                            <span className="text-sm">{formatOrgStudentPickerLabel(student)}</span>
                           </label>
                         ))
                       )}
@@ -3111,9 +3292,7 @@ export default function CompanyTvarkarastis() {
                       </div>
                       {(() => {
                         const visible = createStudentSearch
-                          ? list.filter((s) =>
-                              (s.full_name || '').toLowerCase().includes(createStudentSearch.trim().toLowerCase()),
-                            )
+                          ? list.filter((s) => matchesOrgStudentPickerSearch(s, createStudentSearch))
                           : list;
                         if (visible.length === 0) {
                           return (
@@ -3122,7 +3301,7 @@ export default function CompanyTvarkarastis() {
                         }
                         return visible.map((student) => (
                           <SelectItem key={student.id} value={student.id}>
-                            {formatStudentPickerLabel(student.full_name, student.grade)}
+                            {formatOrgStudentPickerLabel(student)}
                           </SelectItem>
                         ));
                       })()}
@@ -3454,18 +3633,57 @@ export default function CompanyTvarkarastis() {
           setClassGroupParticipants([]);
           setCancelConfirmOpen(false);
           setCancellationReason('');
+          setClassGroupCancelScope('whole_occurrence');
+          setClassGroupCancelStudentId('');
           setIsDeleteRecurringDialogOpen(false);
         }
       }}>
         <DialogContent className="w-[95vw] sm:w-full max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {isEditingSession ? (
-                <><Edit2 className="w-4 h-4 text-indigo-600" /> {t('compSch.editLesson')}</>
-              ) : (
-                <><CalendarDays className="w-4 h-4 text-indigo-600" /> {t('compSess.lessonInfo')}</>
+            <div className="flex items-center gap-2 flex-wrap">
+              <DialogTitle className="flex items-center gap-2 flex-1 min-w-0">
+                {isEditingSession ? (
+                  <><Edit2 className="w-4 h-4 text-indigo-600" /> {t('compSch.editLesson')}</>
+                ) : (
+                  <>
+                    <CalendarDays className="w-4 h-4 text-indigo-600" />
+                    <span className="flex-1 min-w-0">{t('compSess.lessonInfo')}</span>
+                  </>
+                )}
+              </DialogTitle>
+              {canView && isSchoolOrgView && isClassGroupSession && !isEditingSession
+                && !cancelConfirmOpen && selectedEvent?.status !== 'cancelled' && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-indigo-700 hover:text-indigo-800 hover:bg-indigo-50 h-8 px-2 flex-shrink-0"
+                  onClick={() => selectedEvent && beginSessionEdit(selectedEvent)}
+                >
+                  <Pencil className="w-3.5 h-3.5 mr-1" />
+                  {t('compSess.editLesson')}
+                </Button>
               )}
-            </DialogTitle>
+              {isLaisviVaikai && !isEditingSession && !cancelConfirmOpen && schoolLessonCanCancel && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-rose-700 hover:text-rose-800 hover:bg-rose-50 h-8 px-2 flex-shrink-0"
+                  onClick={() => {
+                    const firstCancellable = selectedGroupSessions.find((s) =>
+                      isLaisviVaikai ? sessionStatusCanCancel(s.status) : s.status === 'active',
+                    );
+                    setClassGroupCancelScope(isClassGroupSession ? 'whole_occurrence' : 'one_student');
+                    setClassGroupCancelStudentId(firstCancellable?.student_id || selectedEvent?.student_id || '');
+                    setCancelConfirmOpen(true);
+                  }}
+                >
+                  <Ban className="w-3.5 h-3.5 mr-1" />
+                  {t('compSess.cancelLesson')}
+                </Button>
+              )}
+            </div>
           </DialogHeader>
 
           {/* VIEW MODE — layout aligned with Pamokos (CompanySessions) */}
@@ -3491,27 +3709,52 @@ export default function CompanyTvarkarastis() {
                     </div>
                   </div>
                   <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                    {(isClassGroupSession ? classGroupParticipants : selectedGroupSessions.map((session) => ({
-                      student_id: session.student_id,
-                      full_name: session.student?.full_name || '—',
-                      grade: session.student?.grade ?? null,
-                      session,
-                    }))).map((participant) => (
+                    {(() => {
+                      const participantRows = isClassGroupSession
+                        ? classGroupParticipants
+                        : selectedGroupSessions.map((session) => ({
+                            student_id: session.student_id,
+                            full_name: session.student?.full_name || '—',
+                            grade: session.student?.grade ?? null,
+                            session,
+                          }));
+                      const siblingStatuses = participantRows
+                        .map((row) => row.session?.status)
+                        .filter((status): status is NonNullable<typeof status> => Boolean(status));
+                      return participantRows.map((participant) => {
+                      const displayStatus = classGroupParticipantStatusForDisplay(
+                        participant.session?.status,
+                        siblingStatuses,
+                        { coerceCompletedAfterGroupCancel: isLaisviVaikai },
+                      );
+                      return (
                       <div key={participant.student_id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
                         <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
-                          {participant.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
+                          {String(participant.full_name || '?').split(/\s+/).filter(Boolean).map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-gray-900">{participant.full_name}</p>
                           {participant.grade && (
                             <p className="text-xs text-emerald-600 font-medium">{displayStudentGrade(participant.grade)}</p>
                           )}
-                          {participant.session?.status && (
-                            <p className="text-xs text-gray-500">{participant.session.status}</p>
+                          {displayStatus && (
+                            <p className={`text-xs font-medium ${
+                              displayStatus === 'cancelled'
+                                ? 'text-red-600'
+                                : displayStatus === 'no_show'
+                                  ? 'text-rose-700'
+                                  : displayStatus === 'completed'
+                                    ? 'text-gray-600'
+                                    : 'text-gray-500'
+                            }`}>
+                              {t(sessionStatusI18nKey(displayStatus))}
+                            </p>
                           )}
                         </div>
                       </div>
-                    ))}
+                      );
+                    });
+                    })()}
                   </div>
                 </div>
               ) : null}
@@ -3537,12 +3780,18 @@ export default function CompanyTvarkarastis() {
                 <div>
                   <Label className="text-xs text-gray-500">{t('compSess.labelStart')}</Label>
                   <p className="font-medium text-sm mt-1">
-                    {format(selectedEvent.start_time, 'yyyy-MM-dd HH:mm')}
+                    {Number.isNaN(new Date(selectedEvent.start_time).getTime())
+                      ? '—'
+                      : format(selectedEvent.start_time, 'yyyy-MM-dd HH:mm')}
                   </p>
                 </div>
                 <div>
                   <Label className="text-xs text-gray-500">{t('compSess.end')}</Label>
-                  <p className="font-medium text-sm mt-1">{format(selectedEvent.end_time, 'HH:mm')}</p>
+                  <p className="font-medium text-sm mt-1">
+                    {Number.isNaN(new Date(selectedEvent.end_time).getTime())
+                      ? '—'
+                      : format(selectedEvent.end_time, 'HH:mm')}
+                  </p>
                 </div>
               </div>
 
@@ -3699,6 +3948,21 @@ export default function CompanyTvarkarastis() {
 
               {cancelConfirmOpen && (
                 <div className="space-y-2 bg-red-50 rounded-xl p-3 border border-red-200">
+                  {isClassGroupSession && (
+                    <ClassGroupCancelScopeFields
+                      radioName="orgClassGroupCancelScope"
+                      scope={classGroupCancelScope}
+                      onScopeChange={setClassGroupCancelScope}
+                      studentId={classGroupCancelStudentId}
+                      onStudentIdChange={setClassGroupCancelStudentId}
+                      students={selectedGroupSessions.filter((s) =>
+                        isLaisviVaikai ? sessionStatusCanCancel(s.status) : s.status === 'active',
+                      ).map((s) => ({
+                        student_id: s.student_id,
+                        name: s.student?.full_name || s.student_id,
+                      }))}
+                    />
+                  )}
                   <p className="text-sm font-semibold text-red-800">{t('compSch.cancellationReasonRequired')}</p>
                   <Input
                     value={cancellationReason}
@@ -3715,6 +3979,7 @@ export default function CompanyTvarkarastis() {
                       Korepetitorius neatvyko (klientas nemoka, −30 € korep.)
                     </label>
                   )}
+                  {!isClassGroupSession && (
                   <label className="flex items-start gap-2 cursor-pointer">
                     <Checkbox
                       checked={leaveFreeTimeOnCancel}
@@ -3722,27 +3987,46 @@ export default function CompanyTvarkarastis() {
                     />
                     <span className="text-sm text-gray-700 leading-snug">{t('dash.leaveFreeTime')}</span>
                   </label>
+                  )}
                   <div className="flex gap-2">
                     <Button size="sm" variant="outline" className="flex-1 rounded-xl" onClick={() => { setCancelConfirmOpen(false); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); }}>
                       {t('compSch.back')}
                     </Button>
                     <Button size="sm" variant="destructive" className="flex-1 rounded-xl" onClick={handleCancelSession}
-                      disabled={saving || cancellationReason.trim().length < 3}>
+                      disabled={saving || cancellationReason.trim().length < 3 || (isClassGroupSession && classGroupCancelScope === 'one_student' && !classGroupCancelStudentId)}>
                       {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('compSch.confirmCancellation')}
                     </Button>
                   </div>
                 </div>
               )}
 
-              {isSchoolOrgView && can('sessions.edit') && !selectedEvent.class_group_id && !cancelConfirmOpen && (
+              {schoolLessonCanCancel && !cancelConfirmOpen && (
                 <Button
                   variant="outline"
-                  className="w-full rounded-xl border-red-200 text-red-700 hover:bg-red-50"
-                  disabled={saving}
-                  onClick={handleHardDeleteScheduleSession}
+                  className="w-full rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                  onClick={() => {
+                    const firstCancellable = selectedGroupSessions.find((s) =>
+                      isLaisviVaikai ? sessionStatusCanCancel(s.status) : s.status === 'active',
+                    );
+                    setClassGroupCancelScope(isClassGroupSession ? 'whole_occurrence' : 'one_student');
+                    setClassGroupCancelStudentId(firstCancellable?.student_id || selectedEvent.student_id || '');
+                    setCancelConfirmOpen(true);
+                  }}
                 >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  {t('cal.deleteSession')}
+                  <Ban className="w-4 h-4 mr-2" />
+                  {t('compSess.cancelLesson')}
+                </Button>
+              )}
+
+              {canView && isSchoolOrgView && isClassGroupSession && !cancelConfirmOpen
+                && selectedEvent.status !== 'cancelled' && (
+                <Button
+                  variant="outline"
+                  className="w-full rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                  onClick={() => beginSessionEdit(selectedEvent)}
+                >
+                  <Pencil className="w-4 h-4 mr-2" />
+                  {t('compSess.editLesson')}
                 </Button>
               )}
 
@@ -3794,27 +4078,18 @@ export default function CompanyTvarkarastis() {
                         className="w-full rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50"
                         onClick={() => {
                           if (!selectedEvent) return;
-                          const durMs = selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime();
-                          setEditStartTime(format(selectedEvent.start_time, "yyyy-MM-dd'T'HH:mm"));
-                          setEditDurationMinutes(Math.round(durMs / 60000));
-                          setEditTopic(selectedEvent.topic || '');
-                          setEditMeetingLink((selectedEvent as any).meeting_link || '');
-                          setEditPrice((selectedEvent as any).price || 0);
-                          setEditSubjectId(selectedEvent.subject_id || '');
-                          setEditStudentId(selectedEvent.student_id);
-                          setEditTutorId(selectedEvent.tutor_id);
-                          setEditPaid((selectedEvent as any).paid || false);
-                          setEditStatus(selectedEvent.status);
-                          setGroupEditChoice('single');
-                          setRescheduleReason('');
-                          setRescheduleRequestedBy('');
-                          setIsEditingSession(true);
+                          beginSessionEdit(selectedEvent);
                         }}
                       >
                         <Pencil className="w-4 h-4 mr-2" />
                         {t('compSess.editLesson')}
                       </Button>
-                      <Button variant="outline" className="w-full rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => setCancelConfirmOpen(true)}>
+                      <Button variant="outline" className="w-full rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => {
+                        const firstActive = selectedGroupSessions.find((s) => s.status === 'active');
+                        setClassGroupCancelScope(isClassGroupSession ? 'whole_occurrence' : 'one_student');
+                        setClassGroupCancelStudentId(firstActive?.student_id || selectedEvent.student_id || '');
+                        setCancelConfirmOpen(true);
+                      }}>
                         <Ban className="w-4 h-4 mr-2" />
                         {t('compSess.cancelLesson')}
                       </Button>
@@ -3863,7 +4138,7 @@ export default function CompanyTvarkarastis() {
           {selectedEvent && isEditingSession && (
             <div className="space-y-4">
               {/* Recurring choice banner */}
-              {selectedEvent.recurring_session_id && (
+              {selectedEvent.recurring_session_id && !isClassGroupSession && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
                   <p className="text-xs font-semibold text-amber-800 mb-2">{t('compSch.recurringSeriesPart')}</p>
                   <div className="flex gap-2">
@@ -3930,6 +4205,7 @@ export default function CompanyTvarkarastis() {
                     </div>
                   </div>
                 )}
+                {!isClassGroupSession && (
                 <label className="flex items-start gap-2 cursor-pointer">
                   <Checkbox
                     checked={leaveFreeTimeOnReschedule}
@@ -3937,6 +4213,7 @@ export default function CompanyTvarkarastis() {
                   />
                   <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
                 </label>
+                )}
                 <div className="space-y-2 max-w-[200px]">
                   <Label>{t('compSch.durationMin')}</Label>
                   <Input
@@ -3951,6 +4228,7 @@ export default function CompanyTvarkarastis() {
               </div>
 
               {/* People */}
+              {!isClassGroupSession && (
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.tutor')}</Label>
@@ -3987,7 +4265,7 @@ export default function CompanyTvarkarastis() {
                       {sortStudentsByFullName(pickStudentsForOrgTutorPicker(students, editTutorId)).map(
                         (s) => (
                           <SelectItem key={s.id} value={s.id}>
-                            {formatStudentPickerLabel(s.full_name, s.grade)}
+                            {formatOrgStudentPickerLabel(s)}
                           </SelectItem>
                         ),
                       )}
@@ -3995,8 +4273,10 @@ export default function CompanyTvarkarastis() {
                   </Select>
                 </div>
               </div>
+              )}
 
               {/* Subject */}
+              {!isClassGroupSession && (
               <div>
                 <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.subject')}</Label>
                 <Select value={editSubjectId || 'none'} onValueChange={(v) => {
@@ -4017,6 +4297,7 @@ export default function CompanyTvarkarastis() {
                   </SelectContent>
                 </Select>
               </div>
+              )}
 
               {/* Topic + Price + Meeting link */}
               <div>
@@ -4036,6 +4317,27 @@ export default function CompanyTvarkarastis() {
                 <Input value={editMeetingLink} onChange={(e) => setEditMeetingLink(e.target.value)} placeholder="https://..." className="rounded-xl" />
               </div>
 
+              <div>
+                <Label className="text-xs text-gray-500 mb-1 block">{t('dash.commentLabel')}</Label>
+                <textarea
+                  value={editTutorComment}
+                  onChange={(e) => setEditTutorComment(e.target.value)}
+                  placeholder={t('dash.commentPlaceholder')}
+                  className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
+                  rows={3}
+                />
+                <label className="flex items-center gap-2 cursor-pointer mt-2">
+                  <input
+                    type="checkbox"
+                    checked={editShowCommentToStudent}
+                    onChange={(e) => setEditShowCommentToStudent(e.target.checked)}
+                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-700">{t('cal.showToStudent')}</span>
+                </label>
+              </div>
+
+              {!isClassGroupSession && (
               <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
                 <div>
                   <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.status')}</Label>
@@ -4062,6 +4364,7 @@ export default function CompanyTvarkarastis() {
                   </label>
                 </div>
               </div>
+              )}
             </div>
           )}
 
@@ -4128,6 +4431,14 @@ export default function CompanyTvarkarastis() {
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>{t('compSch.repeatsFromOptional')}</Label>
+                  <DateInput
+                    value={availEditStartDate}
+                    onChange={(e) => setAvailEditStartDate(e.target.value)}
+                    className="rounded-xl"
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label>{t('compSch.repeatsUntilOptional')}</Label>
@@ -4252,7 +4563,7 @@ export default function CompanyTvarkarastis() {
                                     else setCreateFromAvailStudentIds(prev => prev.filter(id => id !== s.id));
                                   }}
                                 />
-                                <span>{formatStudentPickerLabel(s.full_name, s.grade)}</span>
+                                <span>{formatOrgStudentPickerLabel(s)}</span>
                               </label>
                             ))}
                         </div>
@@ -4269,7 +4580,7 @@ export default function CompanyTvarkarastis() {
                               pickStudentsForOrgTutorPicker(students, editingAvailability?.tutor_id),
                             ).map(s => (
                                 <SelectItem key={s.id} value={s.id}>
-                                  {formatStudentPickerLabel(s.full_name, s.grade)}
+                                  {formatOrgStudentPickerLabel(s)}
                                 </SelectItem>
                               ))}
                           </SelectContent>
@@ -4381,7 +4692,7 @@ export default function CompanyTvarkarastis() {
             </div>
 
             {createAvailIsRecurring ? (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-3">
                 <div className="space-y-1.5">
                   <Label>{t('compSch.weekday')}</Label>
                   <Select value={createAvailDayOfWeek} onValueChange={setCreateAvailDayOfWeek}>
@@ -4395,9 +4706,15 @@ export default function CompanyTvarkarastis() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>{t('compSch.repeatsUntil')}</Label>
-                  <DateInput value={createAvailEndDate} onChange={(e) => setCreateAvailEndDate(e.target.value)} className="rounded-xl" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>{t('compSch.repeatsFrom')}</Label>
+                    <DateInput value={createAvailStartDate} onChange={(e) => setCreateAvailStartDate(e.target.value)} className="rounded-xl" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>{t('compSch.repeatsUntil')}</Label>
+                    <DateInput value={createAvailEndDate} onChange={(e) => setCreateAvailEndDate(e.target.value)} className="rounded-xl" />
+                  </div>
                 </div>
               </div>
             ) : (

@@ -21,14 +21,13 @@ import {
   type StartWithin14Status,
 } from '../../src/lib/extraLessonsContract.js';
 import { snapshotFromRow } from './extraLessonsContractShared.js';
-import { readAllSchoolBillingRows } from './schoolBillingPagination.js';
 
 export const CLASS_GROUP_HORIZON_DAYS = 60;
 const INSERT_CHUNK = 400;
 
 export const CLASS_GROUP_MATERIALIZE_SELECT =
   'id, organization_id, tutor_id, subject_id, meeting_link, duration_minutes, school_year_start, school_year_end, '
-  + 'slots:school_class_group_slots(weekday, start_time, end_time), members:school_class_group_members(student_id, schedule_slots)';
+  + 'slots:school_class_group_slots(weekday, start_time, end_time), members:school_class_group_members(student_id)';
 
 export type MaterializeGroupSlot = { weekday: number | string; start_time: string; end_time: string };
 
@@ -42,7 +41,7 @@ export type MaterializeGroupRow = {
   school_year_start: string;
   school_year_end: string;
   slots?: MaterializeGroupSlot[] | null;
-  members?: Array<{ student_id: string; schedule_slots?: MaterializeGroupSlot[] | null }> | null;
+  members?: Array<{ student_id: string }> | null;
 };
 
 export type ClassGroupOccurrence = {
@@ -163,35 +162,25 @@ export async function loadExtraLessonsStartGates(
   organizationId?: string | null,
 ): Promise<ExtraStartGateMap> {
   const gates: ExtraStartGateMap = new Map();
-  const { data, error } = await readAllSchoolBillingRows((afterId) => {
   let query = supabase
     .from('school_contracts')
-    .select('id, student_id, class_group_id, accepted_at, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at')
+    .select('student_id, class_group_id, accepted_at, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at')
     .eq('kind', EXTRA_LESSONS_CONTRACT_KIND)
     .eq('signing_status', 'signed')
-    .not('accepted_at', 'is', null).order('id').limit(500);
+    .not('accepted_at', 'is', null);
   if (organizationId) query = query.eq('organization_id', organizationId);
-  if (afterId) query = query.gt('id', afterId);
-  return query;
-  });
-  if (error) throw new Error(`Failed to load contract start gates: ${error.message}`);
-  const endedKeys = new Set<string>();
+  const { data } = await query;
   for (const row of (data || []) as any[]) {
+    if (row.withdrawal_requested_at) continue;
     const order = snapshotFromRow(row) as ExtraLessonsOrderSnapshot | null;
     if (!order || !row.accepted_at || !row.student_id) continue;
-    const key = `${row.student_id}:${row.class_group_id || order.group_id || ''}`;
-    if (row.withdrawal_requested_at) { endedKeys.add(key); continue; }
     const ymd = extraLessonsServiceStartYmd({
       status: (row.start_within_14_status || (row.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status,
       acceptedAtIso: row.accepted_at,
       order,
     });
-    const previous = gates.get(key);
-    gates.set(key, previous && previous < ymd ? previous : ymd);
+    gates.set(`${row.student_id}:${row.class_group_id || order.group_id || ''}`, ymd);
   }
-  // An ended agreement must not cause the hourly cron to recreate its future
-  // lessons. A replacement active agreement for the same group takes priority.
-  for (const key of endedKeys) if (!gates.has(key)) gates.set(key, '9999-12-31');
   return gates;
 }
 
@@ -259,14 +248,9 @@ export async function reconcileClassGroupSessions(
   const activeMembers = memberIds.filter((id) => !detached?.has(id));
 
   const occurrences = expectedClassGroupOccurrences(group, window);
-  const memberStarts = new Map((group.members || []).filter(m => Array.isArray(m.schedule_slots)).map(m => [
-    m.student_id,
-    new Set(expectedClassGroupOccurrences({ ...group, slots: m.schedule_slots }, window).map(o => o.startIso)),
-  ]));
   const expected = new Map<string, { student_id: string; startIso: string; endIso: string }>();
   for (const occ of occurrences) {
     for (const studentId of activeMembers) {
-      if (memberStarts.has(studentId) && !memberStarts.get(studentId)!.has(occ.startIso)) continue;
       const gate = options.extraGates?.get(`${studentId}:${group.id}`);
       if (gate && occ.ymd < gate) {
         result.skipped += 1;
@@ -382,8 +366,7 @@ export async function loadClassGroupForMaterialize(
     .select(CLASS_GROUP_MATERIALIZE_SELECT)
     .eq('id', groupId)
     .maybeSingle();
-  if (error) throw new Error(`[class-groups] load group failed: ${error.message}`);
-  if (!data) return null;
+  if (error || !data) return null;
   return data as unknown as MaterializeGroupRow;
 }
 

@@ -70,6 +70,12 @@ export function isManoKorepetitoriusOrg(orgIdOrSlug?: string | null): boolean {
   return key === MANO_KOREPETITORIUS_ORG_ID || key === MANO_KOREPETITORIUS_SLUG;
 }
 
+export function isLaisviVaikaiOrg(orgIdOrSlug?: string | null): boolean {
+  if (!orgIdOrSlug) return false;
+  const key = orgIdOrSlug.trim().toLowerCase();
+  return key === LAISVI_VAIKIAI_ORG_ID || key === LAISVI_VAIKIAI_SLUG;
+}
+
 export function isMoksloVaisiaiOrg(orgIdOrSlug?: string | null): boolean {
   if (!orgIdOrSlug) return false;
   const key = orgIdOrSlug.trim().toLowerCase();

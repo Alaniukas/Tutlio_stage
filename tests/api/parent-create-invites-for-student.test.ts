@@ -22,16 +22,32 @@ const t = (key: string) => key;
 async function run(secondary = false) {
   mocks.from.mockImplementation((table: string) => {
     const data = table === 'students'
-      ? { id: 'student-1', organization_id: 'org-1', full_name: 'Child', payer_email: 'parent@example.com',
-          parent_secondary_email: secondary ? 'second@example.com' : null }
+      ? {
+          id: 'student-1',
+          organization_id: 'org-1',
+          full_name: 'Child',
+          payer_email: 'parent@example.com',
+          parent_secondary_email: secondary ? 'second@example.com' : null,
+        }
       : { name: 'Org', preferred_locale: 'lt' };
-    const chain: any = { select: () => chain, eq: () => chain,
-      single: async () => ({ data }), maybeSingle: async () => ({ data }) };
+    const chain: any = {
+      select: () => chain,
+      eq: () => chain,
+      single: async () => ({ data }),
+      maybeSingle: async () => ({ data }),
+    };
     return chain;
   });
   let body: any;
-  const res: any = { statusCode: 0, setHeader: vi.fn(), end: (value: string) => { body = JSON.parse(value); } };
-  await handler({ method: 'POST', body: { studentId: 'student-1' }, headers: { host: 'tutlio.lt' } } as any, res);
+  const res: any = {
+    statusCode: 0,
+    setHeader: vi.fn(),
+    end: (value: string) => { body = JSON.parse(value); },
+  };
+  await handler(
+    { method: 'POST', body: { studentId: 'student-1' }, headers: { host: 'tutlio.lt' } } as any,
+    res,
+  );
   return { status: res.statusCode, body };
 }
 

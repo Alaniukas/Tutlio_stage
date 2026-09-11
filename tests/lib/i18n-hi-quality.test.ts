@@ -1,5 +1,5 @@
-import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { hi, hiOverrides } from '../../src/lib/i18n/hi';
@@ -12,7 +12,9 @@ import { isTranslatedLocale, LOCALE_FORMAT_TAGS, localeDirection } from '../../s
 import { CHROME, chromeFor, formatShortDay } from '../../src/lib/publicPage';
 import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 
-const deferredPrefixes = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('hi');
+
+const deferredPrefixes = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferredPrefixes.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 
@@ -20,11 +22,12 @@ beforeAll(async () => { await loadLocaleDict('hi'); });
 
 describe('Hindi tutor and business localization', () => {
   it('explicitly covers every in-scope key and leaves deferred products on English', () => {
-    expect(Object.keys(hiOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual(expectedKeys.sort());
+    expect(expectedKeys.filter((key) => !(key in hiOverrides))).toEqual([]);
+    expect(Object.keys(hiOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(hi).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !hi[key])).toEqual([]);
     for (const key of Object.keys(en).filter((key) => deferredPrefixes.has(key.split('.')[0]))) {
-      expect(hi[key], key).toBe(hiOverrides[key] ?? en[key]);
+      expect(hi[key]).toBe(en[key]);
     }
   });
 
@@ -98,6 +101,3 @@ describe('Hindi tutor and business localization', () => {
     }
   });
 });
-
-// Match server renderers: synchronous translation runs after its lazy preload.
-beforeAll(async () => { await preloadExtraLocaleDict('hi'); });

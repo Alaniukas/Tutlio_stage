@@ -67,6 +67,7 @@ describe('Dutch locale production contracts', () => {
       'quiz.audience.school.title', // "Online school" is idiomatic Dutch too.
       'quiz.info.story.company.customerName', 'quiz.offer.testimonial.company.name1',
       'quiz.info.story.school.customerName', 'quiz.offer.testimonial.school.name1',
+      'compare.hub.metaTitle', 'compare.vsTitle',
     ]);
     expect(reference.filter(key => !allowed.has(key) && typeof en[key] === 'string'
       && nl[key] === en[key] && /[A-Za-z]{2,}\s+[A-Za-z]{2,}/.test(en[key]))).toEqual([]);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import JoinLessonButton from '@/components/JoinLessonButton';
+import { enrichSessionMeetingLink } from '@/lib/meetingLink';
 import StudentLayout from '@/components/StudentLayout';
 import ParentLayout from '@/components/ParentLayout';
 import ParentChildSwitcher from '@/components/parent/ParentChildSwitcher';
@@ -746,7 +747,7 @@ export default function StudentSessions() {
             st.tutor_id
                 ? supabase
                       .from('profiles')
-                      .select('organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, perlas_finance_enabled, enable_per_lesson, enable_monthly_billing')
+                      .select('organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, perlas_finance_enabled, enable_per_lesson, enable_monthly_billing, personal_meeting_link')
                       .eq('id', st.tutor_id)
                       .maybeSingle()
                 : Promise.resolve({ data: null });
@@ -836,36 +837,46 @@ export default function StudentSessions() {
         }
         const sessionRows = (sessionsRes.data || []) as Record<string, unknown>[];
         const subjectIdsForSessions = [...new Set(sessionRows.map((r) => r.subject_id).filter(Boolean) as string[])];
-        let subjectMeta: Record<string, { name: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean }> =
+        let subjectMeta: Record<string, { name: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean; meeting_link?: string | null }> =
             {};
         if (subjectIdsForSessions.length > 0) {
             const { data: subs, error: subErr } = await supabase
                 .from('subjects')
-                .select('id,name,is_group,max_students,is_trial')
+                .select('id,name,is_group,max_students,is_trial,meeting_link')
                 .in('id', subjectIdsForSessions);
             if (subErr) {
                 console.warn('[StudentSessions] subjects load:', subErr.code, subErr.message);
             } else {
                 for (const s of subs ?? []) {
-                    const row = s as { id: string; name: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean };
+                    const row = s as { id: string; name: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean; meeting_link?: string | null };
                     subjectMeta[row.id] = {
                         name: row.name,
                         is_group: row.is_group ?? undefined,
                         max_students: row.max_students,
                         is_trial: row.is_trial ?? undefined,
+                        meeting_link: row.meeting_link ?? null,
                     };
                 }
             }
         }
+        const tutorPersonalLink = (tutorSub as { personal_meeting_link?: string | null } | null)?.personal_meeting_link;
+        const subjectLinksById = new Map(
+            Object.entries(subjectMeta).map(([id, meta]) => [id, { meeting_link: meta.meeting_link }]),
+        );
         const fetchedSessions: Session[] = sessionRows.map((row) => {
             const sid = row.subject_id as string | null | undefined;
             const sm = sid ? subjectMeta[sid] : undefined;
-            return {
+            const base = {
                 ...(row as unknown as Session),
                 subjects: sm
                     ? { name: sm.name, is_group: sm.is_group, max_students: sm.max_students ?? undefined, is_trial: sm.is_trial }
                     : null,
             };
+            return enrichSessionMeetingLink(base, {
+                tutorPersonalLink,
+                studentPersonalLink: (st as { personal_meeting_link?: string | null }).personal_meeting_link,
+                subjectsById: subjectLinksById,
+            });
         });
         const currentStudentIdForFetch = st.id;
         setSessions(fetchedSessions);
@@ -1793,12 +1804,15 @@ export default function StudentSessions() {
                             {seesPaymentAmounts && (
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                     <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('stuSess.price')}</p>
-                                    <p className="font-bold text-gray-900">{fmt(selectedSession?.price)}</p>
-                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && perLessonPayAllowedForSession(selectedSession) && !manualPaymentsOnly && (
-                                        <p className="text-[11px] text-gray-500 mt-1 leading-snug">
-                                            {t('stuSess.stripeChargeNote', { amount: formatLessonCharge(selectedSession.price, tutorOrgIsSchool, tutorOrgFeeProfile) })}
-                                        </p>
-                                    )}
+                                    <p className="font-bold text-gray-900">
+                                        {selectedSession?.price != null &&
+                                        selectedSession.status === 'active' &&
+                                        !selectedSession.paid &&
+                                        perLessonPayAllowedForSession(selectedSession) &&
+                                        !manualPaymentsOnly
+                                            ? formatLessonCharge(selectedSession.price, tutorOrgIsSchool, tutorOrgFeeProfile)
+                                            : fmt(selectedSession?.price)}
+                                    </p>
                                 </div>
                             )}
                             <div className={`bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center ${seesPaymentAmounts ? '' : 'sm:col-span-2'}`}>

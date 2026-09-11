@@ -46,12 +46,8 @@ vi.mock('stripe', () => {
 const sessionsSingle = vi.fn();
 const sessionsUpdateEq = vi.fn();
 const studentsUpdateEq = vi.fn();
-const organizationsSingle = vi.fn();
 
 const from = vi.fn((table: string) => {
-  if (table === 'organizations') {
-    return { select: () => ({ eq: () => ({ single: organizationsSingle }) }) };
-  }
   if (table === 'sessions') {
     return {
       select: vi.fn(() => ({ eq: vi.fn(() => ({ single: sessionsSingle })) })),
@@ -90,7 +86,7 @@ function sessionRow(overrides: Record<string, unknown> = {}) {
     profiles: {
       stripe_account_id: 'acct_individual',
       stripe_onboarding_complete: true,
-      organization_id: null, enable_per_lesson: true,
+      organization_id: null,
       full_name: 'Tutor Name',
       subscription_plan: null,
       manual_subscription_exempt: false,
@@ -102,19 +98,6 @@ function sessionRow(overrides: Record<string, unknown> = {}) {
 
 describe('GET /api/pay-session', () => {
   const originalEnv = process.env;
-
-  it('blocks an old payment link for a monthly organization even with stale tutor defaults', async () => {
-    const row = sessionRow();
-    row.profiles.organization_id = 'org-1' as any;
-    sessionsSingle.mockResolvedValue({ data: row, error: null });
-    organizationsSingle.mockResolvedValue({ data: { enable_per_lesson: false }, error: null });
-    const handler = (await import('../../api/pay-session')).default;
-    const res = mockRes();
-    await handler(mockReq('GET', 'sess-1') as any, res as any);
-    expect(res.getResult().statusCode).toBe(400);
-    expect(stripeCreate).not.toHaveBeenCalled();
-    expect(stripeRetrieve).not.toHaveBeenCalled();
-  });
 
   beforeEach(() => {
     vi.clearAllMocks();

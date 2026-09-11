@@ -1,5 +1,5 @@
-import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { pt, ptOverrides } from '../../src/lib/i18n/pt';
@@ -13,7 +13,9 @@ import { CHROME, chromeFor, formatShortDay } from '../../src/lib/publicPage';
 import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone } from '../../src/lib/utils';
 
-const deferredPrefixes = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('pt');
+
+const deferredPrefixes = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferredPrefixes.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 // Parameters supplied by existing callers but omitted from abbreviated English source strings.
 const restoredSourceParameters: Record<string, string[]> = {
@@ -40,7 +42,8 @@ beforeAll(async () => { await loadLocaleDict('pt'); });
 
 describe('European Portuguese tutor and business localization', () => {
   it('explicitly covers every in-scope source key, including the entire onboarding quiz', () => {
-    expect(Object.keys(ptOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in ptOverrides))).toEqual([]);
+    expect(Object.keys(ptOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(pt).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !pt[key])).toEqual([]);
     expect(Object.keys(ptOverrides).filter((key) => key.startsWith('quiz.')).sort())
@@ -147,7 +150,7 @@ describe('European Portuguese tutor and business localization', () => {
     expect(getSeoMeta('pt', 'pricing').title).toContain('Preços');
     expect(isTranslatedLocale('pt')).toBe(false);
     for (const key of Object.keys(en).filter((key) => deferredPrefixes.has(key.split('.')[0]))) {
-      expect(pt[key], key).toBe(ptOverrides[key] ?? en[key]);
+      expect(pt[key]).toBe(en[key]);
     }
   });
 
@@ -174,6 +177,3 @@ describe('European Portuguese tutor and business localization', () => {
     expect(validateLocalizedPhone('912345678', 'pt')).toBe(false);
   });
 });
-
-// Match server renderers: synchronous translation runs after its lazy preload.
-beforeAll(async () => { await preloadExtraLocaleDict('pt'); });

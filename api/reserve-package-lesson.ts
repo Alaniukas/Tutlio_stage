@@ -30,7 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: pkg, error: pkgErr } = await supabase
     .from('lesson_packages')
-    .select('id, available_lessons, reserved_lessons, total_lessons, tutor_id, student_id, subject_id, expires_at')
+    .select('id, available_lessons, reserved_lessons, total_lessons, tutor_id, student_id, subject_id, expires_at, pool_organization_id')
     .eq('id', packageId)
     .eq('paid', true)
     .eq('active', true)
@@ -38,6 +38,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (pkgErr || !pkg) {
     return json(res, 404, { error: 'Package not found', details: pkgErr?.message });
+  }
+  if (pkg.pool_organization_id) {
+    return json(res, 409, { error: 'Pooled credits are allocated atomically with the lesson; standalone reservations are not supported.' });
   }
 
   const available = Number(pkg.available_lessons || 0);

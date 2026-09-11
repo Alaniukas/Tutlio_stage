@@ -68,11 +68,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from('lesson_packages')
       .select(`
         id, tutor_id, student_id, subject_id, paid, payment_status, created_at,
-        stripe_checkout_session_id, payment_method, total_lessons
+        stripe_checkout_session_id, payment_method, total_lessons, pool_organization_id
       `)
       .eq('id', body.packageId)
       .single();
     if (pkgErr || !pkg) return json(res, 404, { error: 'Paketas nerastas' });
+    if (pkg.pool_organization_id) {
+      return json(res, 409, { error: 'Consolidated package terms cannot be edited.', code: 'pooled_package_immutable' });
+    }
 
     const { data: tutor } = await supabase
       .from('profiles')

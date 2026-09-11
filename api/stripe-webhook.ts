@@ -3,8 +3,6 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { tryIssueSalesInvoiceForStripePackage } from './_lib/issuePackageSalesInvoice.js';
-import { ensurePaidTrialInvoice, ensurePaidTrialPackageInvoice } from './_lib/paidTrialInvoice.js';
-import { isProKlaseOrg } from './_lib/marketMoney.js';
 import { markInvoicesPaidForPackage } from './_lib/markPackageInvoicePaid.js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
@@ -19,7 +17,6 @@ import { summarizeStripeOnboarding } from './_lib/stripeAccountOnboarding.js';
 import { sendTrialReservationConfirmedNotifications } from './_lib/trialReservation.js';
 import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
 import { markSchoolMonthlyInvoicePaid } from './_lib/schoolMonthlyInvoiceEmail.js';
-import { subscriptionPeriodEndIso } from './_lib/stripeSubscriptionPeriod.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -176,7 +173,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const plan = isSubscriptionOnlyPriceId(priceItem?.price)
                     ? 'subscription_only'
                     : priceItem?.price.recurring?.interval === 'year' ? 'yearly' : 'monthly';
-                const periodEnd = subscriptionPeriodEndIso(subToUse);
+                const periodEnd = new Date((subToUse as Stripe.Subscription & { current_period_end: number }).current_period_end * 1000).toISOString();
                 const statusToSave = subToUse.status === 'canceled' || (subToUse as any).cancel_at_period_end ? 'canceled' : subToUse.status;
                 const isTrialing = statusToSave === 'trialing';
 
@@ -189,7 +186,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         subscription_current_period_end: periodEnd,
                         ...(isTrialing && { trial_used: true }),
                     })
-                    .eq('id', profile.id).throwOnError();
+                    .eq('id', profile.id);
 
                 console.log(`[stripe-webhook] Subscription ${statusToSave} for profile ${profile.id}`);
             }
@@ -222,7 +219,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         : otherActive.items.data[0]?.price.recurring?.interval === 'year'
                             ? 'yearly'
                             : 'monthly';
-                    const periodEnd = subscriptionPeriodEndIso(otherActive);
+                    const periodEnd = new Date((otherActive as Stripe.Subscription & { current_period_end: number }).current_period_end * 1000).toISOString();
                     const statusToSave = (otherActive as any).cancel_at_period_end ? 'canceled' : otherActive.status;
                     await supabase
                         .from('profiles')
@@ -232,16 +229,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             subscription_plan: plan,
                             subscription_current_period_end: periodEnd,
                         })
-                        .eq('id', profile.id).throwOnError();
+                        .eq('id', profile.id);
                     console.log(`[stripe-webhook] Subscription deleted but found active sub ${otherActive.id}, updated profile ${profile.id}`);
                 } else {
                     await supabase
                         .from('profiles')
                         .update({
                             subscription_status: 'canceled',
-                            subscription_current_period_end: subscriptionPeriodEndIso(subscription),
+                            subscription_current_period_end: new Date((subscription as Stripe.Subscription & { current_period_end: number }).current_period_end * 1000).toISOString(),
                         })
-                        .eq('id', profile.id).throwOnError();
+                        .eq('id', profile.id);
                     console.log(`[stripe-webhook] Subscription canceled for profile ${profile.id}`);
                 }
             }
@@ -379,10 +376,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                 stripe_subscription_id: subscriptionId,
                                 subscription_status: subscription.status,
                                 subscription_plan: plan,
-                                subscription_current_period_end: subscriptionPeriodEndIso(subscription),
+                                subscription_current_period_end: new Date((subscription as unknown as { current_period_end: number }).current_period_end * 1000).toISOString(),
                                 ...(isTrialing && { trial_used: true }),
                             })
-                            .eq('id', profile.id).throwOnError();
+                            .eq('id', profile.id);
 
                         console.log(`[stripe-webhook] Profile ${profile.id} updated with subscription`);
                     }
@@ -430,7 +427,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     .eq('id', packageId)
                     .eq('paid', false)
                     .select(
-                        'id, tutor_id, total_lessons, available_lessons, total_price, payment_method, manual_sales_invoice_id, paid_at, students(full_name, email, payer_email, payer_name), subject:subjects(name), lesson_package_items(subject_id, total_lessons, price_per_lesson, position, subjects!inner(name))'
+                        'id, tutor_id, total_lessons, available_lessons, total_price, payment_method, manual_sales_invoice_id, paid_at, pool_organization_id, students(full_name, email, payer_email, payer_name), subject:subjects(name), lesson_package_items(subject_id, total_lessons, price_per_lesson, position, subjects!inner(name))'
                     )
                     .maybeSingle();
 
@@ -457,7 +454,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         .eq('id', (updatedPackage as any).tutor_id)
                         .maybeSingle();
 
-                    const orgName = await getOrgName(supabase, tutor?.organization_id);
+                    const packageOrganizationId = (updatedPackage as any).pool_organization_id || tutor?.organization_id || null;
+                    const orgName = await getOrgName(supabase, packageOrganizationId);
                     const providerName = orgName || tutor?.full_name || 'Korepetitorius';
                     const packageGrossEur = session.amount_total != null ? session.amount_total / 100 : null;
                     const packageBaseEur = metadataBaseEur(session.metadata) ?? Number(updatedPackage.total_price);
@@ -467,7 +465,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         sourceId: packageId,
                         baseAmountEur: packageBaseEur,
                         grossAmountEur: packageGrossEur,
-                        organizationId: tutor?.organization_id ?? null,
+                        organizationId: packageOrganizationId,
                         tutorId: (updatedPackage as any).tutor_id ?? null,
                         stripeCheckoutSessionId: session.id,
                     });
@@ -512,7 +510,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     baseTotalEur: packageBaseEur,
                                     ...(packageGrossEur != null ? { totalChargedEur: packageGrossEur } : {}),
                                     items: webhookEmailItems,
-                                    ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
+                                    ...(packageOrganizationId ? { organizationId: packageOrganizationId } : {}),
                                 },
                             }),
                         }).catch(e => console.error('[stripe-webhook] Error sending package success email:', e));
@@ -530,9 +528,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         console.error('[stripe-webhook] Error updating invoice status:', invErr);
                     }
 
-                    const trialInvoiced = await ensurePaidTrialPackageInvoice(supabase, packageId);
                     try {
-                        if (!trialInvoiced) await tryIssueSalesInvoiceForStripePackage(supabase, updatedPackage as any);
+                        await tryIssueSalesInvoiceForStripePackage(supabase, updatedPackage as any);
                     } catch (sfErr) {
                         console.error('[stripe-webhook] Auto S.F. for package failed (non-blocking):', sfErr);
                     }
@@ -548,7 +545,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     } catch (invErr) {
                         console.error('[stripe-webhook] Error marking package invoice paid (already-paid path):', invErr);
                     }
-                    await ensurePaidTrialPackageInvoice(supabase, packageId);
                 }
 
                 // If there are pre-created sessions tied to this package (e.g. trial lessons),
@@ -930,23 +926,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     }).catch(e => console.error('[stripe-webhook] Error sending lesson payment email:', e));
                                 }
 
-                                if (tutor?.email) {
-                                    const tutorPayload = isOrgTutor(tutor.organization_id)
-                                        ? {
-                                            type: 'lesson_confirmed_tutor',
-                                            to: tutor.email,
-                                            data: {
-                                                studentName: student.full_name,
-                                                tutorName: tutor.full_name || 'Korepetitorius',
-                                                date: dateStr,
-                                                time: timeStr,
-                                                subject: (dbSession as any).topic,
-                                                sessionId: dbSession.id,
-                                                meetingLink: (dbSession as any).meeting_link || '',
-                                                organizationId: tutor.organization_id,
-                                            },
-                                        }
-                                        : {
+                                // Org tutors already received booking_notification at reservation — no payment email.
+                                if (tutor?.email && !isOrgTutor(tutor.organization_id)) {
+                                    await fetch(sendEmailUrl, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                                        body: JSON.stringify({
                                             type: 'payment_received_tutor',
                                             to: tutor.email,
                                             data: {
@@ -958,21 +943,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                                 price: (dbSession as any).price,
                                                 ...(tutor.organization_id ? { organizationId: tutor.organization_id } : {}),
                                             },
-                                        };
-                                    await fetch(sendEmailUrl, {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-                                        body: JSON.stringify(tutorPayload),
+                                        }),
                                     }).catch(e => console.error('[stripe-webhook] Error sending tutor email:', e));
                                 }
 
                                 console.log(`[stripe-webhook] Lesson session ${sessionId} confirmed and emails sent`);
                             } else {
                                 console.log(`[stripe-webhook] Lesson session ${sessionId} was already paid, skipping duplicate emails`);
-                            }
-                            // Run on retries too: a prior PDF/email failure must be recoverable.
-                            if (!updateErr && isProKlaseOrg(tutor?.organization_id)) {
-                                await ensurePaidTrialInvoice(supabase, sessionId);
                             }
                         }
                     }

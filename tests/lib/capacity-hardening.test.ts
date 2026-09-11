@@ -13,7 +13,7 @@ const chatPermissionMigration = read(
   'supabase/migrations/20260825180724_capacity_chat_broadcast_admin_permissions.sql',
 );
 const jobMigration = read(
-  'supabase/migrations/20260825171248_capacity_background_jobs.sql',
+  'supabase/migrations/20260827144421_capacity_background_job_rpcs.sql',
 );
 const reminders = read('api/send-reminders.ts');
 const schoolReminders = read('api/school-installment-reminders.ts');

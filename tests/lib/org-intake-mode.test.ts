@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canScheduleStudentBeforeActivation,
   getFeaturesByCategoryForOrg,
   isProKlaseOnlyFeature,
   proKlaseFeatureEnabled,
@@ -7,7 +8,12 @@ import {
   proKlaseOrgAdminContext,
   stripProKlaseOnlyFeatures,
 } from '@/lib/orgIntakeMode';
-import { PRO_KLASE_ORG_ID, PRO_KLASE_QA_ORG_ID } from '@/lib/marketMoney';
+import {
+  MOKSLO_VAISIAI_DEMO_ORG_ID,
+  MOKSLO_VAISIAI_ORG_ID,
+  PRO_KLASE_ORG_ID,
+  PRO_KLASE_QA_ORG_ID,
+} from '@/lib/marketMoney';
 
 describe('orgIntakeMode Pro Klasė gating', () => {
   const proKlaseOrgId = PRO_KLASE_QA_ORG_ID;
@@ -28,6 +34,18 @@ describe('orgIntakeMode Pro Klasė gating', () => {
     expect(proKlaseFeatureEnabled(proKlaseOrgId, 'company', hasStudentCardBooking, 'student_card_booking')).toBe(
       true,
     );
+  });
+
+  it('allows Mokslo Vaisiai and Pro Klasė admins to schedule before account activation', () => {
+    expect(canScheduleStudentBeforeActivation(PRO_KLASE_ORG_ID, 'company')).toBe(true);
+    expect(canScheduleStudentBeforeActivation(MOKSLO_VAISIAI_ORG_ID, 'company')).toBe(true);
+    expect(canScheduleStudentBeforeActivation(MOKSLO_VAISIAI_DEMO_ORG_ID, 'company')).toBe(true);
+  });
+
+  it('does not expand pre-activation scheduling to schools, generic orgs, or loading state', () => {
+    expect(canScheduleStudentBeforeActivation(MOKSLO_VAISIAI_ORG_ID, 'school')).toBe(false);
+    expect(canScheduleStudentBeforeActivation(otherOrgId, 'company')).toBe(false);
+    expect(canScheduleStudentBeforeActivation(MOKSLO_VAISIAI_ORG_ID, 'company', true)).toBe(false);
   });
 
   it('isProKlaseOnlyFeature identifies Pro Klasė registry entries', () => {

@@ -21,15 +21,6 @@ const rules: OrganizationDynamicPricingRule[] = [
 ];
 
 describe('organization dynamic pricing', () => {
-  it('keeps the manually agreed family frequency when booking one recurring weekday at a time', () => {
-    const student = { grade: '6 klasė', pricing_lessons_per_week: 2, pricing_lessons_per_week_is_manual: true };
-    for (const weekdays of [[1], [4]]) {
-      expect(resolveOrganizationLessonPrice({ rules, student,
-        lessonsPerWeek: contractedLessonsPerWeek(true, weekdays, 2), fallbackPrice: 30 })).toBe(25);
-    }
-    expect(resolveOrganizationLessonPrice({ rules, student, individualPrice: 21, lessonsPerWeek: 1, fallbackPrice: 30 })).toBe(21);
-    expect(findOrganizationDynamicPrice(rules, { ...student, pricing_lessons_per_week_is_manual: false }, 1)).toBe(27);
-  });
   it('recognizes only dynamic-pricing schema rollout errors', () => {
     expect(
       isDynamicPricingSchemaMissing({

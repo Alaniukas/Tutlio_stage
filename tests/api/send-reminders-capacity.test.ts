@@ -109,20 +109,6 @@ function emailResponse(ok: boolean): Response {
 }
 
 describe('session reminder capacity behavior', () => {
-  it('falls back to the payer without a student email even when payment_payer is not parent', async () => {
-    const session = futureSession();
-    session.student.email = '  ';
-    session.student.payer_email = 'parent@example.test';
-    session.reminder_tutor_sent = true;
-    mocks.sessions.push(session);
-    const fetchMock = vi.fn(async () => emailResponse(true));
-    vi.stubGlobal('fetch', fetchMock);
-    await handler(mockReq(), mockRes());
-    const mails = fetchMock.mock.calls.map(call => JSON.parse((call[1] as any)?.body || '{}')).filter(body => body.type);
-    expect(mails).toHaveLength(1);
-    expect(mails[0]).toMatchObject({ type: 'session_reminder_payer', to: 'parent@example.test', data: { meetingLink: 'https://example.test/lesson' } });
-    expect(mocks.updateCalls).toContainEqual({ reminder_payer_sent: true });
-  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.sessions.length = 0;

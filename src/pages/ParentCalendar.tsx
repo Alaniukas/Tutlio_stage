@@ -40,6 +40,7 @@ import {
 } from '@/components/ui/dialog';
 import { CalendarDays, ChevronLeft, ChevronRight, Loader2, ShieldAlert, Wallet } from 'lucide-react';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
+import { dedupeParentChildren } from '@/lib/parentChildIdentity';
 
 type SessionRow = {
   id: string;
@@ -206,7 +207,7 @@ export default function ParentCalendar() {
   const loadChildren = useCallback(async () => {
     const { data: links, error } = await supabase
       .from('parent_students')
-      .select('student_id, students(id, full_name, grade, tutor_id, profiles:tutor_id(full_name))');
+      .select('student_id, students(id, full_name, email, grade, tutor_id, organization_id, linked_user_id, profiles:tutor_id(full_name))');
 
     if (error) {
       console.warn('[ParentCalendar] parent_students load failed:', error);
@@ -218,8 +219,10 @@ export default function ParentCalendar() {
     const meta = new Map<string, StudentMeta>();
     const studentIds: string[] = [];
 
-    for (const link of links ?? []) {
-      const s = (link as any).students as any;
+    const canonicalStudents = dedupeParentChildren(
+      (links ?? []).map((link) => (link as any).students).filter((student) => Boolean(student?.id)),
+    );
+    for (const s of canonicalStudents) {
       if (!s?.id) continue;
       studentIds.push(s.id);
       meta.set(s.id, {

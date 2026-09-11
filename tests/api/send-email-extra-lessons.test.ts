@@ -78,10 +78,12 @@ describe('school extra-lessons emails', () => {
       schedule: 'Antradieniais 16:00–16:45',
     });
     expect(sent.subject).toContain('Papildomų užsiėmimų sutartis');
-    expect(sent.html).toContain('Peržiūrėti ir patvirtinti sutartį');
+    expect(sent.html).toContain('Užsakymas su prievole sumokėti');
+    expect(sent.html).toContain('Peržiūrėkite sutartį ir pateikite užsakymą');
     expect(sent.html).toContain('school-extra-lessons-accept');
     expect(sent.html).toContain('papildomų užsiėmimų sutartį');
-    expect(sent.html).not.toContain('prievole sumokėti');
+    expect(sent.html).toContain('text-align:center');
+    expect(sent.html).not.toContain('Peržiūrėti ir patvirtinti sutartį');
   }, 15000);
 
   it('shows school contact once when contactEmail is set', async () => {

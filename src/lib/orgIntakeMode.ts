@@ -1,6 +1,6 @@
 import type { OrgEntityType } from '@/contexts/OrgEntityContext';
 import { FEATURE_REGISTRY, type FeatureDefinition } from './featureRegistry.js';
-import { isProKlaseOrg } from './marketMoney.js';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from './marketMoney.js';
 
 /** Traditional school org (contracts, installments, school parent flows). Not Pro Klasė. */
 export function isSchoolOrg(entityType: OrgEntityType | string | null | undefined): boolean {
@@ -63,6 +63,20 @@ export function proKlaseOrgAdminContext(
 ): boolean {
   if (isSchoolOrg(entityType) || featuresLoading) return false;
   return isProKlaseOrg(orgId);
+}
+
+/**
+ * Org admins that may create a student schedule before the student activates
+ * a portal account. Sessions are linked to the internal students row, so an
+ * auth user is intentionally not required for this workflow.
+ */
+export function canScheduleStudentBeforeActivation(
+  orgId: string | null | undefined,
+  entityType: OrgEntityType | string | null | undefined,
+  featuresLoading = false,
+): boolean {
+  if (isSchoolOrg(entityType) || featuresLoading) return false;
+  return isProKlaseOrg(orgId) || isMoksloVaisiaiOrg(orgId);
 }
 
 /** Pro Klasė-only flag: Pro Klasė org + flag on. */

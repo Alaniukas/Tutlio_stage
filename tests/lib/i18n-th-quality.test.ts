@@ -1,5 +1,5 @@
-import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
@@ -18,7 +18,9 @@ import { CHROME, chromeFor, formatShortDay } from '../../src/lib/publicPage';
 import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 import { formatLocalizedPhone, validateLocalizedPhone, getLocalizedPhonePlaceholder } from '../../src/lib/utils';
 
-const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('th');
+
+const deferred = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 // Existing international validation accepts +66. Correct these LT-only source examples.
 const phoneCorrections = new Set(['onboard.parentPhoneFormat', 'onboard.phoneFormatError', 'register.phoneError', 'register.phoneHint', 'settings.phoneFormat', 'stu.phoneFormat']);
@@ -31,10 +33,11 @@ beforeAll(async () => { await loadLocaleDict('th'); });
 
 describe('Thai tutor and business localization', () => {
   it('covers the complete scope, including every quiz key, and retains deferred English copy', () => {
-    expect(Object.keys(thOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in thOverrides))).toEqual([]);
+    expect(Object.keys(thOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(th).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !th[key])).toEqual([]);
-    for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) expect(th[key], key).toBe(thOverrides[key] ?? en[key]);
+    for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) expect(th[key]).toBe(en[key]);
     expect(expectedKeys.filter((key) => key.startsWith('quiz.') && /[A-Za-z]/.test(en[key]) && !/[\u0e00-\u0e7f]/.test(th[key])).sort()).toEqual([
       'quiz.info.story.solo.name1', 'quiz.info.story.solo.name2',
       'quiz.info.story.company.customerName', 'quiz.offer.testimonial.company.name1',
@@ -142,6 +145,3 @@ describe('Thai tutor and business localization', () => {
     expect(chromeFor('en')).toBe(CHROME.en);
   });
 });
-
-// Match server renderers: synchronous translation runs after its lazy preload.
-beforeAll(async () => { await preloadExtraLocaleDict('th'); });

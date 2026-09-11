@@ -1,6 +1,6 @@
 import { isMoksloVaisiaiOrg } from './marketMoney.js';
 
-/** MV-only: vaikas be portalo paskyros — pamokų info siunčiama mokėtojui, ne kitoms org. */
+/** MV-only: a child without a contact email receives lesson information through the payer. */
 export function moksloVaisiaiRoutesLessonCommsToPayer(opts: {
   organizationId?: string | null;
   tutorOrganizationId?: string | null;
@@ -13,7 +13,6 @@ export function moksloVaisiaiRoutesLessonCommsToPayer(opts: {
     isMoksloVaisiaiOrg(opts.tutorOrganizationId) ||
     isMoksloVaisiaiOrg(opts.tutorOrganizationSlug);
   if (!isMv) return false;
-  if (opts.linkedUserId) return false;
   return !String(opts.studentEmail ?? '').trim();
 }
 

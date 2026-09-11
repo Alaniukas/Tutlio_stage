@@ -1,4 +1,3 @@
-import TemporaryPasswordGate from '@/components/TemporaryPasswordGate';
 import { useEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { resolveAccountPortals, setLastRolePortal, type AccountPortals } from '@/lib/account-portal';
@@ -130,7 +129,7 @@ export default function StudentProtectedRoute() {
                     Your account is currently frozen. You can view your data but cannot make changes.
                 </div>
             )}
-            <TemporaryPasswordGate><Outlet context={{ isFrozen }} /></TemporaryPasswordGate>
+            <Outlet context={{ isFrozen }} />
         </>
     );
     if (allowInvoiceSuccess) return <Outlet />;

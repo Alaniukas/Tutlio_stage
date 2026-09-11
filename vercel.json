@@ -5,18 +5,6 @@
     "devCommand": null,
     "trailingSlash": false,
     "functions": {
-        "api/stripe-webhook.ts": {
-            "includeFiles": "api/_lib/fonts/**"
-        },
-        "api/confirm-stripe-payment.ts": {
-            "includeFiles": "api/_lib/fonts/**"
-        },
-        "api/confirm-package-payment.ts": {
-            "includeFiles": "api/_lib/fonts/**"
-        },
-        "api/confirm-manual-payment.ts": {
-            "includeFiles": "api/_lib/fonts/**"
-        },
         "api/generate-invoice.ts": {
             "includeFiles": "api/_lib/fonts/**"
         },
@@ -103,22 +91,24 @@
             "maxDuration": 60
         },
         "api/school-contract-complete.ts": {
-            "maxDuration": 60
+            "maxDuration": 120
         },
         "api/school-contract-render-docx-pdf.ts": {
-            "maxDuration": 60
+            "maxDuration": 120
+        },
+        "api/convert-docx-to-pdf.ts": {
+            "maxDuration": 120
         },
         "api/extra-lessons-contract-offer.ts": {
-            "maxDuration": 60,
-            "includeFiles": "api/_lib/templates/**"
+            "maxDuration": 120,
+            "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
         },
         "api/extra-lessons-contract-accept.ts": {
-            "maxDuration": 60,
-            "includeFiles": "api/_lib/templates/**"
+            "maxDuration": 120,
+            "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
         },
         "api/extra-lessons-contract-withdraw.ts": {
-            "maxDuration": 60,
-            "includeFiles": "api/_lib/templates/**"
+            "includeFiles": "src/lib/**"
         },
         "api/bill-school-extra-lessons.ts": {
             "maxDuration": 300,
@@ -126,6 +116,9 @@
         },
         "api/retry-school-monthly-invoice-emails.ts": {
             "maxDuration": 90
+        },
+        "api/process-school-acceptances.ts": {
+            "maxDuration": 120
         }
     },
     "headers": [
@@ -274,7 +267,7 @@
         },
         {
             "path": "/api/bill-school-extra-lessons",
-            "schedule": "0 4-23 1 * *"
+            "schedule": "0 4 1 * *"
         },
         {
             "path": "/api/retry-school-monthly-invoice-emails",
@@ -291,6 +284,10 @@
         {
             "path": "/api/blog-auto-generate",
             "schedule": "0 5 * * *"
+        },
+        {
+            "path": "/api/process-school-acceptances",
+            "schedule": "* * * * *"
         }
     ]
 }

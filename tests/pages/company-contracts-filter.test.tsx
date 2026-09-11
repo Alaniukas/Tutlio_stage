@@ -66,6 +66,7 @@ describe('CompanyContracts list filter', () => {
       {
         ...contractBase,
         id: 'contract-signed',
+        media_publicity_consent: 'disagree',
         student_id: 'student-1',
         signing_status: 'signed',
         contract_number: 'SUT-1',
@@ -78,6 +79,7 @@ describe('CompanyContracts list filter', () => {
       {
         ...contractBase,
         id: 'contract-pending',
+        media_publicity_consent: 'agree',
         student_id: 'student-2',
         signing_status: 'signed_by_school',
         contract_number: 'SUT-2',
@@ -87,7 +89,7 @@ describe('CompanyContracts list filter', () => {
     ];
   });
 
-  const statusFilterTrigger = () => screen.getAllByRole('combobox')[1];
+  const statusFilterTrigger = () => screen.getByRole('combobox', { name: 'Sutarties būsena' });
 
   // School view filters through a Select; pick a bucket by its labelled option.
   const pickFilter = (label: string) => {
@@ -96,6 +98,14 @@ describe('CompanyContracts list filter', () => {
     expect(option).toBeTruthy();
     fireEvent.keyDown(option!, { key: 'Enter' });
   };
+
+  it('filters contract consent independently of signing status', () => {
+    render(<MemoryRouter initialEntries={['/school/contracts']}><CompanyContracts /></MemoryRouter>);
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Atvaizdo sutikimas' }), { key: 'Enter' });
+    fireEvent.keyDown(screen.getByRole('option', { name: 'Atvaizdas: nesutinka' }), { key: 'Enter' });
+    expect(screen.getByText('Vėgėlė Ąžuolas')).toBeTruthy();
+    expect(screen.queryByText('Petraitis Jonas')).toBeNull();
+  });
 
   it('filters by bucket with counts and searches diacritics-insensitively', () => {
     render(

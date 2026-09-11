@@ -17,6 +17,7 @@ import {
   standaloneSessionClientPaidEur,
   sumProKlaseRealizedPaidTutorPayEur,
 } from '@/lib/proKlaseAdminFinance';
+import { dedupeParentChildren } from '@/lib/parentChildIdentity';
 
 /** Columns the tutor Dashboard needs (avoid `*` + share one deduped round-trip with Layout preload). */
 const TUTOR_DASH_SESSIONS_SELECT =
@@ -200,7 +201,7 @@ export function tutorStudentsRowsDeduped(tutorId: string) {
   return dedupeAsync(`tutor_students_star:${tutorId}`, () =>
     supabase
       .from('students')
-      .select('*, linked_user_id, parent_students(parent_id)')
+      .select('*, linked_user_id')
       .eq('tutor_id', tutorId)
       .is('detached_at', null)
       .order('created_at', { ascending: false }),
@@ -731,14 +732,43 @@ export function parentFullNameForUserDeduped(userId: string) {
   });
 }
 
+const PARENT_STUDENT_LINK_SELECT =
+  'id, full_name, email, tutor_id, linked_user_id, organization_id, profiles:tutor_id(full_name)';
+
 export function parentStudentLinksDeduped(userId: string) {
-  return dedupeAsync(`parent_student_links:${userId}`, () =>
-    supabase
-      .from('parent_students')
-      .select(
-        'student_id, students(id, full_name, tutor_id, linked_user_id, organization_id, profiles:tutor_id(full_name))',
-      ),
-  );
+  return dedupeAsync(`parent_student_links:${userId}`, async () => {
+    const [linksRes, directRes] = await Promise.all([
+      supabase
+        .from('parent_students')
+        .select(`student_id, students(${PARENT_STUDENT_LINK_SELECT})`),
+      supabase.from('students').select(PARENT_STUDENT_LINK_SELECT).eq('parent_user_id', userId),
+    ]);
+    if (linksRes.error) return linksRes;
+    const linked = linksRes.data ?? [];
+    const directStudents = (directRes.data ?? []).filter((s) => s?.id);
+    const linkedIds = new Set(
+      linked.map((row) => String((row as { student_id?: string }).student_id ?? '')).filter(Boolean),
+    );
+    const syntheticLinks = directStudents
+      .filter((s) => !linkedIds.has(String(s.id)))
+      .map((s) => ({ student_id: s.id, students: s }));
+    const allLinks = [...linked, ...syntheticLinks];
+    // Supabase's generated relation shape can be either one object or an array,
+    // depending on the inferred FK cardinality. Normalize it before identity
+    // deduplication so a nested array can never be treated as a child row.
+    const relationStudents = allLinks.flatMap((row) => {
+      const value = row.students as unknown;
+      if (Array.isArray(value)) return value as Array<Record<string, unknown>>;
+      return value ? [value as Record<string, unknown>] : [];
+    });
+    const canonicalStudents = dedupeParentChildren(
+      relationStudents.filter((student) => Boolean(student?.id)),
+    );
+    return {
+      ...linksRes,
+      data: canonicalStudents.map((student) => ({ student_id: student.id, students: student })),
+    };
+  });
 }
 
 export async function preloadParentData() {

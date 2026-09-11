@@ -22,6 +22,8 @@ import {
   type MatchSubject,
 } from '@/lib/tutorMatching';
 import { availabilitySlotKey } from '@/lib/pickedAvailabilityTime';
+import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 
 export type TutorSlotPick = MatchSlot;
 
@@ -74,6 +76,11 @@ type SubjectCriterion = {
   frequency: number;
 };
 
+type TutorOption = {
+  name: string;
+  teachingNotes?: string | null;
+};
+
 const SEARCH_HORIZON_DAYS = 27;
 
 function matchSlotKey(slot: MatchSlot): string {
@@ -120,8 +127,7 @@ export default function FindTutorModal({
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<MatchSlot[]>([]);
   const [searched, setSearched] = useState(false);
-  const [tutors, setTutors] = useState<Record<string, string>>({});
-  const [teachingNotes, setTeachingNotes] = useState<Record<string, string>>({});
+  const [tutors, setTutors] = useState<Record<string, TutorOption>>({});
   const [selectedSlotKeys, setSelectedSlotKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -176,37 +182,56 @@ export default function FindTutorModal({
 
   useEffect(() => {
     if (!isOpen || !orgId) return;
-    (async () => {
-      const { getOrgVisibleTutors } = await import('@/lib/orgVisibleTutors');
-      const { data: orgRow } = await supabase
-        .from('organizations')
-        .select('tutor_license_count')
-        .eq('id', orgId)
-        .single();
+    let cancelled = false;
+    void (async () => {
+      const [{ data: orgRow }, visibleTutors] = await Promise.all([
+        supabase
+          .from('organizations')
+          .select('tutor_license_count')
+          .eq('id', orgId)
+          .single(),
+        getOrgVisibleTutors(
+          supabase,
+          orgId,
+          'id, full_name, email, teaching_notes, has_active_license',
+        ),
+      ]);
+      if (cancelled) return;
       const orgUsesLicenses = (Number(orgRow?.tutor_license_count) || 0) > 0;
-      const tutorList = (await getOrgVisibleTutors(supabase, orgId, 'id, full_name, email, has_active_license, teaching_notes')).filter(
+      const tutorList = visibleTutors.filter(
         (p) => !orgUsesLicenses || p.has_active_license !== false,
       );
-      const map: Record<string, string> = {};
-      tutorList.forEach((t: any) => { map[t.id] = t.full_name; });
+      const map: Record<string, TutorOption> = {};
+      tutorList.forEach((t: any) => {
+        map[t.id] = { name: t.full_name, teachingNotes: t.teaching_notes };
+      });
       setTutors(map);
-      setTeachingNotes(Object.fromEntries(tutorList.map((t: any) => [t.id, String(t.teaching_notes || '').trim()])));
 
       const tutorIds = tutorList.map((t: any) => t.id);
-      if (tutorIds.length === 0) return;
+      if (tutorIds.length === 0) {
+        setSubjects([]);
+        return;
+      }
       const { data: subjectsData } = await supabase
         .from('subjects')
         .select('id, name, price, duration_minutes, tutor_id, is_trial')
         .in('tutor_id', tutorIds)
         .order('name');
+      if (cancelled) return;
       const rows = ((subjectsData as MatchSubject[]) || []).filter((row) => row.is_trial !== true);
       setSubjects(rows);
     })();
+    return () => { cancelled = true; };
   }, [isOpen, orgId]);
 
   const uniqueSubjectNames = useMemo(
     () => [...new Set(subjects.map(s => s.name).filter((name) => String(name || '').trim()))].sort(),
     [subjects]
+  );
+
+  const tutorNames = useMemo(
+    () => Object.fromEntries(Object.entries(tutors).map(([id, tutor]) => [id, tutor.name])),
+    [tutors],
   );
 
   const weekdays = useMemo(() => [
@@ -293,7 +318,7 @@ export default function FindTutorModal({
         (availability as AvailabilityRule[]) || [],
         busy,
         subjects,
-        tutors,
+        tutorNames,
         {
           dateFrom,
           dateTo: effectiveDateTo,
@@ -429,8 +454,13 @@ export default function FindTutorModal({
                     <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__all__">{t('findLesson.allTutors')}</SelectItem>
-                      {Object.entries(tutors).map(([id, name]) => (
-                        <SelectItem key={id} value={id}>{name}</SelectItem>
+                      {Object.entries(tutors).map(([id, tutor]) => (
+                        <SelectItem key={id} value={id}>
+                          <span className="inline-flex max-w-full items-center gap-1.5">
+                            <span className="truncate">{tutor.name}</span>
+                            <TutorTeachingNotesBadge notes={tutor.teachingNotes} />
+                          </span>
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -759,9 +789,9 @@ export default function FindTutorModal({
               {groups.map((group) => (
                 <div key={group.tutorId} className="border border-gray-200 rounded-xl p-2.5">
                   <div className="flex items-center justify-between gap-2 px-1 pb-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                       <p className="text-sm font-semibold text-gray-900 truncate">{group.tutorName}</p>
-                      {teachingNotes[group.tutorId] && <p className="text-xs text-gray-600 whitespace-pre-wrap break-words">{teachingNotes[group.tutorId]}</p>}
+                      <TutorTeachingNotesBadge notes={tutors[group.tutorId]?.teachingNotes} />
                       {group.isPrimary && (
                         <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">
                           <Star className="w-3 h-3" />

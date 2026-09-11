@@ -13,6 +13,7 @@ import AdminBillingPanel from '@/components/admin/AdminBillingPanel';
 import AdminAttendancePanel from '@/components/admin/AdminAttendancePanel';
 import { fmtMoney } from '@/lib/marketMoney';
 import { isPlMarket } from '@/lib/market';
+import { normalizeUrl } from '@/lib/utils';
 type Step = 'lock' | 'panel';
 
 interface FormState {
@@ -58,6 +59,7 @@ interface TutorRow {
   full_name: string | null;
   email: string | null;
   phone: string | null;
+  personal_meeting_link: string | null;
 }
 
 interface ArchivedTutorRow {
@@ -1319,6 +1321,17 @@ export default function AdminPanel() {
                         <div className="min-w-0">
                           <span>{tu.full_name || '—'}</span>
                           <div className="text-slate-500 truncate text-xs">{tu.email}</div>
+                          {tu.personal_meeting_link ? (
+                            <a
+                              href={normalizeUrl(tu.personal_meeting_link) || undefined}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-1 block max-w-md truncate text-xs text-indigo-300 hover:text-indigo-200 hover:underline"
+                              title={tu.personal_meeting_link}
+                            >
+                              {t('compTut.personalMeetingLink')}: {tu.personal_meeting_link}
+                            </a>
+                          ) : null}
                         </div>
                         <button
                           type="button"

@@ -50,10 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const proKlase = isProKlaseOrg(org.id) || isProKlaseOrg(org.slug);
   const moksloVaisiai = isMoksloVaisiaiOrg(org.id) || isMoksloVaisiaiOrg(org.slug);
   if (!features.custom_branding && !proKlase && !moksloVaisiai) {
-    // Public whitelabel URLs must still resolve only to branded organizations.
-    if (slug) return res.status(404).json({ error: 'Branding not enabled' });
-    res.setHeader('Cache-Control', 'public, s-maxage=60');
-    return res.status(200).json({ enabled: false });
+    return res.status(404).json({ error: 'Branding not enabled' });
   }
 
   const customDesc = typeof features.login_description === 'string' ? features.login_description : '';
@@ -74,6 +71,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       locale,
     }),
     hide_powered_by: proKlase || moksloVaisiai || features.hide_powered_by === true,
-    logo_on_dark: moksloVaisiai,
+    logo_on_dark: false,
   });
 }

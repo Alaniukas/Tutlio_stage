@@ -56,4 +56,41 @@ describe('automated notification language', () => {
     expect(res.json.mock.calls[0][0].html).toContain('<html lang="he" dir="rtl">');
     expect(mocks.send).not.toHaveBeenCalled();
   });
+  it('parent cancellation email uses tutor-initiative wording when the tutor cancelled', async () => {
+    profile('lt');
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
+    await handler({
+      method: 'POST', headers: { 'x-internal-key': 'test-only-service' }, query: {},
+      body: {
+        type: 'session_cancelled_parent', to: 'parent@example.com', dryRun: true,
+        data: {
+          organizationId: 'org-id', studentName: 'Mokinys', tutorName: 'Korep', date: '2026-09-09', time: '10:00',
+          cancelledBy: 'tutor', reason: 'Liga',
+        },
+      },
+    } as any, res as any);
+    expect(res.status).toHaveBeenCalledWith(200);
+    const html = res.json.mock.calls[0][0].html as string;
+    expect(html).toContain('korepetitoriaus iniciatyva');
+    expect(html).not.toContain('Jūsų vaikas atšaukė pamoką');
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+  it('school parent cancellation omits the Tutlio portal button', async () => {
+    profile('lt');
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
+    await handler({
+      method: 'POST', headers: { 'x-internal-key': 'test-only-service' }, query: {},
+      body: {
+        type: 'session_cancelled_parent', to: 'parent@example.com', dryRun: true,
+        data: {
+          organizationId: 'org-id', studentName: 'Mokinys', tutorName: 'Mokytoja', date: '2026-09-09', time: '12:00',
+          cancelledBy: 'tutor', reason: 'Mokytojo liga', schoolFlow: true,
+        },
+      },
+    } as any, res as any);
+    const html = res.json.mock.calls[0][0].html as string;
+    expect(html).toContain('Mokytojo liga');
+    expect(html).not.toContain('/parent/calendar');
+    expect(html).not.toContain('/student/sessions');
+  });
 });

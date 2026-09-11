@@ -13,9 +13,13 @@ import { Resend } from 'resend';
 import { getFromEmail, getResendApiKey, INTERNAL_NOTIFY_EMAILS } from './resendConfig.js';
 import { sendEnterpriseWelcomeEmail } from './sendEnterpriseWelcomeEmail.js';
 import { insertInitialOrgOwner } from './orgAdminAccess.js';
-import { subscriptionPeriodEndIso } from './stripeSubscriptionPeriod.js';
 
 type Supabase = SupabaseClient;
+
+function subscriptionPeriodEndIso(subscription: Stripe.Subscription): string {
+  const end = (subscription as Stripe.Subscription & { current_period_end: number }).current_period_end;
+  return new Date(end * 1000).toISOString();
+}
 
 function subscriptionQuantity(subscription: Stripe.Subscription): number {
   return subscription.items.data[0]?.quantity ?? 0;

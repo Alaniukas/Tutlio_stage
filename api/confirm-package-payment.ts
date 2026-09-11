@@ -7,7 +7,6 @@ import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedg
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { sendTrialReservationConfirmedNotifications } from './_lib/trialReservation.js';
 import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
-import { ensurePaidTrialPackageInvoice } from './_lib/paidTrialInvoice.js';
 
 function getStripe() {
   return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
@@ -129,8 +128,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[confirm-package-payment] mark invoices paid:', e);
     }
 
-    await ensurePaidTrialPackageInvoice(supabase, packageId);
-
     // Record platform fee (idempotent; webhook records it too — first writer wins).
     // Bookkeeping must never fail an already-activated payment.
     try {
@@ -144,7 +141,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sourceId: packageId,
         baseAmountEur: metadataBaseEur(checkout.metadata) ?? Number(finalPackage.total_price),
         grossAmountEur: checkout.amount_total != null ? checkout.amount_total / 100 : null,
-        organizationId: (tutorRow as { organization_id?: string | null } | null)?.organization_id ?? null,
+        organizationId: finalPackage.pool_organization_id
+          ?? (tutorRow as { organization_id?: string | null } | null)?.organization_id
+          ?? null,
         tutorId: finalPackage.tutor_id ?? null,
         stripeCheckoutSessionId: checkout.id,
       });

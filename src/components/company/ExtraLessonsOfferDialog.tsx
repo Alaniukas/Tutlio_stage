@@ -23,7 +23,7 @@ import { formatStudentPickerLabel } from '@/lib/orgStudentIdentity';
 import { DateRangeFields, ScheduleSlotPicker } from '@/components/company/ScheduleSlotPicker';
 
 type Student = { id: string; full_name: string; payer_email?: string | null; grade?: string | null };
-export type ExtraLessonsOfferGroup = {
+type Group = {
   id: string;
   name: string;
   tutor_name?: string | null;
@@ -32,9 +32,7 @@ export type ExtraLessonsOfferGroup = {
   meeting_link?: string | null;
   school_year_end?: string | null;
   slots?: { weekday: number; start_time: string; end_time: string }[];
-  members?: { student_id: string; schedule_slots?: { weekday: number; start_time: string; end_time: string }[] | null }[];
 };
-type Group = ExtraLessonsOfferGroup;
 
 function laisviOpenDefaults(organizationId: string | null | undefined) {
   if (!usesLaisviStyleExtraLessonsPrefill(organizationId)) {
@@ -174,30 +172,7 @@ export default function ExtraLessonsOfferDialog(props: {
     });
   }, [sortedStudents, studentSearch]);
 
-  const [loadedSubjects, setLoadedSubjects] = useState<ExtraLessonsTaughtSubject[]>([]);
-  const [subjectsLoading, setSubjectsLoading] = useState(false);
-  const [subjectsError, setSubjectsError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!props.open || props.individualSubjects !== undefined) return;
-    let cancelled = false;
-    setLoadedSubjects([]);
-    setSubjectsLoading(true);
-    setSubjectsError(null);
-    void (async () => {
-      try {
-        const response = await fetch('/api/school-individual-subjects', { headers: await authHeaders() });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Nepavyko įkelti dalykų.');
-        if (!cancelled) setLoadedSubjects(data.subjects || []);
-      } catch (err) {
-        if (!cancelled) setSubjectsError(err instanceof Error ? err.message : 'Nepavyko įkelti dalykų.');
-      } finally {
-        if (!cancelled) setSubjectsLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [props.open, props.organizationId, props.individualSubjects]);
-  const subjects = props.individualSubjects ?? loadedSubjects;
+  const subjects = props.individualSubjects || [];
   const selectedGroup = props.groups.find((g) => g.id === groupId);
 
   const recalcBaseLessons = (nextSlots: ExtraLessonsScheduleSlot[], start: string, end: string, group?: Group) => {
@@ -211,15 +186,14 @@ export default function ExtraLessonsOfferDialog(props: {
     if (count > 0) setBaseLessons(String(count));
   };
 
-  const applyGroupSelection = (id: string, selectedStudentId = studentId) => {
+  const applyGroupSelection = (id: string) => {
     setGroupId(id);
     setSubjectId('');
     const g = props.groups.find((x) => x.id === id);
     if (!g) return;
     setServiceType('group');
     setServiceName((prev) => prev || g.name);
-    const memberSlots = g.members?.find(member => member.student_id === selectedStudentId)?.schedule_slots;
-    const defaults = applyGroupDefaults(props.organizationId, { ...g, slots: memberSlots ?? g.slots }, 'group', startDate, endDate);
+    const defaults = applyGroupDefaults(props.organizationId, g, 'group', startDate, endDate);
     setSlots(defaults.slots);
     if (defaults.platform) setPlatform(defaults.platform);
     if (defaults.duration) setDuration(defaults.duration);
@@ -340,14 +314,13 @@ export default function ExtraLessonsOfferDialog(props: {
           <DialogTitle>Papildomų užsiėmimų sutartis</DialogTitle>
         </DialogHeader>
         <p className="text-xs text-gray-500">
-          Privaloma: mokinys ir užsiėmimo kaina. Grupinei sutarčiai rinkitės klasės grupę, individualiai — dėstomą dalyką.
-          Grafiką, datas ir kiekius galite palikti tuščius — tėvai juos užpildys priimdami sutartį.
+          Privaloma: mokinys ir užsiėmimo kaina. Grupinei sutarčiai rinkitės klasės grupę, individualiai — dėstomą dalyką. Grafiką, datas ir kiekius galite palikti tuščius — tėvai juos užpildys priimdami sutartį.
         </p>
         <div className="space-y-3">
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div>
             <Label>Mokinys *</Label>
-            <Select value={studentId} onValueChange={id => { setStudentId(id); if (groupId) applyGroupSelection(groupId, id); }}>
+            <Select value={studentId} onValueChange={setStudentId}>
               <SelectTrigger className="w-full rounded-md h-9">
                 <SelectValue placeholder="Pasirinkite…" />
               </SelectTrigger>
@@ -389,7 +362,7 @@ export default function ExtraLessonsOfferDialog(props: {
               <option value="individual">Individuali</option>
             </select>
           </div>
-          {serviceType !== 'individual' && (
+          {serviceType === 'group' && (
             <div>
               <Label>Grupė</Label>
               <select className="w-full border rounded-md h-9 px-2 text-sm" value={groupId} onChange={(e) => applyGroupSelection(e.target.value)}>
@@ -411,9 +384,7 @@ export default function ExtraLessonsOfferDialog(props: {
                   </option>
                 ))}
               </select>
-              {subjectsLoading && <p className="text-xs text-gray-500 mt-1">Įkeliami dalykai…</p>}
-              {subjectsError && <p role="alert" className="text-xs text-red-600 mt-1">{subjectsError}</p>}
-              {!subjectsLoading && !subjectsError && subjects.length === 0 && (
+              {subjects.length === 0 && (
                 <p className="text-xs text-amber-700 mt-1">
                   Nėra individualių dėstomų dalykų. Pridėkite juos nustatymuose (dalykų valdymas).
                 </p>

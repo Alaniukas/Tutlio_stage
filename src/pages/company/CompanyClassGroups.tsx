@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { CalendarClock, Pencil, Plus, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -106,8 +106,6 @@ export default function CompanyClassGroups() {
   const [orgId, setOrgId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [materializeWarning, setMaterializeWarning] = useState<string | null>(null);
-  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
-  const [deleteSessionError, setDeleteSessionError] = useState<string | null>(null);
 
   const loadGroups = async () => {
     const headers = await authHeaders();
@@ -260,28 +258,6 @@ export default function CompanyClassGroups() {
     return true;
   };
 
-  const deleteIndividualSession = async (session: IndividualSessionRecord) => {
-    if (!isOrgAdmin || deletingSessionId) return;
-    if (!window.confirm(t('cal.deleteConfirmSingle'))) return;
-    setDeletingSessionId(session.id);
-    setDeleteSessionError(null);
-    try {
-      const headers = await authHeaders();
-      const res = await fetch('/api/delete-session', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ sessionId: session.id, deleteScope: 'single' }),
-      });
-      if (!res.ok) throw new Error(t('cal.deleteFailed'));
-      dropCalendarCaches();
-      setIndividualSessions((prev) => prev.filter((row) => row.id !== session.id));
-    } catch {
-      setDeleteSessionError(t('cal.deleteFailed'));
-    } finally {
-      setDeletingSessionId(null);
-    }
-  };
-
   const renderCard = (g: SchoolClassGroupRecord) => (
     <button
       key={g.id}
@@ -389,7 +365,6 @@ export default function CompanyClassGroups() {
 
       {filteredIndividualSessions.length > 0 && (
         <section className="space-y-3" aria-labelledby="individual-lessons-title">
-          {deleteSessionError && <p role="alert" className="text-sm text-red-700">{deleteSessionError}</p>}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 id="individual-lessons-title" className="text-base font-semibold text-gray-900 flex items-center gap-2">
               <CalendarClock className="h-4 w-4 text-emerald-700" />
@@ -418,19 +393,6 @@ export default function CompanyClassGroups() {
                     ? ` · ${staff}: ${tutorNameById.get(session.tutor_id) || '—'}`
                     : ''}
                 </div>
-                {isOrgAdmin && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="mt-3 rounded-xl border-red-200 text-red-700 hover:bg-red-50"
-                    disabled={deletingSessionId !== null}
-                    onClick={() => void deleteIndividualSession(session)}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    {deletingSessionId === session.id ? '…' : t('cal.deleteSession')}
-                  </Button>
-                )}
               </div>
             ))}
           </div>

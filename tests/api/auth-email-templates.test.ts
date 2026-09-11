@@ -22,7 +22,8 @@ describe('confirmation and recovery email artifacts', () => {
 
   it('keeps all four checked-in Supabase templates synchronized with the reviewed source', () => {
     for (const [name, content] of Object.entries(generateAuthEmailTemplates())) {
-      expect(readFileSync(`supabase/email-templates/${name}`, 'utf8')).toBe(content);
+      const checkedIn = readFileSync(`supabase/email-templates/${name}`, 'utf8').replace(/\r\n?/g, '\n');
+      expect(checkedIn).toBe(content.replace(/\r\n?/g, '\n'));
       if (name.endsWith('.html')) {
         expect(content.match(/href="\{\{ \.ConfirmationURL \}\}"/g)).toHaveLength(1);
         expect(content).not.toContain('.Data.full_name');

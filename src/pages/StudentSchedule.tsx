@@ -8,6 +8,7 @@ import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { startPerlasPayment } from '@/lib/perlasPay';
 import { dedupeAsync } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
+import { enrichSessionMeetingLink } from '@/lib/meetingLink';
 import { format, addDays, getDay, startOfWeek, parse, addHours, isBefore, isAfter, parseISO, differenceInHours, startOfMonth, endOfMonth, startOfDay, endOfDay } from 'date-fns';
 import { lt } from 'date-fns/locale';
 import { useTranslation } from '@/lib/i18n';
@@ -21,6 +22,7 @@ import WhiteboardButton from '@/components/WhiteboardButton';
 import SessionFiles from '@/components/SessionFiles';
 import { useSearchParams, useNavigate, useMatch } from 'react-router-dom';
 import { sendEmail } from '@/lib/email';
+import { notifyTutorAfterLessonBooked } from '@/lib/mvTutorSessionNotify';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
 import {
     defaultSessionPaymentStatusForStudent,
@@ -39,6 +41,7 @@ import {
     type ParentChildOption,
 } from '@/lib/parentActiveChild';
 import { fetchStudentActiveLessonPackagesDeduped } from '@/lib/studentLessonPackagesLight';
+import { packageCoversLessonDate } from '@/lib/pooledPackageBookingWindow';
 import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 import { tutorUsesManualStudentPayments, trimManualPaymentBankDetails } from '@/lib/subscription';
@@ -88,6 +91,9 @@ interface LessonPackageItemSummary {
 
 interface LessonPackageSummary {
     id: string;
+    pool_organization_id?: string | null;
+    billing_period_start?: string | null;
+    billing_period_end?: string | null;
     /** Denormalized "primary" subject from lesson_packages.subject_id (legacy single-subject reads). */
     subject_id: string;
     available_lessons: number;
@@ -612,10 +618,14 @@ export default function StudentSchedule() {
                 .select('student_id, students(full_name)')
                 .eq('parent_id', parentProfileId);
             const options: ParentChildOption[] = (links ?? [])
-                .map((row: { student_id?: string; students?: { full_name?: string } | { full_name?: string }[] | null }) => ({
-                    id: String(row.student_id ?? ''),
-                    fullName: String((Array.isArray(row.students) ? row.students[0] : row.students)?.full_name ?? '').trim(),
-                }))
+                .map((row) => {
+                    const student = row.students as { full_name?: string } | { full_name?: string }[] | null | undefined;
+                    const fullName = Array.isArray(student) ? student[0]?.full_name : student?.full_name;
+                    return {
+                        id: String(row.student_id ?? ''),
+                        fullName: String(fullName ?? '').trim(),
+                    };
+                })
                 .filter((p) => p.id);
             options.sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }));
             if (options.length === 0) {
@@ -895,18 +905,17 @@ export default function StudentSchedule() {
             });
         }
 
-        // org_student: show trial subject only after trial offer/package is actually sent.
+        // org_student: show trial subject only after trial offer/package is actually sent
+        // (pending unpaid packages count — create-trial-package starts paid=false, active=false).
         const isOrgStudentFlow = !!(tutorProfile.data as any)?.organization_id;
         if (isOrgStudentFlow) {
             const trialSubjectIds = finalSubjects.filter((s: any) => s.is_trial === true).map((s) => s.id);
             if (trialSubjectIds.length > 0) {
                 const { data: trialPackages } = await supabase
                     .from('lesson_packages')
-                    .select('id, subject_id, paid, active')
+                    .select('id, subject_id')
                     .eq('student_id', st.id)
                     .in('subject_id', trialSubjectIds)
-                    .eq('paid', true)
-                    .eq('active', true)
                     .order('created_at', { ascending: false })
                     .limit(20);
                 const sentTrialSubjectIds = new Set((trialPackages || []).map((p: any) => p.subject_id));
@@ -941,6 +950,9 @@ export default function StudentSchedule() {
             pkgDeduped.map(
                 (p): LessonPackageSummary => ({
                     id: p.id,
+                    pool_organization_id: p.pool_organization_id,
+                    billing_period_start: p.billing_period_start,
+                    billing_period_end: p.billing_period_end,
                     subject_id: p.subject_id || '',
                     available_lessons: Number(p.available_lessons || 0),
                     reserved_lessons: Number(p.reserved_lessons || 0),
@@ -963,6 +975,20 @@ export default function StudentSchedule() {
                 supabase,
                 (sessionsRes.data || []) as Record<string, unknown>[],
             );
+            const tutorMeetingLinkForSessions =
+                (tutorProfile.data as { personal_meeting_link?: string | null } | null)?.personal_meeting_link;
+            const studentMeetingLinkForSessions =
+                (st as { personal_meeting_link?: string | null }).personal_meeting_link;
+            const subjectMeetingLinksById = new Map(
+                (subs.data || []).map((subject) => [subject.id, { meeting_link: subject.meeting_link }]),
+            );
+            mySessionsData = mySessionsData.map((session) =>
+                enrichSessionMeetingLink(session, {
+                    tutorPersonalLink: tutorMeetingLinkForSessions,
+                    studentPersonalLink: studentMeetingLinkForSessions,
+                    subjectsById: subjectMeetingLinksById,
+                }),
+            );
         }
 
         setExistingSessions(mySessionsData);
@@ -978,7 +1004,16 @@ export default function StudentSchedule() {
         setTimeout(() => {
             const monthStart = startOfMonth(new Date());
             const monthEnd = endOfMonth(new Date());
-            void fetchDateRange(monthStart, monthEnd, { studentId: st.id, tutorId: st.tutor_id });
+            void fetchDateRange(monthStart, monthEnd, {
+                studentId: st.id,
+                tutorId: st.tutor_id,
+                tutorPersonalLink:
+                    (tutorProfile.data as { personal_meeting_link?: string | null } | null)?.personal_meeting_link,
+                studentPersonalLink: (st as { personal_meeting_link?: string | null }).personal_meeting_link,
+                subjectLinksById: new Map(
+                    (subs.data || []).map((subject) => [subject.id, { meeting_link: subject.meeting_link }]),
+                ),
+            });
         }, 500);
 
         // Defer occupied-slots API so the calendar can paint before the extra round-trip.
@@ -1006,7 +1041,13 @@ export default function StudentSchedule() {
     const fetchDateRange = async (
         startDate: Date,
         endDate: Date,
-        scope?: { studentId?: string; tutorId?: string },
+        scope?: {
+            studentId?: string;
+            tutorId?: string;
+            tutorPersonalLink?: string | null;
+            studentPersonalLink?: string | null;
+            subjectLinksById?: ReadonlyMap<string, { meeting_link?: string | null }>;
+        },
     ) => {
         // Don't fetch if already loaded
         if (isRangeLoaded(startDate, endDate)) {
@@ -1042,6 +1083,16 @@ export default function StudentSchedule() {
                 myNewSessions = await enrichScheduleSessionsWithSubjects(
                     supabase,
                     (sessionsRes.data || []) as Record<string, unknown>[],
+                );
+                const subjectLinksById =
+                    scope?.subjectLinksById ??
+                    new Map(subjects.map((subject) => [subject.id, { meeting_link: subject.meeting_link }]));
+                myNewSessions = myNewSessions.map((session) =>
+                    enrichSessionMeetingLink(session, {
+                        tutorPersonalLink: scope?.tutorPersonalLink ?? tutorPersonalMeetingLink,
+                        studentPersonalLink: scope?.studentPersonalLink ?? studentPersonalMeetingLink,
+                        subjectsById: subjectLinksById,
+                    }),
                 );
             }
             // If tutor is frozen by org license, don't reveal their busy slots to the student.
@@ -1313,6 +1364,9 @@ export default function StudentSchedule() {
         // Falls back to the legacy subject_id field when a package has no items rows yet.
         const activePackage = activePackages.find((pkg) => {
             if (pkg.available_lessons <= 0) return false;
+            if (pkg.pool_organization_id) {
+                return selectedSubject?.is_trial !== true && packageCoversLessonDate(pkg, selectedTime);
+            }
             if (pkg.items.length > 0) {
                 return pkg.items.some(
                     (it) => it.subject_id === selectedSubjectId && it.available_lessons > 0,
@@ -1447,7 +1501,7 @@ export default function StudentSchedule() {
                 .eq('id', tutorId)
                 .single();
 
-            if (usesPackage && activePackage) {
+            if (usesPackage && activePackage && !activePackage.pool_organization_id) {
                 try {
                     const reserveRes = await fetch('/api/reserve-package-lesson', {
                         method: 'POST',
@@ -1505,21 +1559,20 @@ export default function StudentSchedule() {
             (async () => {
                 if (tutorProfile?.email) {
                     const organizationTutor = Boolean(tutorProfile.organization_id);
-                    sendEmail({
-                        type: 'booking_notification',
-                        to: tutorProfile.email,
-                        data: {
-                            studentName: studentName || 'Mokinys',
-                            tutorName: tutorProfile.full_name || '',
-                            date: format(selectedTime, 'yyyy-MM-dd'),
-                            time: format(selectedTime, 'HH:mm'),
-                            paymentStatus: usesPackage ? 'paid' : 'pending',
-                            organizationTutor,
-                            /** @deprecated Prefer organizationTutor — kept for older API payloads. */
-                            hidePaymentStatus: organizationTutor,
-                            sessionId: sessionData.id,
-                        },
-                    });
+                    void notifyTutorAfterLessonBooked({
+                        supabase,
+                        tutorId,
+                        tutorEmail: tutorProfile.email,
+                        tutorName: tutorProfile.full_name || '',
+                        organizationId: tutorProfile.organization_id,
+                        studentId,
+                        studentName: studentName || '',
+                        sessionId: sessionData.id,
+                        date: format(selectedTime, 'yyyy-MM-dd'),
+                        time: format(selectedTime, 'HH:mm'),
+                        paymentStatus: usesPackage ? 'paid' : 'pending',
+                        organizationTutor,
+                    }).catch((err) => console.error('[StudentSchedule] tutor notify', err));
                 }
 
                 if (studentEmail) {
@@ -2045,6 +2098,13 @@ export default function StudentSchedule() {
                         </div>
 
                         <div className="p-6 bg-white">
+                            {!selectedEvent?.occupied && subjects.length === 0 && (
+                                <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                                    <p className="font-semibold">{t('stuSched.noBookableSubjects')}</p>
+                                    <p className="mt-1 text-xs text-amber-700">{t('stuSched.noBookableSubjectsHint')}</p>
+                                </div>
+                            )}
+
                             {!selectedEvent?.occupied && subjects.length > 0 && (
                                 <div className="mb-5">
                                     <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">{t('stuSched.selectSubject')}</p>
@@ -2218,11 +2278,13 @@ export default function StudentSchedule() {
                                 </>
                             ) : (
                                 <div className="bg-gray-50 rounded-2xl p-4 mb-4 border border-gray-100 text-sm text-gray-600 font-medium">
-                                    {!selectedSubjectId
-                                        ? t('stuSched.selectSubjectFirst')
-                                        : !selectedTime
-                                            ? t('stuSched.selectTimeFirst')
-                                            : t('stuSched.confirmSelection')}
+                                    {subjects.length === 0
+                                        ? t('parent.bookingNoSubjects')
+                                        : !selectedSubjectId
+                                            ? t('stuSched.selectSubjectFirst')
+                                            : !selectedTime
+                                                ? t('stuSched.selectTimeFirst')
+                                                : t('stuSched.confirmSelection')}
                                 </div>
                             )}
 
@@ -2415,9 +2477,21 @@ export default function StudentSchedule() {
                                 <div className="grid grid-cols-2 gap-3 text-sm">
                                     <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                         <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('studentDash.priceLabel')}</p>
-                                        <p className="font-bold text-gray-900">{fmt(mySessionData?.price)}</p>
+                                        <p className="font-bold text-gray-900">
+                                            {mySessionData?.price != null && mySessionData.status === 'active' && !mySessionData.paid
+                                                ? (() => {
+                                                    const { creditApplied, remaining } = lessonCreditBreakdown(mySessionData.price);
+                                                    if (remaining > 0 && !tutorSoloManualPayments) {
+                                                        return formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile);
+                                                    }
+                                                    if (remaining <= 0) return fmt(0);
+                                                    return fmt(mySessionData.price);
+                                                })()
+                                                : fmt(mySessionData?.price)}
+                                        </p>
                                         {mySessionData?.status === 'active' && !mySessionData.paid && mySessionData.price != null && (() => {
                                             const { creditApplied, remaining } = lessonCreditBreakdown(mySessionData.price);
+                                            if (creditApplied <= 0 && remaining > 0) return null;
                                             return (
                                                 <div className="text-[11px] text-gray-500 mt-1 leading-snug space-y-0.5">
                                                     {creditApplied > 0 && (
@@ -2425,19 +2499,12 @@ export default function StudentSchedule() {
                                                             {t('stuSched.creditRowApplied')}: {fmt(creditApplied)}
                                                         </p>
                                                     )}
-                                                    <p>
-                                                        {remaining > 0 ? (
-                                                            tutorSoloManualPayments ? (
-                                                                t('stuSched.manualPayNoStripeNote')
-                                                            ) : (
-                                                                t('stuSched.cardTotal', {
-                                                                    amount: formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile),
-                                                                })
-                                                            )
-                                                        ) : (
-                                                            t('stuSched.creditCoversFullLesson')
-                                                        )}
-                                                    </p>
+                                                    {remaining <= 0 && (
+                                                        <p>{t('stuSched.creditCoversFullLesson')}</p>
+                                                    )}
+                                                    {remaining > 0 && tutorSoloManualPayments && (
+                                                        <p>{t('stuSched.manualPayNoStripeNote')}</p>
+                                                    )}
                                                 </div>
                                             );
                                         })()}
@@ -2605,16 +2672,15 @@ export default function StudentSchedule() {
                                     const { creditApplied, remaining } = lessonCreditBreakdown(pendingPaymentSession.price);
                                     return (
                                         <>
-                                            <p><span className="font-medium">{t('studentDash.priceLabel')}:</span> {fmt(pendingPaymentSession.price)}</p>
+                                            <p>
+                                                <span className="font-medium">{t('studentDash.priceLabel')}:</span>{' '}
+                                                {remaining > 0 && !manualPaymentInBookingModal
+                                                    ? formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile)
+                                                    : fmt(pendingPaymentSession.price)}
+                                            </p>
                                             {creditApplied > 0 && (
                                                 <p className="text-emerald-700 font-medium">
                                                     {t('stuSched.creditRowApplied')}: {fmt(creditApplied)}
-                                                </p>
-                                            )}
-                                            {remaining > 0 && !manualPaymentInBookingModal && (
-                                                <p>
-                                                    <span className="font-medium">{t('stuSched.cardPayTotal')}</span>{' '}
-                                                    {formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile)}
                                                 </p>
                                             )}
                                             {remaining > 0 && manualPaymentInBookingModal && (

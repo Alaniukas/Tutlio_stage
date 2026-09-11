@@ -10,7 +10,6 @@ export interface OrganizationDynamicPricingRule {
 export interface DynamicPricingStudent {
   grade?: string | null;
   pricing_lessons_per_week?: number | null;
-  pricing_lessons_per_week_is_manual?: boolean | null;
 }
 
 interface PostgrestLikeError {
@@ -59,9 +58,7 @@ export function findOrganizationDynamicPrice(
   lessonsPerWeek?: number | null,
 ): number | null {
   const grade = parseStudentGrade(student?.grade);
-  const frequency = student?.pricing_lessons_per_week_is_manual
-    ? student.pricing_lessons_per_week
-    : lessonsPerWeek ?? student?.pricing_lessons_per_week ?? null;
+  const frequency = lessonsPerWeek ?? student?.pricing_lessons_per_week ?? null;
   if (grade === null || !Number.isInteger(Number(frequency)) || Number(frequency) < 1) return null;
 
   const matching = rules

@@ -59,6 +59,30 @@ describe('SchoolExtraLessonsAccept', () => {
     vi.stubGlobal('fetch', fetchMock);
   });
 
+  it('shows durable pending state after submit and finishes when the worker finalizes', async () => {
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return { ok: true, status: 202, json: async () => ({ ok: true, pending: true }) };
+      if (_url.includes('status=1')) return { ok: true, json: async () => ({ ok: true, alreadyAccepted: true, pdfUrl: 'https://example.com/final.pdf' }) };
+      return { ok: true, text: async () => JSON.stringify(preview) };
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=test']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+    await screen.findByRole('checkbox');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+    await screen.findByRole('heading', { name: 'Patvirtinimas išsaugotas' });
+    expect(screen.queryByRole('heading', { name: 'Sutartis sudaryta' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Užsakymas su prievole sumokėti' })).toBeNull();
+    await screen.findByRole('heading', { name: 'Sutartis sudaryta' }, { timeout: 4500 });
+  });
+
+  it('restores the pending screen on page reload', async () => {
+    fetchMock.mockResolvedValue({ ok: true, text: async () => JSON.stringify({ ...preview, pending: true, needsAttention: true }) });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=test']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+    await screen.findByRole('heading', { name: 'Patvirtinimas išsaugotas' });
+    expect(screen.getByText(/Dokumento paruošimas užtruko/)).toBeTruthy();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+  });
+
   it('shows a PDF preview and Sutinku/Nesutinku choices for the parent', async () => {
     fetchMock.mockResolvedValue({
       ok: true,
@@ -80,17 +104,13 @@ describe('SchoolExtraLessonsAccept', () => {
     expect(screen.getByText('Palaukti')).toBeTruthy();
     expect((screen.getByRole('radio', { name: 'Sutinku pradėti iš karto' }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole('radio', { name: 'Palaukti' }) as HTMLInputElement).checked).toBe(false);
-    expect(screen.getByText('Sutinku')).toBeTruthy();
-    expect(screen.getByText('Nesutinku')).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Peržiūrėkite sutartį ir pateikite užsakymą' })).toBeTruthy();
-    const submitButton = screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }) as HTMLButtonElement;
-    expect(submitButton.disabled).toBe(true);
     expect((screen.getByRole('radio', { name: 'Sutinku' }) as HTMLInputElement).checked).toBe(true);
-    fireEvent.click(screen.getByRole('radio', { name: 'Nesutinku' }));
-    expect((screen.getByRole('radio', { name: 'Nesutinku' }) as HTMLInputElement).checked).toBe(true);
-    fireEvent.click(screen.getByRole('checkbox'));
-    expect(submitButton.disabled).toBe(false);
-    expect(screen.getByText('Tutlio 🎓')).toBeTruthy();
+    expect((screen.getByRole('radio', { name: 'Nesutinku' }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' })).toBeTruthy();
+    expect(screen.getByText('Tutlio')).toBeTruthy();
+    expect(screen.queryByText('Tutlio 🎓')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Peržiūrėkite sutartį ir pateikite užsakymą' })).toBeTruthy();
+    expect(screen.queryByText(/\*\s*$/)).toBeNull();
     expect(screen.getByText(/Grupiniai užsiėmimai užsakomi visam mėnesiui/)).toBeTruthy();
     expect(
       screen.getByRole('link', { name: 'Sutarties atsisakymo forma' }).getAttribute('href'),

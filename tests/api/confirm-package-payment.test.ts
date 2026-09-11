@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-vi.mock('../../api/_lib/paidTrialInvoice', () => ({ ensurePaidTrialPackageInvoice: vi.fn(async () => false) }));
 
 function mockRes() {
   const out: { statusCode: number; body: any } = { statusCode: 0, body: null };

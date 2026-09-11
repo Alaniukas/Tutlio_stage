@@ -98,7 +98,7 @@ describe('sendTrialReservationConfirmedNotifications', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('emails the org tutor after payment and does not send a registration invite', async () => {
+  it('does not email org tutors after payment (reservation notice is sent earlier)', async () => {
     const { client } = makeSupabase(
       [{ id: 'tutor-1', full_name: 'Alice', email: 'alice@example.com', organization_id: 'org-1' }],
       [{ id: 'student-1', full_name: 'Sam' }],
@@ -109,16 +109,10 @@ describe('sendTrialReservationConfirmedNotifications', () => {
       holds: [baseHold],
     });
 
-    const types = fetchMock.mock.calls.map((c) => JSON.parse((c[1] as any).body).type);
-    expect(types).toContain('lesson_confirmed_tutor');
-    expect(types).not.toContain('invite_email');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    const headers = (fetchMock.mock.calls[0][1] as any).headers;
-    expect(headers['x-internal-key']).toBe('svc-key');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('skips the tutor email for a non-org (private) tutor and does not invite after payment', async () => {
+  it('emails a private (non-org) tutor after payment', async () => {
     const { client } = makeSupabase(
       [{ id: 'tutor-1', full_name: 'Alice', email: 'alice@example.com', organization_id: null }],
       [{ id: 'student-1', full_name: 'Sam' }],
@@ -126,6 +120,7 @@ describe('sendTrialReservationConfirmedNotifications', () => {
 
     await sendTrialReservationConfirmedNotifications(client, { appUrl: 'https://app.test', holds: [baseHold] });
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toContain('lesson_confirmed_tutor');
   });
 });

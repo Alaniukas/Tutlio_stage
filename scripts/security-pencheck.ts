@@ -56,7 +56,10 @@ async function checkHeaders() {
   const headerPaths = ["/", "/login", "/company/login"];
   for (const p of headerPaths) {
     const url = toUrl(targetUrl, p);
-    const res = await safeFetch(url, { method: "GET", redirect: "manual" });
+    // Production apex domains redirect to their canonical www host. Validate
+    // the response users actually receive instead of treating the redirect
+    // hop (which intentionally carries only HSTS) as the application page.
+    const res = await safeFetch(url, { method: "GET", redirect: "follow" });
     if (!res) continue;
 
     const hsts = res.headers.get("strict-transport-security");

@@ -24,6 +24,9 @@ export type StudentActivePackageRow = {
   available_lessons: number | null;
   reserved_lessons: number | null;
   expires_at: string | null;
+  pool_organization_id?: string | null;
+  billing_period_start?: string | null;
+  billing_period_end?: string | null;
   /** Per-subject breakdown. Multi-subject packages list >1 item; legacy single-subject packages list 1. */
   items: StudentActivePackageItemRow[];
 };
@@ -38,6 +41,7 @@ export async function fetchStudentActiveLessonPackagesDeduped(
       .select(
         `
         id, subject_id, total_lessons, available_lessons, reserved_lessons, expires_at,
+        pool_organization_id, billing_period_start, billing_period_end,
         lesson_package_items(subject_id, total_lessons, available_lessons, reserved_lessons, completed_lessons)
         `,
       )
@@ -56,7 +60,11 @@ export async function fetchStudentActiveLessonPackagesDeduped(
       );
       return [];
     }
-    return ((res.data ?? []) as any[]).map((row): StudentActivePackageRow => {
+    const pooled = await supabase.rpc('get_pooled_packages_for_student', { p_student_id: studentId });
+    const byId = new Map<string, any>();
+    for (const row of res.data || []) byId.set(row.id, row);
+    for (const row of pooled.data || []) if (!byId.has(row.id)) byId.set(row.id, row);
+    return [...byId.values()].map((row): StudentActivePackageRow => {
       const itemsRaw = Array.isArray(row.lesson_package_items) ? row.lesson_package_items : [];
       const items: StudentActivePackageItemRow[] = itemsRaw.map((it: any) => ({
         subject_id: String(it.subject_id),
@@ -72,6 +80,9 @@ export async function fetchStudentActiveLessonPackagesDeduped(
         available_lessons: row.available_lessons,
         reserved_lessons: row.reserved_lessons,
         expires_at: row.expires_at,
+        pool_organization_id: row.pool_organization_id,
+        billing_period_start: row.billing_period_start,
+        billing_period_end: row.billing_period_end,
         items,
       };
     });

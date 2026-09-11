@@ -1,16 +1,17 @@
-import type { OrganizationDynamicPricingRule } from '@/lib/organizationDynamicPricing';
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { SessionStatCards } from '@/components/SessionStatCards';
-import { calculateSessionStats } from '@/lib/session-stats';
+import { calculateSessionStats, calculateOrgSessionListStats } from '@/lib/session-stats';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
+import { planRecurringSeriesPatches, sortSeriesPatchesForApply } from '@/lib/recurringSessions';
 import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
 import { Checkbox } from '@/components/ui/checkbox';
-import { format } from 'date-fns';
+import { format as dateFnsFormat } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import type { OrganizationDynamicPricingRule } from '@/lib/organizationDynamicPricing';
 import { CalendarDays, Search, ChevronDown, ListOrdered, UserX, XCircle, CheckCircle, Pencil, Ban, Loader2, MessageSquare, Trash2, Gift } from 'lucide-react';
 import { defaultNoShowWhenForNow, buildNoShowSessionPatch } from '@/lib/noShowWhen';
 import { Input } from '@/components/ui/input';
@@ -37,18 +38,32 @@ import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { isAttendanceFlagged } from '@/lib/attendance';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
-import { orgStudentIdentityGroupKey, pickStudentsForOrgTutorPicker } from '@/lib/orgStudentIdentity';
+import {
+  formatOrgStudentPickerLabel,
+  orgStudentIdentityGroupKey,
+  pickStudentsForOrgTutorPicker,
+} from '@/lib/orgStudentIdentity';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { useHideWaitlist } from '@/hooks/useHideWaitlist';
-import { isWaitlistHiddenForOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { isWaitlistHiddenForOrg, isProKlaseOrg, isLaisviVaikaiOrg } from '@/lib/marketMoney';
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
 import {
   resolveOrgSessionSubjectDefaults,
   type OrgSubjectForDefaults,
 } from '@/lib/orgSessionSubjectDefaults';
 import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
+import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
+import { classGroupCancelTargets, classGroupOccurrenceSessionIds, sessionStatusCanCancel, usesClassGroupCancelFlow } from '@/lib/schoolClassGroupSessions';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { defaultStatsDateRange } from '@/lib/statsDateRange';
+import { schoolCalendarInstant, schoolDate } from '@/lib/schoolTime';
+import { fetchAllRows } from '@/lib/fetchAllRows';
+import {
+  schoolActivitySummary,
+  schoolMeetingOccurrences,
+  schoolStudentAttendance,
+} from '@/lib/schoolSessionMonitoring';
 
 interface Session {
   id: string;
@@ -78,6 +93,8 @@ interface Session {
   student_admin_comment_visible_to_tutor?: boolean;
   tutor_joined_at?: string | null;
   student_joined_at?: string | null;
+  status_confirmed_at?: string | null;
+  no_show_reason?: string | null;
 }
 
 interface Subject extends OrgSubjectForDefaults {
@@ -97,7 +114,6 @@ type OrgStudentRow = {
   personal_meeting_link?: string | null;
   grade?: string | null;
   pricing_lessons_per_week?: number | null;
-  pricing_lessons_per_week_is_manual?: boolean | null;
 };
 
 const ORG_SESSION_DETAIL_SELECT =
@@ -132,6 +148,8 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
     student_admin_comment_visible_to_tutor: row.student?.admin_comment_visible_to_tutor ?? false,
     tutor_joined_at: row.tutor_joined_at ?? null,
     student_joined_at: row.student_joined_at ?? null,
+    status_confirmed_at: row.status_confirmed_at ?? null,
+    no_show_reason: row.no_show_reason ?? null,
   };
 }
 
@@ -140,6 +158,8 @@ export default function CompanySessions() {
   const { fmt } = useMarketMoney();
   const entityType = useOrgEntityType();
   const isSchoolOrgView = entityType === 'school';
+  const format: typeof dateFnsFormat = (date, pattern, options) =>
+    dateFnsFormat(isSchoolOrgView ? schoolDate(date) : date, pattern, options);
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
@@ -160,6 +180,8 @@ export default function CompanySessions() {
   );
 
   const sc = getCached<any>('company_sessions');
+  const loadRequest = useRef(0);
+  const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(!sc);
   const [sessions, setSessions] = useState<Session[]>(sc?.sessions ?? []);
   const [tutors, setTutors] = useState<OrgTutorRow[]>(sc?.tutors ?? []);
@@ -167,15 +189,19 @@ export default function CompanySessions() {
   const [filterStatus, setFilterStatus] = useState('');
   const [search, setSearch] = useState('');
   const [sortNewest, setSortNewest] = useState(true);
-  const [filterStartDate, setFilterStartDate] = useState<Date | null>(null);
-  const [filterEndDate, setFilterEndDate] = useState<Date | null>(null);
-  const [isFilterActive, setIsFilterActive] = useState(false);
+  const [filterStartDate, setFilterStartDate] = useState<Date | null>(() => isSchoolOrgView ? defaultStatsDateRange().start : null);
+  const [filterEndDate, setFilterEndDate] = useState<Date | null>(() => isSchoolOrgView ? defaultStatsDateRange().end : null);
+  const [isFilterActive, setIsFilterActive] = useState(isSchoolOrgView);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [markingNoShow, setMarkingNoShow] = useState(false);
   const [noShowDialogOpen, setNoShowDialogOpen] = useState(false);
   const [cancelMode, setCancelMode] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
   const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
+  const [classGroupCancelScope, setClassGroupCancelScope] = useState<'one_student' | 'whole_occurrence'>('whole_occurrence');
+  const [classGroupCancelStudentId, setClassGroupCancelStudentId] = useState('');
+  const [classGroupCancelRows, setClassGroupCancelRows] = useState<Session[]>([]);
+  const [classGroupCancelLoading, setClassGroupCancelLoading] = useState(false);
   const [cancellingSession, setCancellingSession] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editTopic, setEditTopic] = useState('');
@@ -188,12 +214,14 @@ export default function CompanySessions() {
   const [editMeetingLink, setEditMeetingLink] = useState('');
   const [editPaid, setEditPaid] = useState(false);
   const [editStatus, setEditStatus] = useState('active');
-  const [confirmSchoolOutcome, setConfirmSchoolOutcome] = useState(false);
+  const [editTutorComment, setEditTutorComment] = useState('');
+  const [editShowCommentToStudent, setEditShowCommentToStudent] = useState(false);
   const [groupEditChoice, setGroupEditChoice] = useState<'single' | 'all_future'>('single');
   const [savingEdit, setSavingEdit] = useState(false);
   const [togglingPaid, setTogglingPaid] = useState(false);
   const [togglingComplimentary, setTogglingComplimentary] = useState(false);
   const [organizationId, setOrganizationId] = useState<string | null>(cachedOrgId);
+  const isLaisviVaikai = isLaisviVaikaiOrg(organizationId);
   const [deletingSession, setDeletingSession] = useState(false);
   const [deleteRecurringOpen, setDeleteRecurringOpen] = useState(false);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -214,7 +242,7 @@ export default function CompanySessions() {
   const [filterStudent, setFilterStudent] = useState('');
 
   useEffect(() => {
-    if (!getCached('company_sessions')) loadData();
+    void loadData();
   }, []);
 
   useEffect(() => {
@@ -290,8 +318,15 @@ export default function CompanySessions() {
     ],
   );
 
-  const loadData = async () => {
+  const loadData = async (
+    range = {
+      start: isFilterActive ? filterStartDate : null,
+      end: isFilterActive ? filterEndDate : null,
+    },
+  ) => {
+    const request = ++loadRequest.current;
     if (!getCached('company_sessions')) setLoading(true);
+    setLoadError('');
     try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -316,7 +351,7 @@ export default function CompanySessions() {
     const [studentsResult, subjectsResult, pricingResult, tspResult, dynamicResult] = await Promise.all([
       supabase
         .from('students')
-        .select('id, full_name, tutor_id, linked_user_id, email, organization_id, personal_meeting_link, grade, pricing_lessons_per_week, pricing_lessons_per_week_is_manual')
+        .select('id, full_name, tutor_id, linked_user_id, email, organization_id, personal_meeting_link, grade, pricing_lessons_per_week, payer_name, payer_email')
         .eq('organization_id', adminRow.organization_id)
         .order('full_name'),
       supabase
@@ -353,25 +388,40 @@ export default function CompanySessions() {
       })),
     );
 
-    if (tutorList.length === 0) return;
+    if (tutorList.length === 0) {
+      if (request === loadRequest.current) setSessions([]);
+      return;
+    }
 
-    const threeMonthsAgo = new Date();
-    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    const sessionsData = await fetchAllRows<any>((from, to) => {
+      let query = supabase.from('sessions').select(ORG_SESSION_DETAIL_SELECT).in('tutor_id', tutorIds);
+      if (range.start) {
+        const start = isSchoolOrgView ? schoolCalendarInstant(range.start) : new Date(range.start);
+        start.setHours(0, 0, 0, 0);
+        query = query.gte('start_time', start.toISOString());
+      } else if (!isSchoolOrgView) {
+        const threeMonthsAgo = new Date();
+        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+        query = query.gte('start_time', threeMonthsAgo.toISOString());
+      }
+      if (range.end) {
+        const end = isSchoolOrgView ? schoolCalendarInstant(range.end) : new Date(range.end);
+        end.setHours(23, 59, 59, 999);
+        query = query.lte('start_time', end.toISOString());
+      }
+      return query.order('start_time', { ascending: false }).order('id').range(from, to);
+    });
 
-    const { data: sessionsData } = await supabase
-      .from('sessions')
-      .select(ORG_SESSION_DETAIL_SELECT)
-      .in('tutor_id', tutorIds)
-      .gte('start_time', threeMonthsAgo.toISOString())
-      .order('start_time', { ascending: false })
-      .limit(2000);
+    const enriched: Session[] = sessionsData.map((s: any) => mapOrgSessionRow(s, tutorList));
 
-    const enriched: Session[] = (sessionsData || []).map((s: any) => mapOrgSessionRow(s, tutorList));
-
+    if (request !== loadRequest.current) return;
     setSessions(enriched);
     setCache('company_sessions', { sessions: enriched, tutors: tutorList, students: studentsResult.data || [] });
+    } catch (error) {
+      if (request !== loadRequest.current) return;
+      setLoadError(error instanceof Error ? error.message : 'Nepavyko įkelti užsiėmimų.');
     } finally {
-      setLoading(false);
+      if (request === loadRequest.current) setLoading(false);
     }
   };
 
@@ -400,29 +450,50 @@ export default function CompanySessions() {
   const selectedSessionAttendanceFlagged =
     !!selectedSession && isAttendanceFlagged(selectedSession);
 
+  const isClassGroupCancel = usesClassGroupCancelFlow({ classGroupId: selectedSession?.class_group_id });
+
   const handleCancelSession = async () => {
     if (!selectedSession || cancellationReason.trim().length < 5) return;
+    if (isClassGroupCancel && (classGroupCancelLoading || (classGroupCancelScope === 'one_student' && !classGroupCancelStudentId))) return;
     setCancellingSession(true);
     try {
-      const { success, error } = await cancelSessionAndFillWaitlist({
-        sessionId: selectedSession.id,
-        tutorId: selectedSession.tutor_id,
-        reason: cancellationReason.trim(),
-        cancelledBy: 'tutor',
-        studentName: selectedSession.student_name,
-        tutorName: selectedSession.tutor_name,
-        studentEmail: null,
-        tutorEmail: null,
-        leaveFreeTime: leaveFreeTimeOnCancel,
-      });
-      if (success) {
+      const pool = classGroupCancelRows.length > 0 ? classGroupCancelRows : [selectedSession];
+      const targets = isClassGroupCancel
+        ? classGroupCancelTargets(pool, classGroupCancelScope, classGroupCancelStudentId, {
+            includeCompleted: isLaisviVaikai,
+          })
+        : [selectedSession];
+      if (targets.length === 0) {
+        alert(t('compSch.errorCancelling', { msg: t('cal.errorCancelling') }));
+        return;
+      }
+      let successCount = 0;
+      let lastError: string | undefined;
+      for (const row of targets) {
+        const { success, error } = await cancelSessionAndFillWaitlist({
+          sessionId: row.id,
+          tutorId: row.tutor_id,
+          reason: cancellationReason.trim(),
+          cancelledBy: 'tutor',
+          studentName: row.student_name,
+          tutorName: row.tutor_name,
+          studentEmail: null,
+          tutorEmail: null,
+          leaveFreeTime: isClassGroupCancel ? false : leaveFreeTimeOnCancel,
+        });
+        if (success) successCount++;
+        else lastError = error;
+      }
+      if (successCount > 0) {
         setSelectedSession(null);
         setCancelMode(false);
         setCancellationReason('');
         setLeaveFreeTimeOnCancel(false);
+        setClassGroupCancelRows([]);
+        setClassGroupCancelScope('whole_occurrence');
         loadData();
       } else {
-        alert(error || t('compSch.errorCancelling', { msg: '' }));
+        alert(lastError || t('compSch.errorCancelling', { msg: '' }));
       }
     } finally {
       setCancellingSession(false);
@@ -524,49 +595,88 @@ export default function CompanySessions() {
       const newStart = new Date(editStartTime);
       if (Number.isNaN(newStart.getTime())) throw new Error(t('compSch.invalidStartDateTime'));
       const newEnd = new Date(newStart.getTime() + editDurationMinutes * 60 * 1000);
-      const confirmOutcome = isSchoolOrgView && ['completed', 'no_show'].includes(editStatus)
-        && (editStatus !== selectedSession.status || confirmSchoolOutcome);
-      if (confirmOutcome && groupEditChoice === 'all_future') throw new Error(t('compSch.thisOnly'));
-      if (confirmOutcome && (!Number.isFinite(newEnd.getTime()) || newEnd.getTime() > Date.now())) throw new Error(t('school.confirmLessonOutcomeHint'));
 
       const paidChanged = editPaid !== selectedSession.paid;
-      const payload: Record<string, any> = {
-        start_time: newStart.toISOString(),
-        end_time: newEnd.toISOString(),
-        topic: editTopic || null,
-        meeting_link: editMeetingLink || null,
-        price: editPrice,
-        subject_id: editSubjectId || null,
-        student_id: editStudentId || selectedSession.student_id,
-        tutor_id: editTutorId || selectedSession.tutor_id,
-        paid: editPaid,
-        ...(paidChanged ? { payment_status: editPaid ? 'paid' : 'pending' } : {}),
-        ...(!confirmOutcome ? { status: editStatus } : {}),
-        ...(isSchoolOrgView && editStatus === 'active' && selectedSession.status !== 'active' ? { status_confirmed_at: null, status_confirmed_by: null } : {}),
-      };
+      const isClassGroupEdit = Boolean(selectedSession.class_group_id);
+      const seriesFields: Record<string, any> = isClassGroupEdit
+        ? {
+            topic: editTopic || null,
+            meeting_link: editMeetingLink || null,
+            price: editPrice,
+            tutor_comment: editTutorComment || null,
+            show_comment_to_student: editShowCommentToStudent,
+          }
+        : {
+            topic: editTopic || null,
+            meeting_link: editMeetingLink || null,
+            price: editPrice,
+            subject_id: editSubjectId || null,
+            student_id: editStudentId || selectedSession.student_id,
+            tutor_id: editTutorId || selectedSession.tutor_id,
+            paid: editPaid,
+            ...(paidChanged ? { payment_status: editPaid ? 'paid' : 'pending' } : {}),
+            status: editStatus,
+            tutor_comment: editTutorComment || null,
+            show_comment_to_student: editShowCommentToStudent,
+          };
 
-      if (groupEditChoice === 'all_future' && selectedSession.recurring_session_id) {
+      if (isClassGroupEdit) {
+        const { data: siblingRows, error: siblingErr } = await supabase
+          .from('sessions')
+          .select('id')
+          .eq('class_group_id', selectedSession.class_group_id)
+          .eq('start_time', selectedSession.start_time);
+        if (siblingErr) throw new Error(siblingErr.message);
+        const ids = classGroupOccurrenceSessionIds([
+          selectedSession,
+          ...((siblingRows || []) as Array<{ id: string }>),
+        ]);
+        if (!ids.length) throw new Error(t('compSch.saveFailedPermissionsOrRecords'));
         const { error } = await supabase
           .from('sessions')
-          .update(payload)
+          .update({
+            start_time: newStart.toISOString(),
+            end_time: newEnd.toISOString(),
+            ...seriesFields,
+          })
+          .in('id', ids);
+        if (error) throw new Error(error.message);
+      } else if (groupEditChoice === 'all_future' && selectedSession.recurring_session_id) {
+        const { data: futureRows, error: futureErr } = await supabase
+          .from('sessions')
+          .select('id, start_time, end_time')
           .eq('recurring_session_id', selectedSession.recurring_session_id)
           .gte('start_time', selectedSession.start_time);
-        if (error) throw new Error(error.message);
+        if (futureErr) throw new Error(futureErr.message);
+        const rows = futureRows || [];
+        if (!rows.length) throw new Error(t('compSch.saveFailedPermissionsOrRecords'));
+        const patches = sortSeriesPatchesForApply(
+          planRecurringSeriesPatches(
+            rows,
+            {
+              id: selectedSession.id,
+              start_time: selectedSession.start_time,
+              end_time: selectedSession.end_time,
+            },
+            { start: newStart, end: newEnd },
+            seriesFields,
+          ),
+          rows,
+        );
+        for (const { id, patch } of patches) {
+          const { error } = await supabase.from('sessions').update(patch).eq('id', id);
+          if (error) throw new Error(error.message);
+        }
       } else {
         const { error } = await supabase
           .from('sessions')
-          .update(payload)
+          .update({
+            start_time: newStart.toISOString(),
+            end_time: newEnd.toISOString(),
+            ...seriesFields,
+          })
           .eq('id', selectedSession.id);
         if (error) throw new Error(error.message);
-      }
-
-      if (confirmOutcome) {
-        const response = await fetch('/api/confirm-session-status', {
-          method: 'POST', headers: await authHeaders(),
-          body: JSON.stringify({ sessionId: selectedSession.id, status: editStatus, confirmExisting: true }),
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || t('school.confirmLessonOutcomeHint'));
       }
 
       setEditMode(false);
@@ -584,6 +694,9 @@ export default function CompanySessions() {
       setSelectedSession(session);
       setCancelMode(false);
       setCancellationReason('');
+      setClassGroupCancelRows([]);
+      setClassGroupCancelScope('whole_occurrence');
+      setClassGroupCancelStudentId(session.student_id);
       setEditMode(false);
       setDeleteRecurringOpen(false);
       setGroupEditChoice('single');
@@ -600,7 +713,8 @@ export default function CompanySessions() {
       setEditMeetingLink(session.meeting_link || '');
       setEditPaid(session.paid);
       setEditStatus(session.status);
-      setConfirmSchoolOutcome(false);
+      setEditTutorComment(session.tutor_comment || '');
+      setEditShowCommentToStudent(Boolean(session.show_comment_to_student));
 
       const sid = session.id;
       void (async () => {
@@ -708,12 +822,12 @@ export default function CompanySessions() {
       if (isFilterActive) {
         const when = new Date(s.start_time);
         if (filterStartDate) {
-          const start = new Date(filterStartDate);
+          const start = isSchoolOrgView ? schoolCalendarInstant(filterStartDate) : new Date(filterStartDate);
           start.setHours(0, 0, 0, 0);
           if (when < start) return false;
         }
         if (filterEndDate) {
-          const end = new Date(filterEndDate);
+          const end = isSchoolOrgView ? schoolCalendarInstant(filterEndDate) : new Date(filterEndDate);
           end.setHours(23, 59, 59, 999);
           if (when > end) return false;
         }
@@ -734,7 +848,7 @@ export default function CompanySessions() {
     return sortNewest
       ? list.sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
       : list.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
-  }, [sessions, filterTutor, filterStatus, studentIdSetForFilter, search, isFilterActive, filterStartDate, filterEndDate, sortNewest]);
+  }, [sessions, filterTutor, filterStatus, studentIdSetForFilter, search, isFilterActive, filterStartDate, filterEndDate, sortNewest, isSchoolOrgView]);
 
   if (loading) {
     return (
@@ -774,11 +888,23 @@ export default function CompanySessions() {
               onStartDateChange={setFilterStartDate}
               onEndDateChange={setFilterEndDate}
               onClear={() => {
-                setFilterStartDate(null);
-                setFilterEndDate(null);
-                setIsFilterActive(false);
+                if (isSchoolOrgView) {
+                  const nextRange = defaultStatsDateRange();
+                  setFilterStartDate(nextRange.start);
+                  setFilterEndDate(nextRange.end);
+                  setIsFilterActive(true);
+                  void loadData(nextRange);
+                } else {
+                  setFilterStartDate(null);
+                  setFilterEndDate(null);
+                  setIsFilterActive(false);
+                  void loadData({ start: null, end: null });
+                }
               }}
-              onSearch={() => setIsFilterActive(true)}
+              onSearch={() => {
+                setIsFilterActive(true);
+                void loadData({ start: filterStartDate, end: filterEndDate });
+              }}
             />
           </div>
           <div className="relative flex-1 min-w-0 w-full sm:min-w-[180px]">
@@ -843,11 +969,25 @@ export default function CompanySessions() {
           </div>
         </div>
 
+        {loadError ? (
+          <div role="alert" className="rounded-xl bg-red-50 p-4 text-red-700">
+            {loadError}
+            <Button variant="outline" className="ml-3" onClick={() => void loadData()}>
+              Bandyti dar kartą
+            </Button>
+          </div>
+        ) : null}
+
+        {isSchoolOrgView && !loadError ? <SchoolSessionMonitoring sessions={filtered} /> : null}
+
         {/* Stats */}
-        {filtered.length > 0 && (() => {
-          const stats = calculateSessionStats(filtered as any, null, null);
+        {!isSchoolOrgView && filtered.length > 0 && (() => {
+          const stats = isLaisviVaikai
+            ? calculateOrgSessionListStats(filtered as any)
+            : calculateSessionStats(filtered as any, null, null);
           return (
             <SessionStatCards
+              totalUpcoming={isLaisviVaikai ? (stats as { totalUpcoming?: number }).totalUpcoming : undefined}
               totalSuccessful={stats.totalSuccessful}
               totalStudentNoShow={stats.totalStudentNoShow}
               totalCancelled={stats.totalCancelled}
@@ -1021,7 +1161,7 @@ export default function CompanySessions() {
 
               {editMode ? (
                 <div className="space-y-4">
-                  {selectedSession.recurring_session_id && (
+                  {selectedSession.recurring_session_id && !selectedSession.class_group_id && (
                     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
                       <p className="text-xs font-semibold text-amber-800 mb-2">{t('compSch.recurringSeriesPart')}</p>
                       <div className="flex gap-2">
@@ -1054,6 +1194,7 @@ export default function CompanySessions() {
                     </div>
                   </div>
 
+                  {!selectedSession.class_group_id && (
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.tutor')}</Label>
@@ -1073,14 +1214,16 @@ export default function CompanySessions() {
                         <SelectContent>
                           {sortStudentsByFullName(pickStudentsForOrgTutorPicker(students, editTutorId)).map(
                             (s) => (
-                              <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                              <SelectItem key={s.id} value={s.id}>{formatOrgStudentPickerLabel(s)}</SelectItem>
                             ),
                           )}
                         </SelectContent>
                       </Select>
                     </div>
                   </div>
+                  )}
 
+                  {!selectedSession.class_group_id && (
                   <div>
                     <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.subject')}</Label>
                     <Select value={editSubjectId || 'none'} onValueChange={(v) => {
@@ -1099,6 +1242,7 @@ export default function CompanySessions() {
                       </SelectContent>
                     </Select>
                   </div>
+                  )}
 
                   <div>
                     <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.topic')}</Label>
@@ -1116,6 +1260,27 @@ export default function CompanySessions() {
                     </div>
                   </div>
 
+                  <div>
+                    <Label className="text-xs text-gray-500 mb-1 block">{t('dash.commentLabel')}</Label>
+                    <textarea
+                      value={editTutorComment}
+                      onChange={(e) => setEditTutorComment(e.target.value)}
+                      placeholder={t('dash.commentPlaceholder')}
+                      className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
+                      rows={3}
+                    />
+                    <label className="flex items-center gap-2 cursor-pointer mt-2">
+                      <input
+                        type="checkbox"
+                        checked={editShowCommentToStudent}
+                        onChange={(e) => setEditShowCommentToStudent(e.target.checked)}
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-sm text-gray-700">{t('cal.showToStudent')}</span>
+                    </label>
+                  </div>
+
+                  {!selectedSession.class_group_id && (
                   <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
                     <div>
                       <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.status')}</Label>
@@ -1123,8 +1288,7 @@ export default function CompanySessions() {
                         <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="active">{t('compSch.statusActive')}</SelectItem>
-                          <SelectItem value="completed" disabled={isSchoolOrgView && selectedSession.status !== 'active' && selectedSession.status !== 'completed'}>{t('compSch.statusCompleted')}</SelectItem>
-                          {isSchoolOrgView && <SelectItem value="no_show" disabled={selectedSession.status !== 'active' && selectedSession.status !== 'no_show'}>{t('cal.statusNoShowOpt')}</SelectItem>}
+                          <SelectItem value="completed">{t('compSch.statusCompleted')}</SelectItem>
                           <SelectItem value="cancelled">{t('compSch.statusCancelled')}</SelectItem>
                         </SelectContent>
                       </Select>
@@ -1136,15 +1300,6 @@ export default function CompanySessions() {
                       </label>
                     </div>
                   </div>
-
-                  {isSchoolOrgView && ['completed', 'no_show'].includes(editStatus) && groupEditChoice === 'single' && (
-                    <label className="flex items-start gap-2 rounded-xl border border-indigo-100 p-3">
-                      <input type="checkbox" checked={confirmSchoolOutcome} onChange={e => setConfirmSchoolOutcome(e.target.checked)} className="mt-1 h-4 w-4" />
-                      <span className="text-sm">
-                        <span className="block font-medium">{t('school.confirmLessonOutcome')}</span>
-                        <span className="block text-xs text-gray-500">{t('school.confirmLessonOutcomeHint')}</span>
-                      </span>
-                    </label>
                   )}
 
                   <div className="flex gap-2 pt-2">
@@ -1210,6 +1365,14 @@ export default function CompanySessions() {
                     </p>
                   </div>
 
+                  {selectedSession.status === 'no_show' ? (
+                    <p className="text-sm text-amber-700">
+                      {selectedSession.no_show_reason === 'missed_join'
+                        ? 'Mokinys neprisijungė per nustatytą laiką.'
+                        : selectedSession.no_show_reason || 'Pažymėtas mokinio neatvykimas.'}
+                    </p>
+                  ) : null}
+
                   {selectedSession.cancellation_reason && (
                     <div>
                       <Label className="text-xs text-gray-500">{t('compSess.cancellationReason')}</Label>
@@ -1267,12 +1430,28 @@ export default function CompanySessions() {
 
                   {cancelMode && (
                     <div className="space-y-2 bg-red-50 rounded-xl p-3">
+                      {isClassGroupCancel && (
+                        <ClassGroupCancelScopeFields
+                          radioName="sessionsClassGroupCancelScope"
+                          scope={classGroupCancelScope}
+                          onScopeChange={setClassGroupCancelScope}
+                          studentId={classGroupCancelStudentId}
+                          onStudentIdChange={setClassGroupCancelStudentId}
+                          students={classGroupCancelRows.filter((s) =>
+                            isLaisviVaikai ? sessionStatusCanCancel(s.status) : s.status === 'active',
+                          ).map((s) => ({
+                            student_id: s.student_id,
+                            name: s.student_name,
+                          }))}
+                        />
+                      )}
                       <Input
                         placeholder={t('compSess.cancelReasonPlaceholder')}
                         value={cancellationReason}
                         onChange={e => setCancellationReason(e.target.value)}
                         className="rounded-lg"
                       />
+                      {!isClassGroupCancel && (
                       <label className="flex items-start gap-2 cursor-pointer">
                         <Checkbox
                           checked={leaveFreeTimeOnCancel}
@@ -1280,6 +1459,7 @@ export default function CompanySessions() {
                         />
                         <span className="text-sm text-gray-700 leading-snug">{t('dash.leaveFreeTime')}</span>
                       </label>
+                      )}
                       <div className="flex gap-2">
                         <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setCancelMode(false)}>
                           {t('compSess.close')}
@@ -1287,7 +1467,7 @@ export default function CompanySessions() {
                         <Button
                           variant="destructive"
                           className="flex-1 rounded-xl"
-                          disabled={cancellingSession || cancellationReason.trim().length < 5}
+                          disabled={cancellingSession || classGroupCancelLoading || cancellationReason.trim().length < 5 || (isClassGroupCancel && classGroupCancelScope === 'one_student' && !classGroupCancelStudentId)}
                           onClick={handleCancelSession}
                         >
                           <>
@@ -1324,17 +1504,45 @@ export default function CompanySessions() {
                         </Button>
                       )}
 
-                      {selectedSession.status === 'active' && isFutureSession(selectedSession) && (
-                        <>
-                          <Button variant="outline" className="w-full rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50" onClick={() => setEditMode(true)}>
-                            <Pencil className="w-4 h-4 mr-2" />
-                            {t('compSess.editLesson')}
-                          </Button>
-                          <Button variant="outline" className="w-full rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => setCancelMode(true)}>
+                      {(
+                        (Boolean(selectedSession.class_group_id) && (selectedSession.status === 'active' || selectedSession.status === 'completed'))
+                        || (selectedSession.status === 'active' && isFutureSession(selectedSession))
+                      ) && (
+                        <Button variant="outline" className="w-full rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50" onClick={() => setEditMode(true)}>
+                          <Pencil className="w-4 h-4 mr-2" />
+                          {t('compSess.editLesson')}
+                        </Button>
+                      )}
+                      {(isLaisviVaikai
+                        ? sessionStatusCanCancel(selectedSession.status)
+                        : selectedSession.status === 'active' && isFutureSession(selectedSession)) && (
+                          <Button variant="outline" className="w-full rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => {
+                            setClassGroupCancelScope(selectedSession.class_group_id ? 'whole_occurrence' : 'one_student');
+                            setClassGroupCancelStudentId(selectedSession.student_id);
+                            setCancelMode(true);
+                            if (selectedSession.class_group_id) {
+                              const groupId = selectedSession.class_group_id;
+                              const start = selectedSession.start_time;
+                              setClassGroupCancelLoading(true);
+                              setClassGroupCancelRows([selectedSession]);
+                              void (async () => {
+                                const { data } = await supabase
+                                  .from('sessions')
+                                  .select(ORG_SESSION_DETAIL_SELECT)
+                                  .eq('class_group_id', groupId)
+                                  .eq('start_time', start);
+                                const mapped = (data || []).map((row: any) => mapOrgSessionRow(row, tutors));
+                                setClassGroupCancelRows(mapped.length > 0 ? mapped : [selectedSession]);
+                                setClassGroupCancelLoading(false);
+                              })();
+                            } else {
+                              setClassGroupCancelRows([]);
+                              setClassGroupCancelLoading(false);
+                            }
+                          }}>
                             <Ban className="w-4 h-4 mr-2" />
                             {t('compSess.cancelLesson')}
                           </Button>
-                        </>
                       )}
 
                       {selectedSessionAttendanceFlagged &&
@@ -1423,5 +1631,161 @@ export default function CompanySessions() {
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+function SchoolSessionMonitoring({ sessions }: { sessions: Session[] }) {
+  const { t } = useTranslation();
+  const activity = schoolActivitySummary(sessions);
+  const students = schoolStudentAttendance(sessions);
+  const attendanceRows = students.map(student => {
+    const confirmed = student.joined + student.noShow;
+    return {
+      ...student,
+      confirmed,
+      rate: confirmed > 0 ? Math.round((student.joined / confirmed) * 100) : null,
+    };
+  });
+  const reasons = new Map<string, number>();
+
+  for (const occurrence of schoolMeetingOccurrences(sessions)) {
+    if (occurrence.row.status === 'cancelled') {
+      const reason = occurrence.row.cancellation_reason || t('schoolDash.cancelledWithoutReason');
+      reasons.set(reason, (reasons.get(reason) || 0) + 1);
+    }
+    for (const session of occurrence.rows) {
+      if (session.status !== 'no_show') continue;
+      const reason = session.no_show_reason === 'missed_join'
+        ? t('schoolDash.missedJoinReason')
+        : session.no_show_reason || t('schoolDash.markedNoShowReason');
+      reasons.set(reason, (reasons.get(reason) || 0) + 1);
+    }
+  }
+
+  const summary = [
+    { label: t('companyDash.planned'), count: activity.scheduled, tone: 'text-indigo-700 bg-indigo-50' },
+    { label: t('schoolDash.completed'), count: activity.completed, tone: 'text-emerald-700 bg-emerald-50' },
+    { label: t('schoolDash.upcoming'), count: activity.upcoming, tone: 'text-blue-700 bg-blue-50' },
+    { label: t('schoolDash.absentChildren'), count: activity.absentStudents, tone: 'text-rose-700 bg-rose-50' },
+    { label: t('schoolDash.cancelled'), count: activity.cancelled, tone: 'text-gray-700 bg-gray-50' },
+    { label: t('schoolDash.unconfirmedAttendance'), count: activity.unconfirmedStudents, tone: 'text-amber-700 bg-amber-50' },
+  ];
+
+  return (
+    <section className="space-y-4" aria-label={t('schoolDash.monitoringAria')}>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {summary.map(({ label, count, tone }) => (
+          <div key={label} className={`rounded-xl border p-4 ${tone}`}>
+            <div className="text-2xl font-semibold">{count}</div>
+            <div className="text-sm">{label}</div>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-gray-500">
+        {t('schoolDash.attendanceExplanation')}
+      </p>
+      {reasons.size > 0 ? (
+        <details className="rounded-xl border bg-white p-4">
+          <summary className="cursor-pointer font-medium">{t('schoolDash.failureReasons')}</summary>
+          <ul className="mt-3 space-y-1 text-sm">
+            {[...reasons].map(([reason, count]) => <li key={reason}>{reason}: <strong>{count}</strong></li>)}
+          </ul>
+        </details>
+      ) : null}
+      <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <div className="flex flex-col gap-1 border-b border-gray-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-semibold text-gray-900">{t('schoolStats.attendance')}</h2>
+            <p className="mt-0.5 text-xs text-gray-500">
+              {t('schoolDash.studentAttendanceSummary', {
+                count: students.length,
+                rate: activity.attendanceRate === null ? '–' : `${activity.attendanceRate}%`,
+              })}
+            </p>
+          </div>
+          <div className="text-xs text-gray-500">
+            {t('schoolDash.attendanceTotals', {
+              attended: activity.attendedStudents,
+              absent: activity.absentStudents,
+            })}
+          </div>
+        </div>
+        <p className="px-4 pt-3 text-xs text-gray-500">
+          {t('schoolDash.filteredAttendanceExplanation')}
+        </p>
+        <div className="space-y-3 px-4 pb-4 pt-3 sm:hidden">
+          {attendanceRows.length === 0 ? (
+            <p className="p-6 text-center text-sm text-gray-400">{t('schoolDash.noAttendanceData')}</p>
+          ) : attendanceRows.map(student => (
+            <div key={student.id} className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
+              <p className="font-medium text-gray-900">{student.name}</p>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <SchoolAttendanceMetric
+                  label={t('schoolDash.attendance')}
+                  value={`${student.joined}/${student.confirmed}${student.rate === null ? '' : ` (${student.rate}%)`}`}
+                  tone="text-emerald-700"
+                />
+                <SchoolAttendanceMetric label={t('schoolDash.absentShort')} value={student.noShow} tone="text-rose-700" />
+                <SchoolAttendanceMetric label={t('schoolDash.cancelled')} value={student.cancelled} />
+                <SchoolAttendanceMetric label={t('schoolDash.unconfirmedShort')} value={student.unconfirmed} tone="text-amber-700" />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="hidden max-h-[32rem] overflow-auto px-4 pb-4 pt-3 sm:block">
+          <table className="w-full text-left text-sm">
+            <thead className="sticky top-0 bg-white">
+              <tr className="border-b text-xs uppercase tracking-wide text-gray-500">
+                {[
+                  t('common.student'),
+                  t('schoolDash.attendance'),
+                  t('schoolDash.absentShort'),
+                  t('schoolDash.cancelled'),
+                  t('schoolDash.unconfirmedShort'),
+                ].map(label => (
+                  <th key={label} className="p-2 font-semibold">{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {attendanceRows.length === 0 ? (
+                <tr><td colSpan={5} className="p-8 text-center text-gray-400">{t('schoolDash.noAttendanceData')}</td></tr>
+              ) : attendanceRows.map(student => {
+                return (
+                  <tr key={student.id} className="border-b border-gray-50 last:border-0">
+                    <td className="p-2 font-medium text-gray-900">{student.name}</td>
+                    <td className="p-2">
+                      <span className="font-semibold text-emerald-700">{student.joined}</span>
+                      <span className="text-gray-400"> / {student.confirmed}</span>
+                      {student.rate !== null ? <span className="ml-1 text-xs text-gray-500">({student.rate}%)</span> : null}
+                    </td>
+                    <td className="p-2 font-medium text-rose-700">{student.noShow}</td>
+                    <td className="p-2 text-gray-700">{student.cancelled}</td>
+                    <td className="p-2 font-medium text-amber-700">{student.unconfirmed}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SchoolAttendanceMetric({
+  label,
+  value,
+  tone = 'text-gray-800',
+}: {
+  label: string;
+  value: string | number;
+  tone?: string;
+}) {
+  return (
+    <div className="rounded-lg bg-white p-2">
+      <p className={`font-semibold ${tone}`}>{value}</p>
+      <p className="mt-0.5 text-gray-500">{label}</p>
+    </div>
   );
 }

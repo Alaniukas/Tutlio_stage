@@ -1,5 +1,5 @@
-import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { ro, roOverrides } from '../../src/lib/i18n/ro';
@@ -13,7 +13,9 @@ import { CHROME, chromeFor, formatShortDay } from '../../src/lib/publicPage';
 import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone } from '../../src/lib/utils';
 
-const deferredPrefixes = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('ro');
+
+const deferredPrefixes = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferredPrefixes.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 
@@ -30,7 +32,8 @@ beforeAll(async () => { await loadLocaleDict('ro'); });
 
 describe('Romanian tutor and business localization', () => {
   it('explicitly covers the tutor/business scope and preserves source keys', () => {
-    expect(Object.keys(roOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual(expectedKeys.sort());
+    expect(expectedKeys.filter((key) => !(key in roOverrides))).toEqual([]);
+    expect(Object.keys(roOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(ro).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !ro[key])).toEqual([]);
   });
@@ -99,7 +102,7 @@ describe('Romanian tutor and business localization', () => {
     expect(getSeoMeta('ro', 'pricing').title).toContain('Prețuri');
     expect(isTranslatedLocale('ro')).toBe(false);
     for (const key of Object.keys(en).filter((key) => deferredPrefixes.has(key.split('.')[0]))) {
-      expect(ro[key], key).toBe(roOverrides[key] ?? en[key]);
+      expect(ro[key]).toBe(en[key]);
     }
   });
 
@@ -126,6 +129,3 @@ describe('Romanian tutor and business localization', () => {
     expect(validateLocalizedPhone('+40712345678', 'lt')).toBe(false);
   });
 });
-
-// Match server renderers: synchronous translation runs after its lazy preload.
-beforeAll(async () => { await preloadExtraLocaleDict('ro'); });

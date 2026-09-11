@@ -27,6 +27,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import BuyLicensesDialog from '@/components/company/BuyLicensesDialog';
 import { fmtMoney, isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { backfillTutorMeetingLinks } from '@/lib/backfillTutorMeetingLinks';
 import {
   compactTutorPayBySubject,
   parseTutorPayBySubject,
@@ -36,9 +37,14 @@ import {
   countConductedOrgSessions,
   filterConductedOrgSessions,
 } from '@/lib/orgTutorConductedSessions';
+import { schoolDate } from '@/lib/schoolTime';
+import { fetchAllRows } from '@/lib/fetchAllRows';
+import { schoolMeetingCounts, schoolMeetings } from '@/lib/schoolSessionMonitoring';
 import { sumProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
 import { authHeaders } from '@/lib/apiHelpers';
 import { isPlMarket } from '@/lib/market';
+import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
+import { meetingLinkWasPersisted } from '@/lib/meetingLink';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -122,20 +128,6 @@ const COLORS = [
 function generateToken(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-}
-
-/** Dark pill next to tutor/invite name — matches the admin “klasių pastaba” mock. */
-function TeachingNotesBadge({ notes }: { notes?: string | null }) {
-  const text = String(notes || '').trim();
-  if (!text) return null;
-  return (
-    <span
-      className="text-[11px] font-medium text-white bg-slate-700 px-2 py-0.5 rounded-lg max-w-full sm:max-w-[16rem] whitespace-pre-wrap break-words"
-      title={text}
-    >
-      {text}
-    </span>
-  );
 }
 
 // ─── SubjectPresetList – shared in both invite types ─────────────────────────
@@ -534,6 +526,7 @@ export default function CompanyTutors() {
   const [editBreakBetween, setEditBreakBetween] = useState(0);
   const [editMinBooking, setEditMinBooking] = useState(1);
   const [editCommissionPercent, setEditCommissionPercent] = useState(0);
+  const [tutorSaveError, setTutorSaveError] = useState<string | null>(null);
   const [editSubjectPay, setEditSubjectPay] = useState<Record<string, string>>({});
   const [editMeetingLink, setEditMeetingLink] = useState('');
   const [tutorInvoiceProfile, setTutorInvoiceProfile] = useState<Record<string, string | null> | null>(null);
@@ -981,7 +974,10 @@ export default function CompanyTutors() {
 
       if (data.success) {
         await loadData();
-        if (data.emailSent === false) {
+        if (data.alreadyMember) {
+          setInviteError(null);
+          setInviteSuccess(t('compTut.inviteSent', { email: inviteeEmail }));
+        } else if (data.emailSent === false) {
           setInviteSuccess(null);
           setInviteError(
             [data.emailError, t('compTut.inviteCreatedCopy')]
@@ -1021,25 +1017,28 @@ export default function CompanyTutors() {
     const { data: subjects } = await supabase.from('subjects').select('*').eq('tutor_id', tutor.id);
 
     // OPTIMIZED: Limit sessions query to last year for stats
-    const oneYearAgo = new Date();
+    const oneYearAgo = isSchoolView ? schoolDate() : new Date();
     oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+    if (isSchoolView) oneYearAgo.setHours(0, 0, 0, 0);
 
-    const { data: sessions } = await supabase
+    const sessions = await fetchAllRows<any>((from, to) => supabase
       .from('sessions')
-      .select('price, status, subject_id, is_complimentary, subjects(is_trial)')
+      .select('id, tutor_id, class_group_id, start_time, price, status, subject_id, is_complimentary, subjects(is_trial, is_group)')
       .eq('tutor_id', tutor.id)
       .in('status', ['completed', 'no_show'])
       .gte('start_time', oneYearAgo.toISOString())
       .lte('end_time', new Date().toISOString())
-      .limit(1000);
+      .order('start_time')
+      .order('id')
+      .range(from, to));
 
     const { data: tspData } = await supabase
       .from('tutor_subject_prices')
       .select('*')
       .eq('tutor_id', tutor.id);
 
-    const conducted = filterConductedOrgSessions(sessions || []);
-    const sessionCount = countConductedOrgSessions(conducted);
+    const conducted = filterConductedOrgSessions(isSchoolView ? schoolMeetings(sessions) : sessions);
+    const sessionCount = isSchoolView ? schoolMeetingCounts(sessions).completed : countConductedOrgSessions(conducted);
     const tutorRate = tutor.company_commission_percent ?? orgDefaults.company_commission_percent;
     const earnings = isProKlaseAdmin
       ? sumProKlasePayBreakdown(conducted as any[], tutorRate).totalEur
@@ -1057,6 +1056,7 @@ export default function CompanyTutors() {
     setEditName(tutor.full_name);
     setEditPhone(tutor.phone || '');
     setEditTeachingNotes(tutor.teaching_notes || '');
+    setTutorSaveError(null);
     setShowAddSubject(false);
     setNewSubjectName('');
     setAddSubjectCatalogPick('');
@@ -1101,30 +1101,49 @@ export default function CompanyTutors() {
   const handleSaveTutor = async () => {
     if (!selectedTutor) return;
     setSavingTutor(true);
-    const { data: saved, error } = await supabase.from('profiles').update({
-      full_name: editName, 
-      phone: editPhone,
-      cancellation_hours: editCancellationHours,
-      cancellation_fee_percent: editCancellationFee,
-      reminder_student_hours: editReminderStudent,
-      reminder_tutor_hours: editReminderTutor,
-      break_between_lessons: editBreakBetween,
-      min_booking_hours: editMinBooking,
-      company_commission_percent: editCommissionPercent,
-      ...(isManoKorepetitoriusAdmin
-        ? { company_commission_by_subject: compactTutorPayBySubject(editSubjectPay) }
-        : {}),
-      personal_meeting_link: editMeetingLink.trim() || null,
-      teaching_notes: editTeachingNotes.trim() || null,
-    }).eq('id', selectedTutor.id).select('id').maybeSingle();
-    if (error || !saved) {
+    setTutorSaveError(null);
+    const personalLink = editMeetingLink.trim() || null;
+    try {
+      const { data: updatedRows, error } = await supabase.from('profiles').update({
+        full_name: editName,
+        phone: editPhone,
+        cancellation_hours: editCancellationHours,
+        cancellation_fee_percent: editCancellationFee,
+        reminder_student_hours: editReminderStudent,
+        reminder_tutor_hours: editReminderTutor,
+        break_between_lessons: editBreakBetween,
+        min_booking_hours: editMinBooking,
+        company_commission_percent: editCommissionPercent,
+        ...(isManoKorepetitoriusAdmin
+          ? { company_commission_by_subject: compactTutorPayBySubject(editSubjectPay) }
+          : {}),
+        personal_meeting_link: personalLink,
+        teaching_notes: editTeachingNotes.trim() || null,
+      })
+        .eq('id', selectedTutor.id)
+        .select('id, company_commission_percent, personal_meeting_link');
+
+      const savedRow = updatedRows?.[0];
+      if (
+        error
+        || !savedRow
+        || Number(savedRow.company_commission_percent) !== editCommissionPercent
+        || !meetingLinkWasPersisted(personalLink, savedRow.personal_meeting_link)
+      ) {
+        throw error || new Error('Tutor profile update was not persisted');
+      }
+
+      if (personalLink) {
+        await backfillTutorMeetingLinks(supabase, selectedTutor.id, personalLink);
+      }
+      await loadData();
+      setTutorModalOpen(false);
+    } catch (error) {
+      console.error('[CompanyTutors] tutor save failed:', error);
+      setTutorSaveError(t('common.saveFailed'));
+    } finally {
       setSavingTutor(false);
-      alert(t('common.error'));
-      return;
     }
-    await loadData();
-    setTutorModalOpen(false);
-    setSavingTutor(false);
   };
 
   const handleArchiveTutor = async () => {
@@ -1401,15 +1420,15 @@ export default function CompanyTutors() {
             <div className="space-y-2">
               {sortedTutors.map(tutor => (
                 <button key={tutor.id} onClick={() => openTutor(tutor)}
-                  className="w-full bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3.5 flex flex-wrap sm:flex-nowrap items-center gap-3 hover:border-indigo-200 hover:shadow-md transition-all text-left hover:bg-indigo-50/40"
+                  className="w-full bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3.5 flex items-center gap-3 hover:border-indigo-200 hover:shadow-md transition-all text-left hover:bg-indigo-50/40"
                 >
                   <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
                     <span className="text-sm font-bold text-indigo-700">{tutor.full_name.charAt(0).toUpperCase()}</span>
                   </div>
-                  <div className="flex-1 min-w-[calc(100%-4rem)] sm:min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 truncate">{tutor.full_name}</p>
-                      <TeachingNotesBadge notes={tutor.teaching_notes} />
+                      <TutorTeachingNotesBadge notes={tutor.teaching_notes} />
                     </div>
                     <p className="text-xs text-gray-500 truncate">{tutor.email}</p>
                   </div>
@@ -1475,7 +1494,7 @@ export default function CompanyTutors() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                         <p className="text-sm font-semibold text-gray-800 truncate">{invite.invitee_name || invite.invitee_email}</p>
-                        <TeachingNotesBadge notes={invite.teaching_notes} />
+                        <TutorTeachingNotesBadge notes={invite.teaching_notes} />
                       </div>
                       <p className="text-xs text-gray-400">{invite.invitee_email} · {format(new Date(invite.created_at), 'd MMM yyyy', { locale: dateFnsLocale })}</p>
                       {invite.token && (
@@ -1644,6 +1663,8 @@ export default function CompanyTutors() {
                       <Label className="text-xs font-medium text-gray-600">{t('compTut.commission')}</Label>
                       <Input
                         type="number"
+                        min={0}
+                        step={0.5}
                         value={inviteCommissionPercent}
                         onChange={e => setInviteCommissionPercent(Number(e.target.value) || 0)}
                         className="rounded-xl w-32"
@@ -2073,6 +2094,12 @@ export default function CompanyTutors() {
               </div>
             </div>
           )}
+
+          {tutorSaveError ? (
+            <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {tutorSaveError}
+            </p>
+          ) : null}
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setTutorModalOpen(false)}>{t('compTut.cancelBtn')}</Button>

@@ -34,6 +34,11 @@ import {
   toggleEmailOptOut,
   type EmailOptOutKey,
 } from '@/lib/emailNotificationOptOut';
+import { backfillTutorMeetingLinks } from '@/lib/backfillTutorMeetingLinks';
+import {
+  meetingLinkWasPersisted,
+  normalizeMeetingLinkValue,
+} from '@/lib/meetingLink';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -374,19 +379,37 @@ export default function LessonSettingsPage() {
   const handleSavePersonalLink = async () => {
     if (!ctxUser) return;
     setSavingPersonalLink(true);
-    const { error } = await supabase
-      .from('profiles')
-      .update({ personal_meeting_link: personalMeetingLink.trim() || null })
-      .eq('id', ctxUser.id);
+    const requestedLink = normalizeMeetingLinkValue(personalMeetingLink);
+    try {
+      const { data: savedProfile, error } = await supabase
+        .from('profiles')
+        .update({ personal_meeting_link: requestedLink })
+        .eq('id', ctxUser.id)
+        .select('personal_meeting_link')
+        .single();
 
-    if (error) {
-      console.error('[LessonSettings] personal_meeting_link update', error);
-      alert(error.message || t('lessonSet.saveFailed'));
-    } else {
+      if (
+        error
+        || !savedProfile
+        || !meetingLinkWasPersisted(requestedLink, savedProfile.personal_meeting_link)
+      ) {
+        throw error || new Error('Tutor meeting link update was not persisted');
+      }
+
+      const link = normalizeMeetingLinkValue(savedProfile.personal_meeting_link);
+      setPersonalMeetingLink(link || '');
+      if (link) {
+        await backfillTutorMeetingLinks(supabase, ctxUser.id, link);
+      }
       setPersonalLinkSaved(true);
       setTimeout(() => setPersonalLinkSaved(false), 3000);
+    } catch (error) {
+      console.error('[LessonSettings] personal_meeting_link update', error);
+      alert(t('lessonSet.saveFailed'));
+      await fetchData();
+    } finally {
+      setSavingPersonalLink(false);
     }
-    setSavingPersonalLink(false);
   };
 
   // Subject CRUD

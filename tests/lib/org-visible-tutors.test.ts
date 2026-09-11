@@ -6,8 +6,8 @@ function clientFor(options: {
   teammateAdmins?: Array<{ user_id: string }>;
   rpcTutors?: Array<{ user_id: string }>;
   linkedStudents?: Array<{ tutor_id: string | null }>;
-  inviteTutors?: Array<{ used_by_profile_id: string | null }>;
-  profiles: Array<{ id: string; full_name: string }>;
+  inviteTutors?: Array<{ used_by_profile_id: string | null; used?: boolean; invitee_email?: string | null }>;
+  profiles: Array<{ id: string; full_name: string; email?: string | null }>;
 }) {
   const rows: Record<string, unknown[]> = {
     organization_admins: options.adminUsers || [],
@@ -83,5 +83,26 @@ describe('getOrgVisibleTutors', () => {
     const result = await getOrgVisibleTutors(client as any, 'org-1', 'id, full_name');
 
     expect(result.map((row) => row.id)).toEqual(['tutor-1', 'tutor-2']);
+  });
+
+  it('keeps a joined tutor visible when the used invite has no used_by_profile_id', async () => {
+    const client = clientFor({
+      adminUsers: [{ user_id: 'admin-1' }],
+      rpcTutors: [{ user_id: 'tutor-1' }],
+      inviteTutors: [{
+        used_by_profile_id: null,
+        used: true,
+        invitee_email: 'hidden@org.lt',
+      }],
+      profiles: [
+        { id: 'admin-1', full_name: 'Owner' },
+        { id: 'tutor-1', full_name: 'Tutor One', email: 'one@org.lt' },
+        { id: 'tutor-2', full_name: 'Tutor Two', email: 'hidden@org.lt' },
+      ],
+    });
+
+    const result = await getOrgVisibleTutors(client as any, 'org-1', 'id, full_name, email');
+
+    expect(result.map((row) => row.id).sort()).toEqual(['tutor-1', 'tutor-2']);
   });
 });

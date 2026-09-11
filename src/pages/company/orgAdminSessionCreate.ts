@@ -4,10 +4,15 @@ import {
   recurringMaterializeEndDate,
 } from '@/lib/recurringSessions';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { authHeaders } from '@/lib/apiHelpers';
 import { sendEmail } from '@/lib/email';
-import { syncCreatedSessionsToGoogle } from '@/lib/syncCreatedSessionsToGoogle';
+import { isMoksloVaisiaiOrg } from '@/lib/marketMoney';
+import {
+  countNonCancelledSessionsForPair,
+  isFirstLessonForStudentTutorPair,
+} from '@/lib/mvFirstLessonPlanned';
+import { authHeaders } from '@/lib/apiHelpers';
 import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
+import { packageCoversLessonDate } from '@/lib/pooledPackageBookingWindow';
 import { defaultSessionPaymentStatusForStudent } from '@/lib/studentPaymentModel';
 import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
 import {
@@ -195,8 +200,6 @@ async function notifyAfterOrgAdminSessionsCreated(
     .eq('id', tutorId)
     .single();
 
-  const orgIdPayload = (tutorProfile as any)?.organization_id ? { organizationId: (tutorProfile as any).organization_id } : {};
-
   const studentIds = [...new Set(sessionsForNotify.map(s => s.student_id))];
   const { data: studentRows } = await supabase
     .from('students')
@@ -215,20 +218,57 @@ async function notifyAfterOrgAdminSessionsCreated(
     .map(id => studentById.get(id)?.full_name)
     .filter(Boolean) as string[];
   const tutorStudentLabel = studentNames.length === 1 ? studentNames[0]! : studentNames.join(', ');
+  const tutorOrgId = (tutorProfile as any)?.organization_id as string | null | undefined;
+  const orgIdPayload = tutorOrgId ? { organizationId: tutorOrgId } : {};
+  const isMvOrg = isMoksloVaisiaiOrg(tutorOrgId);
 
   if (tutorProfile?.email) {
-    void sendEmail({
-      type: 'booking_notification',
-      to: tutorProfile.email,
-      data: {
-        scheduledByOrgAdmin: true,
-        studentName: tutorStudentLabel,
-        tutorName: tutorProfile.full_name || '',
-        date: format(tutorStart, 'yyyy-MM-dd'),
-        time: format(tutorStart, 'HH:mm'),
-        ...((tutorProfile as any).organization_id ? { organizationId: (tutorProfile as any).organization_id } : {}),
-      },
-    }).catch(err => console.error('[OrgSchedule] tutor notify', err));
+    if (isMvOrg) {
+      for (const studentId of studentIds) {
+        const batchCount = sessionsForNotify.filter((s) => s.student_id === studentId).length;
+        try {
+          const totalCount = await countNonCancelledSessionsForPair(supabase, studentId, tutorId);
+          if (!isFirstLessonForStudentTutorPair(totalCount, batchCount)) continue;
+
+          const st = studentById.get(studentId);
+          const studentSessions = sessionsForNotify.filter((s) => s.student_id === studentId);
+          const earliest = studentSessions.reduce(
+            (min, s) => (new Date(s.start_time) < new Date(min.start_time) ? s : min),
+            studentSessions[0],
+          );
+          const lessonStart = new Date(earliest.start_time);
+
+          void sendEmail({
+            type: 'mv_first_lesson_planned_tutor',
+            to: tutorProfile.email,
+            data: {
+              scheduledByOrgAdmin: true,
+              studentName: st?.full_name || '',
+              tutorName: tutorProfile.full_name || '',
+              date: format(lessonStart, 'yyyy-MM-dd'),
+              time: format(lessonStart, 'HH:mm'),
+              sessionId: earliest.id,
+              ...orgIdPayload,
+            },
+          }).catch((err) => console.error('[OrgSchedule] MV first lesson notify', err));
+        } catch (err) {
+          console.error('[OrgSchedule] MV first lesson check', err);
+        }
+      }
+    } else {
+      void sendEmail({
+        type: 'booking_notification',
+        to: tutorProfile.email,
+        data: {
+          scheduledByOrgAdmin: true,
+          studentName: tutorStudentLabel,
+          tutorName: tutorProfile.full_name || '',
+          date: format(tutorStart, 'yyyy-MM-dd'),
+          time: format(tutorStart, 'HH:mm'),
+          ...orgIdPayload,
+        },
+      }).catch(err => console.error('[OrgSchedule] tutor notify', err));
+    }
   }
 
   if (isRecurring) {
@@ -467,7 +507,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     createIsMakeup = false,
     subjects,
     individualPricing,
-    dynamicPricingRules: suppliedPricingRules,
+    dynamicPricingRules = [],
     classGroupId = null,
   } = p;
   const schoolClassGroupId = classGroupId ? String(classGroupId).trim() : '';
@@ -556,7 +596,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
 
   const { data: studentPaymentRows } = await supabase
     .from('students')
-    .select('id, payment_model, grade, pricing_lessons_per_week, pricing_lessons_per_week_is_manual')
+    .select('id, payment_model, grade, pricing_lessons_per_week')
     .in('id', studentIdsToCreate);
   const paymentModelByStudentId = new Map(
     (studentPaymentRows ?? []).map((row: { id: string; payment_model?: string | null }) => [
@@ -569,7 +609,6 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       id: string;
       grade?: string | null;
       pricing_lessons_per_week?: number | null;
-      pricing_lessons_per_week_is_manual?: boolean | null;
     }) => [row.id, row]),
   );
   const planFrequency = contractedLessonsPerWeek(
@@ -577,16 +616,6 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     createRecurringWeekdays,
     null,
   );
-  let dynamicPricingRules = suppliedPricingRules ?? [];
-  if (!suppliedPricingRules && !subj.is_group && !subj.is_trial) {
-    const { data: tutor, error: tutorError } = await supabase.from('profiles').select('organization_id').eq('id', createTutorId).single();
-    if (tutorError) throw tutorError;
-    if (tutor?.organization_id) {
-      const { data: rules, error } = await supabase.from('organization_dynamic_pricing').select('*').eq('organization_id', tutor.organization_id);
-      if (error) throw error;
-      dynamicPricingRules = rules || [];
-    }
-  }
   const pricingRulesForSubject = subj.is_group || subj.is_trial ? [] : dynamicPricingRules;
   const priceByStudentId = new Map(
     studentIdsToCreate.map((studentId) => {
@@ -607,9 +636,14 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     }),
   );
 
-  const syncGoogle = (sessionIds: string[]) => {
-    void syncCreatedSessionsToGoogle(supabase, createTutorId, sessionIds)
-      .catch((error) => console.warn('[OrgSchedule] Google Calendar sync failed:', error));
+  const syncGoogle = (sessionId: string) => {
+    void (async () => {
+      await fetch('/api/google-calendar-sync', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ userId: createTutorId, sessionId }),
+      });
+    })().catch(() => {});
   };
 
   if (createIsRecurring) {
@@ -668,6 +702,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       available_lessons: number;
       reserved_lessons: number;
       item_id: string;
+      pool_organization_id?: string | null;
+      billing_period_start?: string | null;
+      billing_period_end?: string | null;
       item_available_lessons: number;
       item_reserved_lessons: number;
     };
@@ -679,6 +716,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
         if (match) {
           packagesByStudent.set(sid, {
             id: match.pkg.id,
+            pool_organization_id: match.pkg.pool_organization_id,
+            billing_period_start: match.pkg.billing_period_start,
+            billing_period_end: match.pkg.billing_period_end,
             available_lessons: match.pkg.available_lessons,
             reserved_lessons: match.pkg.reserved_lessons,
             item_id: match.item.id,
@@ -709,7 +749,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           if (pkg) {
             const used = packagesUsage.get(pkg.id) || 0;
             const remaining = Math.min(pkg.available_lessons, pkg.item_available_lessons) - used;
-            if (remaining > 0) {
+            if (remaining > 0 && packageCoversLessonDate(pkg, current)) {
               lessonPackageId = pkg.id;
               sessionPaid = true;
               sessionPaymentStatus = 'confirmed';
@@ -796,7 +836,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
 
     for (const [pkgId, usedCount] of packagesUsage.entries()) {
       const pkg = Array.from(packagesByStudent.values()).find((x) => x.id === pkgId);
-      if (!pkg || usedCount <= 0) continue;
+      if (!pkg || pkg.pool_organization_id || usedCount <= 0) continue;
       const { error: itemErr } = await supabase
         .from('lesson_package_items')
         .update({
@@ -829,7 +869,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       !(createRecurringEndDate || '').trim(),
     );
 
-    syncGoogle(allCreated.map((row) => row.id));
+    for (const row of inserted || []) {
+      syncGoogle((row as { id: string }).id);
+    }
 
     await persistRecurringPlanFrequency(supabase, [...new Set(recurringTemplates.map((t) => t.student_id))], planFrequency);
 
@@ -843,6 +885,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     available_lessons: number;
     reserved_lessons: number;
     item_id: string;
+    pool_organization_id?: string | null;
+    billing_period_start?: string | null;
+    billing_period_end?: string | null;
     item_available_lessons: number;
     item_reserved_lessons: number;
   }> = [];
@@ -857,14 +902,21 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     let lessonPackageId: string | null = null;
 
     if (!createIsMakeup && !createIsPaid && createSubjectId) {
-      const match = await findActivePackageForBooking(supabase, { studentId, subjectId: createSubjectId });
+      const match = await findActivePackageForBooking(supabase, {
+        studentId,
+        subjectId: createSubjectId,
+        startIso: startDate.toISOString(),
+      });
       if (match) {
         const { pkg, item } = match;
         lessonPackageId = pkg.id;
         sessionPaid = true;
         sessionPaymentStatus = 'confirmed';
-        packagesToUpdate.push({
+        if (!pkg.pool_organization_id) packagesToUpdate.push({
           id: pkg.id,
+          pool_organization_id: pkg.pool_organization_id,
+          billing_period_start: pkg.billing_period_start,
+          billing_period_end: pkg.billing_period_end,
           available_lessons: pkg.available_lessons - 1,
           reserved_lessons: pkg.reserved_lessons + 1,
           item_id: item.id,
@@ -1006,9 +1058,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
         },
       }).catch(() => {});
     }
-  }
 
-  syncGoogle(((created || []) as Array<{ id: string }>).map((row) => row.id));
+    syncGoogle(sess.id);
+  }
 
   if (!p.suppressSuccessAlert) {
     if (isGroupLesson && studentIdsToCreate.length > 1) {

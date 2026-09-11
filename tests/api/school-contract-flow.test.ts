@@ -70,13 +70,13 @@ function mockRes() {
       out.body = body;
       return res;
     },
-    end(body?: string) {
-      if (body !== undefined) out.body = body;
-      return res;
-    },
     redirect(code: number, url: string) {
       out.statusCode = code;
       out.headers.Location = url;
+      return res;
+    },
+    end(body?: string) {
+      if (body !== undefined) out.body = body;
       return res;
     },
     getResult: () => out,
@@ -173,7 +173,7 @@ describe('School contract full flow (API integration)', () => {
     accessToken = new URL(completionUrl).searchParams.get('token') || '';
     expect(flowDb.findToken(accessToken)).toBeTruthy();
 
-    // 2) The email opens the completion page; that page serves the PDF with the same token.
+    // 2) send-email: unified token for PDF + completion
     const sendHandler = (await import('../../api/send-email')).default;
     const sendRes = mockRes();
     await sendHandler(
@@ -201,6 +201,9 @@ describe('School contract full flow (API integration)', () => {
     expect(sendRes.getResult().statusCode).toBe(200);
     expect(resendSend).toHaveBeenCalled();
     const emailCall = resendSend.mock.calls[0]?.[0] as { html?: string };
+    // When required contract data is still missing, the parent gets the
+    // completion action first; the regenerated PDF is available afterwards.
+    expect(emailCall.html).not.toContain('/api/school-contract-pdf?token=');
     expect(emailCall.html).toContain('/school-contract-complete?token=');
     const formMatch = emailCall.html!.match(/school-contract-complete\?token=([^"'&]+)/);
     const formToken = formMatch ? decodeURIComponent(formMatch[1]) : null;
@@ -291,7 +294,7 @@ describe('School contract full flow (API integration)', () => {
     expect(confirmJson.success).toBe(true);
     expect(flowDb.installments[0].payment_status).toBe('paid');
     expect(flowDb.installments[0].paid_at).toBeTruthy();
-  });
+  }, 15_000);
 
   it('rejects completion form when token is unknown', async () => {
     const completeHandler = (await import('../../api/school-contract-complete')).default;

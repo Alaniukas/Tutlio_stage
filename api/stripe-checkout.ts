@@ -1,4 +1,3 @@
-import { allowsPerLessonBilling, loadPerLessonBillingFlags } from './_lib/perLessonBillingEligibility.js';
 // ─── Vercel Serverless: Stripe Checkout Session Creator ────────────────────────
 // POST /api/stripe-checkout
 // Body: { sessionId: string, payerEmail?: string }
@@ -64,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     stripe_account_id, stripe_onboarding_complete,
                     payment_timing, payment_deadline_hours, organization_id,
                     full_name,
-                    subscription_plan, manual_subscription_exempt, enable_manual_student_payments, enable_per_lesson
+                    subscription_plan, manual_subscription_exempt, enable_manual_student_payments
                 )
             `)
             .eq('id', sessionId)
@@ -89,8 +88,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         const isPenaltyPayment = typeof penaltyAmountOverride === 'number' && penaltyAmountOverride > 0;
-        const billingFlags = await loadPerLessonBillingFlags(supabase, tutor);
-        const allowsPerLessonPayment = allowsPerLessonBilling(student?.payment_model, billingFlags);
+        const studentPaymentModelRaw = String(student?.payment_model || '').trim();
+        const allowsPerLessonPayment =
+            !studentPaymentModelRaw ||
+            studentPaymentModelRaw
+                .split(',')
+                .map((part: string) => part.trim())
+                .includes('per_lesson');
 
         if (!isPenaltyPayment && !allowsPerLessonPayment) {
             return res.status(400).json({

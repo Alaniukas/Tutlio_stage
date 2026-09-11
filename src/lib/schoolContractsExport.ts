@@ -1,6 +1,7 @@
 import type { SchoolContractFilter, SchoolContractFilterInput } from './schoolContractFilters';
 import { getContractMissingFieldLabels } from './schoolContractFilters';
 import { signingStatusLabel } from './schoolFinanceExport';
+import { isExtraLessonsContractKind } from './extraLessonsContract';
 
 export type SchoolContractExportRow = {
   contractNumber: string;
@@ -17,6 +18,8 @@ export type SchoolContractExportRow = {
 export type SchoolContractExportSource = SchoolContractFilterInput & {
   contract_number?: string | null;
   annual_fee?: number;
+  unit_price_eur?: number | null;
+  kind?: string | null;
   created_at?: string;
 };
 
@@ -27,7 +30,11 @@ export function buildSchoolContractExportRows(
 ): SchoolContractExportRow[] {
   return contracts.map((contract) => {
     const student = contract.student;
-    const missing = getContractMissingFieldLabels(contract, isSchoolView);
+    const isExtra = isExtraLessonsContractKind(contract.kind);
+    const missing = isExtra ? [] : getContractMissingFieldLabels(contract, isSchoolView);
+    const fee = isExtra
+      ? Number(contract.unit_price_eur) || 0
+      : Number(contract.annual_fee) || 0;
     return {
       contractNumber: String(contract.contract_number || '').trim(),
       studentName: String(student?.full_name || '').trim(),
@@ -36,7 +43,7 @@ export function buildSchoolContractExportRows(
       parentPhone: String(student?.payer_phone || '').trim(),
       signingStatus: signingStatusLabel(contract.signing_status, t),
       missingFields: missing.join(', '),
-      annualFee: Number(contract.annual_fee) || 0,
+      annualFee: fee,
       createdAt: contract.created_at
         ? new Date(contract.created_at).toLocaleDateString('lt-LT')
         : '',

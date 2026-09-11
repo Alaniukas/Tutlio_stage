@@ -30,7 +30,6 @@ export function useOrgBrandingContext(): OrgBrandingData {
 export type OrgBrandingScope = 'tutor' | 'student' | 'parent';
 
 const CACHE_KEY = 'tutlio_org_branding';
-const CACHE_TTL_MS = 5 * 60 * 1000;
 
 /** Cache is bound to user + scope: a logout hard-redirect can race the SIGNED_OUT
  *  cleanup, so the next account in the same tab must never reuse this entry. */
@@ -38,7 +37,6 @@ interface CachedBranding {
   userId: string;
   scope: OrgBrandingScope;
   data: OrgBrandingData;
-  expiresAt: number;
 }
 
 function getCached(): CachedBranding | null {
@@ -47,8 +45,7 @@ function getCached(): CachedBranding | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedBranding;
     // Legacy entries (plain OrgBrandingData without user binding) are ignored.
-    if (!parsed || typeof parsed.userId !== 'string' || typeof parsed.scope !== 'string' || !parsed.data
-      || typeof parsed.expiresAt !== 'number' || parsed.expiresAt <= Date.now()) {
+    if (!parsed || typeof parsed.userId !== 'string' || typeof parsed.scope !== 'string' || !parsed.data) {
       return null;
     }
     if (typeof parsed.data.brand_color_secondary !== 'string') {
@@ -62,7 +59,7 @@ function getCached(): CachedBranding | null {
 
 function setCache(userId: string, scope: OrgBrandingScope, data: OrgBrandingData) {
   try {
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify({ userId, scope, data, expiresAt: Date.now() + CACHE_TTL_MS } satisfies CachedBranding));
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify({ userId, scope, data } satisfies CachedBranding));
   } catch {
     /* ignore */
   }
@@ -203,13 +200,7 @@ export function OrgBrandingProvider({ scope, children }: { scope: OrgBrandingSco
         const res = await fetch(`/api/org-branding?id=${encodeURIComponent(orgId)}`);
         if (!res.ok) return;
         const org = await res.json();
-        if (cancelled) return;
-        if (org?.enabled === false) {
-          setBranding(DEFAULT);
-          setCache(userId, scope, DEFAULT);
-          return;
-        }
-        if (!org?.name) return;
+        if (cancelled || !org?.name) return;
 
         const data: OrgBrandingData = {
           name: org.name,

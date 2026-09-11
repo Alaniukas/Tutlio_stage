@@ -95,7 +95,10 @@ describe('Swedish locale quality regressions', () => {
   });
 
   it('does not retain unchanged English prose', () => {
-    const permitted = new Set(['companyWait.inQueueSince', 'nav.brandSchools']);
+    const permitted = new Set([
+      'companyWait.inQueueSince', 'nav.brandSchools',
+      'compare.hub.metaTitle', 'compare.vsTitle',
+    ]);
     const unchanged = reference.filter((key) => {
       const source = en[key];
       return typeof source === 'string'

@@ -7,7 +7,12 @@ type SendArgs = {
   appOrigin: string;
   sendEmailUrl: string;
   serviceRoleKey: string;
+  idempotencyKey?: string;
 };
+
+export function pooledPackageEmailIdempotencyKey(packageId: string): string {
+  return `pooled-package/${packageId}/offer`;
+}
 
 export async function sendPendingPackagePaymentEmail(args: SendArgs): Promise<{ ok: true } | { ok: false; status: number; error: string; details?: string }> {
   const { supabase, packageId, organizationId, appOrigin, sendEmailUrl, serviceRoleKey } = args;
@@ -92,13 +97,17 @@ export async function sendPendingPackagePaymentEmail(args: SendArgs): Promise<{ 
           studentName: student.full_name,
           tutorName: orgDisplayName,
           subjectName: items.map((it) => it.subjectName).join(', ') || firstItem.subjectName,
+          items,
           totalLessons: Number(pkg.total_lessons) || items.reduce((n, it) => n + it.totalLessons, 0),
           pricePerLesson: firstItem.pricePerLesson.toFixed(2),
           totalPrice: Number(pkg.total_price || 0).toFixed(2),
           paymentLink: `${appOrigin}/api/pay-package?package=${pkg.id}`,
           organizationId,
+          ...(args.idempotencyKey ? { packageId: pkg.id, pooledPackage: true } : {}),
         },
       };
+
+  if (args.idempotencyKey) emailPayload.idempotencyKey = args.idempotencyKey;
 
   if (pkg.manual_sales_invoice_id) {
     const { data: inv } = await supabase

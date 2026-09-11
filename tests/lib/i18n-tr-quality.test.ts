@@ -1,5 +1,5 @@
-import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { format, parse, formatDistanceStrict } from 'date-fns';
 import { readFileSync } from 'node:fs';
 import { en } from '../../src/lib/i18n/en';
@@ -18,7 +18,9 @@ import { formatLocalizedPhone, validateLocalizedPhone, getLocalizedPhonePlacehol
 import { resolvePlatformTranslation } from '../../src/lib/i18n/platformOverrides';
 import { getCaseStudy, getTestimonials, SHOW_PLACEHOLDER_SOCIAL_PROOF } from '../../src/components/landing/v2/socialProof';
 
-const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('tr');
+
+const deferred = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 // The existing non-LT validator accepts international numbers, not only +370.
 const correctedPhones = new Set(['onboard.parentPhoneFormat', 'onboard.phoneFormatError', 'register.phoneError', 'register.phoneHint', 'settings.phoneFormat', 'stu.phoneFormat']);
@@ -34,10 +36,11 @@ beforeAll(async () => { await loadLocaleDict('tr'); });
 
 describe('Turkish tutor and tutoring-business localization', () => {
   it('covers the complete intended surface and preserves deferred English fallback', () => {
-    expect(Object.keys(trOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in trOverrides))).toEqual([]);
+    expect(Object.keys(trOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(tr).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !tr[key])).toEqual([]);
-    for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) expect(tr[key], key).toBe(trOverrides[key] ?? en[key]);
+    for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) expect(tr[key]).toBe(en[key]);
     expect(Object.keys(trOverrides).filter((key) => key.startsWith('quiz.')).length).toBeGreaterThan(450);
   });
 
@@ -156,6 +159,3 @@ describe('Turkish tutor and tutoring-business localization', () => {
     expect(sql).not.toMatch(/\b(?:UPDATE|DELETE FROM|DROP TABLE)\b/i);
   });
 });
-
-// Match server renderers: synchronous translation runs after its lazy preload.
-beforeAll(async () => { await preloadExtraLocaleDict('tr'); });

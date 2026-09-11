@@ -1,3 +1,4 @@
+import { matchesSchoolConsent, type SchoolConsentFilter } from '@/lib/schoolConsentFilter';
 import { useRef, useState, useEffect } from 'react';
 import mammoth from 'mammoth';
 import { supabase } from '@/lib/supabase';
@@ -53,9 +54,9 @@ import {
 import { buildSchoolContractExportRows, schoolContractsExportFilename } from '@/lib/schoolContractsExport';
 import { downloadSchoolContractsXlsx } from '@/lib/schoolContractsXlsxExport';
 import { fetchOrganizationRow } from '@/lib/orgLookup';
-import ExtraLessonsOfferDialog, { type ExtraLessonsOfferGroup } from '@/components/company/ExtraLessonsOfferDialog';
+import ExtraLessonsOfferDialog, { type ExtraLessonsTaughtSubject } from '@/components/company/ExtraLessonsOfferDialog';
 import { isExtraLessonsContractKind } from '@/lib/extraLessonsContract';
-import { extraLessonsContractListTitle, extraLessonsContractListDetails, extraLessonsContractSearchText } from '@/lib/extraLessonsContractList';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 
 interface Student {
   id: string;
@@ -102,12 +103,20 @@ interface Contract {
   signed_uploaded_at?: string | null;
   completion_submitted_at?: string | null;
   media_publicity_consent?: string | null;
+  recording_consent?: boolean | null;
   additional_fee_amount?: number | null;
   additional_fee_purpose?: string | null;
   kind?: 'annual' | 'extra_lessons' | null;
-  order_snapshot?: unknown;
-  class_group?: { name?: string | null; tutor?: { full_name?: string | null } | null } | null;
   accepted_at?: string | null;
+  unit_price_eur?: number | null;
+  order_snapshot?: {
+    service_name?: string | null;
+    service_type?: 'group' | 'individual' | string | null;
+    schedule_label?: string | null;
+    group_name?: string | null;
+    tutor_name?: string | null;
+  } | null;
+  class_group?: { name?: string | null; tutor?: { full_name?: string | null } | null } | null;
   signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null; manually_marked_at?: string | null; signed_pdf_path?: string | null }[];
   installments?: { installment_number: number; amount: number; due_date: string | null; payment_status: string | null }[];
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null; media_publicity_consent?: string | null };
@@ -243,7 +252,16 @@ export default function CompanyContracts() {
   const [tForm, setTForm] = useState({ name: '', body: '', annual_fee_default: '', pdf_url: '' });
   const [templatePdfFile, setTemplatePdfFile] = useState<File | null>(null);
   const [extraOfferOpen, setExtraOfferOpen] = useState(false);
-  const [classGroups, setClassGroups] = useState<ExtraLessonsOfferGroup[]>([]);
+  const [classGroups, setClassGroups] = useState<Array<{
+    id: string;
+    name: string;
+    tutor_name?: string | null;
+    platform?: string | null;
+    duration_minutes?: number | null;
+    school_year_end?: string | null;
+    slots?: { weekday: number; start_time: string; end_time: string }[];
+  }>>([]);
+  const [extraIndividualSubjects, setExtraIndividualSubjects] = useState<ExtraLessonsTaughtSubject[]>([]);
   const [isTemplateDragActive, setIsTemplateDragActive] = useState(false);
   const templateFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -268,6 +286,7 @@ export default function CompanyContracts() {
 
   const [tab, setTab] = useState<'contracts' | 'templates'>('contracts');
 
+  const [consentFilter, setConsentFilter] = useState<SchoolConsentFilter>('all');
   // Contract list filter (schools accumulate many contracts — no more scrolling).
   const [contractFilter, setContractFilter] = useState<SchoolContractFilter | 'unsigned'>('all');
   const [contractKindFilter, setContractKindFilter] = useState<SchoolContractKindFilter>('all');
@@ -980,13 +999,9 @@ export default function CompanyContracts() {
             templatePayload,
           }),
         });
-        const renderJson = (await renderResp.json().catch(() => ({}))) as { pdfUrl?: string; path?: string; error?: string };
-        const storedPath =
-          (typeof renderJson.path === 'string' && renderJson.path) ||
-          (typeof renderJson.pdfUrl === 'string' && renderJson.pdfUrl) ||
-          '';
-        if (renderResp.ok && storedPath) {
-          return storedPath;
+        const renderJson = (await renderResp.json().catch(() => ({}))) as { pdfUrl?: string; error?: string };
+        if (renderResp.ok && typeof renderJson.pdfUrl === 'string' && renderJson.pdfUrl) {
+          return renderJson.pdfUrl;
         }
         throw new Error(typeof renderJson.error === 'string' ? renderJson.error : 'DOCX → PDF nepavyko');
       } catch (error) {
@@ -1674,8 +1689,8 @@ export default function CompanyContracts() {
     reload();
   };
 
-  const openContractFile = async (urlOrPath?: string | null) => {
-    if (!urlOrPath?.trim()) {
+  const openContractFile = async (urlOrPath?: string | null, contractId?: string | null) => {
+    if (!urlOrPath?.trim() && !contractId?.trim()) {
       setToast({ message: tr('school.toastFileOpenFail'), type: 'error' });
       return;
     }
@@ -1683,7 +1698,10 @@ export default function CompanyContracts() {
       const res = await fetch('/api/school-contract-file-url', {
         method: 'POST',
         headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: urlOrPath }),
+        body: JSON.stringify({
+          path: urlOrPath?.trim() || undefined,
+          contractId: contractId?.trim() || undefined,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && typeof data?.signedUrl === 'string') {
@@ -1861,6 +1879,7 @@ export default function CompanyContracts() {
   const contractFilterCounts = countContractsByFilter(contracts, isSchoolView, { eSignEnabled });
   const visibleContracts = contracts.filter((c) => {
     if (isSchoolView) {
+      if (!matchesSchoolConsent(consentFilter, c)) return false;
       if (!matchesContractFilter(contractFilter as SchoolContractFilter, c, isSchoolView, { eSignEnabled })) return false;
       if (!matchesContractKindFilter(contractKindFilter, c.kind)) return false;
     } else {
@@ -1870,7 +1889,7 @@ export default function CompanyContracts() {
     const q = searchable(contractSearch.trim());
     if (!q) return true;
     const haystack = searchable(
-      [c.student?.full_name, c.student?.payer_name, c.student?.parent_secondary_name, c.contract_number, extraLessonsContractSearchText(c)]
+      [c.student?.full_name, c.student?.payer_name, c.student?.parent_secondary_name, c.contract_number]
         .filter(Boolean)
         .join(' '),
     );
@@ -1937,10 +1956,53 @@ export default function CompanyContracts() {
                     onClick={async () => {
                       try {
                         const headers = await authHeaders();
-                        const res = await fetch('/api/school-class-groups', { headers });
-                        const data = await res.json();
-                        if (res.ok) {
-                          setClassGroups(data.groups || []);
+                        const groupsRes = await fetch('/api/school-class-groups', { headers });
+                        const groupsData = await groupsRes.json();
+                        if (groupsRes.ok) {
+                          setClassGroups((groupsData.groups || []).map((g: {
+                            id: string;
+                            name: string;
+                            platform?: string | null;
+                            duration_minutes?: number | null;
+                            school_year_end?: string | null;
+                            tutor?: { full_name?: string | null } | null;
+                            slots?: { weekday: number; start_time: string; end_time: string }[];
+                          }) => ({
+                            id: g.id,
+                            name: g.name,
+                            platform: g.platform,
+                            duration_minutes: g.duration_minutes,
+                            school_year_end: g.school_year_end,
+                            tutor_name: g.tutor?.full_name || null,
+                            slots: (g.slots || []).map((s) => ({
+                              weekday: Number(s.weekday),
+                              start_time: String(s.start_time).slice(0, 5),
+                              end_time: String(s.end_time || '').slice(0, 5),
+                            })),
+                          })));
+                        }
+                        if (orgId) {
+                          const tutorList = await getOrgVisibleTutors(supabase as any, orgId, 'id, full_name');
+                          if (tutorList.length > 0) {
+                            const { data: subjectsData } = await supabase
+                              .from('subjects')
+                              .select('id, name, price, duration_minutes, tutor_id, is_group')
+                              .in('tutor_id', tutorList.map((t) => t.id))
+                              .order('name');
+                            setExtraIndividualSubjects(
+                              (subjectsData || [])
+                                .filter((s) => !s.is_group)
+                                .map((s) => ({
+                                  id: s.id,
+                                  name: s.name,
+                                  duration_minutes: s.duration_minutes,
+                                  price: s.price,
+                                  tutor_name: tutorList.find((t) => t.id === s.tutor_id)?.full_name || null,
+                                })),
+                            );
+                          } else {
+                            setExtraIndividualSubjects([]);
+                          }
                         }
                       } catch { /* ignore */ }
                       setExtraOfferOpen(true);
@@ -2036,9 +2098,21 @@ export default function CompanyContracts() {
             </div>
           ) : (
             <>
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
                 {isSchoolView ? (
                   <>
+                  <Select value={consentFilter} onValueChange={(value) => setConsentFilter(value as SchoolConsentFilter)}>
+                    <SelectTrigger className="w-full sm:w-64 rounded-xl" aria-label="Atvaizdo sutikimas">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Visi atvaizdo sutikimai</SelectItem>
+                      <SelectItem value="disagree">Atvaizdas: nesutinka</SelectItem>
+                      <SelectItem value="agree">Atvaizdas: sutinka</SelectItem>
+                      <SelectItem value="missing">Atvaizdas: neatsakyta</SelectItem>
+                      <SelectItem value="recording_declined">Pamokų įrašymas: nesutinka</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Select
                     value={contractKindFilter}
                     onValueChange={(v) => setContractKindFilter(v as SchoolContractKindFilter)}
@@ -2060,7 +2134,7 @@ export default function CompanyContracts() {
                     value={contractFilter as SchoolContractFilter}
                     onValueChange={(v) => setContractFilter(v as SchoolContractFilter)}
                   >
-                    <SelectTrigger className="w-full sm:w-[min(100%,320px)] rounded-xl border-gray-200 bg-white">
+                    <SelectTrigger aria-label="Sutarties būsena" className="w-full sm:w-[min(100%,320px)] rounded-xl border-gray-200 bg-white">
                       <SelectValue placeholder={tr('school.filterContractsLabel')} />
                     </SelectTrigger>
                     <SelectContent>
@@ -2129,7 +2203,17 @@ export default function CompanyContracts() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs text-gray-400 tabular-nums">{contractIdx + 1}.</span>
-                        <p className="font-semibold text-gray-900">{extraLessonsContractListTitle(c.student?.full_name || '—', c)}</p>
+                        <p className="font-semibold text-gray-900">
+                          {isExtraLessonsContractKind(c.kind)
+                            ? [
+                                c.student?.full_name || '—',
+                                c.order_snapshot?.service_name,
+                                c.order_snapshot?.service_type === 'group'
+                                  ? 'grupinis užsiėmimas'
+                                  : 'individualus užsiėmimas',
+                              ].filter(Boolean).join(' – ')
+                            : c.student?.full_name || '—'}
+                        </p>
                         {c.kind === 'extra_lessons' && (
                           <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium bg-teal-50 text-teal-800">
                             {tr('school.extra.kindBadge')}
@@ -2139,8 +2223,8 @@ export default function CompanyContracts() {
                       </div>
                       <p className="text-sm text-gray-500 mt-1">
                         {c.contract_number && <span className="mr-3">Sutarties Nr. {c.contract_number}</span>}
-                        {isExtraLessonsContractKind(c.kind) ? 'Mėnesinis mokestis:' : tr('school.annualFee')} <span className="font-medium text-gray-700">&euro;{Number(c.annual_fee).toFixed(2)}</span>
-                        {isExtraLessonsContractKind(c.kind) && <span> (orientacinis)</span>}
+                        {isExtraLessonsContractKind(c.kind) ? tr('school.extra.monthlyFee') : tr('school.annualFee')}{' '}
+                        <span className="font-medium text-gray-700">&euro;{Number(c.annual_fee).toFixed(2)}</span>
                         {Number(c.additional_fee_amount || 0) > 0 && (
                           <span className="ml-3 text-gray-600">
                             + Papildomas: <span className="font-medium text-gray-700">&euro;{Number(c.additional_fee_amount).toFixed(2)}</span>
@@ -2150,8 +2234,20 @@ export default function CompanyContracts() {
                         {c.sent_at && <span className="ml-3">{tr('school.sent')} {new Date(c.sent_at).toLocaleDateString('lt-LT')}</span>}
                         {c.signed_at && <span className="ml-3">{tr('school.signed')} {new Date(c.signed_at).toLocaleDateString('lt-LT')}</span>}
                       </p>
-                      {isExtraLessonsContractKind(c.kind) && extraLessonsContractListDetails(c).teacher && (
-                        <p className="text-xs text-gray-500 mt-1">Mokytojas: {extraLessonsContractListDetails(c).teacher}</p>
+                      {isExtraLessonsContractKind(c.kind) && (
+                        <p className="mt-1 text-xs text-gray-500">
+                          {(c.order_snapshot?.tutor_name || c.class_group?.tutor?.full_name) && (
+                            <span className="mr-3">
+                              {tr('school.extra.teacherLabel')} {c.order_snapshot?.tutor_name || c.class_group?.tutor?.full_name}
+                            </span>
+                          )}
+                          {(c.order_snapshot?.group_name || c.class_group?.name) && (
+                            <span className="mr-3">
+                              {tr('school.extra.groupLabel')} {c.order_snapshot?.group_name || c.class_group?.name}
+                            </span>
+                          )}
+                          {c.order_snapshot?.schedule_label || null}
+                        </p>
                       )}
                       {(c.installments || []).length > 0 && (
                         <p className="text-xs text-gray-500 mt-1">
@@ -2169,23 +2265,21 @@ export default function CompanyContracts() {
                         </p>
                       )}
                       {(() => {
-                        const extraFallback = isExtraLessonsContractKind(c.kind) && orgId
-                          ? schoolContractPdfStoragePath({
-                              organizationId: orgId,
-                              contractId: c.id,
-                              contractNumber: c.contract_number,
-                            })
-                          : null;
-                        const currentPdf = currentContractPdfPath(c) || extraFallback;
+                        const currentPdf = currentContractPdfPath(c);
+                        const canOpenExtraPdf = isExtraLessonsContractKind(c.kind) && Boolean(c.id);
                         const schoolSignedPdf = (c.signatures || []).find((s) => s.role === 'school' && s.status === 'signed' && s.signed_pdf_path)?.signed_pdf_path;
                         const parentScan = c.signed_contract_url && c.signed_contract_url !== currentPdf ? c.signed_contract_url : null;
                         return (
                           <>
-                            {currentPdf && (
+                            {(currentPdf || canOpenExtraPdf) && (
                               <p className={`text-xs mt-1 ${schoolSignedPdf ? 'text-emerald-700' : 'text-indigo-700'}`}>
                                 {schoolSignedPdf ? 'Naujausia pasirašyta versija' : 'Naujausia sutarties versija'}
                                 {' '}({c.student?.full_name || 'mokinys'}):{' '}
-                                <button type="button" className="underline" onClick={() => openContractFile(currentPdf)}>
+                                <button
+                                  type="button"
+                                  className="underline"
+                                  onClick={() => openContractFile(currentPdf, c.id)}
+                                >
                                   Atidaryti failą
                                 </button>
                               </p>
@@ -2193,7 +2287,7 @@ export default function CompanyContracts() {
                             {parentScan && (
                               <p className="text-xs text-gray-500 mt-1">
                                 Įkelta tėvų kopija (be naujausio mokyklos parašo):{' '}
-                                <button type="button" className="underline" onClick={() => openContractFile(parentScan)}>
+                                <button type="button" className="underline" onClick={() => openContractFile(parentScan, c.id)}>
                                   Atidaryti originalą
                                 </button>
                               </p>
@@ -3033,6 +3127,7 @@ export default function CompanyContracts() {
         organizationId={orgId}
         students={students}
         groups={classGroups}
+        individualSubjects={extraIndividualSubjects}
         onCreated={(info) => {
           const mail = info.emailTo ? ` ${info.emailTo}` : '';
           if (info.emailSent) {

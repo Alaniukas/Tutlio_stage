@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { inviteEmailsMatch, type OrgTutorInviteLink } from './tutorInviteClaim.js';
 
 export type OrgTutorRow = {
   id: string;
@@ -15,6 +16,7 @@ export type OrgTutorRow = {
   company_commission_percent?: number | null;
   company_commission_by_subject?: Record<string, number> | null;
   personal_meeting_link?: string | null;
+  teaching_notes?: string | null;
 };
 
 /**
@@ -24,7 +26,9 @@ export type OrgTutorRow = {
  *
  * A "real tutor" is either:
  * - assigned to at least one student in the org (`students.tutor_id`), OR
- * - has accepted a tutor invite in the org (`tutor_invites.used_by_profile_id`).
+ * - has accepted a tutor invite in the org (`tutor_invites.used_by_profile_id`), OR
+ * - has a used invite whose invitee email matches their org profile (legacy
+ *   rows that were marked used without `used_by_profile_id`).
  *
  * We also exclude organization admins.
  *
@@ -33,7 +37,8 @@ export type OrgTutorRow = {
  */
 export function buildOrgTutorIdSet(
   linkedStudents: Array<{ tutor_id?: string | null }> | null | undefined,
-  inviteData: Array<{ used_by_profile_id?: string | null }> | null | undefined,
+  inviteData: Array<OrgTutorInviteLink> | null | undefined,
+  orgProfiles?: Array<{ id: string; email?: string | null }> | null,
 ): Set<string> {
   const assignedTutorIds = new Set(
     (linkedStudents || [])
@@ -45,7 +50,17 @@ export function buildOrgTutorIdSet(
       .map((inv) => inv.used_by_profile_id)
       .filter((id: string | null | undefined): id is string => !!id),
   );
-  return new Set<string>([...assignedTutorIds, ...acceptedTutorIds]);
+  const ids = new Set<string>([...assignedTutorIds, ...acceptedTutorIds]);
+  const profiles = orgProfiles || [];
+  for (const inv of inviteData || []) {
+    if (!inv.used) continue;
+    for (const profile of profiles) {
+      if (inviteEmailsMatch(inv.invitee_email, profile.email)) {
+        ids.add(profile.id);
+      }
+    }
+  }
+  return ids;
 }
 
 export function filterConfirmedOrgTutors<T extends { id: string }>(
@@ -73,7 +88,7 @@ export async function getOrgVisibleTutors(
     supabase.rpc('get_my_org_admin_user_ids'),
     supabase.rpc('get_my_org_visible_tutor_ids'),
     supabase.from('students').select('linked_user_id, email, tutor_id').eq('organization_id', orgId),
-    supabase.from('tutor_invites').select('used_by_profile_id').eq('organization_id', orgId),
+    supabase.from('tutor_invites').select('used_by_profile_id, used, invitee_email').eq('organization_id', orgId),
     supabase.from('profiles').select(select).eq('organization_id', orgId),
   ]);
 
@@ -81,18 +96,21 @@ export async function getOrgVisibleTutors(
     [...(adminUsers || []), ...(teammateAdmins || [])].map((a: any) => a.user_id),
   );
 
-  const relationshipTutorIds = buildOrgTutorIdSet(linkedStudents, inviteData);
+  const relationshipTutorIds = buildOrgTutorIdSet(
+    linkedStudents,
+    inviteData,
+    (profileRows || []) as unknown as Array<{ id: string; email?: string | null }>,
+  );
   const rpcTutorIds =
     !visibleTutorIds.error && (adminUsers || []).length > 0
       ? (visibleTutorIds.data || []).map((row: any) => row.user_id).filter(Boolean)
       : null;
-  // If the RPC succeeds but returns no rows (e.g. auth.uid() not ready yet), fall back
-  // to student/invite relationships so the tutor list does not flash empty.
-  const tutorIdSet =
-    rpcTutorIds != null
-      ? rpcTutorIds.length > 0
-        ? new Set<string>(rpcTutorIds)
-        : relationshipTutorIds
-      : relationshipTutorIds;
+  // Union RPC ids with student/invite relationships. RPC can miss tutors whose
+  // invite was marked used without used_by_profile_id; empty RPC still falls
+  // back so the list does not flash empty while auth.uid() is not ready.
+  const tutorIdSet = new Set<string>([
+    ...(rpcTutorIds || []),
+    ...relationshipTutorIds,
+  ]);
   return filterConfirmedOrgTutors((profileRows || []) as unknown as OrgTutorRow[], adminIds, tutorIdSet);
 }

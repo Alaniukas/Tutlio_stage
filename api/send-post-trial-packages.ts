@@ -10,6 +10,9 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { requireCronAuth } from './_lib/cronAuth.js';
+import { generatePooledMonthlyPackage } from './_lib/pooledMonthlyGeneration.js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { fetchOrgStudentDynamicPrice } from '../src/lib/orgStudentPricing.js';
 import { buildRollingOccurrenceDates } from './_lib/recurringOccurrences.js';
 import { endOfMonthYmd, nextMonthFirstYmd } from '../src/lib/monthlyPackagePlan.js';
 import { resolveOrganizationLessonPrice } from '../src/lib/organizationDynamicPricing.js';
@@ -109,6 +112,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const failures: Array<{ pair: string; error: string }> = [];
   const todayYmd = ymdInVilnius();
 
+  const pooledIdentities = new Set<string>();
   for (const candidate of candidateByPair.values()) {
     const pairLabel = `${candidate.tutorId}|${candidate.studentId}`;
     const orgId = orgByTutor.get(candidate.tutorId) ?? null;
@@ -116,6 +120,70 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const entityType = orgId ? orgEntityType.get(orgId) : null;
     if (!orgId || !features || !proKlaseFeatureEnabledForOrgRecord(orgId, orgEntityType.get(orgId), features, 'post_trial_auto_package')) {
       skipped += 1;
+      continue;
+    }
+
+    if (isProKlaseOrg(orgId)) {
+      try {
+        const pricing = await fetchOrgStudentDynamicPrice(supabase, candidate.studentId);
+        const identityKey = `${orgId}:${pricing.studentIds.slice().sort().join(',')}`;
+        if (pooledIdentities.has(identityKey)) {
+          skipped += 1;
+          continue;
+        }
+        pooledIdentities.add(identityKey);
+
+        const { data: activePlans, error: plansError } = await supabase
+          .from('recurring_monthly_package_plans')
+          .select('id')
+          .eq('organization_id', orgId)
+          .in('student_id', pricing.studentIds)
+          .eq('active', true)
+          .limit(1);
+        if (plansError) throw new Error(plansError.message);
+        if (activePlans?.length) {
+          skipped += 1;
+          continue;
+        }
+
+        const { data: laterPackages, error: packagesError } = await supabase
+          .from('lesson_packages')
+          .select('id, subjects(is_trial)')
+          .in('student_id', pricing.studentIds)
+          .gte('created_at', candidate.endTime)
+          .neq('payment_status', 'cancelled');
+        if (packagesError) throw new Error(packagesError.message);
+        const hasRealPackage = (laterPackages || []).some((pkg: any) => {
+          const subject = Array.isArray(pkg.subjects) ? pkg.subjects[0] : pkg.subjects;
+          return subject?.is_trial !== true;
+        });
+        if (hasRealPackage) {
+          skipped += 1;
+          continue;
+        }
+
+        const createdBy = await getOrgOwnerUserId(supabase, orgId);
+        if (!createdBy) throw new Error('Organization has no renewal owner');
+        const trustedOrigin = process.env.VERCEL_URL
+          ? `https://${process.env.VERCEL_URL}`
+          : process.env.APP_URL || process.env.VITE_APP_URL;
+        if (!trustedOrigin) throw new Error('Missing configured application origin');
+        const result = await generatePooledMonthlyPackage(supabase, {
+          organizationId: orgId,
+          studentId: candidate.studentId,
+          periodStart: `${todayYmd.slice(0, 7)}-01`,
+          createdBy,
+          appOrigin: trustedOrigin,
+          serviceRoleKey,
+        });
+        if (result.emailSent) sent += 1;
+        else skipped += 1;
+      } catch (pooledError) {
+        failures.push({
+          pair: pairLabel,
+          error: pooledError instanceof Error ? pooledError.message : String(pooledError),
+        });
+      }
       continue;
     }
 

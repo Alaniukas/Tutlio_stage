@@ -4,8 +4,6 @@ import { createClient } from '@supabase/supabase-js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
-import { ensurePaidTrialInvoice } from './_lib/paidTrialInvoice.js';
-import { isProKlaseOrg } from './_lib/marketMoney.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -241,7 +239,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             if (!updatedSession) {
-                if (isProKlaseOrg(tutor?.organization_id)) await ensurePaidTrialInvoice(supabase, sessionId);
                 return res.status(200).json({ success: true, already_paid: true });
             }
 
@@ -314,24 +311,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }
             }
 
-            if (tutor?.email) {
+            // Org tutors already received booking_notification at reservation — no payment email.
+            if (tutor?.email && !isOrgTutor(tutorProfile?.organization_id)) {
                 try {
-                    const tutorPayload = isOrgTutor(tutorProfile?.organization_id)
-                        ? {
-                            type: 'lesson_confirmed_tutor',
-                            to: tutor.email,
-                            data: {
-                                studentName: student.full_name,
-                                tutorName: tutor.full_name || 'Korepetitorius',
-                                date: dateStr,
-                                time: timeStr,
-                                subject: sessionData.topic,
-                                sessionId: sessionData.id,
-                                meetingLink: (sessionData as { meeting_link?: string | null }).meeting_link || '',
-                                organizationId: tutorProfile.organization_id,
-                            }
-                        }
-                        : {
+                    await fetch(sendEmailUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                        body: JSON.stringify({
                             type: 'payment_received_tutor',
                             to: tutor.email,
                             data: {
@@ -342,19 +328,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                 subject: sessionData.topic,
                                 price: sessionData.price,
                                 ...(tutorProfile?.organization_id ? { organizationId: tutorProfile.organization_id } : {}),
-                            }
-                        };
-                    await fetch(sendEmailUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-                        body: JSON.stringify(tutorPayload)
+                            },
+                        }),
                     });
                 } catch (e) {
                     console.error('[confirm-stripe-payment] Failed to send tutor email', e);
                 }
             }
 
-            if (isProKlaseOrg(tutor?.organization_id)) await ensurePaidTrialInvoice(supabase, sessionId);
             return res.status(200).json({ success: true });
         } else {
             return res.status(400).json({ error: 'Payment not successful yet' });

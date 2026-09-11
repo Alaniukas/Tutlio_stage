@@ -1,5 +1,3 @@
-import { StudentConnectionStatus } from '@/components/StudentConnectionStatus';
-import StudentAccountSetup from '@/components/company/StudentAccountSetup';
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { extractStoragePath, openContractFileInNewTab } from '@/lib/contractStorage';
@@ -30,7 +28,6 @@ import {
 import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock, MessageSquare, Archive, ArchiveRestore, Download, AlertCircle, Ban, Pencil } from 'lucide-react';
 import { sendEmail, sendEmailDetailed } from '@/lib/email';
 import Toast from '@/components/Toast';
-import { parentInviteProblem, type ParentInviteResponse } from '@/lib/parentInviteFeedback';
 import { useTranslation } from '@/lib/i18n';
 import {
   ALL_SCHOOL_STUDENT_EXPORT_COLUMNS,
@@ -101,6 +98,7 @@ import {
 import { defaultLessonRange, lessonFitsAvailabilityWindow, appendUniqueBySlotKey, availabilitySlotKey } from '@/lib/pickedAvailabilityTime';
 import { orgCanonicalOrigin } from '@/lib/orgPublicOrigin';
 import {
+  shouldProvisionAccountsOnCreate,
   shouldSendParentInviteOnCreate,
   shouldSendStudentInviteEmail,
   type OrgStudentInviteTarget,
@@ -109,6 +107,7 @@ import type { BusyInterval } from '@/lib/tutorMatching';
 import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
 import { pickStudentContactsForTutorEmail } from '@/lib/orgContactVisibility';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { parentInviteProblem, type ParentInviteResponse } from '@/lib/parentInviteFeedback';
 import {
   groupsContainingStudent,
   scheduleLabelFromGroupSlots,
@@ -119,8 +118,28 @@ import { removeOrgStudentTutorPairing } from '@/lib/reassignStudentTutorLessons'
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { useUser } from '@/contexts/UserContext';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
-import { proKlaseOrgAdminContext, proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
+import {
+  canScheduleStudentBeforeActivation,
+  proKlaseOrgAdminContext,
+  proKlaseFeatureEnabled,
+} from '@/lib/orgIntakeMode';
 import { isProKlaseOrg, isMoksloVaisiaiOrg } from '@/lib/marketMoney';
+import {
+  credentialsFromProvisionResponse,
+  postMvProvisionFamilyAccounts,
+  provisionEmailsSent,
+  type MvProvisionCredentialsView,
+} from '@/lib/mvProvisionApi';
+import {
+  defaultMvProvisionDelivery,
+  type MvEmailDelivery,
+} from '@/lib/mvProvisionOptions';
+import MvProvisionDialog, { type MvProvisionDialogSubmit } from '@/components/company/MvProvisionDialog';
+import {
+  mergeMvStudentAccountStatus,
+  mvNeedsAnyAccountProvisioning,
+  mvProvisionStudentIds,
+} from '@/lib/mvStudentAccountStatus';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import {
   parseStudentGrade,
@@ -131,7 +150,23 @@ import { formatLocalYmd, monthlyPackagePeriodFrom } from '@/lib/monthlyPackagePl
 import { canEditPendingPackage } from '@/lib/pendingPackageEdit';
 import { displayStudentGrade, normalizeStudentGrade1to12, proKlaseGradeSelectValue } from '@/lib/studentGrade';
 import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
-import { orgStudentIdentityGroupKey } from '@/lib/orgStudentIdentity';
+import {
+  matchesOrgStudentPickerSearch,
+  orgStudentDisplayName,
+  orgStudentIdentityGroupKey,
+} from '@/lib/orgStudentIdentity';
+
+type MonthlyStudentPackagePreview = {
+  items: Array<{ subjectId: string; subjectName: string; totalLessons: number }>;
+  totalLessons: number;
+  pricePerLesson: number;
+  totalPrice: number;
+  lessonsPerWeek: number;
+  periodStart: string;
+  periodEnd: string;
+  nextGenerationDate: string;
+  previewToken: string;
+};
 
 interface Student {
   id: string;
@@ -168,7 +203,7 @@ interface Student {
   payment_model?: string | null;
   payment_payer?: 'self' | 'parent' | string | null;
   linked_user_id?: string | null;
-  parent_students?: { parent_id: string }[];
+  parent_user_id?: string | null;
   created_at: string;
   admin_comment?: string | null;
   admin_comment_visible_to_tutor?: boolean;
@@ -361,6 +396,12 @@ export default function CompanyStudents() {
     proKlaseFeatureEnabled(orgId, orgEntityType, hasFeature, flagId, orgFeaturesLoading);
   const orgUsesManualPackages = !orgFeaturesLoading && hasFeature('manual_payments');
   const isMvOrg = isMoksloVaisiaiOrg(orgId);
+  const preActivationSchedulingUi = canScheduleStudentBeforeActivation(
+    orgId,
+    orgEntityType,
+    orgFeaturesLoading,
+  );
+  const studentCardBookingEnabled = pkFeat('student_card_booking') || (isMvOrg && preActivationSchedulingUi);
   /** Full contact editing: schools always; other orgs behind full_student_edit (email only until registered). */
   const canFullEditStudent = isSchoolView || (!orgFeaturesLoading && hasFeature('full_student_edit'));
   /** Sutartims / school moduliui: asmens kodas, gimimo data, adresas — ne company / Pro Klasė. */
@@ -377,8 +418,6 @@ export default function CompanyStudents() {
   const [addStudentPickedLessons, setAddStudentPickedLessons] = useState<AddStudentLessonPick[]>([]);
   const [addStudentFirstLessonIsTrial, setAddStudentFirstLessonIsTrial] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [newAdminComment, setNewAdminComment] = useState('');
-  const [newCommentVisibleToTutor, setNewCommentVisibleToTutor] = useState<boolean | null>(null);
   const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [baseUrl, setBaseUrl] = useState('');
   /** Org preferred_locale — invite links use the org's canonical domain (.lt for Pro Klasė). */
@@ -407,10 +446,23 @@ export default function CompanyStudents() {
     child_birth_date: '',
     tutor_ids: [] as string[],
     // Flexible invitations (req 7): who to invite on create when enabled.
-    invite_target: (isMoksloVaisiaiOrg(membership?.organizationId) ? 'parent' : 'student') as OrgStudentInviteTarget,
+    invite_target: (isMoksloVaisiaiOrg(membership?.organizationId) ? 'provision' : 'student') as OrgStudentInviteTarget,
     payment_payer: isMoksloVaisiaiOrg(membership?.organizationId) ? 'parent' : 'self',
   });
   const parentFirstInvite = isMvOrg && !isSchoolView && newStudent.invite_target === 'parent';
+  const provisionAccounts = isMvOrg && !isSchoolView && newStudent.invite_target === 'provision';
+  const [provisionCredentialsOpen, setProvisionCredentialsOpen] = useState(false);
+  const [provisionCredentials, setProvisionCredentials] = useState<MvProvisionCredentialsView | null>(null);
+  const [mvProvisionDialogOpen, setMvProvisionDialogOpen] = useState(false);
+  const [mvProvisionDialogStudent, setMvProvisionDialogStudent] = useState<Student | null>(null);
+  const [mvProvisionDialogStudentIds, setMvProvisionDialogStudentIds] = useState<string[]>([]);
+  const [mvCreateProvisionDelivery, setMvCreateProvisionDelivery] = useState<MvEmailDelivery>(
+    defaultMvProvisionDelivery().emailDelivery,
+  );
+  const [mvCreateParentNotifyEmail, setMvCreateParentNotifyEmail] = useState('');
+  const [mvCreateStudentNotifyEmail, setMvCreateStudentNotifyEmail] = useState('');
+  const [mvCreateBothNotifyEmail, setMvCreateBothNotifyEmail] = useState('');
+  const [provisioningExistingStudent, setProvisioningExistingStudent] = useState(false);
   const [tutorSubjects, setTutorSubjects] = useState<SubjectOption[]>([]);
   const [selectedSubjectForInvite, setSelectedSubjectForInvite] = useState('');
   const [useIndividualPrice, setUseIndividualPrice] = useState(false);
@@ -492,14 +544,18 @@ export default function CompanyStudents() {
   const [packageSubjects, setPackageSubjects] = useState<any[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(false);
   const [sendPackageOpen, setSendPackageOpen] = useState(false);
+  const [monthlyPreview, setMonthlyPreview] = useState<MonthlyStudentPackagePreview | null>(null);
+  const [monthlyPreviewError, setMonthlyPreviewError] = useState('');
+  const [monthlyPreviewLoading, setMonthlyPreviewLoading] = useState(false);
+  const [monthlyPreviewRefresh, setMonthlyPreviewRefresh] = useState(0);
+  const [monthlyPeriodStart, setMonthlyPeriodStart] = useState(
+    () => `${formatLocalYmd(new Date()).slice(0, 7)}-01`,
+  );
   const [pkgItems, setPkgItems] = useState<PackageEditorItem[]>([]);
   const [pkgIndividualPricing, setPkgIndividualPricing] = useState<Record<string, number>>({});
   const [pkgExpiresAt, setPkgExpiresAt] = useState('');
   const [pkgSending, setPkgSending] = useState(false);
   const [pkgAttachSalesInvoice, setPkgAttachSalesInvoice] = useState(true);
-  const [pkgGrade, setPkgGrade] = useState(1);
-  const [pkgLessonsPerWeek, setPkgLessonsPerWeek] = useState(1);
-  const [pkgDynamicPricingRules, setPkgDynamicPricingRules] = useState<OrganizationDynamicPricingRule[]>([]);
   // Optional pre-booked package times (req 3, gated by package_reservation_flow)
   const [pkgReserveSlots, setPkgReserveSlots] = useState<Array<{ subjectId: string; startIso: string; endIso: string }>>([]);
   const [pkgSlotSubjectId, setPkgSlotSubjectId] = useState('');
@@ -572,11 +628,24 @@ export default function CompanyStudents() {
     enable_prepaid_packages: false,
   });
 
-  const monthlyPackageMode = proKlaseAdminUi && hasFeature('monthly_packages');
-  const monthlyPackagePeriod = useMemo(
-    () => monthlyPackagePeriodFrom(formatLocalYmd(new Date()), pkgLessonsPerWeek),
-    [pkgLessonsPerWeek],
+  const selectedStudentGroupIds = useMemo(
+    () => selectedStudentGroup.length > 0
+      ? selectedStudentGroup.map((row) => row.id)
+      : selectedStudent ? [selectedStudent.id] : [],
+    [selectedStudent?.id, selectedStudentGroup],
   );
+  const selectedMvAccountStatus = useMemo(
+    () => mergeMvStudentAccountStatus(
+      selectedStudentGroup.length > 0
+        ? selectedStudentGroup
+        : selectedStudent
+          ? [selectedStudent]
+          : [],
+    ),
+    [selectedStudent, selectedStudentGroup],
+  );
+
+  const monthlyPackageMode = proKlaseAdminUi && hasFeature('monthly_packages');
   const classGroupsEnabled = isSchoolView && !orgFeaturesLoading && hasFeature('school_class_groups');
 
   useEffect(() => {
@@ -658,7 +727,7 @@ export default function CompanyStudents() {
         const { data: pricingRes } = await supabase
           .from('student_individual_pricing')
           .select('id, price, duration_minutes, cancellation_hours, cancellation_fee_percent, subject:subjects(id, name, color, duration_minutes)')
-          .eq('student_id', selectedStudent.id)
+          .in('student_id', monthlyPackageMode ? selectedStudentGroupIds : [selectedStudent.id])
           .eq('tutor_id', selectedStudent.tutor_id)
           .order('created_at', { ascending: false });
 
@@ -672,7 +741,13 @@ export default function CompanyStudents() {
     return () => {
       cancelled = true;
     };
-  }, [selectedStudent?.id, selectedStudent?.tutor_id, isStudentModalOpen]);
+  }, [
+    selectedStudent?.id,
+    selectedStudent?.tutor_id,
+    isStudentModalOpen,
+    monthlyPackageMode,
+    selectedStudentGroupIds,
+  ]);
 
   const showPaymentModelUi = isSchoolView || (!orgFeaturesLoading && hasFeature('per_student_payment_override'));
 
@@ -692,8 +767,13 @@ export default function CompanyStudents() {
     }
     return order.map((key) => {
       const rows = groups.get(key)!;
-      // students already ordered by created_at desc; keep first row as "primary"
-      return { key, primary: rows[0], rows };
+      // Prefer a row with real account links. A newer empty duplicate must not
+      // hide the child's already-created account or its populated contact data.
+      const primary = rows.find((row) => row.linked_user_id)
+        || rows.find((row) => row.parent_user_id)
+        || rows.find((row) => row.email)
+        || rows[0];
+      return { key, primary, rows };
     });
   }, [students]);
 
@@ -726,7 +806,7 @@ export default function CompanyStudents() {
     );
     if (normalizedSearch) {
       groups = groups.filter((g) =>
-        g.rows.some((r) => String(r.full_name || '').toLowerCase().includes(normalizedSearch)),
+        g.rows.some((r) => matchesOrgStudentPickerSearch(r, normalizedSearch)),
       );
     }
     if (gradeFilter !== 'all') {
@@ -915,11 +995,8 @@ export default function CompanyStudents() {
           lessons_per_week: Number(rule.lessons_per_week),
           price: Number(rule.price),
         }));
-        setPkgDynamicPricingRules(dynamicRules);
         const initialGrade = parseStudentGrade(selectedStudent.grade) ?? 1;
         const initialFrequency = Math.max(1, Number(selectedStudent.pricing_lessons_per_week) || 1);
-        setPkgGrade(initialGrade);
-        setPkgLessonsPerWeek(initialFrequency);
         const first = subjRes.data?.[0];
         if (first) {
           const initialPrice = resolveOrganizationLessonPrice({
@@ -929,10 +1006,9 @@ export default function CompanyStudents() {
             individualPrice: pricingMap[first.id],
             fallbackPrice: Number(first.price ?? 0),
           });
-          const period = monthlyPackagePeriodFrom(formatLocalYmd(new Date()), initialFrequency);
           setPkgItems([{
             subjectId: first.id,
-            totalLessons: monthlyPackageMode ? period.totalLessons : 5,
+            totalLessons: monthlyPackageMode ? 0 : 5,
             pricePerLesson: initialPrice,
           }]);
         } else {
@@ -942,7 +1018,7 @@ export default function CompanyStudents() {
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedStudent, isStudentModalOpen, orgId, monthlyPackageMode, packagesRefreshKey]);
+  }, [selectedStudent, isStudentModalOpen, orgId, monthlyPackageMode, packagesRefreshKey, selectedStudentGroupIds]);
 
   // Auto (post-trial) monthly package plans across the identity group.
   useEffect(() => {
@@ -950,15 +1026,12 @@ export default function CompanyStudents() {
       setStudentAutoPlans([]);
       return;
     }
-    const groupIds = selectedStudentGroup.length > 0
-      ? selectedStudentGroup.map((row) => row.id)
-      : [selectedStudent.id];
     let cancelled = false;
     (async () => {
       const { data } = await supabase
         .from('recurring_monthly_package_plans')
         .select('id, tutor_id, student_id, next_generation_date, payment_method, auto_from_schedule, active, tutor:profiles!recurring_monthly_package_plans_tutor_id_fkey(full_name)')
-        .in('student_id', groupIds)
+        .in('student_id', selectedStudentGroupIds)
         .eq('active', true)
         .eq('auto_from_schedule', true);
       if (!cancelled) {
@@ -971,39 +1044,51 @@ export default function CompanyStudents() {
       }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedStudent?.id, isStudentModalOpen, selectedStudentGroup.length, modalSessionsRefreshKey]);
+  }, [selectedStudent?.id, isStudentModalOpen, selectedStudentGroupIds, modalSessionsRefreshKey]);
 
   useEffect(() => {
-    if (!monthlyPackageMode || !sendPackageOpen || pkgItems.length === 0) return;
-    const current = pkgItems[0];
-    const subject = packageSubjects.find((row: any) => row.id === current.subjectId);
-    if (!subject) return;
-    const price = resolveOrganizationLessonPrice({
-      rules: pkgDynamicPricingRules,
-      student: { grade: String(pkgGrade), pricing_lessons_per_week: pkgLessonsPerWeek },
-      lessonsPerWeek: pkgLessonsPerWeek,
-      individualPrice: pkgIndividualPricing[current.subjectId],
-      fallbackPrice: Number(subject.price ?? 0),
-    });
-    setPkgItems((items) => {
-      const item = items[0];
-      if (!item) return items;
-      if (item.totalLessons === monthlyPackagePeriod.totalLessons && item.pricePerLesson === price && items.length === 1) {
-        return items;
+    setMonthlyPreview(null);
+    setMonthlyPreviewError('');
+    if (!monthlyPackageMode || !selectedStudent || !isStudentModalOpen || !sendPackageOpen) {
+      setMonthlyPreviewLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setMonthlyPreviewLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch('/api/create-monthly-student-package', {
+          method: 'POST',
+          headers: await authHeaders(),
+          signal: controller.signal,
+          body: JSON.stringify({
+            studentId: selectedStudent.id,
+            preview: true,
+            periodStart: monthlyPeriodStart,
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || t('common.error'));
+        if (!controller.signal.aborted) setMonthlyPreview(result);
+      } catch (previewError) {
+        if (!controller.signal.aborted) {
+          setMonthlyPreviewError(previewError instanceof Error ? previewError.message : t('common.error'));
+        }
+      } finally {
+        if (!controller.signal.aborted) setMonthlyPreviewLoading(false);
       }
-      return [{ ...item, totalLessons: monthlyPackagePeriod.totalLessons, pricePerLesson: price }];
-    });
+    })();
+    return () => controller.abort();
   }, [
     monthlyPackageMode,
+    selectedStudent?.id,
+    isStudentModalOpen,
     sendPackageOpen,
-    pkgGrade,
-    pkgLessonsPerWeek,
-    pkgDynamicPricingRules,
-    pkgIndividualPricing,
-    packageSubjects,
-    monthlyPackagePeriod.totalLessons,
-    pkgItems[0]?.subjectId,
+    monthlyPeriodStart,
+    monthlyPreviewRefresh,
+    modalSessionsRefreshKey,
+    t,
   ]);
 
   useEffect(() => {
@@ -1171,12 +1256,12 @@ export default function CompanyStudents() {
       const [byTutorRes, unassignedRes] = await Promise.all([
         supabase
           .from('students')
-          .select('*, linked_user_id, parent_students(parent_id), tutor:profiles!students_tutor_id_fkey(full_name)')
+          .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
           .in('tutor_id', tutorIds)
           .order('created_at', { ascending: false }),
         supabase
           .from('students')
-          .select('*, linked_user_id, parent_students(parent_id), tutor:profiles!students_tutor_id_fkey(full_name)')
+          .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
           .is('tutor_id', null)
           .eq('organization_id', organizationId)
           .order('created_at', { ascending: false }),
@@ -1195,7 +1280,7 @@ export default function CompanyStudents() {
     } else {
       const { data, error } = await supabase
         .from('students')
-        .select('*, linked_user_id, parent_students(parent_id), tutor:profiles!students_tutor_id_fkey(full_name)')
+        .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
         .is('tutor_id', null)
         .eq('organization_id', organizationId)
         .order('created_at', { ascending: false });
@@ -1365,7 +1450,44 @@ export default function CompanyStudents() {
     };
   }, [newStudent.tutor_ids]);
 
+  const handleSaveMonthlyPackage = async () => {
+    if (!selectedStudent || !monthlyPreview?.previewToken || !monthlyPreview.totalLessons
+      || monthlyPreviewLoading || monthlyPreviewError) return;
+    setPkgSending(true);
+    try {
+      const response = await fetch('/api/create-monthly-student-package', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          studentId: selectedStudent.id,
+          preview: false,
+          previewToken: monthlyPreview.previewToken,
+          periodStart: monthlyPreview.periodStart,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setMonthlyPreview(null);
+        setMonthlyPreviewRefresh((value) => value + 1);
+        throw new Error(result.error || t('compStu.errorSendingPackage'));
+      }
+      setSendPackageOpen(false);
+      setPackagesRefreshKey((value) => value + 1);
+      setToastMessage(result.emailSent === true
+        ? { message: t('compStu.packageSent', { name: selectedStudent.full_name }), type: 'success' }
+        : { message: t('compStu.packageCreatedEmailNotSent'), type: 'error' });
+    } catch (saveError) {
+      setToastMessage({
+        message: saveError instanceof Error ? saveError.message : t('common.error'),
+        type: 'error',
+      });
+    } finally {
+      setPkgSending(false);
+    }
+  };
+
   const handleSendPackage = async () => {
+    if (monthlyPackageMode) return handleSaveMonthlyPackage();
     if (!selectedStudent || pkgItems.length === 0) return;
     // Local validation (same rules as SendPackageModal)
     const seen = new Set<string>();
@@ -1400,17 +1522,7 @@ export default function CompanyStudents() {
             totalLessons: it.totalLessons,
             pricePerLesson: it.pricePerLesson,
           })),
-          ...(monthlyPackageMode
-            ? {
-              expiresAt: monthlyPackagePeriod.periodEnd,
-              monthlyPlan: {
-                grade: pkgGrade,
-                lessonsPerWeek: pkgLessonsPerWeek,
-                periodStart: monthlyPackagePeriod.periodStart,
-                periodEnd: monthlyPackagePeriod.periodEnd,
-              },
-            }
-            : pkgExpiresAt ? { expiresAt: pkgExpiresAt } : {}),
+          ...(pkgExpiresAt ? { expiresAt: pkgExpiresAt } : {}),
           ...(!orgUsesManualPackages ? { attachSalesInvoice: pkgAttachSalesInvoice } : {}),
           ...(pkFeat('package_reservation_flow') && pkgReserveSlots.length > 0
             ? { slots: pkgReserveSlots }
@@ -1570,7 +1682,7 @@ export default function CompanyStudents() {
     setEditingPackage(pkg);
     setEditPeriodStart(firstOfMonth);
     setEditLessons(Math.max(1, Number(pkg.total_lessons) || 1));
-    setEditLessonsPerWeek(Math.max(1, Number(selectedStudent?.pricing_lessons_per_week) || pkgLessonsPerWeek || 1));
+    setEditLessonsPerWeek(Math.max(1, Number(selectedStudent?.pricing_lessons_per_week) || 1));
   };
 
   const handleSaveEditedPackage = async () => {
@@ -1794,6 +1906,43 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.parentInviteEmailRequired'), type: 'error' });
       return;
     }
+    if (
+      !isSchoolView &&
+      isMvOrg &&
+      newStudent.invite_target === 'provision' &&
+      !newStudent.full_name.trim()
+    ) {
+      setToastMessage({ message: t('compStu.fullNameRequired'), type: 'error' });
+      return;
+    }
+    if (
+      !isSchoolView &&
+      isMvOrg &&
+      newStudent.invite_target === 'provision' &&
+      !newStudent.payer_name.trim()
+    ) {
+      setToastMessage({ message: t('compStu.parentInviteNameRequired'), type: 'error' });
+      return;
+    }
+    if (
+      !isSchoolView &&
+      isMvOrg &&
+      newStudent.invite_target === 'provision' &&
+      !newStudent.payer_email.trim()
+    ) {
+      setToastMessage({ message: t('compStu.parentInviteEmailRequired'), type: 'error' });
+      return;
+    }
+    if (
+      !isSchoolView &&
+      isMvOrg &&
+      newStudent.invite_target === 'provision' &&
+      newStudent.email.trim() &&
+      newStudent.payer_email.trim().toLowerCase() === newStudent.email.trim().toLowerCase()
+    ) {
+      setToastMessage({ message: t('compStu.provisionEmailsMustDiffer'), type: 'error' });
+      return;
+    }
 
     for (const item of addStudentPickedLessons) {
       const windowStart = new Date(item.pick.startIso);
@@ -1869,12 +2018,10 @@ export default function CompanyStudents() {
           ...(tutorId ? { tutor_id: tutorId } : {}),
           full_name:
             !isSchoolView && isMvOrg && newStudent.invite_target === 'parent'
-              ? t('parent.pendingChildName')
-              : newStudent.full_name,
+              ? ''
+              : newStudent.full_name.trim(),
           email: newStudent.email?.trim() || null,
           phone: newStudent.phone?.trim() || null,
-          admin_comment: newAdminComment.trim() || null,
-          admin_comment_visible_to_tutor: newCommentVisibleToTutor ?? proKlaseAdminUi,
           grade: (normalizeStudentGrade1to12(newStudent.grade) ?? newStudent.grade) || null,
           school_year: isSchoolView ? (newStudent.school_year || null) : null,
           enrollment_status: isSchoolView ? newStudent.enrollment_status : 'active',
@@ -2042,6 +2189,7 @@ export default function CompanyStudents() {
 
     let emailOk = true;
     let inviteSkippedExisting = false;
+    const parentInviteProblems: string[] = [];
 
     const shouldSendInviteOnCreate =
       !isSchoolView && shouldSendStudentInviteEmail(newStudent.invite_target);
@@ -2067,13 +2215,53 @@ export default function CompanyStudents() {
       }
     }
 
-    const parentInviteProblems: string[] = [];
     // When admin chose "student + parent", send parent portal invites.
     // Plain company: always; school: only with flexible_invitations (Pro Klasė-style).
     if (shouldSendParentInviteOnCreate(newStudent.invite_target) && (!isSchoolView || hasFeature('flexible_invitations'))) {
       for (const row of inserted) {
         const problem = await sendParentPortalInvites(row.id, false);
         if (problem) parentInviteProblems.push(problem);
+      }
+    }
+
+    let provisionOk = true;
+    let provisionPayload: typeof provisionCredentials = null;
+    if (
+      shouldProvisionAccountsOnCreate(newStudent.invite_target) &&
+      !isSchoolView &&
+      inserted.length > 0
+    ) {
+      const row = inserted[0]!;
+      try {
+        const provisionResult = await postMvProvisionFamilyAccounts(
+          {
+            studentId: row.id,
+            studentIds: inserted.map((item) => item.id),
+            parentName: newStudent.payer_name.trim(),
+            parentEmail: newStudent.payer_email.trim(),
+            studentFullName: newStudent.full_name.trim(),
+            studentEmail: newStudent.email.trim(),
+            locale: orgPreferredLocale || locale,
+            scope: 'both',
+            emailDelivery: mvCreateProvisionDelivery,
+            parentNotifyEmail: mvCreateParentNotifyEmail.trim() || undefined,
+            studentNotifyEmail: mvCreateStudentNotifyEmail.trim() || undefined,
+            bothNotifyEmail: mvCreateBothNotifyEmail.trim() || undefined,
+          },
+          authHeaders,
+        );
+        if (!provisionResult.ok) {
+          provisionOk = false;
+          setToastMessage({
+            message: provisionResult.json.error || t('compStu.provisionFailed'),
+            type: 'error',
+          });
+        } else {
+          provisionPayload = credentialsFromProvisionResponse(provisionResult.json);
+        }
+      } catch {
+        provisionOk = false;
+        setToastMessage({ message: t('compStu.provisionFailed'), type: 'error' });
       }
     }
 
@@ -2105,16 +2293,26 @@ export default function CompanyStudents() {
           )
         : null;
 
+    const provisionFlow = shouldProvisionAccountsOnCreate(newStudent.invite_target) && !isSchoolView;
     const toastType: 'success' | 'error' =
-      (shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk) || lessonCreateFailed || parentInviteProblems.length > 0 ? 'error' : 'success';
+      (shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk) ||
+      parentInviteProblems.length > 0 ||
+      lessonCreateFailed ||
+      (provisionFlow && !provisionOk)
+        ? 'error'
+        : 'success';
     const toastMessage =
-      shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
+      provisionFlow && !provisionOk
+        ? t('compStu.provisionFailed')
+        : shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
         ? t('compStu.emailSendFailed')
         : lessonCreateFailed
           ? t('compStu.studentAddedLessonFailed')
           : inviteSkippedExisting
             ? t('compStu.inviteSkippedAlreadyRegistered')
-            : newStudent.invite_target === 'parent'
+            : provisionFlow && provisionOk
+              ? t('compStu.provisionSuccess')
+              : newStudent.invite_target === 'parent'
               ? t('compStu.parentInvitedFirst')
               : plannedSummary && plannedSummary.totalLessons > 0
               ? plannedSummary.trialLessons > 0
@@ -2127,15 +2325,17 @@ export default function CompanyStudents() {
                   })
               : t('compStu.studentAdded');
 
-    setToastMessage({
-      message: parentInviteProblems.length > 0
-        ? [t('compStu.studentAdded'), ...(lessonCreateFailed || !emailOk ? [toastMessage] : []), ...new Set(parentInviteProblems)].join('\n')
-        : toastMessage,
-      type: toastType,
-    });
+    if (!(provisionFlow && !provisionOk)) {
+      setToastMessage({
+        message: [toastMessage, ...new Set(parentInviteProblems)].join('\n'),
+        type: toastType,
+      });
+    }
+    if (provisionFlow && provisionOk && provisionPayload) {
+      setProvisionCredentials(provisionPayload);
+      setProvisionCredentialsOpen(true);
+    }
     setIsDialogOpen(false);
-    setNewAdminComment('');
-    setNewCommentVisibleToTutor(null);
     setAddStudentFirstLessonIsTrial(false);
     setAddStudentPickedLessons([]);
     setNewStudent({
@@ -2161,9 +2361,14 @@ export default function CompanyStudents() {
       student_city: '',
       child_birth_date: '',
       tutor_ids: [],
-      invite_target: isMvOrg ? 'parent' : 'student',
+      invite_target: isMvOrg ? 'provision' : 'student',
       payment_payer: isMvOrg ? 'parent' : 'self',
     });
+    const provisionDefaults = defaultMvProvisionDelivery();
+    setMvCreateProvisionDelivery(provisionDefaults.emailDelivery);
+    setMvCreateParentNotifyEmail(provisionDefaults.parentNotifyEmail);
+    setMvCreateStudentNotifyEmail(provisionDefaults.studentNotifyEmail);
+    setMvCreateBothNotifyEmail(provisionDefaults.bothNotifyEmail);
     setSelectedSubjectForInvite('');
     setUseIndividualPrice(false);
     setCustomPrice('');
@@ -2178,23 +2383,20 @@ export default function CompanyStudents() {
 
   const handleSaveComment = async () => {
     if (!selectedStudent) return;
-    const ids = selectedStudentGroup.length ? selectedStudentGroup.map((row) => row.id) : [selectedStudent.id];
     setSavingComment(true);
-    const { data: saved, error } = await supabase
+    const { error } = await supabase
       .from('students')
       .update({
         admin_comment: commentDraft.trim() || null,
         admin_comment_visible_to_tutor: commentVisibleToTutor,
       })
-      .in('id', ids)
-      .select('id');
-    if (error || saved?.length !== ids.length) {
+      .eq('id', selectedStudent.id);
+    if (error) {
       setToastMessage({ message: t('compStu.commentSaveFailed'), type: 'error' });
     } else {
       setSelectedStudent((s) =>
         s ? { ...s, admin_comment: commentDraft.trim() || null, admin_comment_visible_to_tutor: commentVisibleToTutor } : null,
       );
-      setSelectedStudentGroup((rows) => rows.map((row) => ({ ...row, admin_comment: commentDraft.trim() || null, admin_comment_visible_to_tutor: commentVisibleToTutor })));
       setToastMessage({ message: t('compStu.commentSaved'), type: 'success' });
       setEditingComment(false);
       fetchData();
@@ -2461,46 +2663,8 @@ export default function CompanyStudents() {
     setToastMessage({ message: t('dynamicPricing.studentGradeSaved'), type: 'success' });
   };
 
-  /**
-   * Item 9 (dynamic pricing): contracted lessons-per-week the admin decides.
-   * 'auto' recomputes from the recurring schedule; a number pins it manually.
-   * The RPC also re-prices upcoming unpaid lessons to the matching tier.
-   */
-  const persistStudentPricingFrequency = async (
-    studentIds: string[],
-    lessonsPerWeek: number,
-    options?: { silent?: boolean },
-  ) => {
-    let effective: number | null = lessonsPerWeek;
-    for (const id of studentIds) {
-      const { data, error } = await supabase.rpc('set_student_pricing_frequency', {
-        p_student_id: id,
-        p_lessons_per_week: lessonsPerWeek,
-      });
-      if (error) {
-        if (!options?.silent) {
-          setToastMessage({ message: t('common.error'), type: 'error' });
-        }
-        return false;
-      }
-      if (selectedStudent && id === selectedStudent.id) effective = (data as number | null) ?? lessonsPerWeek;
-    }
-    const patch = { pricing_lessons_per_week: effective, pricing_lessons_per_week_is_manual: true };
-    if (selectedStudent && studentIds.includes(selectedStudent.id)) {
-      setSelectedStudent((current) => (current ? { ...current, ...patch } : current));
-    }
-    setSelectedStudentGroup((current) =>
-      current.map((row) => (studentIds.includes(row.id) ? { ...row, ...patch } : row)),
-    );
-    setStudents((current) =>
-      current.map((row) => (studentIds.includes(row.id) ? { ...row, ...patch } : row)),
-    );
-    if (!options?.silent) {
-      setToastMessage({ message: t('dynamicPricing.frequencySaved'), type: 'success' });
-    }
-    return true;
-  };
-
+  // 'auto' recomputes from the recurring schedule; a number pins it manually.
+  // The existing RPC also re-prices upcoming unpaid lessons to the matching tier.
   const handleUpdateStudentFrequency = async (value: string) => {
     if (!selectedStudent) return;
     const ids = selectedStudentGroup.length > 0
@@ -2525,14 +2689,6 @@ export default function CompanyStudents() {
     setSelectedStudentGroup((current) => current.map((row) => ({ ...row, ...patch })));
     setStudents((current) => current.map((row) => (ids.includes(row.id) ? { ...row, ...patch } : row)));
     setToastMessage({ message: t('dynamicPricing.frequencySaved'), type: 'success' });
-  };
-
-  const handlePkgLessonsPerWeekChange = (value: string) => {
-    const next = Number(value);
-    if (!Number.isFinite(next) || next < 1) return;
-    setPkgLessonsPerWeek(next);
-    if (!selectedStudent) return;
-    void persistStudentPricingFrequency([selectedStudent.id], next, { silent: true });
   };
 
   const handleDetachStudent = async (id: string) => {
@@ -2620,6 +2776,66 @@ export default function CompanyStudents() {
     if (!ok) setToastMessage({ message: t('compStu.contractOpenFail'), type: 'error' });
   };
 
+  const openMvProvisionDialog = (student: Student, relatedRows: Student[] = [student]) => {
+    setMvProvisionDialogStudent({
+      ...student,
+      ...mergeMvStudentAccountStatus(relatedRows),
+    });
+    setMvProvisionDialogStudentIds(mvProvisionStudentIds(relatedRows));
+    setMvProvisionDialogOpen(true);
+  };
+
+  const provisionMvAccountsForStudent = async (
+    student: Student,
+    payload: MvProvisionDialogSubmit,
+    showCredentials: boolean,
+  ): Promise<boolean> => {
+    setProvisioningExistingStudent(true);
+    try {
+      const provisionResult = await postMvProvisionFamilyAccounts(
+        {
+          studentId: student.id,
+          studentIds: mvProvisionDialogStudentIds,
+          parentName: payload.parentName,
+          parentEmail: payload.parentEmail,
+          studentFullName: payload.studentFullName,
+          studentEmail: payload.studentEmail,
+          locale: orgPreferredLocale || locale,
+          scope: payload.scope,
+          emailDelivery: payload.emailDelivery,
+          parentNotifyEmail: payload.parentNotifyEmail,
+          studentNotifyEmail: payload.studentNotifyEmail,
+          bothNotifyEmail: payload.bothNotifyEmail,
+        },
+        authHeaders,
+      );
+      if (!provisionResult.ok) {
+        setToastMessage({
+          message: provisionResult.json.error || t('compStu.provisionFailed'),
+          type: 'error',
+        });
+        return false;
+      }
+      const credentials = credentialsFromProvisionResponse(provisionResult.json);
+      setToastMessage({ message: t('compStu.provisionSuccess'), type: 'success' });
+      setMvProvisionDialogOpen(false);
+      if (showCredentials && credentials) {
+        setProvisionCredentials(credentials);
+        setProvisionCredentialsOpen(true);
+      }
+      void fetchData();
+      if (selectedStudent?.id === student.id) {
+        setModalSessionsRefreshKey((k) => k + 1);
+      }
+      return true;
+    } catch {
+      setToastMessage({ message: t('compStu.provisionFailed'), type: 'error' });
+      return false;
+    } finally {
+      setProvisioningExistingStudent(false);
+    }
+  };
+
   const sendParentPortalInvites = async (studentId: string, showToast: boolean) => {
     setSendingParentInvites(true);
     try {
@@ -2628,13 +2844,13 @@ export default function CompanyStudents() {
         headers: await authHeaders(),
         body: JSON.stringify({ studentId, locale }),
       });
-      const json: ParentInviteResponse = await res.json().catch(() => ({}));
+      const json = await res.json().catch(() => ({})) as ParentInviteResponse;
       const problem = parentInviteProblem(json, res.ok, t);
       if (showToast) {
         if (problem) {
           setToastMessage({ message: problem, type: 'error' });
         } else {
-          const n = (json as { sent?: number }).sent ?? 0;
+          const n = json.sent ?? 0;
           setToastMessage({
             message: n > 0 ? t('studentSettings.inviteParentSuccess') : t('studentSettings.inviteParentNoEmail'),
             type: n > 0 ? 'success' : 'error',
@@ -2762,7 +2978,7 @@ export default function CompanyStudents() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <Label>{t('compStu.tutorsRequired')}</Label>
-                      {proKlaseAdminUi && !parentFirstInvite && (
+                      {preActivationSchedulingUi && !parentFirstInvite && (
                       <Button
                         type="button"
                         size="sm"
@@ -3112,28 +3328,111 @@ export default function CompanyStudents() {
                             {t('compStu.inviteStudentAndParent')}
                           </Button>
                           {isMvOrg && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant={newStudent.invite_target === 'parent' ? 'default' : 'outline'}
-                              className="rounded-xl text-xs"
-                              onClick={() => {
-                                setAddStudentPickedLessons([]);
-                                setNewStudent({
-                                  ...newStudent,
-                                  invite_target: 'parent',
-                                  payment_payer: 'parent',
-                                  full_name: '',
-                                  email: '',
-                                  phone: '',
-                                  grade: '',
-                                });
-                              }}
-                            >
-                              {t('compStu.inviteParentFirst')}
-                            </Button>
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={newStudent.invite_target === 'provision' ? 'default' : 'outline'}
+                                className="rounded-xl text-xs"
+                                onClick={() => {
+                                  setNewStudent({
+                                    ...newStudent,
+                                    invite_target: 'provision',
+                                    payment_payer: 'parent',
+                                  });
+                                }}
+                              >
+                                {t('compStu.provisionAccounts')}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={newStudent.invite_target === 'parent' ? 'default' : 'outline'}
+                                className="rounded-xl text-xs"
+                                onClick={() => {
+                                  setAddStudentPickedLessons([]);
+                                  setNewStudent({
+                                    ...newStudent,
+                                    invite_target: 'parent',
+                                    payment_payer: 'parent',
+                                    full_name: '',
+                                    email: '',
+                                    phone: '',
+                                    grade: '',
+                                  });
+                                }}
+                              >
+                                {t('compStu.inviteParentFirst')}
+                              </Button>
+                            </>
                           )}
                         </div>
+                        {isMvOrg && newStudent.invite_target === 'provision' && (
+                          <>
+                            <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2.5 text-sm font-medium text-emerald-900">
+                              {t('compStu.provisionAccountsNotice')}
+                            </div>
+                            <p className="text-[11px] text-gray-500">{t('compStu.provisionAccountsHint')}</p>
+                            <div className="space-y-2 pt-1">
+                              <Label>{t('compStu.provisionDeliveryLabel')}</Label>
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={mvCreateProvisionDelivery === 'separate' ? 'default' : 'outline'}
+                                  className="rounded-xl text-xs"
+                                  onClick={() => setMvCreateProvisionDelivery('separate')}
+                                >
+                                  {t('compStu.provisionDeliverySeparate')}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={mvCreateProvisionDelivery === 'parent_both' ? 'default' : 'outline'}
+                                  className="rounded-xl text-xs"
+                                  onClick={() => setMvCreateProvisionDelivery('parent_both')}
+                                >
+                                  {t('compStu.provisionDeliveryParentBoth')}
+                                </Button>
+                              </div>
+                            </div>
+                            {mvCreateProvisionDelivery === 'separate' ? (
+                              <div className="grid sm:grid-cols-2 gap-3">
+                                <div className="space-y-2">
+                                  <Label>{t('compStu.provisionSendParentTo')}</Label>
+                                  <Input
+                                    type="email"
+                                    value={mvCreateParentNotifyEmail}
+                                    onChange={(e) => setMvCreateParentNotifyEmail(e.target.value)}
+                                    placeholder={newStudent.payer_email || t('compStu.provisionNotifyDefaultHint')}
+                                    className="rounded-xl"
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>{t('compStu.provisionSendStudentTo')}</Label>
+                                  <Input
+                                    type="email"
+                                    value={mvCreateStudentNotifyEmail}
+                                    onChange={(e) => setMvCreateStudentNotifyEmail(e.target.value)}
+                                    placeholder={newStudent.email || t('compStu.provisionNotifyDefaultHint')}
+                                    className="rounded-xl"
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <Label>{t('compStu.provisionSendBothTo')}</Label>
+                                <Input
+                                  type="email"
+                                  value={mvCreateBothNotifyEmail}
+                                  onChange={(e) => setMvCreateBothNotifyEmail(e.target.value)}
+                                  placeholder={newStudent.payer_email || t('compStu.provisionNotifyDefaultHint')}
+                                  className="rounded-xl"
+                                />
+                              </div>
+                            )}
+                          </>
+                        )}
                         {isMvOrg && newStudent.invite_target === 'parent' && (
                           <>
                             <div className="rounded-xl border border-violet-100 bg-violet-50/80 px-3 py-2.5 text-sm font-medium text-violet-900">
@@ -3323,30 +3622,6 @@ export default function CompanyStudents() {
                       <p className="text-xs text-gray-500">{t('compStu.parentContactLabel')}</p>
                     </>
                   )}
-
-                  <div className="border-t border-gray-100 pt-4 space-y-2">
-                    <label htmlFor="new-student-admin-comment" className="font-semibold text-gray-900 flex items-center gap-2">
-                      <MessageSquare className="w-4 h-4 text-blue-500" />
-                      {t('compStu.adminComment')}
-                    </label>
-                    <textarea
-                      id="new-student-admin-comment"
-                      value={newAdminComment}
-                      onChange={(e) => setNewAdminComment(e.target.value)}
-                      rows={3}
-                      className="w-full rounded-xl border border-gray-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 resize-none"
-                      placeholder={t('compStu.commentPlaceholder')}
-                    />
-                    <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={newCommentVisibleToTutor ?? proKlaseAdminUi}
-                        onChange={(e) => setNewCommentVisibleToTutor(e.target.checked)}
-                        className="rounded border-gray-300"
-                      />
-                      {t('compStu.commentVisibleToTutor')}
-                    </label>
-                  </div>
 
                   <div className="border-t border-gray-200 pt-4 space-y-3">
                     <label className="flex items-center gap-2 cursor-pointer">
@@ -3773,7 +4048,8 @@ export default function CompanyStudents() {
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0 flex-wrap">
                             <p className="font-semibold text-gray-900 truncate">
-                              <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span> {student.full_name}
+                              <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span>{' '}
+                              {orgStudentDisplayName(student)}
                             </p>
                             {displayStudentGrade(student.grade) && (
                               <span className="inline-flex items-center text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg border border-indigo-200 font-semibold flex-shrink-0">
@@ -3781,7 +4057,15 @@ export default function CompanyStudents() {
                               </span>
                             )}
                           </div>
-                          <StudentConnectionStatus students={g.rows} />
+                          {student.linked_user_id ? (
+                            <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-1.5 py-0.5 flex-shrink-0">
+                              {t('compStu.connected')}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5 flex-shrink-0">
+                              {t('compStu.notConnected')}
+                            </span>
+                          )}
                         </div>
                         {needsPackage && (
                           <div className="mt-1">
@@ -3907,7 +4191,8 @@ export default function CompanyStudents() {
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <p className="font-semibold text-gray-900 truncate">
-                                  <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span> {student.full_name}
+                                  <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span>{' '}
+                                  {orgStudentDisplayName(student)}
                                 </p>
                                 {displayStudentGrade(student.grade) && (
                                   <span className="inline-flex items-center text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg border border-indigo-200 font-semibold">
@@ -3916,7 +4201,11 @@ export default function CompanyStudents() {
                                 )}
                               </div>
                               <div className="mt-1 flex flex-wrap items-center gap-1">
-                                <StudentConnectionStatus students={g.rows} />
+                                {student.linked_user_id ? (
+                                  <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-0.5">{t('compStu.connected')}</span>
+                                ) : (
+                                  <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5">{t('compStu.notConnected')}</span>
+                                )}
                                 {needsPackage && (
                                   <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-0.5">
                                     <AlertCircle className="w-3 h-3" />
@@ -4284,7 +4573,9 @@ export default function CompanyStudents() {
                         value={
                           selectedStudent.pricing_lessons_per_week_is_manual && selectedStudent.pricing_lessons_per_week
                             ? String(selectedStudent.pricing_lessons_per_week)
-                            : 'auto'
+                            : selectedStudent.pricing_lessons_per_week
+                              ? String(selectedStudent.pricing_lessons_per_week)
+                              : 'auto'
                         }
                         onValueChange={(value) => void handleUpdateStudentFrequency(value)}
                       >
@@ -4559,7 +4850,22 @@ export default function CompanyStudents() {
                           </Button>
                         );
                       })()}
-                      {(selectedStudent.payer_email || selectedStudent.parent_secondary_email) && (
+                      {isMvOrg
+                        && selectedStudent
+                        && mvNeedsAnyAccountProvisioning(selectedMvAccountStatus)
+                        && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="default"
+                          className="h-7 px-2.5 text-[11px] bg-emerald-700 hover:bg-emerald-800"
+                          disabled={provisioningExistingStudent}
+                          onClick={() => openMvProvisionDialog(selectedStudent, selectedStudentGroup)}
+                        >
+                          {provisioningExistingStudent ? t('common.loading') : t('compStu.provisionAccountsExisting')}
+                        </Button>
+                      )}
+                      {!isMvOrg && (selectedStudent.payer_email || selectedStudent.parent_secondary_email) && (
                         <Button
                           type="button"
                           size="sm"
@@ -4571,19 +4877,26 @@ export default function CompanyStudents() {
                           {sendingParentInvites ? t('common.loading') : t('compStu.inviteParent')}
                         </Button>
                       )}
-                      <StudentAccountSetup key={selectedStudent.id} studentId={selectedStudent.id} onProvisioned={async result => {
-                        const studentId = selectedStudent.id;
-                        if (result.role === 'student') {
-                          setSelectedStudent(prev => prev?.id === studentId ? { ...prev, linked_user_id: result.userId } : prev);
-                        } else {
-                          const { data, error } = await supabase.from('parent_students').select('parent_id').eq('student_id', studentId);
-                          if (!error) {
-                            setSelectedStudent(prev => prev?.id === studentId ? { ...prev, parent_students: data || [] } : prev);
-                          }
-                        }
-                        void fetchData();
-                      }} />
-                      <StudentConnectionStatus students={[selectedStudent, ...selectedStudentGroup.filter((row) => row.id !== selectedStudent.id)]} />
+                      {isMvOrg ? (
+                        <>
+                          <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs ${selectedMvAccountStatus.linked_user_id ? 'border-green-200 bg-green-50 text-green-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                            {selectedMvAccountStatus.linked_user_id ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                            {t('compStu.provisionStudentAccount')}: {selectedMvAccountStatus.linked_user_id ? t('compStu.accountCreated') : t('compStu.accountMissing')}
+                          </span>
+                          <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs ${selectedMvAccountStatus.parent_user_id ? 'border-green-200 bg-green-50 text-green-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                            {selectedMvAccountStatus.parent_user_id ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                            {t('compStu.provisionParentAccount')}: {selectedMvAccountStatus.parent_user_id ? t('compStu.accountCreated') : t('compStu.accountMissing')}
+                          </span>
+                        </>
+                      ) : selectedStudent.linked_user_id ? (
+                        <span className="inline-flex items-center gap-1 text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-1 text-xs">
+                          <CheckCircle className="w-3.5 h-3.5" /> {t('compStu.connected')}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 text-xs">
+                          <XCircle className="w-3.5 h-3.5" /> {t('compStu.notConnected')}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -4722,7 +5035,7 @@ export default function CompanyStudents() {
                               );
                               const { data, error } = await supabase
                                 .from('students')
-                                .select('*, linked_user_id, parent_students(parent_id), tutor:profiles!students_tutor_id_fkey(full_name)')
+                                .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
                                 .eq('id', pairedId)
                                 .single();
                               if (error || !data) {
@@ -4800,7 +5113,7 @@ export default function CompanyStudents() {
                           className="text-xs rounded-lg"
                           onClick={() => {
                             setCommentDraft(selectedStudent.admin_comment || '');
-                            setCommentVisibleToTutor(selectedStudent.admin_comment ? selectedStudent.admin_comment_visible_to_tutor ?? false : proKlaseAdminUi);
+                            setCommentVisibleToTutor(selectedStudent.admin_comment_visible_to_tutor ?? false);
                             setEditingComment(true);
                           }}
                         >
@@ -4854,15 +5167,32 @@ export default function CompanyStudents() {
                     <h4 className="font-semibold text-gray-900 text-sm mb-2">{t('compStu.personalMeetingLink')}</h4>
                     <div className="flex gap-2">
                       <input
+                        key={selectedStudent.id}
                         type="url"
                         className="flex-1 rounded-xl border border-gray-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
                         placeholder="https://meet.google.com/..."
                         defaultValue={selectedStudent.personal_meeting_link || ''}
                         onBlur={async (e) => {
-                          const val = e.target.value.trim() || null;
-                          if (val === (selectedStudent.personal_meeting_link || null)) return;
-                          await supabase.from('students').update({ personal_meeting_link: val }).eq('id', selectedStudent.id);
-                          setSelectedStudent(s => s ? { ...s, personal_meeting_link: val } : null);
+                          const input = e.currentTarget;
+                          const previousValue = selectedStudent.personal_meeting_link || '';
+                          const val = input.value.trim() || null;
+                          if (val === (previousValue || null)) return;
+                          const studentId = selectedStudent.id;
+                          try {
+                            const { data, error } = await supabase
+                              .from('students')
+                              .update({ personal_meeting_link: val })
+                              .eq('id', studentId)
+                              .select('personal_meeting_link')
+                              .single();
+                            if (error || !data) throw error || new Error('Student link was not saved');
+                            setSelectedStudent((student) => student?.id === studentId
+                              ? { ...student, personal_meeting_link: data.personal_meeting_link }
+                              : student);
+                          } catch {
+                            input.value = previousValue;
+                            setToastMessage({ message: t('common.error'), type: 'error' });
+                          }
                         }}
                       />
                     </div>
@@ -5189,73 +5519,53 @@ export default function CompanyStudents() {
                     <div className="mb-4 p-4 bg-violet-50 border border-violet-200 rounded-xl space-y-3">
                       <p className="text-xs font-semibold text-violet-800">{t('compStu.sendPackageTitle')}</p>
                       {monthlyPackageMode ? (
-                        <div className="space-y-3 rounded-xl border border-violet-200 bg-white/70 p-3">
-                          <div className="space-y-1">
-                            <Label className="text-[11px] text-violet-900">{t('package.itemSubject')}</Label>
-                            <Select
-                              value={pkgItems[0]?.subjectId || undefined}
-                              onValueChange={(subjectId) => {
-                                const subject = packageSubjects.find((row: any) => row.id === subjectId);
-                                const price = resolveOrganizationLessonPrice({
-                                  rules: pkgDynamicPricingRules,
-                                  student: { grade: String(pkgGrade), pricing_lessons_per_week: pkgLessonsPerWeek },
-                                  lessonsPerWeek: pkgLessonsPerWeek,
-                                  individualPrice: pkgIndividualPricing[subjectId],
-                                  fallbackPrice: Number(subject?.price ?? 0),
-                                });
-                                setPkgItems([{
-                                  subjectId,
-                                  totalLessons: monthlyPackagePeriod.totalLessons,
-                                  pricePerLesson: price,
-                                }]);
-                              }}
-                            >
-                              <SelectTrigger className="h-9 rounded-lg text-xs">
-                                <SelectValue placeholder={t('package.selectSubject')} />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {packageSubjects.map((subject: any) => (
-                                  <SelectItem key={subject.id} value={subject.id}>{subject.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="space-y-1">
-                              <Label className="text-[11px] text-violet-900">{t('package.studentGrade')}</Label>
-                              <Select value={String(pkgGrade)} onValueChange={(value) => setPkgGrade(Number(value))}>
-                                <SelectTrigger className="h-9 rounded-lg text-xs"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  {Array.from({ length: 12 }, (_, index) => index + 1).map((grade) => (
-                                    <SelectItem key={grade} value={String(grade)}>{t('package.gradeValue', { grade })}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-[11px] text-violet-900">{t('package.weeklyFrequency')}</Label>
-                              <Select value={String(pkgLessonsPerWeek)} onValueChange={handlePkgLessonsPerWeekChange}>
-                                <SelectTrigger className="h-9 rounded-lg text-xs"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  {[1, 2, 3, 4, 5].map((count) => (
-                                    <SelectItem key={count} value={String(count)}>{t('findLesson.lessonsPerWeek', { count })}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          <div className="rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-800">
-                            <p className="font-medium">
-                              {t('package.monthlyCalculation', {
-                                from: monthlyPackagePeriod.periodStart,
-                                to: monthlyPackagePeriod.periodEnd,
-                                lessons: monthlyPackagePeriod.totalLessons,
-                              })}
-                            </p>
-                            <p className="mt-1 text-[11px] text-violet-600">
-                              {t('package.monthlyAutoRenewHint', { date: monthlyPackagePeriod.nextGenerationDate })}
-                            </p>
-                          </div>
+                        <div className="space-y-2 rounded-xl border border-violet-200 bg-white/70 p-3" aria-live="polite">
+                          <Label htmlFor="monthly-package-month">{t('compStu.pkgEditMonth')}</Label>
+                          <Select value={monthlyPeriodStart} onValueChange={setMonthlyPeriodStart} disabled={pkgSending}>
+                            <SelectTrigger id="monthly-package-month"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {monthOptionStarts.map((start) => (
+                                <SelectItem key={start} value={start}>{start.slice(0, 7)}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {monthlyPreviewLoading ? <p className="text-xs">{t('common.loading')}</p> : null}
+                          {monthlyPreviewError ? <p role="alert" className="text-xs text-red-700">{monthlyPreviewError}</p> : null}
+                          {monthlyPreview ? (
+                            <>
+                              <p className="text-xs">
+                                {t('package.monthlyCalculation', {
+                                  from: monthlyPreview.periodStart,
+                                  to: monthlyPreview.periodEnd,
+                                  lessons: monthlyPreview.totalLessons,
+                                })}
+                              </p>
+                              <p className="text-xs">
+                                {t('package.weeklyFrequency')}: {monthlyPreview.lessonsPerWeek}
+                              </p>
+                              {monthlyPreview.items.map((item) => (
+                                <p className="text-xs" key={item.subjectId}>
+                                  {item.subjectName}: {item.totalLessons} × {fmt(monthlyPreview.pricePerLesson)} ={' '}
+                                  {fmt(item.totalLessons * monthlyPreview.pricePerLesson)}
+                                </p>
+                              ))}
+                              <p className="text-xs font-semibold">
+                                {t('package.totalToPay')}: {fmt(monthlyPreview.totalPrice)}
+                              </p>
+                              <p className="text-[11px] text-violet-600">
+                                {t('package.monthlyAutoRenewHint', { date: monthlyPreview.nextGenerationDate })}
+                              </p>
+                            </>
+                          ) : null}
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={monthlyPreviewLoading || pkgSending}
+                            onClick={() => setMonthlyPreviewRefresh((value) => value + 1)}
+                          >
+                            {t('package.refreshPreview')}
+                          </Button>
                         </div>
                       ) : (
                         <PackageItemsEditor
@@ -5267,7 +5577,7 @@ export default function CompanyStudents() {
                           onChange={setPkgItems}
                         />
                       )}
-                      {!orgFeaturesLoading && proKlaseAdminUi && hasFeature('package_reservation_flow') && (
+                      {!monthlyPackageMode && !orgFeaturesLoading && proKlaseAdminUi && hasFeature('package_reservation_flow') && (
                         <div className="space-y-2 border-t border-violet-200 pt-3">
                           <p className="text-xs font-semibold text-violet-800">{t('package.reserveTimesTitle')}</p>
                           <p className="text-[11px] text-violet-600">{t('package.reserveTimesHint')}</p>
@@ -5367,13 +5677,15 @@ export default function CompanyStudents() {
                         {monthlyPackageMode && (
                           <div className="col-span-3">
                             <Button size="sm" className="h-9 w-full rounded-lg bg-violet-600 text-xs hover:bg-violet-700"
-                              onClick={handleSendPackage} disabled={pkgSending || pkgItems.length === 0 || orgFeaturesLoading}>
+                              onClick={handleSendPackage}
+                              disabled={pkgSending || monthlyPreviewLoading || !monthlyPreview?.previewToken
+                                || !monthlyPreview.totalLessons || !!monthlyPreviewError || orgFeaturesLoading}>
                               {pkgSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t('compStu.sendBtn')}
                             </Button>
                           </div>
                         )}
                       </div>
-                      {!orgUsesManualPackages && (
+                      {!monthlyPackageMode && !orgUsesManualPackages && (
                       <label className="flex items-start gap-2 cursor-pointer text-xs text-violet-900">
                         <input
                           type="checkbox"
@@ -5389,9 +5701,13 @@ export default function CompanyStudents() {
                       )}
                       {!monthlyPackageMode && <p className="text-[11px] text-violet-500">{t('package.validUntilHint')}</p>}
                       <p className="text-xs text-violet-600">
-                        {orgUsesManualPackages ? t('compStu.manualPackageSendHint') : t('compStu.stripePaymentHint')}
+                        {monthlyPackageMode
+                          ? t('package.pooledPaymentHint')
+                          : orgUsesManualPackages
+                            ? t('compStu.manualPackageSendHint')
+                            : t('compStu.stripePaymentHint')}
                       </p>
-                      {pkgItems.length > 0 && pkgItems.some((it) => it.totalLessons > 0) && (
+                      {!monthlyPackageMode && pkgItems.length > 0 && pkgItems.some((it) => it.totalLessons > 0) && (
                         <p className="text-xs font-medium text-violet-800">
                           {t('package.totalAcrossSubjects')}: {pkgItems.reduce((acc, it) => acc + (Number(it.totalLessons) || 0), 0)}
                           {' · '}
@@ -5447,7 +5763,7 @@ export default function CompanyStudents() {
                               <span className="font-medium text-gray-800">
                                 {isMulti
                                   ? items.map((it: any) => it.subjects?.name).filter(Boolean).join(', ')
-                                  : (pkg.subject?.name || '—')}
+                                  : (pkg.subject?.name || items[0]?.subjects?.name || '—')}
                               </span>
                               {(pkg.subject?.is_trial || items.some((it: any) => it.subjects?.is_trial)) && (
                                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800">
@@ -5473,7 +5789,7 @@ export default function CompanyStudents() {
                             </span>
                             {pkg.payment_status === 'pending' && !pkg.paid && (
                               <>
-                                {canEditPendingPackage(pkg) && (
+                                {!pkg.pool_organization_id && canEditPendingPackage(pkg) && (
                                   <Button
                                     type="button"
                                     size="sm"
@@ -5561,7 +5877,7 @@ export default function CompanyStudents() {
                 </div>
 
                 {/* Book a lesson from the student card (req 4) */}
-                {pkFeat('student_card_booking') && (
+                {studentCardBookingEnabled && (
                   <div className="border-t border-gray-100 pt-4">
                     <h4 className="font-semibold mb-1 text-gray-900">{t('compStu.bookLessonTitle')}</h4>
                     <p className="text-xs text-gray-500 mb-3">{t('compStu.bookLessonDesc')}</p>
@@ -5652,7 +5968,7 @@ export default function CompanyStudents() {
           }}
         />
 
-        {proKlaseAdminUi && (
+        {preActivationSchedulingUi && (
         <FindTutorModal
           isOpen={addStudentFindTutorOpen}
           onClose={() => setAddStudentFindTutorOpen(false)}
@@ -5691,14 +6007,14 @@ export default function CompanyStudents() {
         />
         )}
 
-        {pkFeat('student_card_booking') && (
+        {studentCardBookingEnabled && (
           <>
             <FindTutorModal
               isOpen={findLessonOpen}
               onClose={() => setFindLessonOpen(false)}
               orgId={orgId}
               primaryTutorId={selectedStudent?.tutor_id ?? null}
-              frequencyEnabled={pkFeat('tutor_frequency_search')}
+              frequencyEnabled={isMvOrg || pkFeat('tutor_frequency_search')}
               hidePrices={pkFeat('hide_admin_lesson_prices')}
               confirmSelection
               initialPreferredWindows={toFindTutorWindows(
@@ -5991,6 +6307,111 @@ export default function CompanyStudents() {
                 onClick={() => void exportStudentsXlsx()}
               >
                 {exportingStudents ? <Loader2 className="w-4 h-4 animate-spin" /> : t('compStu.exportDownload')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {mvProvisionDialogStudent && (
+          <MvProvisionDialog
+            open={mvProvisionDialogOpen}
+            onOpenChange={(open) => {
+              setMvProvisionDialogOpen(open);
+              if (!open) {
+                setMvProvisionDialogStudent(null);
+                setMvProvisionDialogStudentIds([]);
+              }
+            }}
+            student={mvProvisionDialogStudent}
+            loading={provisioningExistingStudent}
+            onSubmit={(payload) =>
+              void provisionMvAccountsForStudent(mvProvisionDialogStudent, payload, true)
+            }
+          />
+        )}
+
+        <Dialog open={provisionCredentialsOpen} onOpenChange={setProvisionCredentialsOpen}>
+          <DialogContent className="sm:max-w-lg rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>{t('compStu.provisionCredentialsTitle')}</DialogTitle>
+              <DialogDescription>{t('compStu.provisionCredentialsDesc')}</DialogDescription>
+            </DialogHeader>
+            {provisionCredentials && (
+              <div className="space-y-4 py-2">
+                {provisionEmailsSent(provisionCredentials) && (
+                  <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">
+                    {t('compStu.provisionEmailsSent')}
+                  </p>
+                )}
+                {provisionCredentials.parent && (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      {t('compStu.provisionParentAccount')}
+                    </p>
+                    <p className="text-sm text-gray-700">{provisionCredentials.parent.email}</p>
+                    {provisionCredentials.parent.password ? (
+                      <p className="font-mono text-base font-semibold text-gray-900">{provisionCredentials.parent.password}</p>
+                    ) : (
+                      <p className="text-sm font-medium text-emerald-700">{t('compStu.provisionExistingLinked')}</p>
+                    )}
+                    {provisionCredentials.parent.emailSent && provisionCredentials.parent.notifyEmail && (
+                      <p className="text-[11px] text-gray-500">
+                        {t('compStu.provisionSentTo', { email: provisionCredentials.parent.notifyEmail })}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {provisionCredentials.student && (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      {t('compStu.provisionStudentAccount')}
+                    </p>
+                    <p className="text-sm text-gray-700">{provisionCredentials.student.email}</p>
+                    {provisionCredentials.student.password ? (
+                      <p className="font-mono text-base font-semibold text-gray-900">{provisionCredentials.student.password}</p>
+                    ) : (
+                      <p className="text-sm font-medium text-emerald-700">{t('compStu.provisionExistingLinked')}</p>
+                    )}
+                    {provisionCredentials.student.emailSent && provisionCredentials.student.notifyEmail && (
+                      <p className="text-[11px] text-gray-500">
+                        {t('compStu.provisionSentTo', { email: provisionCredentials.student.notifyEmail })}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => {
+                  if (!provisionCredentials) return;
+                  const lines: string[] = [];
+                  if (provisionCredentials.parent) {
+                    lines.push(
+                      t('compStu.provisionParentAccount'),
+                      provisionCredentials.parent.email,
+                      provisionCredentials.parent.password || t('compStu.provisionExistingLinked'),
+                      '',
+                    );
+                  }
+                  if (provisionCredentials.student) {
+                    lines.push(
+                      t('compStu.provisionStudentAccount'),
+                      provisionCredentials.student.email,
+                      provisionCredentials.student.password || t('compStu.provisionExistingLinked'),
+                    );
+                  }
+                  void navigator.clipboard.writeText(lines.join('\n').trim());
+                  setToastMessage({ message: t('compStu.provisionCopied'), type: 'success' });
+                }}
+              >
+                {t('compStu.provisionCopyAll')}
+              </Button>
+              <Button type="button" className="rounded-xl" onClick={() => setProvisionCredentialsOpen(false)}>
+                {t('common.close')}
               </Button>
             </DialogFooter>
           </DialogContent>

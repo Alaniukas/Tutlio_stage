@@ -35,6 +35,24 @@ export type MergedClassGroupSession<T extends ClassGroupSessionRow> = T & {
   _classGroupMembers: ClassGroupMemberDisplay[];
 };
 
+export function toValidDate(value: unknown): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/** react-big-calendar whitescreens / hangs on Invalid Date or end <= start. */
+export function isUsableCalendarDateRange(start: unknown, end: unknown): boolean {
+  const s = toValidDate(start);
+  const e = toValidDate(end);
+  return Boolean(s && e && e.getTime() > s.getTime());
+}
+
 function sessionTimeKey(start: Date, end: Date): string {
   return `${start.getTime()}_${end.getTime()}`;
 }
@@ -78,14 +96,17 @@ function enrichSessionStudent<T extends ClassGroupSessionRow>(
 export function mergeSchoolClassGroupSessions<T extends ClassGroupSessionRow>(
   sessions: T[],
   groupMeta: Map<string, ClassGroupMeta>,
+  opts?: { preferCancelledOccurrence?: boolean },
 ): Array<T | MergedClassGroupSession<T>> {
   const grouped = new Map<string, T[]>();
   const individual: T[] = [];
 
   for (const session of sessions) {
+    const start = toValidDate(session.start_time);
+    const end = toValidDate(session.end_time);
     const groupId = session.class_group_id;
-    if (groupId && groupMeta.has(groupId)) {
-      const key = `${groupId}_${sessionTimeKey(session.start_time, session.end_time)}`;
+    if (start && end && groupId && groupMeta.has(groupId)) {
+      const key = `${groupId}_${sessionTimeKey(start, end)}`;
       if (!grouped.has(key)) grouped.set(key, []);
       grouped.get(key)!.push(session);
     } else {
@@ -100,9 +121,12 @@ export function mergeSchoolClassGroupSessions<T extends ClassGroupSessionRow>(
     const first = rows[0];
     const meta = groupMeta.get(first.class_group_id!)!;
     const enrichedRows = rows.map((row) => enrichSessionStudent(row, meta.members));
+    const display = opts?.preferCancelledOccurrence
+      ? (pickClassGroupOccurrenceSession(enrichedRows) ?? first)
+      : first;
 
     merged.push({
-      ...first,
+      ...display,
       id: `classgroup_${key}`,
       topic: first.topic && first.topic !== meta.calendarName && first.topic !== meta.name
         ? first.topic
@@ -169,6 +193,127 @@ export function orgScheduleSessionTitle(
   const tutor = String(session.tutor?.full_name || opts.tutorFallback || 'Tutorius').trim();
   if (!tutor || name.toLowerCase().includes(tutor.toLowerCase())) return name;
   return `${name} - ${tutor}`;
+}
+
+export type ClassGroupCancelScope = 'one_student' | 'whole_occurrence';
+
+/** Merged class-group events must not use the recurring "this vs all future" dialog. */
+export function usesClassGroupCancelFlow(opts: {
+  isClassGroupSession?: boolean;
+  classGroupId?: string | null;
+}): boolean {
+  return Boolean(opts.isClassGroupSession || String(opts.classGroupId || '').trim());
+}
+
+export function isSyntheticClassGroupCalendarId(id: string | null | undefined): boolean {
+  return String(id || '').startsWith('classgroup_');
+}
+
+/** Real `sessions.id` values for one class-group slot (never the merged calendar id). */
+export function classGroupOccurrenceSessionIds<T extends { id: string }>(sessions: T[]): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const row of sessions) {
+    const id = String(row.id || '').trim();
+    if (!id || isSyntheticClassGroupCalendarId(id) || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+/** Active or leftover completed rows that a whole-slot cancel should still mark cancelled. */
+export function sessionStatusCanCancel(status: string): boolean {
+  const s = normalizeSessionStatus(status);
+  return s === 'active' || s === 'completed';
+}
+
+/** Active sibling rows for a class-group slot: one child vs every member at this time. */
+export function classGroupCancelTargets<T extends { student_id: string; status: string }>(
+  sessions: T[],
+  scope: ClassGroupCancelScope,
+  studentId?: string | null,
+  opts?: { includeCompleted?: boolean },
+): T[] {
+  const cancellable = sessions.filter((row) =>
+    opts?.includeCompleted ? sessionStatusCanCancel(row.status) : row.status === 'active',
+  );
+  if (scope === 'whole_occurrence') return cancellable;
+  const sid = String(studentId || '').trim();
+  if (!sid) return [];
+  return cancellable.filter((row) => row.student_id === sid);
+}
+
+export function normalizeSessionStatus(status: string): string {
+  return status === 'canceled' ? 'cancelled' : status;
+}
+
+function isCancelledStatus(status: string): boolean {
+  return normalizeSessionStatus(status) === 'cancelled';
+}
+
+function isOccurredStatus(status: string): boolean {
+  const s = normalizeSessionStatus(status);
+  return s === 'completed' || s === 'no_show';
+}
+
+/**
+ * Calendar / modal header for a merged slot must not follow array order.
+ * After a whole-group cancel, leftover auto-completed rows should not win
+ * over cancelled siblings when cancel is a substantial share of the slot
+ * (not a single student among a completed class).
+ */
+export function pickClassGroupOccurrenceSession<T extends { status: string }>(
+  rows: T[],
+): T | undefined {
+  if (!rows.length) return undefined;
+  const active = rows.find((row) => normalizeSessionStatus(row.status) === 'active');
+  if (active) return active;
+  const cancelled = rows.filter((row) => isCancelledStatus(row.status));
+  const occurred = rows.filter((row) => isOccurredStatus(row.status));
+  if (cancelled.length > 0 && cancelled.length * 2 >= occurred.length) return cancelled[0];
+  if (occurred.length) return occurred[0];
+  return cancelled[0] ?? rows[0];
+}
+
+export function isClassGroupOccurrenceCancelled(statuses: readonly string[]): boolean {
+  const normalized = statuses.map(normalizeSessionStatus);
+  if (normalized.some((status) => status === 'active')) return false;
+  const cancelledCount = normalized.filter((status) => status === 'cancelled').length;
+  if (cancelledCount === 0) return false;
+  const occurredCount = normalized.filter((status) => status === 'completed' || status === 'no_show').length;
+  return cancelledCount * 2 >= occurredCount;
+}
+
+/** Per-member label: leftover `completed` after a group cancel reads as cancelled. */
+export function classGroupParticipantStatusForDisplay(
+  status: string | null | undefined,
+  siblingStatuses: readonly string[],
+  opts?: { coerceCompletedAfterGroupCancel?: boolean },
+): string | null {
+  if (!status) return null;
+  const normalized = normalizeSessionStatus(status);
+  if (
+    opts?.coerceCompletedAfterGroupCancel &&
+    normalized === 'completed' &&
+    isClassGroupOccurrenceCancelled(siblingStatuses)
+  ) {
+    return 'cancelled';
+  }
+  return normalized;
+}
+
+export function sessionStatusI18nKey(status: string): string {
+  switch (normalizeSessionStatus(status)) {
+    case 'completed':
+      return 'status.completed';
+    case 'cancelled':
+      return 'status.cancelled';
+    case 'no_show':
+      return 'status.noShow';
+    default:
+      return 'compSch.statusActive';
+  }
 }
 
 export function classGroupParticipantsForModal<T extends ClassGroupSessionRow>(

@@ -9,6 +9,7 @@ import PwaInstallGuide from '@/components/PwaInstallGuide';
 import { parentFullNameForUserDeduped } from '@/lib/preload';
 import { getCached } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
+import { isPendingChildName } from '@/lib/pendingChildName';
 
 type MvChild = {
   studentId: string;
@@ -71,6 +72,8 @@ export default function ParentSettings() {
   const [archiveConfirmId, setArchiveConfirmId] = useState<string | null>(null);
   const [archivingId, setArchivingId] = useState<string | null>(null);
   const [childBanner, setChildBanner] = useState<string | null>(null);
+  const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
+  const [nameBusyId, setNameBusyId] = useState<string | null>(null);
 
   const loadMvChildren = async () => {
     setMvChildrenLoading(true);
@@ -227,7 +230,12 @@ export default function ParentSettings() {
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(t('parent.addChildFailed'));
+        const duplicate = body?.error === 'child_already_exists';
+        setError(t(duplicate ? 'parent.childAlreadyExists' : 'parent.addChildFailed'));
+        if (duplicate) {
+          await loadMvChildren();
+          if (body.studentId) setInviteOpenIds((prev) => ({ ...prev, [body.studentId]: true }));
+        }
         return;
       }
       setAddChildName('');
@@ -268,6 +276,32 @@ export default function ParentSettings() {
       setError(t('parent.inviteChildFailed'));
     } finally {
       setInviteBusyId(null);
+    }
+  };
+
+  const handleSaveChildName = async (studentId: string) => {
+    const fullName = (nameDrafts[studentId] || '').trim();
+    if (!fullName || nameBusyId) return;
+    setNameBusyId(studentId);
+    setError(null);
+    setChildBanner(null);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch('/api/parent-child', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ action: 'updateName', studentId, fullName }),
+      });
+      if (!res.ok) {
+        setError(t('studentSettings.profileSaveError'));
+        return;
+      }
+      setChildBanner(t('studentSettings.saved'));
+      await loadMvChildren();
+    } catch {
+      setError(t('studentSettings.profileSaveError'));
+    } finally {
+      setNameBusyId(null);
     }
   };
 
@@ -445,17 +479,49 @@ export default function ParentSettings() {
 
             {mvChildren.map((child) => {
               const inviteOpen = inviteOpenIds[child.studentId] === true;
-              const displayName = (child.fullName || '').trim() || t('parent.unnamedChild');
+              const namePending = isPendingChildName(child.fullName);
+              const displayName = namePending
+                ? t('parent.pendingChildName')
+                : (child.fullName || '').trim() || t('parent.unnamedChild');
+              const nameDraft = nameDrafts[child.studentId] ?? (namePending ? '' : child.fullName || '');
               return (
               <div
                 key={child.studentId}
                 className="rounded-2xl border border-gray-100 bg-white p-4 space-y-3 shadow-sm"
               >
                 <div className="min-w-0">
-                  <p className="font-bold text-gray-900 truncate">{displayName}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {child.linkedUserId ? t('parent.childHasLogin') : t('parent.childManagedByYou')}
-                  </p>
+                  {namePending ? (
+                    <div className="space-y-2">
+                      <p className="text-sm font-semibold text-amber-800">{displayName}</p>
+                      <p className="text-[11px] text-gray-500 leading-relaxed">{t('parent.editPendingChildNameHint')}</p>
+                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                        {t('parent.addChildName')}
+                      </label>
+                      <input
+                        type="text"
+                        value={nameDraft}
+                        onChange={(e) =>
+                          setNameDrafts((prev) => ({ ...prev, [child.studentId]: e.target.value }))
+                        }
+                        className="w-full px-4 py-3 bg-white rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-orange-100/60"
+                      />
+                      <button
+                        type="button"
+                        disabled={nameBusyId === child.studentId || !nameDraft.trim()}
+                        onClick={() => void handleSaveChildName(child.studentId)}
+                        className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold text-sm hover:bg-violet-700 disabled:opacity-50"
+                      >
+                        {nameBusyId === child.studentId ? t('common.saving') : t('common.save')}
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="font-bold text-gray-900 truncate">{displayName}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {child.linkedUserId ? t('parent.childHasLogin') : t('parent.childManagedByYou')}
+                      </p>
+                    </>
+                  )}
                 </div>
 
                 {!child.linkedUserId && !child.alreadyRequested && (

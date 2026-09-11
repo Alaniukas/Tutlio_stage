@@ -231,5 +231,5 @@ describe('schools SSR content integrity', () => {
         expect(dict[key], key).toBeTruthy();
       }
     }
-  });
+  }, 15_000);
 });

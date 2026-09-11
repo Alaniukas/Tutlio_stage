@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   calculateSessionStats,
+  calculateOrgSessionListStats,
   countCancellationAttribution,
   countUserInitiatedCancellations,
   formatCancellationBreakdown,
@@ -91,5 +92,32 @@ describe('calculateSessionStats', () => {
 
     expect(stats.totalStudentNoShow).toBe(1);
     expect(stats.totalSuccessful).toBe(1);
+  });
+});
+
+describe('calculateOrgSessionListStats', () => {
+  it('counts future active lessons as upcoming and future cancelled as cancelled', () => {
+    const nowYear = new Date().getFullYear() + 1;
+    const stats = calculateOrgSessionListStats([
+      {
+        ...base,
+        id: 'future-active',
+        start_time: `${nowYear}-03-01T10:00:00.000Z`,
+        end_time: `${nowYear}-03-01T10:45:00.000Z`,
+        status: 'active',
+      },
+      {
+        ...base,
+        id: 'future-cancelled',
+        start_time: `${nowYear}-03-02T10:00:00.000Z`,
+        end_time: `${nowYear}-03-02T10:45:00.000Z`,
+        status: 'cancelled',
+        cancelled_by: 'tutor',
+      },
+    ]);
+    expect(stats.totalUpcoming).toBe(1);
+    expect(stats.totalCancelled).toBe(1);
+    expect(stats.cancelledByTutor).toBe(1);
+    expect(stats.totalSuccessful).toBe(0);
   });
 });

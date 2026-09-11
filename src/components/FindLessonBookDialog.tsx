@@ -1,5 +1,4 @@
-import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
-import { useState, useEffect, useMemo, useRef } from 'react';
+﻿import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -29,6 +28,7 @@ import { parseOrgTrialPolicy, shouldAutoMarkNextLessonTrial, countTrialsFromHist
 import { isMoksloVaisiaiOrg } from '@/lib/marketMoney';
 import { ASSIGN_STUDENT_FREE_SLOT_DIALOG_CONTENT_CLASS } from '@/components/AssignStudentFreeSlotDialog';
 import RecurrenceFields, { type RecurrenceFrequency } from '@/components/RecurrenceFields';
+import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
 
 /** A free availability window picked from FindTutorModal, to be narrowed to a lesson slot. */
 export interface FindLessonBookPick {
@@ -320,7 +320,7 @@ export default function FindLessonBookDialog({
             max_students: subject.max_students,
           },
         ],
-        individualPricing: overridePrice == null ? [] : [{ student_id: studentId, subject_id: pick.subjectId, price: overridePrice }],
+        individualPricing: [],
         suppressSuccessAlert: true,
       });
 

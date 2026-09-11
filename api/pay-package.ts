@@ -23,8 +23,8 @@ const supabase = createClient(
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-    const market = marketFromRequest(req);
-    const currency = chargeCurrency(market);
+    let market = marketFromRequest(req);
+    let currency = chargeCurrency(market);
     const appOrigin = publicOriginFromRequest(req);
 
     const packageId = typeof req.query.package === 'string' ? req.query.package.trim() : '';
@@ -37,6 +37,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .select(`
                 id, tutor_id, student_id, subject_id, total_lessons, price_per_lesson, total_price,
                 paid, payment_status, stripe_checkout_session_id, payment_method,
+                pool_organization_id, active, expires_at,
                 students!inner(id, full_name, email, payer_email, payer_name, payment_payer),
                 profiles!lesson_packages_tutor_id_fkey(
                     stripe_account_id, stripe_onboarding_complete, organization_id, full_name,
@@ -57,6 +58,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Annulled by the org admin — old email links must not collect payment.
         if (pkg.payment_status === 'cancelled') {
             return res.status(200).send(errorPage('Paketas atšauktas', 'Šis paketas buvo atšauktas. Jei tai netikėta, susisiekite su administracija.'));
+        }
+
+        // Pooled Pro Klasė offers are denominated in EUR regardless of which
+        // localized host the recipient used to open the public payment link.
+        if (pkg.pool_organization_id) {
+            market = 'default';
+            currency = 'eur';
+        }
+        if (pkg.pool_organization_id && (
+            !pkg.active || (pkg.expires_at && new Date(pkg.expires_at).getTime() <= Date.now())
+        )) {
+            return res.status(409).send(errorPage('Paketas nebegalioja', 'Kreipkitės į administraciją dėl naujo paketo.'));
         }
 
         const tutor = pkg.profiles as any;
@@ -89,18 +102,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let useSchoolOrgAbsorbedFees = false;
         let feeProfile: OrgFeeProfile | null = null;
 
-        if (tutor?.organization_id) {
+        const paymentOrganizationId = pkg.pool_organization_id || tutor?.organization_id;
+        if (paymentOrganizationId) {
             const { data: org } = await supabase
                 .from('organizations')
                 .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug')
-                .eq('id', tutor.organization_id)
+                .eq('id', paymentOrganizationId)
                 .single();
             if (!org?.stripe_onboarding_complete || !org.stripe_account_id) {
                 return res.status(500).send(errorPage('Klaida', 'Organizacijos mokėjimo paskyra nėra prijungta.'));
             }
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
-            feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
+            feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(paymentOrganizationId);
             // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
             useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school' && !feeProfile;
         } else {
@@ -164,7 +178,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
                 success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${appOrigin}/package-cancelled`,
-            });
+            }, { idempotencyKey: `package-checkout:${packageId}:${pkg.stripe_checkout_session_id || 'initial'}` });
         } else {
             const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
             checkoutSession = await stripe.checkout.sessions.create({
@@ -182,7 +196,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 metadata: { ...metadataBase, ...checkoutBaseMetadata(basePriceEur, market) },
                 success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${appOrigin}/package-cancelled`,
-            });
+            }, { idempotencyKey: `package-checkout:${packageId}:${pkg.stripe_checkout_session_id || 'initial'}` });
         }
 
         // 6. Update package with new checkout session ID

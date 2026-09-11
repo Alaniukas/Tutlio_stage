@@ -52,6 +52,7 @@ import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
 import { authHeaders } from '@/lib/apiHelpers';
 import { autoCloseBillingBatchIfAllPaid } from '@/lib/autoCloseBillingBatch';
 import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
+import { packageCoversLessonDate } from '@/lib/pooledPackageBookingWindow';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -124,11 +125,11 @@ import {
   isRecurringEndDateOpen,
   recurringMaterializeEndDate,
 } from '@/lib/recurringSessions';
-import { resolveLessonMeetingLink } from '@/lib/meetingLink';
+import { enrichSessionMeetingLink, resolveLessonMeetingLink } from '@/lib/meetingLink';
 import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
-import { isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { isLaisviVaikaiOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
 import { resolveOrCreateTrialSubject } from '@/pages/company/orgAdminSessionCreate';
 import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
@@ -139,10 +140,16 @@ import {
   calendarSessionTopicSuffix,
   calendarTitleForSession,
   classGroupParticipantsForModal,
+  classGroupCancelTargets,
+  classGroupOccurrenceSessionIds,
   isMergedClassGroupSession,
+  isUsableCalendarDateRange,
   mergeSchoolClassGroupSessions,
+  pickClassGroupOccurrenceSession,
+  sessionStatusCanCancel,
   type MergedClassGroupSession,
 } from '@/lib/schoolClassGroupSessions';
+import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
 import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
 import type { SchoolClassGroupRecord } from '@/lib/schoolClassGroups';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
@@ -316,6 +323,7 @@ export default function CalendarPage() {
   const showTutorTrialToggle =
     orgPolicy.isOrgTutor && !orgFeaturesLoading && isMoksloVaisiaiOrg(organizationId);
   const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
+  const isLaisviVaikai = isLaisviVaikaiOrg(organizationId) || isLaisviVaikaiOrg(ctxProfile?.organization_id);
   const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
   const hideProKlaseOrgTutorDelete = hideProKlaseOrgTutorCancel;
   const showProKlaseCalendarFeatures =
@@ -365,6 +373,7 @@ export default function CalendarPage() {
   const [freeTimeDays, setFreeTimeDays] = useState<number[]>([]);
   const [freeTimeSameTimes, setFreeTimeSameTimes] = useState(true);
   const [freeTimeDayTimes, setFreeTimeDayTimes] = useState<Record<number, DayTime>>({});
+  const [freeTimeStartDate, setFreeTimeStartDate] = useState('');
   const [freeTimeUntilMode, setFreeTimeUntilMode] = useState<FreeTimeUntilMode>('weeks');
   const [freeTimeUntilDate, setFreeTimeUntilDate] = useState('');
   const [freeTimeWeeks, setFreeTimeWeeks] = useState(8);
@@ -380,6 +389,8 @@ export default function CalendarPage() {
       setIsEditingSession(false);
       setGroupEditChoice(null);
       setGroupCancelChoice(null);
+      setClassGroupCancelScope('whole_occurrence');
+      setClassGroupCancelStudentId('');
       setEventModalNotice(null);
       setIsClassGroupSession(false);
       setClassGroupParticipants([]);
@@ -519,6 +530,8 @@ export default function CalendarPage() {
   // Group edit/cancel choice states
   const [groupEditChoice, setGroupEditChoice] = useState<'single' | 'all_future' | null>(null);
   const [groupCancelChoice, setGroupCancelChoice] = useState<'single' | 'all_future' | null>(null);
+  const [classGroupCancelScope, setClassGroupCancelScope] = useState<'one_student' | 'whole_occurrence'>('whole_occurrence');
+  const [classGroupCancelStudentId, setClassGroupCancelStudentId] = useState('');
 
   useEffect(() => {
     if (!ctxUser) return;
@@ -739,7 +752,6 @@ export default function CalendarPage() {
       start_time: new Date(session.start_time),
       end_time: new Date(session.end_time),
     }));
-    setSessions(parsedSessions);
 
     const { data: studentsData } = await tutorStudentsRowsDeduped(user.id);
     const calStudents =
@@ -757,7 +769,25 @@ export default function CalendarPage() {
     setStudents(calStudents as Student[]);
 
     const { data: subjectsData } = await tutorSubjectsCalendarDeduped(user.id);
-    setSubjects(dedupeSubjectsById(subjectsData || []));
+    const calSubjects = dedupeSubjectsById(subjectsData || []);
+    setSubjects(calSubjects);
+
+    const tutorLink = (profileData as { personal_meeting_link?: string | null })?.personal_meeting_link || '';
+    const studentsById = new Map(
+      calStudents.map((s) => [String(s.id), { personal_meeting_link: s.personal_meeting_link as string | null | undefined }]),
+    );
+    const subjectsById = new Map(
+      calSubjects.map((s) => [s.id, { meeting_link: s.meeting_link }]),
+    );
+    setSessions(
+      parsedSessions.map((session) =>
+        enrichSessionMeetingLink(session, {
+          tutorPersonalLink: tutorLink,
+          studentsById,
+          subjectsById,
+        }),
+      ),
+    );
 
     const { data: pricingData } = await tutorStudentPricingAllDeduped(user.id);
     setIndividualPricing(pricingData || []);
@@ -947,8 +977,10 @@ export default function CalendarPage() {
   const classGroupMeta = useMemo(() => buildClassGroupMetaMap(classGroups), [classGroups]);
 
   const sessionsAfterClassGroups = useMemo(
-    () => mergeSchoolClassGroupSessions(sessions, classGroupMeta) as Session[],
-    [sessions, classGroupMeta],
+    () => mergeSchoolClassGroupSessions(sessions, classGroupMeta, {
+      preferCancelledOccurrence: isLaisviVaikai,
+    }) as Session[],
+    [sessions, classGroupMeta, isLaisviVaikai],
   );
 
   const mergeGroupSessions = useCallback((sessionsToMerge: Session[]) => {
@@ -961,9 +993,11 @@ export default function CalendarPage() {
         individual.push(session);
         return;
       }
+      const startMs = new Date(session.start_time).getTime();
+      const endMs = new Date(session.end_time).getTime();
       const subject = subjects.find(s => s.id === session.subject_id);
-      if (subject?.is_group) {
-        const key = `${session.start_time.getTime()}_${session.end_time.getTime()}_${session.subject_id}`;
+      if (subject?.is_group && Number.isFinite(startMs) && Number.isFinite(endMs)) {
+        const key = `${startMs}_${endMs}_${session.subject_id}`;
         if (!grouped.has(key)) {
           grouped.set(key, []);
         }
@@ -1015,9 +1049,18 @@ export default function CalendarPage() {
     [sessionsAfterClassGroups, mergeGroupSessions],
   );
 
+  const calendarGridSessions = useMemo(
+    () => mergedSessions.filter((session) =>
+      isUsableCalendarDateRange(session.start_time, session.end_time),
+    ),
+    [mergedSessions],
+  );
+
   const allEvents = useMemo(() => {
-    return [...mergedSessions, ...backgroundEvents];
-  }, [mergedSessions, backgroundEvents]);
+    return [...calendarGridSessions, ...backgroundEvents].filter((ev) =>
+      isUsableCalendarDateRange(ev.start_time, ev.end_time),
+    );
+  }, [calendarGridSessions, backgroundEvents]);
 
   const timeRangeBounds = useMemo(() => {
     const defaultMin = new Date(1970, 0, 1, 7, 0, 0);
@@ -1039,6 +1082,7 @@ export default function CalendarPage() {
     }
 
     const relevant = allEvents.filter(ev => {
+      if (!isUsableCalendarDateRange(ev.start_time, ev.end_time)) return false;
       const s = new Date(ev.start_time);
       const e = new Date(ev.end_time);
       return s.getTime() < rangeEnd.getTime() && e.getTime() > rangeStart.getTime();
@@ -1053,10 +1097,14 @@ export default function CalendarPage() {
     relevant.forEach(ev => {
       const s = new Date(ev.start_time);
       const e = new Date(ev.end_time);
+      if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) return;
       minH = Math.min(minH, s.getHours());
       const eH = e.getHours() + (e.getMinutes() > 0 ? 1 : 0);
       maxH = Math.max(maxH, eH);
     });
+    if (!Number.isFinite(minH) || !Number.isFinite(maxH) || minH > maxH) {
+      return { min: defaultMin, max: defaultMax, scrollToTime: defaultScroll };
+    }
 
     const floorH = Math.min(minH, 7);
     const ceilH = Math.max(maxH, 21);
@@ -1225,6 +1273,7 @@ export default function CalendarPage() {
     setSlotChoiceStep('choice');
     setFreeTimeRepeat(false);
     setFreeTimeSameTimes(true);
+    setFreeTimeStartDate(format(start, 'yyyy-MM-dd'));
     setFreeTimeUntilMode('weeks');
     setFreeTimeUntilDate('');
     setFreeTimeWeeks(8);
@@ -1293,17 +1342,18 @@ export default function CalendarPage() {
           return;
         }
       }
+      const ruleStartDate = (freeTimeStartDate || specificDate).trim();
       const endDate = resolveFreeTimeEndDate({
         mode: freeTimeUntilMode,
         untilDate: freeTimeUntilDate,
         weeks: freeTimeWeeks,
-        fromDate: specificDate,
+        fromDate: ruleStartDate,
       });
       if (!endDate) {
         setToastMessage({ message: t('cal.freeTimeNeedUntil'), type: 'error' });
         return;
       }
-      if (endDate < specificDate) {
+      if (endDate < ruleStartDate) {
         setToastMessage({ message: t('cal.freeTimeNeedUntil'), type: 'error' });
         return;
       }
@@ -1317,7 +1367,7 @@ export default function CalendarPage() {
           .eq('is_recurring', true)
           .in('day_of_week', freeTimeDays);
 
-        const stillValid = (existingRecurring || []).filter((s) => !s.end_date || s.end_date >= specificDate);
+        const stillValid = (existingRecurring || []).filter((s) => !s.end_date || s.end_date >= ruleStartDate);
         const hasOverlap = freeTimeDays.some((day) => {
           const times = freeTimeSameTimes
             ? { start: specificStart, end: specificEnd }
@@ -1338,6 +1388,7 @@ export default function CalendarPage() {
           defaultStart: specificStart,
           defaultEnd: specificEnd,
           dayTimes: freeTimeDayTimes,
+          startDate: ruleStartDate,
           endDate,
         });
         const { error } = await supabase.from('availability').insert(rows);
@@ -1448,9 +1499,12 @@ export default function CalendarPage() {
       setIsClassGroupSession(true);
       setSelectedGroupSessions(event._classGroupSessions);
       setClassGroupParticipants(classGroupParticipantsForModal(event as MergedClassGroupSession<Session>));
+      const displayRow = (isLaisviVaikai
+        ? pickClassGroupOccurrenceSession(event._classGroupSessions)
+        : event._classGroupSessions[0]) ?? event._classGroupSessions[0] ?? event;
       setSelectedEvent({
-        ...event._classGroupSessions[0],
-        topic: event._classGroupName || event._classGroupSessions[0].topic,
+        ...displayRow,
+        topic: event._classGroupName || displayRow.topic,
       });
     } else if (event._isGroup && event._groupSessions) {
       setIsGroupSession(true);
@@ -1466,7 +1520,7 @@ export default function CalendarPage() {
       setSelectedEvent(event);
     }
     setIsEventModalOpen(true);
-  }, []);
+  }, [isLaisviVaikai]);
 
   // When student changes, check for individual pricing to auto-fill
   const handleStudentChange = (studentId: string) => {
@@ -1785,6 +1839,9 @@ export default function CalendarPage() {
         available_lessons: number;
         reserved_lessons: number;
         item_id: string;
+        pool_organization_id?: string | null;
+        billing_period_start?: string | null;
+        billing_period_end?: string | null;
         item_available_lessons: number;
         item_reserved_lessons: number;
       }>();
@@ -1795,6 +1852,9 @@ export default function CalendarPage() {
           if (match) {
             packagesByStudent.set(sid, {
               id: match.pkg.id,
+              pool_organization_id: match.pkg.pool_organization_id,
+              billing_period_start: match.pkg.billing_period_start,
+              billing_period_end: match.pkg.billing_period_end,
               available_lessons: match.pkg.available_lessons,
               reserved_lessons: match.pkg.reserved_lessons,
               item_id: match.item.id,
@@ -1829,7 +1889,7 @@ export default function CalendarPage() {
               const used = packagesUsage.get(pkg.id) || 0;
               const remaining = Math.min(pkg.available_lessons, pkg.item_available_lessons) - used;
 
-              if (remaining > 0) {
+              if (remaining > 0 && packageCoversLessonDate(pkg, current)) {
                 lessonPackageId = pkg.id;
                 sessionPaid = true;
                 sessionPaymentStatus = 'confirmed';
@@ -1922,7 +1982,7 @@ export default function CalendarPage() {
         if (packagesUsage.size > 0) {
           for (const [pkgId, usedCount] of packagesUsage.entries()) {
             const pkg = Array.from(packagesByStudent.values()).find(p => p.id === pkgId);
-            if (pkg && usedCount > 0) {
+            if (pkg && !pkg.pool_organization_id && usedCount > 0) {
               const { error: itemErr } = await supabase
                 .from('lesson_package_items')
                 .update({
@@ -2185,6 +2245,9 @@ export default function CalendarPage() {
         available_lessons: number;
         reserved_lessons: number;
         item_id: string;
+        pool_organization_id?: string | null;
+        billing_period_start?: string | null;
+        billing_period_end?: string | null;
         item_available_lessons: number;
         item_reserved_lessons: number;
         studentId: string;
@@ -2200,15 +2263,22 @@ export default function CalendarPage() {
         let lessonPackageId = null;
 
         if (!createIsTrial && !isPaid && sessionSubjectId) {
-          const match = await findActivePackageForBooking(supabase, { studentId, subjectId: sessionSubjectId });
+          const match = await findActivePackageForBooking(supabase, {
+            studentId,
+            subjectId: sessionSubjectId,
+            startIso: startDate.toISOString(),
+          });
           if (match) {
             const { pkg, item } = match;
             lessonPackageId = pkg.id;
             sessionPaid = true;
             sessionPaymentStatus = 'confirmed';
 
-            packagesToUpdate.push({
+            if (!pkg.pool_organization_id) packagesToUpdate.push({
               id: pkg.id,
+              pool_organization_id: pkg.pool_organization_id,
+              billing_period_start: pkg.billing_period_start,
+              billing_period_end: pkg.billing_period_end,
               available_lessons: pkg.available_lessons - 1,
               reserved_lessons: pkg.reserved_lessons + 1,
               item_id: item.id,
@@ -2663,36 +2733,42 @@ export default function CalendarPage() {
         let lessonPackageId = null;
 
         if (assignSubjectId) {
-          const match = await findActivePackageForBooking(supabase, { studentId, subjectId: assignSubjectId });
+          const match = await findActivePackageForBooking(supabase, {
+            studentId,
+            subjectId: assignSubjectId,
+            startIso: startDateTime,
+          });
           if (match) {
             const { pkg, item } = match;
             lessonPackageId = pkg.id;
             sessionPaid = true;
             sessionPaymentStatus = 'confirmed';
 
-            // Decrement item first, then parent aggregate
-            const { error: itemErr } = await supabase
-              .from('lesson_package_items')
-              .update({
-                available_lessons: item.available_lessons - 1,
-                reserved_lessons: item.reserved_lessons + 1,
-              })
-              .eq('id', item.id);
-            if (itemErr) {
-              console.error('Error updating lesson package item:', itemErr);
-            } else {
-              const { error: pkgError } = await supabase
-                .from('lesson_packages')
+            if (!pkg.pool_organization_id) {
+              // Legacy packages still use their existing explicit counters.
+              const { error: itemErr } = await supabase
+                .from('lesson_package_items')
                 .update({
-                  available_lessons: pkg.available_lessons - 1,
-                  reserved_lessons: pkg.reserved_lessons + 1,
+                  available_lessons: item.available_lessons - 1,
+                  reserved_lessons: item.reserved_lessons + 1,
                 })
-                .eq('id', pkg.id);
-
-              if (pkgError) {
-                console.error('Error updating lesson package:', pkgError);
+                .eq('id', item.id);
+              if (itemErr) {
+                console.error('Error updating lesson package item:', itemErr);
               } else {
-                console.log(`[Calendar] Auto-deducted 1 lesson from package ${pkg.id} item ${item.id} for student ${studentId}`);
+                const { error: pkgError } = await supabase
+                  .from('lesson_packages')
+                  .update({
+                    available_lessons: pkg.available_lessons - 1,
+                    reserved_lessons: pkg.reserved_lessons + 1,
+                  })
+                  .eq('id', pkg.id);
+
+                if (pkgError) {
+                  console.error('Error updating lesson package:', pkgError);
+                } else {
+                  console.log(`[Calendar] Auto-deducted 1 lesson from package ${pkg.id} item ${item.id} for student ${studentId}`);
+                }
               }
             }
           }
@@ -2928,7 +3004,17 @@ export default function CalendarPage() {
 
     // Step 1: Show cancel button (first click)
     if (cancelConfirmId !== selectedEvent.id) {
-      // For recurring or group sessions, ask whether to cancel one or all future
+      if (isClassGroupSession) {
+        const firstCancellable = selectedGroupSessions.find((s) =>
+          isLaisviVaikai ? sessionStatusCanCancel(s.status) : s.status === 'active',
+        );
+        setClassGroupCancelScope('whole_occurrence');
+        setClassGroupCancelStudentId(firstCancellable?.student_id || selectedEvent.student_id || '');
+        setCancelConfirmId(selectedEvent.id);
+        setCancellationReason('');
+        return;
+      }
+      // For recurring or (non class-group) group sessions, ask whether to cancel one or all future
       if ((isGroupSession || selectedEvent.recurring_session_id) && !groupCancelChoice) {
         setGroupCancelChoice('single'); // Open the choice dialog
         return;
@@ -2940,6 +3026,7 @@ export default function CalendarPage() {
 
     // Step 2: Validate cancellation reason
     if (cancellationReason.trim().length < 5) return;
+    if (isClassGroupSession && classGroupCancelScope === 'one_student' && !classGroupCancelStudentId) return;
 
     setSaving(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -2948,7 +3035,46 @@ export default function CalendarPage() {
     try {
       let cancelSucceeded = false;
 
-      if (groupCancelChoice === 'all_future' && (isGroupSession || selectedEvent.recurring_session_id)) {
+      if (isClassGroupSession) {
+        const targets = classGroupCancelTargets(
+          selectedGroupSessions,
+          classGroupCancelScope,
+          classGroupCancelStudentId,
+          { includeCompleted: isLaisviVaikai },
+        );
+        if (targets.length === 0) {
+          setToastMessage({ message: t('cal.errorCancelling'), type: 'error' });
+        } else {
+          let successCount = 0;
+          for (const session of targets) {
+            const { data: studentData } = await supabase
+              .from('students')
+              .select('email, full_name')
+              .eq('id', session.student_id)
+              .maybeSingle();
+            const { success } = await cancelSessionAndFillWaitlist({
+              sessionId: session.id,
+              tutorId: user?.id || '',
+              reason: cancellationReason.trim(),
+              cancelledBy: 'tutor',
+              studentName: studentData?.full_name || session.student?.full_name || '',
+              tutorName: tutorProfile?.full_name || '',
+              studentEmail: studentData?.email || null,
+              tutorEmail: tutorProfile?.email || null,
+              leaveFreeTime: false,
+            });
+            if (success) successCount++;
+          }
+          if (successCount > 0) {
+            cancelSucceeded = true;
+            if (successCount > 1) {
+              alert(t('cal.cancelledCount', { count: String(successCount) }));
+            }
+          } else {
+            setToastMessage({ message: t('cal.errorCancelling'), type: 'error' });
+          }
+        }
+      } else if (groupCancelChoice === 'all_future' && (isGroupSession || selectedEvent.recurring_session_id)) {
         // Cancel all future sessions in the same recurring/group scope
         let futureQuery = supabase
           .from('sessions')
@@ -3023,6 +3149,8 @@ export default function CalendarPage() {
         setCancellationReason('');
         setLeaveFreeTimeOnCancel(false);
         setGroupCancelChoice(null);
+        setClassGroupCancelScope('whole_occurrence');
+        setClassGroupCancelStudentId('');
         fetchData();
         // Update Google Calendar – remove cancelled session and update free time blocks
         try {
@@ -3384,6 +3512,18 @@ export default function CalendarPage() {
             }
           }
         }
+      } else if (isClassGroupSession) {
+        const ids = classGroupOccurrenceSessionIds(selectedGroupSessions);
+        if (!ids.length) {
+          error = new Error(t('cal.errorGeneric'));
+        } else {
+          const { error: groupError } = await supabase.from('sessions').update({
+            start_time: newStart.toISOString(),
+            end_time: newEnd.toISOString(),
+            ...editSessionPayload,
+          }).in('id', ids);
+          error = groupError;
+        }
       } else {
         const { error: singleError } = await supabase.from('sessions').update({
           start_time: newStart.toISOString(),
@@ -3407,7 +3547,7 @@ export default function CalendarPage() {
 
       if (!error) {
         // Send comment email if checkbox is checked AND it wasn't already checked/sent
-        if (editShowCommentToStudent && editTutorComment && (editTutorComment !== selectedEvent.tutor_comment || (!selectedEvent.show_comment_to_student && editShowCommentToStudent))) {
+        if (editShowCommentToStudent && !isClassGroupSession && editTutorComment && (editTutorComment !== selectedEvent.tutor_comment || (!selectedEvent.show_comment_to_student && editShowCommentToStudent))) {
           let studentEmail: string | undefined = selectedEvent?.student?.email;
           if (selectedEvent?.student_id) {
             const { data: studentRow } = await supabase
@@ -3450,7 +3590,7 @@ export default function CalendarPage() {
         }
 
         // Send reschedule email only to student
-        if (timeChanged) {
+        if (timeChanged && !isClassGroupSession) {
           const { data: studentData } = await supabase
             .from('students')
             .select('email, linked_user_id')
@@ -3620,6 +3760,23 @@ export default function CalendarPage() {
    */
   const openSessionEditor = () => {
     if (!selectedEvent) return;
+    if (isClassGroupSession) {
+      setEditNewStartTime(format(selectedEvent.start_time, "yyyy-MM-dd'T'HH:mm"));
+      setEditDurationMinutes(Math.max(5, Math.round((selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime()) / 60000)));
+      const groupName = String((selectedEvent as Session & { _classGroupName?: string })._classGroupName || '');
+      const siblingTopic = selectedGroupSessions
+        .map((row) => String(row.topic || '').trim())
+        .find((topic) => topic && topic !== groupName);
+      setEditTopic(siblingTopic || '');
+      setEditMeetingLink(selectedGroupSessions.find((row) => row.meeting_link)?.meeting_link || selectedEvent.meeting_link || '');
+      setEditPrice(Number(selectedEvent.price ?? 0) || 0);
+      setEditTutorComment(selectedEvent.tutor_comment || '');
+      setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
+      setRescheduleReason('');
+      setRescheduleRequestedBy('');
+      setIsEditingSession(true);
+      return;
+    }
     if ((isGroupSession || selectedEvent.recurring_session_id) && !groupEditChoice) {
       setGroupEditChoice('single');
       return;
@@ -3627,7 +3784,14 @@ export default function CalendarPage() {
     setEditNewStartTime(format(selectedEvent.start_time, "yyyy-MM-dd'T'HH:mm"));
     setEditDurationMinutes(Math.max(5, Math.round((selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime()) / 60000)));
     setEditTopic(selectedEvent.topic || '');
-    setEditMeetingLink(selectedEvent.meeting_link || '');
+    setEditMeetingLink(
+      selectedEvent.meeting_link
+      || resolveMeetingLink(
+        subjects.find((s) => s.id === selectedEvent.subject_id)?.meeting_link,
+        selectedEvent.student_id,
+      )
+      || '',
+    );
     setEditPrice(Number(selectedEvent.price ?? 0) || 0);
     setEditTutorComment(selectedEvent.tutor_comment || '');
     setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
@@ -4491,7 +4655,7 @@ export default function CalendarPage() {
                   : (calendarExpanded ? 1100 : 700),
               }}
               localizer={locale === 'ar' || locale === 'he' ? rtlLocalizer : localizer}
-              events={mergedSessions}
+              events={calendarGridSessions}
               backgroundEvents={backgroundEvents}
               startAccessor="start_time"
               endAccessor="end_time"
@@ -5018,7 +5182,7 @@ export default function CalendarPage() {
                   </div>
                 </div>
               )}
-              {!hideProKlaseOrgTutorFreeTime && (
+              {!hideProKlaseOrgTutorFreeTime && !isClassGroupSession && (
               <label className="flex items-start gap-2 cursor-pointer">
                 <Checkbox
                   checked={leaveFreeTimeOnReschedule}
@@ -5128,7 +5292,7 @@ export default function CalendarPage() {
                         return (
                           <div key={participant.student_id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg opacity-80">
                             <div className="w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
-                              {participant.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
+                              {String(participant.full_name || '?').split(/\s+/).filter(Boolean).map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-semibold text-gray-900">{participant.full_name}</p>
@@ -5441,7 +5605,7 @@ export default function CalendarPage() {
                 )}
               </div>
 
-              {selectedEvent?.meeting_link && (
+              {cancelConfirmId !== selectedEvent?.id && selectedEvent?.meeting_link && (
                 <a
                   href={normalizeUrl(selectedEvent.meeting_link) || undefined}
                   target="_blank"
@@ -5462,6 +5626,7 @@ export default function CalendarPage() {
                   {t('cal.joinVideoCall')}
                 </a>
               )}
+              {cancelConfirmId !== selectedEvent?.id && (
               <WhiteboardButton
                 roomId={(selectedEvent as any)?.whiteboard_room_id}
                 sessionStatus={selectedEvent?.status}
@@ -5473,7 +5638,8 @@ export default function CalendarPage() {
                       : null
                 }
               />
-              {selectedEvent && (
+              )}
+              {cancelConfirmId !== selectedEvent?.id && selectedEvent && (
                 <SessionFiles
                   sessionId={selectedEvent.id}
                   role="tutor"
@@ -5486,19 +5652,34 @@ export default function CalendarPage() {
           {/* Cancellation reason textarea */}
           {cancelConfirmId === selectedEvent?.id && (
             <div className="space-y-2 pt-2 border-t border-gray-100">
+              {isClassGroupSession && (
+                <ClassGroupCancelScopeFields
+                  radioName="classGroupCancelScope"
+                  scope={classGroupCancelScope}
+                  onScopeChange={setClassGroupCancelScope}
+                  studentId={classGroupCancelStudentId}
+                  onStudentIdChange={setClassGroupCancelStudentId}
+                  students={selectedGroupSessions.filter((s) =>
+                    isLaisviVaikai ? sessionStatusCanCancel(s.status) : s.status === 'active',
+                  ).map((s) => ({
+                    student_id: s.student_id,
+                    name: s.student?.full_name || s.student_id,
+                  }))}
+                />
+              )}
               <label className="text-sm font-semibold text-gray-700">{t('cal.cancellationReasonLabel')}</label>
               <textarea
                 value={cancellationReason}
                 onChange={(e) => setCancellationReason(e.target.value)}
                 placeholder={t('cal.cancellationPlaceholder')}
                 className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-red-200 focus:border-red-300 outline-none"
-                rows={3}
+                rows={isClassGroupSession ? 2 : 3}
                 autoFocus
               />
               {cancellationReason.length > 0 && cancellationReason.trim().length < 5 && (
                 <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(cancellationReason.trim().length) })}</p>
               )}
-              {!hideProKlaseOrgTutorFreeTime && (
+              {!hideProKlaseOrgTutorFreeTime && !isClassGroupSession && (
               <label className="flex items-start gap-2 cursor-pointer pt-1">
                 <Checkbox
                   checked={leaveFreeTimeOnCancel}
@@ -5508,10 +5689,10 @@ export default function CalendarPage() {
               </label>
               )}
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); }} className="rounded-xl flex-1">
+                <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); setClassGroupCancelScope('whole_occurrence'); }} className="rounded-xl flex-1">
                   {t('cal.cancelBtn')}
                 </Button>
-                <Button variant="destructive" size="sm" onClick={handleCancelSession} disabled={saving || cancellationReason.trim().length < 5} className="rounded-xl flex-1 gap-2">
+                <Button variant="destructive" size="sm" onClick={handleCancelSession} disabled={saving || cancellationReason.trim().length < 5 || (isClassGroupSession && classGroupCancelScope === 'one_student' && !classGroupCancelStudentId)} className="rounded-xl flex-1 gap-2">
                   {saving ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : null}
                   {t('cal.confirmCancellation')}
                 </Button>
@@ -5527,7 +5708,12 @@ export default function CalendarPage() {
 
           {cancelConfirmId !== selectedEvent?.id && (
           <div className="flex flex-col gap-2 pt-2">
-            {selectedEvent?.status === 'completed' && !hideProKlaseOrgTutorCancel && (
+            {(selectedEvent?.status === 'completed' ||
+              (isLaisviVaikai &&
+                isClassGroupSession &&
+                selectedEvent?.status !== 'active' &&
+                selectedGroupSessions.some((s) => sessionStatusCanCancel(s.status)))) &&
+              !hideProKlaseOrgTutorCancel && (
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="destructive"
@@ -6272,6 +6458,15 @@ export default function CalendarPage() {
                   </div>
 
                   <div className="space-y-2">
+                    <p className="text-sm font-medium text-gray-800">{t('cal.freeTimeFrom')}</p>
+                    <DateInput
+                      value={freeTimeStartDate}
+                      onChange={(e) => setFreeTimeStartDate(e.target.value)}
+                    />
+                    <p className="text-xs text-gray-500">{t('cal.freeTimeFromHint')}</p>
+                  </div>
+
+                  <div className="space-y-2">
                     <p className="text-sm font-medium text-gray-800">{t('cal.freeTimeUntil')}</p>
                     <div className="grid grid-cols-2 gap-2">
                       <button
@@ -6310,7 +6505,7 @@ export default function CalendarPage() {
                     ) : (
                       <DateInput
                         value={freeTimeUntilDate}
-                        min={pendingSlot ? format(pendingSlot.start, 'yyyy-MM-dd') : undefined}
+                        min={freeTimeStartDate || (pendingSlot ? format(pendingSlot.start, 'yyyy-MM-dd') : undefined)}
                         onChange={(e) => setFreeTimeUntilDate(e.target.value)}
                       />
                     )}

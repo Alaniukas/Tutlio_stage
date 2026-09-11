@@ -1,5 +1,5 @@
-import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { esMx, esMxOverrides } from '../../src/lib/i18n/es-mx';
@@ -12,7 +12,9 @@ import { isTranslatedLocale, LOCALE_FORMAT_TAGS } from '../../src/lib/i18n/local
 import { CHROME, chromeFor, formatShortDay } from '../../src/lib/publicPage';
 import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 
-const deferredPrefixes = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('es-mx');
+
+const deferredPrefixes = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferredPrefixes.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 
@@ -29,7 +31,8 @@ beforeAll(async () => {
 
 describe('Mexican Spanish tutor and business localization', () => {
   it('covers every in-scope source key, including the complete onboarding quiz', () => {
-    expect(Object.keys(esMxOverrides).filter(key => expectedKeys.includes(key)).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in esMxOverrides))).toEqual([]);
+    expect(Object.keys(esMxOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(esMx).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !esMx[key])).toEqual([]);
     expect(Object.keys(esMxOverrides).filter((key) => key.startsWith('quiz.')).sort())
@@ -106,7 +109,7 @@ describe('Mexican Spanish tutor and business localization', () => {
     expect(getSeoMeta('es-mx', 'pricing').title).toContain('Precios');
     expect(isTranslatedLocale('es-mx')).toBe(false);
     for (const key of Object.keys(en).filter((key) => deferredPrefixes.has(key.split('.')[0]))) {
-      expect(esMx[key], key).toBe(esMxOverrides[key] ?? en[key]);
+      expect(esMx[key]).toBe(en[key]);
     }
   });
 
@@ -125,6 +128,3 @@ describe('Mexican Spanish tutor and business localization', () => {
     }
   });
 });
-
-// Match server renderers: synchronous translation runs after its lazy preload.
-beforeAll(async () => { await preloadExtraLocaleDict('es-mx'); });

@@ -48,7 +48,18 @@ async function resolveSingle(db: SchoolContractFlowDb, table: string, filters: F
     const ok =
       filters.user_id === db.adminUserId &&
       (filters.organization_id === undefined || filters.organization_id === db.org.id);
-    return { data: ok ? { id: 'oa-1', organization_id: db.org.id, user_id: db.adminUserId, role: 'owner', status: 'active', permissions: {} } : null, error: null };
+    return {
+      data: ok ? {
+        id: 'oa-1',
+        organization_id: db.org.id,
+        user_id: db.adminUserId,
+        role: 'owner',
+        status: 'active',
+        permissions: {},
+        accepted_at: '2026-01-01T00:00:00.000Z',
+      } : null,
+      error: null,
+    };
   }
   if (table === 'organizations') {
     if (filters.id === db.org.id) return { data: { ...db.org }, error: null };
@@ -125,7 +136,14 @@ function resolveInsert(db: SchoolContractFlowDb, table: string, row: Record<stri
 
 function buildChain(db: SchoolContractFlowDb, table: string) {
   const filters: Filters = {};
+  const excluded: Filters = {};
+  const included: Record<string, unknown[]> = {};
   let updatePayload: Record<string, unknown> = {};
+
+  const queryRows = () => resolveMany(db, table, filters).filter((row) => (
+    Object.entries(excluded).every(([column, value]) => row[column] !== value)
+    && Object.entries(included).every(([column, values]) => values.includes(row[column]))
+  ));
 
   const chain: any = {
     select: vi.fn(() => chain),
@@ -133,14 +151,17 @@ function buildChain(db: SchoolContractFlowDb, table: string) {
       filters[col] = val;
       return chain;
     }),
-    is: vi.fn(() => chain),
-    in: vi.fn(() => chain),
-    neq: vi.fn(() => chain),
+    neq: vi.fn((col: string, val: unknown) => {
+      excluded[col] = val;
+      return chain;
+    }),
+    in: vi.fn((col: string, values: unknown[]) => {
+      included[col] = values;
+      return chain;
+    }),
     limit: vi.fn(() => chain),
-    order: vi.fn(() => chain),
-    then(resolve: (value: unknown) => unknown, reject?: (error: unknown) => unknown) {
-      return Promise.resolve({ data: resolveMany(db, table, filters), error: null }).then(resolve, reject);
-    },
+    is: vi.fn(() => chain),
+    order: vi.fn(async () => ({ data: queryRows(), error: null })),
     maybeSingle: vi.fn(async () => resolveSingle(db, table, filters)),
     single: vi.fn(async () => {
       const r = await resolveSingle(db, table, filters);
@@ -186,6 +207,9 @@ function buildChain(db: SchoolContractFlowDb, table: string) {
       };
       return updateChain;
     }),
+    then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+      return Promise.resolve({ data: queryRows(), error: null }).then(onFulfilled, onRejected);
+    },
   };
 
   return chain;
