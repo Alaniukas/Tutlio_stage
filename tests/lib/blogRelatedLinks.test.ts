@@ -13,7 +13,8 @@ describe('enrichBlogLocaleContent', () => {
     ]);
     expect(out).toContain('## Apie Tutlio');
     expect(out).toContain('## Skaitykite taip pat');
-    expect(out).toContain('/blog/test-post');
+    expect(out).toContain('/lt/blog/test-post');
+    expect(out).toContain('/lt/pricing');
   });
 
   it('is idempotent', () => {
@@ -40,7 +41,7 @@ describe('localized blog supporting links', () => {
       { id: '1', slug: 'artikel', title: 'Ein Artikel', tag: 'Tipps', url: 'https://www.tutlio.com/de/blog/artikel' },
     ], 'de');
     const about = renderAboutTutlioHtml('fr', 'https://www.tutlio.com/fr/pricing', 'https://www.tutlio.com/fr/blog');
-    expect(related).toContain('Auch lesenswert');
+    expect(related).toContain('Lesen Sie auch');
     expect(about).toContain('À propos de Tutlio');
     expect(about).not.toContain('About Tutlio');
   });

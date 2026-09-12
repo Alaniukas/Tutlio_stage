@@ -15,6 +15,7 @@ export interface Session {
   meeting_link?: string | null;
   student_joined_at?: string | null;
   tutor_joined_at?: string | null;
+  status_confirmed_at?: string | null;
   student?: {
     full_name: string;
     email?: string;
@@ -30,6 +31,63 @@ export interface SessionStats {
   totalCancelled: number;
   cancelledByTutor: number;
   cancelledByStudent: number;
+}
+
+export interface OrgSessionListStats extends SessionStats {
+  /** Future `active` rows in the already-filtered list (not dropped as "not yet occurred"). */
+  totalUpcoming: number;
+}
+
+export interface SessionStatsOptions {
+  /** Missing join tracking is only a review hint; absence requires an explicit no_show status. */
+  requireExplicitNoShow?: boolean;
+}
+
+/**
+ * Stats for the org/school sessions page. Unlike calculateSessionStats, future
+ * lessons in the current list still count: upcoming stay planned, cancelled
+ * future still count as cancelled.
+ */
+export function calculateOrgSessionListStats(
+  sessions: Session[],
+  options: SessionStatsOptions = {},
+): OrgSessionListStats {
+  const now = new Date();
+  const stats: OrgSessionListStats = {
+    totalSuccessful: 0,
+    totalStudentNoShow: 0,
+    totalCancelled: 0,
+    cancelledByTutor: 0,
+    cancelledByStudent: 0,
+    totalUpcoming: 0,
+  };
+
+  sessions.forEach((session) => {
+    const start = new Date(session.start_time);
+    const end = new Date(session.end_time);
+    const hasEnded = end.getTime() < now.getTime();
+    const isFuture = start.getTime() > now.getTime();
+
+    if (session.status === 'cancelled') {
+      stats.totalCancelled++;
+      if (session.cancelled_by === 'tutor') stats.cancelledByTutor++;
+      else if (session.cancelled_by === 'student') stats.cancelledByStudent++;
+      return;
+    }
+
+    if (isStudentNoShowSession(session, now, options)) {
+      stats.totalStudentNoShow++;
+      return;
+    }
+
+    if (session.status === 'completed' || (session.status === 'active' && hasEnded)) {
+      stats.totalSuccessful++;
+    } else if (session.status === 'active' && isFuture) {
+      stats.totalUpcoming++;
+    }
+  });
+
+  return stats;
 }
 
 export interface StudentSessionStats extends SessionStats {
@@ -74,9 +132,14 @@ export function filterSessionsByDateRange(
  * Student did not attend: explicit no_show status, or join-link attendance shows
  * student missing after the grace window (even if cron has not flipped status yet).
  */
-export function isStudentNoShowSession(session: Session, now: Date = new Date()): boolean {
+export function isStudentNoShowSession(
+  session: Session,
+  now: Date = new Date(),
+  options: SessionStatsOptions = {},
+): boolean {
   if (session.status === 'no_show') return true;
   if (session.status === 'cancelled') return false;
+  if (options.requireExplicitNoShow) return false;
   if (!(session.meeting_link || '').trim()) return false;
   const info = deriveAttendance(session as AttendanceSessionLike, now);
   return info.applicable && info.student === 'missing';
@@ -94,7 +157,8 @@ export function isStudentNoShowSession(session: Session, now: Date = new Date())
 export function calculateSessionStats(
   sessions: Session[],
   startDate: Date | null = null,
-  endDate: Date | null = null
+  endDate: Date | null = null,
+  options: SessionStatsOptions = {},
 ): SessionStats {
   const filteredSessions = filterSessionsByDateRange(sessions, startDate, endDate);
   const now = new Date();
@@ -111,7 +175,7 @@ export function calculateSessionStats(
     const sessionEndTime = new Date(session.end_time);
     const hasEnded = sessionEndTime < now;
 
-    if (isStudentNoShowSession(session, now)) {
+    if (isStudentNoShowSession(session, now, options)) {
       stats.totalStudentNoShow++;
       return;
     }
@@ -139,13 +203,14 @@ export function getStudentSessionStats(
   sessions: Session[],
   studentId: string,
   startDate: Date | null = null,
-  endDate: Date | null = null
+  endDate: Date | null = null,
+  options: SessionStatsOptions = {},
 ): SessionStats {
   const studentSessions = sessions.filter(
     (session) => session.student_id === studentId
   );
 
-  return calculateSessionStats(studentSessions, startDate, endDate);
+  return calculateSessionStats(studentSessions, startDate, endDate, options);
 }
 
 /**
@@ -154,7 +219,8 @@ export function getStudentSessionStats(
 export function getAllStudentsStats(
   sessions: Session[],
   startDate: Date | null = null,
-  endDate: Date | null = null
+  endDate: Date | null = null,
+  options: SessionStatsOptions = {},
 ): StudentSessionStats[] {
   // Surinkti unikalius mokinius
   const studentsMap = new Map<string, string>();
@@ -167,7 +233,7 @@ export function getAllStudentsStats(
   // Calculate each student's statistics
   const studentsStats: StudentSessionStats[] = [];
   studentsMap.forEach((studentName, studentId) => {
-    const stats = getStudentSessionStats(sessions, studentId, startDate, endDate);
+    const stats = getStudentSessionStats(sessions, studentId, startDate, endDate, options);
     studentsStats.push({
       ...stats,
       studentId,

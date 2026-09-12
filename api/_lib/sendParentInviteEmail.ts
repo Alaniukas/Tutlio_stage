@@ -11,6 +11,11 @@ import {
   resolveEmailOrgBranding,
   type OrgRowForEmailBranding,
 } from './emailOrgBranding.js';
+import {
+  appendMvPayerFeeNoticeBeforeFooter,
+  finalizeMvPayerFirstFeeNoticeAfterSend,
+  maybeMvPayerFirstFeeNoticeFooter,
+} from './mvPayerFeeNotice.js';
 
 const baseStyles = `
   <style>
@@ -122,6 +127,15 @@ export async function sendParentInviteEmail(
       </div>${footerFor(locale, !!(resolved.emailContactEmail || resolved.emailFooterPoweredBy))}`,
     locale,
   );
+  const feeNoticeFooter = await maybeMvPayerFirstFeeNoticeFooter(
+    data.organizationId,
+    to,
+    locale,
+  );
+  if (feeNoticeFooter) {
+    html = appendMvPayerFeeNoticeBeforeFooter(html, feeNoticeFooter);
+  }
+
   html = applyOrgBrandingToHtml(html, {
     branding: resolved.branding,
     emailTeamSignature: resolved.emailTeamSignature,
@@ -146,5 +160,10 @@ export async function sendParentInviteEmail(
         : 'Failed to send email';
     return { ok: false, error: msg };
   }
+
+  if (feeNoticeFooter) {
+    await finalizeMvPayerFirstFeeNoticeAfterSend(data.organizationId, to, true);
+  }
+
   return { ok: true };
 }

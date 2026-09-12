@@ -11,7 +11,8 @@ import {
   hreflangCode,
 } from './_lib/seo-routing.js';
 import { evaluatePublicPageSeo } from '../src/lib/publicPage.js';
-import { BLOG_SCHEMA_LOCALES, isSeoPublished, seoLocalesForPath } from '../src/lib/i18n/localeRelease.js';
+import { BLOG_SCHEMA_LOCALES, blogLocaleColumn, isSeoPublished, seoLocalesForPath } from '../src/lib/i18n/localeRelease.js';
+import { COMPARE_HUB_PATH, COMPARISON_PAGE_IDS, comparePagePath } from '../src/lib/comparisonPages.js';
 
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -21,7 +22,7 @@ function getSupabase() {
 }
 
 /** Bump when marketing copy meaningfully changes — emitted as <lastmod>. */
-const STATIC_LASTMOD = '2026-08-10';
+const STATIC_LASTMOD = '2026-09-05';
 
 interface SitemapPage {
   urlFor: (locale: Locale) => string;
@@ -35,6 +36,8 @@ function plainPage(path: string, changefreq: string, priority: string): SitemapP
 
 export const STATIC_PAGES: SitemapPage[] = [
   plainPage('/', 'weekly', '1.0'),
+  // Solo-tutor landing; `/` is the agency/school landing.
+  plainPage('/for-tutors', 'weekly', '0.9'),
   plainPage('/pricing', 'monthly', '0.8'),
   { urlFor: (l) => buildCanonicalUrl(localizedPagePath('about', l), l), changefreq: 'monthly', priority: '0.7' },
   { urlFor: (l) => buildCanonicalUrl(localizedPagePath('contacts', l), l), changefreq: 'monthly', priority: '0.6' },
@@ -48,25 +51,50 @@ export const STATIC_PAGES: SitemapPage[] = [
   plainPage('/features/reminders', 'monthly', '0.7'),
   plainPage('/features/cancellation', 'monthly', '0.7'),
   plainPage('/features/comments', 'monthly', '0.7'),
+  // Comparison pages are published only in the three domain languages; the
+  // alternates cluster follows the compare SEO surface automatically.
+  plainPage(COMPARE_HUB_PATH, 'monthly', '0.7'),
+  ...COMPARISON_PAGE_IDS.map((id) => plainPage(comparePagePath(id), 'monthly', '0.6')),
   plainPage('/privacy-policy', 'yearly', '0.3'),
   plainPage('/terms', 'yearly', '0.3'),
   plainPage('/dpa', 'yearly', '0.2'),
 ];
 
-const TITLE_COLUMNS = BLOG_SCHEMA_LOCALES.map((l) => `title_${l}`).join(', ');
-const SLUG_COLUMNS = BLOG_SCHEMA_LOCALES.map((l) => `slug_${l}`).join(', ');
+const TITLE_COLUMNS = BLOG_SCHEMA_LOCALES.map((l) => blogLocaleColumn('title', l)).join(', ');
+const SLUG_COLUMNS = BLOG_SCHEMA_LOCALES.map((l) => blogLocaleColumn('slug', l)).join(', ');
 
 function postHasTranslation(post: Record<string, unknown>, locale: Locale): boolean {
-  return !!post[`title_${locale}`];
+  return !!post[blogLocaleColumn('title', locale)];
 }
 
 function postSlug(post: Record<string, unknown>, locale: Locale): string {
-  return (post[`slug_${locale}`] as string) || (post.slug as string);
+  return (post[blogLocaleColumn('slug', locale)] as string) || (post.slug as string);
 }
 
 function postLastmod(post: Record<string, unknown>): string | undefined {
   const raw = (post.updated_at as string) || (post.published_at as string) || '';
   return raw ? raw.split('T')[0] : undefined;
+}
+
+function xmlEsc(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+/** Google image-sitemap extension for a crawlable blog cover. */
+export function imageSitemapXml(imageUrl: unknown): string {
+  if (typeof imageUrl !== 'string' || !imageUrl.trim()) return '';
+  try {
+    const url = new URL(imageUrl.trim());
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return '';
+    return `    <image:image>\n      <image:loc>${xmlEsc(url.toString())}</image:loc>\n    </image:image>`;
+  } catch {
+    return '';
+  }
 }
 
 export function publicPageBelongsInSitemap(
@@ -118,12 +146,14 @@ function urlEntry(
   priority: string,
   alternates: string,
   lastmod?: string,
+  imageUrl?: unknown,
 ): string {
+  const image = imageSitemapXml(imageUrl);
   return `  <url>
-    <loc>${loc}</loc>${lastmod ? `\n    <lastmod>${lastmod}</lastmod>` : ''}
+    <loc>${xmlEsc(loc)}</loc>${lastmod ? `\n    <lastmod>${xmlEsc(lastmod)}</lastmod>` : ''}
     <changefreq>${changefreq}</changefreq>
     <priority>${priority}</priority>
-${alternates}
+${alternates}${image ? `\n${image}` : ''}
   </url>`;
 }
 
@@ -138,7 +168,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const [blogResult, publicPageResult] = await Promise.all([
       supabase
         .from('blog_posts')
-        .select(`slug, ${SLUG_COLUMNS}, published_at, updated_at, ${TITLE_COLUMNS}`)
+        .select(`slug, ${SLUG_COLUMNS}, cover_image, published_at, updated_at, ${TITLE_COLUMNS}`)
         .eq('status', 'published')
         .order('published_at', { ascending: false }),
       supabase
@@ -227,6 +257,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           '0.7',
           alternatesXmlFor(postUrlFor, allPostLocales, allPostLocales.includes('en')),
           lastmod,
+          post.cover_image,
         ),
       );
     }
@@ -234,7 +265,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+        xmlns:xhtml="http://www.w3.org/1999/xhtml"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
 ${entries.join('\n')}
 </urlset>`;
 

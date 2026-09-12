@@ -17,6 +17,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { startPerlasPayment } from '@/lib/perlasPay';
 import { format, isAfter } from 'date-fns';
 import type { NavigateFunction } from 'react-router-dom';
+import { isSessionCommentVisibleToParent } from '@/lib/sessionCommentDelivery';
 import type { Locale } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,8 +28,8 @@ import {
 } from '@/components/ui/dialog';
 import StatusBadge from '@/components/StatusBadge';
 import WhiteboardButton from '@/components/WhiteboardButton';
-import { normalizeUrl } from '@/lib/utils';
-import { recordJoinClick } from '@/lib/joinTracking';
+import JoinLessonButton from '@/components/JoinLessonButton';
+import SessionFiles from '@/components/SessionFiles';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import type { OrgFeeProfile } from '@/lib/marketMoney';
 /** Tutor contact + payment / cancellation rules (from profiles). */
@@ -46,7 +47,7 @@ export type ParentTutorContactPolicy = {
   orgIsSchool?: boolean;
   /** Custom per-org fee deal (e.g. Proklasė); charged on top even for school orgs. */
   orgFeeProfile?: OrgFeeProfile | null;
-  /** Service provider shown in the fee breakdown (org name when tutor belongs to one). */
+  /** Service provider label (org name when tutor belongs to one). */
   providerName?: string | null;
   /** Org feature disable_student_reschedule_cancel — self-service moves/cancels go through administration. */
   studentActionsDisabled?: boolean;
@@ -67,6 +68,7 @@ export type ParentLessonModalSession = {
   whiteboard_room_id?: string | null;
   tutor_comment?: string | null;
   show_comment_to_student?: boolean;
+  show_comment_to_parent?: boolean;
   isGroupSubject?: boolean;
   classGroupName?: string | null;
   classGroupMemberNames?: string[];
@@ -109,10 +111,8 @@ export function ParentLessonDetailModal({
 
   const orgIsSchool = !!tutorPolicy?.orgIsSchool;
   const orgFee = tutorPolicy?.orgFeeProfile ?? null;
-  const providerName =
-    tutorPolicy?.providerName || tutorPolicy?.tutorName || t('studentDash.tutorLabel');
 
-  const { fmt, formatLessonCharge, lessonBreakdown, isPl } = useMarketMoney();
+  const { fmt, formatLessonCharge, isPl } = useMarketMoney();
   const [stripeLoading, setStripeLoading] = useState(false);
   const [perlasLoading, setPerlasLoading] = useState(false);
 
@@ -265,7 +265,9 @@ export function ParentLessonDetailModal({
                 {t('studentDash.priceLabel')}
               </p>
               <p className="font-bold text-gray-900">
-                {session.price != null ? fmt(session.price) : '–'}
+                {session.price != null
+                  ? formatLessonCharge(Number(session.price), orgIsSchool, orgFee)
+                  : '–'}
               </p>
             </div>
             <div className="bg-gray-50 rounded-xl p-4 text-center border border-gray-100 flex flex-col items-center justify-center">
@@ -281,7 +283,7 @@ export function ParentLessonDetailModal({
             </div>
           </div>
 
-          {session.show_comment_to_student && session.tutor_comment && (
+          {isSessionCommentVisibleToParent(session) && session.tutor_comment && (
             <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
               <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider mb-1">
                 {t('studentDash.tutorComment')}
@@ -293,16 +295,13 @@ export function ParentLessonDetailModal({
           )}
 
           {session.meeting_link && session.status !== 'cancelled' && (
-            <a
-              href={normalizeUrl(session.meeting_link) || undefined}
-              target="_blank"
-              rel="noreferrer"
-              onClick={() => recordJoinClick(session as any, 'student')}
+            <JoinLessonButton
+              session={session}
               className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100"
             >
               <Play className="w-4 h-4" />
               {t('studentDash.joinMeeting')}
-            </a>
+            </JoinLessonButton>
           )}
 
           <WhiteboardButton
@@ -310,6 +309,8 @@ export function ParentLessonDetailModal({
             sessionStatus={session.status}
             sessionEndTime={(session as any)?.end_time ?? null}
           />
+
+          <SessionFiles sessionId={session.id} role="student" />
 
           {tutorPolicy && session.status === 'active' && (
             <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1.5">
@@ -369,25 +370,6 @@ export function ParentLessonDetailModal({
             !session.paid &&
             isAfter(new Date(session.end_time), now) && (
               <div className="space-y-2">
-                {session.price != null && (!orgIsSchool || orgFee) && (() => {
-                  const b = lessonBreakdown(Number(session.price), orgFee);
-                  return (
-                    <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-sm space-y-1.5">
-                      <div className="flex items-start justify-between gap-3 text-gray-700">
-                        <span>{t('parent.feeBreakdownTeaching', { provider: providerName })}</span>
-                        <span className="font-semibold whitespace-nowrap">{fmt(b.base)}</span>
-                      </div>
-                      <div className="flex items-start justify-between gap-3 text-gray-700">
-                        <span>{t('parent.feeBreakdownPlatform')}</span>
-                        <span className="font-semibold whitespace-nowrap">{fmt(b.fee)}</span>
-                      </div>
-                      <div className="flex items-start justify-between gap-3 pt-1.5 border-t border-gray-200 font-bold text-gray-900">
-                        <span>{t('parent.feeBreakdownTotal')}</span>
-                        <span className="whitespace-nowrap">{fmt(b.total)}</span>
-                      </div>
-                    </div>
-                  );
-                })()}
                 <button
                   type="button"
                   disabled={stripeLoading}

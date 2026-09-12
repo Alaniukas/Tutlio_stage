@@ -1,6 +1,8 @@
 import type { TutlioMarket } from './market.js';
 import { currentMarket } from './market.js';
 import { formatPln } from './formatPln.js';
+import type { OrgPayerFeeSplit } from './orgPayerFeeSplit.js';
+import { payerFeeSplitShare01 } from './orgPayerFeeSplit.js';
 
 export type ChargeCurrency = 'eur' | 'pln';
 
@@ -27,7 +29,7 @@ export type OrgFeeProfile = {
  * server mirror in `api/_lib/marketMoney.ts`.
  */
 export const ORG_FEE_PROFILES: Record<string, OrgFeeProfile> = {
-  // Proklasė: <= €30 → 1.5% + €0.25; > €30 → 2% + €0.10.
+  // Pro Klasė payer fees: <= €30 → Stripe only (1.5% + €0.25 gross-up); > €30 → 2% + €0.10 on top.
   proklase: {
     tiers: [
       { maxBase: 30, percent: 0.015, fixed: 0.25 },
@@ -35,6 +37,24 @@ export const ORG_FEE_PROFILES: Record<string, OrgFeeProfile> = {
     ],
   },
 };
+
+const PRO_KLASE_LOW_TIER_MAX_BASE = 30;
+const PRO_KLASE_HIGH_TIER_PERCENT = 0.02;
+const PRO_KLASE_HIGH_TIER_FIXED_EUR = 0.1;
+
+export function isProKlaseFeeProfile(profile: OrgFeeProfile | null | undefined): boolean {
+  if (!profile) return false;
+  return profile === ORG_FEE_PROFILES.proklase
+    || Object.values(ORG_FEE_PROFILE_BY_ID).includes(profile);
+}
+
+function proKlaseCustomerTotal(baseAmount: number, market: TutlioMarket): number {
+  const fixed = stripeFixedFee(market);
+  if (baseAmount <= PRO_KLASE_LOW_TIER_MAX_BASE) {
+    return (baseAmount + fixed) / (1 - MARKET_FEES.stripePercent);
+  }
+  return baseAmount + baseAmount * PRO_KLASE_HIGH_TIER_PERCENT + PRO_KLASE_HIGH_TIER_FIXED_EUR;
+}
 
 /** Canonical Pro Klasė org UUID (slug is admin-editable). */
 export const PRO_KLASE_ORG_ID = '3422031d-6e21-424d-980b-35a9c6d7b8f1';
@@ -68,6 +88,12 @@ export function isManoKorepetitoriusOrg(orgIdOrSlug?: string | null): boolean {
   if (!orgIdOrSlug) return false;
   const key = orgIdOrSlug.trim().toLowerCase();
   return key === MANO_KOREPETITORIUS_ORG_ID || key === MANO_KOREPETITORIUS_SLUG;
+}
+
+export function isLaisviVaikaiOrg(orgIdOrSlug?: string | null): boolean {
+  if (!orgIdOrSlug) return false;
+  const key = orgIdOrSlug.trim().toLowerCase();
+  return key === LAISVI_VAIKIAI_ORG_ID || key === LAISVI_VAIKIAI_SLUG;
 }
 
 export function isMoksloVaisiaiOrg(orgIdOrSlug?: string | null): boolean {
@@ -161,22 +187,45 @@ export function stripeFixedFee(market: TutlioMarket): number {
 export function orgBaseFromPayerChargedTotal(
   payerTotal: number,
   profile: OrgFeeProfile | null | undefined,
+  market: TutlioMarket = 'default',
 ): number {
   const total = Math.round(Number(payerTotal) * 100) / 100;
   if (!Number.isFinite(total) || total <= 0) return 0;
-  if (!profile) return total;
+
+  const netBeforeStripe = total * (1 - MARKET_FEES.stripePercent);
+  const stripeFixed = stripeFixedFee(market);
+
+  if (!profile) {
+    const base = (netBeforeStripe - stripeFixed) / (1 + MARKET_FEES.platformPercent);
+    const rounded = Math.round(base * 100) / 100;
+    if (rounded > 0 && Math.abs(customerTotal(rounded, market, null) - total) <= 0.01) return rounded;
+    return total;
+  }
+
+  if (isProKlaseFeeProfile(profile)) {
+    const baseLow = netBeforeStripe - stripeFixed;
+    const roundedLow = Math.round(baseLow * 100) / 100;
+    if (roundedLow > 0 && roundedLow <= PRO_KLASE_LOW_TIER_MAX_BASE
+      && Math.abs(customerTotal(roundedLow, market, profile) - total) <= 0.01) {
+      return roundedLow;
+    }
+    const baseHigh = (total - PRO_KLASE_HIGH_TIER_FIXED_EUR) / (1 + PRO_KLASE_HIGH_TIER_PERCENT);
+    const roundedHigh = Math.round(baseHigh * 100) / 100;
+    if (roundedHigh > PRO_KLASE_LOW_TIER_MAX_BASE
+      && Math.abs(customerTotal(roundedHigh, market, profile) - total) <= 0.01) {
+      return roundedHigh;
+    }
+    return total;
+  }
+
   let lower = 0;
   for (const tier of profile.tiers) {
-    const base = Math.round(((total - tier.fixed) / (1 + tier.percent)) * 100) / 100;
+    const base = (netBeforeStripe - stripeFixed - tier.fixed) / (1 + tier.percent);
     const upper = tier.maxBase;
-    const cents = Math.round(base * 100);
-    if (cents % 5 !== 0) {
-      if (upper !== Infinity) lower = upper;
-      continue;
-    }
     const inBand = base > lower && (upper === Infinity || base <= upper);
-    const gross = Math.round((base + base * tier.percent + tier.fixed) * 100) / 100;
-    if (inBand && Math.abs(gross - total) <= 0.01) return base;
+    if (inBand && Math.abs(customerTotal(base, market, profile) - total) <= 0.01) {
+      return Math.round(base * 100) / 100;
+    }
     if (upper !== Infinity) lower = upper;
   }
   return total;
@@ -186,10 +235,22 @@ export function customerTotal(
   baseAmount: number,
   market: TutlioMarket = 'default',
   feeProfile?: OrgFeeProfile | null,
+  feeSplit?: OrgPayerFeeSplit | null,
 ): number {
-  if (feeProfile) return baseAmount + orgProfileFee(baseAmount, feeProfile);
-  const platformFee = baseAmount * MARKET_FEES.platformPercent;
+  if (isProKlaseFeeProfile(feeProfile)) {
+    return proKlaseCustomerTotal(baseAmount, market);
+  }
   const fixed = stripeFixedFee(market);
+  if (feeSplit) {
+    const payerPlatform = baseAmount * MARKET_FEES.platformPercent * payerFeeSplitShare01(feeSplit.platformShare);
+    const payerStripeFixed = fixed * payerFeeSplitShare01(feeSplit.stripeFixedShare);
+    const payerStripeRate = MARKET_FEES.stripePercent * payerFeeSplitShare01(feeSplit.stripePercentShare);
+    if (payerStripeRate <= 0) {
+      return Math.round((baseAmount + payerPlatform + payerStripeFixed) * 100) / 100;
+    }
+    return Math.round(((baseAmount + payerPlatform + payerStripeFixed) / (1 - payerStripeRate)) * 100) / 100;
+  }
+  const platformFee = baseAmount * MARKET_FEES.platformPercent;
   return (baseAmount + platformFee + fixed) / (1 - MARKET_FEES.stripePercent);
 }
 
@@ -197,8 +258,9 @@ export function lessonCheckoutBreakdownCents(
   baseAmount: number,
   market: TutlioMarket = 'default',
   feeProfile?: OrgFeeProfile | null,
+  feeSplit?: OrgPayerFeeSplit | null,
 ): { baseCents: number; feesCents: number; totalCents: number } {
-  const total = customerTotal(baseAmount, market, feeProfile);
+  const total = customerTotal(baseAmount, market, feeProfile, feeSplit);
   const totalCents = Math.round(total * 100);
   const baseCents = Math.round(baseAmount * 100);
   return { baseCents, feesCents: totalCents - baseCents, totalCents };
@@ -242,11 +304,14 @@ export function formatLessonStripeCharge(
   tutorOrganizationIsSchool: boolean,
   market: TutlioMarket = 'default',
   feeProfile?: OrgFeeProfile | null,
+  feeSplit?: OrgPayerFeeSplit | null,
 ): string {
   const p = Number(lessonBasePrice);
   if (!Number.isFinite(p) || p <= 0) return '—';
   // A custom org fee profile is charged on top even for school orgs (the payer pays the fee).
-  const charge = (tutorOrganizationIsSchool && !feeProfile) ? p : customerTotal(p, market, feeProfile);
+  const charge = (tutorOrganizationIsSchool && !feeProfile)
+    ? p
+    : customerTotal(p, market, feeProfile, feeSplit);
   return market === 'pl'
     ? formatPln(charge)
     : `€${charge.toFixed(2)}`;
@@ -256,8 +321,9 @@ export function lessonStripeBreakdown(
   lessonPrice: number,
   market: TutlioMarket = 'default',
   feeProfile?: OrgFeeProfile | null,
+  feeSplit?: OrgPayerFeeSplit | null,
 ): { base: number; fee: number; total: number } {
-  const { baseCents, feesCents, totalCents } = lessonCheckoutBreakdownCents(lessonPrice, market, feeProfile);
+  const { baseCents, feesCents, totalCents } = lessonCheckoutBreakdownCents(lessonPrice, market, feeProfile, feeSplit);
   return {
     base: baseCents / 100,
     fee: feesCents / 100,

@@ -8,6 +8,8 @@ import { verifyRequestAuth } from './_lib/auth.js';
 import { sendPushForUserId } from './_lib/sendPush.js';
 import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission, normalizeOrgAdminPermissions } from '../src/lib/orgAdminPermissions.js';
+import { isMoksloVaisiaiOrg } from './_lib/marketMoney.js';
+import { studentLoginNameFromEmail } from '../src/lib/studentLoginIdentity.js';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -41,7 +43,7 @@ async function resolveDisplayName(sb: any, userId: string): Promise<string> {
   return s?.full_name?.trim() || 'Tutlio';
 }
 
-async function resolveRecipientEmail(
+export async function resolveRecipientEmail(
   sb: any,
   userId: string,
 ): Promise<{ email: string | null; name: string }> {
@@ -62,7 +64,14 @@ async function resolveRecipientEmail(
   }
   try {
     const { data: authData } = await sb.auth.admin.getUserById(userId);
-    const authEmail = authData?.user?.email?.trim();
+    const user = authData?.user;
+    const managedContactValue = user?.app_metadata?.student_login_name
+      && isMoksloVaisiaiOrg(user.app_metadata.provisioned_by_organization)
+      ? user.app_metadata.student_contact_email
+      : null;
+    const managedContact = typeof managedContactValue === 'string' ? managedContactValue.trim() : null;
+    const rawEmail = user?.email?.trim();
+    const authEmail = managedContact || (rawEmail && !studentLoginNameFromEmail(rawEmail) ? rawEmail : null);
     if (authEmail) {
       return {
         email: authEmail,

@@ -30,12 +30,14 @@ import {
   RefreshCw,
   CheckCircle2,
   Mail,
+  Trash2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { orgTutorSessionPayEur } from '@/lib/orgTutorLessonPay';
 import { ORG_TUTOR_CARD_LIST_SCROLL_CLASS } from '@/lib/orgUi';
+import { isInvoiceProfileComplete } from '@/lib/invoiceProfileReady';
 
 interface Invoice {
   id: string;
@@ -107,6 +109,8 @@ export default function CompanyInvoices() {
   const [sortAsc, setSortAsc] = useState(true);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [remindingId, setRemindingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [orgInvoiceProfileReady, setOrgInvoiceProfileReady] = useState<boolean | null>(null);
 
   const tutorEffectiveRange = useMemo(() => {
     if (tutorPeriodMode === 'month' && tutorMonth && /^\d{4}-\d{2}$/.test(tutorMonth)) {
@@ -160,9 +164,11 @@ export default function CompanyInvoices() {
 
     const { data: orgInvProf } = await supabase
       .from('invoice_profiles')
-      .select('business_name')
+      .select('entity_type, business_name, company_code, address, activity_number, contact_email, contact_phone')
       .eq('organization_id', orgIdVal)
       .maybeSingle();
+
+    setOrgInvoiceProfileReady(isInvoiceProfileComplete(orgInvProf));
 
     const buyerNameSet = new Set<string>();
     for (const raw of [(orgRow as { name?: string } | null)?.name, orgInvProf?.business_name]) {
@@ -481,6 +487,34 @@ export default function CompanyInvoices() {
     }
   };
 
+  const handleDelete = async (invoiceId: string) => {
+    const target = invoices.find((inv) => inv.id === invoiceId);
+    if (!target) return;
+    if (target.status === 'paid' || target.billing_batches?.paid) return;
+    const confirmed = window.confirm(t('invoices.deleteConfirm'));
+    if (!confirmed) return;
+    setDeletingId(invoiceId);
+    try {
+      const res = await fetch('/api/delete-invoice', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ invoiceId }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        window.alert(body.error || t('invoices.deleteFailed'));
+        return;
+      }
+      setInvoices((prev) => prev.filter((inv) => inv.id !== invoiceId));
+      window.alert(t('invoices.deleteSuccess'));
+    } catch (e) {
+      console.error('[CompanyInvoices] delete error:', e);
+      window.alert(t('invoices.deleteFailed'));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const handleMarkPaid = async (invoiceId: string) => {
     const target = invoices.find(inv => inv.id === invoiceId);
     if (!target) return;
@@ -548,7 +582,9 @@ export default function CompanyInvoices() {
             </Button>
             <Button
               onClick={() => setIsCreateOpen(true)}
-              className="rounded-xl gap-2 bg-indigo-600 hover:bg-indigo-700 touch-manipulation flex-1 min-w-0 sm:flex-initial"
+              disabled={orgInvoiceProfileReady === false}
+              title={orgInvoiceProfileReady === false ? t('invoices.orgProfileIncompleteHint') : undefined}
+              className="rounded-xl gap-2 bg-indigo-600 hover:bg-indigo-700 touch-manipulation flex-1 min-w-0 sm:flex-initial disabled:opacity-50"
             >
               <Plus className="w-4 h-4 shrink-0" />
               <span className="truncate">{t('invoices.create')}</span>
@@ -574,13 +610,33 @@ export default function CompanyInvoices() {
           )}
         </div>
 
+        {orgInvoiceProfileReady === false && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-amber-900">{t('invoices.orgProfileIncomplete')}</p>
+              <p className="text-xs text-amber-800 mt-1">{t('invoices.orgProfileIncompleteHint')}</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl border-amber-300 text-amber-900 hover:bg-amber-100 shrink-0"
+              onClick={() => setShowSettings(true)}
+            >
+              {t('invoices.openOrgSettings')}
+            </Button>
+          </div>
+        )}
+
         <div className={showSettings ? '' : 'hidden'}>
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('invoices.orgSettingsTitle')}</h2>
             <InvoiceSettingsForm
               scope="organization"
               allowedEntityTypes={['mb', 'uab', 'ii', 'individuali_veikla']}
-              onSaved={() => setShowSettings(false)}
+              onSaved={() => {
+                setShowSettings(false);
+                void loadData();
+              }}
             />
           </div>
         </div>
@@ -1157,6 +1213,20 @@ export default function CompanyInvoices() {
                               </Button>
                             </>
                           )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(inv.id)}
+                            disabled={deletingId === inv.id || inv.billing_batches?.paid === true}
+                            className="rounded-lg text-red-600 hover:text-red-700 hover:bg-red-50"
+                            title={t('invoices.delete')}
+                          >
+                            {deletingId === inv.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"

@@ -9,10 +9,14 @@ const LAST_PORTAL_KEY = 'tutlio_last_portal';
 
 export function isStandalonePwa(): boolean {
   if (typeof window === 'undefined') return false;
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as any).standalone === true
-  );
+  try {
+    return (
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true
+    );
+  } catch {
+    return (window.navigator as any).standalone === true;
+  }
 }
 
 export function setLastPortal(portal: LastPortal): void {

@@ -24,7 +24,7 @@ const schoolsEn: PlatformLocaleConfig = {
   overrides: {
     'nav.platform': 'Platform',
     'nav.forTutors': 'Tutors',
-    'nav.forSchools': 'Schools',
+    'nav.forSchools': 'Online schools',
     'nav.brandSchools': 'Tutlio Schools',
   },
 };
@@ -61,7 +61,7 @@ const schoolsLt: PlatformLocaleConfig = {
   overrides: {
     'nav.platform': 'Platforma',
     'nav.forTutors': 'Korepetitoriai',
-    'nav.forSchools': 'Mokykloms',
+    'nav.forSchools': 'Internetinės mokyklos',
     'nav.brandSchools': 'Tutlio Schools',
   },
 };
@@ -75,7 +75,7 @@ const schoolsPl: PlatformLocaleConfig = {
   overrides: {
     'nav.platform': 'Platforma',
     'nav.forTutors': 'Korepetytorzy',
-    'nav.forSchools': 'Szkoły',
+    'nav.forSchools': 'Szkoły online',
     'nav.brandSchools': 'Tutlio Schools',
   },
 };
@@ -87,7 +87,7 @@ const schoolsLv: PlatformLocaleConfig = {
   overrides: {
     'nav.platform': 'Platforma',
     'nav.forTutors': 'Privātskolotāji',
-    'nav.forSchools': 'Skolām',
+    'nav.forSchools': 'Tiešsaistes skolas',
     'nav.brandSchools': 'Tutlio Schools',
   },
 };
@@ -99,7 +99,7 @@ const schoolsEe: PlatformLocaleConfig = {
   overrides: {
     'nav.platform': 'Platvorm',
     'nav.forTutors': 'Õpetajad',
-    'nav.forSchools': 'Koolidele',
+    'nav.forSchools': 'Veebikoolid',
     'nav.brandSchools': 'Tutlio Schools',
   },
 };
@@ -115,7 +115,7 @@ const teachersEn: PlatformLocaleConfig = {
   overrides: {
     'nav.platform': 'Platform',
     'nav.forTutors': 'Tutors',
-    'nav.forSchools': 'Schools',
+    'nav.forSchools': 'Online schools',
     'nav.brandSchools': 'Tutlio Schools',
   },
 };
@@ -157,7 +157,7 @@ const teachersLt: PlatformLocaleConfig = {
   overrides: {
     'nav.platform': 'Platforma',
     'nav.forTutors': 'Korepetitoriai',
-    'nav.forSchools': 'Mokykloms',
+    'nav.forSchools': 'Internetinės mokyklos',
     'nav.brandSchools': 'Tutlio Schools',
   },
 };
@@ -173,7 +173,7 @@ const teachersPl: PlatformLocaleConfig = {
   overrides: {
     'nav.platform': 'Platforma',
     'nav.forTutors': 'Korepetytorzy',
-    'nav.forSchools': 'Szkoły',
+    'nav.forSchools': 'Szkoły online',
     'nav.brandSchools': 'Tutlio Schools',
   },
 };
@@ -185,7 +185,7 @@ const teachersLv: PlatformLocaleConfig = {
   overrides: {
     'nav.platform': 'Platforma',
     'nav.forTutors': 'Privātskolotāji',
-    'nav.forSchools': 'Skolām',
+    'nav.forSchools': 'Tiešsaistes skolas',
     'nav.brandSchools': 'Tutlio Schools',
   },
 };
@@ -197,7 +197,7 @@ const teachersEe: PlatformLocaleConfig = {
   overrides: {
     'nav.platform': 'Platvorm',
     'nav.forTutors': 'Õpetajad',
-    'nav.forSchools': 'Koolidele',
+    'nav.forSchools': 'Veebikoolid',
     'nav.brandSchools': 'Tutlio Schools',
   },
 };

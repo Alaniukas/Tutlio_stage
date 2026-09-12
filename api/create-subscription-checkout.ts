@@ -6,6 +6,7 @@ import { buildPublicPath, publicOriginFromRequest, type CheckoutAudience } from 
 import { marketFromRequest } from './_lib/market.js';
 import { stripeSubscriptionEnv } from './_lib/stripe-subscription-env.js';
 import { isEnterpriseLicensePriceId } from './_lib/enterprise-license.js';
+import { subscriptionCurrencyFor } from '../src/lib/localeCurrency.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const DEFAULT_SUBSCRIPTION_ONLY_PRODUCT_IDS = {
@@ -79,6 +80,28 @@ function trialPeriodDaysForCode(code?: string): number | undefined {
     return DEFAULT_TRIAL_PERIOD_DAYS;
   }
   return undefined;
+}
+
+/**
+ * Create the session; when a USD checkout is rejected because the price has no
+ * USD currency option yet (`npm run stripe:setup-usd` not run on this account),
+ * fall back to the price's own currency rather than blocking the purchase.
+ */
+async function createCheckoutSession(
+  stripeClient: Stripe,
+  params: Stripe.Checkout.SessionCreateParams,
+): Promise<Stripe.Checkout.Session> {
+  try {
+    return await stripeClient.checkout.sessions.create(params);
+  } catch (error) {
+    const message = String((error as { message?: string })?.message || '');
+    if (params.currency && /currenc/i.test(message)) {
+      console.warn(`Stripe rejected currency=${params.currency}; retrying in the price currency: ${message}`);
+      const { currency: _dropped, ...withoutCurrency } = params;
+      return stripeClient.checkout.sessions.create(withoutCurrency);
+    }
+    throw error;
+  }
 }
 
 function isTrialCode(code?: string): boolean {
@@ -201,6 +224,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const market = marketFromRequest(req);
+    // Interface languages without a supported local currency pay USD through the
+    // multi-currency option on the same EUR price (npm run stripe:setup-usd).
+    const checkoutCurrency = subscriptionCurrencyFor(market, localeCode);
+    const currencyParams = checkoutCurrency === 'USD' ? { currency: 'usd' as const } : {};
     const stripeEnv = stripeSubscriptionEnv(market);
 
     const isSubscriptionOnlyPlan = plan === 'subscription_only' || plan === 'subscription_only_yearly';
@@ -300,6 +327,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (plan === 'yearly' && price.type === 'one_time') {
       const sessionParams: Stripe.Checkout.SessionCreateParams = {
         mode: 'payment',
+        ...currencyParams,
         payment_method_types: isEmbedded ? ['card', 'link'] : ['card', 'link', 'revolut_pay'],
         line_items: [{ price: priceId, quantity: 1 }],
         ...(isEmbedded
@@ -325,7 +353,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(400).json({ error: 'Nepavyko pritaikyti nuolaidos kodo' });
         }
       }
-      const session = await stripe.checkout.sessions.create(sessionParams);
+      const session = await createCheckoutSession(stripe, sessionParams);
       if (isEmbedded) {
         if (!session.client_secret) throw new Error('Stripe did not return an Embedded Checkout client secret');
         return res.status(200).json({
@@ -354,6 +382,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: 'subscription',
+      ...currencyParams,
       payment_method_types: isEmbedded ? ['card', 'link'] : ['card', 'link', 'revolut_pay'],
       line_items: [{ price: priceId, quantity: 1 }],
       ...(isEmbedded
@@ -398,7 +427,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sessionParams.allow_promotion_codes = true;
     }
 
-    const session = await stripe.checkout.sessions.create(sessionParams);
+    const session = await createCheckoutSession(stripe, sessionParams);
 
     if (isEmbedded && !session.client_secret) {
       throw new Error('Stripe did not return an Embedded Checkout client secret');

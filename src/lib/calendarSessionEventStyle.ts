@@ -9,8 +9,18 @@ export type CalendarSessionStyleInput = {
   isMovedLesson?: boolean;
   /** Org tutor: status-only coloring (no payment amber). */
   isOrgTutor?: boolean;
+  /** Mokslo vaisiai use a dedicated trial/completed calendar palette. */
+  useMoksloVaisiaiPalette?: boolean;
   defaultColor?: string;
 };
+
+export const MOKSLO_VAISIAI_CALENDAR_COLORS = {
+  trialBackground: '#e5e7eb',
+  trialBorder: '#9ca3af',
+  trialText: '#374151',
+  completedBackground: '#facc15',
+  completedText: '#422006',
+} as const;
 
 const TRIAL_BG = '#a855f7';
 const TRIAL_BORDER = '#7e22ce';
@@ -41,6 +51,7 @@ export function getCalendarSessionEventStyle(input: CalendarSessionStyleInput): 
     cancellationReasonCode,
     isMovedLesson,
     isOrgTutor,
+    useMoksloVaisiaiPalette,
     defaultColor = ACTIVE_BG,
   } = input;
 
@@ -63,14 +74,24 @@ export function getCalendarSessionEventStyle(input: CalendarSessionStyleInput): 
     };
   }
 
-  const hasEnded = endAt.getTime() <= Date.now();
+  const endMs = endAt instanceof Date ? endAt.getTime() : new Date(endAt as Date).getTime();
+  const hasEnded = Number.isFinite(endMs) && endMs <= Date.now();
   const isPaid =
     paid === true || payment_status === 'paid' || payment_status === 'confirmed';
+  const isMoksloVaisiaiTrial = useMoksloVaisiaiPalette === true && isTrial === true;
+  const isMoksloVaisiaiEnded =
+    useMoksloVaisiaiPalette === true &&
+    !isTrial &&
+    (status === 'completed' || (status === 'active' && hasEnded));
 
   let backgroundColor = defaultColor;
 
   if (isTrial) {
-    backgroundColor = TRIAL_BG;
+    backgroundColor = isMoksloVaisiaiTrial
+      ? MOKSLO_VAISIAI_CALENDAR_COLORS.trialBackground
+      : TRIAL_BG;
+  } else if (isMoksloVaisiaiEnded) {
+    backgroundColor = MOKSLO_VAISIAI_CALENDAR_COLORS.completedBackground;
   } else if (isOrgTutor) {
     if (status === 'completed') {
       backgroundColor = isPaid ? PAID_BG : UNPAID_BG;
@@ -109,24 +130,36 @@ export function getCalendarSessionEventStyle(input: CalendarSessionStyleInput): 
       backgroundColor,
       border: '2px dashed #f59e0b',
       boxShadow: 'inset 0 0 0 9999px rgba(245, 158, 11, 0.18)',
-      color: '#fff',
+      color: isMoksloVaisiaiEnded
+        ? MOKSLO_VAISIAI_CALENDAR_COLORS.completedText
+        : '#fff',
     };
   }
 
   if (isTrial) {
     return {
       backgroundColor,
-      border: '2px solid #7e22ce',
-      borderColor: TRIAL_BORDER,
-      boxShadow: 'inset 0 0 0 9999px rgba(126, 34, 206, 0.15)',
-      color: '#fff',
+      border: isMoksloVaisiaiTrial
+        ? `2px solid ${MOKSLO_VAISIAI_CALENDAR_COLORS.trialBorder}`
+        : '2px solid #7e22ce',
+      borderColor: isMoksloVaisiaiTrial
+        ? MOKSLO_VAISIAI_CALENDAR_COLORS.trialBorder
+        : TRIAL_BORDER,
+      boxShadow: isMoksloVaisiaiTrial
+        ? 'inset 0 0 0 9999px rgba(107, 114, 128, 0.05)'
+        : 'inset 0 0 0 9999px rgba(126, 34, 206, 0.15)',
+      color: isMoksloVaisiaiTrial
+        ? MOKSLO_VAISIAI_CALENDAR_COLORS.trialText
+        : '#fff',
     };
   }
 
   return {
     backgroundColor,
     border: 'none',
-    color: '#fff',
+    color: isMoksloVaisiaiEnded
+      ? MOKSLO_VAISIAI_CALENDAR_COLORS.completedText
+      : '#fff',
   };
 }
 

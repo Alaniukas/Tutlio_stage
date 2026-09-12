@@ -19,6 +19,8 @@ const AboutUs = lazy(() => import('@/pages/AboutUs'));
 const Contact = lazy(() => import('@/pages/Contact'));
 const FeaturePage = lazy(() => import('@/pages/FeaturePage'));
 const FeaturesIndexPage = lazy(() => import('@/pages/FeaturesIndexPage'));
+const ComparePage = lazy(() => import('@/pages/ComparePage'));
+const CompareIndexPage = lazy(() => import('@/pages/CompareIndexPage'));
 const Pricing = lazy(() => import('@/pages/Pricing'));
 const Blog = lazy(() => import('@/pages/Blog'));
 const BlogPost = lazy(() => import('@/pages/BlogPost'));
@@ -66,6 +68,7 @@ const AdminPanel = lazy(() => import('@/pages/AdminPanel'));
 const CompanyLogin = lazy(() => import('@/pages/CompanyLogin'));
 const CompanyLayout = lazy(() => import('@/components/CompanyLayout'));
 const CompanyDashboard = lazy(() => import('@/pages/company/CompanyDashboard'));
+const SchoolDashboard = lazy(() => import('@/pages/company/SchoolDashboard'));
 const CompanyTutors = lazy(() => import('@/pages/company/CompanyTutors'));
 const CompanyStudents = lazy(() => import('@/pages/company/CompanyStudents'));
 const CompanyWaitlist = lazy(() => import('@/pages/company/CompanyWaitlist'));
@@ -98,6 +101,8 @@ const ParentSettings = lazy(() => import('@/pages/ParentSettings'));
 const ParentRegister = lazy(() => import('@/pages/ParentRegister'));
 const SchoolContractComplete = lazy(() => import('@/pages/SchoolContractComplete'));
 const SchoolExtraLessonsAccept = lazy(() => import('@/pages/SchoolExtraLessonsAccept'));
+const MvAccountActivate = lazy(() => import('@/pages/MvAccountActivate'));
+const SchoolHomework = lazy(() => import('@/pages/SchoolHomework'));
 const StripeSuccess = lazy(() => import('@/pages/StripeSuccess'));
 const EnterpriseSuccess = lazy(() => import('@/pages/EnterpriseSuccess'));
 const PerlasSuccess = lazy(() => import('@/pages/PerlasSuccess'));
@@ -110,6 +115,7 @@ const SupportWidget = lazy(() => import('@/components/support/SupportWidget'));
 import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
 import ThemeColorManager from '@/hooks/useThemeColor';
 import LocaleRouteSync from '@/components/LocaleRouteSync';
+import { Analytics } from '@vercel/analytics/react';
 
 /** New routes start at the top; in-page scrolling remains owned by the page. */
 function ScrollToTopOnRouteChange() {
@@ -270,6 +276,13 @@ export default function App({ basename }: { basename: string }) {
             /:locale above, so /new-landing is never read as a locale. */}
         <Route path="/new-landing" element={<Landing />} />
         <Route path="/:locale/new-landing" element={<Landing />} />
+        {/* Solo-tutor landing on its own URL; `/` is the agency/school landing. */}
+        <Route path="/for-tutors" element={<Landing audience="solo" />} />
+        <Route path="/:locale/for-tutors" element={<Landing audience="solo" />} />
+        <Route path="/compare" element={<CompareIndexPage />} />
+        <Route path="/:locale/compare" element={<CompareIndexPage />} />
+        <Route path="/compare/:competitor" element={<ComparePage />} />
+        <Route path="/:locale/compare/:competitor" element={<ComparePage />} />
         <Route path="/apie-mus" element={<AboutUs />} />
         <Route path="/:locale/apie-mus" element={<AboutUs />} />
         {/* English aliases — same canonical pages, kept in sync with bot SSR (middleware.ts). */}
@@ -323,8 +336,11 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/:locale/book/:inviteCode" element={<StudentOnboarding />} />
         <Route path="/parent-register" element={<ParentRegister />} />
         <Route path="/:locale/parent-register" element={<ParentRegister />} />
+        <Route path="/mv-account-activate" element={<MvAccountActivate />} />
+        <Route path="/:locale/mv-account-activate" element={<MvAccountActivate />} />
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
         <Route path="/school-extra-lessons-accept" element={<SchoolExtraLessonsAccept />} />
+        <Route path="/school-homework" element={<SchoolHomework />} />
         <Route path="/school-sign" element={<SchoolSign />} />
         <Route path="/school-sign/return" element={<SchoolSignReturn />} />
         <Route path="/unsubscribe" element={<UnsubscribeReminders />} />
@@ -353,6 +369,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/groups" element={<TutorClassGroupsPage />} />
+          <Route path="/recordings" element={<CompanyLessonRecordings />} />
           <Route path="/students" element={<StudentsPage />} />
           <Route path="/waitlist" element={<WaitlistPage />} />
           <Route path="/messages" element={<Messages />} />
@@ -372,6 +389,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/student" element={<StudentDashboard />} />
           <Route path="/student/schedule" element={<RequireStudentBooking><StudentSchedule /></RequireStudentBooking>} />
           <Route path="/student/sessions" element={<StudentSessions />} />
+          <Route path="/student/recordings" element={<CompanyLessonRecordings />} />
           <Route path="/student/messages" element={<StudentMessages />} />
           <Route path="/student/waitlist" element={<RequireStudentBooking><StudentWaitlist /></RequireStudentBooking>} />
           <Route path="/student/payments" element={<RequireStudentPayments><StudentPayments /></RequireStudentPayments>} />
@@ -387,6 +405,7 @@ export default function App({ basename }: { basename: string }) {
               StudentSchedule detects parent mode via studentId in the URL. */}
           <Route path="/parent/calendar" element={<StudentSchedule />} />
           <Route path="/parent/lessons" element={<StudentSessions />} />
+          <Route path="/parent/recordings" element={<CompanyLessonRecordings />} />
           {/* Legacy child routes – redirect everything booking-related to the parent calendar. */}
           <Route
             path="/parent/child/:studentId/schedule"
@@ -434,7 +453,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/team" element={<OrgPermissionRoute permission="team.view" editPermission="team.edit"><CompanyTeam /></OrgPermissionRoute>} />
             <Route path="/company/groups" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyClassGroups /></OrgPermissionRoute>} />
 
-            <Route path="/school" element={<OrgPermissionRoute permission="dashboard.view"><CompanyDashboard /></OrgPermissionRoute>} />
+            <Route path="/school" element={<OrgPermissionRoute permission="dashboard.view"><SchoolDashboard /></OrgPermissionRoute>} />
             <Route path="/school/tutors" element={<OrgPermissionRoute permission="tutors.view" editPermission="tutors.edit"><CompanyTutors /></OrgPermissionRoute>} />
             <Route path="/school/students" element={<OrgPermissionRoute permission="students.view" editPermission="students.edit"><CompanyStudents /></OrgPermissionRoute>} />
             <Route path="/school/waitlist" element={<OrgPermissionRoute permission="students.view" editPermission="students.edit"><CompanyWaitlist /></OrgPermissionRoute>} />
@@ -453,12 +472,15 @@ export default function App({ basename }: { basename: string }) {
           </Route>
         </Route>
 
+        <Route path="/contracts" element={<Navigate to="/school/contracts" replace />} />
+
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
       </Suspense>
       <Suspense fallback={null}>
         <SupportWidget />
       </Suspense>
+      <Analytics />
     </Router>
   );
 }

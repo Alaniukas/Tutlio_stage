@@ -1,6 +1,7 @@
 import { useTranslation } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { deriveAttendance, type AttendanceSessionLike } from '@/lib/attendance';
+import { isUnconfirmedAutomaticNoShow } from '@/lib/schoolJoinNoShow';
 import { UserCheck, AlertTriangle } from 'lucide-react';
 
 /**
@@ -11,15 +12,33 @@ import { UserCheck, AlertTriangle } from 'lucide-react';
 export default function AttendanceBadge({
   session,
   className,
+  manualConfirmationRequired = false,
 }: {
-  session: AttendanceSessionLike & { meeting_link?: string | null };
+  session: AttendanceSessionLike & { meeting_link?: string | null; no_show_reason?: string | null };
   className?: string;
+  /** Join clicks are hints only until the lesson outcome is explicitly confirmed. */
+  manualConfirmationRequired?: boolean;
 }) {
   const { t } = useTranslation();
   if (!session?.meeting_link) return null;
 
   const info = deriveAttendance(session);
   if (!info.applicable) return null;
+  const automaticNoShowNeedsReview = isUnconfirmedAutomaticNoShow(session);
+
+  if (
+    manualConfirmationRequired
+    && (session.status !== 'no_show' || automaticNoShowNeedsReview)
+    && !session.status_confirmed_at
+    && info.flagged
+  ) {
+    return (
+      <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-100 whitespace-nowrap', className)}>
+        <AlertTriangle className="w-3 h-3" />
+        {t('att.unconfirmed')}
+      </span>
+    );
+  }
 
   const time = (iso: string | null | undefined) =>
     iso ? new Date(iso).toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -28,7 +47,7 @@ export default function AttendanceBadge({
     return (
       <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100 whitespace-nowrap', className)}>
         <UserCheck className="w-3 h-3" />
-        {t('att.bothJoined')}
+        {info.confirmedManually ? t('att.confirmedManually') : t('att.bothJoined')}
       </span>
     );
   }

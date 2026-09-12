@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { CheckCircle2, XCircle, User, Users, UserX } from 'lucide-react';
+import { CheckCircle2, XCircle, User, Users, UserX, CalendarDays } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -10,6 +10,7 @@ interface SessionStatCardsProps {
   showCancellationDetails?: boolean;
   cancelledByTutor?: number;
   cancelledByStudent?: number;
+  totalUpcoming?: number;
 }
 
 export function SessionStatCards({
@@ -19,16 +20,40 @@ export function SessionStatCards({
   showCancellationDetails = false,
   cancelledByTutor = 0,
   cancelledByStudent = 0,
+  totalUpcoming,
 }: SessionStatCardsProps) {
   const { t } = useTranslation();
+  const showUpcoming = totalUpcoming != null;
 
   return (
     <div
       className={cn(
         'grid gap-4',
-        showCancellationDetails ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-5' : 'grid-cols-1 sm:grid-cols-3'
+        showUpcoming
+          ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+          : showCancellationDetails
+            ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-5'
+            : 'grid-cols-1 sm:grid-cols-3'
       )}
     >
+      {showUpcoming && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              {t('companyDash.upcomingLessons')}
+            </CardTitle>
+            <CalendarDays className="h-4 w-4 text-indigo-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-indigo-600">
+              {totalUpcoming}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {t('stats.inSelectedPeriod')}
+            </p>
+          </CardContent>
+        </Card>
+      )}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">

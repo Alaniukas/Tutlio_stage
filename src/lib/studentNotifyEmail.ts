@@ -3,6 +3,7 @@ import {
   moksloVaisiaiPayerInboxEmail,
   moksloVaisiaiRoutesLessonCommsToPayer,
 } from '@/lib/moksloVaisiaiLessonComms';
+import { studentLoginNameFromEmail } from '@/lib/studentLoginIdentity';
 
 /** Resolve where to send booking / session emails for a student row. */
 export async function resolveStudentNotificationEmail(
@@ -28,7 +29,7 @@ export async function resolveStudentNotificationEmail(
     try {
       const { data: prof } = await supabase.from('profiles').select('email').eq('id', uid).maybeSingle();
       const em = String(prof?.email ?? '').trim();
-      if (em) return em;
+      if (em && !studentLoginNameFromEmail(em)) return em;
     } catch {
       /* fall through to MV payer routing */
     }

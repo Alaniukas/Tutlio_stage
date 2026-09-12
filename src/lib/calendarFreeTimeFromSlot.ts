@@ -62,8 +62,10 @@ export function buildRecurringFreeTimeRows(opts: {
   defaultStart: string;
   defaultEnd: string;
   dayTimes: Record<number, DayTime>;
+  startDate: string | null;
   endDate: string | null;
 }): Array<Record<string, unknown>> {
+  const startDate = (opts.startDate || '').trim() || null;
   return opts.days.map((day) => {
     const times = timesForDay(day, opts.sameTimes, opts.defaultStart, opts.defaultEnd, opts.dayTimes);
     return {
@@ -72,6 +74,7 @@ export function buildRecurringFreeTimeRows(opts: {
       start_time: times.start,
       end_time: times.end,
       is_recurring: true,
+      start_date: startDate,
       end_date: opts.endDate,
       subject_ids: [],
       public_bookable: false,

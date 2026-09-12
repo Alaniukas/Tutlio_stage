@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { extractBlogFaqs, blogFaqJsonLd } from '../../api/_lib/blogFaq.js';
-import { isBlogAutoPublishWeekday } from '../../api/_lib/blogMarkets.js';
+import { BLOG_LOCALE_WRITE_ORDER, isBlogAutoPublishWeekday } from '../../api/_lib/blogMarkets.js';
 import { missingBlogLocales } from '../../api/_lib/blogAutoGenerate.js';
+import { BLOG_SCHEMA_LOCALES, blogLocaleColumn } from '../../src/lib/i18n/localeRelease.js';
+import { BLOG_FAQ_LABEL, BLOG_LOCALE_LANGUAGE, BLOG_MARKET_NOTES } from '../../api/_lib/blogMarkets.js';
 
 describe('extractBlogFaqs', () => {
   it('reads question headings after a FAQ section', () => {
@@ -32,15 +34,29 @@ describe('isBlogAutoPublishWeekday', () => {
 describe('missingBlogLocales', () => {
   it('lists every empty locale on a new draft', () => {
     const missing = missingBlogLocales({});
-    expect(missing).toHaveLength(13);
+    expect(missing).toHaveLength(36);
     expect(missing[0]).toBe('en');
   });
 
-  it('skips locales that already have title and body', () => {
-    const post = { title_en: 'A', content_en: 'Body long enough', title_lt: 'B', content_lt: 'Tekstas' };
+  it('skips only locales that have a complete title, excerpt, body and slug', () => {
+    const post = {
+      title_en: 'A', excerpt_en: 'Excerpt', content_en: 'Body long enough', slug_en: 'a',
+      title_lt: 'B', excerpt_lt: 'Ištrauka', content_lt: 'Tekstas', slug_lt: 'b',
+    };
     const missing = missingBlogLocales(post);
     expect(missing).not.toContain('en');
     expect(missing).not.toContain('lt');
     expect(missing).toContain('de');
+  });
+
+  it('has native generation guidance and FAQ labels for every blog locale', () => {
+    for (const locale of BLOG_SCHEMA_LOCALES) {
+      expect(BLOG_LOCALE_LANGUAGE[locale]).toBeTruthy();
+      expect(BLOG_MARKET_NOTES[locale].length).toBeGreaterThan(40);
+      expect(BLOG_FAQ_LABEL[locale]).toBeTruthy();
+      expect(blogLocaleColumn('title', locale)).not.toContain('-');
+    }
+    expect(BLOG_LOCALE_WRITE_ORDER).toHaveLength(BLOG_SCHEMA_LOCALES.length);
+    expect(new Set(BLOG_LOCALE_WRITE_ORDER)).toEqual(new Set(BLOG_SCHEMA_LOCALES));
   });
 });

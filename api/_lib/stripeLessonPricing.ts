@@ -1,5 +1,6 @@
 /**
- * Client pays: lesson price + platform % + estimated Stripe processing fee.
+ * Client pays the lesson price plus Tutlio's platform fee. Stripe processing
+ * fees are charged directly to the connected account.
  * On tutlio.pl amounts and Stripe charges are PLN; elsewhere EUR.
  */
 import type { TutlioMarket } from './market.js';
@@ -10,14 +11,19 @@ import {
   stripeFixedFee,
   type OrgFeeProfile,
 } from './marketMoney.js';
+import type { OrgPayerFeeSplit } from './orgPayerFeeSplit.js';
 
 export const STRIPE_FEE_PERCENT = MARKET_FEES.stripePercent;
 export const PLATFORM_FEE_PERCENT = MARKET_FEES.platformPercent;
 export const STRIPE_FEE_FIXED_EUR = MARKET_FEES.stripeFixed.eur;
 
 /** @deprecated Use customerTotal(amount, market) */
-export function customerTotalEur(lessonPriceEur: number, feeProfile?: OrgFeeProfile | null): number {
-  return customerTotal(lessonPriceEur, 'default', feeProfile);
+export function customerTotalEur(
+  lessonPriceEur: number,
+  feeProfile?: OrgFeeProfile | null,
+  feeSplit?: OrgPayerFeeSplit | null,
+): number {
+  return customerTotal(lessonPriceEur, 'default', feeProfile, feeSplit);
 }
 
 export { customerTotal, lessonCheckoutBreakdownCents };

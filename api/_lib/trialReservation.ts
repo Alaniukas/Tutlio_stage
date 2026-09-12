@@ -205,7 +205,8 @@ export async function sendTrialReservationConfirmedNotifications(
 
   for (const h of holds) {
     const tutor = tutorById.get(h.tutor_id);
-    if (!tutor?.email || !isOrgTutor(tutor.organization_id)) continue;
+    // Org tutors already get booking/reservation notices — skip payment confirmation.
+    if (!tutor?.email || isOrgTutor(tutor.organization_id)) continue;
     const student = studentById.get(h.student_id);
     const start = new Date(h.start_time);
     await postInternalEmail(baseUrl, {

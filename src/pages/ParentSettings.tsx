@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import ParentLayout from '@/components/ParentLayout';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
-import { Archive, Eye, EyeOff, Check, LogOut, BellOff, Bell, AlertTriangle, UserPlus, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Check, LogOut, BellOff, Bell, AlertTriangle, UserPlus, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
 import { parentFullNameForUserDeduped } from '@/lib/preload';
 import { getCached } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
+import { isPendingChildName } from '@/lib/pendingChildName';
 
 type MvChild = {
   studentId: string;
@@ -64,13 +65,15 @@ export default function ParentSettings() {
   const [isMvParent, setIsMvParent] = useState(false);
   const [mvChildren, setMvChildren] = useState<MvChild[] | null>(null);
   const [addChildName, setAddChildName] = useState('');
-  const [addChildEmail, setAddChildEmail] = useState('');
   const [addingChild, setAddingChild] = useState(false);
   const [inviteDrafts, setInviteDrafts] = useState<Record<string, string>>({});
+  const [inviteOpenIds, setInviteOpenIds] = useState<Record<string, boolean>>({});
   const [inviteBusyId, setInviteBusyId] = useState<string | null>(null);
   const [archiveConfirmId, setArchiveConfirmId] = useState<string | null>(null);
   const [archivingId, setArchivingId] = useState<string | null>(null);
   const [childBanner, setChildBanner] = useState<string | null>(null);
+  const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
+  const [nameBusyId, setNameBusyId] = useState<string | null>(null);
 
   const loadMvChildren = async () => {
     setMvChildrenLoading(true);
@@ -217,28 +220,26 @@ export default function ParentSettings() {
     setChildBanner(null);
     try {
       const headers = await authHeaders();
-      const inviteEmail = addChildEmail.trim();
       const res = await fetch('/api/parent-child', {
         method: 'POST',
         headers,
         body: JSON.stringify({
           action: 'add',
           fullName: addChildName.trim(),
-          email: inviteEmail || undefined,
         }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.error === 'invalid_email' ? t('parent.inviteChildInvalidEmail') : t('parent.addChildFailed'));
+        const duplicate = body?.error === 'child_already_exists';
+        setError(t(duplicate ? 'parent.childAlreadyExists' : 'parent.addChildFailed'));
+        if (duplicate) {
+          await loadMvChildren();
+          if (body.studentId) setInviteOpenIds((prev) => ({ ...prev, [body.studentId]: true }));
+        }
         return;
       }
       setAddChildName('');
-      setAddChildEmail('');
-      setChildBanner(
-        body?.emailSent === false && inviteEmail
-          ? t('parent.inviteChildFailed')
-          : t('parent.addChildSuccess'),
-      );
+      setChildBanner(t('parent.addChildSuccess'));
       await loadMvChildren();
     } catch {
       setError(t('parent.addChildFailed'));
@@ -275,6 +276,32 @@ export default function ParentSettings() {
       setError(t('parent.inviteChildFailed'));
     } finally {
       setInviteBusyId(null);
+    }
+  };
+
+  const handleSaveChildName = async (studentId: string) => {
+    const fullName = (nameDrafts[studentId] || '').trim();
+    if (!fullName || nameBusyId) return;
+    setNameBusyId(studentId);
+    setError(null);
+    setChildBanner(null);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch('/api/parent-child', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ action: 'updateName', studentId, fullName }),
+      });
+      if (!res.ok) {
+        setError(t('studentSettings.profileSaveError'));
+        return;
+      }
+      setChildBanner(t('studentSettings.saved'));
+      await loadMvChildren();
+    } catch {
+      setError(t('studentSettings.profileSaveError'));
+    } finally {
+      setNameBusyId(null);
     }
   };
 
@@ -422,7 +449,7 @@ export default function ParentSettings() {
           <div className="bg-white rounded-3xl p-5 shadow-sm border border-orange-100/40 space-y-5">
             <div>
               <h2 className="font-bold text-gray-900">{t('parent.childrenAccountsTitle')}</h2>
-              <p className="text-xs text-gray-500 mt-1">{t('parent.childrenAccountsDesc')}</p>
+              <p className="text-xs text-gray-500 mt-1 leading-relaxed">{t('parent.childrenListIntro')}</p>
             </div>
 
             <div className="rounded-2xl border border-orange-100/60 bg-[#fffefc] p-4 space-y-3">
@@ -437,19 +464,7 @@ export default function ParentSettings() {
                   onChange={(e) => setAddChildName(e.target.value)}
                   className="w-full px-4 py-3 bg-white rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-orange-100/60"
                 />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide">
-                  {t('parent.addChildEmail')}
-                </label>
-                <input
-                  type="email"
-                  value={addChildEmail}
-                  onChange={(e) => setAddChildEmail(e.target.value)}
-                  placeholder={t('parent.addChildEmailPlaceholder')}
-                  className="w-full px-4 py-3 bg-white rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-orange-100/60"
-                />
-                <p className="text-[11px] text-gray-500">{t('parent.addChildEmailHint')}</p>
+                <p className="text-[11px] text-gray-500">{t('parent.addChildNameOnlyHint')}</p>
               </div>
               <button
                 type="button"
@@ -462,48 +477,104 @@ export default function ParentSettings() {
               </button>
             </div>
 
-            {mvChildren.map((child) => (
+            {mvChildren.map((child) => {
+              const inviteOpen = inviteOpenIds[child.studentId] === true;
+              const namePending = isPendingChildName(child.fullName);
+              const displayName = namePending
+                ? t('parent.pendingChildName')
+                : (child.fullName || '').trim() || t('parent.unnamedChild');
+              const nameDraft = nameDrafts[child.studentId] ?? (namePending ? '' : child.fullName || '');
+              return (
               <div
                 key={child.studentId}
                 className="rounded-2xl border border-gray-100 bg-white p-4 space-y-3 shadow-sm"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-bold text-gray-900 truncate">{child.fullName}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {child.linkedUserId ? t('parent.childRegistered') : t('parent.childNotRegistered')}
-                    </p>
-                    {!child.linkedUserId && (
-                      <p className="text-[11px] text-gray-400 mt-1">{t('parent.childNotRegisteredDesc')}</p>
-                    )}
-                  </div>
+                <div className="min-w-0">
+                  {namePending ? (
+                    <div className="space-y-2">
+                      <p className="text-sm font-semibold text-amber-800">{displayName}</p>
+                      <p className="text-[11px] text-gray-500 leading-relaxed">{t('parent.editPendingChildNameHint')}</p>
+                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                        {t('parent.addChildName')}
+                      </label>
+                      <input
+                        type="text"
+                        value={nameDraft}
+                        onChange={(e) =>
+                          setNameDrafts((prev) => ({ ...prev, [child.studentId]: e.target.value }))
+                        }
+                        className="w-full px-4 py-3 bg-white rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-orange-100/60"
+                      />
+                      <button
+                        type="button"
+                        disabled={nameBusyId === child.studentId || !nameDraft.trim()}
+                        onClick={() => void handleSaveChildName(child.studentId)}
+                        className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold text-sm hover:bg-violet-700 disabled:opacity-50"
+                      >
+                        {nameBusyId === child.studentId ? t('common.saving') : t('common.save')}
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="font-bold text-gray-900 truncate">{displayName}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {child.linkedUserId ? t('parent.childHasLogin') : t('parent.childManagedByYou')}
+                      </p>
+                    </>
+                  )}
                 </div>
 
                 {!child.linkedUserId && !child.alreadyRequested && (
-                  <div className="space-y-2 rounded-2xl border border-dashed border-gray-200 bg-gray-50/80 p-3">
-                    <p className="text-xs font-semibold text-gray-500">{t('parent.inviteChildOptionalTitle')}</p>
-                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide">
-                      {t('parent.addChildEmail')}
-                    </label>
-                    <input
-                      type="email"
-                      value={inviteDrafts[child.studentId] ?? ''}
-                      onChange={(e) =>
-                        setInviteDrafts((prev) => ({ ...prev, [child.studentId]: e.target.value }))
-                      }
-                      placeholder={t('parent.addChildEmailPlaceholder')}
-                      className="w-full px-4 py-3 bg-white rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-gray-100"
-                    />
-                    <p className="text-[11px] text-gray-500">{t('parent.addChildEmailHint')}</p>
-                    <button
-                      type="button"
-                      disabled={inviteBusyId === child.studentId || !(inviteDrafts[child.studentId] || '').trim()}
-                      onClick={() => void handleInviteChild(child.studentId)}
-                      className="w-full py-2.5 rounded-xl border border-violet-200 text-violet-700 font-semibold text-sm hover:bg-violet-50 disabled:opacity-50"
-                    >
-                      {inviteBusyId === child.studentId ? t('common.saving') : t('parent.inviteChildCta')}
-                    </button>
-                  </div>
+                  inviteOpen ? (
+                    <div className="space-y-2 rounded-2xl border border-violet-100 bg-violet-50/40 p-3">
+                      <p className="text-sm font-semibold text-gray-900">{t('parent.inviteChildOpen')}</p>
+                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                        {t('parent.inviteChildEmail')}
+                      </label>
+                      <input
+                        type="email"
+                        value={inviteDrafts[child.studentId] ?? ''}
+                        onChange={(e) =>
+                          setInviteDrafts((prev) => ({ ...prev, [child.studentId]: e.target.value }))
+                        }
+                        placeholder={t('parent.inviteChildEmailPlaceholder')}
+                        className="w-full px-4 py-3 bg-white rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-gray-100"
+                      />
+                      <p className="text-[11px] text-gray-500">{t('parent.inviteChildHint')}</p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setInviteOpenIds((prev) => ({ ...prev, [child.studentId]: false }))
+                          }
+                          className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 bg-white"
+                        >
+                          {t('common.cancel')}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={inviteBusyId === child.studentId || !(inviteDrafts[child.studentId] || '').trim()}
+                          onClick={() => void handleInviteChild(child.studentId)}
+                          className="flex-1 py-2.5 rounded-xl bg-violet-600 text-white font-semibold text-sm hover:bg-violet-700 disabled:opacity-50"
+                        >
+                          {inviteBusyId === child.studentId ? t('common.saving') : t('parent.inviteChildCta')}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setInviteOpenIds((prev) => ({ ...prev, [child.studentId]: true }))
+                        }
+                        className="w-full py-2.5 rounded-xl border border-violet-200 bg-violet-50/60 text-violet-800 font-semibold text-sm hover:bg-violet-50"
+                      >
+                        {t('parent.inviteChildOpen')}
+                      </button>
+                      <p className="text-[11px] text-gray-500 leading-relaxed">{t('parent.inviteChildOpenHint')}</p>
+                    </div>
+                  )
                 )}
 
                 {child.alreadyRequested ? (
@@ -520,6 +591,7 @@ export default function ParentSettings() {
                       <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
                       <p className="text-sm text-red-700 font-medium">{t('parent.archiveChildConfirm')}</p>
                     </div>
+                    <p className="text-xs text-red-600">{t('parent.archiveChildDesc')}</p>
                     <div className="flex gap-2">
                       <button
                         type="button"
@@ -539,17 +611,19 @@ export default function ParentSettings() {
                     </div>
                   </div>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => setArchiveConfirmId(child.studentId)}
-                    className="w-full py-2.5 rounded-xl border border-red-200 text-red-600 font-bold text-sm hover:bg-red-50 transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Archive className="w-4 h-4" />
-                    {t('parent.archiveChildTitle')}
-                  </button>
+                  <div className="pt-2 border-t border-gray-100">
+                    <button
+                      type="button"
+                      onClick={() => setArchiveConfirmId(child.studentId)}
+                      className="text-xs font-medium text-gray-400 hover:text-red-600 transition-colors"
+                    >
+                      {t('parent.removeChildLink')}
+                    </button>
+                  </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

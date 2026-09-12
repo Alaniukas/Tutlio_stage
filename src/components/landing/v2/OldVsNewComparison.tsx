@@ -51,13 +51,15 @@ const OUTER_ORBIT = [
   { icon: MessageSquare, labelKey: 'landing.hl.messaging', path: '/features' },
 ] as const;
 
-/** Inner orbit ring — the four pillars, 4 slots at 90° steps. */
-const INNER_ORBIT = [
-  { icon: GraduationCap, labelKey: 'landing.insideStudents', tone: 'bg-violet-50 border-violet-200', iconTone: 'text-violet-600' },
-  { icon: CalendarDays, labelKey: 'landing.feature.calendar', tone: 'bg-blue-50 border-blue-200', iconTone: 'text-blue-600' },
-  { icon: CreditCard, labelKey: 'landing.feature.payments', tone: 'bg-emerald-50 border-emerald-200', iconTone: 'text-emerald-600' },
-  { icon: Clock, labelKey: 'landing.feature.waitlist', tone: 'bg-amber-50 border-amber-200', iconTone: 'text-amber-600' },
-] as const;
+/** Inner orbit ring — the four pillars, 4 slots at 90° steps. Crisp white
+ * tiles with a dark glyph lead the softer grey outer ring without a block of
+ * colour or black. */
+const INNER_ORBIT: { icon: typeof GraduationCap; labelKey: string }[] = [
+  { icon: GraduationCap, labelKey: 'landing.insideStudents' },
+  { icon: CalendarDays, labelKey: 'landing.feature.calendar' },
+  { icon: CreditCard, labelKey: 'landing.feature.payments' },
+  { icon: Clock, labelKey: 'landing.feature.waitlist' },
+];
 
 /** cos/sin for 60° steps starting at the top (-90°), as multipliers of the radius. */
 const SIX_STEP = [
@@ -152,9 +154,9 @@ export default function OldVsNewComparison() {
                 {['oldPill1', 'oldPill2', 'oldPill3'].map((k) => (
                   <span
                     key={k}
-                    className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 shadow-sm"
                   >
-                    <TriangleAlert className="h-3 w-3" />
+                    <TriangleAlert className="h-3 w-3 text-red-500" />
                     {t(`landing.v2.${k}`)}
                   </span>
                 ))}
@@ -200,7 +202,7 @@ export default function OldVsNewComparison() {
                   {OUTER_ORBIT.map((item, i) => {
                     const Icon = item.icon;
                     return (
-                      <div key={item.labelKey} className="pointer-events-auto absolute" style={{ transform: orbitTransform(SIX_STEP[i]) }}>
+                      <div key={item.labelKey} className="pointer-events-auto absolute left-0 top-0" style={{ transform: orbitTransform(SIX_STEP[i]) }}>
                         <div className="orbit-counter">
                           <Link
                             to={buildLocalizedPath(item.path, locale)}
@@ -238,10 +240,10 @@ export default function OldVsNewComparison() {
                   {INNER_ORBIT.map((item, i) => {
                     const Icon = item.icon;
                     return (
-                      <div key={item.labelKey} className="pointer-events-auto absolute" style={{ transform: orbitTransform(FOUR_STEP[i]) }}>
+                      <div key={item.labelKey} className="pointer-events-auto absolute left-0 top-0" style={{ transform: orbitTransform(FOUR_STEP[i]) }}>
                         <div className="orbit-counter">
-                          <div className={`flex h-[72px] w-[72px] flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border shadow-sm ${item.tone}`}>
-                            <Icon className={`h-5 w-5 ${item.iconTone}`} />
+                          <div className="flex h-[72px] w-[72px] flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-zinc-200 bg-white text-zinc-900 shadow-[0_12px_28px_-14px_rgba(24,24,27,0.35)]">
+                            <Icon className="h-5 w-5" strokeWidth={1.75} />
                             <span className="w-[64px] text-center text-[8px] font-semibold leading-tight text-zinc-700">
                               {t(item.labelKey)}
                             </span>
@@ -264,9 +266,9 @@ export default function OldVsNewComparison() {
                 {['newPill1', 'newPill2'].map((k) => (
                   <span
                     key={k}
-                    className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-800 shadow-sm"
                   >
-                    <CheckCircle2 className="h-3 w-3" />
+                    <CheckCircle2 className="h-3 w-3 text-emerald-600" />
                     {t(`landing.v2.${k}`)}
                   </span>
                 ))}

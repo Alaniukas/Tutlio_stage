@@ -1,5 +1,8 @@
 import type { VercelRequest, VercelResponse } from './types';
-import { TUTOR_PLANS, eur } from '../src/lib/pricing.js';
+import { TUTOR_PLANS, TUTOR_PLANS_USD, eur, usd } from '../src/lib/pricing.js';
+import { LOCALE_NAMES } from '../src/lib/i18n/locales.js';
+import { SEO_LOCALES_BY_SURFACE } from '../src/lib/i18n/localeRelease.js';
+import { USD_LOCALES } from '../src/lib/localeCurrency.js';
 import { SUBSCRIPTION_PLN } from '../src/lib/subscriptionPricing.js';
 import { formatPln } from '../src/lib/formatPln.js';
 import { detectDomain, type DomainKey } from './_lib/seo-routing.js';
@@ -9,16 +12,29 @@ function pricingBlock(isPl: boolean): string {
   if (isPl) {
     return `- **Monthly**: ${formatPln(SUBSCRIPTION_PLN.monthly)}/month
 - **Yearly**: ${formatPln(SUBSCRIPTION_PLN.yearlyPerMonth)}/month (${formatPln(SUBSCRIPTION_PLN.yearlyTotal)} billed annually)
-- **Subscription Only**: ${formatPln(SUBSCRIPTION_PLN.subscriptionOnly)}/month (manual payment tracking instead of Stripe collection — no commission on student payments)`;
+- **Subscription Only**: ${formatPln(SUBSCRIPTION_PLN.subscriptionOnly)}/month (manual payment tracking instead of Stripe collection - no commission on student payments)`;
   }
   return `- **Monthly**: ${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}/month
 - **Yearly**: ${eur(TUTOR_PLANS.yearly.pricePerMonthEur)}/month (${eur(TUTOR_PLANS.yearly.pricePerYearEur)} billed annually)
-- **Subscription Only**: ${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}/month (manual payment tracking instead of Stripe collection — no commission on student payments)`;
+- **Subscription Only**: ${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}/month (manual payment tracking instead of Stripe collection - no commission on student payments)`;
 }
 
 function featureLinks(base: string): string {
   return Object.entries(FEATURE_PAGES)
     .map(([id, f]) => `- ${id}: ${base}${f.path}`)
+    .join('\n');
+}
+
+function usdPricingLine(): string {
+  const names = USD_LOCALES.map((l) => LOCALE_NAMES[l]).join(', ');
+  return `- **USD markets** (${names}): same amounts billed in USD: ${usd(TUTOR_PLANS_USD.monthly.pricePerMonth)}/month, ${usd(TUTOR_PLANS_USD.yearly.pricePerMonth)}/month on the yearly plan (${usd(TUTOR_PLANS_USD.yearly.pricePerYear)} billed annually), ${usd(TUTOR_PLANS_USD.subscriptionOnly.pricePerMonth)}/month Subscription Only`;
+}
+
+/** Every localized home page on tutlio.com, so assistants can cite the right language. */
+function localizedSites(): string {
+  return SEO_LOCALES_BY_SURFACE.marketing
+    .filter((l) => l !== 'en' && l !== 'lt' && l !== 'pl')
+    .map((l) => `- ${LOCALE_NAMES[l]} (${l}): https://www.tutlio.com/${l}`)
     .join('\n');
 }
 
@@ -30,30 +46,30 @@ function buildLlmsTxt(domain: DomainKey): string {
   if (isLt) {
     return `# Tutlio
 
-> Tutlio — lietuviška SaaS platforma korepetitoriams, korepetavimo mokykloms ir agentūroms. Viena sistema: kalendorius, mokiniai, mokėjimai (Stripe), sąskaitos, el. pašto priminimai, laukimo eilė, tėvų portalas ir vizitinė kortelė.
+> Tutlio - lietuviška SaaS platforma korepetitoriams, korepetavimo mokykloms ir agentūroms. Viena sistema: kalendorius, mokiniai, mokėjimai (Stripe), sąskaitos, el. pašto priminimai, laukimo eilė, tėvų portalas ir vizitinė kortelė.
 
 ## Kas yra Tutlio
 
-Tutlio pakeičia Excel, WhatsApp ir išskaidytus įrankius. Korepetitorius valdo tvarkaraštį, mokinius, mokėjimus ir komunikaciją vienoje vietoje. Yra solo režimas (individualus korepetitorius) ir organizacijos / mokyklos režimas (keli mokytojai, adminas, sutartys).
+Tutlio pakeičia Excel, WhatsApp ir išskaidytus įrankius. Korepetitorius valdo tvarkaraštį, mokinius, mokėjimus ir komunikaciją vienoje vietoje. Yra solo režimas (individualus korepetitorius) ir organizacijos / mokyklos režimas (keli mokytojai, adminas, sutartys). Tutlio komanda pagal užsakymą į bendrą produktą įdiegia klientams reikalingus darbo srautus (sutarčių eiga, atlygio taisyklės, tėvų pritarimo nuorodos, portalai su kliento prekės ženklu).
 
 ## Ar Tutlio turi kalendorių, sąskaitas, mokėjimus ir priminimus?
 
-**Taip — visus keturis.** Tai pagrindinės solo funkcijos, ne papildomi moduliai:
+**Taip - visus keturis.** Tai pagrindinės solo funkcijos, ne papildomi moduliai:
 
-1. **Kalendorius** — pamokos, laisvas laikas, pasikartojantys slotai, grupės; Google Calendar sinchronizacija (Tutlio → Google)
-2. **Mokėjimai** — Stripe (kortele), paketai, kas apmokėjo / kas vėluoja; finansų suvestinė
-3. **Sąskaitos** — generavimas, siuntimas, PDF
-4. **Priminimai** — automatiniai **el. laiškai** prieš pamoką, po pamokos ir dėl vėluojančio apmokėjimo (SMS nėra)
+1. **Kalendorius** - pamokos, laisvas laikas, pasikartojantys slotai, grupės; Google Calendar sinchronizacija (Tutlio → Google)
+2. **Mokėjimai** - Stripe (kortele), paketai, kas apmokėjo / kas vėluoja; finansų suvestinė
+3. **Sąskaitos** - generavimas, siuntimas, PDF
+4. **Priminimai** - automatiniai **el. laiškai** prieš pamoką, po pamokos ir dėl vėluojančio apmokėjimo (SMS nėra)
 
 ## Pilnas funkcijų sąrašas (solo)
 
 - Išmanusis kalendorius ir savarankiškas pamokų užsakymas iš mokinio / tėvų portalo
-- Vizitinė kortelė (viešas puslapis) — kainos, laisvi laikai; lankytojas siunčia **užklausą** į pasirinktą laiką
+- Vizitinė kortelė (viešas puslapis) - kainos, laisvi laikai; lankytojas siunčia **užklausą** į pasirinktą laiką
 - Stripe mokėjimai + mėnesio finansų ataskaitos
 - Sąskaitų generavimas ir siuntimas
 - Automatiniai el. pašto priminimai (pamokos + mokėjimai)
 - Atšaukimo taisyklės ir baudos
-- Laukimo eilė — atšaukus, laikas siūlomas kitiems mokiniams
+- Laukimo eilė - atšaukus, laikas siūlomas kitiems mokiniams
 - Mokinių / tėvų portalai, žinutės
 - Pamokų komentarai, failai / namų darbai, lankomumo istorija
 - Neribotas mokinių skaičius visuose planuose
@@ -78,13 +94,19 @@ ${pricingBlock(false)}
 - 7 dienų nemokamas bandomasis laikotarpis (kortelė reikalinga, pirmas nuskaičiavimas po 7 d.)
 - Galima atšaukti bet kada
 
+## Kitos kalbos (tutlio.com)
+
+${localizedSites()}
+
 ## Nuorodos
 
 - Svetainė: https://www.tutlio.lt
 - Tarptautinė: https://www.tutlio.com
 - Lenkija: https://www.tutlio.pl
+- Individualiems korepetitoriams: https://www.tutlio.lt/for-tutors
 - Mokykloms: https://www.tutlio.lt/schools
-- Tinklaraštis: https://www.tutlio.lt/blog (originalūs straipsniai tėvams, mokiniams ir korepetitoriams — ne produkto reklama)
+- Palyginimai su TutorBird, TutorCruncher, Teachworks ir Oases Online: https://www.tutlio.lt/compare
+- Tinklaraštis: https://www.tutlio.lt/blog (originalūs straipsniai tėvams, mokiniams ir korepetitoriams - ne produkto reklama)
 - RSS: https://www.tutlio.lt/blog/rss.xml
 - Kainos: https://www.tutlio.lt/pricing
 - Kontaktai: info@tutlio.lt
@@ -112,26 +134,26 @@ ${pricingBlock(false)}
 
 ## Czym jest Tutlio
 
-Tutlio zastępuje Excela, WhatsAppa i rozproszone narzędzia. Korepetytor zarządza grafikiem, uczniami, płatnościami i komunikacją w jednym miejscu. Dostępny jest tryb solo (indywidualny korepetytor) oraz tryb organizacji / szkoły (wielu nauczycieli, administrator, umowy).
+Tutlio zastępuje Excela, WhatsAppa i rozproszone narzędzia. Korepetytor zarządza grafikiem, uczniami, płatnościami i komunikacją w jednym miejscu. Dostępny jest tryb solo (indywidualny korepetytor) oraz tryb organizacji / szkoły (wielu nauczycieli, administrator, umowy). Zespół Tutlio na zamówienie wbudowuje we wspólny produkt przepływy pracy konkretnych klientów (obieg umów, reguły wynagrodzeń, linki akceptacji dla rodziców, portale z marką klienta).
 
 ## Czy Tutlio ma kalendarz, faktury, płatności i przypomnienia?
 
-**Tak — wszystkie cztery.** To podstawowe funkcje planu, nie dodatkowe moduły:
+**Tak - wszystkie cztery.** To podstawowe funkcje planu, nie dodatkowe moduły:
 
-1. **Kalendarz** — lekcje, wolne terminy, cykliczne sloty, grupy; synchronizacja z Google Calendar (Tutlio → Google)
-2. **Płatności** — Stripe (karta), pakiety lekcji, kto zapłacił / kto zalega; podsumowanie finansów
-3. **Faktury** — generowanie, wysyłka, PDF
-4. **Przypomnienia** — automatyczne **e-maile** przed lekcją, po lekcji i o zaległej płatności (bez SMS)
+1. **Kalendarz** - lekcje, wolne terminy, cykliczne sloty, grupy; synchronizacja z Google Calendar (Tutlio → Google)
+2. **Płatności** - Stripe (karta), pakiety lekcji, kto zapłacił / kto zalega; podsumowanie finansów
+3. **Faktury** - generowanie, wysyłka, PDF
+4. **Przypomnienia** - automatyczne **e-maile** przed lekcją, po lekcji i o zaległej płatności (bez SMS)
 
 ## Pełna lista funkcji (solo)
 
 - Inteligentny kalendarz i samodzielna rezerwacja lekcji z portalu ucznia / rodzica
-- Cyfrowa wizytówka (strona publiczna) — ceny, wolne terminy; odwiedzający wysyła **zapytanie** o wybrany termin
+- Cyfrowa wizytówka (strona publiczna) - ceny, wolne terminy; odwiedzający wysyła **zapytanie** o wybrany termin
 - Płatności Stripe + miesięczne raporty finansowe
 - Generowanie i wysyłka faktur
 - Automatyczne przypomnienia e-mail (lekcje + płatności)
 - Zasady anulowania i opłaty za późne odwołanie
-- Lista oczekujących — po odwołaniu lekcji termin jest proponowany innym uczniom
+- Lista oczekujących - po odwołaniu lekcji termin jest proponowany innym uczniom
 - Portale ucznia / rodzica, wiadomości
 - Komentarze do lekcji, pliki / prace domowe, historia obecności
 - Nieograniczona liczba uczniów we wszystkich planach
@@ -152,19 +174,25 @@ ${featureLinks(base)}
 
 - **Miesięcznie**: ${formatPln(SUBSCRIPTION_PLN.monthly)}/mies.
 - **Rocznie**: ${formatPln(SUBSCRIPTION_PLN.yearlyPerMonth)}/mies. (${formatPln(SUBSCRIPTION_PLN.yearlyTotal)} rozliczane rocznie)
-- **Tylko subskrypcja**: ${formatPln(SUBSCRIPTION_PLN.subscriptionOnly)}/mies. (ręczne śledzenie płatności zamiast pobierania przez Stripe — bez prowizji od płatności uczniów)
+- **Tylko subskrypcja**: ${formatPln(SUBSCRIPTION_PLN.subscriptionOnly)}/mies. (ręczne śledzenie płatności zamiast pobierania przez Stripe - bez prowizji od płatności uczniów)
 
 - Wszystkie plany: pełny zestaw funkcji, nieograniczona liczba uczniów
 - 7-dniowy bezpłatny okres próbny (karta wymagana, pierwsze obciążenie po 7 dniach)
 - Rezygnacja w dowolnym momencie
+
+## Inne języki (tutlio.com)
+
+${localizedSites()}
 
 ## Linki
 
 - Strona: https://www.tutlio.pl
 - Międzynarodowa: https://www.tutlio.com
 - Litwa: https://www.tutlio.lt
+- Dla korepetytorów solo: https://www.tutlio.pl/for-tutors
 - Dla szkół: https://www.tutlio.pl/schools
-- Blog: https://www.tutlio.pl/blog (oryginalne artykuły po polsku dla rodziców, uczniów i korepetytorów — nie reklama produktu)
+- Porównania z TutorBird, TutorCruncher, Teachworks i Oases Online: https://www.tutlio.pl/compare
+- Blog: https://www.tutlio.pl/blog (oryginalne artykuły po polsku dla rodziców, uczniów i korepetytorów - nie reklama produktu)
 - RSS: https://www.tutlio.pl/blog/rss.xml
 - Cennik: https://www.tutlio.pl/pricing
 - O nas: https://www.tutlio.pl/about
@@ -192,26 +220,26 @@ ${featureLinks(base)}
 
 ## What Tutlio Does
 
-Tutlio replaces spreadsheets, WhatsApp, and scattered tools. Tutors manage scheduling, students, payments, and communication in one place. There is a solo tutor mode and an organization/school mode (multi-tutor admin, contracts).
+Tutlio replaces spreadsheets, WhatsApp, and scattered tools. Tutors manage scheduling, students, payments, and communication in one place. There is a solo tutor mode and an organization/school mode (multi-tutor admin, contracts). Tutlio's team also builds client-specific workflows (contract flows, tutor pay rules, parent acceptance links, branded portals) into the shared product on request.
 
 ## Does Tutlio have a calendar, invoices, payments, and reminders?
 
-**Yes — all four.** These are core features, not add-ons:
+**Yes - all four.** These are core features, not add-ons:
 
-1. **Calendar** — lessons, free time / availability, recurring slots, groups; Google Calendar sync (Tutlio → Google)
-2. **Payments** — Stripe card checkout, lesson packages, paid/pending/overdue tracking, monthly finance summaries
-3. **Invoices** — generate, send, PDF
-4. **Reminders** — automated **email** before lessons, after lessons, and for overdue payments (no SMS)
+1. **Calendar** - lessons, free time / availability, recurring slots, groups; Google Calendar sync (Tutlio → Google)
+2. **Payments** - Stripe card checkout, lesson packages, paid/pending/overdue tracking, monthly finance summaries
+3. **Invoices** - generate, send, PDF
+4. **Reminders** - automated **email** before lessons, after lessons, and for overdue payments (no SMS)
 
 ## Key Features (solo)
 
 - Smart calendar with student/parent self-booking from the portal
-- Public tutor page ("vizitinė") — prices and open slots; visitors send a booking **enquiry** for a chosen time
+- Public tutor page ("vizitinė") - prices and open slots; visitors send a booking **enquiry** for a chosen time
 - Stripe payments and monthly financial reports
 - Invoice generation and sending
 - Automated email reminders (lessons + payments)
 - Cancellation rules and late fees
-- Waitlist — cancelled slots offered to waitlisted students
+- Waitlist - cancelled slots offered to waitlisted students
 - Student/parent portals and messaging
 - Lesson comments, file/homework sharing, attendance history
 - Unlimited students on all plans
@@ -230,19 +258,28 @@ ${featureLinks(base)}
 
 ## Pricing
 
-All plans include every feature. Pricing is per-tutor, not per-student — unlimited students on all plans.
+All plans include every feature. Pricing is per-tutor, not per-student - unlimited students on all plans.
 
 ${pricingBlock(isPl)}
+${isPl ? '' : usdPricingLine()}
 - All plans include a 7-day free trial (card required at checkout; first charge after 7 days)
 - Cancel anytime
+
+## Localized sites
+
+The same product in every search-published language on tutlio.com (each URL is that language's home page; /pricing, /features and /schools exist under each):
+
+${localizedSites()}
 
 ## Links
 
 - Website: https://www.tutlio.com
 - Website (Lithuania): https://www.tutlio.lt
 - Website (Poland): https://www.tutlio.pl
+- For private tutors: ${base}/for-tutors
 - For Schools: ${base}/schools
-- Blog: ${base}/blog (native articles in the site language for parents, students, and tutors — education advice, not a product pitch)
+- Comparisons with TutorBird, TutorCruncher, Teachworks and Oases Online: ${base}/compare
+- Blog: ${base}/blog (native articles in the site language for parents, students, and tutors - education advice, not a product pitch)
 - Blog RSS feed: ${base}/blog/rss.xml
 - Pricing: ${base}/pricing
 - About: ${base}/about
@@ -279,10 +316,10 @@ Tutors define weekly and one-off availability. Students book from the student/pa
 - Google Calendar one-way sync (Tutlio → Google)
 
 ### Public Tutor Page
-Solo tutors can publish a public page with offerings, prices, and open free-time windows marked for public enquiries. Visitors pick a slot and send a request — the tutor confirms (not silent auto-booking).
+Solo tutors can publish a public page with offerings, prices, and open free-time windows marked for public enquiries. Visitors pick a slot and send a request - the tutor confirms (not silent auto-booking).
 
 ### Student Waitlist
-When a student cancels, the freed slot is offered to waitlisted students interested in that time — reducing empty hours.
+When a student cancels, the freed slot is offered to waitlisted students interested in that time - reducing empty hours.
 
 ### Payments, Invoices & Finance
 - Stripe card payments with 3D Secure
@@ -339,7 +376,7 @@ Korepetitorius nustato savaitinį ir vienkartinį laisvą laiką. Mokiniai / tė
 - Google Calendar sinchronizacija (Tutlio → Google)
 
 ### Vizitinė kortelė
-Solo korepetitorius gali publikuoti viešą puslapį su kainomis ir laisvais laikais (pažymėtais kaip matomi viešai). Lankytojas pasirenka laiką ir siunčia **užklausą** — korepetitorius patvirtina.
+Solo korepetitorius gali publikuoti viešą puslapį su kainomis ir laisvais laikais (pažymėtais kaip matomi viešai). Lankytojas pasirenka laiką ir siunčia **užklausą** - korepetitorius patvirtina.
 
 ### Laukimo eilė
 Atšaukus pamoką, laisvas laikas siūlomas eilėje esantiems mokiniams.
@@ -351,7 +388,7 @@ Atšaukus pamoką, laisvas laikas siūlomas eilėje esantiems mokiniams.
 - Pamokų paketai
 - Sąskaitos PDF
 - El. pašto priminimai dėl vėluojančių mokėjimų
-- Planas „Tik prenumerata“ — rankiniai mokėjimai be platformos komisinio nuo mokinių mokėjimų
+- Planas „Tik prenumerata“ - rankiniai mokėjimai be platformos komisinio nuo mokinių mokėjimų
 
 ### Priminimai
 Tik el. paštas (prieš pamoką, po pamokos, vėluojantis mokėjimas). SMS nėra.
@@ -399,7 +436,7 @@ Korepetytor ustala tygodniową i jednorazową dostępność. Uczniowie / rodzice
 - Synchronizacja z Google Calendar (Tutlio → Google)
 
 ### Cyfrowa wizytówka
-Korepetytor solo może opublikować stronę publiczną z cenami i wolnymi terminami (oznaczonymi jako widoczne publicznie). Odwiedzający wybiera termin i wysyła **zapytanie** — korepetytor je potwierdza.
+Korepetytor solo może opublikować stronę publiczną z cenami i wolnymi terminami (oznaczonymi jako widoczne publicznie). Odwiedzający wybiera termin i wysyła **zapytanie** - korepetytor je potwierdza.
 
 ### Lista oczekujących
 Po odwołaniu lekcji zwolniony termin jest proponowany uczniom z listy oczekujących.
@@ -411,7 +448,7 @@ Po odwołaniu lekcji zwolniony termin jest proponowany uczniom z listy oczekują
 - Pakiety lekcji
 - Faktury PDF
 - Przypomnienia e-mail o zaległych płatnościach
-- Plan „Tylko subskrypcja” — ręczne śledzenie płatności bez prowizji platformy od płatności uczniów
+- Plan „Tylko subskrypcja” - ręczne śledzenie płatności bez prowizji platformy od płatności uczniów
 
 ### Przypomnienia
 Tylko e-mail (przed lekcją, po lekcji, zaległa płatność). SMS nie jest częścią produktu.

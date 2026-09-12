@@ -1,3 +1,4 @@
+import { SEO_LOCALES_BY_SURFACE } from '../../src/lib/i18n/localeRelease.js';
 import { describe, it, expect } from 'vitest';
 import {
   LOCALES,
@@ -22,7 +23,12 @@ import {
   canonicalPublicPagePrefixRedirect,
   isBrowserNavigation,
 } from '../../middleware.js';
-import { STATIC_PAGES, alternatesXmlFor, publicPageBelongsInSitemap } from '../../api/sitemap.js';
+import {
+  STATIC_PAGES,
+  alternatesXmlFor,
+  imageSitemapXml,
+  publicPageBelongsInSitemap,
+} from '../../api/sitemap.js';
 
 function botRequest(url: string, host: string): Request {
   return new Request(url, { headers: { host, 'user-agent': 'Googlebot' } });
@@ -75,7 +81,7 @@ describe('platform-prefixed (schools) URLs', () => {
 
   it('keeps the hreflang cluster complete for schools pages', () => {
     const links = generateHreflangLinksFor((l) => buildPlatformCanonicalUrl('/schools', '/', l));
-    expect(links).toHaveLength(14);
+    expect(links).toHaveLength(SEO_LOCALES_BY_SURFACE.schools.length + 1);
     expect(links.find((l) => l.lang === 'x-default')?.href).toBe('https://www.tutlio.com/schools');
   });
 });
@@ -197,6 +203,24 @@ describe('middleware SSR routing', () => {
       .toBe('/api/features-index-render?locale=en');
   });
 
+  it('routes the solo landing and the comparison pages to their renderers', () => {
+    expect(ssrDestination(botRequest('https://www.tutlio.com/for-tutors', 'www.tutlio.com')))
+      .toBe('/api/page-render?page=for-tutors&locale=en');
+    expect(ssrDestination(botRequest('https://www.tutlio.lt/for-tutors', 'www.tutlio.lt')))
+      .toBe('/api/page-render?page=for-tutors&locale=lt');
+    expect(ssrDestination(botRequest('https://www.tutlio.com/fr/for-tutors', 'www.tutlio.com')))
+      .toBe('/api/page-render?page=for-tutors&locale=fr');
+    expect(ssrDestination(botRequest('https://www.tutlio.com/for-agencies', 'www.tutlio.com'))).toBeNull();
+    expect(ssrDestination(botRequest('https://www.tutlio.com/compare', 'www.tutlio.com')))
+      .toBe('/api/compare-render?locale=en');
+    expect(ssrDestination(botRequest('https://www.tutlio.com/compare/tutorbird', 'www.tutlio.com')))
+      .toBe('/api/compare-render?competitor=tutorbird&locale=en');
+    expect(ssrDestination(botRequest('https://www.tutlio.pl/compare/oases-online', 'www.tutlio.pl')))
+      .toBe('/api/compare-render?competitor=oases-online&locale=pl');
+    expect(ssrDestination(botRequest('https://www.tutlio.com/compare/unknown-vendor', 'www.tutlio.com'))).toBeNull();
+    expect(ssrDestination(botRequest('https://www.tutlio.com/compare/tutorbird/pricing', 'www.tutlio.com'))).toBeNull();
+  });
+
   it('returns null (→ 404) for unknown marketing-shaped URLs', () => {
     expect(ssrDestination(botRequest('https://www.tutlio.com/foo-bar', 'www.tutlio.com'))).toBeNull();
     expect(ssrDestination(botRequest('https://www.tutlio.com/xx/pricing', 'www.tutlio.com'))).toBeNull();
@@ -251,6 +275,11 @@ describe('sitemap', () => {
     expect(urls).toContain('https://www.tutlio.com/contacts');
     expect(urls).toContain('https://www.tutlio.com/features');
     expect(urls).toContain('https://www.tutlio.com/features/digital-business-card');
+    expect(urls).toContain('https://www.tutlio.com/for-tutors');
+    expect(urls).not.toContain('https://www.tutlio.com/for-agencies');
+    expect(urls).toContain('https://www.tutlio.com/compare');
+    expect(urls).toContain('https://www.tutlio.com/compare/tutorbird');
+    expect(urls).toContain('https://www.tutlio.com/compare/oases-online');
 
     const ltUrls = STATIC_PAGES.map((p) => p.urlFor('lt'));
     expect(ltUrls).toContain('https://www.tutlio.lt/apie-mus');
@@ -271,6 +300,18 @@ describe('sitemap', () => {
     }
   });
 
+  it('limits comparison alternates to the three domain languages', () => {
+    const page = STATIC_PAGES.find((p) => p.urlFor('en') === 'https://www.tutlio.com/compare/tutorbird');
+    expect(page).toBeTruthy();
+    const xml = alternatesXmlFor(page!.urlFor);
+    expect(xml).toContain('hreflang="en" href="https://www.tutlio.com/compare/tutorbird"');
+    expect(xml).toContain('hreflang="lt" href="https://www.tutlio.lt/compare/tutorbird"');
+    expect(xml).toContain('hreflang="pl" href="https://www.tutlio.pl/compare/tutorbird"');
+    expect(xml).toContain('hreflang="x-default"');
+    expect(xml).not.toContain('hreflang="de"');
+    expect(xml).not.toContain('hreflang="fr"');
+  });
+
   it('limits blog alternates to translated locales and drops x-default without an EN translation', () => {
     const urlFor = (l: (typeof LOCALES)[number]) => buildCanonicalUrl('/blog/test', l);
     const noEn = alternatesXmlFor(urlFor, ['lt', 'pl'], false);
@@ -281,6 +322,14 @@ describe('sitemap', () => {
 
     const withEn = alternatesXmlFor(urlFor, ['lt', 'en'], true);
     expect(withEn).toContain('x-default');
+  });
+
+  it('emits only valid absolute cover URLs in the image sitemap extension', () => {
+    expect(imageSitemapXml('https://cdn.example/cover.webp?x=1&y=2')).toContain(
+      '<image:loc>https://cdn.example/cover.webp?x=1&amp;y=2</image:loc>',
+    );
+    expect(imageSitemapXml('javascript:alert(1)')).toBe('');
+    expect(imageSitemapXml('/relative-cover.webp')).toBe('');
   });
 });
 

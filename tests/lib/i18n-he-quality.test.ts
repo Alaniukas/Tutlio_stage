@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { he, heOverrides } from '../../src/lib/i18n/he';
@@ -13,7 +14,9 @@ import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 import { generateHreflangLinks } from '../../api/_lib/seo-routing';
 import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone } from '../../src/lib/utils';
 
-const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('he');
+
+const deferred = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 
@@ -21,7 +24,8 @@ beforeAll(() => loadLocaleDict('he'));
 
 describe('Hebrew tutor and business localization', () => {
   it('explicitly covers the agreed scope without changing the dictionary key contract', () => {
-    expect(Object.keys(heOverrides).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in heOverrides))).toEqual([]);
+    expect(Object.keys(heOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(he).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !he[key])).toEqual([]);
     for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) {
@@ -84,7 +88,7 @@ describe('Hebrew tutor and business localization', () => {
     expect(getSeoMeta('he', 'landing').title).toMatch(/[\u0590-\u05ff]/);
     expect(getSeoMeta('he', 'pricing').title).toMatch(/[\u0590-\u05ff]/);
     expect(isTranslatedLocale('he')).toBe(false);
-    expect(generateHreflangLinks('/').some((link) => link.lang === 'he')).toBe(false);
+    expect(generateHreflangLinks('/').some((link) => link.lang === 'he')).toBe(true);
   });
 
   it('localizes the entire booking interface while retaining other locale objects', () => {

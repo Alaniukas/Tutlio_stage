@@ -129,6 +129,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const subjectsPresetClean = dedupeSubjectPresets(subjects);
 
+    const { data: existingTutor } = await supabase
+      .from('profiles')
+      .select('id, email')
+      .eq('organization_id', organizationId)
+      .ilike('email', normalizedInviteeEmail)
+      .maybeSingle();
+
+    if (existingTutor?.id) {
+      const { data: pendingInvites } = await supabase
+        .from('tutor_invites')
+        .select('id')
+        .eq('organization_id', organizationId)
+        .eq('invitee_email', normalizedInviteeEmail)
+        .eq('used', false);
+
+      const pendingIds = (pendingInvites || []).map((row: { id: string }) => row.id);
+      if (pendingIds.length > 0) {
+        await supabase
+          .from('tutor_invites')
+          .update({ used: true, used_by_profile_id: existingTutor.id })
+          .in('id', pendingIds);
+      }
+
+      return res.status(200).json({
+        success: true,
+        alreadyMember: true,
+        emailSent: true,
+        requestId,
+      });
+    }
+
     // Short, readable invite code (8 chars, no 0/O/1/I to avoid confusion)
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     const gen = () => Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');

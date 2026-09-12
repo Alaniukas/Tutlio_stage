@@ -10,6 +10,7 @@ import { summarizeStripeOnboarding } from './_lib/stripeAccountOnboarding.js';
 import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { isAllowedRedirectUrl, publicOriginFromRequest } from './_lib/public-origin.js';
+import { marketFromRequest } from './_lib/market.js';
 
 function getStripe() {
     return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-02-25.clover' as any });
@@ -70,6 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 // Create new Express account
                 const account = await stripe.accounts.create({
                     type: 'express',
+                    country: marketFromRequest(req) === 'pl' ? 'PL' : 'LT',
                     capabilities: {
                         card_payments: { requested: true },
                         transfers: { requested: true },

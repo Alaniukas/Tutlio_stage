@@ -101,13 +101,25 @@ export type ExtraLessonsOrderSnapshot = {
   data_protection_contact: string;
   group_id?: string | null;
   group_name?: string | null;
+  tutor_name?: string | null;
+  subject_id?: string | null;
+  subject_name?: string | null;
 };
 
 export const START_WITHIN_14_CHECKBOX_TEXT =
   'Prašau pradėti teikti paslaugas nepasibaigus 14 dienų sutarties atsisakymo terminui. Suprantu, kad atsisakęs Sutarties turėsiu sumokėti už iki atsisakymo suteiktas paslaugas.';
 
 export const EXTRA_LESSONS_TERMS_CHECKBOX_TEXT =
-  'Perskaičiau Sutartį, susipažinau su jos priedais ir privatumo pranešimu, pateikti duomenys yra teisingi ir sutinku su Sutarties sąlygomis.';
+  'Perskaičiau Sutartį, susipažinau su jos priedais, pateikti duomenys yra teisingi ir sutinku su Sutarties sąlygomis.';
+
+export const EXTRA_LESSONS_BEHAVIOR_RULES_CHECKBOX_APPEND =
+  'Patvirtinu, kad susipažinau ir sutinku su nuotolinių užsiėmimų elgesio taisyklėmis: vaikas turi prisijungti laiku savo vardu ir pavarde, laikytis mokytojo nurodymų, mandagiai bendrauti ir netrukdyti kitiems, nesidalinti užsiėmimo nuoroda bei nefotografuoti, nefilmuoti ir neįrašinėti užsiėmimo. Įsipareigoju supažindinti vaiką su šiomis taisyklėmis ir užtikrinti, kad jis jų laikytųsi.';
+
+export const EXTRA_LESSONS_FULL_TERMS_CHECKBOX_TEXT =
+  `${EXTRA_LESSONS_TERMS_CHECKBOX_TEXT} ${EXTRA_LESSONS_BEHAVIOR_RULES_CHECKBOX_APPEND}`;
+
+export const EXTRA_LESSONS_GROUP_MONTHLY_BILLING_NOTE =
+  'Grupiniai užsiėmimai užsakomi visam mėnesiui. Mokestis skaičiuojamas ir už tuos pagal tvarkaraštį įvykusius užsiėmimus, kuriuose vaikas nedalyvavo.';
 
 export type StartWithin14Status = 'yes' | 'no' | 'na';
 
@@ -155,6 +167,9 @@ export function buildExtraLessonsOrderSnapshot(input: {
   data_protection_contact?: string;
   group_id?: string | null;
   group_name?: string | null;
+  tutor_name?: string | null;
+  subject_id?: string | null;
+  subject_name?: string | null;
   individual_cancel_terms?: string;
   revision_label?: string;
 }): ExtraLessonsOrderSnapshot {
@@ -181,15 +196,18 @@ export function buildExtraLessonsOrderSnapshot(input: {
     indicative_monthly_eur: indicativeMonthlyPrice(base, unit),
     individual_cancel_terms:
       type === 'individual'
-        ? String(input.individual_cancel_terms || 'Individuali pamoka atšaukiama ne vėliau kaip 24 val. iki pradžios; vėliau pamoka apmokama.').trim()
+        ? String(input.individual_cancel_terms || 'Individualus užsiėmimas atšaukiamas ne vėliau kaip 24 val. iki pradžios; vėliau užsiėmimas apmokamas.').trim()
         : type === 'group'
           ? 'netaikoma'
           : String(input.individual_cancel_terms || '').trim(),
     school_email: String(input.school_email || '').trim(),
     school_phone: String(input.school_phone || '').trim(),
     data_protection_contact: String(input.data_protection_contact || input.school_email || '').trim(),
-    group_id: input.group_id || null,
-    group_name: input.group_name || null,
+    group_id: type === 'individual' ? null : (input.group_id || null),
+    group_name: type === 'individual' ? null : (input.group_name || null),
+    tutor_name: input.tutor_name ? String(input.tutor_name).trim() || null : null,
+    subject_id: type === 'group' ? null : (input.subject_id || null),
+    subject_name: type === 'group' ? null : (input.subject_name || null),
   };
 }
 
@@ -234,6 +252,9 @@ export function mergeExtraLessonsOrderPatch(
     base_lessons_per_month: patch.base_lessons_per_month ?? base.base_lessons_per_month,
     group_id: patch.group_id !== undefined ? patch.group_id : base.group_id,
     group_name: patch.group_name !== undefined ? patch.group_name : base.group_name,
+    tutor_name: patch.tutor_name !== undefined ? patch.tutor_name : base.tutor_name,
+    subject_id: patch.subject_id !== undefined ? patch.subject_id : base.subject_id,
+    subject_name: patch.subject_name !== undefined ? patch.subject_name : base.subject_name,
   });
 }
 
@@ -446,6 +467,74 @@ export type ExtraLessonsEndKind = 'withdrawal' | 'termination';
 
 export function extraLessonsEndKind(acceptedAtIso: string, now = new Date()): ExtraLessonsEndKind {
   return isWithinWithdrawalWindow(acceptedAtIso, now) ? 'withdrawal' : 'termination';
+}
+
+export const EXTRA_LESSONS_WITHDRAWAL_FORM_TITLE = 'Sutarties atsisakymo forma';
+export const EXTRA_LESSONS_WITHDRAWAL_FORM_SCHOOL_EMAIL = 'info@laisvivaikai.lt';
+
+export function extraLessonsWithdrawalFormSubmitNote(schoolEmail?: string | null): string {
+  const email = String(schoolEmail || EXTRA_LESSONS_WITHDRAWAL_FORM_SCHOOL_EMAIL).trim()
+    || EXTRA_LESSONS_WITHDRAWAL_FORM_SCHOOL_EMAIL;
+  return `Šį prašymą nusiųskite mokyklai el. paštu ${email}.`;
+}
+
+/** Parent fills every value cell; placeholders must not leak into the download. */
+export function extraLessonsBlankWithdrawalFormPayload(
+  source: Record<string, string | boolean | null | undefined>,
+): Record<string, string | boolean> {
+  return {
+    ...source,
+    sutarties_nr: '',
+    contract_number: '',
+    data: '',
+    vardas_pavarde: '',
+    adresas_ar_el_pastas: '',
+    mokyklos_el_pastas: '',
+  };
+}
+
+/** 1 priedas only — the 14-day withdrawal form from the filled contract body. */
+export function extraLessonsAnnexBody(filledContractBody: string): string {
+  const text = String(filledContractBody || '');
+  const match = text.match(/\n\s*1\s+PRIEDAS\b/i);
+  if (!match || match.index == null) return '';
+  return text.slice(match.index).trim();
+}
+
+/** Standalone download: retitled form without the Tutlio e-signature footnote. */
+export function extraLessonsStandaloneWithdrawalFormBody(
+  filledContractBody: string,
+  schoolEmail?: string | null,
+): string {
+  let annex = extraLessonsAnnexBody(filledContractBody);
+  if (!annex) return '';
+  annex = annex.replace(/^\s*1\s+PRIEDAS\b/i, EXTRA_LESSONS_WITHDRAWAL_FORM_TITLE);
+  annex = annex
+    .replace(/\n*Elektroniniu būdu pateikiant[\s\S]*$/i, '')
+    .replace(/\s+$/g, '');
+  const note = extraLessonsWithdrawalFormSubmitNote(schoolEmail);
+  if (!annex.includes('nusiųskite mokyklai')) annex = `${annex}\n\n${note}`;
+  return annex.trim();
+}
+
+export function extraLessonsBlankWithdrawalFormBody(schoolEmail?: string | null): string {
+  const noteEmail = schoolEmail || EXTRA_LESSONS_WITHDRAWAL_FORM_SCHOOL_EMAIL;
+  return extraLessonsStandaloneWithdrawalFormBody(
+    EXTRA_LESSONS_DEFAULT_BODY
+      .replace(/VšĮ[^\n]*/g, '')
+      .replace(/\{\{mokyklos_el_pastas\}\}/g, '')
+      .replace(/Pranešu, kad atsisakau[^\n]*/g, '')
+      .replace(/reikalingas tik tada[^\n]*/g, '')
+      .replace(/\{\{sutarties_nr\}\}/g, '')
+      .replace(/\{\{data\}\}/g, '')
+      .replace(/\{\{vardas_pavarde\}\}/g, '')
+      .replace(/\{\{adresas_ar_el_pastas\}\}/g, ''),
+    noteEmail,
+  );
+}
+
+export function extraLessonsWithdrawalFormHref(token: string): string {
+  return `/api/extra-lessons-contract-accept?token=${encodeURIComponent(token)}&format=annex-pdf`;
 }
 
 export function isExtraLessonsContract(row: { kind?: string | null } | null | undefined): boolean {

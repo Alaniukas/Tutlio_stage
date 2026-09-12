@@ -10,11 +10,14 @@ export default function BlogSection() {
   const [posts, setPosts] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
-    fetch('/api/admin-blog')
+    const controller = new AbortController();
+    setPosts([]);
+    fetch(`/api/admin-blog?locale=${encodeURIComponent(locale)}`, { signal: controller.signal })
       .then(r => r.json())
-      .then(d => { if (d.posts?.length) setPosts(d.posts.slice(0, 3)); })
+      .then(d => { if (!controller.signal.aborted && d.posts?.length) setPosts(d.posts.slice(0, 3)); })
       .catch(() => {});
-  }, []);
+    return () => controller.abort();
+  }, [locale]);
 
   const title = (p: Record<string, unknown>) => resolveField(p, 'title', locale);
 

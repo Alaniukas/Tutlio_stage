@@ -8,6 +8,7 @@ import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.j
 import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile } from './_lib/marketMoney.js';
 import { customerTotalEur } from './_lib/stripeLessonPricing.js';
+import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import {
   isTrialReservationFlowEnabled,
@@ -18,6 +19,7 @@ import {
 import { isProKlaseOrg } from './_lib/marketMoney.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { directChargeOptions } from './_lib/stripeDirectCharge.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -198,7 +200,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: orgStripe } = await supabase
       .from('organizations')
-      .select('stripe_account_id, stripe_onboarding_complete, entity_type, slug')
+      .select('stripe_account_id, stripe_onboarding_complete, entity_type, slug, features')
       .eq('id', adminRow.organizationId)
       .single();
 
@@ -206,14 +208,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       orgStripe?.stripe_onboarding_complete && orgStripe.stripe_account_id,
     );
 
+    if (!canTransferToOrg) {
+      return json(res, 400, { error: 'Organization Stripe account is not connected' });
+    }
+
     const feeProfile = orgFeeProfile((orgStripe as { slug?: string | null }).slug) ?? orgFeeProfile(adminRow.organizationId);
+    const feeSplit = resolveOrgPayerFeeSplit((orgStripe as { features?: unknown }).features);
     // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
     const useSchoolOrgAbsorbedFees = orgStripe.entity_type === 'school' && !feeProfile;
 
     const basePriceEur = trialPriceEur;
-    const payerChargedTotalEur = useSchoolOrgAbsorbedFees ? basePriceEur : customerTotalEur(basePriceEur, feeProfile);
-    const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
-    const tutorTransferCents = baseCents;
+    const schoolBreakdown = useSchoolOrgAbsorbedFees
+      ? schoolInstallmentCheckoutCents(basePriceEur, market)
+      : null;
+    const payerChargedTotalEur = schoolBreakdown
+      ? schoolBreakdown.chargeCents / 100
+      : customerTotalEur(basePriceEur, feeProfile, feeSplit);
+    const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
 
     const { data: lessonPackage, error: packageErr } = await supabase
       .from('lesson_packages')
@@ -328,25 +339,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const customerEmail = student.payer_email || student.email || undefined;
 
-    // Try destination charge first; if Stripe says destination account doesn't exist,
-    // gracefully fall back to charging platform account only (no transfer_data).
     let checkoutSession;
     try {
-      if (!canTransferToOrg) {
-        throw Object.assign(new Error('Organization Stripe is not connected'), {
-          code: 'resource_missing',
-          raw: { param: 'transfer_data[destination]' },
-        });
-      }
       if (useSchoolOrgAbsorbedFees) {
         const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
         const applicationFeeCents = chargeCents - transferToSchoolCents;
         if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
+          await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
           return json(res, 400, { error: 'Netinkama bandomosios pamokos suma' });
         }
         checkoutSession = await stripe.checkout.sessions.create({
           mode: 'payment',
           customer_email: customerEmail || undefined,
+          customer_creation: 'always',
           payment_method_types: ['card'],
           line_items: [
             {
@@ -363,9 +368,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ],
           payment_intent_data: {
             application_fee_amount: applicationFeeCents,
-            transfer_data: {
-              destination: orgStripe.stripe_account_id,
-            },
             metadata: {
               tutlio_package_id: lessonPackage.id,
               tutor_id: tutorId,
@@ -383,13 +385,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             is_trial: 'true',
             tutlio_school_org_absorbed: 'true',
           },
-          success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}`,
+          success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(String(orgStripe.stripe_account_id))}`,
           cancel_url: `${appOrigin}/package-cancelled`,
-        });
+        }, directChargeOptions(orgStripe.stripe_account_id));
       } else {
         checkoutSession = await stripe.checkout.sessions.create({
           mode: 'payment',
           customer_email: customerEmail || undefined,
+          customer_creation: 'always',
           payment_method_types: ['card'],
           line_items: [
             {
@@ -416,10 +419,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             },
           ],
           payment_intent_data: {
-            transfer_data: {
-              destination: orgStripe.stripe_account_id,
-              amount: tutorTransferCents,
-            },
+            application_fee_amount: feesCents,
             metadata: {
               tutlio_package_id: lessonPackage.id,
               tutor_id: tutorId,
@@ -436,63 +436,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             is_trial: 'true',
             ...checkoutBaseMetadata(basePriceEur, market),
           },
-          success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}`,
+          success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(String(orgStripe.stripe_account_id))}`,
           cancel_url: `${appOrigin}/package-cancelled`,
-        });
+        }, directChargeOptions(orgStripe.stripe_account_id));
       }
     } catch (e: any) {
-      const isMissingDestination =
-        e?.code === 'resource_missing' &&
-        typeof e?.raw?.param === 'string' &&
-        e.raw.param.includes('transfer_data[destination]');
-      if (!isMissingDestination) {
-        throw e;
-      }
-      // Fallback: no destination — funds land in platform Stripe account
-      checkoutSession = await stripe.checkout.sessions.create({
-        mode: 'payment',
-        customer_email: customerEmail || undefined,
-        payment_method_types: ['card'],
-        line_items: [
-          {
-            price_data: {
-              currency,
-              product_data: {
-                name: `Bandomoji pamoka – ${trialTopic}`,
-                description: `Mokymo paslaugos. Paslaugos teikėjas: ${tutor.full_name || 'Korepetitorius'}`,
-              },
-              unit_amount: baseCents,
-            },
-            quantity: 1,
-          },
-          {
-            price_data: {
-              currency,
-              product_data: {
-                name: 'Platformos administravimo mokestis',
-                description: 'Paslaugos teikėjas: MB „Tutlio“',
-              },
-              unit_amount: feesCents,
-            },
-            quantity: 1,
-          },
-        ],
-        metadata: {
-          tutlio_package_id: lessonPackage.id,
-          tutor_id: tutorId,
-          student_id: studentId,
-          subject_id: subjectId,
-          is_trial: 'true',
-          tutlio_base_eur: basePriceEur.toFixed(2),
-        },
-        success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${appOrigin}/package-cancelled`,
-      });
+      await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
+      throw e;
     }
 
     await supabase
       .from('lesson_packages')
-      .update({ stripe_checkout_session_id: checkoutSession.id, total_price: payerChargedTotalEur })
+      .update({ stripe_checkout_session_id: checkoutSession.id, total_price: basePriceEur })
       .eq('id', lessonPackage.id);
 
     // Send email to payer with trial payment link.

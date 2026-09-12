@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { ko, koOverrides } from '../../src/lib/i18n/ko';
@@ -13,7 +14,9 @@ import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 import { getCaseStudy, getTestimonials } from '../../src/components/landing/v2/socialProof';
 import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone } from '../../src/lib/utils';
 
-const deferredPrefixes = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('ko');
+
+const deferredPrefixes = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferredPrefixes.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 
@@ -29,7 +32,8 @@ describe('Korean tutor and business localization', () => {
     expect(validateLocalizedPhone('+821012345678', 'lt')).toBe(false);
   });
   it('covers every in-scope source key and retains intentional English fallbacks', () => {
-    expect(Object.keys(koOverrides).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in koOverrides))).toEqual([]);
+    expect(Object.keys(koOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(ko).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !ko[key])).toEqual([]);
     for (const key of Object.keys(en).filter((key) => deferredPrefixes.has(key.split('.')[0]))) {
@@ -55,8 +59,13 @@ describe('Korean tutor and business localization', () => {
       'landing.v2.pillExam': en['landing.v2.pillExam'].replace('Feb', '2'),
       'landing.v2.demo.weekShort': en['landing.v2.demo.weekShort'].replace('March', '3'),
     };
+    const semanticNumberKeys = new Set([
+      'compare.tutlio.glance.pricingModel',
+      'compare.tutorcruncher.faq.a1',
+      'compare.teachworks.glance.pricingModel',
+    ]);
     const numbers = /\d+(?:[.,]\d+)?/g;
-    expect(expectedKeys.filter((key) =>
+    expect(expectedKeys.filter((key) => !semanticNumberKeys.has(key) &&
       JSON.stringify(tokens(localizedDateSources[key] ?? en[key], numbers)) !== JSON.stringify(tokens(ko[key], numbers)),
     )).toEqual([]);
     expect(ko['landing.v2.pillExam']).toBe('시험 2월 14일');

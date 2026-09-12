@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SchoolExtraLessonsAccept from '../../src/pages/SchoolExtraLessonsAccept';
@@ -49,7 +49,6 @@ const preview = {
   parentEditableFields: [],
   startWithin14Applies: true,
   recordingsEnabled: true,
-  termsCheckboxText: 'Perskaičiau Sutartį',
   startWithin14CheckboxText: 'Prašau pradėti teikti paslaugas nepasibaigus 14 dienų',
   legalLinks: { withdrawalForm: '/legal/extra-lessons-withdrawal-form.html' },
 };
@@ -58,6 +57,30 @@ describe('SchoolExtraLessonsAccept', () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('shows durable pending state after submit and finishes when the worker finalizes', async () => {
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return { ok: true, status: 202, json: async () => ({ ok: true, pending: true }) };
+      if (_url.includes('status=1')) return { ok: true, json: async () => ({ ok: true, alreadyAccepted: true, pdfUrl: 'https://example.com/final.pdf' }) };
+      return { ok: true, text: async () => JSON.stringify(preview) };
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=test']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+    await screen.findByRole('checkbox');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+    await screen.findByRole('heading', { name: 'Patvirtinimas išsaugotas' });
+    expect(screen.queryByRole('heading', { name: 'Sutartis sudaryta' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Užsakymas su prievole sumokėti' })).toBeNull();
+    await screen.findByRole('heading', { name: 'Sutartis sudaryta' }, { timeout: 4500 });
+  });
+
+  it('restores the pending screen on page reload', async () => {
+    fetchMock.mockResolvedValue({ ok: true, text: async () => JSON.stringify({ ...preview, pending: true, needsAttention: true }) });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=test']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+    await screen.findByRole('heading', { name: 'Patvirtinimas išsaugotas' });
+    expect(screen.getByText(/Dokumento paruošimas užtruko/)).toBeTruthy();
+    expect(screen.queryByRole('checkbox')).toBeNull();
   });
 
   it('shows a PDF preview and Sutinku/Nesutinku choices for the parent', async () => {
@@ -79,10 +102,22 @@ describe('SchoolExtraLessonsAccept', () => {
     expect(screen.getByRole('button', { name: 'Atidaryti visą PDF' })).toBeTruthy();
     expect(screen.getByText('Sutinku pradėti iš karto')).toBeTruthy();
     expect(screen.getByText('Palaukti')).toBeTruthy();
-    expect(screen.getByText('Sutinku')).toBeTruthy();
-    expect(screen.getByText('Nesutinku')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Patvirtinti sutartį' })).toBeTruthy();
-    expect(screen.getByText('Tutlio 🎓')).toBeTruthy();
+    expect((screen.getByRole('radio', { name: 'Sutinku pradėti iš karto' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('radio', { name: 'Palaukti' }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole('radio', { name: 'Sutinku' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('radio', { name: 'Nesutinku' }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' })).toBeTruthy();
+    expect(screen.getByText('Tutlio')).toBeTruthy();
+    expect(screen.queryByText('Tutlio 🎓')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Peržiūrėkite sutartį ir pateikite užsakymą' })).toBeTruthy();
+    expect(screen.queryByText(/\*\s*$/)).toBeNull();
+    expect(screen.getByText(/Grupiniai užsiėmimai užsakomi visam mėnesiui/)).toBeTruthy();
+    expect(
+      screen.getByRole('link', { name: 'Sutarties atsisakymo forma' }).getAttribute('href'),
+    ).toBe('/api/extra-lessons-contract-accept?token=legalqawithin14aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&format=annex-pdf');
+    expect(screen.queryByText(/Privatumo pranešimas/)).toBeNull();
+    expect(screen.queryByText(/Elgesio taisyklės — kreipkitės/)).toBeNull();
+    expect(screen.getByText(/nuotolinių užsiėmimų elgesio taisyklėmis/)).toBeTruthy();
   });
 
   it('hides the 14-day radios when the first lesson is after the window', async () => {
@@ -113,7 +148,7 @@ describe('SchoolExtraLessonsAccept', () => {
     });
     expect(screen.queryByText('Sutinku pradėti iš karto')).toBeNull();
     expect(screen.queryByText('Palaukti')).toBeNull();
-    expect(screen.queryByText('Pamokų įrašymas')).toBeNull();
+    expect(screen.queryByText('Užsiėmimų įrašymas')).toBeNull();
   });
 
   it('asks the parent to fill missing order fields', async () => {
@@ -151,7 +186,7 @@ describe('SchoolExtraLessonsAccept', () => {
     expect(screen.getByText('Paslaugos tipas')).toBeTruthy();
     expect(screen.getByText('Grupinė')).toBeTruthy();
     expect(screen.getByText('Individuali')).toBeTruthy();
-    expect(screen.getByText('Pamokos trukmė (min)')).toBeTruthy();
+    expect(screen.getByText('Užsiėmimo trukmė (min)')).toBeTruthy();
   });
 
   it('does not offer withdrawal on the post-accept success screen', async () => {
@@ -176,6 +211,29 @@ describe('SchoolExtraLessonsAccept', () => {
     });
     expect(screen.queryByRole('button', { name: /Atsisakyti sutarties/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Nutraukti sutartį' })).toBeNull();
-    expect(screen.getByText(/tėvų paskyroje/)).toBeTruthy();
+    expect(screen.queryByText(/tėvų paskyroje/)).toBeNull();
+    expect(screen.getByText(/paskyros kurti nereikia/)).toBeTruthy();
+  });
+
+  it('opens only the contract annex when view=annex', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        ...preview,
+        recordingsEnabled: false,
+        body: 'VISA SUTARTIS\n2. DALYKAS\n1 PRIEDAS\nTik atsisakymo forma.',
+      }),
+    });
+    render(
+      <MemoryRouter initialEntries={['/school-extra-lessons-accept?token=legalqawithin14aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&view=annex']}>
+        <SchoolExtraLessonsAccept />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText('Sutarties atsisakymo forma')).toBeTruthy();
+    });
+    expect(screen.getByText(/Tik atsisakymo forma/)).toBeTruthy();
+    expect(screen.queryByText('VISA SUTARTIS')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Užsakymas su prievole sumokėti' })).toBeNull();
   });
 });

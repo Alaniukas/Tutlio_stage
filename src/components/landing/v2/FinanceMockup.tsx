@@ -36,7 +36,8 @@ export default function FinanceMockup() {
             </p>
             <p className="text-[11px] text-zinc-500 sm:text-xs">{t('dash.thisMonth')}</p>
           </div>
-          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
             {t('dash.paidLabel')}
           </span>
         </div>
@@ -44,7 +45,7 @@ export default function FinanceMockup() {
         <p className="mt-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
           {t('dash.totalRevenue')}
         </p>
-        <p className="font-display text-2xl font-bold tracking-tight text-zinc-900 sm:text-3xl">3 540 €</p>
+        <p dir="ltr" className="font-display text-2xl font-bold tracking-tight text-zinc-900 sm:text-3xl">3 540 €</p>
         <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
           <div className="h-full w-[82%] rounded-full bg-gradient-to-r from-indigo-500 to-teal-400" />
         </div>
@@ -59,7 +60,7 @@ export default function FinanceMockup() {
                 <p className="truncate text-xs font-semibold text-zinc-900 sm:text-sm">{t(labelKey)}</p>
                 <p className="truncate text-[10px] text-zinc-500 sm:text-xs">{t(metaKey)}</p>
               </div>
-              <p className="shrink-0 text-xs font-semibold text-zinc-900 sm:text-sm">{amount}</p>
+              <p dir="ltr" className="shrink-0 text-xs font-semibold text-zinc-900 sm:text-sm">{amount}</p>
             </div>
           ))}
         </div>
@@ -76,11 +77,8 @@ export default function FinanceMockup() {
             <div key={name} className="flex items-center gap-2.5">
               <MiniAvatar seed={seed} alt={name} size="sm" className="ring-1 ring-white shadow-sm" />
               <p className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-900 sm:text-sm">{name}</p>
-              <span
-                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                  paid ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-                }`}
-              >
+              <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-zinc-700">
+                <span className={`h-1.5 w-1.5 rounded-full ${paid ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                 {paid ? t('dash.paidLabel') : t('dash.unpaid')}
               </span>
             </div>

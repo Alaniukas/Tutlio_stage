@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { readFileSync } from 'node:fs';
 import { format, parse } from 'date-fns';
 import { en } from '../../src/lib/i18n/en';
@@ -14,7 +15,9 @@ import { CHROME, chromeFor, formatShortDay } from '../../src/lib/publicPage';
 import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 import { formatLocalizedPhone, validateLocalizedPhone, getLocalizedPhonePlaceholder } from '../../src/lib/utils';
 
-const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('zh-hk');
+
+const deferred = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const phoneCorrections = new Set(['onboard.parentPhoneFormat', 'onboard.phoneFormatError', 'register.phoneError', 'register.phoneHint', 'settings.phoneFormat', 'stu.phoneFormat']);
 // Numbers expressed as Chinese words, named months expressed numerically, and
@@ -28,7 +31,8 @@ beforeAll(async () => { await loadLocaleDict('zh-hk'); });
 
 describe('Hong Kong Traditional Chinese tutor and business localization', () => {
   it('covers every scoped source key explicitly and keeps deferred modules English', () => {
-    expect(Object.keys(zhHkOverrides).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in zhHkOverrides))).toEqual([]);
+    expect(Object.keys(zhHkOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(zhHk).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !zhHk[key])).toEqual([]);
     for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) expect(zhHk[key]).toBe(en[key]);

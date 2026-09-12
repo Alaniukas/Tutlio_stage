@@ -19,6 +19,11 @@ import {
   schoolContractAllowsInstallmentPayment,
   SCHOOL_INSTALLMENT_PAYMENT_BLOCKED_LT,
 } from './_lib/schoolContractPaymentGate.js';
+import {
+    directChargeOptions,
+    expireConnectCheckoutSession,
+    retrieveConnectCheckoutSessionWithScope,
+} from './_lib/stripeDirectCharge.js';
 
 /** Connect accounts need this API version (matches api/stripe-connect.ts) — mixed versions caused opaque failures. */
 const STRIPE_API_VERSION = '2026-02-25.clover' as any;
@@ -119,12 +124,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         //    the current charge; otherwise expire it and create a fresh one.
         if (installment.stripe_checkout_session_id) {
             try {
-                const existing = await stripe.checkout.sessions.retrieve(installment.stripe_checkout_session_id);
-                if (existing.status === 'open' && existing.url && existing.amount_total === chargeCents) {
+                const existingLookup = await retrieveConnectCheckoutSessionWithScope(
+                    stripe,
+                    installment.stripe_checkout_session_id,
+                    destinationAcct,
+                );
+                const existing = existingLookup.session;
+                if (existingLookup.stripeAccount === destinationAcct
+                    && existing.status === 'open'
+                    && existing.url
+                    && existing.amount_total === chargeCents) {
                     return res.redirect(303, existing.url);
                 }
                 if (existing.status === 'open') {
-                    await stripe.checkout.sessions.expire(installment.stripe_checkout_session_id).catch(() => {});
+                    await expireConnectCheckoutSession(
+                        stripe,
+                        installment.stripe_checkout_session_id,
+                        existingLookup.stripeAccount,
+                    ).catch(() => {});
                 }
             } catch {
                 // expired or invalid — create a new one below
@@ -164,7 +181,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             lineItems.push({
                 price_data: {
                     currency,
-                    unit_amount: chargeCents,
+                    unit_amount: transferToSchoolCents,
                     product_data: {
                         name: `${org?.name || 'Mokykla'} — Įmoka #${installment.installment_number}`,
                         description: `Metinio mokesčio įmoka: ${student?.full_name || 'Mokinys'}`,
@@ -173,6 +190,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 quantity: 1,
             });
         }
+        lineItems.push({
+            price_data: {
+                currency,
+                unit_amount: applicationFeeCents,
+                product_data: {
+                    name: 'Platformos administravimo mokestis',
+                    description: 'Paslaugos teikėjas: MB „Tutlio“',
+                },
+            },
+            quantity: 1,
+        });
 
         const metadata = {
             tutlio_school_installment_id: installment.id,
@@ -180,21 +208,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             tutlio_student_id: contract.student_id,
         };
 
-        // 6. Create Stripe Checkout Session (Connect transfer to the school)
+        // 6. Create Stripe Checkout Session directly on the school's account.
         const checkoutSession = await stripe.checkout.sessions.create({
             mode: 'payment',
             payment_method_types: ['card'],
             customer_email: payerEmail,
+            customer_creation: 'always',
             line_items: lineItems,
             payment_intent_data: {
                 application_fee_amount: applicationFeeCents,
-                transfer_data: { destination: destinationAcct },
                 metadata,
             },
             metadata,
-            success_url: `${appOrigin}/school-payment-success?success=1&installment=${installment.id}&session_id={CHECKOUT_SESSION_ID}`,
+            success_url: `${appOrigin}/school-payment-success?success=1&installment=${installment.id}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(destinationAcct)}`,
             cancel_url: `${appOrigin}/school-payment-success?cancelled=1&installment=${installment.id}`,
-        });
+        }, directChargeOptions(destinationAcct));
 
         await supabase
             .from('school_payment_installments')

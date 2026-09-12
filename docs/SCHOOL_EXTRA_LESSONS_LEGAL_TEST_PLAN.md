@@ -32,7 +32,7 @@ Viešas click-wrap **be login** — token URL iš laiško / seed konsolės:
 
 | Sutartis | Pirma pamoka | Ką tikrinti |
 |----------|--------------|-------------|
-| `PP-LEGAL-WITHIN14` | per 14 kalendorinių dienų (Vilnius) | Checkbox **matomas**, nepažymėtas; be jo vis tiek galima užsakyti (statusas `no`); su juo — `yes` |
+| `PP-LEGAL-WITHIN14` | per 14 kalendorinių dienų (Vilnius) | Radio **Sutinku pradėti iš karto** matomas ir pasirinktas pagal nutylėjimą (`yes`); tėvas gali pasirinkti **Palaukti** (`no`) |
 | `PP-LEGAL-AFTER14` | po 14 d. | Checkbox **paslėptas**; DB `start_within_14_status = na` |
 | `PP-LEGAL-SPARSE` | admin paliko tuščius laukus (tipas, kiekiai, grafikas) | Tėvas užpildo geltonoje juostoje; SHA nuo **sujungto** order |
 | `PP-LEGAL-WITHDRAW` | jau pasirašyta prieš ~2 d. | Portale **Atsisakyti** (ne Nutraukti) |
@@ -62,9 +62,9 @@ Jei TC-00 failina — TC-02..07 PDF dalies nevertink kaip pass.
 ## TC-02 — Click-wrap (14 d. taikoma)
 
 1. Atidaryk `PP-LEGAL-WITHIN14` URL.
-2. Teisinis checkbox privalomas; 14 d. checkbox **ne** pažymėtas pagal nutylėjimą.
-3. Be 14 d. varnelės spausk **Patvirtinti sutartį** → priimta, `start_within_14_status = no`, paslaugos startas = accept + 14 d. (Vilnius).
-4. Pakartok su nauju pasiūlymu ir **pažymėta** 14 d. varnele → `yes`, pamokos gali prasidėti iš karto.
+2. Teisinis checkbox privalomas; radio **Sutinku pradėti iš karto** pažymėtas pagal nutylėjimą.
+3. Patvirtinus nepakeistą numatytą pasirinkimą → `start_within_14_status = yes`, pamokos gali prasidėti iš karto.
+4. Pakartok su nauju pasiūlymu ir pasirink **Palaukti** → `no`, paslaugos startas = accept + 14 d. (Vilnius).
 5. Laiškas tėvui su PDF priedu; `document_sha256` užšaldomas (įskaitant parodytą 14 d. tekstą).
 6. Sėkmės ekrane **nėra** „Atsisakyti sutarties“.
 

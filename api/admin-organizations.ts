@@ -270,7 +270,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         { data: auditRows },
       ] = await Promise.all([
         supabase.from('organization_admins').select('user_id').eq('organization_id', idParam),
-        supabase.from('profiles').select('id, full_name, email, phone').eq('organization_id', idParam).order('full_name'),
+        supabase.from('profiles').select('id, full_name, email, phone, personal_meeting_link').eq('organization_id', idParam).order('full_name'),
         getOrgStudentProfileExclusions(supabase, idParam),
         supabase.rpc('admin_org_students' as any, { p_org_id: idParam }),
         supabase.from('platform_admin_audit').select('id, created_at, action, details').eq('organization_id', idParam).order('created_at', { ascending: false }).limit(50),

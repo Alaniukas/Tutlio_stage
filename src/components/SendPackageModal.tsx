@@ -12,6 +12,9 @@ import { useTranslation } from '@/lib/i18n';
 import { LOCALE_FORMAT_TAGS } from '@/lib/i18n/locales';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
+import { customerTotal } from '@/lib/marketMoney';
+import { currentMarket } from '@/lib/market';
+import { resolveOrgPayerFeeSplit, type OrgPayerFeeSplit } from '@/lib/orgPayerFeeSplit';
 
 interface SendPackageModalProps {
   isOpen: boolean;
@@ -23,13 +26,8 @@ interface SendPackageModalProps {
   tutorId?: string;
 }
 
-const STRIPE_FEE_PERCENT = 0.015;
-const STRIPE_FEE_FIXED_EUR = 0.25;
-const PLATFORM_FEE_PERCENT = 0.02;
-
-function calcTotalWithFees(basePriceEur: number): number {
-  const platformFee = basePriceEur * PLATFORM_FEE_PERCENT;
-  return (basePriceEur + platformFee + STRIPE_FEE_FIXED_EUR) / (1 - STRIPE_FEE_PERCENT);
+function calcTotalWithFees(basePriceEur: number, feeSplit?: OrgPayerFeeSplit | null): number {
+  return customerTotal(basePriceEur, currentMarket(), null, feeSplit);
 }
 
 export default function SendPackageModal({
@@ -58,6 +56,7 @@ export default function SendPackageModal({
   const [isForceManualOnly, setIsForceManualOnly] = useState(false);
   const [expiresAt, setExpiresAt] = useState('');
   const [attachSalesInvoice, setAttachSalesInvoice] = useState(true);
+  const [orgFeeSplit, setOrgFeeSplit] = useState<OrgPayerFeeSplit | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -84,9 +83,9 @@ export default function SendPackageModal({
     return {
       totalLessons,
       basePriceEur,
-      totalWithFees: calcTotalWithFees(basePriceEur),
+      totalWithFees: calcTotalWithFees(basePriceEur, orgFeeSplit),
     };
-  }, [items]);
+  }, [items, orgFeeSplit]);
 
   const fetchSubjects = async () => {
     setLoadingSubjects(true);
@@ -102,6 +101,16 @@ export default function SendPackageModal({
         .select('organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments')
         .eq('id', effectiveTutorId)
         .single();
+      if (profile?.organization_id) {
+        const { data: orgRow } = await supabase
+          .from('organizations')
+          .select('features')
+          .eq('id', profile.organization_id)
+          .maybeSingle();
+        setOrgFeeSplit(resolveOrgPayerFeeSplit((orgRow as { features?: unknown })?.features));
+      } else {
+        setOrgFeeSplit(null);
+      }
       const manualEnabled = tutorUsesManualStudentPayments(profile);
       setCanUseManual(manualEnabled);
       const forceManual = !profile?.organization_id && (
@@ -307,8 +316,7 @@ export default function SendPackageModal({
                         </PopoverTrigger>
                         <PopoverContent aria-label={t('package.totalToPay')} className="w-64 max-w-[calc(100vw-2rem)] rounded-lg border-violet-200 bg-white p-2.5 text-start text-xs font-medium text-gray-700">
                           {t('package.tooltipTutor', { amount: formatEur(totals.basePriceEur) })}<br />
-                          {t('package.tooltipPlatform', { amount: formatEur(totals.basePriceEur * PLATFORM_FEE_PERCENT) })}<br />
-                          {t('package.tooltipStripe', { amount: formatEur(totals.totalWithFees - totals.basePriceEur - (totals.basePriceEur * PLATFORM_FEE_PERCENT)) })}
+                          {t('package.tooltipPlatform', { amount: formatEur(totals.totalWithFees - totals.basePriceEur) })}
                         </PopoverContent>
                       </Popover>
                     </span>

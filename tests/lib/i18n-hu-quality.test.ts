@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { hu, huOverrides } from '../../src/lib/i18n/hu';
@@ -14,7 +15,9 @@ import { CHROME, chromeFor, formatShortDay } from '../../src/lib/publicPage';
 import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone } from '../../src/lib/utils';
 
-const deferredPrefixes = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('hu');
+
+const deferredPrefixes = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferredPrefixes.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 // Existing callers supply these values, but abbreviated English strings omit them.
 // These deliberate repairs are reviewed in HUNGARIAN_LOCALIZATION_REVIEW.md.
@@ -40,7 +43,8 @@ beforeAll(async () => { await loadLocaleDict('hu'); });
 
 describe('Hungarian tutor and business localization', () => {
   it('covers every in-scope key, including all quiz branches, with no invented keys', () => {
-    expect(Object.keys(huOverrides).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in huOverrides))).toEqual([]);
+    expect(Object.keys(huOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(hu).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !hu[key])).toEqual([]);
     expect(Object.keys(huOverrides).filter((key) => key.startsWith('quiz.')).sort())
@@ -70,7 +74,7 @@ describe('Hungarian tutor and business localization', () => {
       expect(hu[key]).toContain('országhívóval');
       expect(hu[key]).not.toContain('+370');
     }
-    expect(hu['pricing.studentFeeNote']).toContain('3,5% + €0,25');
+    expect(hu['pricing.studentFeeNote']).toContain('2% platformdíjat');
   });
 
   it('loads Hungarian through browser, email, SSR, support and platform overrides', () => {
@@ -83,7 +87,7 @@ describe('Hungarian tutor and business localization', () => {
     expect(emailText('hu', 'em.payReminderBodyOther', { student: 'Anna' }))
       .toBe('<strong>Anna</strong> diák még nem fizette ki az órát.');
     expect(supportGeneralFollowUp('hu')).toBe('Miben segíthetek még?');
-    expect(resolvePlatformTranslation('schools', 'hu', 'nav.forSchools', hu['nav.forSchools'])).toBe('Iskolák');
+    expect(resolvePlatformTranslation('schools', 'hu', 'nav.forSchools', hu['nav.forSchools'])).toBe('Online iskolák');
   });
 
   it('renders restored deadlines, counts and dates instead of labels or date masks', () => {
@@ -145,8 +149,8 @@ describe('Hungarian tutor and business localization', () => {
     expect(isTranslatedLocale('hu')).toBe(false);
     const html = renderShell({ locale: 'hu', domain: 'com', path: '/', ...meta, body: '<h1>Magánórák</h1>' });
     expect(html).toContain('<html lang="hu" dir="ltr">');
-    expect(html).toContain('content="noindex, follow"');
+    expect(html).toContain('content="index, follow, max-image-preview:large"');
     expect(html).toContain('>Iskoláknak</a>');
-    expect(html).not.toContain('hreflang="hu"');
+    expect(html).toContain('hreflang="hu"');
   });
 });

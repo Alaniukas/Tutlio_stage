@@ -9,7 +9,8 @@ if (typeof process !== 'undefined' && process.env.TUTLIO_DEV_API_LOCAL === '1') 
 
 import type { VercelRequest, VercelResponse } from './types';
 import { t, isValidLocale, localizedFromEmail, type Locale } from './_lib/i18n.js';
-import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { preloadExtraLocaleDict } from './_lib/loadExtraLocaleDict.js';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from './_lib/marketMoney.js';
 import {
   applyOrgBrandingToHtml,
   resolveEmailOrgBranding,
@@ -17,6 +18,11 @@ import {
 } from './_lib/emailOrgBranding.js';
 import { Resend } from 'resend';
 import { htmlLanguageCode, localeDirection, LOCALE_FORMAT_TAGS } from '../src/lib/i18n/locales.js';
+import {
+  applySchoolTerminology,
+  schoolTerminologyForOrg,
+  type SchoolTerminology,
+} from '../src/lib/i18n/schoolTerminology.js';
 import { createClient } from '@supabase/supabase-js';
 import { notificationLocale } from './_lib/notificationLocale.js';
 import { TUTOR_NOTIFICATION_COPY } from './_lib/tutorNotificationCopy.js';
@@ -33,7 +39,16 @@ import { canonicalOriginForOrgLocale } from './_lib/public-origin.js';
 import { schoolInstallmentPaymentBreakdown } from './_lib/schoolBookingInvite.js';
 import { studentRegistrationAlreadyActive } from './_lib/registrationInviteGate.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { sanitizeStudentNameForEmail } from './_lib/pendingChildName.js';
 import { hasOrgAdminPermission, type OrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { deliverAcceptanceOnce, validAcceptanceDeliveryKey } from './_lib/schoolAcceptanceDelivery.js';
+import { deliverSchoolMonthlyInvoiceOnce, schoolMonthlyInvoiceIdempotencyKey } from './_lib/schoolMonthlyInvoiceDelivery.js';
+import { pooledPackageEmailIdempotencyKey } from './_lib/sendPendingPackageEmail.js';
+import {
+  appendMvPayerFeeNoticeBeforeFooter,
+  finalizeMvPayerFirstFeeNoticeAfterSend,
+  maybeMvPayerFirstFeeNoticeFooter,
+} from './_lib/mvPayerFeeNotice.js';
 
 
 function randomToken() {
@@ -186,6 +201,7 @@ function joinRoleForEmailType(type: string, d: any): JoinRole | null {
   switch (type) {
     case 'booking_confirmation':
     case 'session_reminder_payer':
+    case 'school_extra_first_lesson_invite':
       return 'student';
     case 'session_reminder':
       return d?.isTutor ? 'tutor' : 'student';
@@ -432,8 +448,32 @@ function bookingConfirmation(d: any, locale: Locale) {
   };
 }
 
+/** MV-only tutor email — always Lithuanian regardless of tutor locale. */
+function mvFirstLessonPlannedTutor(d: any, _locale: Locale) {
+  const locale: Locale = 'lt';
+  const appUrl = getAppUrl();
+  const studentName = sanitizeStudentNameForEmail(d.studentName, 'Mokinys');
+  const byAdmin = d.scheduledByOrgAdmin === true;
+  return {
+    subject: t(locale, 'em.mvFirstLessonPlannedSubEmail', { student: studentName, date: d.date }),
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#124410', '#5C2B02')}"><h1>${t(locale, 'em.mvFirstLessonPlannedHeader')}</h1><p>${byAdmin ? t(locale, 'em.mvFirstLessonPlannedSubAdmin') : t(locale, 'em.mvFirstLessonPlannedSub')}</p></div>
+      <div class="body">
+        <p class="greeting">${t(locale, 'em.hiName', { name: d.tutorName })}</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">${byAdmin
+          ? t(locale, 'em.mvFirstLessonPlannedBodyAdmin', { student: studentName })
+          : t(locale, 'em.mvFirstLessonPlannedBody', { student: studentName })}</p>
+        ${table(td(t(locale, 'em.labelStudent'), studentName) + td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time, false))}
+        <div style="text-align:center; margin-top: 24px;">
+          ${outlookEmailButton(`${appUrl}/dashboard?lang=${locale}`, t(locale, 'em.btnViewCalendar'), '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+        </div>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
 function bookingNotification(d: any, locale: Locale) {
   const appUrl = getAppUrl();
+  const studentName = sanitizeStudentNameForEmail(d.studentName, locale === 'en' ? 'Student' : 'Mokinys');
   const localizedPaymentStatus =
     d.paymentStatus === 'paid' ? t(locale, 'em.statusPaid') :
     d.paymentStatus === 'pending' ? t(locale, 'em.statusPending') :
@@ -442,10 +482,10 @@ function bookingNotification(d: any, locale: Locale) {
   const isOrgSchoolTutorBooking = !!(d.organizationTutor || d.hidePaymentStatus);
 
   const statusParagraph = d.scheduledByOrgAdmin
-    ? `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.bookingNotifAdminBody', { student: d.studentName })}</p>`
+    ? `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.bookingNotifAdminBody', { student: studentName })}</p>`
     : isOrgSchoolTutorBooking
-      ? `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.bookingNotifOrgTutorBody', { student: d.studentName })}</p>`
-      : `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.bookingNotifWithStatus', { student: d.studentName, status: localizedPaymentStatus })}</p>`;
+      ? `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.bookingNotifOrgTutorBody', { student: studentName })}</p>`
+      : `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.bookingNotifWithStatus', { student: studentName, status: localizedPaymentStatus })}</p>`;
 
   const headerSub = d.scheduledByOrgAdmin
     ? t(locale, 'em.bookingNotifAdminSub')
@@ -454,14 +494,14 @@ function bookingNotification(d: any, locale: Locale) {
       : t(locale, 'em.bookingNotifStudentSub');
   return {
     subject: d.scheduledByOrgAdmin
-      ? t(locale, 'em.bookingNotifSubAdmin', { student: d.studentName, date: d.date })
-      : t(locale, 'em.bookingNotifSub', { student: d.studentName, date: d.date }),
+      ? t(locale, 'em.bookingNotifSubAdmin', { student: studentName, date: d.date })
+      : t(locale, 'em.bookingNotifSub', { student: studentName, date: d.date }),
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#6366f1', '#8b5cf6')}"><h1>${t(locale, 'em.bookingNotifHeader')}</h1><p>${headerSub}</p></div>
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiName', { name: d.tutorName })}</p>
         ${statusParagraph}
-        ${table(td(t(locale, 'em.labelStudent'), d.studentName) + td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time, false))}
+        ${table(td(t(locale, 'em.labelStudent'), studentName) + td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time, false))}
         <div style="text-align:center; margin-top: 24px;">
           ${outlookEmailButton(`${appUrl}/dashboard?lang=${locale}`, t(locale, 'em.btnViewCalendar'), '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
         </div>
@@ -496,18 +536,26 @@ function sessionCancelled(d: any, locale: Locale) {
 
 function sessionCancelledParent(d: any, locale: Locale) {
   const appUrl = getAppUrl();
+  const by = d.cancelledBy === 'student' ? t(locale, 'em.cancelByStudent') : t(locale, 'em.cancelByTutor');
+  const headerSub = d.cancelledBy === 'student'
+    ? t(locale, 'em.cancelParentHeaderSub')
+    : t(locale, 'em.cancelHeaderSub', { by });
+  const schoolFlow = d.schoolFlow === true;
+  const portalCta = schoolFlow
+    ? ''
+    : `<div style="text-align:center; margin-top: 24px;">
+          ${outlookEmailButton(`${appUrl}/parent/calendar`, t(locale, 'em.btnBackToSystem'), '#e5e7eb', { textColor: '#374151', fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+        </div>`;
   return {
     subject: t(locale, 'em.cancelParentSub', { date: d.date, time: d.time }),
     html: wrap(`
-      <div class="header" style="${headerInlineStyle('#ef4444', '#f97316')}"><h1>${t(locale, 'em.cancelHeader')}</h1><p>${t(locale, 'em.cancelParentHeaderSub')}</p></div>
+      <div class="header" style="${headerInlineStyle('#ef4444', '#f97316')}"><h1>${t(locale, 'em.cancelHeader')}</h1><p>${headerSub}</p></div>
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiPlain')}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.cancelParentBody', { student: d.studentName, tutor: d.tutorName })}</p>
         <div class="info-card" style="background:#fef2f2; border-color:#fecaca;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time, !d.reason)}</table></div>
         ${d.reason ? `<div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:12px; padding:16px; margin:16px 0;"><p style="color:#9a3412; font-size:13px; font-weight:600; margin:0 0 4px;">${t(locale, 'em.cancelReason')}</p><p style="color:#c2410c; font-size:14px; margin:0; line-height:1.5;">${d.reason}</p></div>` : ''}
-        <div style="text-align:center; margin-top: 24px;">
-          ${outlookEmailButton(`${appUrl}/student/sessions`, t(locale, 'em.btnBackToSystem'), '#e5e7eb', { textColor: '#374151', fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
-        </div>
+        ${portalCta}
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -566,13 +614,28 @@ function sessionReminderPayer(d: any, locale: Locale) {
   const calendarUrl = studentId
     ? `${getAppUrl()}/parent/calendar?studentId=${studentId}&sessionId=${sessionId}`
     : `${getAppUrl()}/parent/calendar?sessionId=${sessionId}`;
+  // School flow: parents get the reminder on the contract email without any
+  // Tutlio account — plain "your child's lesson starts soon, here is the link",
+  // no portal button, nothing about registering.
+  const schoolFlow = d.schoolFlow === true;
+  const lead = schoolFlow
+    ? t(locale, 'em.reminderPayerSchoolLead', { student: d.studentName })
+    : t(locale, 'em.reminderPayerBody', { student: d.studentName, tutor: d.tutorName });
+  const homeworkButton = schoolFlow && d.homeworkUrl
+    ? `<div style="text-align:center; margin-top:10px;">${outlookEmailButton(String(d.homeworkUrl), 'Namų darbai ir užsiėmimo medžiaga', '#059669', { fontWeight: '600', fontSize: '13px', padding: '11px 24px' })}</div>`
+    : '';
+  const cta = schoolFlow
+    ? (d.meetingLink
+      ? `<div style="text-align:center; margin-top:20px;">${outlookEmailButton(String(d.meetingLink), t(locale, 'em.reminderPayerJoinBtn'), '#4f46e5', { fontWeight: '600', fontSize: '15px', padding: '14px 32px' })}</div>`
+      : '') + homeworkButton
+    : (sessionId ? `<div style="text-align:center; margin-top:20px;">${outlookEmailButton(calendarUrl, t(locale, 'em.btnOpenLesson'), '#ea580c', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}</div>` : '');
   return {
     subject: t(locale, 'em.reminderPayerSub', { date: d.date, time: d.time }),
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#f59e0b', '#f97316')}"><h1>${t(locale, 'em.reminderPayerHeader')}</h1><p>${t(locale, 'em.reminderPayerHeaderSub')}</p></div>
       <div class="body">
         <p class="greeting">${t(locale, 'em.hi')}${d.recipientName ? ', ' + d.recipientName : ''}! 👋</p>
-        <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.reminderPayerBody', { student: d.studentName, tutor: d.tutorName })}</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">${lead}</p>
         <div class="info-card" style="background:#fffbeb; border-color:#fde68a;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
         ${td(t(locale, 'em.labelStudent'), d.studentName)}
         ${td(t(locale, 'em.labelTutorAlt'), d.tutorName)}
@@ -587,7 +650,7 @@ function sessionReminderPayer(d: any, locale: Locale) {
           <p style="color:#4b5563; font-size:14px; margin:0 0 6px;">📧 <a href="mailto:${d.tutorEmail || ''}" style="color:#6366f1; text-decoration:none;">${d.tutorEmail || t(locale, 'em.notSpecified')}</a></p>
           ${d.tutorPhone ? `<p style="color:#4b5563; font-size:14px; margin:0;">📱 <a href="tel:${d.tutorPhone}" style="color:#6366f1; text-decoration:none;">${d.tutorPhone}</a></p>` : ''}
         </div>
-        ${sessionId ? `<div style="text-align:center; margin-top:20px;">${outlookEmailButton(calendarUrl, t(locale, 'em.btnOpenLesson'), '#ea580c', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}</div>` : ''}
+        ${cta}
       </div>${footerFor(locale, d.unsubscribeEmail)}`, locale),
   };
 }
@@ -2314,26 +2377,26 @@ function schoolContractExtraOffer(d: any, locale: Locale) {
     extraLessonsOfferRow('Paslauga', d.serviceName),
     extraLessonsOfferRow('Grafikas', d.schedule),
     extraLessonsOfferRow('Laikotarpis', period || d.period),
-    extraLessonsOfferRow('Pamokos kaina', d.unitPrice, { money: true }),
+    extraLessonsOfferRow('Užsiėmimo kaina', d.unitPrice, { money: true }),
     extraLessonsOfferRow('Orientacinė mėnesio kaina', d.monthlyPrice, { money: true }),
   ].filter(Boolean).join('');
   const contact = schoolParentContactEmail(d);
   return {
-    subject: `Papildomų pamokų sutartis${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
+    subject: `Papildomų užsiėmimų sutartis${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
-        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Papildomų pamokų sutartis</h1>
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Peržiūrėkite sutartį ir pateikite užsakymą</h1>
         <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
       </div>
-      <div class="body">
-        <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
-        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          ${esc(d.schoolName || 'Mokykla')} parengė nuotolinių papildomų pamokų sutartį mokiniui
-          <strong>${esc(d.studentName)}</strong>. Atidarykite nuorodą, peržiūrėkite dokumentą ir, jei viskas tinka, patvirtinkite sutartį.
+      <div class="body" style="text-align:center;">
+        <p class="greeting" style="text-align:center;">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6; text-align:center; margin:0 auto; max-width:480px;">
+          ${esc(d.schoolName || 'Mokykla')} parengė nuotolinių papildomų užsiėmimų sutartį mokiniui
+          <strong>${esc(d.studentName)}</strong>. Atidarykite nuorodą, peržiūrėkite dokumentą ir pateikite užsakymą.
         </p>
-        ${rows ? `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>` : ''}
-        ${acceptUrl ? `<div style="text-align:center; margin:24px 0 10px;">${outlookEmailButton(acceptUrl, 'Peržiūrėti ir patvirtinti sutartį', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
-        ${contact ? `<p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(contact)}.</p>` : ''}
+        ${rows ? `<div class="info-card" style="text-align:left;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>` : ''}
+        ${acceptUrl ? `<div style="text-align:center; margin:24px 0 10px;">${outlookEmailButton(acceptUrl, 'Užsakymas su prievole sumokėti', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
+        ${contact ? `<p style="color:#6b7280; font-size:13px; text-align:center;">Jei turite klausimų, susisiekite su mokykla: ${esc(contact)}</p>` : ''}
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -2362,6 +2425,98 @@ function schoolContractExtraAccepted(d: any, locale: Locale) {
   };
 }
 
+/**
+ * Sent right after the click-wrap acceptance: the nearest lesson of that
+ * contract with a tracked join link plus the homework page. School parents have
+ * no account, so the mail must be self-sufficient (school-only, Lithuanian).
+ */
+function schoolExtraFirstLessonInvite(d: any, locale: Locale) {
+  const hasSession = Boolean(d.sessionId && d.date && d.time);
+  const contractRef = d.contractNumber ? ` Nr. ${d.contractNumber}` : '';
+  const joinButton = hasSession && d.meetingLink
+    ? `<div style="text-align:center; margin:22px 0 6px;">${outlookEmailButton(String(d.meetingLink), 'Prisijungti prie užsiėmimo', '#4f46e5', { fontWeight: '600', fontSize: '15px', padding: '14px 32px' })}</div>`
+    : '';
+  const homeworkButton = d.homeworkUrl
+    ? `<div style="text-align:center; margin:6px 0 4px;">${outlookEmailButton(String(d.homeworkUrl), 'Namų darbai ir užsiėmimo medžiaga', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}</div>`
+    : '';
+  const rows = hasSession
+    ? [
+      td('Data', String(d.date)),
+      td('Laikas', String(d.time)),
+      d.duration ? td('Trukmė', `${d.duration} min.`) : '',
+      d.tutorName ? td('Mokytojas', String(d.tutorName)) : '',
+      td('Grupė', String(d.groupName || '—'), false),
+    ].join('')
+    : [
+      d.serviceStartDate ? td('Užsiėmimai nuo', String(d.serviceStartDate)) : '',
+      d.scheduleLabel ? td('Tvarkaraštis', String(d.scheduleLabel)) : '',
+      td('Grupė', String(d.groupName || '—'), false),
+    ].join('');
+  const lead = hasSession
+    ? `Sutartis${contractRef} patvirtinta. Kviečiame <strong>${d.studentName}</strong> į artimiausią užsiėmimą:`
+    : `Sutartis${contractRef} patvirtinta. Artimiausio užsiėmimo laiką patikslins mokykla. Prisijungimo nuorodą atsiųsime priminimu el. paštu prieš užsiėmimą.`;
+  const waitNote = d.waitsFor14Days && d.serviceStartDate
+    ? `<p style="color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:12px; padding:12px 14px; font-size:13px; line-height:1.6;">Pasirinkote pradėti pasibaigus 14 dienų atsisakymo terminui, todėl užsiėmimai vyks nuo <strong>${d.serviceStartDate}</strong>.</p>`
+    : '';
+  return {
+    subject: `Kvietimas į užsiėmimą — ${d.studentName || 'Mokinys'}${hasSession ? `, ${d.date} ${d.time}` : ''}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#4f46e5', '#7c3aed')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Kvietimas į užsiėmimą</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${d.schoolName || 'Mokykla'}</p>
+      </div>
+      <div class="body" style="text-align:center;">
+        <p class="greeting" style="text-align:center;">Sveiki${d.parentName ? `, ${d.parentName}` : ''}!</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6; text-align:center;">${lead}</p>
+        <div class="info-card" style="text-align:left;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>
+        ${waitNote}
+        ${joinButton}
+        ${homeworkButton}
+        <p style="color:#6b7280; font-size:13px; line-height:1.6; margin-top:16px; text-align:center;">
+          Prieš kiekvieną kitą užsiėmimą gausite atskirą priminimą su data, laiku ir prisijungimo nuoroda. Užsiėmimų nenumeruojame. Namų darbus ir mokytojo medžiagą rasite pagal aukščiau esančią nuorodą. Paskyros kurti nereikia.
+        </p>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
+/** Month-end extra-lessons invoice with the "pay now" link (school-only, Lithuanian). */
+function schoolMonthlyInvoice(d: any, locale: Locale) {
+  const baseLessons = Number(d.baseLessons || 0);
+  const extraLessons = Number(d.extraLessons || 0);
+  const rows = [
+    td('Laikotarpis', String(d.periodLabel || `${d.periodStart} – ${d.periodEnd}`)),
+    baseLessons > 0
+      ? td(`Baziniai užsiėmimai (${baseLessons} × ${emailMoney(d.unitPrice, locale)})`, emailMoney(d.baseAmount, locale))
+      : '',
+    extraLessons > 0
+      ? td(`Papildomi užsiėmimai (${extraLessons} × ${emailMoney(d.unitPrice, locale)})`, emailMoney(d.extraAmount, locale))
+      : '',
+    td('Mokėtina suma', `<strong>${emailMoney(d.totalAmount, locale)}</strong>`),
+    td('Apmokėti iki', String(d.dueDate || '—'), false),
+  ].join('');
+  const payBlock = d.payUrl
+    ? `<div style="text-align:center; margin:24px 0 8px;">${outlookEmailButton(String(d.payUrl), `Apmokėti ${emailMoney(d.totalAmount, locale)}`, '#4f46e5', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>
+       <p style="color:#6b7280; font-size:13px; line-height:1.6; text-align:center;">Mokėjimas kortele per saugų Stripe langą. Paskyros kurti ar prisijungti nereikia.</p>`
+    : `<p style="color:#4b5563; font-size:14px; line-height:1.6;">Apmokėjimo būdą nurodys mokykla${d.contactEmail ? ` — <a href="mailto:${d.contactEmail}" style="color:#6366f1;">${d.contactEmail}</a>` : ''}.</p>`;
+  return {
+    subject: `Sąskaita už ${d.periodLabel || 'mėnesį'} — ${d.studentName || 'Mokinys'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#0f766e', '#115e59')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Papildomų užsiėmimų sąskaita</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${d.schoolName || 'Mokykla'}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki${d.parentName ? `, ${d.parentName}` : ''}!</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Pateikiame <strong>${d.studentName || 'mokinio'}</strong> papildomų užsiėmimų sąskaitą už ${d.periodLabel || 'praėjusį mėnesį'}${d.contractNumber ? ` (sutartis Nr. ${d.contractNumber})` : ''}.
+        </p>
+        <div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>
+        ${payBlock}
+        ${d.contactEmail ? `<p style="color:#9ca3af; font-size:12px; margin-top:16px;">Klausimai dėl sąskaitos: <a href="mailto:${d.contactEmail}" style="color:#6366f1;">${d.contactEmail}</a></p>` : ''}
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
 function schoolContractExtraWithdrawn(d: any, locale: Locale) {
   return {
     subject: `Sutarties atsisakymas${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
@@ -2373,7 +2528,7 @@ function schoolContractExtraWithdrawn(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Gavome jūsų atsisakymą nuo papildomų pamokų sutarties per 14 dienų terminą. Pareiškimo kopija pridėta.
+          Gavome jūsų atsisakymą nuo papildomų užsiėmimų sutarties per 14 dienų terminą. Pareiškimo kopija pridėta.
           Mokytojo atskirai informuoti nereikia.
         </p>
         <div class="info-card">
@@ -2397,7 +2552,7 @@ function schoolContractExtraTerminated(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Gavome prašymą nutraukti papildomų pamokų sutartį. Pareiškimo kopija pridėta.
+          Gavome prašymą nutraukti papildomų užsiėmimų sutartį. Pareiškimo kopija pridėta.
           Mokytojo atskirai informuoti nereikia.
         </p>
         <div class="info-card">
@@ -2880,6 +3035,7 @@ function isAuthorizedRequest(req: VercelRequest): boolean {
 const USER_TRIGGERABLE_EMAIL_TYPES = new Set([
   'booking_confirmation',
   'booking_notification',
+  'mv_first_lesson_planned_tutor',
   'org_tutor_availability_notice',
   'session_cancelled',
   'session_reminder',
@@ -3030,6 +3186,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const { type, to, data: rawData, locale: bodyLocale } = req.body;
+    const requestedIdempotencyKey = req.body?.idempotencyKey;
+    const acceptanceDelivery = validAcceptanceDeliveryKey(type, rawData?.acceptanceJobId, requestedIdempotencyKey);
+    const invoiceDelivery = type === 'school_monthly_invoice' && typeof rawData?.invoiceId === 'string'
+      && requestedIdempotencyKey === schoolMonthlyInvoiceIdempotencyKey(rawData.invoiceId);
+    const pooledPackageDelivery = type === 'prepaid_package_request'
+      && rawData?.pooledPackage === true
+      && typeof rawData?.packageId === 'string'
+      && requestedIdempotencyKey === pooledPackageEmailIdempotencyKey(rawData.packageId);
+    if (requestedIdempotencyKey !== undefined
+      && (!isInternalRequest(req) || (!acceptanceDelivery && !invoiceDelivery && !pooledPackageDelivery))) {
+      return res.status(403).json({ error: 'Invalid internal delivery key' });
+    }
+    if (type === 'school_monthly_invoice' && !requestedIdempotencyKey) {
+      return res.status(400).json({ error: 'Invoice delivery requires an idempotency key' });
+    }
     if (!type || !to) {
       return res.status(400).json({ error: 'Missing required fields: type, to' });
     }
@@ -3077,6 +3248,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       null;
     const orgIdForBrandingLookup = orgIdFromPayload || (await resolveOrganizationIdFromAuthBearer(req));
 
+    if (type === 'booking_notification' && isMoksloVaisiaiOrg(orgIdForBrandingLookup)) {
+      return res.status(200).json({ success: true, skipped: true, reason: 'mv_no_booking_notification' });
+    }
+
+    if (type === 'mv_first_lesson_planned_tutor' && !isMoksloVaisiaiOrg(orgIdForBrandingLookup)) {
+      return res.status(200).json({ success: true, skipped: true, reason: 'mv_first_lesson_mv_only' });
+    }
+
     if (type === 'invite_email') {
       const toEmail = Array.isArray(to) ? String(to[0] || '') : String(to || '');
       const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
@@ -3091,6 +3270,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     function tutorStudentAssigned(d: any, locale: Locale) {
       const copy = TUTOR_NOTIFICATION_COPY[locale];
+      const studentLabel = sanitizeStudentNameForEmail(
+        d.studentName,
+        locale === 'en' ? 'Student' : 'Mokinys',
+      );
       const hasEmail = d.studentEmail && String(d.studentEmail).trim() !== '';
       const hasPhone = d.studentPhone && String(d.studentPhone).trim() !== '';
       const contactRows = [
@@ -3109,7 +3292,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <div class="body">
             <p class="greeting">${d.tutorName ? t(locale, 'em.hiNameNoEmoji', { name: esc(d.tutorName) }) : t(locale, 'em.hi')}</p>
             <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-              ${copy.assignmentBody.replace('{student}', () => esc(d.studentName || ''))}
+              ${copy.assignmentBody.replace('{student}', () => esc(studentLabel))}
             </p>
             ${contactBlock}
           </div>${footerFor(locale)}`, locale),
@@ -3196,6 +3379,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let orgBranding: EmailBranding | null = null;
     // School-type orgs get a neutral parent-facing subject for contract/payment emails.
     let isSchoolOrg = false;
+    // Schools read "mokytojas" / "užsiėmimas" — applied to the finished subject + html below.
+    let schoolEmailTerminology: SchoolTerminology | null = null;
     if (orgIdForBrandingLookup) {
       try {
         const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
@@ -3210,6 +3395,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (org) {
             organizationLocale = org.preferred_locale;
             isSchoolOrg = String((org as { entity_type?: string }).entity_type || '').trim().toLowerCase() === 'school';
+            schoolEmailTerminology = schoolTerminologyForOrg(
+              (org as { entity_type?: string | null }).entity_type,
+              (org as { features?: Record<string, unknown> | null }).features ?? null,
+            );
             // Invite links must land on the org's canonical market domain
             // (Pro Klasė → tutlio.lt) regardless of which domain the admin used.
             // Only prod tutlio.* links are rewritten — preview/localhost links
@@ -3241,7 +3430,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (schoolQuestionsEmail) (data as any).contactEmail = schoolQuestionsEmail;
             if (String(type).startsWith('school_contract') && type !== 'school_contract_fee_due') {
               (data as any).esignFlow = features.school_contract_esign === true;
-              if (contractSigningEmail) {
+              if (contractSigningEmail && contractSigningEmail.toLowerCase() !== schoolQuestionsEmail.toLowerCase()) {
                 (data as any).schoolEmail = contractSigningEmail;
               }
             }
@@ -3282,6 +3471,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       locale = await notificationLocale(client, to, bodyLocale, organizationLocale);
     }
 
+    // Newer locale dictionaries stay out of the serverless cold-start bundle.
+    // Load the selected one before synchronous template helpers call t(), so
+    // email rendering never silently falls back to English in ESM runtimes.
+    await preloadExtraLocaleDict(locale);
+
     // Patch the email HTML post-generation to inject org branding into the wrap() header
     function applyBranding(result: { subject: string; html: string }): { subject: string; html: string } {
       let html = applyOrgBrandingToHtml(result.html, {
@@ -3317,6 +3511,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     switch (type) {
       case 'booking_confirmation': emailContent = bookingConfirmation(data, locale); break;
       case 'booking_notification': emailContent = bookingNotification(data, locale); break;
+      case 'mv_first_lesson_planned_tutor': emailContent = mvFirstLessonPlannedTutor(data, locale); break;
       case 'session_cancelled': emailContent = sessionCancelled(data, locale); break;
       case 'session_cancelled_parent': emailContent = sessionCancelledParent(data, locale); break;
       case 'session_student_no_show': emailContent = sessionStudentNoShowPayer(data, locale); break;
@@ -3372,6 +3567,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'school_contract': emailContent = schoolContract(data, locale); break;
       case 'school_contract_extra_offer': emailContent = schoolContractExtraOffer(data, locale); break;
       case 'school_contract_extra_accepted': emailContent = schoolContractExtraAccepted(data, locale); break;
+      case 'school_extra_first_lesson_invite': emailContent = schoolExtraFirstLessonInvite(data, locale); break;
+      case 'school_monthly_invoice': emailContent = schoolMonthlyInvoice(data, locale); break;
       case 'school_contract_extra_withdrawn': emailContent = schoolContractExtraWithdrawn(data, locale); break;
       case 'school_contract_extra_terminated': emailContent = schoolContractExtraTerminated(data, locale); break;
       case 'school_contract_fee_due': emailContent = schoolContractFeeDue(data, locale); break;
@@ -3403,6 +3600,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
     }
 
+    if (schoolEmailTerminology && (schoolEmailTerminology.staff || schoolEmailTerminology.activity)) {
+      emailContent = {
+        subject: applySchoolTerminology(emailContent.subject, locale, schoolEmailTerminology),
+        html: applySchoolTerminology(emailContent.html, locale, schoolEmailTerminology),
+      };
+    }
+
+    let mvPayerFeeNoticeIncluded = false;
+    let mvPayerFeeNoticeRecipient = '';
+    const feeNoticeRecipients = (Array.isArray(to) ? to : [to])
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+    for (const recipient of feeNoticeRecipients) {
+      const footer = await maybeMvPayerFirstFeeNoticeFooter(orgIdForBrandingLookup, recipient, locale);
+      if (footer) {
+        emailContent = {
+          ...emailContent,
+          html: appendMvPayerFeeNoticeBeforeFooter(emailContent.html, footer),
+        };
+        mvPayerFeeNoticeIncluded = true;
+        mvPayerFeeNoticeRecipient = recipient;
+        break;
+      }
+    }
+
     const emailPayload: Parameters<typeof resend.emails.send>[0] = {
       from: localizedFromEmail(locale, { senderName: (data as any).emailSenderName }),
       to: Array.isArray(to) ? to : [to],
@@ -3418,7 +3640,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }));
     }
 
-    const { data: result, error } = await resend.emails.send(emailPayload);
+    if (type === 'school_monthly_invoice') {
+      const delivery = await deliverSchoolMonthlyInvoiceOnce({
+        supabase: createClient(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, supabaseServiceRoleClientOptions()),
+        invoiceId: rawData.invoiceId,
+        organizationId: String(rawData.organizationId || ''),
+        payload: { from: emailPayload.from, to: Array.isArray(emailPayload.to) ? emailPayload.to : [emailPayload.to], subject: emailPayload.subject, html: emailContent.html },
+        send: async (payload, idempotencyKey) => {
+          const response = await resend.emails.send(payload, { idempotencyKey });
+          return { id: response.data?.id, error: response.error?.message };
+        },
+      });
+      if (delivery.reason) return res.status(503).json({ error: delivery.reason });
+      return res.status(200).json({ success: true, ...delivery });
+    }
+
+    if (acceptanceDelivery) {
+      const delivery = await deliverAcceptanceOnce({
+        db: createClient(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, supabaseServiceRoleClientOptions()),
+        jobId: rawData.acceptanceJobId,
+        organizationId: String(rawData.organizationId || ''),
+        key: requestedIdempotencyKey,
+        payload: { ...emailPayload, attachments: Array.isArray(rawAttachments) ? rawAttachments : undefined },
+        send: async (frozen, idempotencyKey) => {
+          const response = await resend.emails.send({ ...frozen,
+            attachments: frozen.attachments?.map((a: any) => ({ filename: a.filename, content: Buffer.from(a.content, 'base64') })),
+          }, { idempotencyKey });
+          return { id: response.data?.id, error: response.error?.message };
+        },
+      });
+      if (delivery.error) return res.status(503).json({ error: delivery.error });
+      return res.status(200).json({ success: true, ...delivery });
+    }
+
+    const { data: result, error } = pooledPackageDelivery
+      ? await resend.emails.send(emailPayload, { idempotencyKey: requestedIdempotencyKey })
+      : await resend.emails.send(emailPayload);
 
     if (error) {
       console.error('[send-email] Resend error:', error);
@@ -3426,9 +3683,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: msg });
     }
 
+    if (mvPayerFeeNoticeIncluded && mvPayerFeeNoticeRecipient) {
+      await finalizeMvPayerFirstFeeNoticeAfterSend(
+        orgIdForBrandingLookup,
+        mvPayerFeeNoticeRecipient,
+        true,
+      );
+    }
+
     // Chat push siunčiamas iš /api/chat-notify-on-message (pagal user_id, nepriklausomai nuo el. throttling).
     if (type !== 'chat_new_message') {
-      sendPushForEmail(Array.isArray(to) ? to : [to], type, rawData).catch((e) =>
+      sendPushForEmail(Array.isArray(to) ? to : [to], type, rawData, schoolEmailTerminology).catch((e) =>
         console.error('[send-email] push error:', e?.message || e),
       );
     }

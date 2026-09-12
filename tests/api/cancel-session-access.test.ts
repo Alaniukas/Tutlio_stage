@@ -39,5 +39,11 @@ describe('cancel-session access helpers', () => {
     it('allows when linked_user_id is null but parent list matches', () => {
       expect(canStudentSideCancelSession('parent-user', null, ['parent-user'])).toBe(true);
     });
+
+    it('allows when students.parent_user_id matches caller', () => {
+      expect(
+        canStudentSideCancelSession('parent-user', 'child-student-user', [], 'parent-user'),
+      ).toBe(true);
+    });
   });
 });

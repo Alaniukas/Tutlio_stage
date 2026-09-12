@@ -136,6 +136,7 @@ async function main() {
   });
 
   await applyBranding(sb);
+  if (process.argv.includes('--branding-only')) return;
 
   const apiCandidates = [API_BASE, 'https://tutlio.lt'];
   let apiBase = '';

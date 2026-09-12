@@ -1,13 +1,23 @@
+import { BLOG_FAQ_LABEL } from './blogMarkets.js';
+
 export interface BlogFaqItem {
   question: string;
   answer: string;
 }
 
-const FAQ_HEADING =
-  /^(faq|duk|dažnai užduodami|preguntas frecuentes|questions fréquentes|häufige fragen|vanliga frågor|ofte stillede|usein kysytty|ofte stilte|veelgestelde|często zadawane|bieži uzdotie|korduma kippuvad)/i;
+const FAQ_HEADINGS = new Set([
+  'faq',
+  ...Object.values(BLOG_FAQ_LABEL).map((heading) => heading.toLocaleLowerCase()),
+]);
+
+function isFaqHeading(value: string): boolean {
+  return FAQ_HEADINGS.has(value.trim().replace(/[:：]\s*$/, '').toLocaleLowerCase());
+}
 
 /**
- * Pull Q&A pairs from a markdown FAQ section for FAQPage JSON-LD (GEO).
+ * Pull reader-facing Q&A pairs from a markdown FAQ section. The JSON-LD keeps
+ * the page semantics explicit, but is not treated as a special AI-search hack
+ * (Google normally limits FAQ rich results to authoritative health/government sites).
  * Expected shape: ## FAQ / DUK, then ### Question followed by answer paragraphs.
  */
 export function extractBlogFaqs(markdown: string, limit = 6): BlogFaqItem[] {
@@ -30,7 +40,7 @@ export function extractBlogFaqs(markdown: string, limit = 6): BlogFaqItem[] {
     const h2 = line.match(/^##\s+(.+)$/);
     if (h2) {
       if (inFaq) flush();
-      inFaq = FAQ_HEADING.test(h2[1].trim());
+      inFaq = isFaqHeading(h2[1]);
       continue;
     }
     if (!inFaq) continue;

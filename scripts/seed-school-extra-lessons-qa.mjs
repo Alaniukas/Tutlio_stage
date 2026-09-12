@@ -1,5 +1,5 @@
 /**
- * Seeds Demo Mokykla (+ optional Laisvi vaikai template) for school extra-lessons QA.
+ * Seeds Demo Mokykla only for school extra-lessons QA (do not touch live orgs).
  * - Uploads DOCX as permanent "Papildomų pamokų sutartis" template
  * - Creates students across enrollment statuses / municipalities / debt
  * - Class group + slots + members
@@ -22,7 +22,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 
 const DEMO_ORG = 'c3a00000-7e57-4000-8000-000000000001';
-const LAISVI_ORG = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
 const TUTOR_ID = 'c3a00000-7e57-4000-8000-000000000003';
 
 const DOCX_CANDIDATES = [
@@ -38,7 +37,6 @@ const IDS = {
   group: 'c3a00000-7e57-4000-8000-0000000000a1',
   slot: 'c3a00000-7e57-4000-8000-0000000000a2',
   templateDemo: 'c3a00000-7e57-4000-8000-0000000000a3',
-  templateLaisvi: 'c3a00000-7e57-4000-8000-0000000000a4',
   contractPending: 'c3a00000-7e57-4000-8000-0000000000a5',
   contractAccepted: 'c3a00000-7e57-4000-8000-0000000000a6',
   sessionMissed: 'c3a00000-7e57-4000-8000-0000000000a7',
@@ -165,17 +163,6 @@ async function main() {
       bodyText,
     });
     console.log('Template uploaded for Demo Mokykla');
-    try {
-      await uploadTemplate(supabase, {
-        orgId: LAISVI_ORG,
-        templateId: IDS.templateLaisvi,
-        bytes,
-        bodyText,
-      });
-      console.log('Template uploaded for Laisvi vaikai');
-    } catch (e) {
-      console.warn('Laisvi vaikai template skipped:', e?.message || e);
-    }
   } else {
     await supabase.from('school_contract_templates').upsert({
       id: IDS.templateDemo,

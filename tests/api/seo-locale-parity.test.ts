@@ -4,11 +4,12 @@ import path from 'node:path';
 import pageRender from '../../api/page-render.js';
 import featureRender from '../../api/feature-render.js';
 import featuresIndexRender from '../../api/features-index-render.js';
+import compareRender from '../../api/compare-render.js';
 import schoolsRender from '../../api/schools-render.js';
 import legalRender from '../../api/legal-render.js';
 import sitemapHandler from '../../api/sitemap.js';
 import { SEO_LOCALES_BY_SURFACE, type SeoSurface } from '../../src/lib/i18n/localeRelease.js';
-import { LOCALE_FORMAT_TAGS } from '../../src/lib/i18n/locales.js';
+import { LOCALE_FORMAT_TAGS, localeDirection } from '../../src/lib/i18n/locales.js';
 import {
   type Locale,
   buildCanonicalUrl,
@@ -18,6 +19,7 @@ import {
   localizedPagePath,
 } from '../../api/_lib/seo-routing.js';
 import { FEATURE_PAGES, FEATURE_PAGE_IDS } from '../../src/lib/featurePages.js';
+import { COMPARE_HUB_PATH, COMPARISON_PAGES, COMPARISON_PAGE_IDS } from '../../src/lib/comparisonPages.js';
 
 /**
  * Locale parity for the international domain.
@@ -46,6 +48,7 @@ interface PageSpec {
 
 const PAGES: PageSpec[] = [
   { id: 'landing', surface: 'marketing', handler: pageRender, query: { page: 'landing' }, canonical: (l) => buildCanonicalUrl('/', l) },
+  { id: 'for-tutors', surface: 'marketing', handler: pageRender, query: { page: 'for-tutors' }, canonical: (l) => buildCanonicalUrl('/for-tutors', l) },
   { id: 'pricing', surface: 'marketing', handler: pageRender, query: { page: 'pricing' }, canonical: (l) => buildCanonicalUrl('/pricing', l) },
   { id: 'about', surface: 'marketing', handler: pageRender, query: { page: 'about' }, canonical: (l) => buildCanonicalUrl(localizedPagePath('about', l), l) },
   { id: 'contacts', surface: 'marketing', handler: pageRender, query: { page: 'contacts' }, canonical: (l) => buildCanonicalUrl(localizedPagePath('contacts', l), l) },
@@ -56,6 +59,14 @@ const PAGES: PageSpec[] = [
     handler: featureRender,
     query: { feature },
     canonical: (l) => buildCanonicalUrl(FEATURE_PAGES[feature].path, l),
+  })),
+  { id: 'compare', surface: 'compare', handler: compareRender, query: {}, canonical: (l) => buildCanonicalUrl(COMPARE_HUB_PATH, l) },
+  ...COMPARISON_PAGE_IDS.map((competitor): PageSpec => ({
+    id: `compare:${competitor}`,
+    surface: 'compare',
+    handler: compareRender,
+    query: { competitor },
+    canonical: (l) => buildCanonicalUrl(COMPARISON_PAGES[competitor].path, l),
   })),
   { id: 'schools', surface: 'schools', handler: schoolsRender, query: { page: 'landing' }, canonical: (l) => buildPlatformCanonicalUrl('/schools', '/', l) },
   { id: 'schools-pricing', surface: 'schools', handler: schoolsRender, query: { page: 'pricing' }, canonical: (l) => buildPlatformCanonicalUrl('/schools', '/pricing', l) },
@@ -68,6 +79,7 @@ const COM_LOCALES: Record<SeoSurface, Locale[]> = {
   marketing: SEO_LOCALES_BY_SURFACE.marketing.filter((l) => canonicalDomain(l) === 'com'),
   schools: SEO_LOCALES_BY_SURFACE.schools.filter((l) => canonicalDomain(l) === 'com'),
   legal: SEO_LOCALES_BY_SURFACE.legal.filter((l) => canonicalDomain(l) === 'com'),
+  compare: SEO_LOCALES_BY_SURFACE.compare.filter((l) => canonicalDomain(l) === 'com'),
   publicPage: [],
   blog: [],
 };
@@ -173,7 +185,8 @@ async function render(page: PageSpec, locale: Locale): Promise<Rendered> {
   return parse(res);
 }
 
-const KEY_LEAK = /\b(landing|feature|featuresIndex|pricing|about|contact|schoolsLanding|schools|common|nav|footer|dpa|tos|priv|blog)\.[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)+\b/;
+const COMPACT_SCRIPT = new Set<string>(['th', 'ja', 'zh-hk']);
+const KEY_LEAK = /\b(landing|feature|featuresIndex|pricing|about|contact|schoolsLanding|schools|common|nav|footer|dpa|tos|priv|blog|compare)\.[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)+\b/;
 const OG_LOCALE = (l: Locale) => LOCALE_FORMAT_TAGS[l].split('-u-')[0].replace('-', '_');
 
 const cache = new Map<string, Rendered>();
@@ -207,12 +220,13 @@ describe('tutlio.com locale parity', () => {
         expect(r.robots).toBe('index, follow, max-image-preview:large');
         expect(r.canonical).toBe(page.canonical(locale));
         expect(r.lang).toBe(hreflangCode(locale));
-        expect(r.dir).toBe('ltr');
+        expect(r.dir).toBe(localeDirection(locale));
         expect(r.contentLanguage).toBe(hreflangCode(locale));
         expect(r.ogLocale).toBe(OG_LOCALE(locale));
         expect(r.title).toContain('Tutlio');
-        expect(r.title.length).toBeGreaterThan(12);
-        expect(r.description.length).toBeGreaterThan(30);
+        const compact = COMPACT_SCRIPT.has(locale);
+        expect(r.title.length).toBeGreaterThan(compact ? 6 : 12);
+        expect(r.description.length).toBeGreaterThan(compact ? 12 : 30);
         expect(r.h1.length).toBeGreaterThan(3);
       });
 
@@ -235,7 +249,12 @@ describe('tutlio.com locale parity', () => {
         expect(r.title, `title falls back to English for ${locale}`).not.toBe(en.title);
         expect(r.description, `description falls back to English for ${locale}`).not.toBe(en.description);
         expect(r.h1, `H1 falls back to English for ${locale}`).not.toBe(en.h1);
-        expect(r.words, `${locale} page is far shorter than English`).toBeGreaterThanOrEqual(Math.floor(en.words * 0.5));
+        if (COMPACT_SCRIPT.has(locale)) {
+          // No word spaces in these scripts: a character count is the only volume signal, and it runs far denser than English.
+          expect(r.text.length, `${locale} page is far shorter than English`).toBeGreaterThanOrEqual(Math.floor(en.text.length * 0.2));
+        } else {
+          expect(r.words, `${locale} page is far shorter than English`).toBeGreaterThanOrEqual(Math.floor(en.words * 0.5));
+        }
       });
 
       it.each(locales)('%s leaks no dictionary keys and references only screenshots that exist', async (locale) => {
@@ -264,7 +283,7 @@ describe('tutlio.com locale parity', () => {
     expect(res.statusCode).toBe(200);
     const xml = res.body;
     for (const locale of COM_LOCALES.marketing) {
-      for (const p of ['/', '/pricing', '/features']) {
+      for (const p of ['/', '/for-tutors', '/pricing', '/features']) {
         const loc = buildCanonicalUrl(p, locale);
         expect(xml, `sitemap misses ${loc}`).toContain(`<loc>${loc}</loc>`);
       }

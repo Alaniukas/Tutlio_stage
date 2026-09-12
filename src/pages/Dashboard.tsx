@@ -50,6 +50,7 @@ import {
     tutorDashboardSessionsDeduped,
     tutorDashboardOrgPackDeduped,
     tutorPreloadProfileDeduped,
+    tutorSidebarProfileDeduped,
     tutorRecentPaidLessonsDeduped,
     tutorRecentPaidPackagesDeduped,
     tutorRecentPaidInvoicesDeduped,
@@ -57,12 +58,15 @@ import {
 } from '@/lib/preload';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { canChooseParentLessonComment } from '@/lib/parentLessonComment';
+import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import { buildNoShowSessionPatch, noShowWhenLabelLt, type NoShowWhen } from '@/lib/noShowWhen';
 import { useDismissibleDashboardItemIds } from '@/hooks/useDismissibleDashboardItemIds';
+import { sessionCommentDeliveryNeeded, sessionCommentDeliveryRecipients } from '@/lib/sessionCommentDelivery';
 
 interface Session {
     id: string;
@@ -80,6 +84,7 @@ interface Session {
     payment_status?: string;
     tutor_comment?: string | null;
     show_comment_to_student?: boolean;
+    show_comment_to_parent?: boolean;
     no_show_when?: string | null;
     is_late_cancelled?: boolean;
     cancellation_penalty_amount?: number | null;
@@ -92,6 +97,7 @@ interface Session {
         email?: string;
         phone?: string;
         payer_email?: string;
+        parent_secondary_email?: string;
         payer_phone?: string;
         grade?: string;
     };
@@ -168,6 +174,9 @@ export default function DashboardPage() {
     } = useDismissibleDashboardItemIds(recentPaymentRowsKey);
     const { contactVisibility, hasFeature: hasOrgFeature, entityType, organizationId, loading: orgFeaturesLoading } = useOrgFeatures();
     const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, entityType, hasOrgFeature, 'monthly_packages', orgFeaturesLoading);
+    const canChooseParentComment = canChooseParentLessonComment(
+        organizationId || ctxProfile?.organization_id,
+    );
     // Org feature: ended lessons are not auto-completed — the tutor must confirm each outcome.
     const requiresStatusConfirmation =
       hasOrgFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(ctxProfile?.organization_id);
@@ -206,6 +215,7 @@ export default function DashboardPage() {
     // View comment (same as Calendar – add/edit without full edit)
     const [viewCommentText, setViewCommentText] = useState('');
     const [viewShowToStudent, setViewShowToStudent] = useState(false);
+    const [viewShowToParent, setViewShowToParent] = useState(false);
     const [forceTrialCommentVisibility, setForceTrialCommentVisibility] = useState(false);
     const [viewCommentSaving, setViewCommentSaving] = useState(false);
     const [paymentTiming, setPaymentTiming] = useState<'before_lesson' | 'after_lesson'>('before_lesson');
@@ -237,11 +247,22 @@ export default function DashboardPage() {
     }, [searchParams, setSearchParams]);
 
     useEffect(() => {
+        if (ctxProfile) {
+            setOrgTutorFallback(!!ctxProfile.organization_id);
+            return;
+        }
+        if (!ctxUser) return;
+        void tutorSidebarProfileDeduped(ctxUser.id).then(({ data }) => {
+            setOrgTutorFallback(data ? !!data.organization_id : false);
+        });
+    }, [ctxUser?.id, ctxProfile?.organization_id]);
+
+    useEffect(() => {
         if (location.pathname !== '/dashboard') return;
         if (!ctxUser) return;
         void fetchData();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [location.pathname, ctxUser?.id]);
+    }, [location.pathname, ctxUser?.id, ctxProfile?.id]);
 
     useEffect(() => {
         if (!loading && tutorName) {
@@ -254,6 +275,7 @@ export default function DashboardPage() {
         if (!selectedSession) return;
         setViewCommentText(selectedSession.tutor_comment ?? '');
         setViewShowToStudent(selectedSession.show_comment_to_student ?? false);
+        setViewShowToParent(selectedSession.show_comment_to_parent ?? false);
         setForceTrialCommentVisibility(false);
 
         (async () => {
@@ -278,6 +300,7 @@ export default function DashboardPage() {
             if (!cancelled && shouldForce) {
                 setForceTrialCommentVisibility(true);
                 setViewShowToStudent(true);
+                setViewShowToParent(true);
             }
         })();
 
@@ -296,7 +319,18 @@ export default function DashboardPage() {
             (ctxProfile as typeof ctxProfile & Record<string, unknown> | null) ??
             (await tutorPreloadProfileDeduped(user.id)).data;
         if (!profileData) {
-            return;
+            const { data: sidebarProfile } = await tutorSidebarProfileDeduped(user.id);
+            if (sidebarProfile) {
+                profileData = {
+                    full_name: sidebarProfile.full_name,
+                    organization_id: sidebarProfile.organization_id,
+                } as typeof profileData;
+                setOrgTutorFallback(!!sidebarProfile.organization_id);
+            } else {
+                setOrgTutorFallback(false);
+                setToastMessage({ message: t('common.error'), type: 'error' });
+                return;
+            }
         }
         const { data: paySync } = await tutorCalendarFallbackProfileDeduped(user.id);
         if (paySync) {
@@ -363,15 +397,44 @@ export default function DashboardPage() {
 
             const orgFeat = orgFeatRes.data?.features;
             const orgFeatObj = orgFeat && typeof orgFeat === 'object' && !Array.isArray(orgFeat) ? (orgFeat as Record<string, unknown>) : {};
-            const trialCommentRequired = orgFeatObj['trial_comment_required'] === true;
+            const trialPolicy = parseOrgTrialPolicy(orgFeatObj);
             const proKlaseCommentRequired = isProKlaseOrg(organizationId);
+
+            const trialsByStudent = new Map<string, Array<{ id: string; start_time?: string | null; status?: string | null }>>();
+            if (trialPolicy.commentRequired) {
+                const trialStudentIds = [...new Set(
+                    (sessionsData || [])
+                        .filter((s: any) => s.subjects?.is_trial === true && s.student_id)
+                        .map((s: any) => s.student_id as string),
+                )];
+                if (trialStudentIds.length > 0) {
+                    const { data: trialHistory } = await supabase
+                        .from('sessions')
+                        .select('id, student_id, start_time, status, subjects!inner(is_trial)')
+                        .eq('tutor_id', user.id)
+                        .in('student_id', trialStudentIds)
+                        .eq('subjects.is_trial', true)
+                        .order('start_time', { ascending: true });
+                    for (const row of trialHistory || []) {
+                        const sid = (row as { student_id: string }).student_id;
+                        const list = trialsByStudent.get(sid) ?? [];
+                        list.push(row as { id: string; start_time?: string | null; status?: string | null });
+                        trialsByStudent.set(sid, list);
+                    }
+                }
+            }
 
             const missingComments = (sessionsData || [])
                 .filter((s: any) => {
                     const needsComment = ['completed', 'no_show'].includes(String(s.status));
                     if (!needsComment || String(s.tutor_comment || '').trim()) return false;
                     if (proKlaseCommentRequired) return true;
-                    return trialCommentRequired && s.subjects?.is_trial === true;
+                    return sessionNeedsOrgTrialComment({
+                        policy: trialPolicy,
+                        isTrial: s.subjects?.is_trial === true,
+                        sessionId: s.id,
+                        studentTrials: trialsByStudent.get(s.student_id) ?? [{ id: s.id, start_time: s.start_time, status: s.status }],
+                    });
                 })
                 .slice(0, 5);
 
@@ -947,67 +1010,74 @@ export default function DashboardPage() {
         const { data: { user } } = await supabase.auth.getUser();
         const { data: tutorProfile } = await supabase.from('profiles').select('full_name, organization_id').eq('id', user?.id).single();
         const effectiveShowToStudent = forceTrialCommentVisibility ? true : viewShowToStudent;
+        const effectiveShowToParent = forceTrialCommentVisibility
+            ? true
+            : canChooseParentComment
+                ? viewShowToParent
+                : Boolean(selectedSession.show_comment_to_parent);
         const { error } = await supabase
             .from('sessions')
             .update({
                 tutor_comment: viewCommentText.trim() || null,
                 show_comment_to_student: effectiveShowToStudent,
+                show_comment_to_parent: effectiveShowToParent,
             })
             .eq('id', selectedSession.id);
         if (!error) {
-            const updated = { ...selectedSession, tutor_comment: viewCommentText.trim() || null, show_comment_to_student: effectiveShowToStudent };
+            const updated = {
+                ...selectedSession,
+                tutor_comment: viewCommentText.trim() || null,
+                show_comment_to_student: effectiveShowToStudent,
+                show_comment_to_parent: effectiveShowToParent,
+            };
             setSessions((prev) => prev.map((s) => (s.id === selectedSession.id ? { ...s, ...updated } : s)));
             setSelectedSession(updated);
             if ((viewCommentText || '').trim().length > 0) {
                 setTutorUpdates((prev) => prev.filter((u) => u.id !== `missing_comment_${selectedSession.id}`));
             }
-            if (effectiveShowToStudent && viewCommentText.trim()) {
-                const alreadySent = selectedSession.show_comment_to_student && selectedSession.tutor_comment === viewCommentText.trim();
-                if (!alreadySent) {
-                    let studentEmail = selectedSession.student?.email;
-                    let payerEmail: string | null = null;
-                    if (!studentEmail && selectedSession.student_id) {
-                        const { data: studentRow } = await supabase.from('students').select('email, payer_email, full_name').eq('id', selectedSession.student_id).single();
-                        studentEmail = studentRow?.email;
-                        payerEmail = (studentRow?.payer_email || null) as any;
-                    } else if (selectedSession.student_id) {
-                        const { data: studentRow } = await supabase.from('students').select('payer_email').eq('id', selectedSession.student_id).single();
-                        payerEmail = (studentRow?.payer_email || null) as any;
-                    }
-                    if (studentEmail) {
-                        let to: string | string[] = studentEmail;
-                        try {
-                            const orgId = (tutorProfile as any)?.organization_id as string | null | undefined;
-                            const subjectId = (selectedSession as any)?.subject_id as string | null | undefined;
-                            if (orgId && subjectId && payerEmail && payerEmail.trim().length > 0 && payerEmail.trim() !== studentEmail.trim()) {
-                                const [{ data: orgRow }, { data: subjRow }] = await Promise.all([
-                                    supabase.from('organizations').select('features').eq('id', orgId).maybeSingle(),
-                                    supabase.from('subjects').select('is_trial').eq('id', subjectId).maybeSingle(),
-                                ]);
-                                const feat = (orgRow as any)?.features;
-                                const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
-                                const mode = featObj['trial_lesson_comment_mode'];
-                                const sendToParent = mode === 'student_and_parent' && (subjRow as any)?.is_trial === true;
-                                if (sendToParent) to = [studentEmail, payerEmail.trim()];
-                            }
-                        } catch {
-                            /* ignore parent email decision errors */
-                        }
+            if ((effectiveShowToStudent || effectiveShowToParent) && viewCommentText.trim()) {
+                let studentEmail = selectedSession.student?.email;
+                let payerEmail = selectedSession.student?.payer_email || null;
+                let secondaryParentEmail = selectedSession.student?.parent_secondary_email || null;
+                if (selectedSession.student_id) {
+                    const { data: studentRow } = await supabase
+                        .from('students')
+                        .select('email, payer_email, parent_secondary_email, full_name')
+                        .eq('id', selectedSession.student_id)
+                        .single();
+                    if (!studentEmail) studentEmail = studentRow?.email;
+                    payerEmail = studentRow?.payer_email || payerEmail;
+                    secondaryParentEmail = studentRow?.parent_secondary_email || secondaryParentEmail;
+                }
+                const delivery = {
+                    nextComment: viewCommentText,
+                    previousComment: selectedSession.tutor_comment,
+                    showToStudent: effectiveShowToStudent,
+                    showToParent: effectiveShowToParent,
+                    previousShowToStudent: selectedSession.show_comment_to_student,
+                    previousShowToParent: selectedSession.show_comment_to_parent,
+                    studentEmail,
+                    parentEmails: [payerEmail, secondaryParentEmail],
+                };
+                const recipients = sessionCommentDeliveryRecipients(delivery);
+                if (recipients.length > 0) {
                         const ok = await sendEmail({
                             type: 'session_comment_added',
-                            to,
+                            to: recipients,
                             data: {
                                 studentName: updated.student?.full_name || selectedSession.student?.full_name || '',
                                 tutorName: tutorProfile?.full_name || '',
                                 date: format(new Date(selectedSession.start_time), 'yyyy-MM-dd'),
                                 time: format(new Date(selectedSession.start_time), 'HH:mm'),
                                 comment: viewCommentText.trim(),
+                                ...((tutorProfile as any)?.organization_id
+                                    ? { organizationId: (tutorProfile as any).organization_id }
+                                    : {}),
                             },
                         }).catch((err) => { console.error('Error sending comment email:', err); return false; });
                         if (!ok) alert(t('dash.commentSavedNoEmail'));
-                    } else {
-                        alert(t('dash.commentSavedNoStudentEmail'));
-                    }
+                } else if (sessionCommentDeliveryNeeded(delivery)) {
+                    alert(t('dash.commentSavedNoStudentEmail'));
                 }
             }
         }
@@ -1024,7 +1094,7 @@ export default function DashboardPage() {
         }
         const { data, error } = await supabase
             .from('sessions')
-            .select('*, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade)')
+            .select('*, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, parent_secondary_email, payer_phone, grade)')
             .eq('id', sessionId)
             .maybeSingle();
         if (error || !data) {
@@ -1364,7 +1434,7 @@ export default function DashboardPage() {
                                           {isToday ? `${t('stuSched.today')}, ${format(start, 'HH:mm')}` : format(start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}
                                           {s.topic && <span className="ml-1">· {s.topic}</span>}
                                         </span>
-                                        <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} pendingConfirmation={requiresStatusConfirmation} /><AttendanceBadge session={s} /></div>
+                                        <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} pendingConfirmation={requiresStatusConfirmation} /><AttendanceBadge session={s} manualConfirmationRequired={requiresStatusConfirmation} /></div>
                                       </div>
                                     </div>
                                     {isOrgTutor !== true && s.price && <span className="text-sm font-semibold text-gray-700 flex-shrink-0">{fmt(s.price)}</span>}
@@ -1587,7 +1657,7 @@ export default function DashboardPage() {
                                                                 {isToday ? `${t('stuSched.today')}, ${format(start, 'HH:mm')}` : format(start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}
                                                                 {s.topic && <span className="ml-1">· {s.topic}</span>}
                                                             </span>
-                                                            <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} /><AttendanceBadge session={s} /></div>
+                                                            <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} /><AttendanceBadge session={s} manualConfirmationRequired={requiresStatusConfirmation} /></div>
                                                         </div>
                                                     </div>
                                                     {s.price ? <span className="text-sm font-semibold text-gray-700 flex-shrink-0">{fmt(s.price)}</span> : null}
@@ -2238,18 +2308,38 @@ export default function DashboardPage() {
                                         : t('dash.commentShowStudent')}
                                 </span>
                             </label>
+                            {canChooseParentComment && !forceTrialCommentVisibility && (
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={viewShowToParent}
+                                        onChange={(e) => setViewShowToParent(e.target.checked)}
+                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    <span className="text-sm text-gray-700">{t('dash.commentShowParent')}</span>
+                                </label>
+                            )}
                             <Button size="sm" onClick={handleSaveViewComment} disabled={viewCommentSaving} className="rounded-xl w-full sm:w-auto">
                                 {viewCommentSaving ? t('dash.savingComment') : t('dash.saveComment')}
                             </Button>
                             {selectedSession?.tutor_comment && (
-                                <div className={`mt-2 p-3 rounded-lg text-sm border ${selectedSession.show_comment_to_student ? 'bg-indigo-50 border-indigo-100 text-indigo-800' : 'bg-gray-50 border-gray-100 text-gray-700'}`}>
-                                    <span className="font-semibold block mb-1">{t('dash.commentVisibleNow')} {selectedSession.show_comment_to_student ? t('dash.visibleToStudent') : t('dash.visibleOnlyYou')}</span>
+                                <div className={`mt-2 p-3 rounded-lg text-sm border ${selectedSession.show_comment_to_student || selectedSession.show_comment_to_parent ? 'bg-indigo-50 border-indigo-100 text-indigo-800' : 'bg-gray-50 border-gray-100 text-gray-700'}`}>
+                                    <span className="font-semibold block mb-1">
+                                        {t('dash.commentVisibleNow')}{' '}
+                                        {selectedSession.show_comment_to_student && selectedSession.show_comment_to_parent
+                                            ? t('dash.visibleToStudentAndParent')
+                                            : selectedSession.show_comment_to_parent
+                                                ? t('dash.visibleToParent')
+                                                : selectedSession.show_comment_to_student
+                                                    ? t('dash.visibleToStudent')
+                                                    : t('dash.visibleOnlyYou')}
+                                    </span>
                                     <div className="whitespace-pre-wrap">{selectedSession.tutor_comment}</div>
                                 </div>
                             )}
                         </div>
 
-                        {selectedSession && <AttendanceBadge session={selectedSession as any} />}
+                        {selectedSession && <AttendanceBadge session={selectedSession as any} manualConfirmationRequired={requiresStatusConfirmation} />}
 
                         {selectedSession?.meeting_link && (
                             <a

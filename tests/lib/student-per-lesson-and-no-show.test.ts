@@ -12,6 +12,7 @@ import {
   noShowWhenLabelLt,
   buildNoShowSessionPatch,
   noShowTutorCommentLine,
+  removeGeneratedNoShowTutorComment,
 } from '@/lib/noShowWhen';
 import { calculateSessionStats, type Session } from '@/lib/session-stats';
 
@@ -173,6 +174,11 @@ describe('no-show helpers', () => {
     expect(patch.tutor_comment.startsWith('Ankstesnis.')).toBe(true);
     expect(patch.tutor_comment).toContain('\n');
     expect(patch.tutor_comment).toContain('prieš pamoką');
+  });
+
+  it('removes only the generated no-show audit line when attendance is corrected', () => {
+    expect(removeGeneratedNoShowTutorComment('Pastaba.\nMokinys neatvyko (po pamokos).')).toBe('Pastaba.');
+    expect(removeGeneratedNoShowTutorComment('Mokinys neatvyko (prieš pamoką).')).toBeNull();
   });
 });
 

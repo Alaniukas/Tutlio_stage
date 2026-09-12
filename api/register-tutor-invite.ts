@@ -30,7 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: invite, error: inviteErr } = await supabase
       .from('tutor_invites')
-      .select('id, used')
+      .select('id, used, organization_id, invitee_email')
       .eq('token', orgToken)
       .maybeSingle();
 
@@ -54,6 +54,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (authError || !authData.user) {
       return res.status(400).json({ error: authError?.message || 'Failed to create user' });
     }
+
+    await supabase
+      .from('tutor_invites')
+      .update({ used: true, used_by_profile_id: authData.user.id })
+      .eq('id', invite.id);
+
+    const siblingEmail = String(invite.invitee_email || email).trim().toLowerCase();
+    if (siblingEmail) {
+      await supabase
+        .from('tutor_invites')
+        .update({ used: true, used_by_profile_id: authData.user.id })
+        .eq('organization_id', invite.organization_id)
+        .eq('used', false)
+        .eq('invitee_email', siblingEmail)
+        .neq('id', invite.id);
+    }
+
+    await supabase.from('profiles').upsert({
+      id: authData.user.id,
+      email,
+      full_name: fullName,
+      phone: phone || '',
+      organization_id: invite.organization_id,
+    }, { onConflict: 'id' });
 
     return res.status(200).json({ success: true, userId: authData.user.id });
   } catch (err: any) {

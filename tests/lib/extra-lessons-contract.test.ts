@@ -6,6 +6,11 @@ import {
   buildExtraLessonsOrderSnapshot,
   canonicalExtraLessonsPayload,
   canClickWrapAccept,
+  extraLessonsAnnexBody,
+  extraLessonsBlankWithdrawalFormBody,
+  extraLessonsStandaloneWithdrawalFormBody,
+  extraLessonsWithdrawalFormHref,
+  EXTRA_LESSONS_WITHDRAWAL_FORM_TITLE,
   extraLessonsEndKind,
   extraLessonsServiceStartYmd,
   firstLessonOnOrAfter,
@@ -239,6 +244,32 @@ describe('extraLessonsContract', () => {
     expect(finished.individual_cancel_terms).toBe('netaikoma');
   });
 
+  it('keeps the taught subject on an individual extra-lessons snapshot', () => {
+    const order = buildExtraLessonsOrderSnapshot({
+      service_name: 'Lietuviu',
+      service_type: 'individual',
+      duration_minutes: 60,
+      start_date: '2026-09-01',
+      end_date: '2027-06-15',
+      unit_price_eur: 22,
+      base_lessons_per_month: 4,
+      group_id: 'should-clear',
+      group_name: '5 klase',
+      subject_id: 'subj-lietuviu',
+      subject_name: 'Lietuviu',
+      tutor_name: 'Alina',
+    });
+    expect(order.service_type).toBe('individual');
+    expect(order.subject_id).toBe('subj-lietuviu');
+    expect(order.subject_name).toBe('Lietuviu');
+    expect(order.tutor_name).toBe('Alina');
+    expect(order.group_id).toBeNull();
+    expect(order.group_name).toBeNull();
+    const merged = mergeExtraLessonsOrderPatch(order, { duration_minutes: 45 });
+    expect(merged.subject_id).toBe('subj-lietuviu');
+    expect(merged.tutor_name).toBe('Alina');
+  });
+
   it('maps every DOCX placeholder used by the Laisvi vaikai template', () => {
     const order = buildExtraLessonsOrderSnapshot({
       service_name: 'Matematika LT 2kl',
@@ -278,5 +309,23 @@ describe('extraLessonsContract', () => {
     expect(isExtraLessonsContractKind('extra_lessons')).toBe(true);
     expect(isExtraLessonsContractKind('annual')).toBe(false);
     expect(isExtraLessonsContractKind(null)).toBe(false);
+  });
+
+  it('extracts only the 1 priedas withdrawal form from the filled contract', () => {
+    const annex = extraLessonsAnnexBody(EXTRA_LESSONS_DEFAULT_BODY);
+    expect(annex.startsWith('1 PRIEDAS')).toBe(true);
+    expect(annex).toContain('atsisakyti nuotolinės Sutarties');
+    expect(annex).not.toContain('SUTARTIES DALYKAS');
+    const standalone = extraLessonsStandaloneWithdrawalFormBody(EXTRA_LESSONS_DEFAULT_BODY);
+    expect(standalone.startsWith(EXTRA_LESSONS_WITHDRAWAL_FORM_TITLE)).toBe(true);
+    expect(standalone).not.toContain('Elektroniniu būdu pateikiant');
+    expect(standalone).toContain('nusiųskite mokyklai');
+    const blank = extraLessonsBlankWithdrawalFormBody();
+    expect(blank).toContain('info@laisvivaikai.lt');
+    expect(blank).not.toContain('Pranešu');
+    expect(blank).not.toContain('{{sutarties_nr}}');
+    expect(extraLessonsWithdrawalFormHref('abc def')).toBe(
+      '/api/extra-lessons-contract-accept?token=abc%20def&format=annex-pdf',
+    );
   });
 });

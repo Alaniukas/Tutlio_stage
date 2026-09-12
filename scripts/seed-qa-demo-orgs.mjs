@@ -101,7 +101,7 @@ const ORGS = [
     label: 'Paprasta įmonė (org admin)',
     orgId: 'c1a00000-7e57-4000-8000-000000000001',
     slug: 'manokorepetitorius',
-    name: 'Mano Korepetitorius',
+    name: 'DEMO',
     entityType: 'company',
     brandColor: '#4F33B2',
     brandColorSecondary: '#68AE4A',
@@ -110,10 +110,10 @@ const ORGS = [
     features: {
       ...PLAIN_COMPANY_FEATURES,
       hide_powered_by: true,
-      public_name: 'Mano Korepetitorius',
+      public_name: 'DEMO',
       contact_email: 'manokorepetitorius.demo.admin@tutlio.lt',
-      email_team_signature: 'Mano Korepetitoriaus komanda',
-      email_sender_name: 'Mano Korepetitorius',
+      email_team_signature: 'DEMO komanda',
+      email_sender_name: 'DEMO',
       login_description:
         'Individualus dėmesys kiekvienam mokiniui. Patyrę ir kruopščiai atrinkti korepetitoriai — gyvai Vilniuje ir nuotoliu visoje Lietuvoje.',
     },

@@ -193,18 +193,13 @@ describe('renderAndStoreExtraLessonsPdf', () => {
     expect(result.uploadedPath).toBe(uploads[0].path);
   });
 
-  it('falls back to a paginated text PDF when extra-lessons DOCX conversion fails', async () => {
+  it('throws instead of replacing an extra-lessons DOCX with a text-dump PDF', async () => {
     const { supabase, uploads } = makeExtraSupabase();
     mocks.renderDocx.mockRejectedValueOnce(new Error('converter unavailable'));
 
-    const result = await renderAndStoreExtraLessonsPdf(supabase as any, extraParams);
-
-    expect(uploads).toHaveLength(1);
-    const bytes = new Uint8Array(Buffer.from(uploads[0].data));
-    expect(Buffer.from(bytes).subarray(0, 5).toString()).toBe('%PDF-');
-    const doc = await PDFDocument.load(bytes);
-    expect(doc.getPageCount()).toBeGreaterThan(1);
-    expect(result.uploadedPath).toBe(uploads[0].path);
+    await expect(renderAndStoreExtraLessonsPdf(supabase as any, extraParams))
+      .rejects.toThrow(/pagal DOCX šabloną/);
+    expect(uploads).toHaveLength(0);
   });
 
   it('uses the bundled Laisvi vaikai DOCX for Demo Mokykla', async () => {
@@ -224,6 +219,20 @@ describe('renderAndStoreExtraLessonsPdf', () => {
     expect(mocks.renderDocx).not.toHaveBeenCalled();
     expect(Buffer.from(uploads[0].data)).toEqual(converted);
     expect(result.uploadedPath).toBe(uploads[0].path);
+  });
+
+  it('throws instead of creating a text-dump PDF when the Demo DOCX converter fails', async () => {
+    const { supabase, uploads } = makeExtraSupabase();
+    mocks.renderDocxBuffer.mockRejectedValueOnce(new Error('converter unavailable'));
+
+    await expect(renderAndStoreExtraLessonsPdf(supabase as any, {
+      ...extraParams,
+      contract: {
+        ...extraParams.contract,
+        organization_id: 'c3a00000-7e57-4000-8000-000000000001',
+      },
+    })).rejects.toThrow(/pagal DOCX šabloną/);
+    expect(uploads).toHaveLength(0);
   });
 });
 

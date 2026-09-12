@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   LayoutDashboard,
@@ -9,12 +9,18 @@ import {
   BookOpen,
   Settings,
   ScrollText,
+  Video,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
-import { useParentHasSchoolOrg } from '@/hooks/useParentHasSchoolOrg';
+import { useParentSchoolOrg } from '@/hooks/useParentHasSchoolOrg';
+import { useSchoolTerminology } from '@/hooks/useSchoolTerminology';
 import { preloadParentData } from '@/lib/preload';
 import BrandedLogo from '@/components/BrandedLogo';
+import {
+  getParentActiveChildId,
+  PARENT_ACTIVE_CHILD_EVENT,
+} from '@/lib/parentActiveChild';
 
 interface ParentLayoutProps {
   children: ReactNode;
@@ -24,32 +30,53 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
   const { t } = useTranslation();
   const location = useLocation();
   const chatUnreadTotal = useTotalChatUnread();
-  const hasSchoolOrg = useParentHasSchoolOrg();
+  const { hasSchoolOrg, lessonRecordingsEnabled, terminology } = useParentSchoolOrg();
+  // School parents read "mokytojas" / "užsiėmimas" everywhere in the portal.
+  useSchoolTerminology(terminology);
+  const [activeChildId, setActiveChildId] = useState(() => getParentActiveChildId());
 
   useEffect(() => {
     void preloadParentData();
   }, []);
 
+  useEffect(() => {
+    const sync = () => setActiveChildId(getParentActiveChildId());
+    window.addEventListener(PARENT_ACTIVE_CHILD_EVENT, sync);
+    return () => window.removeEventListener(PARENT_ACTIVE_CHILD_EVENT, sync);
+  }, []);
+
   const navItems = useMemo(
     () => {
+      const childQs = activeChildId
+        ? `?studentId=${encodeURIComponent(activeChildId)}`
+        : '';
       const items = [
-        { href: '/parent', label: t('parent.dashboard'), icon: LayoutDashboard },
-        { href: '/parent/calendar', label: t('nav.calendar'), icon: CalendarDays },
+        { href: '/parent', path: '/parent', label: t('parent.dashboard'), icon: LayoutDashboard },
+        { href: `/parent/calendar${childQs}`, path: '/parent/calendar', label: t('nav.calendar'), icon: CalendarDays },
         {
-          href: '/parent/lessons',
+          href: `/parent/lessons${childQs}`,
+          path: '/parent/lessons',
           label: t('parent.sessionsTitle') || 'Pamokos',
           icon: BookOpen,
         },
-        { href: '/parent/messages', label: t('parent.messages'), icon: MessageSquare, badge: 'chat' as const },
-        ...(hasSchoolOrg
-          ? [{ href: '/parent/contracts', label: t('parent.contracts'), icon: ScrollText }]
+        ...(lessonRecordingsEnabled
+          ? [{
+              href: `/parent/recordings${childQs}`,
+              path: '/parent/recordings',
+              label: t('companyNav.recordings'),
+              icon: Video,
+            }]
           : []),
-        { href: '/parent/invoices', label: t('parent.invoices'), icon: FileText },
-        { href: '/parent/settings', label: t('parent.settingsNav'), icon: Settings },
+        { href: '/parent/messages', path: '/parent/messages', label: t('parent.messages'), icon: MessageSquare, badge: 'chat' as const },
+        ...(hasSchoolOrg
+          ? [{ href: '/parent/contracts', path: '/parent/contracts', label: t('parent.contracts'), icon: ScrollText }]
+          : []),
+        { href: '/parent/invoices', path: '/parent/invoices', label: t('parent.invoices'), icon: FileText },
+        { href: '/parent/settings', path: '/parent/settings', label: t('parent.settingsNav'), icon: Settings },
       ];
       return items;
     },
-    [t, hasSchoolOrg],
+    [t, hasSchoolOrg, lessonRecordingsEnabled, activeChildId],
   );
 
   return (
@@ -72,16 +99,16 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
         className="fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-sm border-t border-gray-100 z-50 shadow-[0_-4px_20px_-8px_rgba(0,0,0,0.08)] max-w-[100vw] overflow-x-hidden"
         style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
       >
-        <div className={`grid gap-0 px-0.5 sm:px-1 pt-2 pb-1 ${hasSchoolOrg ? 'grid-cols-7' : 'grid-cols-6'}`}>
+        <div className={`grid gap-0 px-0.5 sm:px-1 pt-2 pb-1 ${navItems.length >= 8 ? 'grid-cols-8' : hasSchoolOrg ? 'grid-cols-7' : 'grid-cols-6'}`}>
           {navItems.map((item) => {
             const Icon = item.icon;
-            const active = location.pathname === item.href;
+            const active = location.pathname === item.path;
             const showChatBadge = item.badge === 'chat' && chatUnreadTotal > 0;
             return (
               <Link
-                key={item.href}
+                key={item.path}
                 to={item.href}
-                className={`relative flex flex-col items-center gap-1 min-w-0 py-1 rounded-2xl transition-all ${
+                className={`relative flex flex-col items-center gap-1 min-w-0 overflow-hidden py-1 rounded-2xl transition-all touch-manipulation ${
                   active ? 'text-[var(--org-brand)]' : 'text-gray-400 hover:text-gray-700'
                 }`}
               >
@@ -98,7 +125,7 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
                   )}
                 </div>
                 <span
-                  className={`block w-full text-[10px] sm:text-xs font-semibold leading-tight text-center px-0.5 ${
+                  className={`block w-full ${hasSchoolOrg ? 'text-[9px]' : 'text-[10px]'} sm:text-xs font-semibold leading-tight text-center px-0.5 break-words hyphens-auto line-clamp-2 ${
                     active ? 'text-[var(--org-brand)]' : ''
                   }`}
                 >

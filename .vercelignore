@@ -1,0 +1,6 @@
+api/school-consultations.ts
+api/bill-school-monthly.ts
+api/_lib/schoolConsultationsAccess.ts
+scripts/_*.ts
+scripts/_*.mjs
+scripts/_last-*

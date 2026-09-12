@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { format, parse } from 'date-fns';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
@@ -16,7 +17,9 @@ import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPh
 import { getLandingDemoPersonas } from '../../src/components/landing/v2/demoPersonas';
 import { getCaseStudy, getTestimonials, SHOW_PLACEHOLDER_SOCIAL_PROOF } from '../../src/components/landing/v2/socialProof';
 
-const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('cs');
+
+const deferred = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 
@@ -24,7 +27,8 @@ beforeAll(async () => { await loadLocaleDict('cs'); });
 
 describe('Czech tutor and business localization', () => {
   it('explicitly covers the agreed scope while retaining dedicated school/admin/legal fallback', () => {
-    expect(Object.keys(csOverrides).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in csOverrides))).toEqual([]);
+    expect(Object.keys(csOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(cs).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !cs[key])).toEqual([]);
     expect(expectedKeys.filter((key) => key.startsWith('quiz.'))).toHaveLength(493);
@@ -136,13 +140,13 @@ describe('Czech tutor and business localization', () => {
     expect(SHOW_PLACEHOLDER_SOCIAL_PROOF).toBe(false);
   });
 
-  it('publishes the UI without publishing SEO, blog columns or localized assets', () => {
+  it('publishes the UI and blog while legal pages and localized assets remain gated', () => {
     expect(selectableLocales(true)).toContain('cs');
     expect(selectableLocales()).toContain('cs');
-    expect(hasBlogSchema('cs')).toBe(false);
+    expect(hasBlogSchema('cs')).toBe(true);
     expect(hasLocalizedAssets('cs')).toBe(false);
     for (const path of ['/cs/pricing', '/cs/features', '/cs/terms', '/cs/blog', '/cs/tutor/example', '/schools/cs/pricing']) {
-      expect(isSeoPublished('cs', path), path).toBe(false);
+      expect(isSeoPublished('cs', path), path).toBe(!/\/(terms|privacy-policy|dpa)(\/|$)/.test(path));
     }
   });
 });

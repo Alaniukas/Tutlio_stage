@@ -9,7 +9,9 @@ import { verifyRequestAuth } from './_lib/auth.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
+import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { directChargeOptions } from './_lib/stripeDirectCharge.js';
 import {
     tutorUsesManualStudentPayments,
     trimManualPaymentBankDetails,
@@ -23,8 +25,6 @@ const supabase = createClient(
     process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
 function getEnv(name: string): string | null {
     const v = process.env[name];
@@ -244,6 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let ownerName = tutor.full_name || 'Korepetitorius';
         let useSchoolOrgAbsorbedFees = false;
         let feeProfile: OrgFeeProfile | null = null;
+        let feeSplit = null;
         const usesManualStudentPayments = tutorUsesManualStudentPayments(tutor);
         let tutorManualBankDetails = '';
 
@@ -260,7 +261,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } else if (tutor.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug, features')
                 .eq('id', tutor.organization_id)
                 .single();
 
@@ -270,6 +271,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
             feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
+            feeSplit = resolveOrgPayerFeeSplit((org as { features?: unknown }).features);
             // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
             useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school' && !feeProfile;
         } else {
@@ -365,6 +367,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     checkoutSession = await stripe.checkout.sessions.create({
                         mode: 'payment',
                         customer_email: payerEmail,
+                        customer_creation: 'always',
                         payment_method_types: ['card'],
                         line_items: [
                             {
@@ -381,9 +384,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         ],
                         payment_intent_data: {
                             application_fee_amount: applicationFeeCents,
-                            transfer_data: {
-                                destination: stripeAccountId as string,
-                            },
                             metadata: {
                                 tutlio_billing_batch_id: billingBatch.id,
                                 tutor_id: tutorId,
@@ -395,29 +395,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             tutor_id: tutorId,
                             tutlio_school_org_absorbed: 'true',
                         },
-                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}`,
+                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId as string)}`,
                         cancel_url: `${appOrigin}/student/sessions`,
-                    });
-                    payerCheckoutTotalEur = totalLessonPrice;
+                    }, directChargeOptions(stripeAccountId as string));
+                    payerCheckoutTotalEur = chargeCents / 100;
                 } else if (stripeAccountId) {
                     let baseCents = 0;
                     let feesCents = 0;
                     if (feeProfile) {
                         // Custom org deals are tiered on the full transaction (invoice total), not per session.
-                        const b = lessonCheckoutBreakdownCents(totalLessonPrice, market, feeProfile);
+                        const b = lessonCheckoutBreakdownCents(totalLessonPrice, market, feeProfile, feeSplit);
                         baseCents = b.baseCents;
                         feesCents = b.feesCents;
                     } else {
                         for (const s of payerSessions) {
-                            const b = lessonCheckoutBreakdownCents(Number(s.price) || 0, market);
+                            const b = lessonCheckoutBreakdownCents(Number(s.price) || 0, market, null, feeSplit);
                             baseCents += b.baseCents;
                             feesCents += b.feesCents;
                         }
                     }
-                    const transferToConnectedCents = baseCents;
                     checkoutSession = await stripe.checkout.sessions.create({
                         mode: 'payment',
                         customer_email: payerEmail,
+                        customer_creation: 'always',
                         payment_method_types: ['card'],
                         line_items: [
                             {
@@ -444,10 +444,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             },
                         ],
                         payment_intent_data: {
-                            transfer_data: {
-                                destination: stripeAccountId,
-                                amount: transferToConnectedCents,
-                            },
+                            application_fee_amount: feesCents,
                             metadata: {
                                 tutlio_billing_batch_id: billingBatch.id,
                                 tutor_id: tutorId,
@@ -458,9 +455,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             tutor_id: tutorId,
                             ...checkoutBaseMetadata(baseCents / 100, market),
                         },
-                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}`,
+                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId)}`,
                         cancel_url: `${appOrigin}/student/sessions`,
-                    });
+                    }, directChargeOptions(stripeAccountId));
                     payerCheckoutTotalEur = (baseCents + feesCents) / 100;
                 } else {
                     throw new Error('[create-monthly-invoice] Missing Stripe account for checkout');
@@ -613,7 +610,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                               paymentDeadline: deadlineStr,
                               manualPaymentInstructions: true,
                               bankDetails: tutorManualBankDetails || undefined,
-                              paymentLink: `${APP_URL}/student/sessions`,
+                              paymentLink: `${appOrigin}/student/sessions`,
                               ...(invoiceOrgId ? { organizationId: invoiceOrgId } : {}),
                           }
                         : {

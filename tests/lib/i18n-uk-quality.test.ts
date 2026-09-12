@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { format, parse } from 'date-fns';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
@@ -12,7 +13,9 @@ import { isTranslatedLocale, LOCALE_FORMAT_TAGS, LOCALE_LABELS, htmlLanguageCode
 import { CHROME, chromeFor, formatShortDay } from '../../src/lib/publicPage';
 import { formatLocalizedPhone, validateLocalizedPhone, getLocalizedPhonePlaceholder } from '../../src/lib/utils';
 
-const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('uk');
+
+const deferred = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter(key => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const phoneCorrections = new Set(['onboard.parentPhoneFormat', 'onboard.phoneFormatError', 'register.phoneError', 'register.phoneHint', 'settings.phoneFormat', 'stu.phoneFormat']);
 // Restore arguments already passed by the UI/email callers to damaged source entries.
@@ -23,7 +26,8 @@ beforeAll(async () => { await loadLocaleDict('uk'); });
 
 describe('Ukrainian tutor and business localization', () => {
   it('covers the full agreed scope and preserves deferred English fallback', () => {
-    expect(Object.keys(ukOverrides).sort()).toEqual(expectedKeys.sort());
+    expect(expectedKeys.filter((key) => !(key in ukOverrides))).toEqual([]);
+    expect(Object.keys(ukOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(uk).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter(key => en[key] && !uk[key])).toEqual([]);
     for (const key of Object.keys(en).filter(key => deferred.has(key.split('.')[0]))) expect(uk[key]).toBe(en[key]);

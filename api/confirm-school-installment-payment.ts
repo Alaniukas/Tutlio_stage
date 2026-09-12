@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 import { markSchoolInstallmentPaidAndMaybeInvite } from './_lib/schoolBookingInvite.js';
+import { retrieveConnectCheckoutSession } from './_lib/stripeDirectCharge.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -15,15 +16,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const checkoutSessionId = String(req.body?.sessionId || '').trim();
   const installmentId = String(req.body?.installmentId || '').trim();
+  const stripeAccountId = String(req.body?.stripeAccountId || '').trim();
   if (!checkoutSessionId || !installmentId) {
     return res.status(400).json({ error: 'Missing sessionId or installmentId' });
+  }
+  if (stripeAccountId && !/^acct_/i.test(stripeAccountId)) {
+    return res.status(400).json({ error: 'Invalid Stripe account identifier' });
   }
 
   try {
     const stripe = new Stripe(stripeKey, { apiVersion: '2023-10-16' as any });
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-    const session = await stripe.checkout.sessions.retrieve(checkoutSessionId);
+    if (stripeAccountId) {
+      const { data: scopeInstallment } = await supabase
+        .from('school_payment_installments')
+        .select('contract:school_contracts(org:organizations(stripe_account_id))')
+        .eq('id', installmentId)
+        .maybeSingle();
+      const expectedStripeAccountId = String((scopeInstallment as any)?.contract?.org?.stripe_account_id || '').trim();
+      if (!expectedStripeAccountId || expectedStripeAccountId !== stripeAccountId) {
+        return res.status(400).json({ error: 'Checkout session does not belong to this payment account' });
+      }
+    }
+
+    const session = await retrieveConnectCheckoutSession(stripe, checkoutSessionId, stripeAccountId || null);
     if (!session || session.payment_status !== 'paid') {
       return res.status(400).json({ error: 'Checkout session not paid' });
     }

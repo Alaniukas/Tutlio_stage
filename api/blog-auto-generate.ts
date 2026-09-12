@@ -4,6 +4,7 @@ import { requireCronAuth } from './_lib/cronAuth.js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 import { runBlogAutoGenerate } from './_lib/blogAutoGenerate.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { resolveBlogAiProvider, resolveGeminiTextModel } from './_lib/blogAiProvider.js';
 
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -25,6 +26,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const appOrigin = publicOriginFromRequest(req);
   const result = await runBlogAutoGenerate(supabase as any, { appOrigin });
+
+  console.info('[blog-auto-generate] run completed', {
+    ok: result.ok,
+    skipped: result.skipped === true,
+    reason: result.reason || null,
+    postId: result.postId || null,
+    keyword: result.keyword || null,
+    partial: result.partial === true,
+    localesDone: result.localesDone ?? null,
+    provider: resolveBlogAiProvider(),
+    model: resolveBlogAiProvider() === 'gemini' ? resolveGeminiTextModel() : 'custom',
+  });
 
   if (!result.ok && result.reason) {
     return res.status(500).json(result);

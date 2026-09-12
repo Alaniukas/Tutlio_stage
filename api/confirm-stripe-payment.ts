@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
+import { retrieveConnectCheckoutSession } from './_lib/stripeDirectCharge.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -63,16 +64,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             orgName = (org as { name?: string | null } | null)?.name || null;
         }
 
-        // Checkout kuriamas platformoje (destination charge); senesni UI – ant Connect paskyros.
+        // Direct-charge Checkout lives on the connected account; the platform
+        // fallback keeps sessions created before the migration confirmable.
         let isPaid = false;
         let checkoutSession: Stripe.Checkout.Session | null = null;
         try {
-            checkoutSession = await stripe.checkout.sessions.retrieve(checkoutSessionId).catch(() => null);
-            if (!checkoutSession && stripeAccountId) {
-                checkoutSession = await stripe
-                    .checkout.sessions.retrieve(checkoutSessionId, { stripeAccount: stripeAccountId } as any)
-                    .catch(() => null);
-            }
+            checkoutSession = await retrieveConnectCheckoutSession(
+                stripe,
+                checkoutSessionId,
+                stripeAccountId,
+            ).catch(() => null);
             if (!checkoutSession) {
                 return res.status(400).json({
                     error: 'Could not find Stripe payment session. If payment was made – contact info@tutlio.lt.',
@@ -311,24 +312,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }
             }
 
-            if (tutor?.email) {
+            // Org tutors already received booking_notification at reservation — no payment email.
+            if (tutor?.email && !isOrgTutor(tutorProfile?.organization_id)) {
                 try {
-                    const tutorPayload = isOrgTutor(tutorProfile?.organization_id)
-                        ? {
-                            type: 'lesson_confirmed_tutor',
-                            to: tutor.email,
-                            data: {
-                                studentName: student.full_name,
-                                tutorName: tutor.full_name || 'Korepetitorius',
-                                date: dateStr,
-                                time: timeStr,
-                                subject: sessionData.topic,
-                                sessionId: sessionData.id,
-                                meetingLink: (sessionData as { meeting_link?: string | null }).meeting_link || '',
-                                organizationId: tutorProfile.organization_id,
-                            }
-                        }
-                        : {
+                    await fetch(sendEmailUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                        body: JSON.stringify({
                             type: 'payment_received_tutor',
                             to: tutor.email,
                             data: {
@@ -339,12 +329,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                 subject: sessionData.topic,
                                 price: sessionData.price,
                                 ...(tutorProfile?.organization_id ? { organizationId: tutorProfile.organization_id } : {}),
-                            }
-                        };
-                    await fetch(sendEmailUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-                        body: JSON.stringify(tutorPayload)
+                            },
+                        }),
                     });
                 } catch (e) {
                     console.error('[confirm-stripe-payment] Failed to send tutor email', e);

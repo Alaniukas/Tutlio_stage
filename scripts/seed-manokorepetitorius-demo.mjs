@@ -1,5 +1,5 @@
 /**
- * Idempotent demo org for „Mano Korepetitorius“ sales demo.
+ * Idempotent demo org (slug `manokorepetitorius`, display name DEMO).
  *
  * Usage: node scripts/seed-manokorepetitorius-demo.mjs
  * Requires: .env with VITE_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
@@ -16,7 +16,7 @@ const ROOT = join(__dirname, '..');
 const DEMO = {
   orgId: 'c1a00000-7e57-4000-8000-000000000001',
   slug: 'manokorepetitorius',
-  name: 'Mano Korepetitorius',
+  name: 'DEMO',
   email: 'manokorepetitorius.demo.admin@tutlio.lt',
   brandColor: '#4F33B2',
   brandColorSecondary: '#68AE4A',
@@ -31,6 +31,11 @@ const DEMO = {
       id: 'c1a00000-7e57-4000-8000-000000000003',
       email: 'manokorepetitorius.demo.tutor@tutlio.lt',
       fullName: 'Demo Korepetitorė Ona',
+    },
+    tutorChem: {
+      id: 'c1a00000-7e57-4000-8000-000000000004',
+      email: 'manokorepetitorius.demo.tutor2@tutlio.lt',
+      fullName: 'Demo Korepetitorius Petras',
     },
     student1: {
       id: 'c1a00000-7e57-4000-8000-0000000000a1',
@@ -48,41 +53,55 @@ const DEMO = {
       id: 'c1a00000-7e57-4000-8000-000000000005',
       fullName: 'Demo Mokinys Lukas',
       email: 'manokorepetitorius.demo.student@tutlio.lt',
-      grade: '8 kl.',
+      grade: '8 klasė',
       linkedUserId: 'c1a00000-7e57-4000-8000-0000000000a1',
     },
     {
       id: 'c1a00000-7e57-4000-8000-000000000006',
       fullName: 'Demo Mokinė Gabija',
       email: 'manokorepetitorius.demo.student2@tutlio.lt',
-      grade: '6 kl.',
+      grade: '6 klasė',
       linkedUserId: 'c1a00000-7e57-4000-8000-0000000000a2',
     },
     {
       id: 'c1a00000-7e57-4000-8000-000000000007',
       fullName: 'Demo Mokinys Nojus',
       email: null,
-      grade: '10 kl.',
+      grade: '10 klasė',
       linkedUserId: null,
+    },
+    {
+      id: 'c1a00000-7e57-4000-8000-000000000008',
+      fullName: 'Demo Mokinė Emilija',
+      email: 'manokorepetitorius.demo.student3@tutlio.lt',
+      grade: '10 klasė',
+      linkedUserId: null,
+      tutorKey: 'tutorChem',
     },
   ],
   subjects: [
-    { id: 'c1a00000-7e57-4000-8000-000000000011', name: 'Matematika' },
-    { id: 'c1a00000-7e57-4000-8000-000000000012', name: 'Anglų kalba' },
-    { id: 'c1a00000-7e57-4000-8000-000000000013', name: 'Lietuvių kalba' },
+    { id: 'c1a00000-7e57-4000-8000-000000000011', name: 'Matematika', tutorKey: 'tutor' },
+    { id: 'c1a00000-7e57-4000-8000-000000000012', name: 'Anglų kalba', tutorKey: 'tutor' },
+    { id: 'c1a00000-7e57-4000-8000-000000000013', name: 'Lietuvių kalba', tutorKey: 'tutor' },
+    { id: 'c1a00000-7e57-4000-8000-000000000014', name: 'Chemija', tutorKey: 'tutorChem' },
   ],
 };
 
 function loadEnv() {
-  const path = join(ROOT, '.env');
-  if (!existsSync(path)) throw new Error('Missing .env in project root');
   const env = {};
-  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
-    const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
-    if (!m) continue;
-    let v = m[2].trim();
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-    env[m[1]] = v;
+  for (const file of ['.env', '.env.local']) {
+    const path = join(ROOT, file);
+    if (!existsSync(path)) continue;
+    for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
+      const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
+      if (!m) continue;
+      let v = m[2].trim();
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+      env[m[1]] = v;
+    }
+  }
+  if (!env.VITE_SUPABASE_URL && !env.SUPABASE_URL) {
+    throw new Error('Missing .env or .env.local with Supabase keys');
   }
   return env;
 }
@@ -122,7 +141,10 @@ async function uploadLogo(supabase, orgId) {
     contentType: 'image/png',
     upsert: true,
   });
-  if (error) throw new Error(`logo upload: ${error.message}`);
+  if (error) {
+    console.warn(`logo upload skipped: ${error.message}`);
+    return null;
+  }
   const { data } = supabase.storage.from('blog-images').getPublicUrl(storagePath);
   return data.publicUrl;
 }
@@ -140,8 +162,9 @@ function sessionTimes() {
   const e2 = new Date(d2);
   e2.setHours(15, 30, 0, 0);
   return [
-    { id: 'c1a00000-7e57-4000-8000-000000000021', start: d1, end: e1, topic: 'Matematika', studentId: DEMO.students[0].id },
-    { id: 'c1a00000-7e57-4000-8000-000000000022', start: d2, end: e2, topic: 'Anglų kalba', studentId: DEMO.students[1].id },
+    { id: 'c1a00000-7e57-4000-8000-000000000021', start: d1, end: e1, topic: 'Matematika', studentId: DEMO.students[0].id, tutorKey: 'tutor' },
+    { id: 'c1a00000-7e57-4000-8000-000000000022', start: d2, end: e2, topic: 'Anglų kalba', studentId: DEMO.students[1].id, tutorKey: 'tutor' },
+    { id: 'c1a00000-7e57-4000-8000-000000000023', start: d2, end: e2, topic: 'Chemija', studentId: DEMO.students[3].id, tutorKey: 'tutorChem' },
   ];
 }
 
@@ -152,6 +175,7 @@ async function main() {
   if (!url || !key) throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required in .env');
 
   const supabase = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  console.log('Using Supabase:', url);
 
   console.log('Uploading logo…');
   const logoUrl = await uploadLogo(supabase, DEMO.orgId);
@@ -159,15 +183,16 @@ async function main() {
   const features = {
     custom_branding: true,
     hide_powered_by: true,
-    public_name: 'Mano Korepetitorius',
+    public_name: 'DEMO',
     contact_email: DEMO.email,
-    email_team_signature: 'Mano Korepetitoriaus komanda',
-    email_sender_name: 'Mano Korepetitorius',
+    email_team_signature: 'DEMO komanda',
+    email_sender_name: 'DEMO',
     login_description:
       'Individualus dėmesys kiekvienam mokiniui. Patyrę ir kruopščiai atrinkti korepetitoriai — gyvai Vilniuje ir nuotoliu visoje Lietuvoje.',
     manual_payments: false,
     per_student_payment_override: true,
     org_admin_calendar_view: true,
+    org_admin_calendar_full_control: true,
   };
 
   console.log('Upserting organization…');
@@ -207,6 +232,11 @@ async function main() {
       organization_id: DEMO.orgId,
       enable_manual_student_payments: false,
     },
+    {
+      ...DEMO.users.tutorChem,
+      organization_id: DEMO.orgId,
+      enable_manual_student_payments: false,
+    },
     { ...DEMO.users.student1, organization_id: DEMO.orgId },
     { ...DEMO.users.student2, organization_id: DEMO.orgId },
   ].map((u) => ({
@@ -230,10 +260,11 @@ async function main() {
 
   console.log('Upserting students…');
   for (const s of DEMO.students) {
+    const tutorId = DEMO.users[s.tutorKey || 'tutor'].id;
     const { error } = await supabase.from('students').upsert(
       {
         id: s.id,
-        tutor_id: DEMO.users.tutor.id,
+        tutor_id: tutorId,
         organization_id: DEMO.orgId,
         full_name: s.fullName,
         email: s.email,
@@ -242,6 +273,7 @@ async function main() {
         payer_name: s.fullName,
         payer_email: s.email,
         phone: '+37060000001',
+        invite_code: `MK${s.id.slice(-4).toUpperCase()}`,
       },
       { onConflict: 'id' },
     );
@@ -251,7 +283,7 @@ async function main() {
   console.log('Upserting subjects…');
   for (const sub of DEMO.subjects) {
     const { error } = await supabase.from('subjects').upsert(
-      { id: sub.id, name: sub.name, tutor_id: DEMO.users.tutor.id },
+      { id: sub.id, name: sub.name, tutor_id: DEMO.users[sub.tutorKey || 'tutor'].id },
       { onConflict: 'id' },
     );
     if (error) throw new Error(`subject ${sub.name}: ${error.message}`);
@@ -262,7 +294,7 @@ async function main() {
     const { error } = await supabase.from('sessions').upsert(
       {
         id: sess.id,
-        tutor_id: DEMO.users.tutor.id,
+        tutor_id: DEMO.users[sess.tutorKey || 'tutor'].id,
         student_id: sess.studentId,
         start_time: sess.start.toISOString(),
         end_time: sess.end.toISOString(),
@@ -277,15 +309,16 @@ async function main() {
     if (error) throw new Error(`session: ${error.message}`);
   }
 
-  const appUrl = (env.APP_URL || env.VITE_APP_URL || 'https://tutlio.lt').replace(/\/$/, '');
+  const appUrl = 'http://localhost:3000';
   console.log('\n=== Mano Korepetitorius demo ready ===\n');
-  console.log(`Whitelabel login:  ${appUrl}/login?org=${DEMO.slug}`);
-  console.log(`Company admin:     ${appUrl}/company/login`);
+  console.log(`Company admin:     ${appUrl}/company/login?org=${DEMO.slug}`);
   console.log(`Password (all):    ${DEMO.password}\n`);
-  console.log('Tutor:    ', DEMO.users.tutor.email);
-  console.log('Student:  ', DEMO.users.student1.email);
-  console.log('Student2: ', DEMO.users.student2.email);
-  console.log('Admin:    ', DEMO.users.admin.email);
+  console.log('Admin:     ', DEMO.users.admin.email);
+  console.log('Tutor math:', DEMO.users.tutor.email);
+  console.log('Tutor chem:', DEMO.users.tutorChem.email);
+  console.log('Student:   ', DEMO.users.student1.email);
+  console.log('Student2:  ', DEMO.users.student2.email);
+  console.log('\nQA: Emilija (10 klasė) assigned only to Petras/Chemija — add Ona/Matematika from the card or schedule.');
   console.log('\nOrg id:', DEMO.orgId);
   if (logoUrl) console.log('Logo:  ', logoUrl);
 }

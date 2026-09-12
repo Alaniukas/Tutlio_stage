@@ -6,7 +6,7 @@ import {
 import { MOKSLO_VAISIAI_ORG_ID } from '@/lib/marketMoney';
 
 describe('Mokslo vaisiai lesson comms routing', () => {
-  it('routes to payer inbox only for MV students without portal email', () => {
+  it('routes to payer inbox for MV students without a contact email, including username accounts', () => {
     expect(
       moksloVaisiaiRoutesLessonCommsToPayer({
         organizationId: MOKSLO_VAISIAI_ORG_ID,
@@ -27,7 +27,7 @@ describe('Mokslo vaisiai lesson comms routing', () => {
         studentEmail: null,
         linkedUserId: 'user-1',
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('does not apply to other organizations', () => {

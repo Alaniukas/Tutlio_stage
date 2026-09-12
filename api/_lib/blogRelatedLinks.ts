@@ -1,11 +1,13 @@
 import {
   BLOG_SCHEMA_LOCALES as LOCALES,
+  blogLocaleColumn,
   isSeoPublished,
   type BlogSchemaLocale,
 } from '../../src/lib/i18n/localeRelease.js';
-import { withEnglishLocaleFallback } from '../../src/lib/i18n/locales.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type Locale, buildCanonicalUrl } from './seo-routing.js';
+import { t } from './i18n.js';
+import { blogLocaleInternalPath } from './blogMarkets.js';
 
 const BLOG_LOCALES = LOCALES;
 
@@ -18,12 +20,12 @@ export interface RelatedBlogPost {
 }
 
 function postSlug(post: Record<string, unknown>, locale: Locale): string {
-  return (post[`slug_${locale}`] as string) || (post.slug as string);
+  return (post[blogLocaleColumn('slug', locale)] as string) || (post.slug as string);
 }
 
 const RELATED_LOCALE_COLUMNS = LOCALES.flatMap((locale) => [
-  `title_${locale}`,
-  `slug_${locale}`,
+  blogLocaleColumn('title', locale),
+  blogLocaleColumn('slug', locale),
 ]).join(', ');
 
 export async function fetchRelatedBlogPosts(
@@ -57,7 +59,7 @@ export function relatedPostsForLocale(
     .map((post) => {
       // Related links must be real translations. Linking a French article to
       // an English fallback URL creates mixed-language UX and crawl waste.
-      const title = String(post[`title_${locale}`] || '');
+      const title = String(post[blogLocaleColumn('title', locale)] || '');
       const slug = postSlug(post, locale);
       if (!title || !slug) return null;
       return {
@@ -72,18 +74,18 @@ export function relatedPostsForLocale(
     .slice(0, limit);
 }
 
-const ABOUT_BLOCK: Record<BlogSchemaLocale, string> = {
+const ABOUT_BLOCK: Partial<Record<BlogSchemaLocale, string>> = {
   lt:
     '\n\n---\n\n## Apie Tutlio\n\n' +
-    'Tutlio — korepetitorių ir korepetavimo mokyklų valdymo platforma: pamokų tvarkaraštis, mokinių laukimo eilė, Stripe mokėjimai ir automatizuoti priminimai vienoje vietoje. ' +
+    'Tutlio - korepetitorių ir korepetavimo mokyklų valdymo platforma: pamokų tvarkaraštis, mokinių laukimo eilė, Stripe mokėjimai ir automatizuoti priminimai vienoje vietoje. ' +
     '[Sužinokite daugiau apie kainas](/pricing) arba [peržiūrėkite kitus straipsnius](/blog).',
   en:
     '\n\n---\n\n## About Tutlio\n\n' +
-    'Tutlio is tutoring management software for private tutors and tutoring schools — lesson scheduling, student waitlist, Stripe payments, and automated reminders in one place. ' +
+    'Tutlio is tutoring management software for private tutors and tutoring schools - lesson scheduling, student waitlist, Stripe payments, and automated reminders in one place. ' +
     '[See pricing](/pricing) or [browse more articles](/blog).',
   pl:
     '\n\n---\n\n## O Tutlio\n\n' +
-    'Tutlio to oprogramowanie do zarządzania korepetycjami dla prywatnych korepetytorów i szkół — harmonogram lekcji, lista oczekujących, płatności Stripe i automatyczne przypomnienia w jednym miejscu. ' +
+    'Tutlio to oprogramowanie do zarządzania korepetycjami dla prywatnych korepetytorów i szkół - harmonogram lekcji, lista oczekujących, płatności Stripe i automatyczne przypomnienia w jednym miejscu. ' +
     '[Zobacz cennik](/pricing) lub [przeglądaj więcej artykułów](/blog).',
   lv:
     '\n\n---\n\n## Par Tutlio\n\n' +
@@ -127,7 +129,7 @@ const ABOUT_BLOCK: Record<BlogSchemaLocale, string> = {
     '[Bekijk de prijzen](/pricing) of [bekijk meer artikelen](/blog).',
 };
 
-const RELATED_HEADING: Record<BlogSchemaLocale, string> = {
+const RELATED_HEADING: Partial<Record<BlogSchemaLocale, string>> = {
   lt: '## Skaitykite taip pat',
   en: '## Read also',
   pl: '## Przeczytaj także',
@@ -145,8 +147,15 @@ const RELATED_HEADING: Record<BlogSchemaLocale, string> = {
 
 function relatedMarkdownSection(related: RelatedBlogPost[], locale: BlogSchemaLocale): string {
   if (!related.length) return '';
-  const lines = related.map((p) => `- [${p.title}](/blog/${p.slug})`);
-  return `\n\n${RELATED_HEADING[locale]}\n\n${lines.join('\n')}`;
+  const blogPath = blogLocaleInternalPath(locale, '/blog');
+  const lines = related.map((p) => `- [${p.title}](${blogPath}/${p.slug})`);
+  return `\n\n${RELATED_HEADING[locale] || `## ${t(locale, 'blog.readAlso')}`}\n\n${lines.join('\n')}`;
+}
+
+function localizeSupportingMarkdownLinks(content: string, locale: BlogSchemaLocale): string {
+  return content
+    .replace(/\]\(\/pricing\)/g, `](${blogLocaleInternalPath(locale, '/pricing')})`)
+    .replace(/\]\(\/blog\)/g, `](${blogLocaleInternalPath(locale, '/blog')})`);
 }
 
 /** Append about block + related links to generated locale content (idempotent). */
@@ -157,11 +166,12 @@ export function enrichBlogLocaleContent(
 ): string {
   let out = content.trimEnd();
   const about = ABOUT_BLOCK[locale];
-  const aboutTitle = about.match(/^[\s\S]*## (.+)\n/)?.[1] || 'About Tutlio';
-  if (!out.includes(`## ${aboutTitle}`) && !out.includes('## Apie Tutlio') && !out.includes('## About Tutlio')) {
-    out += about;
+  const aboutTitle = about?.match(/^[\s\S]*## (.+)\n/)?.[1] || '';
+  if (about && !out.includes(`## ${aboutTitle}`) && !out.includes('## Apie Tutlio') && !out.includes('## About Tutlio')) {
+    out += localizeSupportingMarkdownLinks(about, locale);
   }
-  if (related.length && !out.includes(RELATED_HEADING[locale])) {
+  const relatedHeading = RELATED_HEADING[locale] || `## ${t(locale, 'blog.readAlso')}`;
+  if (related.length && !out.includes(relatedHeading)) {
     out += relatedMarkdownSection(related, locale);
   }
   return out;
@@ -178,13 +188,13 @@ export async function enrichBlogPostContents(
   for (const loc of BLOG_LOCALES) {
     const { data: post } = await supabase
       .from('blog_posts')
-      .select(`content_${loc}`)
+      .select(blogLocaleColumn('content', loc))
       .eq('id', postId)
       .maybeSingle();
-    const current = String(post?.[`content_${loc}`] || '');
+    const current = String(post?.[blogLocaleColumn('content', loc)] || '');
     if (!current) continue;
     const related = relatedPostsForLocale(relatedRows, loc);
-    patch[`content_${loc}`] = enrichBlogLocaleContent(current, loc, related);
+    patch[blogLocaleColumn('content', loc)] = enrichBlogLocaleContent(current, loc, related);
   }
 
   if (Object.keys(patch).length) {
@@ -194,39 +204,34 @@ export async function enrichBlogPostContents(
 
 export function renderRelatedPostsHtml(related: RelatedBlogPost[], locale: Locale): string {
   if (!related.length) return '';
-  const heading: Record<Locale, string> = withEnglishLocaleFallback({
-    tr: 'Bunları da okuyun', lt: 'Skaitykite taip pat', en: 'Read also', pl: 'Przeczytaj także', lv: 'Lasiet arī',
-    ee: 'Loe ka', fr: 'À lire aussi', es: 'Lee también', de: 'Auch lesenswert',
-    se: 'Läs också', dk: 'Læs også', fi: 'Lue myös', no: 'Les også', nl: 'Lees ook',
-  });
   const items = related
     .map((p) => `<li><a href="${p.url.replace(/"/g, '&quot;')}">${p.title.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</a></li>`)
     .join('\n');
   return `<section class="related" style="margin-top:2.5em;padding-top:1.5em;border-top:1px solid #e5e7eb">
-  <h2 style="font-size:1.25rem;font-weight:700;margin-bottom:.75em">${heading[locale]}</h2>
+  <h2 style="font-size:1.25rem;font-weight:700;margin-bottom:.75em">${t(locale, 'blog.readAlso')}</h2>
   <ul style="margin:0;padding-left:1.25em">${items}</ul>
 </section>`;
 }
 
 export function renderAboutTutlioHtml(locale: Locale, pricingUrl: string, blogUrl: string): string {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const blocks: Record<Locale, { title: string; body: string; pricing: string; blog: string }> = withEnglishLocaleFallback({
+  const blocks: Partial<Record<Locale, { title: string; body: string; pricing: string; blog: string }>> = {
     tr: { title: 'Tutlio hakkında', body: 'Tutlio, bağımsız özel ders öğretmenleri ve özel ders kurumları için yönetim yazılımıdır. Ders planlama, öğrenci bekleme listesi, Stripe ödemeleri ve otomatik hatırlatmalar tek yerde.', pricing: 'Fiyatları inceleyin', blog: 'diğer yazılara göz atın' },
     lt: {
       title: 'Apie Tutlio',
-      body: 'Tutlio — korepetitorių ir korepetavimo mokyklų valdymo platforma: pamokų tvarkaraštis, mokinių laukimo eilė, Stripe mokėjimai ir automatizuoti priminimai vienoje vietoje.',
+      body: 'Tutlio - korepetitorių ir korepetavimo mokyklų valdymo platforma: pamokų tvarkaraštis, mokinių laukimo eilė, Stripe mokėjimai ir automatizuoti priminimai vienoje vietoje.',
       pricing: 'Sužinokite daugiau apie kainas',
       blog: 'peržiūrėkite kitus straipsnius',
     },
     en: {
       title: 'About Tutlio',
-      body: 'Tutlio is tutoring management software for private tutors and tutoring schools — lesson scheduling, student waitlist, Stripe payments, and automated reminders in one place.',
+      body: 'Tutlio is tutoring management software for private tutors and tutoring schools - lesson scheduling, student waitlist, Stripe payments, and automated reminders in one place.',
       pricing: 'See pricing',
       blog: 'browse more articles',
     },
     pl: {
       title: 'O Tutlio',
-      body: 'Tutlio to oprogramowanie do zarządzania korepetycjami — harmonogram lekcji, lista oczekujących, płatności Stripe i automatyczne przypomnienia w jednym miejscu.',
+      body: 'Tutlio to oprogramowanie do zarządzania korepetycjami - harmonogram lekcji, lista oczekujących, płatności Stripe i automatyczne przypomnienia w jednym miejscu.',
       pricing: 'Zobacz cennik',
       blog: 'przeglądaj więcej artykułów',
     },
@@ -290,8 +295,9 @@ export function renderAboutTutlioHtml(locale: Locale, pricingUrl: string, blogUr
       pricing: 'Bekijk de prijzen',
       blog: 'bekijk meer artikelen',
     },
-  });
-  const b = blocks[locale] || blocks.en;
+  };
+  const b = blocks[locale];
+  if (!b) return '';
   return `<section class="about-tutlio" style="margin-top:2.5em;padding:1.25em 1.5em;background:#f8f9ff;border-radius:12px;border:1px solid #e0e7ff">
   <h2 style="font-size:1.15rem;font-weight:700;margin-bottom:.5em">${esc(b.title)}</h2>
   <p style="margin:0;color:#444">${esc(b.body)} <a href="${esc(pricingUrl)}">${esc(b.pricing)}</a> · <a href="${esc(blogUrl)}">${esc(b.blog)}</a></p>

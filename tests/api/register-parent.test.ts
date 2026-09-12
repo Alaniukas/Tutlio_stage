@@ -104,6 +104,23 @@ describe('POST /api/register-parent', () => {
     expect(source).toContain('./_lib/proKlaseLegal.js');
   });
 
+  it('rejects an invitation for an archived child before creating an account', async () => {
+    mocks.from.mockImplementation((table: string) => table === 'parent_invites'
+      ? chain({ data: invite, error: null })
+      : chain({ data: { organization_id: PRO_KLASE_ORG, detached_at: '2026-09-07' }, error: null }));
+    const response = mockRes();
+    await handler(mockReq({
+      token: 'tok',
+      fullName: 'Parent',
+      password: 'ExamplePassword123!',
+      childGrade: '7',
+      acceptedPrivacy: true,
+      acceptedTerms: true,
+    }), response);
+    expect(response.getResult()).toMatchObject({ statusCode: 404, body: { code: 'invite_not_found' } });
+    expect(mocks.createUser).not.toHaveBeenCalled();
+  });
+
   it('rejects a missing 1–12 grade before touching Auth', async () => {
     const response = mockRes();
     await handler(mockReq({
@@ -155,7 +172,7 @@ describe('POST /api/register-parent', () => {
     }));
   });
 
-  it('links an existing Auth user instead of returning registration_failed', async () => {
+  it('does not reset or link an existing Auth user', async () => {
     mocks.createUser.mockResolvedValue({
       data: { user: null },
       error: { message: 'A user with this email address has already been registered', code: 'email_exists' },
@@ -170,7 +187,7 @@ describe('POST /api/register-parent', () => {
       acceptedPrivacy: true,
       acceptedTerms: true,
     }), response);
-    expect(response.getResult()).toEqual({ statusCode: 200, body: { success: true } });
-    expect(mocks.updateUserById).toHaveBeenCalledWith('existing-user', { password: 'TutlioQaDemo2026!' });
+    expect(response.getResult()).toMatchObject({ statusCode: 400, body: { code: 'email_already_registered' } });
+    expect(mocks.updateUserById).not.toHaveBeenCalled();
   });
 });

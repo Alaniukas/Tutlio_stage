@@ -1,13 +1,11 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-import { renderDocxTemplateUrlToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf.js';
-import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
-import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { renderDocxBufferToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf.js';
+import { schoolContractPdfStoragePath } from './_lib/schoolContractPdfPath.js';
 import {
-  schoolContractPdfStoragePath,
-  SCHOOL_CONTRACTS_BUCKET,
   extractSchoolContractStoragePath,
-} from './_lib/schoolContractPdfPath.js';
+  SCHOOL_CONTRACTS_BUCKET,
+} from './_lib/schoolContractStorage.js';
 
 function json(res: VercelResponse, status: number, body: Record<string, unknown>) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -73,30 +71,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: authData, error: authErr } = await userSb.auth.getUser(jwt);
   if (authErr || !authData.user) return json(res, 401, { error: 'Invalid token' });
 
-  const adminAccess = await getOrgAdminAccessByUserId(adminSb, authData.user.id);
-  if (
-    adminAccess?.organizationId !== organizationId
-    || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.edit')
-  ) return json(res, 403, { error: 'Not authorized for this organization' });
+  const { data: adminRow } = await adminSb
+    .from('organization_admins')
+    .select('organization_id')
+    .eq('user_id', authData.user.id)
+    .eq('organization_id', organizationId)
+    .maybeSingle();
+
+  if (!adminRow?.organization_id) return json(res, 403, { error: 'Not authorized for this organization' });
 
   try {
-    // The `school-contracts` bucket is private, so the stored public URL returns
-    // 400 ("Bucket not found"). Resolve the object path and fetch the template via
-    // a short-lived signed URL minted with the service role (same approach as
-    // api/_lib/schoolContractPdf.ts). External (non-Storage) URLs are fetched as-is.
-    const templateObjectPath = extractSchoolContractStoragePath(templateUrl);
-    let fetchUrl = templateUrl;
-    if (templateObjectPath && templateObjectPath !== templateUrl) {
-      const { data: signed, error: signErr } = await adminSb.storage
-        .from(SCHOOL_CONTRACTS_BUCKET)
-        .createSignedUrl(templateObjectPath, 300);
-      if (signErr || !signed?.signedUrl) {
-        console.error('[school-contract-render-docx-pdf] sign template:', signErr);
-        return json(res, 502, { error: signErr?.message || 'Nepavyko paruošti šablono nuorodos' });
-      }
-      fetchUrl = signed.signedUrl;
+    const templatePath = extractSchoolContractStoragePath(templateUrl);
+    const { data: docxBlob, error: dlErr } = await adminSb.storage
+      .from(SCHOOL_CONTRACTS_BUCKET)
+      .download(templatePath);
+    if (dlErr || !docxBlob) {
+      console.error('[school-contract-render-docx-pdf] download:', dlErr);
+      return json(res, 502, { error: dlErr?.message || 'Nepavyko atsisiųsti DOCX šablono' });
     }
-    const pdfBuffer = await renderDocxTemplateUrlToPdfBuffer({ templateUrl: fetchUrl, payload: templatePayload });
+    const docxBuffer = Buffer.from(await docxBlob.arrayBuffer());
+    const pdfBuffer = await renderDocxBufferToPdfBuffer({ docxBuffer, payload: templatePayload });
     const path = schoolContractPdfStoragePath({
       organizationId,
       contractId,
@@ -111,9 +105,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[school-contract-render-docx-pdf] upload:', upErr);
       return json(res, 502, { error: upErr.message || 'Nepavyko įkelti PDF' });
     }
-    // The `school-contracts` bucket is private, so a public URL 404s with
-    // "Bucket not found". Return the bare object path; callers persist it and mint
-    // a short-lived signed URL on read (email + admin UI), matching uploadContractFile.
     return json(res, 200, { pdfUrl: path, path });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'PDF generavimas nepavyko';

@@ -7,6 +7,10 @@ import {
   nextMonthFirstYmd,
 } from '../src/lib/monthlyPackagePlan.js';
 import { resolveOrganizationLessonPrice } from '../src/lib/organizationDynamicPricing.js';
+import { fetchOrgStudentDynamicPrice } from '../src/lib/orgStudentPricing.js';
+import { generatePooledMonthlyPackage } from './_lib/pooledMonthlyGeneration.js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { getOrgOwnerUserId } from './_lib/orgAdminAccess.js';
 import { buildRollingOccurrenceDates } from './_lib/recurringOccurrences.js';
 
 function ymdInVilnius(value = new Date()): string {
@@ -41,7 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data, error } = await supabase
     .from('recurring_monthly_package_plans')
-    .select('id, organization_id, tutor_id, student_id, subject_id, grade, lessons_per_week, payment_method, attach_sales_invoice, next_generation_date, auto_from_schedule')
+    .select('id, organization_id, created_by, tutor_id, student_id, subject_id, grade, lessons_per_week, payment_method, attach_sales_invoice, next_generation_date, auto_from_schedule')
     .eq('active', true)
     .lte('next_generation_date', today)
     .order('next_generation_date', { ascending: true })
@@ -62,7 +66,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     deactivated += 1;
   };
 
+  const pooledPeriods = new Set<string>();
   for (const plan of data || []) {
+    // Pro Klasė renewals use one identity-wide package. Route them before the
+    // legacy per-tutor branches so the same month cannot be sold twice.
+    if (isProKlaseOrg(plan.organization_id)) {
+      const periodStart = `${String(plan.next_generation_date).slice(0, 7)}-01`;
+      const periodKey = `${plan.organization_id}:${plan.student_id}:${periodStart}`;
+      if (pooledPeriods.has(periodKey)) continue;
+      try {
+        const pricing = await fetchOrgStudentDynamicPrice(supabase, plan.student_id);
+        const createdBy = plan.created_by || await getOrgOwnerUserId(supabase, plan.organization_id);
+        if (!createdBy) throw new Error('Organization has no renewal owner');
+        const trustedOrigin = process.env.VERCEL_URL
+          ? `https://${process.env.VERCEL_URL}`
+          : process.env.APP_URL || process.env.VITE_APP_URL;
+        if (!trustedOrigin) throw new Error('Missing configured application origin');
+        const result = await generatePooledMonthlyPackage(supabase, {
+          organizationId: plan.organization_id,
+          studentId: plan.student_id,
+          periodStart,
+          createdBy,
+          appOrigin: trustedOrigin,
+          serviceRoleKey,
+        });
+        for (const studentId of pricing.studentIds) {
+          pooledPeriods.add(`${plan.organization_id}:${studentId}:${periodStart}`);
+        }
+        if (result.existing) advanced += 1;
+        else generated += 1;
+      } catch (pooledError) {
+        failures.push({
+          planId: plan.id,
+          error: pooledError instanceof Error ? pooledError.message : String(pooledError),
+        });
+      }
+      continue;
+    }
+
     const periodStart = String(plan.next_generation_date);
     const periodEnd = endOfMonthYmd(periodStart);
     const nextGenerationDate = nextMonthFirstYmd(periodStart);

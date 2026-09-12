@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { en } from '../../src/lib/i18n/en';
 import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { bg, bgOverrides } from '../../src/lib/i18n/bg';
@@ -14,7 +15,9 @@ import { getLocalizedPhonePlaceholder, formatLocalizedPhone, validateLocalizedPh
 import { getLandingDemoPersonas } from '../../src/components/landing/v2/demoPersonas';
 import { getCaseStudy, getTestimonials, SHOW_PLACEHOLDER_SOCIAL_PROOF } from '../../src/components/landing/v2/socialProof';
 
-const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('bg');
+
+const deferred = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 // These source hints incorrectly impose Lithuanian rules on international forms.
@@ -29,7 +32,8 @@ beforeAll(async () => { await loadLocaleDict('bg'); });
 
 describe('Bulgarian tutor and business localization', () => {
   it('explicitly covers the requested flows and preserves deliberate fallback boundaries', () => {
-    expect(Object.keys(bgOverrides).sort()).toEqual(expectedKeys.sort());
+    expect(expectedKeys.filter((key) => !(key in bgOverrides))).toEqual([]);
+    expect(Object.keys(bgOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(bg).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !bg[key])).toEqual([]);
     for (const key of Object.keys(en).filter((key) => deferred.has(key.split('.')[0]))) {

@@ -20,6 +20,12 @@ import {
   type OrgFeeProfile,
 } from './_lib/marketMoney.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import {
+    directChargeOptions,
+    expireConnectCheckoutSession,
+    retrieveConnectCheckoutSessionWithScope,
+} from './_lib/stripeDirectCharge.js';
+import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -90,11 +96,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let ownerName = tutor?.full_name || 'Korepetitorius';
         let useSchoolOrgAbsorbedFees = false;
         let feeProfile: OrgFeeProfile | null = null;
+        let feeSplit = null;
 
         if (tutor?.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug, features')
                 .eq('id', tutor.organization_id)
                 .single();
             if (!org?.stripe_onboarding_complete || !org.stripe_account_id) {
@@ -103,6 +110,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
             feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
+            feeSplit = resolveOrgPayerFeeSplit((org as { features?: unknown }).features);
             // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
             useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school' && !feeProfile;
         } else {
@@ -129,7 +137,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (useSchoolOrgAbsorbedFees) {
             expectedTotalCents = schoolInstallmentCheckoutCents(basePriceEur, market).chargeCents;
         } else {
-            const breakdown = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
+            const breakdown = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
             expectedTotalCents = breakdown.baseCents + breakdown.feesCents;
         }
 
@@ -140,12 +148,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         //    instead of the old, smaller one.
         if (session.stripe_checkout_session_id) {
             try {
-                const existing = await stripe.checkout.sessions.retrieve(session.stripe_checkout_session_id);
-                if (existing.status === 'open' && existing.url && existing.amount_total === expectedTotalCents) {
+                const existingLookup = await retrieveConnectCheckoutSessionWithScope(
+                    stripe,
+                    session.stripe_checkout_session_id,
+                    stripeAccountId,
+                );
+                const existing = existingLookup.session;
+                if (existingLookup.stripeAccount === stripeAccountId
+                    && existing.status === 'open'
+                    && existing.url
+                    && existing.amount_total === expectedTotalCents) {
                     return res.redirect(303, existing.url);
                 }
                 if (existing.status === 'open') {
-                    await stripe.checkout.sessions.expire(session.stripe_checkout_session_id).catch(() => {});
+                    await expireConnectCheckoutSession(
+                        stripe,
+                        session.stripe_checkout_session_id,
+                        existingLookup.stripeAccount,
+                    ).catch(() => {});
                 }
             } catch {
                 // expired or invalid — create new below
@@ -170,35 +190,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
+                customer_creation: 'always',
                 payment_method_types: ['card'],
                 line_items: [{ price_data: { currency, product_data: { name: itemName, description: itemDesc }, unit_amount: chargeCents }, quantity: 1 }],
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
-                    transfer_data: { destination: stripeAccountId! },
                     metadata: { tutlio_session_id: sessionId, tutlio_school_org_absorbed: 'true' },
                 },
                 metadata: { tutlio_session_id: sessionId, tutlio_school_org_absorbed: 'true' },
                 success_url: `${appOrigin}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${appOrigin}/student/sessions`,
-            });
+            }, directChargeOptions(stripeAccountId!));
         } else {
-            const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
+            const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
+                customer_creation: 'always',
                 payment_method_types: ['card'],
                 line_items: [
                     { price_data: { currency, product_data: { name: itemName, description: itemDesc }, unit_amount: baseCents }, quantity: 1 },
                     { price_data: { currency, product_data: { name: 'Platformos administravimo mokestis', description: 'Paslaugos teikėjas: MB „Tutlio“' }, unit_amount: feesCents }, quantity: 1 },
                 ],
                 payment_intent_data: {
-                    transfer_data: { destination: stripeAccountId!, amount: baseCents },
+                    application_fee_amount: feesCents,
                     metadata: { tutlio_session_id: sessionId },
                 },
                 metadata: { tutlio_session_id: sessionId, ...checkoutBaseMetadata(baseCents / 100, market) },
                 success_url: `${appOrigin}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${appOrigin}/student/sessions`,
-            });
+            }, directChargeOptions(stripeAccountId!));
         }
 
         // 6. Update session with new checkout session ID

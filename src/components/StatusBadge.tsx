@@ -75,7 +75,7 @@ function StatusBadgeBase({
         );
     }
 
-    if (status === 'cancelled') {
+    if (status === 'cancelled' || status === 'canceled') {
         return (
             <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-red-100 text-red-700 text-xs font-medium", className)}>
                 <XCircle className="w-3.5 h-3.5" />

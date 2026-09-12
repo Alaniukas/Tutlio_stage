@@ -78,7 +78,7 @@ describe('schools-render', () => {
 });
 
 describe('page-render about/contact canonical slugs', () => {
-  it.each(PENDING_TRANSLATION_LOCALES)('renders the unpublished %s locale with noindex', async (locale) => {
+  it.each(PENDING_TRANSLATION_LOCALES)('renders the published %s locale as indexable with its own hreflang', async (locale) => {
     const res = mockRes();
     await pageRender(mockReq({ page: 'landing', locale }, 'www.tutlio.com'), res);
 
@@ -86,15 +86,17 @@ describe('page-render about/contact canonical slugs', () => {
     expect(res.body).toContain(`lang="${htmlLanguageCode(locale)}" dir="${localeDirection(locale)}"`);
     if (locale === 'he') expect(res.body).toContain('property="og:locale" content="he_IL"');
     if (locale === 'ar') expect(res.body).toContain('property="og:locale" content="ar_SA"');
-    expect(res.body).toContain('<meta name="robots" content="noindex, follow" />');
+    expect(res.body).toContain('<meta name="robots" content="index, follow, max-image-preview:large" />');
     expect(res.body).toContain(`<link rel="canonical" href="https://www.tutlio.com/${locale}" />`);
-    // A pending locale may have a draft translation while retaining noindex.
+    // Published since 2026-09-05: the copy must be the locale's own, not English.
     const escapeHtml = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
-    expect(res.body).toContain(`<h1>${escapeHtml(ssrText(locale, 'landing.v2.heroTitleSolo'))}${escapeHtml(ssrText(locale, 'landing.v2.heroTitleSoloHighlight'))}</h1>`);
+    // `/` is the agency/school landing; the solo hero lives on /for-tutors.
+    expect(res.body).toContain(`<h1>${escapeHtml(ssrText(locale, 'landing.v2.heroTitleBiz'))}${escapeHtml(ssrText(locale, 'landing.v2.heroTitleBizHighlight'))}</h1>`);
+    expect(res.body).toContain(`href="/${locale}/for-tutors"`);
     expect(res.body).toContain(locale === 'uk' ? '>Блог</a>' : locale === 'bg' ? '>Блог</a>' : locale === 'th' ? '>บล็อก</a>' : locale === 'zh-hk' ? '>網誌</a>' : locale === 'he' ? '>בלוג</a>' : locale === 'ja' ? '>ブログ</a>' : locale === 'ko' ? '>블로그</a>' : locale === 'ar' ? '>المدونة</a>' : locale === 'el' ? '>Ιστολόγιο</a>' : '>Blog</a>');
     expect(res.body).toContain(locale === 'cs' ? '>Pro školy</a>' : locale === 'sl' ? '>Za šole</a>' : locale === 'hu' ? '>Iskoláknak</a>' : locale === 'hr' ? '>Za škole</a>' : locale === 'sk' ? '>Pre školy</a>' : locale === 'uk' ? '>Для шкіл</a>' : locale === 'bg' ? '>За училища</a>' : locale === 'th' ? '>สำหรับโรงเรียน</a>' : locale === 'zh-hk' ? '>學校專用</a>' : locale === 'he' ? '>לבתי ספר</a>' : locale === 'tr' ? '>Okullar için</a>' : locale === 'ja' ? '>学校向け</a>' : locale === 'fil' ? '>Para sa mga paaralan</a>' : locale === 'hi' ? '>स्कूलों के लिए</a>' : locale === 'ko' ? '>학교용</a>' : locale === 'id' ? '>Untuk sekolah</a>' : locale === 'ar' ? '>للمدارس</a>' : (locale === 'pt' || locale === 'pt-br') ? '>Para escolas</a>' : locale === 'ro' ? '>Pentru școli</a>' : locale === 'it' ? '>Per le scuole</a>' : locale === 'es-mx' ? '>Para escuelas</a>' : locale === 'el' ? '>Για σχολές</a>' : '>For Schools</a>');
     expect(res.body).not.toContain('>undefined</a>');
-    expect(res.body).not.toContain(`hreflang="${htmlLanguageCode(locale)}"`);
+    expect(res.body).toContain(`hreflang="${htmlLanguageCode(locale)}" href="https://www.tutlio.com/${locale}"`);
   });
 
   it('emits localized search metadata and truthful structured data', async () => {

@@ -1,10 +1,25 @@
-/**
- * Auto-mark student no-show when they never clicked "Prisijungti".
- * Pure — used by cron and tests.
- */
+/** Missing tracked joins are review signals; people confirm the final outcome. */
 import { ATTENDANCE_GRACE_MS, deriveAttendance, type AttendanceSessionLike } from './attendance.js';
 
 export const NO_SHOW_REASON_MISSED_JOIN = 'missed_join';
+
+export function isUnconfirmedAutomaticNoShow(session: {
+  status?: string | null;
+  no_show_reason?: string | null;
+  status_confirmed_at?: string | null;
+}): boolean {
+  return session.status === 'no_show'
+    && session.no_show_reason === NO_SHOW_REASON_MISSED_JOIN
+    && !session.status_confirmed_at;
+}
+
+export function shouldRestoreAutomaticNoShowOnJoin(session: {
+  status?: string | null;
+  no_show_reason?: string | null;
+  status_confirmed_at?: string | null;
+}): boolean {
+  return isUnconfirmedAutomaticNoShow(session);
+}
 
 export type JoinNoShowSession = AttendanceSessionLike & {
   id: string;
@@ -16,14 +31,14 @@ export type JoinNoShowSession = AttendanceSessionLike & {
 };
 
 /**
- * Student missed join → no_show only when:
+ * Student attendance needs human review when:
  * - online lesson (meeting_link)
  * - still active
  * - grace window passed
  * - student never clicked join
  * - tutor DID join (otherwise the lesson likely did not happen — PDF 4.5)
  */
-export function shouldMarkStudentNoShowFromMissedJoin(
+export function shouldReviewStudentAttendanceFromMissingJoin(
   session: JoinNoShowSession,
   now: Date = new Date(),
 ): boolean {

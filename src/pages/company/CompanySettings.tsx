@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,7 +30,7 @@ import {
   type TutorSeesContactMode,
   type StudentSeesTutorContactMode,
 } from '@/lib/orgContactVisibility';
-import { getCached, setCache } from '@/lib/dataCache';
+import { getCached, invalidateCache, setCache } from '@/lib/dataCache';
 import { LOCALE_NAMES, type Locale } from '@/lib/i18n/core';
 import { selectableLocales } from '@/lib/i18n/localeRelease';
 import { cn } from '@/lib/utils';
@@ -38,6 +38,13 @@ import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg } from '@/lib/orgIntakeMode';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS } from '@/lib/orgUi';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { parseOrgTrialPolicy } from '@/lib/orgTrialPolicy';
+import { Checkbox } from '@/components/ui/checkbox';
+import { parseEmailOptOutList, toggleEmailOptOut, type EmailOptOutKey } from '@/lib/emailNotificationOptOut';
+import {
+  resolveDefaultTutorPayForSave,
+  tutorIdsUsingPreviousDefaultPay,
+} from '@/lib/orgTutorDefaultPay';
 
 type TrialCommentMode = 'student_and_parent' | 'internal_only';
 
@@ -96,6 +103,7 @@ export default function CompanySettings() {
   const [saving, setSaving] = useState(false);
   const [orgId, setOrgId] = useState<string | null>(sc?.orgId ?? null);
   const [settings, setSettings] = useState(sc?.settings ?? { ...DEFAULT_SETTINGS });
+  const defaultTutorPayEditedRef = useRef(false);
   const [lessonEditScope, setLessonEditScope] = useState<OrgLessonEditScope>(
     sc?.lessonEditScope ?? { ...EMPTY_ORG_LESSON_SCOPE }
   );
@@ -117,10 +125,7 @@ export default function CompanySettings() {
   const [orgFeaturesSnapshot, setOrgFeaturesSnapshot] = useState<Record<string, unknown>>(
     sc?.orgFeaturesSnapshot ?? {}
   );
-  const showTrialSettings = useMemo(() => {
-    if (isSchoolOrgView) return false;
-    return isProKlaseOrg(orgId);
-  }, [isSchoolOrgView, orgId]);
+  const showTrialSettings = !isSchoolOrgView;
   /** Dynamic pricing orgs don't need per-subject list prices. */
   const hideSubjectPrice = isProKlaseOrg(orgId);
   const [contactTutorStudentEmail, setContactTutorStudentEmail] = useState<TutorSeesContactMode>(
@@ -141,6 +146,8 @@ export default function CompanySettings() {
     sc?.trialCommentMode ?? 'internal_only'
   );
   const [trialCommentRequired, setTrialCommentRequired] = useState(sc?.trialCommentRequired ?? false);
+  const [trialLessonsPerStudent, setTrialLessonsPerStudent] = useState(sc?.trialLessonsPerStudent ?? 1);
+  const [trialCommentAfterCount, setTrialCommentAfterCount] = useState(sc?.trialCommentAfterCount ?? 1);
   // Reservation flow only: hours a held trial slot waits for payment before auto-release.
   const [trialReservationDeadlineHours, setTrialReservationDeadlineHours] = useState(sc?.trialReservationDeadlineHours ?? 24);
   // Package reservation flow only: hours before the first lesson a held package slot waits for payment.
@@ -150,12 +157,13 @@ export default function CompanySettings() {
   // Optional address shown to parents (e.g. contract emails) for questions; empty falls back to the org email.
   const [contactEmail, setContactEmail] = useState<string>(sc?.contactEmail ?? '');
   const [publicName, setPublicName] = useState<string>(sc?.publicName ?? '');
+  const [adminEmailOptOut, setAdminEmailOptOut] = useState<EmailOptOutKey[]>([]);
   const [orgLocale, setOrgLocale] = useState<string>(sc?.orgLocale ?? '');
 
-  useEffect(() => { if (!getCached('company_settings')) fetchSettings(); }, []);
+  useEffect(() => { void fetchSettings({ silent: Boolean(sc) }); }, []);
 
-  const fetchSettings = async () => {
-    if (!getCached('company_settings')) setLoading(true);
+  const fetchSettings = async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       setLoading(false);
@@ -194,6 +202,8 @@ export default function CompanySettings() {
     let nextTrialPriceEur = 0;
     let nextTrialCommentMode: TrialCommentMode = 'internal_only';
     let nextTrialCommentRequired = false;
+    let nextTrialLessonsPerStudent = 1;
+    let nextTrialCommentAfterCount = 1;
     let nextTrialReservationDeadlineHours = 24;
     let nextPackagePaymentDeadlineHours = 24;
     let nextContactEmail = '';
@@ -218,6 +228,9 @@ export default function CompanySettings() {
       if (fcm === 'student_and_parent' || fcm === 'internal_only') nextTrialCommentMode = fcm;
       const fcr = featObj['trial_comment_required'];
       nextTrialCommentRequired = fcr === true;
+      const trialPolicy = parseOrgTrialPolicy(featObj);
+      nextTrialLessonsPerStudent = trialPolicy.lessonsPerStudent;
+      nextTrialCommentAfterCount = trialPolicy.commentAfterCount;
       const frd = featObj['trial_reservation_deadline_hours'];
       if (typeof frd === 'number' && Number.isFinite(frd) && frd > 0) nextTrialReservationDeadlineHours = Math.round(frd);
       const fpd = featObj['package_payment_deadline_hours'];
@@ -226,6 +239,7 @@ export default function CompanySettings() {
       if (typeof fce === 'string') nextContactEmail = fce.trim();
       const fpn = featObj['public_name'];
       if (typeof fpn === 'string') nextPublicName = fpn.trim();
+      setAdminEmailOptOut(parseEmailOptOutList(featObj['admin_email_opt_out']));
       setEnableManualStudentPayments(
         featObj['manual_payments'] === true || featObj['enable_manual_student_payments'] === true,
       );
@@ -252,13 +266,20 @@ export default function CompanySettings() {
       setTrialPriceEur(nextTrialPriceEur);
       setTrialCommentMode(nextTrialCommentMode);
       setTrialCommentRequired(nextTrialCommentRequired);
+      setTrialLessonsPerStudent(nextTrialLessonsPerStudent);
+      setTrialCommentAfterCount(nextTrialCommentAfterCount);
       setTrialReservationDeadlineHours(nextTrialReservationDeadlineHours);
       setPackagePaymentDeadlineHours(nextPackagePaymentDeadlineHours);
       setNotifyTutorsOnAssign(featObj['notify_tutors_on_student_assign'] === true);
       setContactEmail(nextContactEmail);
       setPublicName(nextPublicName);
       setOrgLocale(typeof (orgData as any)?.preferred_locale === 'string' ? (orgData as any).preferred_locale : '');
-      setSettings(nextSettings);
+      setSettings((current: typeof DEFAULT_SETTINGS) => ({
+        ...nextSettings,
+        company_commission_percent: defaultTutorPayEditedRef.current
+          ? current.company_commission_percent
+          : nextSettings.company_commission_percent,
+      }));
       setLessonEditScope(nextLessonEditScope);
     }
 
@@ -350,6 +371,8 @@ export default function CompanySettings() {
         trialPriceEur: nextTrialPriceEur,
         trialCommentMode: nextTrialCommentMode,
         trialCommentRequired: nextTrialCommentRequired,
+        trialLessonsPerStudent: nextTrialLessonsPerStudent,
+        trialCommentAfterCount: nextTrialCommentAfterCount,
         trialReservationDeadlineHours: nextTrialReservationDeadlineHours,
         packagePaymentDeadlineHours: nextPackagePaymentDeadlineHours,
         contactEmail: nextContactEmail,
@@ -721,14 +744,28 @@ export default function CompanySettings() {
     // Merge onto the freshest features JSONB, not the (possibly cached) mount
     // snapshot — flags toggled elsewhere (e.g. AdminPanel) must survive a save.
     let baseFeatures: Record<string, unknown> = orgFeaturesSnapshot;
-    const { data: freshOrg } = await supabase
+    let previousDefaultTutorPay = settings.company_commission_percent;
+    const { data: freshOrg, error: freshOrgError } = await supabase
       .from('organizations')
-      .select('features')
+      .select('features, default_company_commission_percent')
       .eq('id', orgId)
       .single();
+    if (freshOrgError || !freshOrg) {
+      setToastMessage({ message: t('compSet.errorSaving'), type: 'error' });
+      setSaving(false);
+      return;
+    }
     if (freshOrg?.features && typeof freshOrg.features === 'object' && !Array.isArray(freshOrg.features)) {
       baseFeatures = freshOrg.features as Record<string, unknown>;
     }
+    if (freshOrg && Number.isFinite(Number(freshOrg.default_company_commission_percent))) {
+      previousDefaultTutorPay = Number(freshOrg.default_company_commission_percent);
+    }
+    const nextDefaultTutorPay = resolveDefaultTutorPayForSave(
+      settings.company_commission_percent,
+      previousDefaultTutorPay,
+      defaultTutorPayEditedRef.current,
+    );
 
     const mergedFeatures: Record<string, unknown> = {
       ...baseFeatures,
@@ -741,15 +778,21 @@ export default function CompanySettings() {
       trial_lesson_price_eur: Math.max(0, Number(trialPriceEur) || 0),
       trial_lesson_comment_mode: trialCommentMode,
       trial_comment_required: trialCommentRequired,
+      trial_lessons_per_student: Math.min(5, Math.max(1, Math.round(Number(trialLessonsPerStudent) || 1))),
+      trial_comment_after_count: Math.min(
+        Math.min(5, Math.max(1, Math.round(Number(trialLessonsPerStudent) || 1))),
+        Math.max(1, Math.round(Number(trialCommentAfterCount) || 1)),
+      ),
       trial_reservation_deadline_hours: Math.max(1, Math.round(Number(trialReservationDeadlineHours) || 24)),
       package_payment_deadline_hours: Math.max(1, Math.round(Number(packagePaymentDeadlineHours) || 24)),
       notify_tutors_on_student_assign: notifyTutorsOnAssign,
       enable_manual_student_payments: enableManualStudentPayments,
       contact_email: contactEmail.trim(),
       public_name: publicName.trim(),
+      admin_email_opt_out: adminEmailOptOut,
     };
 
-    const { error } = await supabase
+    const { data: savedOrg, error } = await supabase
       .from('organizations')
       .update({
         default_cancellation_hours: settings.cancellation_hours,
@@ -758,19 +801,23 @@ export default function CompanySettings() {
         default_reminder_tutor_hours: settings.reminder_tutor_hours,
         default_break_between_lessons: settings.break_between_lessons,
         default_min_booking_hours: settings.min_booking_hours,
-        default_company_commission_percent: settings.company_commission_percent,
+        default_company_commission_percent: nextDefaultTutorPay,
         org_tutor_lesson_edit: lessonEditScope,
         org_tutors_can_edit_lesson_settings: anyLessonEdit,
         features: mergedFeatures,
         preferred_locale: orgLocale || null,
       })
-      .eq('id', orgId);
+      .eq('id', orgId)
+      .select('id, default_company_commission_percent')
+      .single();
 
-    if (!error) {
+    const defaultPayPersisted = savedOrg
+      && Number(savedOrg.default_company_commission_percent) === nextDefaultTutorPay;
+    if (!error && defaultPayPersisted) {
       setOrgFeaturesSnapshot(mergedFeatures);
     }
 
-    if (error) {
+    if (error || !defaultPayPersisted) {
       setToastMessage({ message: t('compSet.errorSaving'), type: 'error' });
       setSaving(false);
       return;
@@ -779,9 +826,10 @@ export default function CompanySettings() {
     const tutorRows = await getOrgVisibleTutors(
       supabase as any,
       orgId,
-      'id, email',
+      'id, email, company_commission_percent',
     );
     const tutorIds = tutorRows.map((p) => p.id);
+    const tutorIdsFollowingDefault = tutorIdsUsingPreviousDefaultPay(tutorRows, previousDefaultTutorPay);
 
     if (tutorIds.length > 0) {
       const { error: tutorsUpdateError } = await supabase
@@ -793,7 +841,6 @@ export default function CompanySettings() {
           reminder_tutor_hours: settings.reminder_tutor_hours,
           break_between_lessons: settings.break_between_lessons,
           min_booking_hours: settings.min_booking_hours,
-          company_commission_percent: settings.company_commission_percent,
           enable_manual_student_payments: enableManualStudentPayments,
         })
         .in('id', tutorIds);
@@ -803,6 +850,22 @@ export default function CompanySettings() {
           message: t('compSet.savedButTutorsFailed'),
           type: 'error',
         });
+        setSaving(false);
+        return;
+      }
+    }
+
+    if (
+      nextDefaultTutorPay !== previousDefaultTutorPay
+      && tutorIdsFollowingDefault.length > 0
+    ) {
+      const { error: tutorPayUpdateError } = await supabase
+        .from('profiles')
+        .update({ company_commission_percent: nextDefaultTutorPay })
+        .in('id', tutorIdsFollowingDefault);
+
+      if (tutorPayUpdateError) {
+        setToastMessage({ message: t('compSet.savedButTutorsFailed'), type: 'error' });
         setSaving(false);
         return;
       }
@@ -824,7 +887,7 @@ export default function CompanySettings() {
         reminder_tutor_hours: settings.reminder_tutor_hours,
         break_between_lessons: settings.break_between_lessons,
         min_booking_hours: settings.min_booking_hours,
-        company_commission_percent: settings.company_commission_percent,
+        company_commission_percent: nextDefaultTutorPay,
       },
       lessonEditScope,
       orgFeaturesSnapshot: mergedFeatures,
@@ -837,6 +900,8 @@ export default function CompanySettings() {
       trialPriceEur,
       trialCommentMode,
       trialCommentRequired,
+      trialLessonsPerStudent,
+      trialCommentAfterCount,
       trialReservationDeadlineHours,
       packagePaymentDeadlineHours,
       notifyTutorsOnAssign,
@@ -847,7 +912,13 @@ export default function CompanySettings() {
       orgTutors,
       subjects,
     });
+    invalidateCache('company_tutors');
 
+    defaultTutorPayEditedRef.current = false;
+    setSettings((current: typeof DEFAULT_SETTINGS) => ({
+      ...current,
+      company_commission_percent: nextDefaultTutorPay,
+    }));
     setSaving(false);
   };
 
@@ -945,6 +1016,17 @@ export default function CompanySettings() {
               placeholder={t('compSet.parentContactEmailPlaceholder')}
               className="rounded-xl"
             />
+            <div className="pt-2 space-y-2 border-t border-gray-100">
+              <p className="text-sm font-medium text-gray-900">{t('compSet.emailNotificationsTitle')}</p>
+              <p className="text-xs text-gray-500">{t('compSet.emailNotificationsHint')}</p>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <Checkbox
+                  checked={adminEmailOptOut.includes('payment_deadline_warning')}
+                  onChange={() => setAdminEmailOptOut((prev) => toggleEmailOptOut(prev, 'payment_deadline_warning'))}
+                />
+                <span className="text-sm text-gray-700">{t('compSet.emailOptOutPaymentDeadline')}</span>
+              </label>
+            </div>
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
@@ -1093,7 +1175,41 @@ export default function CompanySettings() {
                   />
                   <span className="text-sm text-gray-700">{t('compSet.trialCommentRequired')}</span>
                 </label>
-                <p className="text-xs text-gray-400 ml-6">{t('compSet.trialCommentRequiredDesc')}</p>
+                <p className="text-xs text-gray-400 ml-6">{t('compSet.trialCommentRequiredHelp')}</p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 col-span-full">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">{t('compSet.trialLessonsPerStudent')}</Label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={5}
+                    step={1}
+                    value={trialLessonsPerStudent}
+                    onChange={(e) => {
+                      const n = Math.min(5, Math.max(1, Math.round(Number(e.target.value) || 1)));
+                      setTrialLessonsPerStudent(n);
+                      setTrialCommentAfterCount((prev: number) => Math.min(prev, n));
+                    }}
+                    className="w-28 rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  />
+                  <p className="text-xs text-gray-400">{t('compSet.trialLessonsPerStudentDesc')}</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">{t('compSet.trialCommentAfterNth')}</Label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={trialLessonsPerStudent}
+                    step={1}
+                    value={trialCommentAfterCount}
+                    onChange={(e) => setTrialCommentAfterCount(
+                      Math.min(trialLessonsPerStudent, Math.max(1, Math.round(Number(e.target.value) || 1))),
+                    )}
+                    className="w-28 rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  />
+                  <p className="text-xs text-gray-400">{t('compSet.trialCommentAfterNthDesc')}</p>
+                </div>
               </div>
               {orgFeaturesSnapshot['trial_reservation_flow'] === true && (
                 <div className="space-y-1.5 col-span-full border-t border-gray-100 pt-4">
@@ -1143,6 +1259,9 @@ export default function CompanySettings() {
                 <p className="text-xs text-gray-500 mt-0.5">
                   {t('compSet.subjectManagementDesc')}
                 </p>
+                <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
+                  {t('compSet.subjectCatalogNote')}
+                </p>
               </div>
               <Button onClick={openAddSubjectDialog} size="sm" className="gap-2 rounded-xl">
                 <Plus className="w-4 h-4" /> {t('compSet.addSubject')}
@@ -1164,6 +1283,9 @@ export default function CompanySettings() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-sm text-gray-900">{subject.name}</span>
+                          <span className="text-[10px] uppercase tracking-wide font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                            {t('compTut.orgCatalogTitle')}
+                          </span>
                           {subject.is_group && (
                             <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200">
                               <Users className="w-3 h-3" /> {t('compSet.groupLesson', { count: String(subject.max_students) })}
@@ -1470,8 +1592,12 @@ export default function CompanySettings() {
                   <Input
                     type="number"
                     min={0}
+                    step={0.5}
                     value={settings.company_commission_percent}
-                    onChange={(e) => setSettings({ ...settings, company_commission_percent: parseInt(e.target.value) || 0 })}
+                    onChange={(e) => {
+                      defaultTutorPayEditedRef.current = true;
+                      setSettings({ ...settings, company_commission_percent: Number(e.target.value) || 0 });
+                    }}
                     className="rounded-xl w-32"
                   />
                   <span className="text-sm text-gray-500">{t('compSet.eurPerLesson')}</span>

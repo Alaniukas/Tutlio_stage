@@ -16,6 +16,7 @@ import { isSubscriptionOnlyPriceId } from './_lib/stripe-subscription-env.js';
 import { summarizeStripeOnboarding } from './_lib/stripeAccountOnboarding.js';
 import { sendTrialReservationConfirmedNotifications } from './_lib/trialReservation.js';
 import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
+import { markSchoolMonthlyInvoicePaid } from './_lib/schoolMonthlyInvoiceEmail.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -426,7 +427,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     .eq('id', packageId)
                     .eq('paid', false)
                     .select(
-                        'id, tutor_id, total_lessons, available_lessons, total_price, payment_method, manual_sales_invoice_id, paid_at, students(full_name, email, payer_email, payer_name), subject:subjects(name), lesson_package_items(subject_id, total_lessons, price_per_lesson, position, subjects!inner(name))'
+                        'id, tutor_id, total_lessons, available_lessons, total_price, payment_method, manual_sales_invoice_id, paid_at, pool_organization_id, students(full_name, email, payer_email, payer_name), subject:subjects(name), lesson_package_items(subject_id, total_lessons, price_per_lesson, position, subjects!inner(name))'
                     )
                     .maybeSingle();
 
@@ -453,7 +454,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         .eq('id', (updatedPackage as any).tutor_id)
                         .maybeSingle();
 
-                    const orgName = await getOrgName(supabase, tutor?.organization_id);
+                    const packageOrganizationId = (updatedPackage as any).pool_organization_id || tutor?.organization_id || null;
+                    const orgName = await getOrgName(supabase, packageOrganizationId);
                     const providerName = orgName || tutor?.full_name || 'Korepetitorius';
                     const packageGrossEur = session.amount_total != null ? session.amount_total / 100 : null;
                     const packageBaseEur = metadataBaseEur(session.metadata) ?? Number(updatedPackage.total_price);
@@ -463,7 +465,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         sourceId: packageId,
                         baseAmountEur: packageBaseEur,
                         grossAmountEur: packageGrossEur,
-                        organizationId: tutor?.organization_id ?? null,
+                        organizationId: packageOrganizationId,
                         tutorId: (updatedPackage as any).tutor_id ?? null,
                         stripeCheckoutSessionId: session.id,
                     });
@@ -508,7 +510,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     baseTotalEur: packageBaseEur,
                                     ...(packageGrossEur != null ? { totalChargedEur: packageGrossEur } : {}),
                                     items: webhookEmailItems,
-                                    ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
+                                    ...(packageOrganizationId ? { organizationId: packageOrganizationId } : {}),
                                 },
                             }),
                         }).catch(e => console.error('[stripe-webhook] Error sending package success email:', e));
@@ -755,6 +757,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     console.log(`[stripe-webhook] School installment ${installmentId} was already paid, skipping`);
                 }
             }
+            // Monthly extra-lessons invoice paid from the emailed "Apmokėti" link
+            else if (session.payment_status === 'paid' && session.metadata?.tutlio_school_monthly_invoice_id) {
+                const invoiceId = session.metadata.tutlio_school_monthly_invoice_id;
+                const result = await markSchoolMonthlyInvoicePaid(supabase, invoiceId, {
+                    paidVia: 'stripe',
+                    stripePaymentIntentId: typeof (session as any).payment_intent === 'string' ? (session as any).payment_intent : null,
+                });
+                if (result.ok === false) console.error('[stripe-webhook] school monthly invoice update failed:', invoiceId, result.error);
+                else console.log(`[stripe-webhook] School monthly invoice ${invoiceId} ${result.alreadyPaid ? 'already paid' : 'marked as paid'}`);
+            }
             // Handle lesson payment — update DB and send emails directly (same pattern as packages)
             // Do NOT call /api/confirm-stripe-payment here: StripeSuccess page also calls that endpoint,
             // and two concurrent callers would race and sometimes both send emails.
@@ -914,23 +926,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     }).catch(e => console.error('[stripe-webhook] Error sending lesson payment email:', e));
                                 }
 
-                                if (tutor?.email) {
-                                    const tutorPayload = isOrgTutor(tutor.organization_id)
-                                        ? {
-                                            type: 'lesson_confirmed_tutor',
-                                            to: tutor.email,
-                                            data: {
-                                                studentName: student.full_name,
-                                                tutorName: tutor.full_name || 'Korepetitorius',
-                                                date: dateStr,
-                                                time: timeStr,
-                                                subject: (dbSession as any).topic,
-                                                sessionId: dbSession.id,
-                                                meetingLink: (dbSession as any).meeting_link || '',
-                                                organizationId: tutor.organization_id,
-                                            },
-                                        }
-                                        : {
+                                // Org tutors already received booking_notification at reservation — no payment email.
+                                if (tutor?.email && !isOrgTutor(tutor.organization_id)) {
+                                    await fetch(sendEmailUrl, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                                        body: JSON.stringify({
                                             type: 'payment_received_tutor',
                                             to: tutor.email,
                                             data: {
@@ -942,11 +943,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                                 price: (dbSession as any).price,
                                                 ...(tutor.organization_id ? { organizationId: tutor.organization_id } : {}),
                                             },
-                                        };
-                                    await fetch(sendEmailUrl, {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-                                        body: JSON.stringify(tutorPayload),
+                                        }),
                                     }).catch(e => console.error('[stripe-webhook] Error sending tutor email:', e));
                                 }
 

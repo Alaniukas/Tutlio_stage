@@ -41,7 +41,8 @@ import {
   hreflangCode,
 } from './seo-routing.js';
 import { t } from './ssr-i18n.js';
-import { TUTOR_PLANS } from '../../src/lib/pricing.js';
+import { TUTOR_PLANS, TUTOR_PLANS_USD } from '../../src/lib/pricing.js';
+import { isUsdLocale } from '../../src/lib/localeCurrency.js';
 import { SUBSCRIPTION_PLN } from '../../src/lib/subscriptionPricing.js';
 
 const OG_LOCALE_MAP = Object.fromEntries(Object.entries(LOCALE_FORMAT_TAGS).map(([locale, tag]) => [locale, tag.split('-u-')[0].replace('-', '_')]));
@@ -235,6 +236,8 @@ ${body}
     <a href="${buildPath('/terms', locale, domain)}">${t(locale, 'footer.terms')}</a>
     <a href="${buildPath('/dpa', locale, domain)}">${t(locale, 'footer.dpa')}</a>
     <a href="${buildPath(localizedPagePath('contacts', locale), locale, domain)}">${t(locale, 'contact.title')}</a>
+    <a href="${buildPath('/for-tutors', locale, domain)}">${t(locale, 'nav.forTutors')}</a>
+    <a href="${buildPath('/compare', locale, domain)}">${t(locale, 'nav.compare')}</a>
     <a href="${buildPlatformPath('/schools', '/', locale, domain)}">${withEnglishLocaleFallback({cs: 'Pro školy', sl: 'Za šole', el: 'Για σχολές', uk: 'Для шкіл', sk: 'Pre školy', bg: 'За училища', th: 'สำหรับโรงเรียน', he: 'לבתי ספר', 'zh-hk': '學校專用', ja: '学校向け', hi: 'स्कूलों के लिए', ko: '학교용', id: 'Untuk sekolah', ar: 'للمدارس', lt: 'Mokykloms', hr: 'Za škole', hu: 'Iskoláknak', en: 'For Schools', tr: 'Okullar için', fil: 'Para sa mga paaralan', pt: 'Para escolas', 'pt-br': 'Para escolas', ro: 'Pentru școli', it: 'Per le scuole', 'es-mx': 'Para escuelas', pl: 'Dla szkół', lv: 'Skolām', ee: 'Koolidele', fr: 'Pour les écoles', es: 'Para escuelas', de: 'Für Schulen', se: 'För skolor', dk: 'Til skoler', fi: 'Kouluille', no: 'For skoler', nl: 'Voor scholen' })[locale]}</a>
   </div>
   ${opts.showLocaleLinks === false ? '' : localeLinksHtml(urlFor, locale, domain)}
@@ -330,11 +333,18 @@ export function faqJsonLd(items: { question: string; answer: string }[]): string
 
 export function softwareAppJsonLd(locale: Locale): string {
   const isPl = locale === 'pl';
+  const isUsd = isUsdLocale(locale);
   const canonicalHome = buildCanonicalUrl('/', locale);
   const parsedHome = new URL(canonicalHome);
   const site = parsedHome.pathname === '/' ? parsedHome.origin : canonicalHome;
   const pricingUrl = buildCanonicalUrl('/pricing', locale);
-  const offers = isPl
+  const offers = isUsd
+    ? [
+        { '@type': 'Offer', name: t(locale, 'pricing.monthly'), price: TUTOR_PLANS_USD.monthly.pricePerMonth.toFixed(2), priceCurrency: 'USD', url: pricingUrl },
+        { '@type': 'Offer', name: t(locale, 'pricing.yearly'), price: TUTOR_PLANS_USD.yearly.pricePerMonth.toFixed(2), priceCurrency: 'USD', url: pricingUrl },
+        { '@type': 'Offer', name: t(locale, 'pricing.subscriptionOnly'), price: TUTOR_PLANS_USD.subscriptionOnly.pricePerMonth.toFixed(2), priceCurrency: 'USD', url: pricingUrl },
+      ]
+    : isPl
     ? [
         { '@type': 'Offer', name: t(locale, 'pricing.monthly'), price: SUBSCRIPTION_PLN.monthly.toFixed(2), priceCurrency: 'PLN', url: pricingUrl },
         { '@type': 'Offer', name: t(locale, 'pricing.yearly'), price: SUBSCRIPTION_PLN.yearlyPerMonth.toFixed(2), priceCurrency: 'PLN', url: pricingUrl },

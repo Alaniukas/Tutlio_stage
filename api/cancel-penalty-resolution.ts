@@ -4,6 +4,7 @@
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { directChargeOptions } from './_lib/stripeDirectCharge.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 
 function paymentIntentIdFromCheckout(cs: { payment_intent?: unknown }): string | null {
@@ -149,22 +150,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const stripe = new Stripe(stripeSecretKey, { apiVersion: '2023-10-16' as any });
 
         let paymentIntentId: string | null = null;
+        let paymentIntentStripeAccountId: string | null = null;
 
         const retrieveOpts = { expand: ['payment_intent'] as string[] };
 
         const retrieveCheckout = async (checkoutId: string) => {
+            if (connectStripeAccountId) {
+                try {
+                    const directSession = await stripe.checkout.sessions.retrieve(
+                        checkoutId,
+                        retrieveOpts,
+                        directChargeOptions(connectStripeAccountId),
+                    );
+                    paymentIntentStripeAccountId = connectStripeAccountId;
+                    return directSession;
+                } catch {
+                    // Fall through for destination-charge sessions created before migration.
+                }
+            }
             try {
+                paymentIntentStripeAccountId = null;
                 return await stripe.checkout.sessions.retrieve(checkoutId, retrieveOpts);
             } catch {
-                if (!connectStripeAccountId) return null;
-                try {
-                    return await stripe.checkout.sessions.retrieve(checkoutId, {
-                        ...retrieveOpts,
-                        stripeAccount: connectStripeAccountId,
-                    } as any);
-                } catch {
-                    return null;
-                }
+                return null;
             }
         };
 
@@ -183,10 +191,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!paymentIntentId) {
             refundInfo.searchAttempted = true;
             try {
-                const searchRes = await stripe.paymentIntents.search({
+                const searchParams = {
                     query: `metadata['tutlio_session_id']:'${sessionId}' AND status:'succeeded'`,
                     limit: 10,
-                });
+                };
+                let searchRes;
+                if (connectStripeAccountId) {
+                    try {
+                        searchRes = await stripe.paymentIntents.search(
+                            searchParams,
+                            directChargeOptions(connectStripeAccountId),
+                        );
+                        paymentIntentStripeAccountId = connectStripeAccountId;
+                    } catch {
+                        // Fall through to the platform for pre-migration payments.
+                    }
+                }
+                if (!searchRes) {
+                    searchRes = await stripe.paymentIntents.search(searchParams);
+                    paymentIntentStripeAccountId = null;
+                }
                 const succeeded = (searchRes.data || []).filter((p) => p.status === 'succeeded');
                 refundInfo.searchResultCount = succeeded.length;
                 succeeded.sort((a, b) => (b.created || 0) - (a.created || 0));
@@ -214,11 +238,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const refundCents = Math.round(refundableAmount * 100);
         refundInfo.refundCents = refundCents;
 
-        await stripe.refunds.create({
+        const refundParams = {
             payment_intent: paymentIntentId,
             amount: refundCents,
             metadata: { tutlio_session_id: sessionId, reason: 'late_cancel_partial_refund' },
-        });
+            ...(paymentIntentStripeAccountId ? { refund_application_fee: true } : {}),
+        };
+        await stripe.refunds.create(
+            refundParams,
+            paymentIntentStripeAccountId
+                ? directChargeOptions(paymentIntentStripeAccountId)
+                : undefined,
+        );
         refundInfo.stripeRefundCreated = true;
 
         await supabase.from('sessions').update({ penalty_resolution: 'refunded' }).eq('id', sessionId);

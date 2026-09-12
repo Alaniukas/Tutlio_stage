@@ -32,6 +32,9 @@ export type PackageForBooking = {
   completed_lessons: number;
   expires_at: string | null;
   items: PackageItemForBooking[];
+  pool_organization_id?: string | null;
+  billing_period_start?: string | null;
+  billing_period_end?: string | null;
 };
 
 /**
@@ -41,7 +44,7 @@ export type PackageForBooking = {
  */
 export async function findActivePackageForBooking(
   supabase: SupabaseClient,
-  args: { studentId: string; subjectId: string },
+  args: { studentId: string; subjectId: string; startIso?: string },
 ): Promise<{ pkg: PackageForBooking; item: PackageItemForBooking } | null> {
   const { studentId, subjectId } = args;
 
@@ -55,6 +58,7 @@ export async function findActivePackageForBooking(
       `,
     )
     .eq('student_id', studentId)
+    .is('pool_organization_id', null)
     .eq('active', true)
     .eq('paid', true)
     .gt('available_lessons', 0)
@@ -67,8 +71,34 @@ export async function findActivePackageForBooking(
     console.warn('[lessonPackageBooking] find error', error.code, error.message);
     return null;
   }
-  const row = (data || [])[0] as any;
-  if (!row) return null;
+  let row = (data || [])[0] as any;
+  if (!row) {
+    const pooled = await supabase.rpc('get_pooled_packages_for_student', { p_student_id: studentId });
+    if (pooled.error || !pooled.data?.length) return null;
+    row = pooled.data[0];
+    if (args.startIso) {
+      const date = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Europe/Vilnius',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date(args.startIso));
+      row = pooled.data.find((candidate: any) => (
+        date >= candidate.billing_period_start && date <= candidate.billing_period_end
+      ));
+      if (!row) return null;
+    }
+    // The session trigger reserves this common balance atomically. This
+    // compatibility item advertises it without creating a per-subject quota.
+    row.lesson_package_items = [{
+      id: row.id,
+      subject_id: subjectId,
+      total_lessons: row.total_lessons,
+      available_lessons: row.available_lessons,
+      reserved_lessons: row.reserved_lessons,
+      completed_lessons: row.completed_lessons,
+    }];
+  }
 
   const itemsRaw = Array.isArray(row.lesson_package_items) ? row.lesson_package_items : [];
   const matchItem = itemsRaw.find((it: any) => it.subject_id === subjectId);
@@ -84,6 +114,9 @@ export async function findActivePackageForBooking(
     reserved_lessons: Number(row.reserved_lessons || 0),
     completed_lessons: Number(row.completed_lessons || 0),
     expires_at: row.expires_at,
+    pool_organization_id: row.pool_organization_id,
+    billing_period_start: row.billing_period_start,
+    billing_period_end: row.billing_period_end,
     items: itemsRaw.map((it: any) => ({
       id: it.id,
       subject_id: it.subject_id,
@@ -116,6 +149,7 @@ export async function applyPackageBookingUsage(
   },
 ): Promise<{ ok: boolean; error?: string }> {
   const { pkg, usageBySubject } = args;
+  if (pkg.pool_organization_id) return { ok: true };
   if (usageBySubject.size === 0) return { ok: true };
 
   let totalDelta = 0;

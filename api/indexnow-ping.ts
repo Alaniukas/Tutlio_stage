@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-import { seoLocalesForPath } from '../src/lib/i18n/localeRelease.js';
+import { blogLocaleColumn, seoLocalesForPath } from '../src/lib/i18n/localeRelease.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { type Locale, buildCanonicalUrl } from './_lib/seo-routing.js';
 
@@ -24,7 +24,7 @@ function getSupabase() {
 }
 
 function postSlug(post: Record<string, unknown>, locale: Locale): string {
-  return (post[`slug_${locale}`] as string) || (post.slug as string);
+  return (post[blogLocaleColumn('slug', locale)] as string) || (post.slug as string);
 }
 
 /**
@@ -56,7 +56,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const urlsByHost = new Map<string, string[]>();
   for (const post of posts) {
     for (const locale of seoLocalesForPath('/blog')) {
-      if (!post[`title_${locale}`]) continue;
+      if (!post[blogLocaleColumn('title', locale)]) continue;
       const url = buildCanonicalUrl(`/blog/${postSlug(post, locale)}`, locale);
       const host = new URL(url).host;
       const list = urlsByHost.get(host) || [];

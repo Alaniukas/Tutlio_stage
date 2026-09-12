@@ -6,6 +6,7 @@ import { publishAutoBlogPost } from './_lib/blogAutoGenerate.js';
 import { buildCanonicalUrl, buildPath, canonicalDomain } from './_lib/seo-routing.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { INDEXNOW_KEY } from './indexnow-ping.js';
+import { BLOG_SCHEMA_LOCALES, blogLocaleColumn } from '../src/lib/i18n/localeRelease.js';
 
 const INDEXNOW_ENDPOINT = 'https://api.indexnow.org/indexnow';
 
@@ -57,26 +58,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: before } = await supabase
     .from('blog_posts')
-    .select('id, status, source, slug_lt, slug, title_lt, title_en, title_pl')
+    .select([
+      'id', 'status', 'source', 'slug',
+      ...BLOG_SCHEMA_LOCALES.flatMap((locale) => [
+        blogLocaleColumn('title', locale),
+        blogLocaleColumn('slug', locale),
+      ]),
+    ].join(', '))
     .eq('id', postId)
     .maybeSingle();
+  const beforePost = before as unknown as Record<string, unknown> | null;
 
   const result = await publishAutoBlogPost(supabase as any, postId);
   if (!result.ok) {
     return res.status(400).send(result.error || 'Publish failed');
   }
 
-  const slugLt = result.slugLt || before?.slug_lt || before?.slug || '';
+  const slugLt = result.slugLt
+    || String(beforePost?.[blogLocaleColumn('slug', 'lt')] || beforePost?.slug || '');
   const origin = publicOriginFromRequest(req);
   const livePath = buildPath(`/blog/${slugLt}`, 'lt', canonicalDomain('lt'));
   const liveUrl = `${origin}${livePath}`;
   const canonicalLiveUrl = buildCanonicalUrl(`/blog/${slugLt}`, 'lt');
 
-  if (before?.status !== 'published') {
-    const urls = ['lt', 'en', 'pl']
+  if (beforePost?.status !== 'published') {
+    const urls = BLOG_SCHEMA_LOCALES
+      .filter((locale) => beforePost?.[blogLocaleColumn('title', locale)])
       .map((loc) => {
-        const slugKey = loc === 'lt' ? slugLt : (before as any)?.[`slug_${loc}`] || slugLt;
-        return buildCanonicalUrl(`/blog/${slugKey}`, loc as 'lt' | 'en' | 'pl');
+        const localizedSlug = loc === 'lt'
+          ? slugLt
+          : String(beforePost?.[blogLocaleColumn('slug', loc)] || slugLt);
+        return buildCanonicalUrl(`/blog/${localizedSlug}`, loc);
       })
       .filter(Boolean);
     void pingIndexNowForUrls(urls);

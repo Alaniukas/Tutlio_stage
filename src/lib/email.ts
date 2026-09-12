@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 type EmailType =
     | 'booking_confirmation'
     | 'booking_notification'
+    | 'mv_first_lesson_planned_tutor'
     | 'org_tutor_availability_notice'
     | 'session_cancelled'
     | 'session_reminder'

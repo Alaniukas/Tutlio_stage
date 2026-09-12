@@ -12,6 +12,13 @@ describe('organization sidebar navigation', () => {
     expect(paths.at(-1)).toBe('/school/instructions');
   });
 
+  it('shows recordings only when the Drive feature is ready for the school', () => {
+    const paths = buildCompanyNavItems(true, '/school', translate, false, false, true, true, true)
+      .map((item) => item.href);
+
+    expect(paths).toContain('/school/recordings');
+  });
+
   it('can hide instructions for Pro Klasė-style orgs', () => {
     const paths = buildCompanyNavItems(false, '/company', translate, true, false, false).map(
       (item) => item.href,

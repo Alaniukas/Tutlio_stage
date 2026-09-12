@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { sameOrgStudentIdentity } from '@/lib/orgStudentIdentity';
 import { reassignOpenLessonsToTutor } from '@/lib/reassignStudentTutorLessons';
 
 export const generateStudentInviteCode = () =>
@@ -54,7 +55,10 @@ export async function ensureStudentPairedWithTutor(
       .from('students')
       .select(PAIRING_SELECT)
       .eq('linked_user_id', student.linked_user_id);
-    if (siblingRows?.length) siblings = siblingRows as StudentPairingRow[];
+    const sameChild = (siblingRows || []).filter((row) =>
+      sameOrgStudentIdentity(student, row as StudentPairingRow),
+    ) as StudentPairingRow[];
+    if (sameChild.length) siblings = sameChild;
   }
 
   const existingPairing = siblings.find((s) => s.tutor_id === tutorId);

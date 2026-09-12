@@ -1,114 +1,195 @@
 import type { VercelRequest, VercelResponse } from './types';
-import { requireOrgAdminAccess } from './_lib/orgAdminAccess.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { serviceSupabase } from './_lib/extraLessonsContractShared.js';
-import { matchRecordingToSession, type RecordingIngestMeta } from '../src/lib/schoolLessonRecordings.js';
+import {
+  extractGoogleDriveId,
+  getDriveFileMetadata,
+  listDriveRecordings,
+  recordingRetentionDays,
+} from './_lib/googleDriveRecordings.js';
+import { resolveRecordingViewerAccess } from './_lib/schoolRecordingAccess.js';
+import {
+  createSchoolRecordingTicket,
+  createSchoolRecordingViewerSession,
+} from './_lib/schoolRecordingTicket.js';
+
+type FolderMapping = {
+  group_id: string;
+  organization_id: string;
+  drive_folder_id: string;
+  drive_folder_name: string | null;
+};
+
+function firstQueryValue(value: string | string[] | undefined): string {
+  return String(Array.isArray(value) ? value[0] || '' : value || '').trim();
+}
+
+function publicGroup(group: { id: string; organizationId: string; name: string }, mapping?: FolderMapping) {
+  return {
+    id: group.id,
+    organizationId: group.organizationId,
+    name: group.name,
+    configured: Boolean(mapping),
+  };
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const supabase = serviceSupabase();
+  res.setHeader('Cache-Control', 'private, no-store');
   const auth = await verifyRequestAuth(req);
-  if (!auth?.userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (!auth?.userId || auth.isInternal) return res.status(401).json({ error: 'Unauthorized' });
+  const supabase = serviceSupabase();
+  const requestedStudentId = firstQueryValue(req.query?.studentId) || undefined;
 
-  const admin = await requireOrgAdminAccess(req, supabase, 'sessions.view');
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('id, organization_id')
-    .eq('id', auth.userId)
-    .maybeSingle();
-  const orgId = admin.ok ? admin.access.organizationId : profile?.organization_id;
-  if (!orgId) return res.status(403).json({ error: 'No organization' });
+  let access: Awaited<ReturnType<typeof resolveRecordingViewerAccess>>;
+  try {
+    access = await resolveRecordingViewerAccess(supabase, auth.userId, requestedStudentId);
+  } catch (error) {
+    console.error('[school-recordings] access resolution failed', (error as Error)?.message);
+    return res.status(500).json({ error: 'Nepavyko patikrinti prieigos prie įrašų.' });
+  }
 
   if (req.method === 'GET') {
-    let q = supabase
-      .from('school_lesson_recordings')
-      .select('*, groups:school_lesson_recording_groups(group_id)')
-      .eq('organization_id', orgId)
-      .order('created_at', { ascending: false })
-      .limit(100);
-    if (!admin.ok) {
-      const { data: sessions } = await supabase.from('sessions').select('id').eq('tutor_id', auth.userId);
-      const ids = (sessions || []).map((s) => s.id);
-      q = q.in('session_id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
+    const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+    const secure = forwardedProto === 'https' ? '; Secure' : '';
+    const viewerSession = createSchoolRecordingViewerSession(auth.userId);
+    res.setHeader(
+      'Set-Cookie',
+      `tutlio_recording_viewer=${encodeURIComponent(viewerSession)}; HttpOnly; SameSite=Strict; Path=/api/school-lesson-recording-stream; Max-Age=7200${secure}`,
+    );
+    const groupIds = access.groups.map((group) => group.id);
+    let mappings: FolderMapping[] = [];
+    if (groupIds.length) {
+      const { data, error } = await supabase
+        .from('school_recording_drive_folders')
+        .select('group_id, organization_id, drive_folder_id, drive_folder_name')
+        .in('group_id', groupIds);
+      if (error) {
+        const setupMissing = error.code === '42P01' || /school_recording_drive_folders/i.test(error.message || '');
+        return res.status(setupMissing ? 503 : 500).json({
+          error: setupMissing
+            ? 'Įrašų duomenų bazės migracija dar nepritaikyta.'
+            : 'Nepavyko įkelti įrašų aplankų.',
+          setupRequired: setupMissing,
+        });
+      }
+      mappings = (data || []) as FolderMapping[];
     }
-    const { data, error } = await q;
-    if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json({ recordings: data || [] });
+
+    const mappingByGroup = new Map(mappings.map((mapping) => [mapping.group_id, mapping]));
+    const groups = await Promise.all(access.groups.map(async (group) => {
+      const mapping = mappingByGroup.get(group.id);
+      const base = publicGroup(group, mapping);
+      if (!mapping) {
+        return {
+          ...base,
+          ...(access.canManage ? { driveFolderId: '', driveFolderName: null } : {}),
+          recordings: [],
+        };
+      }
+      try {
+        const recordings = await listDriveRecordings(mapping.drive_folder_id);
+        return {
+          ...base,
+          ...(access.canManage ? {
+            driveFolderId: mapping.drive_folder_id,
+            driveFolderName: mapping.drive_folder_name,
+          } : {}),
+          recordings: recordings.map((file) => {
+            const ticket = createSchoolRecordingTicket({
+              userId: auth.userId!,
+              groupId: group.id,
+              fileId: file.id,
+            });
+            return {
+              id: file.id,
+              name: file.name,
+              recordedAt: file.createdTime,
+              durationMillis: file.durationMillis,
+              size: file.size,
+              streamUrl: `/api/school-lesson-recording-stream?t=${encodeURIComponent(ticket)}`,
+            };
+          }),
+          loadError: null,
+        };
+      } catch (error) {
+        console.error('[school-recordings] Drive list failed', group.id, (error as Error)?.message);
+        return {
+          ...base,
+          ...(access.canManage ? {
+            driveFolderId: mapping.drive_folder_id,
+            driveFolderName: mapping.drive_folder_name,
+          } : {}),
+          recordings: [],
+          loadError: access.canManage
+            ? 'Nepavyko perskaityti šio Drive aplanko. Patikrinkite, ar jis bendrinamas su tarnybine paskyra.'
+            : 'Įrašai laikinai nepasiekiami.',
+        };
+      }
+    }));
+
+    return res.status(200).json({
+      ok: true,
+      enabled: access.organizationIds.length > 0,
+      canManage: access.canManage,
+      retentionDays: recordingRetentionDays(),
+      groups,
+    });
   }
 
-  if (req.method === 'POST') {
+  if (req.method === 'PUT') {
+    if (!access.canManage) return res.status(403).json({ error: 'Insufficient organization permission' });
     const body = (req.body || {}) as Record<string, unknown>;
-    const meta: RecordingIngestMeta = {
-      drive_file_id: String(body.drive_file_id || '').trim(),
-      name: String(body.name || body.drive_file_name || '').trim(),
-      created_at: String(body.created_at || new Date().toISOString()),
-      duration_minutes: body.duration_minutes ? Number(body.duration_minutes) : null,
-      meet_conference_id: body.meet_conference_id ? String(body.meet_conference_id) : null,
-    };
-    if (!meta.drive_file_id) return res.status(400).json({ error: 'Missing drive_file_id' });
+    const groupId = String(body.groupId || '').trim();
+    const group = access.groups.find((candidate) => candidate.id === groupId);
+    if (!group) return res.status(404).json({ error: 'Grupė nerasta.' });
 
-    const { data: sessions } = await supabase
-      .from('sessions')
-      .select('id, start_time, end_time, meeting_link, class_group_id, tutor_id')
-      .eq('status', 'completed')
-      .gte('start_time', new Date(Date.parse(meta.created_at) - 6 * 3600000).toISOString())
-      .lte('start_time', new Date(Date.parse(meta.created_at) + 6 * 3600000).toISOString())
-      .limit(50);
+    const rawFolder = String(body.driveFolderId || '').trim();
+    if (!rawFolder) {
+      const { error } = await supabase
+        .from('school_recording_drive_folders')
+        .delete()
+        .eq('group_id', group.id)
+        .eq('organization_id', group.organizationId);
+      if (error) return res.status(500).json({ error: 'Nepavyko pašalinti Drive aplanko priskyrimo.' });
+      return res.status(200).json({ ok: true, removed: true });
+    }
 
-    const scoped = admin.ok
-      ? (sessions || [])
-      : (sessions || []).filter((s) => s.tutor_id === auth.userId);
-    const matched = matchRecordingToSession(meta, scoped as any);
-    const sessionId = body.session_id ? String(body.session_id) : matched?.id || null;
+    const folderId = extractGoogleDriveId(rawFolder);
+    if (!folderId) return res.status(400).json({ error: 'Neteisingas Google Drive aplanko ID arba URL.' });
+    let folder;
+    try {
+      folder = await getDriveFileMetadata(folderId);
+    } catch (error) {
+      console.error('[school-recordings] Drive folder validation failed', (error as Error)?.message);
+      return res.status(400).json({
+        error: 'Aplankas nepasiekiamas. Bendrinkite jį su Tutlio tarnybine Google paskyra ir bandykite dar kartą.',
+      });
+    }
+    if (folder.mimeType !== 'application/vnd.google-apps.folder') {
+      return res.status(400).json({ error: 'Nurodyta nuoroda nėra Google Drive aplankas.' });
+    }
 
-    const { data: rec, error } = await supabase
-      .from('school_lesson_recordings')
+    const { error } = await supabase
+      .from('school_recording_drive_folders')
       .upsert({
-        organization_id: orgId,
-        session_id: sessionId,
-        drive_file_id: meta.drive_file_id,
-        drive_file_name: meta.name,
-        drive_web_view_link: body.drive_web_view_link ? String(body.drive_web_view_link) : null,
-        recorded_at: meta.created_at,
-        duration_minutes: meta.duration_minutes,
-        meet_conference_id: meta.meet_conference_id,
-        created_by: auth.userId,
-      }, { onConflict: 'organization_id,drive_file_id' })
-      .select('*')
-      .single();
-    if (error || !rec) return res.status(500).json({ error: error?.message || 'Upsert failed' });
-
-    const groupIds: string[] = Array.isArray(body.group_ids) ? body.group_ids.map(String) : [];
-    if (matched?.class_group_id && !groupIds.includes(matched.class_group_id)) {
-      groupIds.push(matched.class_group_id);
+        group_id: group.id,
+        organization_id: group.organizationId,
+        drive_folder_id: folder.id,
+        drive_folder_name: folder.name,
+        configured_by: auth.userId,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'group_id' });
+    if (error) {
+      const duplicate = error.code === '23505';
+      return res.status(duplicate ? 409 : 500).json({
+        error: duplicate
+          ? 'Šis Drive aplankas jau priskirtas kitai grupei.'
+          : 'Nepavyko išsaugoti Drive aplanko priskyrimo.',
+      });
     }
-    if (groupIds.length) {
-      await supabase.from('school_lesson_recording_groups').upsert(
-        groupIds.map((group_id) => ({ recording_id: rec.id, group_id })),
-        { onConflict: 'recording_id,group_id' },
-      );
-    }
-    return res.status(200).json({ ok: true, recording: rec, matchedSessionId: matched?.id || null });
+    return res.status(200).json({ ok: true, folderId: folder.id, folderName: folder.name });
   }
 
-  if (req.method === 'PATCH') {
-    const body = (req.body || {}) as Record<string, unknown>;
-    const recordingId = String(body.id || '').trim();
-    if (!recordingId) return res.status(400).json({ error: 'Missing id' });
-    const groupIds: string[] = Array.isArray(body.group_ids) ? body.group_ids.map(String) : [];
-    await supabase.from('school_lesson_recording_groups').delete().eq('recording_id', recordingId);
-    if (groupIds.length) {
-      await supabase.from('school_lesson_recording_groups').insert(
-        groupIds.map((group_id) => ({ recording_id: recordingId, group_id })),
-      );
-    }
-    if (body.session_id) {
-      await supabase.from('school_lesson_recordings')
-        .update({ session_id: String(body.session_id) })
-        .eq('id', recordingId)
-        .eq('organization_id', orgId);
-    }
-    return res.status(200).json({ ok: true });
-  }
-
+  res.setHeader('Allow', 'GET, PUT');
   return res.status(405).json({ error: 'Method not allowed' });
 }

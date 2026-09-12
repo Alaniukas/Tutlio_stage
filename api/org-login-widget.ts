@@ -57,7 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     logo: org.logo_url || '',
     color: org.brand_color || '#6366f1',
     color2: org.brand_color_secondary || org.brand_color || '#8b5cf6',
-    logoOnDark: moksloVaisiai,
+    logoOnDark: false,
     buttons: [
       { href: `${origin}/login?org=${encodeURIComponent(org.slug)}&portal=student`, label: labels.student },
       { href: `${origin}/login?org=${encodeURIComponent(org.slug)}&portal=parent`, label: labels.parent },

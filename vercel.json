@@ -29,6 +29,9 @@
         "api/features-index-render.ts": {
             "maxDuration": 30
         },
+        "api/compare-render.ts": {
+            "maxDuration": 30
+        },
         "api/schools-render.ts": {
             "maxDuration": 30
         },
@@ -88,24 +91,34 @@
             "maxDuration": 60
         },
         "api/school-contract-complete.ts": {
-            "maxDuration": 60
+            "maxDuration": 120
         },
         "api/school-contract-render-docx-pdf.ts": {
-            "maxDuration": 60
+            "maxDuration": 120
+        },
+        "api/convert-docx-to-pdf.ts": {
+            "maxDuration": 120
         },
         "api/extra-lessons-contract-offer.ts": {
-            "maxDuration": 60,
+            "maxDuration": 120,
             "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
         },
         "api/extra-lessons-contract-accept.ts": {
-            "maxDuration": 60,
+            "maxDuration": 120,
             "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
         },
         "api/extra-lessons-contract-withdraw.ts": {
             "includeFiles": "src/lib/**"
         },
         "api/bill-school-extra-lessons.ts": {
+            "maxDuration": 300,
             "includeFiles": "src/lib/**"
+        },
+        "api/retry-school-monthly-invoice-emails.ts": {
+            "maxDuration": 90
+        },
+        "api/process-school-acceptances.ts": {
+            "maxDuration": 120
         }
     },
     "headers": [
@@ -257,6 +270,10 @@
             "schedule": "0 4 1 * *"
         },
         {
+            "path": "/api/retry-school-monthly-invoice-emails",
+            "schedule": "17 * * * *"
+        },
+        {
             "path": "/api/cleanup-whiteboard-data",
             "schedule": "20 * * * *"
         },
@@ -267,6 +284,10 @@
         {
             "path": "/api/blog-auto-generate",
             "schedule": "0 5 * * *"
+        },
+        {
+            "path": "/api/process-school-acceptances",
+            "schedule": "* * * * *"
         }
     ]
 }

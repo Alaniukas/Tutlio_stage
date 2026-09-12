@@ -1,6 +1,7 @@
 import webpush from 'web-push';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { t } from './i18n.js';
+import { applySchoolTerminology, type SchoolTerminology } from '../../src/lib/i18n/schoolTerminology.js';
 
 const VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
@@ -59,6 +60,16 @@ const PUSH_ELIGIBLE: Record<string, (data: any, locale: string) => PushPayload |
     }),
     url: '/dashboard',
     tag: `booking-notif-${d.date}-${d.time}`,
+  }),
+  mv_first_lesson_planned_tutor: (d, _locale) => ({
+    title: t('lt', 'push.mv_first_lesson_planned_tutor.title'),
+    body: t('lt', 'push.mv_first_lesson_planned_tutor.body', {
+      studentName: d.studentName,
+      date: d.date,
+      time: d.time,
+    }),
+    url: '/dashboard',
+    tag: `mv-first-lesson-${d.date}-${d.time}`,
   }),
   session_cancelled: (d, locale) => ({
     title: t(locale, 'push.session_cancelled.title'),
@@ -237,6 +248,8 @@ export async function sendPushForEmail(
   toEmail: string | string[],
   type: string,
   data: any,
+  /** School orgs: same "mokytojas" / "užsiėmimas" wording as the email that triggered the push. */
+  terminology: SchoolTerminology | null = null,
 ): Promise<number> {
   if (!VAPID_PUBLIC || !VAPID_PRIVATE) return 0;
 
@@ -283,6 +296,10 @@ export async function sendPushForEmail(
 
     const payload = builder(data, locale);
     if (!payload) continue;
+    if (terminology && (terminology.staff || terminology.activity)) {
+      payload.title = applySchoolTerminology(payload.title, locale, terminology);
+      payload.body = applySchoolTerminology(payload.body, locale, terminology);
+    }
 
     sent += await deliverPayloadToUserSubscriptions(sb, userId, payload);
   }

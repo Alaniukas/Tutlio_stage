@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-import { findAuthUserByEmail, isAuthEmailAlreadyRegistered } from './_lib/findAuthUserByEmail.js';
+import { isAuthEmailAlreadyRegistered } from './_lib/findAuthUserByEmail.js';
 import { isAcceptedFlag, parentLegalAcceptanceMissing, usesProKlaseLegalDocs } from './_lib/proKlaseLegal.js';
 import { normalizeStudentGrade1to12 } from './_lib/studentGrade.js';
 
@@ -95,9 +95,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: studentRow } = await supabase
       .from('students')
-      .select('organization_id, tutor_id')
+      .select('organization_id, tutor_id, detached_at')
       .eq('id', invite.student_id)
       .maybeSingle();
+    if (!studentRow || studentRow.detached_at) {
+      return res.status(404).json({ error: 'Student record not found', code: 'invite_not_found' });
+    }
     let orgId: string | null = studentRow?.organization_id || null;
     if (!orgId && studentRow?.tutor_id) {
       const { data: tutorRow } = await supabase
@@ -133,19 +136,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (authErr) {
       const msg = authErr.message || '';
       const alreadyRegistered = isAuthEmailAlreadyRegistered(msg) || authErr.code === 'email_exists';
-      if (alreadyRegistered) {
-        const existing = await findAuthUserByEmail(supabase, normalizedEmail);
-        if (existing?.id) {
-          const { error: pwErr } = await supabase.auth.admin.updateUserById(existing.id, { password });
-          if (pwErr) {
-            console.warn('[register-parent] could not update password for existing user:', pwErr.message);
-          }
-          await linkParent(supabase, existing.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail, childInfo, {
-            acceptedAt: usesProKlaseLegalDocs(orgId) ? acceptedAt : null,
-          });
-          return res.status(200).json({ success: true });
-        }
-      }
       console.error('[register-parent] createUser failed', {
         message: msg,
         code: authErr.code,

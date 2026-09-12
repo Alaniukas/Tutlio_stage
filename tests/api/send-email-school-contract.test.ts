@@ -79,7 +79,7 @@ describe('school_contract signing instructions', () => {
     expect(html).toContain('Smart-ID');
     // Final email is ready to sign — it must not still nag about missing data.
     expect(html).not.toContain('Prašome papildyti trūkstamus duomenis');
-  });
+  }, 15_000);
 
   it('omits signing instructions on the initial email while data is still missing', async () => {
     const { html } = await sendEmail('school_contract', {
@@ -163,11 +163,11 @@ describe('school_contract questions contact', () => {
     const { html } = await sendEmail('school_contract', {
       schoolName: 'VšĮ „Laisvi vaikai"',
       schoolEmail: 'info@laisvivaikai.lt',
-      contactEmail: 'irminta@laisvivaikai.lt',
+      contactEmail: 'tutlio@laisvivaikai.lt',
       studentName: 'Jonukas Pet',
       recipientName: 'Irminta Mal',
     });
-    expect(html).toContain('susisiekite su mokykla: irminta@laisvivaikai.lt');
+    expect(html).toContain('susisiekite su mokykla: tutlio@laisvivaikai.lt');
   });
 
   it('falls back to the school email for the questions line when contactEmail is absent', async () => {

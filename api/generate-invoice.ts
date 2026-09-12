@@ -23,6 +23,7 @@ import {
   groupSessionsByStudent,
   orgHasPvmEducationInvoice,
 } from './_lib/pvmEducationInvoice.js';
+import { isInvoiceProfileComplete, ORG_INVOICE_PROFILE_INCOMPLETE } from './_lib/invoiceProfileReady.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -148,7 +149,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const sellerUserId = isOrgTutor ? tutorId : issuingUserId;
     let sellerProfile = await getSellerProfile(sellerUserId, profile.organization_id, isOrgTutor);
 
-    // Fallback: build a minimal seller profile from tutor's profile when no invoice_profiles entry exists
+    if (!isOrgTutor && profile.organization_id) {
+      if (!sellerProfile || !isInvoiceProfileComplete(sellerProfile)) {
+        return res.status(400).json({
+          code: ORG_INVOICE_PROFILE_INCOMPLETE,
+          error: 'Negalima išrašyti sąskaitos: organizacijos rekvizitai neužpildyti. Prašome užpildyti Finansai → Sąskaitos → Nustatymai.',
+        });
+      }
+    }
+
+    // Fallback: solo tutor without invoice_profiles — use profile name (org invoices must be configured above).
     if (!sellerProfile) {
       sellerProfile = {
         id: `fallback-${sellerUserId}`,
@@ -708,17 +718,16 @@ async function getSellerProfile(userId: string, orgId: string | null, isOrgTutor
     return data;
   }
 
-  // Org admin or org tutor issuing to students/payers: seller is the organization when configured.
+  // Org admin issuing to students/payers: seller is the organization only (no tutor fallback).
   if (orgId) {
     const { data: orgInvoiceProfile } = await supabase
       .from('invoice_profiles')
       .select('*')
       .eq('organization_id', orgId)
       .maybeSingle();
-    if (orgInvoiceProfile) return orgInvoiceProfile;
+    return orgInvoiceProfile;
   }
 
-  // Fallback: user's personal profile
   const { data } = await supabase
     .from('invoice_profiles')
     .select('*')

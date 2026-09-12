@@ -11,7 +11,11 @@ coverage/
 Tutlio-main-compare/
 .env*.local
 .gosign-keys/
+service-account*.json
+server-account*.json
 tmp/
+_google_setup/
+_tmp_*
 scripts/_*.mjs
 preview-*.html
 scripts/load/users.staging.json

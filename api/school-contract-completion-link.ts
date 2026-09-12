@@ -53,6 +53,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
   if (error) return res.status(500).json({ error: error.message });
 
+  const { data: saved } = await supabase
+    .from('school_contract_completion_tokens')
+    .select('token')
+    .eq('token', token)
+    .eq('contract_id', contractId)
+    .maybeSingle();
+  if (!saved?.token) {
+    return res.status(500).json({ error: 'Completion token was not saved. Check database schema and RLS.' });
+  }
+
   const host = typeof req.headers.host === 'string' ? req.headers.host : '';
   const protoHeader = typeof req.headers['x-forwarded-proto'] === 'string'
     ? req.headers['x-forwarded-proto']

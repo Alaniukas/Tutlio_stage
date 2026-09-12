@@ -12,8 +12,7 @@ import {
   lessonCheckoutBreakdownCents as serverBreakdown,
 } from '../../api/_lib/marketMoney';
 
-// Proklasė deal: payment <= €30 → 1.5% + €0.25; payment > €30 → 2% + €0.10.
-// The fee is added on top of the lesson price (the payer pays base + fee).
+// Pro Klasė payer fees: <= €30 → Stripe only (1.5% + €0.25 gross-up); > €30 → 2% + €0.10 on top.
 
 describe('orgFeeProfile resolver', () => {
   it('resolves the Proklasė profile and normalizes the slug', () => {
@@ -34,41 +33,40 @@ describe('orgFeeProfile resolver', () => {
   });
 });
 
-describe('Proklasė tiered fee — customerTotal', () => {
+describe('Proklasė payer fee — customerTotal', () => {
   const p = orgFeeProfile('proklase');
 
-  it('charges 1.5% + €0.25 on top up to €30 (inclusive)', () => {
-    expect(customerTotal(20, 'default', p)).toBeCloseTo(20.55, 5); // 20 + (0.30 + 0.25)
-    expect(customerTotal(30, 'default', p)).toBeCloseTo(30.70, 5); // 30 + (0.45 + 0.25)
+  it('adds only Stripe processing for lessons up to €30', () => {
+    expect(customerTotal(20, 'default', p)).toBeCloseTo((20 + 0.25) / 0.985, 6);
+    expect(customerTotal(30, 'default', p)).toBeCloseTo((30 + 0.25) / 0.985, 6);
   });
 
-  it('charges 2% + €0.10 on top above €30', () => {
-    expect(customerTotal(50, 'default', p)).toBeCloseTo(51.10, 5); // 50 + (1.00 + 0.10)
-    expect(customerTotal(100, 'default', p)).toBeCloseTo(102.10, 5); // 100 + (2.00 + 0.10)
+  it('adds only 2% + €0.10 for lessons above €30', () => {
+    expect(customerTotal(50, 'default', p)).toBeCloseTo(51.1, 6);
+    expect(customerTotal(100, 'default', p)).toBeCloseTo(102.1, 6);
   });
 
-  it('leaves the standard market model untouched when no profile is given', () => {
-    // (base + 2% + €0.25) / (1 - 1.5%)
+  it('uses the standard market gross-up when no profile is given', () => {
     expect(customerTotal(20, 'default')).toBeCloseTo((20 + 0.4 + 0.25) / 0.985, 6);
     expect(customerTotal(20, 'default', null)).toBeCloseTo((20 + 0.4 + 0.25) / 0.985, 6);
   });
 
-  it('strips Tutlio add-on from Stripe gross so org stats keep the lesson base', () => {
-    expect(orgBaseFromPayerChargedTotal(10.4, p)).toBe(10);
-    expect(orgBaseFromPayerChargedTotal(20.55, p)).toBe(20);
-    expect(orgBaseFromPayerChargedTotal(51.1, p)).toBe(50);
-    expect(orgBaseFromPayerChargedTotal(200, p)).toBe(200);
+  it('recovers the lesson base from the payer total', () => {
+    expect(orgBaseFromPayerChargedTotal(customerTotal(20, 'default', p)!, p)).toBe(20);
+    expect(orgBaseFromPayerChargedTotal(customerTotal(50, 'default', p)!, p)).toBe(50);
+    expect(orgBaseFromPayerChargedTotal(customerTotal(20, 'default', null)!, null)).toBe(20);
   });
 });
 
-describe('Proklasė tiered fee — checkout breakdown (cents)', () => {
+describe('Proklasė payer fee — checkout breakdown (cents)', () => {
   const p = orgFeeProfile('proklase');
 
   it('splits base and fee correctly for the low tier', () => {
+    const total = customerTotal(20, 'default', p);
     expect(lessonCheckoutBreakdownCents(20, 'default', p)).toEqual({
       baseCents: 2000,
-      feesCents: 55,
-      totalCents: 2055,
+      feesCents: Math.round(total * 100) - 2000,
+      totalCents: Math.round(total * 100),
     });
   });
 
@@ -86,14 +84,12 @@ describe('Proklasė tiered fee — checkout breakdown (cents)', () => {
   });
 });
 
-describe('Proklasė tiered fee — display helpers', () => {
+describe('Proklasė payer fee — display helpers', () => {
   const p = orgFeeProfile('proklase');
 
   it('charges the fee on top even for school-type orgs when a profile is set', () => {
-    // School org normally absorbs fees (payer pays list price)...
     expect(formatLessonStripeCharge(20, true, 'default', null)).toBe('€20.00');
-    // ...but a custom profile is charged on top regardless.
-    expect(formatLessonStripeCharge(20, true, 'default', p)).toBe('€20.55');
+    expect(formatLessonStripeCharge(20, true, 'default', p)).toBe(`€${customerTotal(20, 'default', p).toFixed(2)}`);
   });
 
   it('reports the tiered breakdown', () => {

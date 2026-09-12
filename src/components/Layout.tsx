@@ -22,6 +22,7 @@ import {
   X,
   ChevronsLeft,
   ChevronsRight,
+  Video,
 } from 'lucide-react';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
 import PwaInstallPrompt from '@/components/PwaInstallPrompt';
@@ -33,6 +34,7 @@ import { usePushSubscription } from '@/hooks/usePushSubscription';
 import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 import { useHideWaitlist } from '@/hooks/useHideWaitlist';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { useSchoolTerminology } from '@/hooks/useSchoolTerminology';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -47,7 +49,12 @@ export default function Layout({ children }: LayoutProps) {
   const { hideWaitlist: hideWaitlistFromFeatures } = useHideWaitlist({
     failClosedWhileLoading: isOrgTutor,
   });
-  const { hasFeature } = useOrgFeatures();
+  const { hasFeature, entityType: orgEntityType, loading: orgFeaturesLoading } = useOrgFeatures();
+  // Teachers of a school see "mokytojas" / "užsiėmimas" wording, same as the school admin.
+  useSchoolTerminology(orgFeaturesLoading ? null : {
+    staff: orgEntityType === 'school' || hasFeature('school_teacher_labels'),
+    activity: orgEntityType === 'school' && hasFeature('school_activity_labels'),
+  });
   const chatUnreadTotal = useTotalChatUnread();
   usePushSubscription();
   const [tutorName, setTutorName] = useState('');
@@ -70,6 +77,7 @@ export default function Layout({ children }: LayoutProps) {
       { href: '/dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
       { href: '/calendar', label: t('nav.calendar'), icon: Calendar },
       { href: '/groups', label: t('companyNav.groups'), icon: Users, feature: 'school_class_groups' as const },
+      { href: '/recordings', label: t('companyNav.recordings'), icon: Video, feature: 'school_lesson_recordings' as const, schoolOnly: true },
       { href: '/students', label: t('nav.students'), icon: Users },
       { href: '/waitlist', label: t('nav.waitlist'), icon: ListOrdered, highlight: true },
       { href: '/messages', label: t('nav.messages'), icon: MessageSquare },
@@ -86,10 +94,11 @@ export default function Layout({ children }: LayoutProps) {
       if (isOrgTutor && (item.href === '/invoices' || item.href === '/landing-editor')) return false;
       if (hideWaitlist && item.href === '/waitlist') return false;
       if (hideInstructions && item.href === '/instructions') return false;
+      if ('schoolOnly' in item && item.schoolOnly && orgEntityType !== 'school') return false;
       if ('feature' in item && item.feature && !hasFeature(item.feature)) return false;
       return true;
     });
-  }, [isOrgTutor, t, profile?.organization_id, profileOrgId, hideWaitlistFromFeatures, hasFeature]);
+  }, [isOrgTutor, t, profile?.organization_id, profileOrgId, hideWaitlistFromFeatures, hasFeature, orgEntityType]);
 
   useEffect(() => {
     void preloadTutorData();

@@ -5,6 +5,7 @@ import { getPasswordResetRedirectTo, safeInternalNextPath } from '@/lib/auth-red
 import { resolveAuthEmailLocale } from '@/lib/auth-locale';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
+import { isStudentLoginName, loginIdentifierToEmail } from '@/lib/studentLoginIdentity';
 import {
   canAccessLoginPortal,
   getHomePathForPortals,
@@ -334,7 +335,9 @@ export default function Login() {
   useEffect(() => {
     setLastPortal('regular');
     const saved = loadSavedLoginForm();
-    if (saved.email) setEmail(saved.email);
+    const emailFromUrl = (searchParams.get('email') || '').trim();
+    if (emailFromUrl) setEmail(emailFromUrl);
+    else if (saved.email) setEmail(saved.email);
     if (saved.password) setPassword(saved.password);
     setRememberMeState(saved.rememberMe);
     // Deep-link from reminder emails / org website buttons: open the matching portal login form.
@@ -355,7 +358,10 @@ export default function Login() {
     ) {
       setRole('tutor');
     }
-  }, [nextPath, loginPortalParam]);
+  }, [nextPath, loginPortalParam, searchParams]);
+
+  const mvActivatedBanner =
+    searchParams.get('mvActivated') === '1' ? t('login.mvActivatedHint') : null;
 
   useEffect(() => {
     const code = searchParams.get('auth_error');
@@ -410,7 +416,7 @@ export default function Login() {
       // Clear logout intent when user is actively logging in
       sessionStorage.removeItem('tutlio_logout_intent');
       const { data, error } = await withTimeout(
-        supabase.auth.signInWithPassword({ email: email.trim(), password }),
+        supabase.auth.signInWithPassword({ email: loginIdentifierToEmail(email), password }),
         30000,
         'Login timeout',
       );
@@ -543,7 +549,7 @@ export default function Login() {
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) {
-      setError(t('login.enterEmail'));
+      setError(t('login.emailOrUsername'));
       return;
     }
     setLoading(true);
@@ -763,6 +769,12 @@ export default function Login() {
               <span>{authHashBanner}</span>
             </div>
           )}
+          {mvActivatedBanner && (
+            <div className="flex items-start gap-2 text-sm text-emerald-100 bg-emerald-900/40 border border-emerald-700/50 rounded-xl px-3 py-2.5 mb-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span>{mvActivatedBanner}</span>
+            </div>
+          )}
 
           {/* ── STEP 1: Role selection ─────────────────────────────────────────── */}
           {role === null && (
@@ -954,15 +966,15 @@ export default function Login() {
                 {isForgotPassword ? (
                   <form onSubmit={handleForgotPassword} className="space-y-4">
                     <p className="text-sm text-gray-500 font-medium mb-4">
-                      {t('login.forgotPasswordDesc')}
+                      {t('login.resetIdentifierDesc')}
                     </p>
                     <div className="space-y-2">
-                      <Label htmlFor="email" className="text-sm font-medium text-gray-700">{t('common.email')}</Label>
+                      <Label htmlFor="email" className="text-sm font-medium text-gray-700">{t('login.emailOrUsername')}</Label>
                       <Input
                         id="email"
-                        type="email"
+                        type="text"
                         autoComplete="username"
-                        placeholder={t('register.emailPlaceholder')}
+                        placeholder={t('login.emailOrUsername')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -977,7 +989,7 @@ export default function Login() {
                     )}
                     {resetSent && (
                       <div className="text-sm text-green-700 bg-green-50 rounded-xl px-4 py-3 font-medium border border-green-200">
-                        {t('login.resetLinkSent', { email })}
+                        {isStudentLoginName(email) ? t('login.childResetSent') : t('login.resetLinkSent', { email })}
                       </div>
                     )}
                     {!resetSent && (
@@ -1000,12 +1012,12 @@ export default function Login() {
                 ) : (
                   <form onSubmit={handleLogin} className="space-y-4">
                     <div className="space-y-2">
-                      <Label htmlFor="email" className="text-sm font-medium text-gray-700">{t('common.email')}</Label>
+                      <Label htmlFor="email" className="text-sm font-medium text-gray-700">{t('login.emailOrUsername')}</Label>
                       <Input
                         id="email"
-                        type="email"
+                        type="text"
                         autoComplete="username"
-                        placeholder={t('register.emailPlaceholder')}
+                        placeholder={t('login.emailOrUsername')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -1142,12 +1154,12 @@ export default function Login() {
                 {isForgotPassword ? (
                   <form onSubmit={handleForgotPassword} className="space-y-4">
                     <div className="space-y-2">
-                      <Label htmlFor="p-email" className="text-sm font-medium text-gray-700">{t('common.email')}</Label>
+                      <Label htmlFor="p-email" className="text-sm font-medium text-gray-700">{t('login.emailOrUsername')}</Label>
                       <Input
                         id="p-email"
-                        type="email"
+                        type="text"
                         autoComplete="username"
-                        placeholder={t('register.emailPlaceholder')}
+                        placeholder={t('login.emailOrUsername')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -1162,7 +1174,7 @@ export default function Login() {
                     )}
                     {resetSent && (
                       <div className="text-sm text-green-700 bg-green-50 rounded-xl px-4 py-3 font-medium border border-green-200">
-                        {t('login.resetLinkSent', { email })}
+                        {isStudentLoginName(email) ? t('login.childResetSent') : t('login.resetLinkSent', { email })}
                       </div>
                     )}
                     {!resetSent && (
@@ -1182,12 +1194,12 @@ export default function Login() {
                 ) : (
                   <form onSubmit={handleLogin} className="space-y-4">
                     <div className="space-y-2">
-                      <Label htmlFor="p-email2" className="text-sm font-medium text-gray-700">{t('common.email')}</Label>
+                      <Label htmlFor="p-email2" className="text-sm font-medium text-gray-700">{t('login.emailOrUsername')}</Label>
                       <Input
                         id="p-email2"
-                        type="email"
+                        type="text"
                         autoComplete="username"
-                        placeholder={t('register.emailPlaceholder')}
+                        placeholder={t('login.emailOrUsername')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -1336,15 +1348,15 @@ export default function Login() {
                   isForgotPassword ? (
                     <form onSubmit={handleForgotPassword} className="space-y-4">
                       <p className="text-sm text-gray-500 font-medium mb-4">
-                        {t('login.forgotPasswordDesc')}
+                        {t('login.resetIdentifierDesc')}
                       </p>
                       <div className="space-y-2">
-                        <Label htmlFor="s-email" className="text-sm font-medium text-gray-700">{t('common.email')}</Label>
+                        <Label htmlFor="s-email" className="text-sm font-medium text-gray-700">{t('login.emailOrUsername')}</Label>
                         <Input
                           id="s-email"
-                          type="email"
+                          type="text"
                         autoComplete="username"
-                          placeholder={t('register.emailPlaceholder')}
+                          placeholder={t('login.emailOrUsername')}
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           required
@@ -1359,7 +1371,7 @@ export default function Login() {
                       )}
                       {resetSent && (
                         <div className="text-sm text-green-700 bg-green-50 rounded-xl px-4 py-3 font-medium border border-green-200">
-                          {t('login.resetLinkSent', { email })}
+                          {isStudentLoginName(email) ? t('login.childResetSent') : t('login.resetLinkSent', { email })}
                         </div>
                       )}
                       {!resetSent && (
@@ -1379,12 +1391,12 @@ export default function Login() {
                   ) : (
                     <form onSubmit={handleLogin} className="space-y-4">
                       <div className="space-y-2">
-                        <Label htmlFor="s-email" className="text-sm font-medium text-gray-700">{t('common.email')}</Label>
+                        <Label htmlFor="s-email" className="text-sm font-medium text-gray-700">{t('login.emailOrUsername')}</Label>
                         <Input
                           id="s-email"
-                          type="email"
+                          type="text"
                         autoComplete="username"
-                          placeholder={t('register.emailPlaceholder')}
+                          placeholder={t('login.emailOrUsername')}
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           required

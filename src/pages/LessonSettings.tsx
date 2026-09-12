@@ -20,13 +20,25 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Trash2, Plus, BookOpen, Clock, Euro, Save, Pencil, ShieldAlert, Bell, CalendarClock, ChevronDown, Lock, Building2, AlertTriangle, Users, Video } from 'lucide-react';
+import { Trash2, Plus, BookOpen, Clock, Euro, Save, Pencil, ShieldAlert, Bell, CalendarClock, ChevronDown, Lock, Building2, AlertTriangle, Users, Video, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useTranslation } from '@/lib/i18n';
 import { tutorSubjectsContainLessonDuplicate } from '@/lib/subjectPresetDedupe';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isPlMarket } from '@/lib/market';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  EMAIL_OPT_OUT_KEYS,
+  parseEmailOptOutList,
+  toggleEmailOptOut,
+  type EmailOptOutKey,
+} from '@/lib/emailNotificationOptOut';
+import { backfillTutorMeetingLinks } from '@/lib/backfillTutorMeetingLinks';
+import {
+  meetingLinkWasPersisted,
+  normalizeMeetingLinkValue,
+} from '@/lib/meetingLink';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -216,6 +228,7 @@ export default function LessonSettingsPage() {
   const [personalMeetingLink, setPersonalMeetingLink] = useState('');
   const [savingPersonalLink, setSavingPersonalLink] = useState(false);
   const [personalLinkSaved, setPersonalLinkSaved] = useState(false);
+  const [emailOptOut, setEmailOptOut] = useState<EmailOptOutKey[]>([]);
 
   // Subject dialog state
   const [isSubjectDialogOpen, setIsSubjectDialogOpen] = useState(false);
@@ -257,7 +270,7 @@ export default function LessonSettingsPage() {
 
     const { data: tutorData } = await supabase
       .from('profiles')
-      .select('cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, payment_timing, payment_deadline_hours, personal_meeting_link, organization_id')
+      .select('cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, payment_timing, payment_deadline_hours, personal_meeting_link, organization_id, email_notification_opt_out')
       .eq('id', user.id)
       .single();
 
@@ -277,6 +290,7 @@ export default function LessonSettingsPage() {
     setPaymentTiming((tutorData?.payment_timing as 'before_lesson' | 'after_lesson') ?? 'before_lesson');
     setPaymentDeadlineHours(tutorData?.payment_deadline_hours ?? null);
     setPersonalMeetingLink((tutorData as { personal_meeting_link?: string | null })?.personal_meeting_link || '');
+    setEmailOptOut(parseEmailOptOutList((tutorData as { email_notification_opt_out?: unknown })?.email_notification_opt_out));
 
     const { data: subjectsData, error } = await supabase
       .from('subjects')
@@ -325,7 +339,7 @@ export default function LessonSettingsPage() {
     setSaving(true);
     const user = ctxUser;
 
-    const patch: Record<string, number> = {};
+    const patch: Record<string, number | string[]> = {};
     if (!orgName || orgPolicy.editCancellation) {
       patch.cancellation_hours = settings.cancellation_hours;
       patch.cancellation_fee_percent = settings.cancellation_fee_percent;
@@ -340,6 +354,7 @@ export default function LessonSettingsPage() {
       patch.reminder_student_hours = settings.reminder_student_hours;
       patch.reminder_tutor_hours = settings.reminder_tutor_hours;
     }
+    patch.email_notification_opt_out = emailOptOut;
 
     if (Object.keys(patch).length === 0) {
       setSaving(false);
@@ -364,19 +379,37 @@ export default function LessonSettingsPage() {
   const handleSavePersonalLink = async () => {
     if (!ctxUser) return;
     setSavingPersonalLink(true);
-    const { error } = await supabase
-      .from('profiles')
-      .update({ personal_meeting_link: personalMeetingLink.trim() || null })
-      .eq('id', ctxUser.id);
+    const requestedLink = normalizeMeetingLinkValue(personalMeetingLink);
+    try {
+      const { data: savedProfile, error } = await supabase
+        .from('profiles')
+        .update({ personal_meeting_link: requestedLink })
+        .eq('id', ctxUser.id)
+        .select('personal_meeting_link')
+        .single();
 
-    if (error) {
-      console.error('[LessonSettings] personal_meeting_link update', error);
-      alert(error.message || t('lessonSet.saveFailed'));
-    } else {
+      if (
+        error
+        || !savedProfile
+        || !meetingLinkWasPersisted(requestedLink, savedProfile.personal_meeting_link)
+      ) {
+        throw error || new Error('Tutor meeting link update was not persisted');
+      }
+
+      const link = normalizeMeetingLinkValue(savedProfile.personal_meeting_link);
+      setPersonalMeetingLink(link || '');
+      if (link) {
+        await backfillTutorMeetingLinks(supabase, ctxUser.id, link);
+      }
       setPersonalLinkSaved(true);
       setTimeout(() => setPersonalLinkSaved(false), 3000);
+    } catch (error) {
+      console.error('[LessonSettings] personal_meeting_link update', error);
+      alert(t('lessonSet.saveFailed'));
+      await fetchData();
+    } finally {
+      setSavingPersonalLink(false);
     }
-    setSavingPersonalLink(false);
   };
 
   // Subject CRUD
@@ -800,6 +833,28 @@ export default function LessonSettingsPage() {
                   disabled={!!(orgName && !canEditReminders)}
                   customLabel={t('lessonSet.customInput')} changeLabel={t('lessonSet.change')} listLabel={t('lessonSet.listView')}
                 />
+              </div>
+              <div className="mt-6 space-y-3">
+                <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-violet-600" /> {t('lessonSet.emailNotificationsTitle')}
+                </h4>
+                <p className="text-xs text-gray-500">{t('lessonSet.emailNotificationsHint')}</p>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={emailOptOut.includes('lesson_reminder_tutor')}
+                    onChange={() => setEmailOptOut((prev) => toggleEmailOptOut(prev, 'lesson_reminder_tutor'))}
+                  />
+                  <span className="text-sm text-gray-700">{t('lessonSet.emailOptOutLessonReminderTutor')}</span>
+                </label>
+                {!orgName && (
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={emailOptOut.includes('payment_deadline_warning')}
+                      onChange={() => setEmailOptOut((prev) => toggleEmailOptOut(prev, 'payment_deadline_warning'))}
+                    />
+                    <span className="text-sm text-gray-700">{t('lessonSet.emailOptOutPaymentDeadline')}</span>
+                  </label>
+                )}
               </div>
               <div className="h-px bg-gray-100 mt-8" />
             </div>

@@ -112,6 +112,20 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'premium',
   },
 
+  org_payer_fee_split: {
+    id: 'org_payer_fee_split',
+    name: 'Mokėjimo mokesčių paskirstymas',
+    nameEn: 'Payer fee split',
+    description:
+      'Org admin finansų puslapyje gali nustatyti, kokią platformos ir Stripe mokesčių dalį apmoka mokėtojas, o kokią organizacija.',
+    descriptionEn:
+      'Org admins can configure on the finance page what share of platform and Stripe fees the payer covers versus the organization.',
+    category: 'payments',
+    defaultValue: false,
+    requiresSetup: true,
+    pricingTier: 'premium',
+  },
+
   custom_branding: {
     id: 'custom_branding',
     name: 'Whitelabel / organizacijos stilius',
@@ -313,9 +327,9 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     name: 'Pirmoji pamoka automatiškai bandomoji',
     nameEn: 'First lesson defaults to trial',
     description:
-      'Tvarkaraštyje kuriant pamoką mokiniui, kuris dar neturi nė vienos pamokos, ji automatiškai pažymima kaip bandomoji su org. bandomosios pamokos tema, trukme ir kaina. Administratorius gali viską pakoreguoti prieš išsaugant.',
+      'Tvarkaraštyje kuriant pamoką mokiniui, kuris dar neturi įprastų pamokų, ji automatiškai pažymima kaip bandomoji (iki org. nustatyto bandomųjų skaičiaus) su bandomosios tema, trukme ir kaina. Administratorius gali viską pakoreguoti prieš išsaugant.',
     descriptionEn:
-      'When creating a lesson in the schedule for a student with no lessons yet, it is automatically marked as a trial with the org trial topic, duration and price. The admin can adjust everything before saving.',
+      'When creating a lesson in the schedule for a student who still has no regular lessons, it is automatically marked as a trial (up to the org trial count) with the org trial topic, duration and price. The admin can adjust everything before saving.',
     category: 'automation',
     defaultValue: false,
     pricingTier: 'premium',
@@ -460,7 +474,7 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     name: 'Papildomų pamokų sutartys (klik-akceptas)',
     nameEn: 'Extra-lessons contracts (click-wrap)',
     description:
-      'Mokykla pildo užsakymo formą (grafikas, kaina, bazinis pamokų skaičius). Tėvai Tutlio paskyroje peržiūri visą tekstą ir spaudžia „Patvirtinti sutartį“. Užšaldoma parodyta redakcija (SHA-256), 14 d. atsisakyti galima tėvų portale. GoSign lieka neprivalomas.',
+      'Mokykla pildo užsakymo formą (grafikas, kaina, bazinis pamokų skaičius). Tėvai peržiūri visą tekstą ir spaudžia „Užsakymas su prievole sumokėti“. Užšaldoma parodyta redakcija (SHA-256), 14 d. atsisakyti galima tėvų portale. GoSign lieka neprivalomas.',
     descriptionEn:
       'School fills an order form (schedule, price, base lesson count). Parents review the full text in Tutlio and click “Order with obligation to pay”. The shown redaction is frozen (SHA-256); 14-day withdrawal is available. GoSign stays optional.',
     category: 'advanced',
@@ -507,14 +521,27 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'basic',
   },
 
+  school_activity_labels: {
+    id: 'school_activity_labels',
+    name: 'Terminologija „užsiėmimas“ vietoj „pamoka“',
+    nameEn: 'Activity / session wording instead of lesson',
+    description:
+      'Mokyklos portaluose (administracija, mokytojai, mokiniai, tėvai) ir laiškuose vietoj „pamoka“ rodoma „užsiėmimas“. Mokykloms įjungta pagal nutylėjimą — išjunkite, jei mokykla nori palikti „pamoka“. Company org tekstams įtakos neturi.',
+    descriptionEn:
+      'School portals (admin, teachers, students, parents) and emails say “session” instead of “lesson”. On by default for schools — switch off if a school prefers “lesson”. Company org wording is unchanged.',
+    category: 'appearance',
+    defaultValue: true,
+    pricingTier: 'basic',
+  },
+
   school_lesson_recordings: {
     id: 'school_lesson_recordings',
     name: 'Pamokų įrašai (Drive) ir grupių prieiga',
     nameEn: 'Lesson recordings (Drive) and group access',
     description:
-      'Google Meet įrašai iš Drive gali būti priskirti pamokai. Mokytojas ar administratorius parenka, kurios klasės grupės mato įrašą. Reikia Google Workspace ir Drive API raktų.',
+      'Kiekvienai klasei priskiriamas privatus Google Drive aplankas. Jo įrašus per Tutlio mato tik tos grupės mokytojas, mokiniai, tėvai ir įgalioti administratoriai. Reikia serverio Google service-account prieigos.',
     descriptionEn:
-      'Google Meet recordings from Drive can be attached to a lesson. The teacher or admin chooses which class groups may view it. Requires Google Workspace and Drive API credentials.',
+      'Each class gets a private Google Drive folder. Its recordings are streamed through Tutlio only to that group’s teacher, students, parents, and authorized administrators. Requires server-side Google service-account access.',
     category: 'integrations',
     defaultValue: false,
     requiresSetup: true,

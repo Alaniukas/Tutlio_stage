@@ -2,11 +2,9 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import {
-  NO_SHOW_REASON_MISSED_JOIN,
   orgHasJoinNoShow,
-  shouldMarkStudentNoShowFromMissedJoin,
+  shouldReviewStudentAttendanceFromMissingJoin,
 } from '../src/lib/schoolJoinNoShow.js';
-import { buildNoShowSessionPatch, defaultNoShowWhenForNow } from '../src/lib/noShowWhen.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -23,7 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const lookback = new Date(now.getTime() - 7 * 24 * 3600000).toISOString();
   const { data: sessions, error } = await supabase
     .from('sessions')
-    .select('id, tutor_id, start_time, end_time, status, meeting_link, student_joined_at, tutor_joined_at, tutor_comment')
+    .select('id, tutor_id, start_time, end_time, status, meeting_link, student_joined_at, tutor_joined_at')
     .eq('status', 'active')
     .not('meeting_link', 'is', null)
     .is('student_joined_at', null)
@@ -46,24 +44,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .map((o) => o.id),
   );
 
-  let updated = 0;
+  let awaitingReview = 0;
   for (const session of rows) {
     const orgId = session.tutor_id ? orgByTutor.get(session.tutor_id) : null;
     if (!orgId || !flagged.has(orgId)) continue;
-    if (!shouldMarkStudentNoShowFromMissedJoin(session as any, now)) continue;
-    const start = new Date(session.start_time);
-    const end = session.end_time ? new Date(session.end_time) : new Date(start.getTime() + 45 * 60000);
-    const patch = buildNoShowSessionPatch(
-      defaultNoShowWhenForNow(start, end, now),
-      session.tutor_comment,
-    );
-    const { error: updErr } = await supabase
-      .from('sessions')
-      .update({ ...patch, no_show_reason: NO_SHOW_REASON_MISSED_JOIN })
-      .eq('id', session.id)
-      .eq('status', 'active');
-    if (!updErr) updated += 1;
+    if (!shouldReviewStudentAttendanceFromMissingJoin(session as any, now)) continue;
+    // A missing Tutlio redirect click is only a review signal. The student may
+    // have joined through a direct or forwarded meeting link, so only a tutor or
+    // administrator may turn this into the final no-show outcome.
+    awaitingReview += 1;
   }
 
-  return res.status(200).json({ success: true, updated, scanned: rows.length });
+  return res.status(200).json({
+    success: true,
+    updated: 0,
+    awaitingReview,
+    scanned: rows.length,
+  });
 }

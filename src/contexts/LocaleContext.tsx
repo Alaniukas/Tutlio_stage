@@ -1,4 +1,5 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { getSchoolTerminologyVersion, subscribeSchoolTerminology } from '@/lib/i18n/terminologyStore';
 import {
   I18nContext,
   detectLocale,
@@ -54,6 +55,14 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // School portals swap "korepetitorius"/"pamoka" wording at runtime; a version
+  // bump re-creates `t` so every consumer re-renders with the new terms.
+  const terminologyVersion = useSyncExternalStore(
+    subscribeSchoolTerminology,
+    getSchoolTerminologyVersion,
+    getSchoolTerminologyVersion,
+  );
+
   const value = useMemo(() => ({
     locale,
     requestedLocale,
@@ -61,7 +70,8 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     t: (key: string, params?: Record<string, string | number>) => translate(locale, key, params, platform),
     tHtml: (key: string, params?: Record<string, string | number>) => translateHtml(locale, key, params, platform),
     dateFnsLocale: getDateFnsLocale(locale),
-  }), [locale, requestedLocale, setLocale, platform]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [locale, requestedLocale, setLocale, platform, terminologyVersion]);
 
   return <I18nContext.Provider value={value}>
     {dictionary.activeLocale && children}

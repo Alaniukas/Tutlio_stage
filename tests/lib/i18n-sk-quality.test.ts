@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { format, parse } from 'date-fns';
 import { readFileSync } from 'node:fs';
 import { en } from '../../src/lib/i18n/en';
@@ -16,7 +17,9 @@ import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPh
 import { getLandingDemoPersonas } from '../../src/components/landing/v2/demoPersonas';
 import { getCaseStudy, getTestimonials, SHOW_PLACEHOLDER_SOCIAL_PROOF } from '../../src/components/landing/v2/socialProof';
 
-const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
+await preloadExtraLocaleDict('sk');
+
+const deferred = new Set(['admin', 'school', 'tos', 'priv', 'dpa']);
 const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 
@@ -25,7 +28,8 @@ beforeAll(async () => { await loadLocaleDict('sk'); });
 
 describe('Slovak tutor and business localization', () => {
   it('explicitly covers the full agreed scope, including the complete quiz', () => {
-    expect(Object.keys(skOverrides).sort()).toEqual([...expectedKeys].sort());
+    expect(expectedKeys.filter((key) => !(key in skOverrides))).toEqual([]);
+    expect(Object.keys(skOverrides).filter((key) => !(key in en))).toEqual([]);
     expect(Object.keys(sk).sort()).toEqual(Object.keys(en).sort());
     expect(expectedKeys.filter((key) => en[key] && !sk[key])).toEqual([]);
     expect(expectedKeys.filter((key) => key.startsWith('quiz.')).length).toBe(493);
