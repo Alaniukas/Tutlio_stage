@@ -9,7 +9,7 @@ import {
   esc,
 } from './_lib/seo-routing.js';
 import { t } from './_lib/i18n.js';
-import { seoLocalesForPath } from '../src/lib/i18n/localeRelease.js';
+import { blogLocaleColumn, seoLocalesForPath } from '../src/lib/i18n/localeRelease.js';
 import { SUPPORTED_LOCALES } from '../src/lib/i18n/locales.js';
 
 function getSupabase() {
@@ -20,11 +20,11 @@ function getSupabase() {
 }
 
 function postSlug(post: Record<string, unknown>, locale: Locale): string {
-  return (post[`slug_${locale}`] as string) || (post.slug as string);
+  return (post[blogLocaleColumn('slug', locale)] as string) || (post.slug as string);
 }
 
 function resolveField(post: Record<string, unknown>, field: string, locale: Locale): string {
-  return (post[`${field}_${locale}`] as string) || '';
+  return (post[blogLocaleColumn(field as 'title' | 'excerpt' | 'content' | 'slug', locale)] as string) || '';
 }
 
 function rfc822(date: string): string {
@@ -60,7 +60,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from('blog_posts')
       .select('*')
       .eq('status', 'published')
-      .not(`title_${locale}`, 'is', null)
+      .not(blogLocaleColumn('title', locale), 'is', null)
+      .neq(blogLocaleColumn('title', locale), '')
+      .not(blogLocaleColumn('excerpt', locale), 'is', null)
+      .neq(blogLocaleColumn('excerpt', locale), '')
+      .not(blogLocaleColumn('content', locale), 'is', null)
+      .neq(blogLocaleColumn('content', locale), '')
+      .not(blogLocaleColumn('slug', locale), 'is', null)
+      .neq(blogLocaleColumn('slug', locale), '')
       .order('published_at', { ascending: false })
       .limit(FEED_POST_LIMIT);
     posts = data || [];

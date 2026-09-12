@@ -1,5 +1,12 @@
-import { BLOG_SCHEMA_LOCALES, hasBlogSchema, isSeoPublished, seoLocalesForPath } from '../src/lib/i18n/localeRelease.js';
-import { LOCALE_NAMES, LOCALE_FORMAT_TAGS, localeDirection, withEnglishLocaleFallback } from '../src/lib/i18n/locales.js';
+import {
+  BLOG_SCHEMA_LOCALES,
+  blogLocaleColumn,
+  hasBlogSchema,
+  hasCompleteBlogLocale,
+  isSeoPublished,
+  seoLocalesForPath,
+} from '../src/lib/i18n/localeRelease.js';
+import { LOCALE_NAMES, LOCALE_FORMAT_TAGS, localeDirection } from '../src/lib/i18n/locales.js';
 import type { VercelRequest, VercelResponse } from './types';
 import { isSsrMethod, rejectSsrMethod, sendSsrHtml } from './_lib/ssr-http.js';
 import { createClient } from '@supabase/supabase-js';
@@ -21,7 +28,8 @@ import {
   renderRelatedPostsHtml,
 } from './_lib/blogRelatedLinks.js';
 import { extractBlogFaqs, blogFaqJsonLd } from './_lib/blogFaq.js';
-import { BLOG_AUTHOR_NAME, blogAuthorJsonLd } from '../src/lib/blogAuthor.js';
+import { BLOG_AUTHOR_NAME, blogAuthorJsonLd, blogAuthorRole } from '../src/lib/blogAuthor.js';
+import { t } from './_lib/i18n.js';
 
 const LOCALES = seoLocalesForPath('/blog');
 
@@ -33,7 +41,10 @@ function getSupabase() {
 }
 
 function resolve(post: Record<string, unknown>, field: string, locale: Locale): string {
-  return (post[`${field}_${locale}`] as string) || (post[`${field}_en`] as string) || (post[`${field}_lt`] as string) || '';
+  return (post[blogLocaleColumn(field as 'title' | 'excerpt' | 'content' | 'slug', locale)] as string)
+    || (post[blogLocaleColumn(field as 'title' | 'excerpt' | 'content' | 'slug', 'en')] as string)
+    || (post[blogLocaleColumn(field as 'title' | 'excerpt' | 'content' | 'slug', 'lt')] as string)
+    || '';
 }
 
 function esc(s: string): string {
@@ -118,11 +129,11 @@ function fmtDate(d: string | null, locale: Locale): string {
 }
 
 function postSlug(post: Record<string, unknown>, locale: Locale): string {
-  return (post[`slug_${hasBlogSchema(locale) ? locale : 'en'}`] as string) || (post.slug as string);
+  return (post[blogLocaleColumn('slug', hasBlogSchema(locale) ? locale : 'en')] as string) || (post.slug as string);
 }
 
 function postTranslatedLocales(post: Record<string, unknown>): Locale[] {
-  return LOCALES.filter((l) => !!post[`title_${l}`]);
+  return LOCALES.filter((l) => hasCompleteBlogLocale(post, l));
 }
 
 function blogPostHreflangTags(post: Record<string, unknown>): string {
@@ -186,25 +197,14 @@ function localeLinksHtml(locales: Locale[], urlFor: (l: Locale) => string, curre
   return `<nav aria-label="Languages" style="display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-bottom:12px;font-size:.8rem">${links.join('\n')}</nav>`;
 }
 
-const LABELS: Record<Locale, { blog: string; back: string; home: string; read: string }> = withEnglishLocaleFallback({
-  uk: { blog: 'Блог', back: 'Усі статті', home: 'Головна', read: 'Читати далі' },
-  he: { blog: 'בלוג', back: 'כל המאמרים', home: 'בית', read: 'להמשך קריאה' },
-  tr: { blog: 'Blog', back: 'Tüm yazılar', home: 'Ana sayfa', read: 'Devamını oku' },
-  id: { blog: 'Blog', back: 'Semua artikel', home: 'Beranda', read: 'Baca selengkapnya' },
-  lt: { blog: 'Tinklaraštis', back: 'Visi straipsniai', home: 'Pagrindinis', read: 'Skaityti daugiau' },
-  en: { blog: 'Blog', back: 'All articles', home: 'Home', read: 'Read more' },
-  pl: { blog: 'Blog', back: 'Wszystkie artykuły', home: 'Strona główna', read: 'Czytaj więcej' },
-  lv: { blog: 'Emuārs', back: 'Visi raksti', home: 'Sākumlapa', read: 'Lasīt vairāk' },
-  ee: { blog: 'Blogi', back: 'Kõik artiklid', home: 'Avaleht', read: 'Loe edasi' },
-  fr: { blog: 'Blog', back: 'Tous les articles', home: 'Accueil', read: 'Lire la suite' },
-  es: { blog: 'Blog', back: 'Todos los artículos', home: 'Inicio', read: 'Leer más' },
-  de: { blog: 'Blog', back: 'Alle Artikel', home: 'Startseite', read: 'Weiterlesen' },
-  se: { blog: 'Blogg', back: 'Alla artiklar', home: 'Startsida', read: 'Läs mer' },
-  dk: { blog: 'Blog', back: 'Alle artikler', home: 'Forside', read: 'Læs mere' },
-  fi: { blog: 'Blogi', back: 'Kaikki artikkelit', home: 'Etusivu', read: 'Lue lisää' },
-  no: { blog: 'Blogg', back: 'Alle artikler', home: 'Forside', read: 'Les mer' },
-  nl: { blog: 'Blog', back: 'Alle artikelen', home: 'Home', read: 'Lees meer' },
-});
+function labels(locale: Locale): { blog: string; back: string; home: string; read: string } {
+  return {
+    blog: t(locale, 'nav.blog'),
+    back: t(locale, 'blog.backToAll'),
+    home: t(locale, 'blog.breadcrumbHome'),
+    read: t(locale, 'blog.readMore'),
+  };
+}
 
 interface BlogShellOpts {
   locale: Locale;
@@ -230,9 +230,10 @@ const DEFAULT_OG = 'https://www.tutlio.com/og-image.jpg';
 function shell(opts: BlogShellOpts): string {
   const { locale, domain, blogPath, title, description, url, body, jsonLd, publishedTime, modifiedTime, tag, noindex } = opts;
   const image = opts.image || DEFAULT_OG;
-  const l = LABELS[locale];
+  const l = labels(locale);
   const homePath = buildPath('/', locale, domain);
   const blogListPath = buildPath('/blog', locale, domain);
+  const ogLocale = (LOCALE_FORMAT_TAGS[locale] || hreflangCode(locale)).split('-u-')[0].replace('-', '_');
 
   const articleMeta = publishedTime
     ? [
@@ -259,9 +260,8 @@ ${opts.hreflangHtml ?? hreflangTags(blogPath)}
 <meta property="og:description" content="${esc(description)}" />
 <meta property="og:url" content="${esc(url)}" />
 <meta property="og:site_name" content="Tutlio" />
+<meta property="og:locale" content="${esc(ogLocale)}" />
 <meta property="og:image" content="${esc(image)}" />
-<meta property="og:image:width" content="1200" />
-<meta property="og:image:height" content="800" />
 ${articleMeta}
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${esc(title)}" />
@@ -334,12 +334,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const locale = detectLocale(req);
   const slug = typeof req.query.slug === 'string' ? req.query.slug : '';
   const blogListPath = buildPath('/blog', locale, domain);
-  const l = LABELS[locale];
+  const l = labels(locale);
 
   if (slug) {
     // Try locale-specific slug first, then fall back to universal slug
     let { data: post } = await supabase
-      .from('blog_posts').select('*').eq(`slug_${hasBlogSchema(locale) ? locale : 'en'}`, slug).eq('status', 'published').single();
+      .from('blog_posts').select('*').eq(blogLocaleColumn('slug', hasBlogSchema(locale) ? locale : 'en'), slug).eq('status', 'published').single();
     let matchedViaFallback = false;
     if (!post) {
       const { data: fbPost } = await supabase
@@ -351,6 +351,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.setHeader('X-Robots-Tag', 'noindex');
       return res.status(404).send('Not found');
     }
+    if (!hasCompleteBlogLocale(post, locale)) {
+      res.setHeader('X-Robots-Tag', 'noindex');
+      return res.status(404).send('Not translated for this locale');
+    }
 
     // 301 redirect when the URL used the universal slug but a locale-specific one exists
     const localeSlug = postSlug(post, locale);
@@ -361,7 +365,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    const hasNativeTitle = isSeoPublished(locale, '/blog') && !!post[`title_${locale}`];
+    const hasNativeTitle = isSeoPublished(locale, '/blog') && hasCompleteBlogLocale(post, locale);
     const title = resolve(post, 'title', locale);
     const excerpt = resolve(post, 'excerpt', locale);
     const content = resolve(post, 'content', locale);
@@ -378,7 +382,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       '@type': 'BlogPosting',
       headline: title,
       description: excerpt,
-      image: image || undefined,
+      image: image ? {
+        '@type': 'ImageObject',
+        url: image,
+        contentUrl: image,
+        caption: title,
+      } : undefined,
       datePublished: post.published_at,
       dateModified: post.updated_at || post.published_at,
       inLanguage: LANG_MAP[locale],
@@ -387,7 +396,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       url,
       articleSection: tag || undefined,
       isAccessibleForFree: true,
-      wordCount: content.trim() ? content.trim().split(/\s+/).length : undefined,
       mainEntityOfPage: { '@type': 'WebPage', '@id': url },
     };
     const faqDoc = blogFaqJsonLd(extractBlogFaqs(content));
@@ -415,7 +423,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 <div class="hero">
   ${image ? `<img class="cover" src="${esc(safeUrl(image))}" alt="${esc(title)}" />` : ''}
   <h1>${esc(title)}</h1>
-  <div class="meta">${tag ? `<span class="tag">${esc(tag)}</span>` : ''}${esc(BLOG_AUTHOR_NAME)}${date ? ` · ${date}` : ''}</div>
+  <div class="meta">${tag ? `<span class="tag">${esc(tag)}</span>` : ''}${esc(BLOG_AUTHOR_NAME)}, ${esc(blogAuthorRole(locale))}${date ? ` · ${date}` : ''}</div>
 </div>
 <article class="content">
   ${mdToHtml(content)}
@@ -444,16 +452,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Blog listing
-  const SLUG_COLS = BLOG_SCHEMA_LOCALES.map(l2 => `slug_${l2}`).join(', ');
+  const contentLocale = hasBlogSchema(locale) ? locale : 'en';
+  const SLUG_COLS = BLOG_SCHEMA_LOCALES.map(l2 => blogLocaleColumn('slug', l2)).join(', ');
+  const TITLE_COLS = BLOG_SCHEMA_LOCALES.map(l2 => blogLocaleColumn('title', l2)).join(', ');
+  const EXCERPT_COLS = BLOG_SCHEMA_LOCALES.map(l2 => blogLocaleColumn('excerpt', l2)).join(', ');
   const { data: posts } = await supabase
     .from('blog_posts')
-    .select(`slug, ${SLUG_COLS}, cover_image, tag, published_at, title_lt, title_en, title_pl, title_lv, title_ee, title_fr, title_es, title_de, title_se, title_dk, title_fi, title_no, title_nl, excerpt_lt, excerpt_en, excerpt_pl, excerpt_lv, excerpt_ee, excerpt_fr, excerpt_es, excerpt_de, excerpt_se, excerpt_dk, excerpt_fi, excerpt_no, excerpt_nl`)
+    .select(`slug, ${SLUG_COLS}, cover_image, tag, published_at, ${TITLE_COLS}, ${EXCERPT_COLS}`)
     .eq('status', 'published')
+    .not(blogLocaleColumn('title', contentLocale), 'is', null)
+    .neq(blogLocaleColumn('title', contentLocale), '')
+    .not(blogLocaleColumn('excerpt', contentLocale), 'is', null)
+    .neq(blogLocaleColumn('excerpt', contentLocale), '')
+    .not(blogLocaleColumn('content', contentLocale), 'is', null)
+    .neq(blogLocaleColumn('content', contentLocale), '')
+    .not(blogLocaleColumn('slug', contentLocale), 'is', null)
+    .neq(blogLocaleColumn('slug', contentLocale), '')
     .order('published_at', { ascending: false });
 
   const items = posts || [];
-  const contentLocale = hasBlogSchema(locale) ? locale : 'en';
-  const nativeItems = items.filter((p: Record<string, unknown>) => !!p[`title_${contentLocale}`]);
+  const nativeItems = items.filter((p: Record<string, unknown>) => !!p[blogLocaleColumn('title', contentLocale)]);
   const blogPath = '/blog';
   const url = buildCanonicalUrl(blogPath, locale);
   const hasAnyTranslation = isSeoPublished(locale, '/blog') && nativeItems.length > 0;
@@ -481,26 +499,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   <h1>${l.blog}</h1>
 </div>
 <div class="cards">
-  ${cards || `<p style="padding:24px;color:#888">${withEnglishLocaleFallback({ lt: 'Straipsnių dar nėra.', en: 'No posts yet.', tr: 'Henüz yazı yok.', pl: 'Nie ma jeszcze artykułów.', lv: 'Rakstu vēl nav.', ee: 'Artikleid veel pole.', fr: 'Aucun article pour le moment.', es: 'Todavía no hay artículos.', de: 'Noch keine Artikel.', se: 'Inga artiklar ännu.', dk: 'Ingen artikler endnu.', fi: 'Ei vielä artikkeleita.', no: 'Ingen artikler ennå.', nl: 'Nog geen artikelen.' })[locale]}</p>`}
+  ${cards || `<p style="padding:24px;color:#888">${t(locale, 'blog.empty')}</p>`}
 </div>`;
 
-  const BLOG_DESC: Record<Locale, string> = withEnglishLocaleFallback({
-    tr: 'Tutlio blogu: öğretmenler için ipuçları, ders yönetimi stratejileri ve ürün güncellemeleri.',
-    lt: 'Tutlio tinklaraštis – patarimai korepetitoriams, pamokų valdymo strategijos ir produkto naujienos.',
-    en: 'Tutlio blog – tips for tutors, lesson management strategies, and product updates.',
-    pl: 'Blog Tutlio – porady dla korepetytorów, strategie zarządzania lekcjami i aktualności.',
-    lv: 'Tutlio emuārs – padomi pasniedzējiem, nodarbību pārvaldības stratēģijas un produkta jaunumi.',
-    ee: 'Tutlio blogi – nõuanded õpetajatele, tundide haldamise strateegiad ja tooteuudised.',
-    fr: 'Blog Tutlio – conseils pour les tuteurs, stratégies de gestion des cours et actualités produit.',
-    es: 'Blog Tutlio – consejos para tutores, estrategias de gestión de clases y novedades del producto.',
-    de: 'Tutlio Blog – Tipps für Tutoren, Strategien zur Unterrichtsverwaltung und Produktneuheiten.',
-    se: 'Tutlio blogg – tips för lärare, strategier för lektionshantering och produktnyheter.',
-    dk: 'Tutlio blog – tips til undervisere, strategier til lektionsstyring og produktnyheder.',
-    fi: 'Tutlio blogi – vinkkejä opettajille, tuntien hallinnan strategioita ja tuoteuutisia.',
-    no: 'Tutlio blogg – tips for tutorer, strategier for timeadministrasjon og produktnyheter.',
-    nl: 'Tutlio-blog – tips voor docenten, strategieën voor lesbeheer en productnieuws.',
-  });
-  const blogDesc = BLOG_DESC[locale];
+  const blogDesc = t(locale, 'blog.subtitle');
 
   const blogListJsonLd = jsonLd({
     '@context': 'https://schema.org',
@@ -513,7 +515,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
 
   const listTranslatedLocales = LOCALES.filter(
-    (l2) => items.some((p: Record<string, unknown>) => !!p[`title_${l2}`]),
+    (l2) => items.some((p: Record<string, unknown>) => !!p[blogLocaleColumn('title', l2)]),
   );
 
   sendSsrHtml(req, res, shell({

@@ -26,11 +26,11 @@ describe('language navigation', () => {
     meta.name = 'robots'; meta.content = 'index, nofollow, noarchive';
     document.head.appendChild(meta);
     try {
-      const restore = applyLocalePublicationMeta('he', '/he/blog');
+      const restore = applyLocalePublicationMeta('he', '/he/terms');
       expect(meta.content).toBe('noindex, nofollow, noarchive');
       restore();
       expect(meta.content).toBe('index, nofollow, noarchive');
-      const restoreAgain = applyLocalePublicationMeta('he', '/he/blog');
+      const restoreAgain = applyLocalePublicationMeta('he', '/he/terms');
       meta.content = 'noindex, nofollow, nosnippet';
       restoreAgain();
       expect(meta.content).toBe('noindex, nofollow, nosnippet');
@@ -55,7 +55,7 @@ describe('language navigation', () => {
     expect(sync('/login?lang=unknown')).not.toHaveBeenCalled();
   });
   it('marks draft pages noindex and removes its temporary tag on unmount', () => {
-    sync('/he/blog', 'he');
+    sync('/he/terms', 'he');
     expect(document.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe('noindex, follow');
     cleanup();
     expect(document.querySelector('meta[name="robots"]')).toBeNull();

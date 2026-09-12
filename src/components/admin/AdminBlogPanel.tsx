@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ArrowLeft, Plus, Pencil, Trash2, Eye, Globe, Upload, X, Image as ImageIcon } from 'lucide-react';
 import { LOCALE_LABELS, type Locale } from '@/lib/i18n/core';
-import { BLOG_SCHEMA_LOCALES } from '@/lib/i18n/localeRelease';
+import { BLOG_SCHEMA_LOCALES, blogLocaleColumn } from '@/lib/i18n/localeRelease';
 import { blogPostPath } from '@/lib/blogLocale';
 import AdminBlogAutoPanel from '@/components/admin/AdminBlogAutoPanel';
 
@@ -16,8 +16,8 @@ const LOCALE_FIELD_TYPES = ['title', 'excerpt', 'content'] as const;
 function buildEmptyForm(): BlogFormData {
   const f: BlogFormData = { slug: '', cover_image: '', tag: '', status: 'draft' };
   for (const loc of BLOG_SCHEMA_LOCALES) {
-    for (const type of LOCALE_FIELD_TYPES) f[`${type}_${loc}`] = '';
-    f[`slug_${loc}`] = '';
+    for (const type of LOCALE_FIELD_TYPES) f[blogLocaleColumn(type, loc)] = '';
+    f[blogLocaleColumn('slug', loc)] = '';
   }
   return f;
 }
@@ -129,6 +129,10 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
   const updateField = (key: string, value: string) => setForm(prev => ({ ...prev, [key]: value }));
 
   if (view === 'edit') {
+    const titleField = blogLocaleColumn('title', lang);
+    const slugField = blogLocaleColumn('slug', lang);
+    const excerptField = blogLocaleColumn('excerpt', lang);
+    const contentField = blogLocaleColumn('content', lang);
     return (
       <div className="space-y-4">
         <button type="button" onClick={() => { setView('list'); setEditId(null); }} className="inline-flex items-center gap-2 text-slate-400 hover:text-white text-sm">
@@ -145,7 +149,7 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
           <div className="bg-white/5 border border-white/10 rounded-2xl p-5 space-y-4">
             <div className="flex items-center gap-2 mb-2">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Post details</p>
-              <div className="ml-auto flex gap-1">
+              <div className="ml-auto flex max-h-28 max-w-4xl flex-wrap justify-end gap-1 overflow-y-auto">
                 {BLOG_SCHEMA_LOCALES.map(loc => (
                   <button key={loc} type="button" onClick={() => setLang(loc)}
                     className={`px-3 py-1 rounded-lg text-xs font-medium ${lang === loc ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
@@ -158,8 +162,8 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
             <div className="space-y-1.5">
               <Label className="text-slate-300">Title ({LOCALE_LABELS[lang]})</Label>
               <Input
-                value={form[`title_${lang}`] || ''}
-                onChange={(e) => updateField(`title_${lang}`, e.target.value)}
+                value={form[titleField] || ''}
+                onChange={(e) => updateField(titleField, e.target.value)}
                 required={lang === 'lt'}
                 placeholder={lang === 'lt' ? 'Straipsnio pavadinimas' : 'Article title'}
                 className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl"
@@ -168,7 +172,7 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
 
             <div className="space-y-1.5">
               <Label className="text-slate-300">URL slug ({LOCALE_LABELS[lang]})</Label>
-              <Input value={form[`slug_${lang}`] || ''} onChange={(e) => updateField(`slug_${lang}`, e.target.value)}
+              <Input value={form[slugField] || ''} onChange={(e) => updateField(slugField, e.target.value)}
                 placeholder="auto-generated-from-title"
                 className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl" />
               <p className="text-xs text-slate-500">Leave empty to auto-generate from {LOCALE_LABELS[lang]} title</p>
@@ -177,8 +181,8 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
             <div className="space-y-1.5">
               <Label className="text-slate-300">Excerpt ({LOCALE_LABELS[lang]})</Label>
               <textarea
-                value={form[`excerpt_${lang}`] || ''}
-                onChange={(e) => updateField(`excerpt_${lang}`, e.target.value)}
+                value={form[excerptField] || ''}
+                onChange={(e) => updateField(excerptField, e.target.value)}
                 placeholder={lang === 'lt' ? 'Trumpas aprašymas...' : 'Short description...'}
                 rows={2}
                 className="w-full rounded-xl bg-white/10 border border-white/20 text-white placeholder:text-slate-500 px-3 py-2 text-sm resize-none"
@@ -188,8 +192,8 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
             <div className="space-y-1.5">
               <Label className="text-slate-300">Content ({LOCALE_LABELS[lang]}) — Markdown</Label>
               <textarea
-                value={form[`content_${lang}`] || ''}
-                onChange={(e) => updateField(`content_${lang}`, e.target.value)}
+                value={form[contentField] || ''}
+                onChange={(e) => updateField(contentField, e.target.value)}
                 placeholder={lang === 'lt' ? 'Straipsnio turinys...' : 'Article content...'}
                 rows={12}
                 className="w-full rounded-xl bg-white/10 border border-white/20 text-white placeholder:text-slate-500 px-3 py-2 text-sm font-mono resize-y"

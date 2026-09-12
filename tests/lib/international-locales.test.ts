@@ -6,6 +6,7 @@ import { isValidLocale as serverAcceptsLocale, t as serverTranslate } from '../.
 import { preloadExtraLocaleDict } from '../../api/_lib/loadExtraLocaleDict';
 import { buildCanonicalUrl, hreflangTags } from '../../api/_lib/seo-routing';
 import { postSlug, resolveField } from '../../src/lib/blogLocale';
+import { blogLocaleColumn } from '../../src/lib/i18n/localeRelease';
 
 afterEach(() => localStorage.clear());
 
@@ -41,11 +42,17 @@ describe('translation-ready international locales', () => {
     expect(localeDirection('en')).toBe('ltr');
   });
 
-  it('links untranslated blog locales using the same English slug as the server lookup', () => {
-    const post = { slug: 'original-slug', slug_en: 'english-slug', title_en: 'English title', title_lt: 'Lietuviškas' };
+  it('resolves native blog fields for every newer locale, including regional column suffixes', () => {
     for (const locale of PENDING_TRANSLATION_LOCALES) {
-      expect(postSlug(post, locale)).toBe('english-slug');
-      expect(resolveField(post, 'title', locale)).toBe('English title');
+      const post = {
+        slug: 'original-slug',
+        slug_en: 'english-slug',
+        title_en: 'English title',
+        [blogLocaleColumn('slug', locale)]: `${locale}-native-slug`,
+        [blogLocaleColumn('title', locale)]: `${locale} native title`,
+      };
+      expect(postSlug(post, locale)).toBe(`${locale}-native-slug`);
+      expect(resolveField(post, 'title', locale)).toBe(`${locale} native title`);
     }
   });
 });

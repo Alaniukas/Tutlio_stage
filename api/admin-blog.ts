@@ -1,5 +1,10 @@
 import { SUPPORTED_LOCALES } from '../src/lib/i18n/locales.js';
-import { BLOG_SCHEMA_LOCALES as LOCALES, hasBlogSchema } from '../src/lib/i18n/localeRelease.js';
+import {
+  BLOG_SCHEMA_LOCALES as LOCALES,
+  blogLocaleColumn,
+  hasBlogSchema,
+  hasCompleteBlogLocale,
+} from '../src/lib/i18n/localeRelease.js';
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'crypto';
@@ -36,14 +41,18 @@ function requireAdmin(req: VercelRequest, res: VercelResponse): boolean {
   return true;
 }
 
-const LOCALE_FIELDS = LOCALES.flatMap(l => [`title_${l}`, `excerpt_${l}`, `content_${l}`]);
-const SLUG_FIELDS = LOCALES.map(l => `slug_${l}`);
+const LOCALE_FIELDS = LOCALES.flatMap(l => [
+  blogLocaleColumn('title', l),
+  blogLocaleColumn('excerpt', l),
+  blogLocaleColumn('content', l),
+]);
+const SLUG_FIELDS = LOCALES.map(l => blogLocaleColumn('slug', l));
 const PUBLIC_LIST_FIELDS = ['id', 'slug', 'cover_image', 'tag', 'published_at',
-  ...LOCALES.flatMap(l => [`title_${l}`, `excerpt_${l}`]),
+  ...LOCALES.flatMap(l => [blogLocaleColumn('title', l), blogLocaleColumn('excerpt', l)]),
   ...SLUG_FIELDS].join(', ');
 
 function postSlug(post: Record<string, unknown>, locale: (typeof LOCALES)[number]): string {
-  return (post[`slug_${locale}`] as string) || (post.slug as string);
+  return (post[blogLocaleColumn('slug', locale)] as string) || (post.slug as string);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -65,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { data } = await supabase
           .from('blog_posts')
           .select('*')
-          .eq(`slug_${locale}`, slug)
+          .eq(blogLocaleColumn('slug', locale), slug)
           .eq('status', 'published')
           .maybeSingle();
         post = data;
@@ -89,6 +98,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (!post) return res.status(404).json({ error: 'Post not found' });
+      if (locale && !hasCompleteBlogLocale(post, locale)) {
+        return res.status(404).json({ error: 'Post not translated for this locale' });
+      }
 
       const canonicalSlug = locale ? postSlug(post, locale) : (post.slug as string);
       const relatedRows = await fetchRelatedBlogPosts(supabase, {
@@ -103,11 +115,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       return res.status(200).json(payload);
     }
-    const { data, error } = await supabase
+    let listQuery = supabase
       .from('blog_posts')
       .select(PUBLIC_LIST_FIELDS)
-      .eq('status', 'published')
-      .order('published_at', { ascending: false });
+      .eq('status', 'published');
+    if (locale) {
+      for (const field of ['title', 'excerpt', 'content', 'slug'] as const) {
+        const column = blogLocaleColumn(field, locale);
+        listQuery = listQuery.not(column, 'is', null).neq(column, '');
+      }
+    }
+    const { data, error } = await listQuery.order('published_at', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ posts: data || [] });
   }
@@ -131,25 +149,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'POST') {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
-    const titleLt = (body.title_lt || '').trim();
+    const titleLtKey = blogLocaleColumn('title', 'lt');
+    const titleLt = (body[titleLtKey] || '').trim();
     if (!titleLt) return res.status(400).json({ error: 'title_lt is required' });
 
     const slug = body.slug?.trim() || slugify(titleLt);
     const row: Record<string, unknown> = {
       slug,
-      title_lt: titleLt,
+      [titleLtKey]: titleLt,
       cover_image: (body.cover_image || '').trim(),
       tag: (body.tag || '').trim(),
       status: body.status === 'published' ? 'published' : 'draft',
       published_at: body.status === 'published' ? new Date().toISOString() : null,
     };
     for (const f of LOCALE_FIELDS) {
-      if (f !== 'title_lt') row[f] = (body[f] || '').trim();
+      if (f !== titleLtKey) row[f] = (body[f] || '').trim();
     }
     for (const l of LOCALES) {
-      const key = `slug_${l}`;
+      const key = blogLocaleColumn('slug', l);
       const explicit = (body[key] || '').trim();
-      const title = (body[`title_${l}`] || '').trim();
+      const title = (body[blogLocaleColumn('title', l)] || '').trim();
       row[key] = explicit || (title ? slugify(title) : (l === 'lt' ? slug : null));
     }
 
@@ -171,8 +190,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Auto-generate locale slugs when a title is provided but slug is empty
     for (const l of LOCALES) {
-      const slugKey = `slug_${l}`;
-      const titleKey = `title_${l}`;
+      const slugKey = blogLocaleColumn('slug', l);
+      const titleKey = blogLocaleColumn('title', l);
       if (body[titleKey] && !body[slugKey]) {
         const title = (body[titleKey] || '').trim();
         if (title) updates[slugKey] = slugify(title);

@@ -5,6 +5,7 @@ import {
   generateBlogEditorialBrief,
   generateBlogLocaleArticle,
   generateGeminiCoverImage,
+  parseEditorialBrief,
   resolveBlogAiProvider,
   BLOG_AUTO_LOCALES,
   type BlogAutoLocale,
@@ -20,8 +21,8 @@ import { INTERNAL_NOTIFY_EMAILS } from './resendConfig.js';
 import { submitIndexNowUrls } from './indexnowSubmit.js';
 import { buildCanonicalUrl } from './seo-routing.js';
 import { BLOG_LOCALE_WRITE_ORDER, isBlogAutoPublishWeekday } from './blogMarkets.js';
+import { blogLocaleColumn, hasCompleteBlogLocale } from '../../src/lib/i18n/localeRelease.js';
 
-const DUPLICATE_WINDOW_DAYS = 30;
 const GENERATION_DEADLINE_MS = 250_000;
 const LOCALE_CONCURRENCY = 2;
 
@@ -94,16 +95,14 @@ async function pickKeyword(
   return data as BlogAutoKeyword | null;
 }
 
-async function hasRecentDuplicate(
+async function hasExistingKeywordPost(
   supabase: SupabaseClient,
   keyword: string,
 ): Promise<boolean> {
-  const since = new Date(Date.now() - DUPLICATE_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const { data } = await supabase
     .from('blog_posts')
     .select('id')
     .eq('generation_keyword', keyword)
-    .gte('created_at', since)
     .limit(1);
   return (data?.length ?? 0) > 0;
 }
@@ -124,25 +123,14 @@ async function logGeneration(
 }
 
 export function missingBlogLocales(post: Record<string, unknown>): BlogAutoLocale[] {
-  return BLOG_LOCALE_WRITE_ORDER.filter((loc) => {
-    const title = String(post[`title_${loc}`] || '').trim();
-    const content = String(post[`content_${loc}`] || '').trim();
-    return !title || !content;
-  });
+  return BLOG_LOCALE_WRITE_ORDER.filter((loc) => !hasCompleteBlogLocale(post, loc));
 }
 
 function parseStoredBrief(raw: unknown): BlogEditorialBrief | null {
   if (!raw) return null;
   try {
     const o = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    if (!o || typeof o !== 'object') return null;
-    const topic = String((o as { topic?: string }).topic || '').trim();
-    if (!topic) return null;
-    return {
-      tag: String((o as { tag?: string }).tag || 'Education'),
-      topic,
-      angles: ((o as { angles?: BlogEditorialBrief['angles'] }).angles || {}) as BlogEditorialBrief['angles'],
-    };
+    return parseEditorialBrief(o);
   } catch {
     return null;
   }
@@ -222,16 +210,16 @@ async function applyLocalePatch(
   if (!existing) throw new Error('post disappeared during generation');
   const slug = slugify(block.title);
   const patch: Record<string, unknown> = {
-    [`title_${loc}`]: block.title,
-    [`excerpt_${loc}`]: block.excerpt,
-    [`content_${loc}`]: block.content,
-    [`slug_${loc}`]: slug,
+    [blogLocaleColumn('title', loc)]: block.title,
+    [blogLocaleColumn('excerpt', loc)]: block.excerpt,
+    [blogLocaleColumn('content', loc)]: block.content,
+    [blogLocaleColumn('slug', loc)]: slug,
     updated_at: new Date().toISOString(),
   };
   const currentSlug = String(existing.slug || '');
   if (loc === 'lt' || !currentSlug.trim() || currentSlug.startsWith('draft-')) {
     patch.slug = slug || currentSlug;
-    if (loc === 'lt') patch.slug_lt = slug;
+    if (loc === 'lt') patch[blogLocaleColumn('slug', 'lt')] = slug;
   }
   const { error } = await supabase.from('blog_posts').update(patch).eq('id', postId);
   if (error) throw new Error(error.message || `failed to save ${loc}`);
@@ -242,11 +230,13 @@ async function maybeUploadCover(
   post: Record<string, unknown>,
   keyword: string,
   tag: string,
+  concept: string,
+  deadline: number,
 ): Promise<Record<string, unknown>> {
   if (String(post.cover_image || '').trim()) return post;
   const title = String(post.title_lt || post.title_en || keyword);
   try {
-    const cover = await generateGeminiCoverImage({ keyword, title, tag });
+    const cover = await generateGeminiCoverImage({ keyword, title, tag, concept, deadline });
     const url = await uploadBlogImageFromBase64(
       supabase,
       cover.base64,
@@ -320,7 +310,7 @@ async function finalizeIfComplete(
 
   if (autoPublish) {
     const indexUrls = BLOG_AUTO_LOCALES.map((loc) => {
-      const slug = String(finished[`slug_${loc}`] || finished.slug || '');
+      const slug = String(finished[blogLocaleColumn('slug', loc)] || finished.slug || '');
       return buildCanonicalUrl(`/blog/${slug}`, loc);
     }).filter((u) => u.includes('/blog/') && !u.endsWith('/blog/'));
     await submitIndexNowUrls(indexUrls).catch((e) =>
@@ -364,6 +354,7 @@ async function fillGeminiLocales(
         tag,
         locale: loc,
         brief,
+        deadline,
       });
       await applyLocalePatch(supabase, postId, loc, block);
     } catch (e) {
@@ -372,7 +363,14 @@ async function fillGeminiLocales(
   });
   let current = await reloadPost(supabase, postId);
   if (Date.now() < deadline) {
-    current = await maybeUploadCover(supabase, current, keyword, brief.tag || tag);
+    current = await maybeUploadCover(
+      supabase,
+      current,
+      keyword,
+      brief.tag || tag,
+      brief.coverConcept,
+      deadline,
+    );
   }
   return current;
 }
@@ -408,7 +406,7 @@ export async function runBlogAutoGenerate(
           brief = await generateBlogEditorialBrief({
             keyword,
             tag: String(inProgress.tag || ''),
-          });
+          }, deadline);
           await supabase
             .from('blog_posts')
             .update({ generation_brief: JSON.stringify(brief), updated_at: new Date().toISOString() })
@@ -458,9 +456,16 @@ export async function runBlogAutoGenerate(
     return { ok: true, skipped: true, reason: 'empty keyword' };
   }
 
-  if (await hasRecentDuplicate(supabase, keyword)) {
-    await logGeneration(supabase, keyword, 'failed', undefined, 'duplicate within 30 days');
-    return { ok: true, skipped: true, reason: 'duplicate keyword recently used' };
+  if (await hasExistingKeywordPost(supabase, keyword)) {
+    // A second indexable URL for the same seed would compete with the existing
+    // article. Advance the queue and require a genuinely new editorial topic;
+    // refreshes should update the existing URL instead of publishing a clone.
+    await supabase
+      .from('blog_auto_keywords')
+      .update({ last_used_at: new Date().toISOString() })
+      .eq('id', keywordRow.id);
+    await logGeneration(supabase, keyword, 'failed', undefined, 'existing post already targets keyword');
+    return { ok: true, skipped: true, reason: 'existing post already targets keyword' };
   }
 
   try {
@@ -506,10 +511,10 @@ export async function runBlogAutoGenerate(
       for (const loc of BLOG_AUTO_LOCALES) {
         if (loc === 'lt') continue;
         const block = ai.locales[loc];
-        row[`title_${loc}`] = block.title;
-        row[`excerpt_${loc}`] = block.excerpt;
-        row[`content_${loc}`] = block.content;
-        row[`slug_${loc}`] = slugify(block.title);
+        row[blogLocaleColumn('title', loc)] = block.title;
+        row[blogLocaleColumn('excerpt', loc)] = block.excerpt;
+        row[blogLocaleColumn('content', loc)] = block.content;
+        row[blogLocaleColumn('slug', loc)] = slugify(block.title);
       }
 
       const { data: post, error: insertErr } = await supabase
@@ -534,7 +539,10 @@ export async function runBlogAutoGenerate(
       return await finalizeIfComplete(supabase, settings, appOrigin, post as Record<string, unknown>, keyword);
     }
 
-    const brief = await generateBlogEditorialBrief({ keyword, tag: keywordRow.tag || undefined });
+    const brief = await generateBlogEditorialBrief(
+      { keyword, tag: keywordRow.tag || undefined },
+      deadline,
+    );
     const nowIso = new Date().toISOString();
     const draftSlug = `draft-${slugify(keyword).slice(0, 40) || 'topic'}-${Date.now().toString(36)}`;
     const insertRow: Record<string, unknown> = {

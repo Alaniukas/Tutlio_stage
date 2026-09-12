@@ -5,17 +5,21 @@ import { useTranslation } from '@/lib/i18n';
 import { BlogFeaturedCard, BlogGridCard } from '@/components/blog/BlogCards';
 
 export default function Blog() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [posts, setPosts] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/admin-blog')
+    const controller = new AbortController();
+    setLoading(true);
+    setPosts([]);
+    fetch(`/api/admin-blog?locale=${encodeURIComponent(locale)}`, { signal: controller.signal })
       .then(r => r.json())
-      .then(d => setPosts(d.posts || []))
+      .then(d => { if (!controller.signal.aborted) setPosts(d.posts || []); })
       .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [locale]);
 
   const featured = posts[0];
   const rest = posts.slice(1);

@@ -22,16 +22,22 @@ FROM checks CROSS JOIN expected
 GROUP BY table_name, definition
 ),
 
--- Blog schema is deliberately a separate release surface. This checks only the
--- existing 13-language columns, not whether individual posts have reviewed copy.
-locales(locale) AS (
-  VALUES ('lt'), ('en'), ('pl'), ('lv'), ('ee'), ('fr'), ('es'), ('de'),
-    ('se'), ('dk'), ('fi'), ('no'), ('nl')
+-- Blog schema covers every released locale. Hyphenated URL locale codes use
+-- underscore-safe PostgreSQL column suffixes.
+locales(locale, suffix) AS (
+  VALUES ('lt', 'lt'), ('en', 'en'), ('pl', 'pl'), ('lv', 'lv'), ('ee', 'ee'),
+    ('fr', 'fr'), ('es', 'es'), ('de', 'de'), ('se', 'se'), ('dk', 'dk'),
+    ('fi', 'fi'), ('no', 'no'), ('nl', 'nl'), ('it', 'it'), ('pt', 'pt'),
+    ('ro', 'ro'), ('cs', 'cs'), ('el', 'el'), ('hu', 'hu'), ('bg', 'bg'),
+    ('hr', 'hr'), ('sk', 'sk'), ('sl', 'sl'), ('hi', 'hi'), ('ko', 'ko'),
+    ('ja', 'ja'), ('id', 'id'), ('ar', 'ar'), ('pt-br', 'pt_br'),
+    ('es-mx', 'es_mx'), ('fil', 'fil'), ('he', 'he'), ('uk', 'uk'),
+    ('zh-hk', 'zh_hk'), ('tr', 'tr'), ('th', 'th')
 ), fields(field) AS (VALUES ('title'), ('excerpt'), ('content'), ('slug')), blog_result AS (
-SELECT array_agg(field || '_' || locale ORDER BY locale, field) FILTER (WHERE column_name IS NULL) AS missing_blog_columns
+SELECT array_agg(field || '_' || suffix ORDER BY locale, field) FILTER (WHERE column_name IS NULL) AS missing_blog_columns
 FROM locales CROSS JOIN fields
 LEFT JOIN information_schema.columns
-  ON table_schema = 'public' AND table_name = 'blog_posts' AND column_name = field || '_' || locale
+  ON table_schema = 'public' AND table_name = 'blog_posts' AND column_name = field || '_' || suffix
 )
 SELECT (SELECT json_agg(preference_results ORDER BY table_name) FROM preference_results) AS preferences,
   (SELECT missing_blog_columns FROM blog_result) AS missing_blog_columns;

@@ -73,8 +73,8 @@ describe('lazy locale loading', () => {
   });
   it('renders a visible loading state before mounting a cold deep link', async () => {
     state.initial = 'he'; state.loaded.clear();
-    // The blog surface is still unpublished for Hebrew, so the loading state must carry noindex.
-    window.history.replaceState({}, '', '/he/blog');
+    // The legal surface is still unpublished for Hebrew, so the loading state must carry noindex.
+    window.history.replaceState({}, '', '/he/terms');
     render(<LocaleProvider><Form /></LocaleProvider>);
     expect(screen.queryByLabelText('Unsubmitted name')).toBeNull();
     expect(screen.getByRole('status').textContent?.trim()).toBeTruthy();
@@ -127,7 +127,7 @@ describe('lazy locale loading', () => {
     function Navigation() {
       const navigate = useNavigate();
       return <><LocaleRouteSync /><Form />
-        <button onClick={() => navigate('/he/blog')}>Visit Hebrew</button>
+        <button onClick={() => navigate('/he/terms')}>Visit Hebrew</button>
         <button onClick={() => navigate('/lt/login')}>Return Lithuanian</button>
       </>;
     }

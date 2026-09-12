@@ -23,7 +23,12 @@ import {
   canonicalPublicPagePrefixRedirect,
   isBrowserNavigation,
 } from '../../middleware.js';
-import { STATIC_PAGES, alternatesXmlFor, publicPageBelongsInSitemap } from '../../api/sitemap.js';
+import {
+  STATIC_PAGES,
+  alternatesXmlFor,
+  imageSitemapXml,
+  publicPageBelongsInSitemap,
+} from '../../api/sitemap.js';
 
 function botRequest(url: string, host: string): Request {
   return new Request(url, { headers: { host, 'user-agent': 'Googlebot' } });
@@ -317,6 +322,14 @@ describe('sitemap', () => {
 
     const withEn = alternatesXmlFor(urlFor, ['lt', 'en'], true);
     expect(withEn).toContain('x-default');
+  });
+
+  it('emits only valid absolute cover URLs in the image sitemap extension', () => {
+    expect(imageSitemapXml('https://cdn.example/cover.webp?x=1&y=2')).toContain(
+      '<image:loc>https://cdn.example/cover.webp?x=1&amp;y=2</image:loc>',
+    );
+    expect(imageSitemapXml('javascript:alert(1)')).toBe('');
+    expect(imageSitemapXml('/relative-cover.webp')).toBe('');
   });
 });
 

@@ -7,19 +7,38 @@ import { SUPPORTED_LOCALES, LEGACY_LOCALES, PENDING_TRANSLATION_LOCALES, type Lo
 export const UI_RELEASED_LOCALES: readonly Locale[] = [...SUPPORTED_LOCALES];
 
 /** Actual database columns, independent of UI and search publication. */
-export const BLOG_SCHEMA_LOCALES = [...LEGACY_LOCALES] as const;
+export const BLOG_SCHEMA_LOCALES = [...SUPPORTED_LOCALES] as const;
 export type BlogSchemaLocale = (typeof BLOG_SCHEMA_LOCALES)[number];
+
+export type BlogLocaleField = 'title' | 'excerpt' | 'content' | 'slug';
+
+/**
+ * PostgreSQL column suffixes cannot safely use our hyphenated URL locale codes.
+ * Keep this mapping centralized so `zh-hk`, `pt-br`, and `es-mx` are stored as
+ * `*_zh_hk`, `*_pt_br`, and `*_es_mx` everywhere.
+ */
+export function blogLocaleColumn(field: BlogLocaleField, locale: BlogSchemaLocale): string {
+  return `${field}_${locale.replace(/-/g, '_')}`;
+}
+
+/** A public article must never mix a native title with fallback body copy. */
+export function hasCompleteBlogLocale(
+  post: Record<string, unknown>,
+  locale: BlogSchemaLocale,
+): boolean {
+  return (['title', 'excerpt', 'content', 'slug'] as const).every(
+    (field) => String(post[blogLocaleColumn(field, locale)] || '').trim().length > 0,
+  );
+}
 
 /** These files/copy must exist before adding a locale; never derive from SEO. */
 export const LOCALIZED_ASSET_LOCALES: readonly Locale[] = [...LEGACY_LOCALES];
 export const PLATFORM_COPY_LOCALES: readonly Locale[] = [...LEGACY_LOCALES];
 
 /**
- * 2026-09-05: every registered locale renders fully localized marketing,
- * feature, schools and public-page HTML (scripts/seo-locale-readiness.ts), so
- * those surfaces publish all 36. Legal pages and the blog stay on the legacy
- * 13: the newer locales still serve English legal text and have no blog
- * columns, and neither may be indexed under a foreign lang code.
+ * 2026-09-12: every registered locale renders fully localized marketing,
+ * feature, schools, public-page and blog HTML. Legal pages stay on the legacy
+ * 13 until their reviewed legal copy is released.
  */
 const ALL_LOCALES: readonly Locale[] = [...LEGACY_LOCALES, ...PENDING_TRANSLATION_LOCALES];
 
@@ -28,7 +47,7 @@ export const SEO_LOCALES_BY_SURFACE: Record<SeoSurface, readonly Locale[]> = {
   schools: [...ALL_LOCALES],
   legal: [...LEGACY_LOCALES],
   publicPage: [...ALL_LOCALES],
-  blog: [...LEGACY_LOCALES],
+  blog: [...BLOG_SCHEMA_LOCALES],
   // Competitor comparisons are hand-written per market rather than translated
   // UI copy, so only the three domain languages are published to search.
   compare: ['en', 'lt', 'pl'],

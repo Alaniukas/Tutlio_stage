@@ -94,7 +94,7 @@ Examples: `/it`, `/ar/pricing`, `/pt-br/login`, `/es-mx/company/login` on the in
 
 `SUPPORTED_LOCALES` drives URL and translation-code validation. `PENDING_TRANSLATION_LOCALES` tracks the 23 additions that still need native review; it is not a UI visibility list. Production selectors and search publication are controlled separately in `src/lib/i18n/localeRelease.ts`. All 36 are UI-released in the prepared candidate, while the 23 additions remain `noindex, follow` and excluded from sitemap, hreflang and IndexNow publication.
 
-`LEGACY_LOCALES` and its deprecated `TRANSLATED_LOCALES` alias retain the original 13-language baseline. Do not edit them to publish or withhold a language. `UI_RELEASED_LOCALES` contains all 36, while per-surface SEO lists and `BLOG_SCHEMA_LOCALES` remain independent. New-locale blog requests use English content/slug fallbacks; no new blog columns are queried or created. UI publication does not require blog publication; adding blog support requires the corresponding database columns and reviewed content.
+`LEGACY_LOCALES` and its deprecated `TRANSLATED_LOCALES` alias retain the original 13-language baseline. Do not edit them to publish or withhold a language. `UI_RELEASED_LOCALES` and `BLOG_SCHEMA_LOCALES` contain all 36; other per-surface SEO lists remain independent. Blog locale codes containing hyphens use underscore-safe database suffixes through `blogLocaleColumn` (for example, `pt-br` → `title_pt_br`). Legal publication and localized assets remain separately gated.
 
 ## Persistence and release
 
