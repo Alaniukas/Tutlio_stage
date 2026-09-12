@@ -64,6 +64,7 @@ const productionVersions = [
   '20260910130418_parent_rls_reschedule_and_profiles_rpc.sql',
   '20260910143720_parent_rls_unified_access.sql',
   '20260910154207_availability_start_date.sql',
+  '20260912120000_strip_finalized_acceptance_source_bytes.sql',
 ] as const;
 
 const retiredRenames = [

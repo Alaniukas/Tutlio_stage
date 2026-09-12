@@ -8,6 +8,7 @@ import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.j
 import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile } from './_lib/marketMoney.js';
 import { customerTotalEur } from './_lib/stripeLessonPricing.js';
+import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import {
   isTrialReservationFlowEnabled,
@@ -199,7 +200,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: orgStripe } = await supabase
       .from('organizations')
-      .select('stripe_account_id, stripe_onboarding_complete, entity_type, slug')
+      .select('stripe_account_id, stripe_onboarding_complete, entity_type, slug, features')
       .eq('id', adminRow.organizationId)
       .single();
 
@@ -212,6 +213,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const feeProfile = orgFeeProfile((orgStripe as { slug?: string | null }).slug) ?? orgFeeProfile(adminRow.organizationId);
+    const feeSplit = resolveOrgPayerFeeSplit((orgStripe as { features?: unknown }).features);
     // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
     const useSchoolOrgAbsorbedFees = orgStripe.entity_type === 'school' && !feeProfile;
 
@@ -221,8 +223,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : null;
     const payerChargedTotalEur = schoolBreakdown
       ? schoolBreakdown.chargeCents / 100
-      : customerTotalEur(basePriceEur, feeProfile);
-    const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
+      : customerTotalEur(basePriceEur, feeProfile, feeSplit);
+    const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
 
     const { data: lessonPackage, error: packageErr } = await supabase
       .from('lesson_packages')

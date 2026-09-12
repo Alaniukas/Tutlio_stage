@@ -44,6 +44,11 @@ import { hasOrgAdminPermission, type OrgAdminPermission } from '../src/lib/orgAd
 import { deliverAcceptanceOnce, validAcceptanceDeliveryKey } from './_lib/schoolAcceptanceDelivery.js';
 import { deliverSchoolMonthlyInvoiceOnce, schoolMonthlyInvoiceIdempotencyKey } from './_lib/schoolMonthlyInvoiceDelivery.js';
 import { pooledPackageEmailIdempotencyKey } from './_lib/sendPendingPackageEmail.js';
+import {
+  appendMvPayerFeeNoticeBeforeFooter,
+  finalizeMvPayerFirstFeeNoticeAfterSend,
+  maybeMvPayerFirstFeeNoticeFooter,
+} from './_lib/mvPayerFeeNotice.js';
 
 
 function randomToken() {
@@ -3602,6 +3607,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
     }
 
+    let mvPayerFeeNoticeIncluded = false;
+    let mvPayerFeeNoticeRecipient = '';
+    const feeNoticeRecipients = (Array.isArray(to) ? to : [to])
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+    for (const recipient of feeNoticeRecipients) {
+      const footer = await maybeMvPayerFirstFeeNoticeFooter(orgIdForBrandingLookup, recipient, locale);
+      if (footer) {
+        emailContent = {
+          ...emailContent,
+          html: appendMvPayerFeeNoticeBeforeFooter(emailContent.html, footer),
+        };
+        mvPayerFeeNoticeIncluded = true;
+        mvPayerFeeNoticeRecipient = recipient;
+        break;
+      }
+    }
+
     const emailPayload: Parameters<typeof resend.emails.send>[0] = {
       from: localizedFromEmail(locale, { senderName: (data as any).emailSenderName }),
       to: Array.isArray(to) ? to : [to],
@@ -3658,6 +3681,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[send-email] Resend error:', error);
       const msg = error && typeof error === 'object' && 'message' in error ? String((error as any).message) : 'Failed to send email';
       return res.status(500).json({ error: msg });
+    }
+
+    if (mvPayerFeeNoticeIncluded && mvPayerFeeNoticeRecipient) {
+      await finalizeMvPayerFirstFeeNoticeAfterSend(
+        orgIdForBrandingLookup,
+        mvPayerFeeNoticeRecipient,
+        true,
+      );
     }
 
     // Chat push siunčiamas iš /api/chat-notify-on-message (pagal user_id, nepriklausomai nuo el. throttling).

@@ -21,6 +21,8 @@ const DOTENV_FORCE_KEYS = new Set([
   'VITE_SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
   'VITE_SUPABASE_ANON_KEY',
+  'GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64',
+  'GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON',
 ]);
 
 const STRIPE_PARENT_OVERRIDE_KEYS = new Set([
@@ -148,6 +150,15 @@ if (!resendKey) {
   console.warn('[dev-api-local] RESEND_API_KEY / RESEND_API_KEY_STAGE missing — tutor/parent invite emails will fail');
 } else if (!process.env.RESEND_API_KEY?.trim() && process.env.RESEND_API_KEY_STAGE?.trim()) {
   console.log('[dev-api-local] Using RESEND_API_KEY_STAGE for outbound email');
+}
+
+if (
+  !process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64?.trim()
+  && !process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON?.trim()
+) {
+  console.warn('[dev-api-local] GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64 missing — /api/school-lesson-recordings will not list Drive files');
+} else {
+  console.log('[dev-api-local] Google Drive service account configured for lesson recordings');
 }
 
 function buildQuery(url: URL): Record<string, string | string[]> {

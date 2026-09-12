@@ -49,6 +49,7 @@ import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
 import { sendEmail } from '@/lib/email';
 import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
+import { buildLessonRescheduleRecipients } from '@/lib/lessonRescheduleNotify';
 import { authHeaders } from '@/lib/apiHelpers';
 import { autoCloseBillingBatchIfAllPaid } from '@/lib/autoCloseBillingBatch';
 import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
@@ -111,7 +112,10 @@ import {
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
 import { Checkbox } from '@/components/ui/checkbox';
-import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
+import {
+  effectiveAvailabilityOnDate,
+  sliceTimeRangeBySessions,
+} from '@/lib/availabilityCalendarBlocks';
 import {
   buildRecurringFreeTimeRows,
   isValidTimeRange,
@@ -120,6 +124,7 @@ import {
   type DayTime,
   type FreeTimeUntilMode,
 } from '@/lib/calendarFreeTimeFromSlot';
+import { consumeAvailabilityForCreatedSessions } from '@/lib/consumeSessionAvailability';
 import {
   advanceRecurringOccurrence,
   isRecurringEndDateOpen,
@@ -129,7 +134,8 @@ import { enrichSessionMeetingLink, resolveLessonMeetingLink } from '@/lib/meetin
 import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
-import { isLaisviVaikaiOrg, isManoKorepetitoriusOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { isLaisviVaikaiOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { canChooseParentLessonComment } from '@/lib/parentLessonComment';
 import { resolveOrCreateTrialSubject } from '@/pages/company/orgAdminSessionCreate';
 import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
@@ -337,8 +343,9 @@ export default function CalendarPage() {
     !orgFeaturesLoading &&
     (isMoksloVaisiaiOrg(organizationId) || isMoksloVaisiaiOrg(ctxProfile?.organization_id));
   const showTutorTrialToggle = isMoksloVaisiaiCalendar;
-  const canChooseParentComment =
-    isManoKorepetitoriusOrg(organizationId) || isManoKorepetitoriusOrg(ctxProfile?.organization_id);
+  const canChooseParentComment = canChooseParentLessonComment(
+    organizationId || ctxProfile?.organization_id,
+  );
   const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
   const isLaisviVaikai = isLaisviVaikaiOrg(organizationId) || isLaisviVaikaiOrg(ctxProfile?.organization_id);
   const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
@@ -920,13 +927,12 @@ export default function CalendarPage() {
       const dayOfWeek = d.getDay();
       const dateStr = format(d, 'yyyy-MM-dd');
 
-      const rules = availability.filter((a) => {
-        if (a.is_recurring && a.day_of_week !== null) {
-          return recurringAvailabilityAppliesOnDate(a, dateStr, dayOfWeek);
-        }
-        if (!a.is_recurring && a.specific_date === dateStr) return true;
-        return false;
-      });
+      const tutorId = ctxUser?.id ?? '';
+      const rules = effectiveAvailabilityOnDate(
+        availability.map((a) => ({ ...a, tutor_id: tutorId })),
+        dateStr,
+        dayOfWeek,
+      );
 
       rules.forEach(rule => {
         let startHour = parseInt(rule.start_time.split(':')[0]);
@@ -934,41 +940,16 @@ export default function CalendarPage() {
         const endHour = parseInt(rule.end_time.split(':')[0]);
         const endMin = parseInt(rule.end_time.split(':')[1] || '0');
 
-        // Create the full continuous block as a single background event
         const slotStart = new Date(d);
         slotStart.setHours(startHour, startMin, 0, 0);
 
         const slotEnd = new Date(d);
         slotEnd.setHours(endHour, endMin, 0, 0);
 
-        // Slicing logic: subtract overlapping scheduled sessions
-        let freeBlocks = [{ start: slotStart, end: slotEnd }];
-
-        const overlappingSessions = sessions.filter(s =>
-          s.status !== 'cancelled' &&
-          s.start_time < slotEnd &&
-          s.end_time > slotStart
+        const freeBlocks = sliceTimeRangeBySessions(
+          { start: slotStart, end: slotEnd },
+          sessions.filter((s) => s.status !== 'cancelled'),
         );
-
-        overlappingSessions.forEach(session => {
-          const newFreeBlocks: { start: Date; end: Date }[] = [];
-          freeBlocks.forEach(freeBlock => {
-            // Check for overlap
-            if (session.start_time < freeBlock.end && session.end_time > freeBlock.start) {
-              // Free time before the session
-              if (session.start_time > freeBlock.start) {
-                newFreeBlocks.push({ start: freeBlock.start, end: session.start_time });
-              }
-              // Free time after the session
-              if (session.end_time < freeBlock.end) {
-                newFreeBlocks.push({ start: session.end_time, end: freeBlock.end });
-              }
-            } else {
-              newFreeBlocks.push(freeBlock);
-            }
-          });
-          freeBlocks = newFreeBlocks;
-        });
 
         // Add the resulting sliced blocks as background events
         freeBlocks.forEach(block => {
@@ -993,7 +974,7 @@ export default function CalendarPage() {
       });
     }
     return generated;
-  }, [availability, currentDate, currentView, sessions, locale]);
+  }, [availability, ctxUser?.id, currentDate, currentView, sessions, locale]);
 
   // Helper function to merge group lesson sessions
   const classGroupMeta = useMemo(() => buildClassGroupMetaMap(classGroups), [classGroups]);
@@ -2005,6 +1986,8 @@ export default function CalendarPage() {
           return;
         }
 
+        await consumeAvailabilityForCreatedSessions(supabase, user.id, createdSessions || []);
+
         // Update lesson packages based on usage (per-item + parent aggregate)
         if (packagesUsage.size > 0) {
           for (const [pkgId, usedCount] of packagesUsage.entries()) {
@@ -2365,6 +2348,9 @@ export default function CalendarPage() {
       }
 
       const { data: created, error } = await supabase.from('sessions').insert(sessionsToInsert).select();
+      if (!error && created?.length) {
+        await consumeAvailabilityForCreatedSessions(supabase, user.id, created);
+      }
 
       // Update lesson packages (per-item + parent aggregate)
       if (!error && packagesToUpdate.length > 0) {
@@ -3650,31 +3636,72 @@ export default function CalendarPage() {
           setLeaveFreeTimeOnReschedule(false);
         }
 
-        // Send reschedule email only to student
-        if (timeChanged && !isClassGroupSession) {
-          const { data: studentData } = await supabase
-            .from('students')
-            .select('email, linked_user_id')
-            .eq('id', selectedEvent.student_id)
-            .single();
-          const rescheduleTo = await resolveStudentNotificationEmail(studentData);
-          if (rescheduleTo) {
-            await sendEmail({
+        if (timeChanged) {
+          const rescheduleBase = {
+            tutorName: tutorProfile?.full_name || '',
+            oldDate: format(oldStart, 'yyyy-MM-dd'),
+            oldTime: format(oldStart, 'HH:mm'),
+            newDate: format(newStart, 'yyyy-MM-dd'),
+            newTime: format(newStart, 'HH:mm'),
+            rescheduledBy: 'tutor' as const,
+            reason: rescheduleReason.trim(),
+            ...(orgIdEditSave ? { organizationId: orgIdEditSave } : {}),
+          };
+          const sendReschedule = (recipient: ReturnType<typeof buildLessonRescheduleRecipients>[number]) => {
+            void sendEmail({
               type: 'lesson_rescheduled',
-              to: rescheduleTo,
+              to: recipient.to,
               data: {
-                studentName: selectedEvent.student?.full_name || '',
-                tutorName: tutorProfile?.full_name || '',
-                oldDate: format(oldStart, 'yyyy-MM-dd'),
-                oldTime: format(oldStart, 'HH:mm'),
-                newDate: format(newStart, 'yyyy-MM-dd'),
-                newTime: format(newStart, 'HH:mm'),
-                rescheduledBy: 'tutor',
-                recipientRole: 'student',
-                reason: rescheduleReason.trim(),
-                ...(orgIdEditSave ? { organizationId: orgIdEditSave } : {}),
+                ...rescheduleBase,
+                studentName: recipient.studentName,
+                recipientRole: recipient.recipientRole,
+                ...(recipient.recipientRole === 'payer' ? { recipientName: 'Sveiki' } : {}),
+              },
+            }).catch((err) => console.error('[Calendar] reschedule mail', err));
+          };
+
+          if (isClassGroupSession) {
+            const studentIds = [...new Set(
+              selectedGroupSessions.map((session) => session.student_id).filter(Boolean),
+            )];
+            if (studentIds.length > 0) {
+              const { data: studentRows } = await supabase
+                .from('students')
+                .select('id, full_name, email, linked_user_id, payment_payer, payer_email, parent_secondary_email')
+                .in('id', studentIds);
+              for (const row of studentRows || []) {
+                const resolvedStudentEmail = await resolveStudentNotificationEmail(row);
+                for (const recipient of buildLessonRescheduleRecipients({
+                  isSchoolOrg: isSchoolTutor,
+                  studentEmail: row.email,
+                  resolvedStudentEmail,
+                  payerEmail: row.payer_email,
+                  secondaryParentEmail: row.parent_secondary_email,
+                  paymentPayer: row.payment_payer,
+                  studentName: row.full_name || '',
+                })) {
+                  sendReschedule(recipient);
+                }
               }
-            });
+            }
+          } else {
+            const { data: studentData } = await supabase
+              .from('students')
+              .select('full_name, email, linked_user_id, payment_payer, payer_email, parent_secondary_email')
+              .eq('id', selectedEvent.student_id)
+              .single();
+            const resolvedStudentEmail = await resolveStudentNotificationEmail(studentData);
+            for (const recipient of buildLessonRescheduleRecipients({
+              isSchoolOrg: isSchoolTutor,
+              studentEmail: studentData?.email,
+              resolvedStudentEmail,
+              payerEmail: studentData?.payer_email,
+              secondaryParentEmail: studentData?.parent_secondary_email,
+              paymentPayer: studentData?.payment_payer,
+              studentName: studentData?.full_name || selectedEvent.student?.full_name || '',
+            })) {
+              sendReschedule(recipient);
+            }
           }
         }
 

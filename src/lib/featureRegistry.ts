@@ -112,6 +112,20 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'premium',
   },
 
+  org_payer_fee_split: {
+    id: 'org_payer_fee_split',
+    name: 'Mokėjimo mokesčių paskirstymas',
+    nameEn: 'Payer fee split',
+    description:
+      'Org admin finansų puslapyje gali nustatyti, kokią platformos ir Stripe mokesčių dalį apmoka mokėtojas, o kokią organizacija.',
+    descriptionEn:
+      'Org admins can configure on the finance page what share of platform and Stripe fees the payer covers versus the organization.',
+    category: 'payments',
+    defaultValue: false,
+    requiresSetup: true,
+    pricingTier: 'premium',
+  },
+
   custom_branding: {
     id: 'custom_branding',
     name: 'Whitelabel / organizacijos stilius',

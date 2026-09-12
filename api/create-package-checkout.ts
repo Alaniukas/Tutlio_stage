@@ -14,6 +14,7 @@ import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.j
 import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
 import { customerTotalEur } from './_lib/stripeLessonPricing.js';
+import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { directChargeOptions } from './_lib/stripeDirectCharge.js';
 import {
@@ -236,9 +237,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const schoolCheckoutBreakdown = useSchoolOrgAbsorbedFees
             ? schoolInstallmentCheckoutCents(basePriceEur, market)
             : null;
+        const feeSplit = resolveOrgPayerFeeSplit(orgFeatures);
         const payerChargedTotalEur = schoolCheckoutBreakdown
             ? schoolCheckoutBreakdown.chargeCents / 100
-            : customerTotalEur(basePriceEur, feeProfile);
+            : customerTotalEur(basePriceEur, feeProfile, feeSplit);
         // Single-subject packages keep `subject_id` populated for legacy reads;
         // multi-subject packages leave it NULL (items table is the source of truth).
         const primarySubjectId = resolvedItems.length === 1 ? resolvedItems[0]!.subjectId : null;
@@ -404,7 +406,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 cancel_url: `${appOrigin}/package-cancelled`,
             }, directChargeOptions(stripeAccountId));
         } else {
-            const { baseCents, feesCents: feeCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
+            const { baseCents, feesCents: feeCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,

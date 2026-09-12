@@ -109,15 +109,12 @@ describe('CompanyStudents Mokslo Vaisiai pre-activation scheduling', () => {
     });
   });
 
-  it('lets an admin choose schedule slots while creating an unactivated student', () => {
+  it('does not show Pro Klasė-only availability search when creating an MV student', () => {
     render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
 
     fireEvent.click(screen.getByRole('button', { name: 'Pridėti mokinį' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Ieškoti pagal laisvą laiką' }));
 
-    const modal = screen.getByTestId('find-tutor-modal');
-    expect(modal.getAttribute('data-context')).toBe('new-student');
-    expect(modal.getAttribute('data-frequency')).toBe('true');
+    expect(screen.queryByRole('button', { name: 'Ieškoti pagal laisvą laiką' })).toBeNull();
   });
 
   it('lets an admin add siblings to the same parent account', () => {
@@ -134,14 +131,11 @@ describe('CompanyStudents Mokslo Vaisiai pre-activation scheduling', () => {
     expect(screen.queryByText('Vaikas Nr. 2')).toBeNull();
   });
 
-  it('lets an admin book recurring lessons from an unactivated student card without a Pro Klasė flag', () => {
+  it('does not show student-card availability booking without the Pro Klasė flag', () => {
     render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
 
     fireEvent.click(screen.getAllByText('Testinis Mokinys')[0]);
-    fireEvent.click(screen.getByRole('button', { name: 'Ieškoti korepetitoriaus laiko' }));
 
-    const modal = screen.getByTestId('find-tutor-modal');
-    expect(modal.getAttribute('data-context')).toBe('existing-student');
-    expect(modal.getAttribute('data-frequency')).toBe('true');
+    expect(screen.queryByRole('button', { name: 'Ieškoti korepetitoriaus laiko' })).toBeNull();
   });
 });

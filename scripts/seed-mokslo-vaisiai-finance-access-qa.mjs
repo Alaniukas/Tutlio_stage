@@ -92,6 +92,7 @@ const OPERATOR_PERMISSIONS = {
 };
 
 const MV_FEATURES = {
+  org_payer_fee_split: true,
   custom_branding: true,
   hide_powered_by: true,
   per_student_payment_override: true,

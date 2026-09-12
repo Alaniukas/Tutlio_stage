@@ -24,6 +24,7 @@ import { cn, normalizeUrl } from '@/lib/utils';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 import { formatLessonStripeChargeEur, formatMarketAmount, orgFeeProfile, type OrgFeeProfile } from '@/lib/stripeLessonPricing';
+import { resolveOrgPayerFeeSplit, type OrgPayerFeeSplit } from '@/lib/orgPayerFeeSplit';
 import { currentMarket } from '@/lib/market';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import { viewerCanPayLessons } from '@/lib/lessonPayerView';
@@ -92,6 +93,7 @@ export default function StudentDashboard() {
     const [isSchoolOrgStudent, setIsSchoolOrgStudent] = useState(false);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
     const [tutorOrgFeeProfile, setTutorOrgFeeProfile] = useState<OrgFeeProfile | null>(null);
+    const [tutorOrgFeeSplit, setTutorOrgFeeSplit] = useState<OrgPayerFeeSplit | null>(null);
     const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
     const [manualPaymentsOnly, setManualPaymentsOnly] = useState(false);
     const [perlasLoading, setPerlasLoading] = useState(false);
@@ -283,11 +285,14 @@ export default function StudentDashboard() {
                 if (oid) {
                     const { data: oe } = await supabase
                         .from('organizations')
-                        .select('entity_type, slug')
+                        .select('entity_type, slug, features')
                         .eq('id', oid)
                         .maybeSingle();
                     tutorOrgSchoolResolved = oe?.entity_type === 'school';
                     resolvedFeeProfile = orgFeeProfile((oe as { slug?: string | null })?.slug) ?? orgFeeProfile(oid);
+                    setTutorOrgFeeSplit(resolveOrgPayerFeeSplit((oe as { features?: unknown })?.features));
+                } else {
+                    setTutorOrgFeeSplit(null);
                 }
                 setTutorOrgIsSchool(tutorOrgSchoolResolved);
                 setTutorOrgFeeProfile(resolvedFeeProfile);
@@ -814,7 +819,7 @@ export default function StudentDashboard() {
                                     <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('studentDash.priceLabel')}</p>
                                     <p className="font-bold text-gray-900">{fmt(selectedSession?.price)}</p>
                                     {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && showPerLessonPayment && !manualPaymentsOnly && (
-                                        <p className="text-[11px] text-gray-500 mt-1">{t('studentDash.cardTotal', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool, tutorOrgFeeProfile) })}</p>
+                                        <p className="text-[11px] text-gray-500 mt-1">{t('studentDash.cardTotal', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool, tutorOrgFeeProfile, tutorOrgFeeSplit) })}</p>
                                     )}
                                 </div>
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center">
@@ -864,7 +869,7 @@ export default function StudentDashboard() {
                                     >
                                         {stripeLoading
                                             ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}</>
-                                            : <><CreditCard className="w-4 h-4" /> {t('studentDash.stripePayBtn', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool, tutorOrgFeeProfile) })}</>
+                                            : <><CreditCard className="w-4 h-4" /> {t('studentDash.stripePayBtn', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool, tutorOrgFeeProfile, tutorOrgFeeSplit) })}</>
                                         }
                                     </button>
                                 )}

@@ -31,7 +31,9 @@ import {
     shouldUsePackageForBooking,
 } from '@/lib/studentPaymentModel';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
+import { consumeAvailabilityForCreatedSessions } from '@/lib/consumeSessionAvailability';
 import { formatLessonStripeChargeEur, formatMarketAmount, orgFeeProfile, type OrgFeeProfile } from '@/lib/stripeLessonPricing';
+import { resolveOrgPayerFeeSplit, type OrgPayerFeeSplit } from '@/lib/orgPayerFeeSplit';
 import { currentMarket } from '@/lib/market';
 import { ParentLessonDetailModal } from '@/components/parent/ParentLessonDetailModal';
 import ParentChildSwitcher from '@/components/parent/ParentChildSwitcher';
@@ -287,6 +289,7 @@ export default function StudentSchedule() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [portalPolicy.resolved, portalPolicy.actionsDisabled, portalPolicy.bookingDisabled]);
     const [tutorOrgFeeProfile, setTutorOrgFeeProfile] = useState<OrgFeeProfile | null>(null);
+    const [tutorOrgFeeSplit, setTutorOrgFeeSplit] = useState<OrgPayerFeeSplit | null>(null);
     /** Org/tutor Finance toggles — govern whether per-lesson payment UI shows at all. */
     const [tutorPaymentFlags, setTutorPaymentFlags] = useState<{ enable_per_lesson: boolean; enable_monthly_billing: boolean }>({
         enable_per_lesson: true,
@@ -864,6 +867,7 @@ export default function StudentSchedule() {
                 tutorOrgSchoolResolved = oe?.entity_type === 'school';
                 resolvedFeeProfile = orgFeeProfile((oe as { slug?: string | null })?.slug) ?? orgFeeProfile(orgId);
                 const orgFeatures = (oe as { features?: Record<string, unknown> | null })?.features;
+                setTutorOrgFeeSplit(resolveOrgPayerFeeSplit(orgFeatures));
                 setSchoolClassGroupsEnabled(orgFeatures?.school_class_groups === true);
                 actionsDisabledResolved = orgFeatures?.disable_student_reschedule_cancel === true;
                 bookingDisabledResolved = orgFeatures?.disable_student_booking === true;
@@ -874,6 +878,7 @@ export default function StudentSchedule() {
             }
             setTutorOrgIsSchool(tutorOrgSchoolResolved);
             setTutorOrgFeeProfile(resolvedFeeProfile);
+            if (!orgId) setTutorOrgFeeSplit(null);
             setStudentActionsDisabled(actionsDisabledResolved);
             setStudentBookingDisabled(bookingDisabledResolved);
             setTutorPaymentFlags({
@@ -1474,6 +1479,7 @@ export default function StudentSchedule() {
         }]).select().single();
 
         if (!error && sessionData) {
+            await consumeAvailabilityForCreatedSessions(supabase, tutorId, [sessionData]);
             // For group lessons: decrement available_spots on all other sessions at this time
             if (selectedSubject?.is_group) {
                 const { data: otherSessions } = await supabase
@@ -2482,7 +2488,7 @@ export default function StudentSchedule() {
                                                 ? (() => {
                                                     const { creditApplied, remaining } = lessonCreditBreakdown(mySessionData.price);
                                                     if (remaining > 0 && !tutorSoloManualPayments) {
-                                                        return formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile);
+                                                        return formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile, tutorOrgFeeSplit);
                                                     }
                                                     if (remaining <= 0) return fmt(0);
                                                     return fmt(mySessionData.price);
@@ -2567,7 +2573,7 @@ export default function StudentSchedule() {
                                                     <>
                                                         <CreditCard className="w-4 h-4" />
                                                         {remaining > 0
-                                                            ? `${t('stuSched.payStripe')} — ${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile)}`
+                                                            ? `${t('stuSched.payStripe')} — ${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile, tutorOrgFeeSplit)}`
                                                             : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`}
                                                     </>
                                                 )}
@@ -2675,7 +2681,7 @@ export default function StudentSchedule() {
                                             <p>
                                                 <span className="font-medium">{t('studentDash.priceLabel')}:</span>{' '}
                                                 {remaining > 0 && !manualPaymentInBookingModal
-                                                    ? formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile)
+                                                    ? formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile, tutorOrgFeeSplit)
                                                     : fmt(pendingPaymentSession.price)}
                                             </p>
                                             {creditApplied > 0 && (
@@ -2753,7 +2759,7 @@ export default function StudentSchedule() {
                                                         ? (() => {
                                                             const { remaining } = lessonCreditBreakdown(pendingPaymentSession.price);
                                                             return remaining > 0
-                                                                ? `${t('stuSched.payStripe')} — ${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile)}`
+                                                                ? `${t('stuSched.payStripe')} — ${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile, tutorOrgFeeSplit)}`
                                                                 : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`;
                                                         })()
                                                         : t('stuSched.payStripe')}

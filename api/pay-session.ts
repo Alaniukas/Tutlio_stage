@@ -25,6 +25,7 @@ import {
     expireConnectCheckoutSession,
     retrieveConnectCheckoutSessionWithScope,
 } from './_lib/stripeDirectCharge.js';
+import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -95,11 +96,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let ownerName = tutor?.full_name || 'Korepetitorius';
         let useSchoolOrgAbsorbedFees = false;
         let feeProfile: OrgFeeProfile | null = null;
+        let feeSplit = null;
 
         if (tutor?.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug, features')
                 .eq('id', tutor.organization_id)
                 .single();
             if (!org?.stripe_onboarding_complete || !org.stripe_account_id) {
@@ -108,6 +110,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
             feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
+            feeSplit = resolveOrgPayerFeeSplit((org as { features?: unknown }).features);
             // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
             useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school' && !feeProfile;
         } else {
@@ -134,7 +137,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (useSchoolOrgAbsorbedFees) {
             expectedTotalCents = schoolInstallmentCheckoutCents(basePriceEur, market).chargeCents;
         } else {
-            const breakdown = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
+            const breakdown = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
             expectedTotalCents = breakdown.baseCents + breakdown.feesCents;
         }
 
@@ -199,7 +202,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 cancel_url: `${appOrigin}/student/sessions`,
             }, directChargeOptions(stripeAccountId!));
         } else {
-            const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
+            const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,

@@ -4,6 +4,13 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
 import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
@@ -52,6 +59,124 @@ function durationLabel(durationMillis: number | null): string | null {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+const RECORDINGS_COMPACT_THRESHOLD = 3;
+
+function recordingDetails(
+  recording: Recording,
+  locale: string,
+): { title: string; meta: string | null } {
+  const recorded = recording.recordedAt
+    ? new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(recording.recordedAt))
+    : null;
+  const meta = [recorded, durationLabel(recording.durationMillis), fileSizeLabel(recording.size)].filter(Boolean).join(' · ');
+  return { title: recording.name, meta: meta || null };
+}
+
+function recordingPickerLabel(recording: Recording, locale: string): string {
+  const { title, meta } = recordingDetails(recording, locale);
+  return meta ? `${meta} — ${title}` : title;
+}
+
+function RecordingPlayer({
+  recording,
+  unsupportedLabel,
+}: {
+  recording: Recording;
+  unsupportedLabel: string;
+}) {
+  return (
+    <video
+      key={recording.id}
+      className="w-full aspect-video rounded-lg bg-black"
+      controls
+      controlsList="nodownload"
+      preload="none"
+      src={recording.streamUrl}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      {unsupportedLabel}
+    </video>
+  );
+}
+
+function GroupRecordingsList({
+  recordings,
+  locale,
+  countLabel,
+  pickLabel,
+  unsupportedLabel,
+}: {
+  recordings: Recording[];
+  locale: string;
+  countLabel: string;
+  pickLabel: string;
+  unsupportedLabel: string;
+}) {
+  const [selectedId, setSelectedId] = useState(recordings[0]?.id ?? '');
+
+  useEffect(() => {
+    if (!recordings.some((row) => row.id === selectedId)) {
+      setSelectedId(recordings[0]?.id ?? '');
+    }
+  }, [recordings, selectedId]);
+
+  if (!recordings.length) return null;
+
+  const compact = recordings.length > RECORDINGS_COMPACT_THRESHOLD;
+  const selected = recordings.find((row) => row.id === selectedId) ?? recordings[0];
+
+  if (compact && selected) {
+    return (
+      <div className="p-4 sm:p-5 space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <p className="text-sm font-medium text-gray-700">{countLabel}</p>
+          <div className="w-full sm:max-w-xl space-y-1.5">
+            <Label className="text-xs text-gray-500">{pickLabel}</Label>
+            <Select value={selectedId} onValueChange={setSelectedId}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder={pickLabel} />
+              </SelectTrigger>
+              <SelectContent>
+                {recordings.map((recording) => (
+                  <SelectItem key={recording.id} value={recording.id}>
+                    {recordingPickerLabel(recording, locale)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3 space-y-2 min-w-0">
+          <div>
+            <h3 className="font-medium text-gray-900 break-words">{recordingDetails(selected, locale).title}</h3>
+            {recordingDetails(selected, locale).meta && (
+              <p className="mt-1 text-xs text-gray-500">{recordingDetails(selected, locale).meta}</p>
+            )}
+          </div>
+          <RecordingPlayer recording={selected} unsupportedLabel={unsupportedLabel} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-2">
+      {recordings.map((recording) => {
+        const { title, meta } = recordingDetails(recording, locale);
+        return (
+          <article key={recording.id} className="rounded-xl border border-gray-200 bg-gray-50/50 p-3 space-y-3 min-w-0">
+            <div>
+              <h3 className="font-medium text-gray-900 break-words">{title}</h3>
+              {meta && <p className="mt-1 text-xs text-gray-500">{meta}</p>}
+            </div>
+            <RecordingPlayer recording={recording} unsupportedLabel={unsupportedLabel} />
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function SchoolLessonRecordings() {
   const { t, locale } = useTranslation();
   const location = useLocation();
@@ -63,15 +188,19 @@ export default function SchoolLessonRecordings() {
   const [loading, setLoading] = useState(true);
   const [savingGroupId, setSavingGroupId] = useState<string | null>(null);
   const [folderInputs, setFolderInputs] = useState<Record<string, string>>({});
+  const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
+  const [silentRefreshing, setSilentRefreshing] = useState(false);
 
   const endpoint = useMemo(() => {
     if (!selectedStudentId) return '/api/school-lesson-recordings';
     return `/api/school-lesson-recordings?studentId=${encodeURIComponent(selectedStudentId)}`;
   }, [selectedStudentId]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (silent) setSilentRefreshing(true);
+    else setLoading(true);
+    if (!silent) setError('');
     try {
       const headers = await authHeaders();
       const response = await fetch(endpoint, { headers });
@@ -81,15 +210,29 @@ export default function SchoolLessonRecordings() {
       setFolderInputs(Object.fromEntries(
         (payload.groups || []).map((group) => [group.id, group.driveFolderId || '']),
       ));
+      setLastFetchedAt(new Date());
     } catch (loadError) {
-      setError((loadError as Error)?.message || t('school.recordings.error'));
+      if (!silent) setError((loadError as Error)?.message || t('school.recordings.error'));
     } finally {
-      setLoading(false);
+      if (silent) setSilentRefreshing(false);
+      else setLoading(false);
     }
   }, [endpoint, t]);
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    const poll = window.setInterval(() => void load({ silent: true }), 5 * 60 * 1000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load({ silent: true });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(poll);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [load]);
 
   const saveFolder = async (groupId: string, remove = false) => {
@@ -142,9 +285,17 @@ export default function SchoolLessonRecordings() {
               {t('school.recordings.retention', { days: data.retentionDays })}
             </p>
           ) : null}
+          <p className="mt-1 text-xs text-gray-500">{t('school.recordings.autoRefresh')}</p>
+          {lastFetchedAt ? (
+            <p className="mt-0.5 text-xs text-gray-400">
+              {t('school.recordings.lastSynced', {
+                time: lastFetchedAt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }),
+              })}
+            </p>
+          ) : null}
         </div>
-        <Button variant="outline" onClick={() => void load()} disabled={loading}>
-          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+        <Button variant="outline" onClick={() => void load()} disabled={loading || silentRefreshing}>
+          <RefreshCw className={`w-4 h-4 mr-2 ${loading || silentRefreshing ? 'animate-spin' : ''}`} />
           {t('school.recordings.refresh')}
         </Button>
       </div>
@@ -219,32 +370,13 @@ export default function SchoolLessonRecordings() {
               </div>
 
               {group.recordings.length > 0 ? (
-                <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-2">
-                  {group.recordings.map((recording) => {
-                    const recorded = recording.recordedAt
-                      ? new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(recording.recordedAt))
-                      : null;
-                    const details = [recorded, durationLabel(recording.durationMillis), fileSizeLabel(recording.size)].filter(Boolean);
-                    return (
-                      <article key={recording.id} className="rounded-xl border border-gray-200 bg-gray-50/50 p-3 space-y-3 min-w-0">
-                        <div>
-                          <h3 className="font-medium text-gray-900 break-words">{recording.name}</h3>
-                          {details.length > 0 && <p className="mt-1 text-xs text-gray-500">{details.join(' · ')}</p>}
-                        </div>
-                        <video
-                          className="w-full aspect-video rounded-lg bg-black"
-                          controls
-                          controlsList="nodownload"
-                          preload="none"
-                          src={recording.streamUrl}
-                          onContextMenu={(event) => event.preventDefault()}
-                        >
-                          {t('school.recordings.videoUnsupported')}
-                        </video>
-                      </article>
-                    );
-                  })}
-                </div>
+                <GroupRecordingsList
+                  recordings={group.recordings}
+                  locale={locale}
+                  countLabel={t('school.recordings.count', { count: String(group.recordings.length) })}
+                  pickLabel={t('school.recordings.pickRecording')}
+                  unsupportedLabel={t('school.recordings.videoUnsupported')}
+                />
               ) : group.configured && !group.loadError ? (
                 <p className="p-5 text-sm text-gray-500">
                   {t('school.recordings.empty', { days: data?.retentionDays || 30 })}

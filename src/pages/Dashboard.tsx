@@ -57,7 +57,8 @@ import {
     tutorStudentCountEstimatedDeduped,
 } from '@/lib/preload';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
-import { isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { isProKlaseOrg } from '@/lib/marketMoney';
+import { canChooseParentLessonComment } from '@/lib/parentLessonComment';
 import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
@@ -173,8 +174,9 @@ export default function DashboardPage() {
     } = useDismissibleDashboardItemIds(recentPaymentRowsKey);
     const { contactVisibility, hasFeature: hasOrgFeature, entityType, organizationId, loading: orgFeaturesLoading } = useOrgFeatures();
     const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, entityType, hasOrgFeature, 'monthly_packages', orgFeaturesLoading);
-    const canChooseParentComment =
-        isManoKorepetitoriusOrg(organizationId) || isManoKorepetitoriusOrg(ctxProfile?.organization_id);
+    const canChooseParentComment = canChooseParentLessonComment(
+        organizationId || ctxProfile?.organization_id,
+    );
     // Org feature: ended lessons are not auto-completed — the tutor must confirm each outcome.
     const requiresStatusConfirmation =
       hasOrgFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(ctxProfile?.organization_id);

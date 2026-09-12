@@ -16,6 +16,15 @@ import { orgTutorSessionPayEur } from '@/lib/orgTutorLessonPay';
 import { isProKlaseOrg } from '@/lib/marketMoney';
 import { proKlaseSessionPayEur } from '@/lib/proKlaseTutorPay';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { isInvoiceProfileComplete, ORG_INVOICE_PROFILE_INCOMPLETE } from '@/lib/invoiceProfileReady';
+
+function invoiceApiErrorMessage(
+  json: { code?: string; error?: string } | null | undefined,
+  t: (key: string) => string,
+): string {
+  if (json?.code === ORG_INVOICE_PROFILE_INCOMPLETE) return t('invoices.orgProfileIncompleteError');
+  return json?.error || t('common.error');
+}
 
 type GroupingType = 'per_payment' | 'per_week' | 'single';
 
@@ -122,16 +131,18 @@ export default function CreateInvoiceModal({
         const tutorJson = await tutorRes.json();
         profileData = tutorJson.data as SellerInfo | null | undefined;
       } else {
-        const [userRes, orgRes] = await Promise.all([
-          fetch('/api/invoice-settings?scope=user', { headers }),
-          !isOrgTutor ? fetch('/api/invoice-settings?scope=organization', { headers }) : Promise.resolve(null),
-        ]);
-        const userJson = await userRes.json();
-        const orgJson = orgRes ? await orgRes.json() : null;
-        profileData = (orgJson?.data || userJson.data) as SellerInfo | null | undefined;
+        if (!isOrgTutor) {
+          const orgRes = await fetch('/api/invoice-settings?scope=organization', { headers });
+          const orgJson = await orgRes.json();
+          profileData = orgJson.data as SellerInfo | null | undefined;
+        } else {
+          const userRes = await fetch('/api/invoice-settings?scope=user', { headers });
+          const userJson = await userRes.json();
+          profileData = userJson.data as SellerInfo | null | undefined;
+        }
       }
 
-      setHasInvoiceProfile(!!profileData);
+      setHasInvoiceProfile(isInvoiceProfileComplete(profileData));
 
       let previewName: string | null | undefined;
       const needsTutorName =
@@ -349,6 +360,10 @@ export default function CreateInvoiceModal({
 
   const handleGenerate = async () => {
     if (sessions.length === 0) return;
+    if (!isOrgTutor && hasInvoiceProfile === false) {
+      setError(t('invoices.orgProfileIncompleteError'));
+      return;
+    }
 
     setGenerating(true);
     setError(null);
@@ -402,7 +417,7 @@ export default function CreateInvoiceModal({
           }),
         });
         const json = await res.json();
-        if (!res.ok) throw new Error(json.error || t('common.error'));
+        if (!res.ok) throw new Error(invoiceApiErrorMessage(json, t));
         totalCount += json.count || 0;
       } else {
       for (const tid of tutorKeys) {
@@ -425,7 +440,7 @@ export default function CreateInvoiceModal({
           }),
         });
         const json = await res.json();
-        if (!res.ok) throw new Error(json.error || t('common.error'));
+        if (!res.ok) throw new Error(invoiceApiErrorMessage(json, t));
         totalCount += json.count || 0;
       }
       }
@@ -497,8 +512,12 @@ export default function CreateInvoiceModal({
         <div className="space-y-4">
           {hasInvoiceProfile === false && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <p className="text-sm text-amber-900 font-medium">{t('invoiceCreate.noProfile')}</p>
-              <p className="text-xs text-amber-700 mt-1">{t('invoiceCreate.noProfileHint')}</p>
+              <p className="text-sm text-amber-900 font-medium">
+                {isOrgTutor ? t('invoiceCreate.noProfile') : t('invoices.orgProfileIncomplete')}
+              </p>
+              <p className="text-xs text-amber-700 mt-1">
+                {isOrgTutor ? t('invoiceCreate.noProfileHint') : t('invoices.orgProfileIncompleteError')}
+              </p>
             </div>
           )}
 

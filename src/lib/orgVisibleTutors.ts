@@ -82,6 +82,7 @@ export async function getOrgVisibleTutors(
     visibleTutorIds,
     { data: linkedStudents },
     { data: inviteData },
+    { data: classGroups },
     { data: profileRows },
   ] = await Promise.all([
     supabase.from('organization_admins').select('user_id').eq('organization_id', orgId),
@@ -89,6 +90,7 @@ export async function getOrgVisibleTutors(
     supabase.rpc('get_my_org_visible_tutor_ids'),
     supabase.from('students').select('linked_user_id, email, tutor_id').eq('organization_id', orgId),
     supabase.from('tutor_invites').select('used_by_profile_id, used, invitee_email').eq('organization_id', orgId),
+    supabase.from('school_class_groups').select('tutor_id').eq('organization_id', orgId),
     supabase.from('profiles').select(select).eq('organization_id', orgId),
   ]);
 
@@ -108,9 +110,13 @@ export async function getOrgVisibleTutors(
   // Union RPC ids with student/invite relationships. RPC can miss tutors whose
   // invite was marked used without used_by_profile_id; empty RPC still falls
   // back so the list does not flash empty while auth.uid() is not ready.
+  const classGroupTutorIds = (classGroups || [])
+    .map((group: { tutor_id?: string | null }) => group.tutor_id)
+    .filter((id: string | null | undefined): id is string => !!id);
   const tutorIdSet = new Set<string>([
     ...(rpcTutorIds || []),
     ...relationshipTutorIds,
+    ...classGroupTutorIds,
   ]);
   return filterConfirmedOrgTutors((profileRows || []) as unknown as OrgTutorRow[], adminIds, tutorIdSet);
 }

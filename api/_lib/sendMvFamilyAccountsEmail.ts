@@ -12,6 +12,12 @@ import {
 } from './emailOrgBranding.js';
 import { MOKSLO_VAISIAI_BRAND_COLOR, MOKSLO_VAISIAI_BRAND_COLOR_SECONDARY } from './marketMoney.js';
 import type { MvActivationRole } from './mvAccountActivationToken.js';
+import {
+  appendMvPayerFeeNoticeBeforeFooter,
+  finalizeMvPayerFirstFeeNoticeAfterSend,
+  maybeMvPayerFirstFeeNoticeFooter,
+  mvPayerFeeNoticeFooterHtml,
+} from './mvPayerFeeNotice.js';
 
 const baseStyles = `
   <style>
@@ -61,6 +67,8 @@ export type MvAccountActivationEmailData = {
   organizationId?: string | null;
   org?: OrgRowForEmailBranding | null;
   locale?: string;
+  /** Preview scripts: always show fee notice, do not mark payer as notified. */
+  previewForceFeeNotice?: boolean;
 };
 
 export async function sendMvAccountActivationEmail(
@@ -122,6 +130,13 @@ export async function sendMvAccountActivationEmail(
     locale,
   );
 
+  const feeNoticeFooter = data.previewForceFeeNotice
+    ? mvPayerFeeNoticeFooterHtml(locale)
+    : await maybeMvPayerFirstFeeNoticeFooter(data.organizationId, to, locale);
+  if (feeNoticeFooter) {
+    html = appendMvPayerFeeNoticeBeforeFooter(html, feeNoticeFooter);
+  }
+
   html = applyOrgBrandingToHtml(html, {
     branding: resolved.branding,
     emailTeamSignature: resolved.emailTeamSignature,
@@ -143,6 +158,10 @@ export async function sendMvAccountActivationEmail(
   if (error) {
     console.error('[sendMvAccountActivationEmail]', error.message);
     return { ok: false, error: error.message };
+  }
+
+  if (feeNoticeFooter && !data.previewForceFeeNotice) {
+    await finalizeMvPayerFirstFeeNoticeAfterSend(data.organizationId, to, true);
   }
 
   return { ok: true };

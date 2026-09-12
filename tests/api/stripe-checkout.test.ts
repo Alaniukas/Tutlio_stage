@@ -177,7 +177,8 @@ describe('POST /api/stripe-checkout', () => {
     expect(result.body?.creditApplied).toBe(0);
     expect(stripeCreate).toHaveBeenCalledTimes(1);
     expect(stripeCreate.mock.calls[0][0]?.payment_intent_data?.transfer_data).toBeUndefined();
-    expect(stripeCreate.mock.calls[0][0]?.payment_intent_data?.application_fee_amount).toBe(50);
+    const { feesCents } = (await import('../../api/_lib/marketMoney')).lessonCheckoutBreakdownCents(25);
+    expect(stripeCreate.mock.calls[0][0]?.payment_intent_data?.application_fee_amount).toBe(feesCents);
     expect(stripeCreate.mock.calls[0][0]?.customer_creation).toBe('always');
     expect(stripeCreate.mock.calls[0][1]).toEqual({ stripeAccount: 'acct_individual' });
     expect(sessionsUpdateEq).toHaveBeenCalledWith('id', 'sess-1');

@@ -9,6 +9,7 @@ import { verifyRequestAuth } from './_lib/auth.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
+import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { directChargeOptions } from './_lib/stripeDirectCharge.js';
 import {
@@ -243,6 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let ownerName = tutor.full_name || 'Korepetitorius';
         let useSchoolOrgAbsorbedFees = false;
         let feeProfile: OrgFeeProfile | null = null;
+        let feeSplit = null;
         const usesManualStudentPayments = tutorUsesManualStudentPayments(tutor);
         let tutorManualBankDetails = '';
 
@@ -259,7 +261,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } else if (tutor.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug, features')
                 .eq('id', tutor.organization_id)
                 .single();
 
@@ -269,6 +271,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
             feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
+            feeSplit = resolveOrgPayerFeeSplit((org as { features?: unknown }).features);
             // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
             useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school' && !feeProfile;
         } else {
@@ -401,12 +404,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     let feesCents = 0;
                     if (feeProfile) {
                         // Custom org deals are tiered on the full transaction (invoice total), not per session.
-                        const b = lessonCheckoutBreakdownCents(totalLessonPrice, market, feeProfile);
+                        const b = lessonCheckoutBreakdownCents(totalLessonPrice, market, feeProfile, feeSplit);
                         baseCents = b.baseCents;
                         feesCents = b.feesCents;
                     } else {
                         for (const s of payerSessions) {
-                            const b = lessonCheckoutBreakdownCents(Number(s.price) || 0, market);
+                            const b = lessonCheckoutBreakdownCents(Number(s.price) || 0, market, null, feeSplit);
                             baseCents += b.baseCents;
                             feesCents += b.feesCents;
                         }

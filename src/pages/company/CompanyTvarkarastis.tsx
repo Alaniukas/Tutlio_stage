@@ -36,10 +36,21 @@ import { getCached, setCache } from '@/lib/dataCache';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { supabase } from '@/lib/supabase';
 import { sendEmail } from '@/lib/email';
+import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
+import {
+  sessionCommentDeliveryNeeded,
+  sessionCommentDeliveryRecipients,
+} from '@/lib/sessionCommentDelivery';
+import { sessionCommentVisibilityLabelKey } from '@/lib/parentLessonComment';
 import { assertTutorSlotsFree, runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
+import { consumeAvailabilityForCreatedSessions } from '@/lib/consumeSessionAvailability';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { planRecurringSeriesPatches, sortSeriesPatchesForApply } from '@/lib/recurringSessions';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
+import {
+  effectiveAvailabilityOnDate,
+  sliceTimeRangeBySessions,
+} from '@/lib/availabilityCalendarBlocks';
 
 function recurringAvailDateRangeLabel(
   startDate: string,
@@ -62,7 +73,7 @@ import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg, proKlaseOrgAdminContext, proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
-import { isLaisviVaikaiOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { isLaisviVaikaiOrg, isManoKorepetitoriusOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
 import {
   parseOrgTrialPolicy,
   shouldAutoMarkNextLessonTrial,
@@ -244,6 +255,7 @@ interface Session {
   is_makeup?: boolean;
   tutor_comment?: string | null;
   show_comment_to_student?: boolean;
+  show_comment_to_parent?: boolean;
   payment_status?: string | null;
   class_group_id?: string | null;
   _isClassGroup?: boolean;
@@ -380,6 +392,7 @@ export default function CompanyTvarkarastis() {
   const proKlaseAdminUi = proKlaseOrgAdminContext(organizationId, isSchoolOrgView ? 'school' : 'company', featuresLoading);
   const pkFeat = (flagId: string) =>
     proKlaseFeatureEnabled(organizationId, isSchoolOrgView ? 'school' : 'company', hasFeature, flagId, featuresLoading);
+  const canChooseParentComment = isManoKorepetitoriusOrg(organizationId);
 
   // Feature flags
   // Super-admins (owners) always have the calendar. Other seats still need the org flags.
@@ -482,6 +495,7 @@ export default function CompanyTvarkarastis() {
   const [editStatus, setEditStatus] = useState<'active' | 'completed' | 'cancelled' | 'no_show'>('active');
   const [editTutorComment, setEditTutorComment] = useState('');
   const [editShowCommentToStudent, setEditShowCommentToStudent] = useState(false);
+  const [editShowCommentToParent, setEditShowCommentToParent] = useState(false);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
   const [classGroupCancelScope, setClassGroupCancelScope] = useState<'one_student' | 'whole_occurrence'>('whole_occurrence');
@@ -572,6 +586,7 @@ export default function CompanyTvarkarastis() {
   const [createPrice, setCreatePrice] = useState(0);
   const [createTutorComment, setCreateTutorComment] = useState('');
   const [createShowCommentToStudent, setCreateShowCommentToStudent] = useState(false);
+  const [createShowCommentToParent, setCreateShowCommentToParent] = useState(false);
   const [createSelectedFreeSlot, setCreateSelectedFreeSlot] = useState('');
   const [individualPricing, setIndividualPricing] = useState<
     Array<{ student_id: string; subject_id: string; price: number }>
@@ -943,53 +958,48 @@ export default function CompanyTvarkarastis() {
     const endOfPeriod = new Date(currentDate);
     endOfPeriod.setDate(endOfPeriod.getDate() + 60);
 
-    filteredAvailability.forEach(avail => {
-      if (avail.is_recurring && avail.day_of_week !== null) {
-        // Generate recurring blocks
-        for (let d = new Date(startOfPeriod); d <= endOfPeriod; d.setDate(d.getDate() + 1)) {
-          const dateStr = format(d, 'yyyy-MM-dd');
-          if (!recurringAvailabilityAppliesOnDate(avail, dateStr, d.getDay())) continue;
-          const [startHour, startMin] = avail.start_time.split(':');
-          const [endHour, endMin] = avail.end_time.split(':');
-          const blockStart = new Date(d);
-          blockStart.setHours(parseInt(startHour), parseInt(startMin), 0);
-          const blockEnd = new Date(d);
-          blockEnd.setHours(parseInt(endHour), parseInt(endMin), 0);
+    const tutorSessions = (tutorId: string) =>
+      mergedCalendarSessions
+        .filter((s) => s.tutor_id === tutorId && s.status !== 'cancelled')
+        .map((s) => ({
+          start_time: new Date(s.start_time),
+          end_time: new Date(s.end_time),
+          status: s.status,
+        }));
 
+    for (let d = new Date(startOfPeriod); d <= endOfPeriod; d.setDate(d.getDate() + 1)) {
+      const dateStr = format(d, 'yyyy-MM-dd');
+      const dayRules = effectiveAvailabilityOnDate(filteredAvailability, dateStr, d.getDay());
+
+      for (const avail of dayRules) {
+        const [startHour, startMin] = avail.start_time.split(':');
+        const [endHour, endMin] = avail.end_time.split(':');
+        const blockStart = new Date(d);
+        blockStart.setHours(parseInt(startHour, 10), parseInt(startMin, 10), 0);
+        const blockEnd = new Date(d);
+        blockEnd.setHours(parseInt(endHour, 10), parseInt(endMin, 10), 0);
+
+        const slices = sliceTimeRangeBySessions(
+          { start: blockStart, end: blockEnd },
+          tutorSessions(avail.tutor_id),
+        );
+
+        slices.forEach((slice, index) => {
           blocks.push({
-            id: `avail-${avail.id}-${d.toISOString()}`,
+            id: `avail-${avail.id}-${dateStr}-${index}`,
             title: `Laisvas: ${avail.tutor?.full_name || 'Tutorius'}`,
-            start: blockStart,
-            end: blockEnd,
+            start: slice.start,
+            end: slice.end,
             type: 'availability',
             availabilityId: avail.id,
             tutorId: avail.tutor_id,
           });
-        }
-      } else if (!avail.is_recurring && avail.specific_date) {
-        // One-time availability
-        const specificDate = new Date(avail.specific_date);
-        const [startHour, startMin] = avail.start_time.split(':');
-        const [endHour, endMin] = avail.end_time.split(':');
-        const blockStart = new Date(specificDate);
-        blockStart.setHours(parseInt(startHour), parseInt(startMin), 0);
-        const blockEnd = new Date(specificDate);
-        blockEnd.setHours(parseInt(endHour), parseInt(endMin), 0);
-
-        blocks.push({
-          id: `avail-${avail.id}`,
-          title: `Laisvas: ${avail.tutor?.full_name || 'Tutorius'}`,
-          start: blockStart,
-          end: blockEnd,
-          type: 'availability',
-          availabilityId: avail.id,
-          tutorId: avail.tutor_id,
         });
       }
-    });
+    }
 
     return blocks;
-  }, [filteredAvailability, currentDate, showOnlySessions]);
+  }, [filteredAvailability, currentDate, showOnlySessions, mergedCalendarSessions]);
 
   /** Trial (bandomoji) lessons get a distinct highlight in the calendar. */
   const trialSubjectIds = useMemo(
@@ -1773,6 +1783,7 @@ export default function CompanyTvarkarastis() {
     setEditStatus((session.status as typeof editStatus) || 'active');
     setEditTutorComment(session.tutor_comment || '');
     setEditShowCommentToStudent(Boolean(session.show_comment_to_student));
+    setEditShowCommentToParent(Boolean(session.show_comment_to_parent));
     setGroupEditChoice('single');
     setRescheduleReason('');
     setRescheduleRequestedBy('');
@@ -1823,6 +1834,7 @@ export default function CompanyTvarkarastis() {
       const classGroupIds = isClassGroupSession
         ? classGroupOccurrenceSessionIds(selectedGroupSessions)
         : [];
+      const showCommentToParent = canChooseParentComment && editShowCommentToParent;
       const seriesFields: Record<string, any> = isClassGroupSession
         ? {
             topic: editTopic || null,
@@ -1830,6 +1842,7 @@ export default function CompanyTvarkarastis() {
             price: editPrice,
             tutor_comment: editTutorComment || null,
             show_comment_to_student: editShowCommentToStudent,
+            ...(canChooseParentComment ? { show_comment_to_parent: showCommentToParent } : {}),
             ...(editSubjectId ? { subject_id: editSubjectId } : {}),
           }
         : {
@@ -1844,6 +1857,7 @@ export default function CompanyTvarkarastis() {
             status: editStatus,
             tutor_comment: editTutorComment || null,
             show_comment_to_student: editShowCommentToStudent,
+            ...(canChooseParentComment ? { show_comment_to_parent: showCommentToParent } : {}),
           };
       const payload: Record<string, any> = {
         start_time: newStart.toISOString(),
@@ -1962,7 +1976,7 @@ export default function CompanyTvarkarastis() {
           .single();
         const { data: studentRow } = await supabase
           .from('students')
-          .select('full_name, email, payment_payer, payer_email')
+          .select('full_name, email, payment_payer, payer_email, parent_secondary_email')
           .eq('id', studentId)
           .single();
 
@@ -2004,8 +2018,67 @@ export default function CompanyTvarkarastis() {
 
         sendRes(tutorRow?.email, 'tutor');
         sendRes(studentRow?.email, 'student');
-        if (studentRow?.payment_payer === 'parent' && studentRow.payer_email) {
-          sendRes(studentRow.payer_email, 'payer');
+        if (isSchoolOrgView || studentRow?.payment_payer === 'parent') {
+          if (studentRow?.payer_email) sendRes(studentRow.payer_email, 'payer');
+          if (studentRow?.parent_secondary_email) sendRes(studentRow.parent_secondary_email, 'payer');
+        }
+      }
+
+      if (
+        !isClassGroupSession
+        && (editShowCommentToStudent || showCommentToParent)
+        && editTutorComment.trim()
+      ) {
+        const studentId = (payload.student_id as string) || selectedEvent.student_id;
+        let studentEmail: string | undefined = selectedEvent.student?.email;
+        let payerEmail: string | null = null;
+        let secondaryParentEmail: string | null = null;
+        if (studentId) {
+          const { data: studentRow } = await supabase
+            .from('students')
+            .select('email, payer_email, parent_secondary_email, full_name, linked_user_id')
+            .eq('id', studentId)
+            .single();
+          const resolved = await resolveStudentNotificationEmail(studentRow);
+          if (resolved) studentEmail = resolved;
+          payerEmail = studentRow?.payer_email || null;
+          secondaryParentEmail = studentRow?.parent_secondary_email || null;
+        }
+        const delivery = {
+          nextComment: editTutorComment,
+          previousComment: selectedEvent.tutor_comment,
+          showToStudent: editShowCommentToStudent,
+          showToParent: showCommentToParent,
+          previousShowToStudent: selectedEvent.show_comment_to_student,
+          previousShowToParent: selectedEvent.show_comment_to_parent,
+          studentEmail,
+          parentEmails: [payerEmail, secondaryParentEmail],
+        };
+        const recipients = sessionCommentDeliveryRecipients(delivery);
+        if (recipients.length > 0) {
+          const { data: tutorRow } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', (payload.tutor_id as string) || selectedEvent.tutor_id)
+            .maybeSingle();
+          const ok = await sendEmail({
+            type: 'session_comment_added',
+            to: recipients,
+            data: {
+              studentName: selectedEvent.student?.full_name || '',
+              tutorName: tutorRow?.full_name || selectedEvent.tutor?.full_name || '',
+              date: format(newStart, 'yyyy-MM-dd'),
+              time: format(newStart, 'HH:mm'),
+              comment: editTutorComment,
+              ...(organizationId ? { organizationId } : {}),
+            },
+          }).catch((err) => {
+            console.error('[OrgSchedule] comment email error', err);
+            return false;
+          });
+          if (!ok) alert(t('cal.commentSavedEmailFailed2'));
+        } else if (sessionCommentDeliveryNeeded(delivery)) {
+          alert(t('cal.commentSavedNoEmail'));
         }
       }
 
@@ -2483,8 +2556,10 @@ export default function CompanyTvarkarastis() {
         { start: new Date(selectedSlot.startIso), end: new Date(selectedSlot.endIso) },
       ]);
 
-      const { error } = await supabase.from('sessions').insert(sessionRows);
+      const { data: createdFromAvail, error } = await supabase.from('sessions').insert(sessionRows).select('start_time, end_time');
       if (error) throw new Error(error.message);
+
+      await consumeAvailabilityForCreatedSessions(supabase, editingAvailability.tutor_id, createdFromAvail || []);
 
       setCreateFromAvailCreatedIntervals((current) => [
         ...current,
@@ -2683,6 +2758,7 @@ export default function CompanyTvarkarastis() {
         createFirstLessonIsTrial: createIsRecurring && createFirstLessonIsTrial,
         createTutorComment,
         createShowCommentToStudent,
+        createShowCommentToParent: canChooseParentComment && createShowCommentToParent,
         createIsMakeup: isProKlaseOrg(organizationId) && createIsMakeup,
         subjects,
         individualPricing,
@@ -2765,6 +2841,7 @@ export default function CompanyTvarkarastis() {
     setCreatePrice(0);
     setCreateTutorComment('');
     setCreateShowCommentToStudent(false);
+    setCreateShowCommentToParent(false);
     setCreateSelectedFreeSlot('');
     setCreateFromAvailabilityBlock(null);
   };
@@ -3602,6 +3679,17 @@ export default function CompanyTvarkarastis() {
                 />
                 {t('compSch.showToStudent')}
               </label>
+              {canChooseParentComment && (
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={createShowCommentToParent}
+                    onChange={(e) => setCreateShowCommentToParent(e.target.checked)}
+                    className="rounded border-gray-300 text-indigo-600"
+                  />
+                  {t('dash.commentShowParent')}
+                </label>
+              )}
             </div>
 
             <RecurrenceFields
@@ -4077,7 +4165,7 @@ export default function CompanyTvarkarastis() {
                     <MessageSquare className="w-3 h-3" />
                     {t('compSess.tutorComment')}
                     <span className="text-[10px] font-normal ml-1">
-                      ({selectedEvent.show_comment_to_student ? t('compSess.visibleToStudent') : t('compSess.tutorCommentNotForStudent')})
+                      ({t(sessionCommentVisibilityLabelKey(selectedEvent))})
                     </span>
                   </Label>
                   <p className="text-sm mt-1 bg-blue-50 border border-blue-100 rounded-lg p-2 whitespace-pre-wrap">{selectedEvent.tutor_comment}</p>
@@ -4551,6 +4639,17 @@ export default function CompanyTvarkarastis() {
                   />
                   <span className="text-sm text-gray-700">{t('cal.showToStudent')}</span>
                 </label>
+                {canChooseParentComment && (
+                  <label className="flex items-center gap-2 cursor-pointer mt-1">
+                    <input
+                      type="checkbox"
+                      checked={editShowCommentToParent}
+                      onChange={(e) => setEditShowCommentToParent(e.target.checked)}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm text-gray-700">{t('dash.commentShowParent')}</span>
+                  </label>
+                )}
               </div>
 
               {!isClassGroupSession && (

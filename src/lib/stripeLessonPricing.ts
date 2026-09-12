@@ -12,6 +12,7 @@ import {
   MARKET_FEES,
   type OrgFeeProfile,
 } from './marketMoney';
+import type { OrgPayerFeeSplit } from './orgPayerFeeSplit';
 
 export const STRIPE_FEE_PERCENT = MARKET_FEES.stripePercent;
 export const STRIPE_FEE_FIXED_EUR = MARKET_FEES.stripeFixed.eur;
@@ -43,8 +44,9 @@ export function formatLessonStripeChargeEur(
   lessonBasePrice: number | null | undefined,
   tutorOrganizationIsSchool: boolean,
   feeProfile?: OrgFeeProfile | null,
+  feeSplit?: OrgPayerFeeSplit | null,
 ): string {
-  return formatLessonStripeCharge(lessonBasePrice, tutorOrganizationIsSchool, market(), feeProfile);
+  return formatLessonStripeCharge(lessonBasePrice, tutorOrganizationIsSchool, market(), feeProfile, feeSplit);
 }
 
 export {

@@ -19,6 +19,8 @@ import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS } from '@/lib/orgUi';
 import { format } from 'date-fns';
+import OrgPayerFeeSplitSettings from '@/components/company/OrgPayerFeeSplitSettings';
+import { isInvoiceProfileComplete } from '@/lib/invoiceProfileReady';
 
 type CompanyFinanceCache = {
   orgId: string;
@@ -286,6 +288,18 @@ export default function CompanyFinance() {
     setInvoiceSending(true);
     setInvoiceError(null);
     try {
+      if (invoiceIncludeSalesInvoice && orgId) {
+        const { data: orgInvProf } = await supabase
+          .from('invoice_profiles')
+          .select('entity_type, business_name, company_code, address, activity_number, contact_email, contact_phone')
+          .eq('organization_id', orgId)
+          .maybeSingle();
+        if (!isInvoiceProfileComplete(orgInvProf)) {
+          setInvoiceError(t('invoices.orgProfileIncompleteError'));
+          setInvoiceSending(false);
+          return;
+        }
+      }
       const groupedByTutor = invoiceUnpaidSessions.reduce(
         (acc: Record<string, { sessionIds: string[]; packageIds: string[] }>, s: any) => {
           const tid = s.tutor_id;
@@ -662,6 +676,8 @@ export default function CompanyFinance() {
             </div>
           </div>
         )}
+
+        <OrgPayerFeeSplitSettings orgId={orgId} />
 
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
           <h2 className="text-lg font-semibold text-gray-900">{t('companyFinance.studentAccess')}</h2>

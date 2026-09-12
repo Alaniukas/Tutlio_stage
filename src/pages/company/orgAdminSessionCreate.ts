@@ -5,7 +5,9 @@ import {
 } from '@/lib/recurringSessions';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendEmail } from '@/lib/email';
-import { isMoksloVaisiaiOrg } from '@/lib/marketMoney';
+import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
+import { sessionCommentDeliveryRecipients } from '@/lib/sessionCommentDelivery';
+import { isManoKorepetitoriusOrg, isMoksloVaisiaiOrg } from '@/lib/marketMoney';
 import {
   countNonCancelledSessionsForPair,
   isFirstLessonForStudentTutorPair,
@@ -15,6 +17,7 @@ import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
 import { packageCoversLessonDate } from '@/lib/pooledPackageBookingWindow';
 import { defaultSessionPaymentStatusForStudent } from '@/lib/studentPaymentModel';
 import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
+import { consumeAvailabilityForCreatedSessions } from '@/lib/consumeSessionAvailability';
 import {
   contractedLessonsPerWeek,
   resolveOrganizationLessonPrice,
@@ -464,6 +467,7 @@ export interface OrgAdminCreateSessionInput {
   createFirstLessonIsTrial?: boolean;
   createTutorComment: string;
   createShowCommentToStudent: boolean;
+  createShowCommentToParent?: boolean;
   /** Pro Klasė: compensation lesson — client not charged via package. */
   createIsMakeup?: boolean;
   subjects: SubjectLite[];
@@ -504,6 +508,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     createFirstLessonIsTrial = false,
     createTutorComment,
     createShowCommentToStudent,
+    createShowCommentToParent = false,
     createIsMakeup = false,
     subjects,
     individualPricing,
@@ -527,6 +532,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     createPrice = trialMeta.price;
   }
   let effectiveShowCommentToStudent = createShowCommentToStudent;
+  let effectiveShowCommentToParent = false;
   if ((createTutorComment || '').trim()) {
     try {
       const { data: tutorOrg } = await supabase
@@ -544,6 +550,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
         const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
         if (featObj['trial_lesson_comment_mode'] === 'student_and_parent' && (subjRow as any)?.is_trial === true) {
           effectiveShowCommentToStudent = true;
+        }
+        if (isManoKorepetitoriusOrg(orgId) && createShowCommentToParent) {
+          effectiveShowCommentToParent = true;
         }
       }
     } catch {
@@ -782,6 +791,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           lesson_package_id: lessonPackageId,
           tutor_comment: createTutorComment || null,
           show_comment_to_student: effectiveShowCommentToStudent,
+          show_comment_to_parent: effectiveShowCommentToParent,
           recurring_session_id: template.id,
           created_by_role: 'org_admin',
           available_spots: subj.is_group ? subj.max_students : null,
@@ -833,6 +843,8 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       .insert(sessionsRows)
       .select('id, student_id, paid, lesson_package_id, payment_status, price, start_time, end_time');
     if (insErr) throw new Error(insErr.message);
+
+    await consumeAvailabilityForCreatedSessions(supabase, createTutorId, inserted || []);
 
     for (const [pkgId, usedCount] of packagesUsage.entries()) {
       const pkg = Array.from(packagesByStudent.values()).find((x) => x.id === pkgId);
@@ -952,6 +964,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       lesson_package_id: lessonPackageId,
       tutor_comment: createTutorComment || null,
       show_comment_to_student: effectiveShowCommentToStudent,
+      show_comment_to_parent: effectiveShowCommentToParent,
       created_by_role: 'org_admin',
       available_spots: subj.is_group ? subj.max_students : null,
       is_makeup: createIsMakeup,
@@ -965,6 +978,8 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
 
   const { data: created, error } = await supabase.from('sessions').insert(sessionsToInsert).select();
   if (error) throw new Error(error.message);
+
+  await consumeAvailabilityForCreatedSessions(supabase, createTutorId, created || []);
 
   for (const pkgUpdate of packagesToUpdate) {
     const { error: itemErr } = await supabase
@@ -1003,7 +1018,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
   const stripeIds = [...new Set((created || []).map(s => (s as { student_id: string }).student_id))];
   const { data: studentsStripe } = await supabase
     .from('students')
-    .select('id, full_name, email, payment_payer, payer_email')
+    .select('id, full_name, email, payment_payer, payer_email, parent_secondary_email, linked_user_id')
     .in('id', stripeIds);
   const studentByIdStripe = new Map(studentsStripe?.map(s => [s.id, s]) ?? []);
 
@@ -1024,39 +1039,47 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       });
     }
 
-    if (effectiveShowCommentToStudent && createTutorComment && studentData?.email) {
-      let to: string | string[] = studentData.email;
-      try {
-        const orgId = (tutorProfile as any)?.organization_id as string | null | undefined;
-        if (orgId) {
-          const [{ data: orgRow }, { data: subjRow }] = await Promise.all([
-            supabase.from('organizations').select('features').eq('id', orgId).maybeSingle(),
-            supabase.from('subjects').select('is_trial').eq('id', createSubjectId).maybeSingle(),
-          ]);
-          const feat = (orgRow as any)?.features;
-          const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
-          const mode = featObj['trial_lesson_comment_mode'];
-          const sendToParent = mode === 'student_and_parent' && (subjRow as any)?.is_trial === true;
-          const payer = (studentData as any)?.payer_email as string | null | undefined;
-          if (sendToParent && payer && payer.trim().length > 0 && payer.trim() !== studentData.email.trim()) {
-            to = [studentData.email, payer.trim()];
+    if ((effectiveShowCommentToStudent || effectiveShowCommentToParent) && createTutorComment.trim()) {
+      let showToParent = effectiveShowCommentToParent;
+      if (!showToParent && effectiveShowCommentToStudent) {
+        try {
+          const orgId = (tutorProfile as any)?.organization_id as string | null | undefined;
+          if (orgId) {
+            const [{ data: orgRow }, { data: subjRow }] = await Promise.all([
+              supabase.from('organizations').select('features').eq('id', orgId).maybeSingle(),
+              supabase.from('subjects').select('is_trial').eq('id', createSubjectId).maybeSingle(),
+            ]);
+            const feat = (orgRow as any)?.features;
+            const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
+            const mode = featObj['trial_lesson_comment_mode'];
+            showToParent = mode === 'student_and_parent' && (subjRow as any)?.is_trial === true;
           }
+        } catch {
+          /* ignore trial parent auto-send errors */
         }
-      } catch {
-        /* ignore parent email decision errors */
       }
-      sendEmail({
-        type: 'session_comment_added',
-        to,
-        data: {
-          studentName: studentData.full_name || '',
-          tutorName: tutorProfile?.full_name || '',
-          date: format(startDate, 'yyyy-MM-dd'),
-          time: format(startDate, 'HH:mm'),
-          comment: createTutorComment,
-          ...((tutorProfile as any)?.organization_id ? { organizationId: (tutorProfile as any).organization_id } : {}),
-        },
-      }).catch(() => {});
+      const studentEmail = await resolveStudentNotificationEmail(studentData);
+      const recipients = sessionCommentDeliveryRecipients({
+        nextComment: createTutorComment,
+        showToStudent: effectiveShowCommentToStudent,
+        showToParent,
+        studentEmail,
+        parentEmails: [studentData?.payer_email, studentData?.parent_secondary_email],
+      });
+      if (recipients.length > 0) {
+        sendEmail({
+          type: 'session_comment_added',
+          to: recipients,
+          data: {
+            studentName: studentData?.full_name || '',
+            tutorName: tutorProfile?.full_name || '',
+            date: format(startDate, 'yyyy-MM-dd'),
+            time: format(startDate, 'HH:mm'),
+            comment: createTutorComment,
+            ...((tutorProfile as any)?.organization_id ? { organizationId: (tutorProfile as any).organization_id } : {}),
+          },
+        }).catch(() => {});
+      }
     }
 
     syncGoogle(sess.id);

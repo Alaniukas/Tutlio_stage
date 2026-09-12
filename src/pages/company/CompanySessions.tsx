@@ -46,7 +46,7 @@ import {
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { useHideWaitlist } from '@/hooks/useHideWaitlist';
-import { isWaitlistHiddenForOrg, isProKlaseOrg, isLaisviVaikaiOrg } from '@/lib/marketMoney';
+import { isWaitlistHiddenForOrg, isProKlaseOrg, isLaisviVaikaiOrg, isManoKorepetitoriusOrg } from '@/lib/marketMoney';
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
 import {
   resolveOrgSessionSubjectDefaults,
@@ -68,6 +68,13 @@ import {
 } from '@/lib/schoolSessionMonitoring';
 import { isUnconfirmedAutomaticNoShow } from '@/lib/schoolJoinNoShow';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
+import { sendEmail } from '@/lib/email';
+import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
+import {
+  sessionCommentDeliveryNeeded,
+  sessionCommentDeliveryRecipients,
+} from '@/lib/sessionCommentDelivery';
+import { sessionCommentVisibilityLabelKey } from '@/lib/parentLessonComment';
 
 interface Session {
   id: string;
@@ -93,6 +100,7 @@ interface Session {
   recurring_session_id?: string | null;
   tutor_comment?: string | null;
   show_comment_to_student?: boolean;
+  show_comment_to_parent?: boolean;
   student_admin_comment?: string | null;
   student_admin_comment_visible_to_tutor?: boolean;
   tutor_joined_at?: string | null;
@@ -120,8 +128,44 @@ type OrgStudentRow = {
   pricing_lessons_per_week?: number | null;
 };
 
-const ORG_SESSION_DETAIL_SELECT =
-  '*, student:students(full_name, admin_comment, admin_comment_visible_to_tutor), subjects(is_group), tutor_comment, show_comment_to_student';
+const SESSIONS_PAGE_SIZE = 20;
+
+const ORG_SESSION_LIST_SELECT =
+  '*, student:students(full_name, admin_comment, admin_comment_visible_to_tutor), subjects(is_group)';
+
+const ORG_SESSION_STATS_SELECT =
+  'id, status, start_time, end_time, cancelled_by, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at';
+
+function orgSessionDetailSelect(organizationId: string | null | undefined): string {
+  if (isManoKorepetitoriusOrg(organizationId)) {
+    return `${ORG_SESSION_LIST_SELECT}, show_comment_to_parent`;
+  }
+  return ORG_SESSION_LIST_SELECT;
+}
+
+type SessionListRange = { start: Date | null; end: Date | null };
+
+function applySessionListRange<T extends { gte: (c: string, v: string) => T; lte: (c: string, v: string) => T }>(
+  query: T,
+  range: SessionListRange,
+  isSchoolOrgView: boolean,
+): T {
+  if (range.start) {
+    const start = isSchoolOrgView ? schoolCalendarInstant(range.start) : new Date(range.start);
+    start.setHours(0, 0, 0, 0);
+    query = query.gte('start_time', start.toISOString());
+  } else if (!isSchoolOrgView) {
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    query = query.gte('start_time', threeMonthsAgo.toISOString());
+  }
+  if (range.end) {
+    const end = isSchoolOrgView ? schoolCalendarInstant(range.end) : new Date(range.end);
+    end.setHours(23, 59, 59, 999);
+    query = query.lte('start_time', end.toISOString());
+  }
+  return query;
+}
 
 function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }[]): Session {
   return {
@@ -148,6 +192,7 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
     recurring_session_id: row.recurring_session_id || null,
     tutor_comment: row.tutor_comment || null,
     show_comment_to_student: row.show_comment_to_student ?? false,
+    show_comment_to_parent: row.show_comment_to_parent ?? false,
     student_admin_comment: row.student?.admin_comment ?? null,
     student_admin_comment_visible_to_tutor: row.student?.admin_comment_visible_to_tutor ?? false,
     tutor_joined_at: row.tutor_joined_at ?? null,
@@ -226,11 +271,13 @@ export default function CompanySessions() {
   const [editStatus, setEditStatus] = useState('active');
   const [editTutorComment, setEditTutorComment] = useState('');
   const [editShowCommentToStudent, setEditShowCommentToStudent] = useState(false);
+  const [editShowCommentToParent, setEditShowCommentToParent] = useState(false);
   const [groupEditChoice, setGroupEditChoice] = useState<'single' | 'all_future'>('single');
   const [savingEdit, setSavingEdit] = useState(false);
   const [togglingPaid, setTogglingPaid] = useState(false);
   const [togglingComplimentary, setTogglingComplimentary] = useState(false);
   const [organizationId, setOrganizationId] = useState<string | null>(cachedOrgId);
+  const canChooseParentComment = isManoKorepetitoriusOrg(organizationId);
   const isProKlase = isProKlaseOrg(organizationId);
   const isLaisviVaikai = isLaisviVaikaiOrg(organizationId);
   const supportsManualAttendance = isSchoolOrgView || isProKlase;
@@ -252,10 +299,38 @@ export default function CompanySessions() {
     priceEur: 0,
   });
   const [filterStudent, setFilterStudent] = useState('');
+  const [statsSessions, setStatsSessions] = useState<Session[]>([]);
+  const [hasMoreSessions, setHasMoreSessions] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [totalSessionsCount, setTotalSessionsCount] = useState<number | null>(null);
+  const listOffsetRef = useRef(0);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  const initialListLoadDone = useRef(false);
 
   useEffect(() => {
-    void loadData();
+    void loadData({ reset: true }).then(() => {
+      initialListLoadDone.current = true;
+    });
   }, []);
+
+  useEffect(() => {
+    if (!initialListLoadDone.current) return;
+    void loadData({ reset: true });
+  }, [filterTutor, filterStatus, filterStudent]);
+
+  useEffect(() => {
+    if (!loadMoreRef.current || loading || loadingMore || !hasMoreSessions) return;
+    const node = loadMoreRef.current;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) void loadMoreSessions();
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [loading, loadingMore, hasMoreSessions, sessions.length]);
 
   useEffect(() => {
     if (!organizationId) return;
@@ -330,110 +405,194 @@ export default function CompanySessions() {
     ],
   );
 
+  const buildSessionListQuery = (
+    tutorIds: string[],
+    orgId: string,
+    range: SessionListRange,
+    listFilters: { tutorId: string; status: string; studentIds: string[] | null },
+  ) => {
+    let query = supabase
+      .from('sessions')
+      .select(orgSessionDetailSelect(orgId))
+      .in('tutor_id', tutorIds);
+    query = applySessionListRange(query, range, isSchoolOrgView);
+    if (listFilters.tutorId) query = query.eq('tutor_id', listFilters.tutorId);
+    if (listFilters.status) query = query.eq('status', listFilters.status);
+    if (listFilters.studentIds?.length) query = query.in('student_id', listFilters.studentIds);
+    return query.order('start_time', { ascending: false }).order('id');
+  };
+
   const loadData = async (
-    range = {
+    opts: {
+      reset?: boolean;
+      range?: SessionListRange;
+    } = {},
+  ) => {
+    const reset = opts.reset !== false;
+    const range = opts.range ?? {
       start: isFilterActive ? filterStartDate : null,
       end: isFilterActive ? filterEndDate : null,
-    },
-  ) => {
+    };
     const request = ++loadRequest.current;
-    if (!getCached('company_sessions')) setLoading(true);
+    if (reset && !getCached('company_sessions')) setLoading(true);
     setLoadError('');
     try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', user.id)
-      .maybeSingle();
-    if (!adminRow) return;
-    setOrganizationId(adminRow.organization_id);
+      const { data: adminRow } = await supabase
+        .from('organization_admins')
+        .select('organization_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (!adminRow) return;
+      setOrganizationId(adminRow.organization_id);
 
-    const tutorList = await getOrgVisibleTutors(
-      supabase as any,
-      adminRow.organization_id,
-      'id, full_name, email, personal_meeting_link',
-    );
-    setTutors(tutorList);
+      const tutorList = await getOrgVisibleTutors(
+        supabase as any,
+        adminRow.organization_id,
+        'id, full_name, email, personal_meeting_link',
+      );
+      setTutors(tutorList);
 
-    const tutorIds = tutorList.map((t) => t.id);
+      const tutorIds = tutorList.map((t) => t.id);
 
-    const [studentsResult, subjectsResult, pricingResult, tspResult, dynamicResult] = await Promise.all([
-      supabase
-        .from('students')
-        .select('id, full_name, tutor_id, linked_user_id, email, organization_id, personal_meeting_link, grade, pricing_lessons_per_week, payer_name, payer_email')
-        .eq('organization_id', adminRow.organization_id)
-        .order('full_name'),
-      supabase
-        .from('subjects')
-        .select('id, name, price, tutor_id, duration_minutes, is_group, is_trial, meeting_link')
-        .in('tutor_id', tutorIds)
-        .order('name'),
-      supabase
-        .from('student_individual_pricing')
-        .select('student_id, subject_id, price')
-        .in('tutor_id', tutorIds),
-      supabase
-        .from('tutor_subject_prices')
-        .select('tutor_id, org_subject_template_id, price, duration_minutes')
-        .in('tutor_id', tutorIds),
-      isProKlaseOrg(adminRow.organization_id)
-        ? supabase
-            .from('organization_dynamic_pricing')
-            .select('id, organization_id, grade_min, grade_max, lessons_per_week, price')
-            .eq('organization_id', adminRow.organization_id)
-        : Promise.resolve({ data: [] as OrganizationDynamicPricingRule[] }),
-    ]);
-    setStudents(studentsResult.data || []);
-    setSubjects(subjectsResult.data || []);
-    setIndividualPricing(pricingResult.data || []);
-    setTutorSubjectPrices(tspResult.data || []);
-    setDynamicPricingRules(
-      (dynamicResult.data ?? []).map((row) => ({
-        ...row,
-        grade_min: Number(row.grade_min),
-        grade_max: Number(row.grade_max),
-        lessons_per_week: Number(row.lessons_per_week),
-        price: Number(row.price),
-      })),
-    );
+      const [studentsResult, subjectsResult, pricingResult, tspResult, dynamicResult] = await Promise.all([
+        supabase
+          .from('students')
+          .select('id, full_name, tutor_id, linked_user_id, email, organization_id, personal_meeting_link, grade, pricing_lessons_per_week, payer_name, payer_email')
+          .eq('organization_id', adminRow.organization_id)
+          .order('full_name'),
+        tutorIds.length
+          ? supabase
+              .from('subjects')
+              .select('id, name, price, tutor_id, duration_minutes, is_group, is_trial, meeting_link')
+              .in('tutor_id', tutorIds)
+              .order('name')
+          : Promise.resolve({ data: [] as Subject[] }),
+        tutorIds.length
+          ? supabase
+              .from('student_individual_pricing')
+              .select('student_id, subject_id, price')
+              .in('tutor_id', tutorIds)
+          : Promise.resolve({ data: [] }),
+        tutorIds.length
+          ? supabase
+              .from('tutor_subject_prices')
+              .select('tutor_id, org_subject_template_id, price, duration_minutes')
+              .in('tutor_id', tutorIds)
+          : Promise.resolve({ data: [] }),
+        isProKlaseOrg(adminRow.organization_id)
+          ? supabase
+              .from('organization_dynamic_pricing')
+              .select('id, organization_id, grade_min, grade_max, lessons_per_week, price')
+              .eq('organization_id', adminRow.organization_id)
+          : Promise.resolve({ data: [] as OrganizationDynamicPricingRule[] }),
+      ]);
+      setStudents(studentsResult.data || []);
+      setSubjects(subjectsResult.data || []);
+      setIndividualPricing(pricingResult.data || []);
+      setTutorSubjectPrices(tspResult.data || []);
+      setDynamicPricingRules(
+        (dynamicResult.data ?? []).map((row) => ({
+          ...row,
+          grade_min: Number(row.grade_min),
+          grade_max: Number(row.grade_max),
+          lessons_per_week: Number(row.lessons_per_week),
+          price: Number(row.price),
+        })),
+      );
 
-    if (tutorList.length === 0) {
-      if (request === loadRequest.current) setSessions([]);
-      return;
-    }
-
-    const sessionsData = await fetchAllRows<any>((from, to) => {
-      let query = supabase.from('sessions').select(ORG_SESSION_DETAIL_SELECT).in('tutor_id', tutorIds);
-      if (range.start) {
-        const start = isSchoolOrgView ? schoolCalendarInstant(range.start) : new Date(range.start);
-        start.setHours(0, 0, 0, 0);
-        query = query.gte('start_time', start.toISOString());
-      } else if (!isSchoolOrgView) {
-        const threeMonthsAgo = new Date();
-        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-        query = query.gte('start_time', threeMonthsAgo.toISOString());
+      if (tutorList.length === 0) {
+        if (request === loadRequest.current) {
+          setSessions([]);
+          setStatsSessions([]);
+          setHasMoreSessions(false);
+          setTotalSessionsCount(0);
+          listOffsetRef.current = 0;
+        }
+        return;
       }
-      if (range.end) {
-        const end = isSchoolOrgView ? schoolCalendarInstant(range.end) : new Date(range.end);
-        end.setHours(23, 59, 59, 999);
-        query = query.lte('start_time', end.toISOString());
+
+      const studentIdsForFilter = filterStudent
+        ? [...new Set(
+            students
+              .filter((s) => s.id === filterStudent || orgStudentIdentityGroupKey(s) === filterStudent)
+              .map((s) => s.id),
+          )]
+        : null;
+      const listFilters = {
+        tutorId: filterTutor,
+        status: filterStatus,
+        studentIds: studentIdsForFilter,
+      };
+
+      if (reset) listOffsetRef.current = 0;
+      const from = listOffsetRef.current;
+      const to = from + SESSIONS_PAGE_SIZE - 1;
+
+      let countQuery = supabase
+        .from('sessions')
+        .select('id', { count: 'exact', head: true })
+        .in('tutor_id', tutorIds);
+      countQuery = applySessionListRange(countQuery, range, isSchoolOrgView);
+      if (listFilters.tutorId) countQuery = countQuery.eq('tutor_id', listFilters.tutorId);
+      if (listFilters.status) countQuery = countQuery.eq('status', listFilters.status);
+      if (listFilters.studentIds?.length) countQuery = countQuery.in('student_id', listFilters.studentIds);
+
+      const [pageResult, countResult, statsData] = await Promise.all([
+        buildSessionListQuery(tutorIds, adminRow.organization_id, range, listFilters).range(from, to),
+        countQuery,
+        fetchAllRows<any>((statsFrom, statsTo) => {
+          let statsQuery = supabase
+            .from('sessions')
+            .select(ORG_SESSION_STATS_SELECT)
+            .in('tutor_id', tutorIds);
+          statsQuery = applySessionListRange(statsQuery, range, isSchoolOrgView);
+          if (listFilters.tutorId) statsQuery = statsQuery.eq('tutor_id', listFilters.tutorId);
+          if (listFilters.status) statsQuery = statsQuery.eq('status', listFilters.status);
+          if (listFilters.studentIds?.length) statsQuery = statsQuery.in('student_id', listFilters.studentIds);
+          return statsQuery.order('start_time', { ascending: false }).order('id').range(statsFrom, statsTo);
+        }),
+      ]);
+
+      if (pageResult.error) throw new Error(pageResult.error.message);
+      const pageRows = pageResult.data || [];
+      const enriched: Session[] = pageRows.map((s: any) => mapOrgSessionRow(s, tutorList));
+      const statsRows: Session[] = (statsData || []).map((row: any) => ({
+        ...mapOrgSessionRow(row, tutorList),
+        tutor_name: tutorList.find((t) => t.id === row.tutor_id)?.full_name || '–',
+        student_name: '–',
+      }));
+
+      if (request !== loadRequest.current) return;
+      setSessions((prev) => (reset ? enriched : [...prev, ...enriched]));
+      setStatsSessions(statsRows);
+      setTotalSessionsCount(countResult.count ?? enriched.length);
+      setHasMoreSessions(pageRows.length === SESSIONS_PAGE_SIZE);
+      listOffsetRef.current = from + pageRows.length;
+      if (reset) {
+        setCache('company_sessions', {
+          sessions: enriched,
+          tutors: tutorList,
+          students: studentsResult.data || [],
+        });
       }
-      return query.order('start_time', { ascending: false }).order('id').range(from, to);
-    });
-
-    const enriched: Session[] = sessionsData.map((s: any) => mapOrgSessionRow(s, tutorList));
-
-    if (request !== loadRequest.current) return;
-    setSessions(enriched);
-    setCache('company_sessions', { sessions: enriched, tutors: tutorList, students: studentsResult.data || [] });
     } catch (error) {
       if (request !== loadRequest.current) return;
       setLoadError(error instanceof Error ? error.message : 'Nepavyko įkelti užsiėmimų.');
     } finally {
       if (request === loadRequest.current) setLoading(false);
+    }
+  };
+
+  const loadMoreSessions = async () => {
+    if (loading || loadingMore || !hasMoreSessions) return;
+    setLoadingMore(true);
+    try {
+      await loadData({ reset: false });
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -458,7 +617,7 @@ export default function CompanySessions() {
       }
       setNoShowDialogOpen(false);
       setSelectedSession(null);
-      void loadData();
+      void loadData({ reset: true });
       void (async () => {
         await fetch('/api/notify-session-no-show', {
           method: 'POST',
@@ -485,7 +644,7 @@ export default function CompanySessions() {
         endTime: selectedSession.end_time,
       });
       setSelectedSession(null);
-      void loadData();
+      void loadData({ reset: true });
     } catch (error) {
       alert(t('cal.confirmStatusError', { msg: error instanceof Error ? error.message : String(error) }));
     } finally {
@@ -656,6 +815,7 @@ export default function CompanySessions() {
 
       const paidChanged = editPaid !== selectedSession.paid;
       const isClassGroupEdit = Boolean(selectedSession.class_group_id);
+      const showCommentToParent = canChooseParentComment && editShowCommentToParent;
       const seriesFields: Record<string, any> = isClassGroupEdit
         ? {
             topic: editTopic || null,
@@ -663,6 +823,7 @@ export default function CompanySessions() {
             price: editPrice,
             tutor_comment: editTutorComment || null,
             show_comment_to_student: editShowCommentToStudent,
+            ...(canChooseParentComment ? { show_comment_to_parent: showCommentToParent } : {}),
           }
         : {
             topic: editTopic || null,
@@ -676,6 +837,7 @@ export default function CompanySessions() {
             status: editStatus,
             tutor_comment: editTutorComment || null,
             show_comment_to_student: editShowCommentToStudent,
+            ...(canChooseParentComment ? { show_comment_to_parent: showCommentToParent } : {}),
           };
 
       if (isClassGroupEdit) {
@@ -737,6 +899,67 @@ export default function CompanySessions() {
         if (error) throw new Error(error.message);
       }
 
+      if (
+        !isClassGroupEdit
+        && (editShowCommentToStudent || showCommentToParent)
+        && editTutorComment.trim()
+      ) {
+        const studentId = editStudentId || selectedSession.student_id;
+        let studentEmail: string | undefined;
+        let payerEmail: string | null = null;
+        let secondaryParentEmail: string | null = null;
+        let studentName = selectedSession.student_name;
+        if (studentId) {
+          const { data: studentRow } = await supabase
+            .from('students')
+            .select('email, payer_email, parent_secondary_email, full_name, linked_user_id')
+            .eq('id', studentId)
+            .single();
+          const resolved = await resolveStudentNotificationEmail(studentRow);
+          if (resolved) studentEmail = resolved;
+          payerEmail = studentRow?.payer_email || null;
+          secondaryParentEmail = studentRow?.parent_secondary_email || null;
+          studentName = studentRow?.full_name || studentName;
+        }
+        const delivery = {
+          nextComment: editTutorComment,
+          previousComment: selectedSession.tutor_comment,
+          showToStudent: editShowCommentToStudent,
+          showToParent: showCommentToParent,
+          previousShowToStudent: selectedSession.show_comment_to_student,
+          previousShowToParent: selectedSession.show_comment_to_parent,
+          studentEmail,
+          parentEmails: [payerEmail, secondaryParentEmail],
+        };
+        const recipients = sessionCommentDeliveryRecipients(delivery);
+        if (recipients.length > 0) {
+          const tutorId = editTutorId || selectedSession.tutor_id;
+          const { data: tutorRow } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', tutorId)
+            .maybeSingle();
+          const ok = await sendEmail({
+            type: 'session_comment_added',
+            to: recipients,
+            data: {
+              studentName,
+              tutorName: tutorRow?.full_name || selectedSession.tutor_name,
+              date: format(newStart, 'yyyy-MM-dd'),
+              time: format(newStart, 'HH:mm'),
+              comment: editTutorComment,
+              ...(organizationId ? { organizationId } : {}),
+            },
+          }).catch((err) => {
+            console.error('[CompanySessions] comment email error', err);
+            return false;
+          });
+          if (!ok) alert(t('cal.commentSavedEmailFailed2'));
+        } else if (sessionCommentDeliveryNeeded(delivery)) {
+          alert(t('cal.commentSavedNoEmail'));
+        }
+      }
+
       setEditMode(false);
       setSelectedSession(null);
       loadData();
@@ -773,12 +996,13 @@ export default function CompanySessions() {
       setEditStatus(session.status);
       setEditTutorComment(session.tutor_comment || '');
       setEditShowCommentToStudent(Boolean(session.show_comment_to_student));
+      setEditShowCommentToParent(Boolean(session.show_comment_to_parent));
 
       const sid = session.id;
       void (async () => {
         const { data: row, error } = await supabase
           .from('sessions')
-          .select(ORG_SESSION_DETAIL_SELECT)
+          .select(orgSessionDetailSelect(organizationId))
           .eq('id', sid)
           .maybeSingle();
         if (error || !row) return;
@@ -787,7 +1011,7 @@ export default function CompanySessions() {
         setSessions((prev) => prev.map((s) => (s.id === sid ? mapped : s)));
       })();
     },
-    [tutors],
+    [tutors, organizationId],
   );
 
   const deepLinkSessionId = searchParams.get('open')?.trim() ?? '';
@@ -829,7 +1053,7 @@ export default function CompanySessions() {
     (async () => {
       const { data: row, error } = await supabase
         .from('sessions')
-        .select(ORG_SESSION_DETAIL_SELECT)
+        .select(orgSessionDetailSelect(organizationId))
         .eq('id', deepLinkSessionId)
         .maybeSingle();
       if (cancelled) return;
@@ -837,11 +1061,11 @@ export default function CompanySessions() {
         clearOpenParam();
         return;
       }
-      if (!tutors.some((tu) => tu.id === row.tutor_id)) {
+      const enriched = mapOrgSessionRow(row, tutors);
+      if (!tutors.some((tu) => tu.id === enriched.tutor_id)) {
         clearOpenParam();
         return;
       }
-      const enriched = mapOrgSessionRow(row, tutors);
       openSessionDialog(enriched);
       clearOpenParam();
     })();
@@ -925,7 +1149,12 @@ export default function CompanySessions() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">{t('compSess.lessonsTitle')}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{t('compSess.totalCount', { count: sessions.length })}</p>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {t('compSess.totalCount', { count: totalSessionsCount ?? filtered.length })}
+              {sessions.length < (totalSessionsCount ?? 0)
+                ? ` · ${t('compSess.loadedCount', { count: String(sessions.length) })}`
+                : ''}
+            </p>
           </div>
           {!hideWaitlist && (
           <Button variant="outline" className="gap-2 rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0" asChild>
@@ -951,17 +1180,17 @@ export default function CompanySessions() {
                   setFilterStartDate(nextRange.start);
                   setFilterEndDate(nextRange.end);
                   setIsFilterActive(true);
-                  void loadData(nextRange);
+                  void loadData({ reset: true, range: nextRange });
                 } else {
                   setFilterStartDate(null);
                   setFilterEndDate(null);
                   setIsFilterActive(false);
-                  void loadData({ start: null, end: null });
+                  void loadData({ reset: true, range: { start: null, end: null } });
                 }
               }}
               onSearch={() => {
                 setIsFilterActive(true);
-                void loadData({ start: filterStartDate, end: filterEndDate });
+                void loadData({ reset: true, range: { start: filterStartDate, end: filterEndDate } });
               }}
             />
           </div>
@@ -1030,7 +1259,7 @@ export default function CompanySessions() {
         {loadError ? (
           <div role="alert" className="rounded-xl bg-red-50 p-4 text-red-700">
             {loadError}
-            <Button variant="outline" className="ml-3" onClick={() => void loadData()}>
+            <Button variant="outline" className="ml-3" onClick={() => void loadData({ reset: true })}>
               Bandyti dar kartą
             </Button>
           </div>
@@ -1039,10 +1268,10 @@ export default function CompanySessions() {
         {isSchoolOrgView && !loadError ? <SchoolSessionMonitoring sessions={filtered} /> : null}
 
         {/* Stats */}
-        {!isSchoolOrgView && filtered.length > 0 && (() => {
+        {!isSchoolOrgView && statsSessions.length > 0 && (() => {
           const stats = isLaisviVaikai
-            ? calculateOrgSessionListStats(filtered as any)
-            : calculateSessionStats(filtered as any, null, null, { requireExplicitNoShow: isProKlase });
+            ? calculateOrgSessionListStats(statsSessions as any)
+            : calculateSessionStats(statsSessions as any, null, null, { requireExplicitNoShow: isProKlase });
           return (
             <SessionStatCards
               totalUpcoming={isLaisviVaikai ? (stats as { totalUpcoming?: number }).totalUpcoming : undefined}
@@ -1196,6 +1425,18 @@ export default function CompanySessions() {
               </tbody>
             </table>
           </div>
+          {(hasMoreSessions || loadingMore) && (
+            <div ref={loadMoreRef} className="border-t border-gray-100 px-4 py-3 text-center text-sm text-gray-500">
+              {loadingMore ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {t('common.loading')}
+                </span>
+              ) : (
+                t('compSess.scrollForMore')
+              )}
+            </div>
+          )}
           </div>
         )}
       </div>
@@ -1338,6 +1579,17 @@ export default function CompanySessions() {
                       />
                       <span className="text-sm text-gray-700">{t('cal.showToStudent')}</span>
                     </label>
+                    {canChooseParentComment && (
+                      <label className="flex items-center gap-2 cursor-pointer mt-1">
+                        <input
+                          type="checkbox"
+                          checked={editShowCommentToParent}
+                          onChange={(e) => setEditShowCommentToParent(e.target.checked)}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-sm text-gray-700">{t('dash.commentShowParent')}</span>
+                      </label>
+                    )}
                   </div>
 
                   {!selectedSession.class_group_id && (
@@ -1467,7 +1719,7 @@ export default function CompanySessions() {
                         <MessageSquare className="w-3 h-3" />
                         {t('compSess.tutorComment')}
                         <span className="text-[10px] font-normal ml-1">
-                          ({selectedSession.show_comment_to_student ? t('compSess.visibleToStudent') : t('compSess.tutorCommentNotForStudent')})
+                          ({t(sessionCommentVisibilityLabelKey(selectedSession))})
                         </span>
                       </Label>
                       <p className="text-sm mt-1 bg-blue-50 border border-blue-100 rounded-lg p-2 whitespace-pre-wrap">{selectedSession.tutor_comment}</p>
@@ -1594,7 +1846,7 @@ export default function CompanySessions() {
                               void (async () => {
                                 const { data } = await supabase
                                   .from('sessions')
-                                  .select(ORG_SESSION_DETAIL_SELECT)
+                                  .select(orgSessionDetailSelect(organizationId))
                                   .eq('class_group_id', groupId)
                                   .eq('start_time', start);
                                 const mapped = (data || []).map((row: any) => mapOrgSessionRow(row, tutors));

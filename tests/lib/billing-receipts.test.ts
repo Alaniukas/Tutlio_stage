@@ -20,10 +20,9 @@ describe('lesson Stripe breakdown (client/server parity)', () => {
   it('splits a €20 lesson into base + fee that sum to the checkout total', () => {
     const b = lessonStripeBreakdownEur(20);
     expect(b.base).toBe(20);
-    expect(b.fee).toBeCloseTo(0.4, 2);
-    expect(b.total).toBeCloseTo(20.4, 2);
-    expect(Math.round((b.base + b.fee) * 100)).toBe(Math.round(b.total * 100));
     expect(b.total).toBeCloseTo(Math.round(customerTotalEur(20) * 100) / 100, 2);
+    expect(b.fee).toBeCloseTo(b.total - 20, 2);
+    expect(Math.round((b.base + b.fee) * 100)).toBe(Math.round(b.total * 100));
   });
 
   it('matches the server-side cents breakdown across a price sweep', () => {

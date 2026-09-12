@@ -7,6 +7,7 @@ import {
   customerTotal,
   type OrgFeeProfile,
 } from '@/lib/marketMoney';
+import type { OrgPayerFeeSplit } from '@/lib/orgPayerFeeSplit';
 
 /** Market-aware money formatting for tutlio.pl (PLN) vs .lt/.com (EUR). */
 export function useMarketMoney() {
@@ -20,11 +21,12 @@ export function useMarketMoney() {
         base: number | null | undefined,
         tutorOrganizationIsSchool: boolean,
         feeProfile?: OrgFeeProfile | null,
-      ) => formatLessonStripeCharge(base, tutorOrganizationIsSchool, market, feeProfile),
-      lessonBreakdown: (base: number, feeProfile?: OrgFeeProfile | null) =>
-        lessonStripeBreakdown(base, market, feeProfile),
-      customerTotal: (base: number, feeProfile?: OrgFeeProfile | null) =>
-        customerTotal(base, market, feeProfile),
+        feeSplit?: OrgPayerFeeSplit | null,
+      ) => formatLessonStripeCharge(base, tutorOrganizationIsSchool, market, feeProfile, feeSplit),
+      lessonBreakdown: (base: number, feeProfile?: OrgFeeProfile | null, feeSplit?: OrgPayerFeeSplit | null) =>
+        lessonStripeBreakdown(base, market, feeProfile, feeSplit),
+      customerTotal: (base: number, feeProfile?: OrgFeeProfile | null, feeSplit?: OrgPayerFeeSplit | null) =>
+        customerTotal(base, market, feeProfile, feeSplit),
       isPl: market === 'pl',
     }),
     [market],

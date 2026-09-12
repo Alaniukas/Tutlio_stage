@@ -22,12 +22,32 @@ export function acceptanceRetrySeconds(attempt: number) {
   return Math.min(3600, 30 * 2 ** Math.min(Math.max(0, attempt - 1), 7));
 }
 
+export function acceptanceSourceBytesPresent(payload: unknown): boolean {
+  const base64 = (payload as { source?: { base64?: unknown } } | null)?.source?.base64;
+  return typeof base64 === 'string' && base64.length > 0;
+}
+
+/** Drop frozen DOCX/PDF bytes after Storage has the final PDF. Keep kind + the rest of the snapshot. */
+export function stripAcceptanceSourceBytes<T>(payload: T): T {
+  if (!acceptanceSourceBytesPresent(payload)) return payload;
+  const record = payload as Record<string, unknown>;
+  const source = { ...(record.source as Record<string, unknown>) };
+  delete source.base64;
+  return { ...record, source } as T;
+}
+
 /** One leased job per invocation; all work is awaited, never fire-and-forget. */
 export async function processAcceptanceJob(db: SupabaseClient, req: VercelRequest, job: any) {
   const stamp = async (values: Record<string, unknown>) => {
     const { data, error } = await db.from('school_acceptance_jobs').update(values)
       .eq('id', job.id).eq('lease_id', job.lease_id).gt('locked_until', new Date().toISOString()).select('id');
     if (error || !data?.length) throw new Error('Acceptance lease lost or state save failed');
+  };
+  const persistStrippedSource = async () => {
+    if (!acceptanceSourceBytesPresent(job.payload)) return;
+    const next = stripAcceptanceSourceBytes(job.payload);
+    job.payload = next;
+    await stamp({ payload: next });
   };
   try {
     const p = job.payload;
@@ -44,6 +64,7 @@ export async function processAcceptanceJob(db: SupabaseClient, req: VercelReques
       job.pdf_path = path;
       job.finalized_at = new Date().toISOString();
     }
+    await persistStrippedSource();
     if (!job.confirmation_sent) {
       if (p.confirmation.to) {
         const downloaded = await db.storage.from(SCHOOL_CONTRACTS_BUCKET).download(job.pdf_path);

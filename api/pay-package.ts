@@ -12,6 +12,7 @@ import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
+import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import {
     directChargeOptions,
@@ -106,12 +107,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let ownerName = tutor?.full_name || 'Korepetitorius';
         let useSchoolOrgAbsorbedFees = false;
         let feeProfile: OrgFeeProfile | null = null;
+        let feeSplit = null;
 
         const paymentOrganizationId = pkg.pool_organization_id || tutor?.organization_id;
         if (paymentOrganizationId) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug, features')
                 .eq('id', paymentOrganizationId)
                 .single();
             if (!org?.stripe_onboarding_complete || !org.stripe_account_id) {
@@ -120,6 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
             feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(paymentOrganizationId);
+            feeSplit = resolveOrgPayerFeeSplit((org as { features?: unknown }).features);
             // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
             useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school' && !feeProfile;
         } else {
@@ -213,7 +216,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 `package-checkout:${packageId}:${pkg.stripe_checkout_session_id || 'initial'}`,
             ));
         } else {
-            const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
+            const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,

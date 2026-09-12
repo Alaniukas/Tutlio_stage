@@ -41,6 +41,7 @@ import {
 import { CalendarDays, ChevronLeft, ChevronRight, Loader2, ShieldAlert, Wallet } from 'lucide-react';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { dedupeParentChildren } from '@/lib/parentChildIdentity';
+import { consumeAvailabilityForCreatedSessions } from '@/lib/consumeSessionAvailability';
 
 type SessionRow = {
   id: string;
@@ -743,6 +744,11 @@ export default function ParentCalendar() {
         setBookingError(insErr.message || t('parent.bookingErrorGeneric'));
         return;
       }
+
+      await consumeAvailabilityForCreatedSessions(supabase, meta.tutorId, [{
+        start_time: startISO,
+        end_time: endTime.toISOString(),
+      }]);
 
       setBookingSuccess(t('parent.bookingSuccess'));
       const bounds = rangeToBounds(null, currentView, currentDate, localeKey);

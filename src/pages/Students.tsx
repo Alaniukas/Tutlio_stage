@@ -38,7 +38,8 @@ import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isPlMarket } from '@/lib/market';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
-import { isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { isProKlaseOrg } from '@/lib/marketMoney';
+import { canChooseParentLessonComment } from '@/lib/parentLessonComment';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import {
@@ -139,8 +140,9 @@ export default function StudentsPage() {
   const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
   const { hasFeature, loading: orgFeaturesLoading, contactVisibility, entityType, organizationId } = useOrgFeatures();
   const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, entityType, hasFeature, 'monthly_packages', orgFeaturesLoading);
-  const canChooseParentComment =
-    isManoKorepetitoriusOrg(organizationId) || isManoKorepetitoriusOrg(profile?.organization_id);
+  const canChooseParentComment = canChooseParentLessonComment(
+    organizationId || profile?.organization_id,
+  );
   const requiresStatusConfirmation =
     hasFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(profile?.organization_id);
   const stcache = getCached<any>('tutor_students');

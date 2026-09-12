@@ -69,6 +69,7 @@ const COPY = {
   loading: 'Kraunama…',
   none: 'Pamokų dar nėra.',
   hint: 'Šis puslapis veikia be paskyros — nuorodą rasite kiekviename mokyklos laiške apie pamoką.',
+  sectionsIntro: 'Pasirinkite skiltį: artėjančios arba praėjusios pamokos su medžiaga ir namų darbais.',
   deleteConfirm: 'Pašalinti pateiktą failą?',
   badFile: 'Leidžiami PDF, nuotraukų, Word, Excel ir tekstiniai failai iki 10 MB.',
   uploadFailed: 'Nepavyko įkelti failo. Bandykite dar kartą.',
@@ -103,7 +104,7 @@ export default function SchoolHomework() {
   const [loading, setLoading] = useState(true);
   const [busySession, setBusySession] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [section, setSection] = useState<HomeworkSection>('past');
+  const [section, setSection] = useState<HomeworkSection>('upcoming');
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const now = useJoinClock();
 
@@ -347,6 +348,9 @@ export default function SchoolHomework() {
           <h1 className="text-2xl sm:text-3xl font-black text-gray-900">{tx('title')}</h1>
           {payload && <p className="text-sm text-gray-600">{tx('child')}: <strong>{payload.student.name}</strong></p>}
           <p className="text-xs text-gray-500">{tx('hint')}</p>
+          {payload && payload.sessions.length > 0 && (
+            <p className="text-sm text-gray-700">{tx('sectionsIntro')}</p>
+          )}
         </header>
 
         {notice && (
@@ -363,10 +367,10 @@ export default function SchoolHomework() {
           <>
             <div
               role="tablist"
-              aria-label={tx('title')}
-              className="grid grid-cols-2 gap-2 rounded-2xl border border-gray-100 bg-white p-1.5 shadow-sm"
+              aria-label={tx('sectionsIntro')}
+              className="grid grid-cols-2 gap-2 rounded-2xl border-2 border-violet-100 bg-white p-1.5 shadow-sm"
             >
-              {(['past', 'upcoming'] as const).map((key) => {
+              {(['upcoming', 'past'] as const).map((key) => {
                 const count = key === 'past' ? past.length : upcoming.length;
                 const selected = visibleSection === key;
                 return (
