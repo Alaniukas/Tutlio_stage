@@ -1,5 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { customerTotal } from '../../src/lib/marketMoney';
+import { en } from '../../src/lib/i18n/en';
+import { lt } from '../../src/lib/i18n/lt';
+import { nl } from '../../src/lib/i18n/nl';
 import {
   orgNetFromPayerFeeSplit,
   parseOrgPayerFeeSplitConfig,
@@ -8,6 +13,20 @@ import {
 } from '../../src/lib/orgPayerFeeSplit';
 
 describe('org payer fee split', () => {
+  it('has English, Lithuanian, and Dutch copy for every translation used by the settings UI', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/components/company/OrgPayerFeeSplitSettings.tsx'),
+      'utf8',
+    );
+    const keys = [...source.matchAll(/\bt\(\s*['"]([^'"]+)['"]/g)].map((match) => match[1]);
+
+    expect(keys).toContain('companyFinance.payerFeeSplitTitle');
+    for (const [locale, dictionary] of Object.entries({ en, lt, nl })) {
+      const missing = keys.filter((key) => !(key in dictionary));
+      expect(missing, `${locale} is missing settings translations:\n${missing.join('\n')}`).toEqual([]);
+    }
+  });
+
   it('returns null when feature flag is off', () => {
     expect(resolveOrgPayerFeeSplit({ payer_fee_split: { platform_share: 0 } })).toBeNull();
   });
