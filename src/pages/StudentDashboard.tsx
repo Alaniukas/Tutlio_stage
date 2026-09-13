@@ -36,6 +36,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/lib/i18n';
 import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
+import {
+    dedupeSessionsById,
+    linkedStudentProfileIds,
+    pickActiveStudentProfile,
+} from '@/lib/studentLinkedProfiles';
 
 interface Session { id: string; start_time: string; end_time: string; status: string; paid: boolean; price: number | null; topic: string | null; meeting_link: string | null; payment_status?: string; tutor_comment?: string | null; show_comment_to_student?: boolean; subject_id?: string | null; subjects?: { is_group?: boolean; max_students?: number; is_trial?: boolean } | null; }
 interface StudentInfo {
@@ -199,28 +204,18 @@ export default function StudentDashboard() {
         const selectedStudentId = typeof window !== 'undefined'
             ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY)
             : null;
-        let { data: studentRows, error: rpcError } = await rpcGetStudentProfilesDeduped(
-            user.id,
-            selectedStudentId || null,
-        );
+        const { data: allProfileRows, error: rpcError } = await rpcGetStudentProfilesDeduped(user.id, null);
         if (rpcError) {
             console.error('[StudentDashboard] get_student_profiles', rpcError);
             setLoading(false);
             return;
         }
 
-        let studentRow = studentRows?.[0];
+        const studentRow = pickActiveStudentProfile(allProfileRows, selectedStudentId);
+        const sessionStudentIds = linkedStudentProfileIds(allProfileRows);
 
-        if (!studentRow && selectedStudentId) {
-            const { data: fallbackRows, error: fallbackError } = await rpcGetStudentProfilesDeduped(user.id, null);
-            if (fallbackError) {
-                console.error('[StudentDashboard] get_student_profiles fallback', fallbackError);
-            } else {
-                studentRow = fallbackRows?.[0];
-                if (studentRow && typeof window !== 'undefined') {
-                    localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, studentRow.id);
-                }
-            }
+        if (studentRow && typeof window !== 'undefined' && !selectedStudentId) {
+            localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, studentRow.id);
         }
 
         if (!studentRow) {
@@ -253,13 +248,15 @@ export default function StudentDashboard() {
                         supabase.rpc('get_tutor_contact_visibility_for_student', { p_tutor_id: studentRow.tutor_id }),
                     ])
                     : Promise.resolve(null),
-                supabase
-                    .from('sessions')
-                    .select(STUDENT_DASH_SESSION_COLS)
-                    .eq('student_id', studentRow.id)
-                    .gte('start_time', threeMonthsAgo.toISOString())
-                    .order('start_time', { ascending: true })
-                    .limit(400),
+                sessionStudentIds.length > 0
+                    ? supabase
+                        .from('sessions')
+                        .select(STUDENT_DASH_SESSION_COLS)
+                        .in('student_id', sessionStudentIds)
+                        .gte('start_time', threeMonthsAgo.toISOString())
+                        .order('start_time', { ascending: true })
+                        .limit(400)
+                    : Promise.resolve({ data: [], error: null }),
                 fetchStudentActiveLessonPackagesDeduped(supabase, studentRow.id),
                 supabase
                     .from('school_payment_installments')
@@ -355,7 +352,7 @@ export default function StudentDashboard() {
                     getCached<{ sessions?: Session[] }>('student_sessions')?.sessions;
                 setSessions(Array.isArray(fb) ? fb : []);
             } else {
-                const rows = (sessionRowsRaw || []) as Record<string, unknown>[];
+                const rows = dedupeSessionsById((sessionRowsRaw || []) as Array<Record<string, unknown> & { id: string }>);
                 const subjectIds = [...new Set(rows.map((r) => r.subject_id).filter(Boolean) as string[])];
                 let subjectMeta: Record<string, { is_group?: boolean; max_students?: number | null; is_trial?: boolean }> = {};
                 if (subjectIds.length > 0) {
@@ -502,7 +499,7 @@ export default function StudentDashboard() {
 
                 <div className={`grid ${studentBookingDisabled ? 'grid-cols-2' : 'grid-cols-3'} gap-3`}>
                     {!studentBookingDisabled && (
-                        <button onClick={() => navigate('/student/schedule')} className="bg-white hover:bg-violet-50 hover:border-violet-200 transition-all rounded-3xl p-4 flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm aspect-square group">
+                        <button type="button" onClick={() => navigate('/student/schedule')} className="bg-white hover:bg-violet-50 hover:border-violet-200 transition-all rounded-3xl p-4 flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm aspect-square group">
                             <div className="w-12 h-12 rounded-full bg-violet-100 flex items-center justify-center group-hover:scale-110 transition-transform">
                                 <CalendarDays className="w-5 h-5 text-violet-600" />
                             </div>

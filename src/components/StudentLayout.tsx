@@ -122,11 +122,11 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
 
     const navItems = [
         { href: '/student', label: t('studentNav.home'), icon: LayoutDashboard },
+        { href: '/student/schedule', label: t('studentNav.book'), icon: CalendarDays },
         { href: '/student/sessions', label: t('studentNav.sessions'), icon: BookOpen },
         ...(lessonRecordingsEnabled
             ? [{ href: '/student/recordings', label: t('companyNav.recordings'), icon: Video }]
             : []),
-        { href: '/student/schedule', label: t('studentNav.book'), icon: CalendarDays },
         { href: '/student/messages', label: t('studentNav.messages'), icon: MessageSquare },
         { href: '/student/waitlist', label: t('studentNav.queue'), icon: Clock },
         ...(paymentsPageEnabled

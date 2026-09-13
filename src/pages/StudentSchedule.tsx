@@ -50,6 +50,11 @@ import { tutorUsesManualStudentPayments, trimManualPaymentBankDetails } from '@/
 import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
 import { buildClassGroupMetaMap, classGroupDisplayName } from '@/lib/schoolClassGroupSessions';
 import type { SchoolClassGroupRecord } from '@/lib/schoolClassGroups';
+import {
+    dedupeSessionsById,
+    linkedStudentProfileIds,
+    pickActiveStudentProfile,
+} from '@/lib/studentLinkedProfiles';
 
 // BigCalendar Setup
 const locales = { lt: lt };
@@ -203,6 +208,7 @@ export default function StudentSchedule() {
     const [availability, setAvailability] = useState<Availability[]>([]);
     const [existingSessions, setExistingSessions] = useState<ExistingSession[]>([]);
     const [studentId, setStudentId] = useState('');
+    const [linkedSessionStudentIds, setLinkedSessionStudentIds] = useState<string[]>([]);
     const [parentChildOptions, setParentChildOptions] = useState<ParentChildOption[]>([]);
     const { blocked: bookingBlocked, loading: blockLoading, refetch: refetchBookingBlock } = useStudentPaymentBlock(studentId || null);
     const [tutorId, setTutorId] = useState('');
@@ -599,6 +605,7 @@ export default function StudentSchedule() {
         setTutorOrgFeeProfile(null);
         setTutorSoloManualPayments(false);
         let st: any = null;
+        let sessionStudentIds: string[] = [];
 
         // Parent mode: resolve the active child once (auto-pick first linked
         // child if none in URL) and verify the parent-student link in a
@@ -685,27 +692,22 @@ export default function StudentSchedule() {
                 return;
             }
             st = stRowRes.data as Record<string, unknown>;
+            sessionStudentIds = [String(st.id)];
         } else {
             const selectedStudentId = typeof window !== 'undefined'
                 ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY)
                 : null;
-            let { data: studentRows, error: rpcError } = await rpcGetStudentProfilesDeduped(
-                user.id,
-                selectedStudentId || null,
-            );
+            const { data: allProfileRows, error: rpcError } = await rpcGetStudentProfilesDeduped(user.id, null);
             if (rpcError) {
                 console.error('[StudentSchedule] get_student_profiles', rpcError);
                 setLoadError(t('stuSched.profileLoadFailed'));
                 return;
             }
 
-            st = studentRows?.[0] ?? null;
-            if (!st && selectedStudentId) {
-                const { data: fallbackRows } = await rpcGetStudentProfilesDeduped(user.id, null);
-                st = fallbackRows?.[0] ?? null;
-                if (st && typeof window !== 'undefined') {
-                    localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, st.id);
-                }
+            st = pickActiveStudentProfile(allProfileRows, selectedStudentId);
+            sessionStudentIds = linkedStudentProfileIds(allProfileRows);
+            if (st && typeof window !== 'undefined' && !selectedStudentId) {
+                localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, st.id);
             }
             if (!st) {
                 setLoadError(t('stuSched.profileNotFound'));
@@ -716,6 +718,8 @@ export default function StudentSchedule() {
             setLoadError(t('stuSched.profileNotFound'));
             return;
         }
+        setLinkedSessionStudentIds(sessionStudentIds);
+
         if (!st.tutor_id) {
             setStudentId(st.id);
             setStudentName(st.full_name || '');
@@ -741,17 +745,22 @@ export default function StudentSchedule() {
             setTutorOrgIsSchool(orgIsSchool);
             const rangeStart = addDays(new Date(), -30);
             const rangeEnd = addDays(new Date(), 60);
-            const ownSessions = await supabase
-                .from('sessions')
-                .select(PARENT_SCHEDULE_SESSION_COLS)
-                .eq('student_id', st.id)
-                .gte('start_time', rangeStart.toISOString())
-                .lte('start_time', rangeEnd.toISOString())
-                .order('start_time', { ascending: true })
-                .limit(600);
+            const ownSessions = sessionStudentIds.length > 0
+                ? await supabase
+                    .from('sessions')
+                    .select(PARENT_SCHEDULE_SESSION_COLS)
+                    .in('student_id', sessionStudentIds)
+                    .gte('start_time', rangeStart.toISOString())
+                    .lte('start_time', rangeEnd.toISOString())
+                    .order('start_time', { ascending: true })
+                    .limit(600)
+                : { data: [], error: null };
             const rows = ownSessions.error
                 ? []
-                : await enrichScheduleSessionsWithSubjects(supabase, (ownSessions.data || []) as Record<string, unknown>[]);
+                : await enrichScheduleSessionsWithSubjects(
+                    supabase,
+                    dedupeSessionsById((ownSessions.data || []) as Array<Record<string, unknown> & { id: string }>),
+                );
             setExistingSessions(rows);
             setOccupiedSlots([]);
             setLoadedRanges([{ start: rangeStart, end: rangeEnd }]);
@@ -792,14 +801,16 @@ export default function StudentSchedule() {
             supabase.from('availability').select('*').eq('tutor_id', st.tutor_id),
             // All of the student's own lessons, whichever teacher runs them
             // (school class groups are taught by other teachers than the assigned one).
-            supabase
-                .from('sessions')
-                .select(PARENT_SCHEDULE_SESSION_COLS)
-                .eq('student_id', st.id)
-                .gte('start_time', past)
-                .lte('start_time', future)
-                .order('start_time', { ascending: true })
-                .limit(600),
+            sessionStudentIds.length > 0
+                ? supabase
+                    .from('sessions')
+                    .select(PARENT_SCHEDULE_SESSION_COLS)
+                    .in('student_id', sessionStudentIds)
+                    .gte('start_time', past)
+                    .lte('start_time', future)
+                    .order('start_time', { ascending: true })
+                    .limit(600)
+                : Promise.resolve({ data: [], error: null }),
         ]);
 
         if (individualPricing.error) {
@@ -978,7 +989,7 @@ export default function StudentSchedule() {
         } else {
             mySessionsData = await enrichScheduleSessionsWithSubjects(
                 supabase,
-                (sessionsRes.data || []) as Record<string, unknown>[],
+                dedupeSessionsById((sessionsRes.data || []) as Array<Record<string, unknown> & { id: string }>),
             );
             const tutorMeetingLinkForSessions =
                 (tutorProfile.data as { personal_meeting_link?: string | null } | null)?.personal_meeting_link;
@@ -1011,6 +1022,7 @@ export default function StudentSchedule() {
             const monthEnd = endOfMonth(new Date());
             void fetchDateRange(monthStart, monthEnd, {
                 studentId: st.id,
+                sessionStudentIds,
                 tutorId: st.tutor_id,
                 tutorPersonalLink:
                     (tutorProfile.data as { personal_meeting_link?: string | null } | null)?.personal_meeting_link,
@@ -1048,6 +1060,7 @@ export default function StudentSchedule() {
         endDate: Date,
         scope?: {
             studentId?: string;
+            sessionStudentIds?: string[];
             tutorId?: string;
             tutorPersonalLink?: string | null;
             studentPersonalLink?: string | null;
@@ -1063,7 +1076,14 @@ export default function StudentSchedule() {
 
         const resolvedStudentId = scope?.studentId ?? studentId;
         const resolvedTutorId = scope?.tutorId ?? tutorId;
-        if (!resolvedStudentId) {
+        const resolvedSessionStudentIds =
+            scope?.sessionStudentIds ??
+            (linkedSessionStudentIds.length > 0
+                ? linkedSessionStudentIds
+                : resolvedStudentId
+                    ? [resolvedStudentId]
+                    : []);
+        if (resolvedSessionStudentIds.length === 0) {
             setLoadingMore(false);
             return;
         }
@@ -1075,7 +1095,7 @@ export default function StudentSchedule() {
             const sessionsRes = await supabase
                 .from('sessions')
                 .select(PARENT_SCHEDULE_SESSION_COLS)
-                .eq('student_id', resolvedStudentId)
+                .in('student_id', resolvedSessionStudentIds)
                 .gte('start_time', past)
                 .lte('start_time', future)
                 .order('start_time', { ascending: true })
@@ -1087,7 +1107,7 @@ export default function StudentSchedule() {
             } else {
                 myNewSessions = await enrichScheduleSessionsWithSubjects(
                     supabase,
-                    (sessionsRes.data || []) as Record<string, unknown>[],
+                    dedupeSessionsById((sessionsRes.data || []) as Array<Record<string, unknown> & { id: string }>),
                 );
                 const subjectLinksById =
                     scope?.subjectLinksById ??

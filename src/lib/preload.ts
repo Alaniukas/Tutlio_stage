@@ -2,6 +2,7 @@ import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { resolveAuthUser } from '@/lib/authSession';
 import { companyStatsCacheKey, getCached, setCache, dedupeAsync } from '@/lib/dataCache';
+import { dedupeSessionsById, linkedStudentProfileIds, pickActiveStudentProfile } from '@/lib/studentLinkedProfiles';
 import { startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays, subMonths, addMonths } from 'date-fns';
 import { isProKlaseOrg, orgFeeProfile } from '@/lib/marketMoney';
 import { sumOrgTutorLessonsPayEur } from '@/lib/orgTutorLessonPay';
@@ -650,9 +651,10 @@ export async function preloadStudentData() {
     const ACTIVE_KEY = 'tutlio_active_student_profile_id';
     const selectedId = typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_KEY) : null;
 
-    const { data: studentRows } = await rpcGetStudentProfilesDeduped(user.id, selectedId || null);
+    const { data: studentRows } = await rpcGetStudentProfilesDeduped(user.id, null);
 
-    const st = studentRows?.[0];
+    const st = pickActiveStudentProfile(studentRows, selectedId);
+    const sessionStudentIds = linkedStudentProfileIds(studentRows);
     if (!st) return;
 
     const threeMonthsAgo = new Date();
@@ -662,20 +664,22 @@ export async function preloadStudentData() {
       'id,start_time,end_time,status,paid,price,topic,meeting_link,payment_status,tutor_comment,show_comment_to_student,show_comment_to_parent,subject_id';
 
     const [sessionsRes, waitlistRes] = await Promise.all([
-      supabase
-        .from('sessions')
-        .select(STUDENT_PRELOAD_SESSION_COLS)
-        .eq('student_id', st.id)
-        .gte('start_time', threeMonthsAgo.toISOString())
-        .order('start_time', { ascending: true })
-        .limit(400),
+      sessionStudentIds.length > 0
+        ? supabase
+            .from('sessions')
+            .select(STUDENT_PRELOAD_SESSION_COLS)
+            .in('student_id', sessionStudentIds)
+            .gte('start_time', threeMonthsAgo.toISOString())
+            .order('start_time', { ascending: true })
+            .limit(400)
+        : Promise.resolve({ data: [], error: null }),
       supabase.from('waitlists')
         .select('id, notes, session:sessions(start_time, end_time, topic, price)')
         .eq('student_id', st.id)
         .order('created_at', { ascending: true }),
     ]);
 
-    const sessions = sessionsRes.data || [];
+    const sessions = dedupeSessionsById((sessionsRes.data || []) as Array<{ id: string }>);
     const waitlist = waitlistRes.data || [];
 
     if (!getCached('student_dashboard')) {

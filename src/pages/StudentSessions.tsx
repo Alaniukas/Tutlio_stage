@@ -42,6 +42,11 @@ import {
 } from '@/lib/studentPaymentModel';
 import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
 import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
+import {
+    dedupeSessionsById,
+    linkedStudentProfileIds,
+    pickActiveStudentProfile,
+} from '@/lib/studentLinkedProfiles';
 
 interface Session {
     id: string;
@@ -673,31 +678,35 @@ export default function StudentSessions() {
             profileStudentArg = picked;
         }
 
-        let { data: studentRows, error: rpcError } = await supabase.rpc('get_student_profiles', {
-            p_user_id: user.id,
-            p_student_id: profileStudentArg,
-        });
-        if (rpcError) {
-            console.error('[StudentSessions] get_student_profiles', rpcError);
-            setLoading(false);
-            return;
-        }
+        let st: Record<string, unknown> | null = null;
+        let sessionStudentIds: string[] = [];
 
-        let st = studentRows?.[0];
-
-        if (!isParentLessonsRoute && !st && selectedStudentId) {
-            const { data: fallbackRows, error: fallbackError } = await supabase.rpc('get_student_profiles', {
+        if (isParentLessonsRoute) {
+            const { data: studentRows, error: rpcError } = await supabase.rpc('get_student_profiles', {
                 p_user_id: user.id,
-                p_student_id: null,
+                p_student_id: profileStudentArg,
             });
-            if (fallbackError) {
-                console.error('[StudentSessions] get_student_profiles fallback', fallbackError);
+            if (rpcError) {
+                console.error('[StudentSessions] get_student_profiles', rpcError);
                 setLoading(false);
                 return;
             }
-            st = fallbackRows?.[0];
-            if (st && typeof window !== 'undefined') {
-                localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, st.id);
+            st = (studentRows?.[0] as Record<string, unknown> | undefined) ?? null;
+            if (st?.id) sessionStudentIds = [String(st.id)];
+        } else {
+            const { data: allProfileRows, error: rpcError } = await supabase.rpc('get_student_profiles', {
+                p_user_id: user.id,
+                p_student_id: null,
+            });
+            if (rpcError) {
+                console.error('[StudentSessions] get_student_profiles', rpcError);
+                setLoading(false);
+                return;
+            }
+            st = pickActiveStudentProfile(allProfileRows as Array<{ id: string }>, selectedStudentId);
+            sessionStudentIds = linkedStudentProfileIds(allProfileRows as Array<{ id: string }>);
+            if (st && typeof window !== 'undefined' && !selectedStudentId) {
+                localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, String(st.id));
             }
         }
 
@@ -761,13 +770,15 @@ export default function StudentSessions() {
 
         const [tutorManualRes, sessionsRes] = await Promise.all([
             tutorManualPromise,
-            supabase
-                .from('sessions')
-                .select(SESSION_LIST_COLUMNS)
-                .eq('student_id', st.id)
-                .gte('start_time', sixMonthsAgo.toISOString())
-                .order('start_time', { ascending: true })
-                .limit(600),
+            sessionStudentIds.length > 0
+                ? supabase
+                    .from('sessions')
+                    .select(SESSION_LIST_COLUMNS)
+                    .in('student_id', sessionStudentIds)
+                    .gte('start_time', sixMonthsAgo.toISOString())
+                    .order('start_time', { ascending: true })
+                    .limit(600)
+                : Promise.resolve({ data: [], error: null }),
         ]);
         const tutorSub = tutorManualRes.data as
             | {
@@ -836,7 +847,7 @@ export default function StudentSessions() {
             }
             return;
         }
-        const sessionRows = (sessionsRes.data || []) as Record<string, unknown>[];
+        const sessionRows = dedupeSessionsById((sessionsRes.data || []) as Array<Record<string, unknown> & { id: string }>);
         const subjectIdsForSessions = [...new Set(sessionRows.map((r) => r.subject_id).filter(Boolean) as string[])];
         let subjectMeta: Record<string, { name: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean; meeting_link?: string | null }> =
             {};

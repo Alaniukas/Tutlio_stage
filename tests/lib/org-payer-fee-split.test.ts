@@ -5,6 +5,8 @@ import { customerTotal } from '../../src/lib/marketMoney';
 import { en } from '../../src/lib/i18n/en';
 import { lt } from '../../src/lib/i18n/lt';
 import { nl } from '../../src/lib/i18n/nl';
+import { pl } from '../../src/lib/i18n/pl';
+import { fr } from '../../src/lib/i18n/fr';
 import {
   orgNetFromPayerFeeSplit,
   parseOrgPayerFeeSplitConfig,
@@ -21,7 +23,7 @@ describe('org payer fee split', () => {
     const keys = [...source.matchAll(/\bt\(\s*['"]([^'"]+)['"]/g)].map((match) => match[1]);
 
     expect(keys).toContain('companyFinance.payerFeeSplitTitle');
-    for (const [locale, dictionary] of Object.entries({ en, lt, nl })) {
+    for (const [locale, dictionary] of Object.entries({ en, lt, nl, pl, fr })) {
       const missing = keys.filter((key) => !(key in dictionary));
       expect(missing, `${locale} is missing settings translations:\n${missing.join('\n')}`).toEqual([]);
     }
