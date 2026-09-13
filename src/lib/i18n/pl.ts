@@ -2,6 +2,7 @@ import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolInstructionsTranslationsPl } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsPl } from './schoolTeacherContractTranslations.js';
+import { schoolConsultationsPl } from './schoolConsultationsTranslations.js';
 
 export const pl: Record<string, string> = {
   'parent.childAlreadyExists': 'To dziecko jest już na Twojej liście. Nie twórz kolejnego wpisu. Konto możesz utworzyć w istniejącej karcie dziecka.',
@@ -16,6 +17,7 @@ export const pl: Record<string, string> = {
   'common.reloadPageWarning': "Odświeżenie strony spowoduje utratę niezapisanych zmian. Kontynuować?",
   ...familyCatalogTrialCopy.pl,
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolConsultationsPl,
   'compSess.markAttended': 'Uczeń uczestniczył',
   'att.confirmedManually': 'Obecność potwierdzona',
   'att.unconfirmed': 'Obecność niepotwierdzona',

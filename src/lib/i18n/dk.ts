@@ -1,5 +1,6 @@
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsDk } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsDk } from './schoolTeacherContractTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
@@ -132,6 +133,7 @@ export const dk: Record<string, string> = {
   'common.reloadPageWarning': "Hvis du genindlæser siden, går ændringer, der ikke er gemt, tabt. Vil du fortsætte?",
   ...familyCatalogTrialCopy.dk,
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolConsultationsTranslations.dk,
   'compSess.markAttended': 'Eleven deltog',
   'att.confirmedManually': 'Fremmøde bekræftet',
   'att.unconfirmed': 'Fremmøde ikke bekræftet',

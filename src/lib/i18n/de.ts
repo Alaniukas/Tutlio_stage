@@ -1,5 +1,6 @@
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsDe } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsDe } from './schoolTeacherContractTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
@@ -17,6 +18,7 @@ export const de: Record<string, string> = {
   'common.reloadPageWarning': "Beim Neuladen gehen ungespeicherte Änderungen verloren. Fortfahren?",
   ...familyCatalogTrialCopy.de,
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolConsultationsTranslations.de,
   'compSess.markAttended': 'Schüler war anwesend',
   'att.confirmedManually': 'Anwesenheit bestätigt',
   'att.unconfirmed': 'Anwesenheit nicht bestätigt',

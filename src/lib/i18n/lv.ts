@@ -3,6 +3,7 @@ import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWork
 import { schoolInstructionsTranslationsLv } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsLv } from './schoolTeacherContractTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
+import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 
 export const lv: Record<string, string> = {
   'parent.childAlreadyExists': 'Šis bērns jau ir sarakstā. Konta izveidei izmantojiet esošo bērna kartīti.',
@@ -17,6 +18,7 @@ export const lv: Record<string, string> = {
   'common.reloadPageWarning': "Pārlādējot lapu, nesaglabātās izmaiņas tiks zaudētas. Vai turpināt?",
   ...familyCatalogTrialCopy.lv,
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolConsultationsTranslations.lv,
   'compSess.markAttended': 'Skolēns piedalījās',
   'att.confirmedManually': 'Dalība apstiprināta',
   'att.unconfirmed': 'Dalība nav apstiprināta',

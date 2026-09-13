@@ -3,6 +3,10 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import {
+  collectInvoiceLineSessionIds,
+  releaseBillingBatchForReissue,
+} from './_lib/releaseInvoiceBilling.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -27,8 +31,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (invErr || !invoice) return res.status(404).json({ error: 'Invoice not found' });
 
-    if (invoice.status === 'paid') {
-      return res.status(400).json({ error: 'Cannot delete a paid invoice' });
+    if (invoice.origin === 'external') {
+      return res.status(400).json({ error: 'External numbering reservations cannot be deleted here' });
+    }
+
+    if (invoice.status === 'cancelled') {
+      return res.status(400).json({ error: 'Invoice is already cancelled' });
     }
 
     const access = await getOrgAdminAccessByUserId(supabase, auth.userId);
@@ -45,43 +53,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (invoice.billing_batch_id) {
-      const { data: batch } = await supabase
-        .from('billing_batches')
-        .select('id, paid, payment_status')
-        .eq('id', invoice.billing_batch_id)
-        .maybeSingle();
-      if (batch?.paid === true || batch?.payment_status === 'paid') {
-        return res.status(400).json({ error: 'Cannot delete a paid invoice' });
+      await releaseBillingBatchForReissue(supabase, invoice.billing_batch_id);
+    } else {
+      const sessionIdsFromLines = await collectInvoiceLineSessionIds(supabase, invoiceId);
+      if (sessionIdsFromLines.length > 0) {
+        await supabase
+          .from('sessions')
+          .update({ payment_batch_id: null })
+          .in('id', sessionIdsFromLines);
       }
-
-      const { data: batchSessions } = await supabase
-        .from('billing_batch_sessions')
-        .select('session_id')
-        .eq('billing_batch_id', invoice.billing_batch_id);
-      const sessionIds = (batchSessions || []).map((bs) => bs.session_id).filter(Boolean);
-      if (sessionIds.length > 0) {
-        await supabase.from('sessions').update({ payment_batch_id: null }).in('id', sessionIds);
-      }
-      await supabase.from('billing_batch_sessions').delete().eq('billing_batch_id', invoice.billing_batch_id);
-      await supabase.from('billing_batches').delete().eq('id', invoice.billing_batch_id);
-    }
-
-    const { data: lineItems } = await supabase
-      .from('invoice_line_items')
-      .select('session_ids')
-      .eq('invoice_id', invoiceId);
-    const sessionIdsFromLines = new Set<string>();
-    for (const li of lineItems || []) {
-      const ids = Array.isArray((li as { session_ids?: string[] }).session_ids)
-        ? (li as { session_ids: string[] }).session_ids
-        : [];
-      for (const sid of ids) sessionIdsFromLines.add(sid);
-    }
-    if (sessionIdsFromLines.size > 0) {
-      await supabase
-        .from('sessions')
-        .update({ payment_batch_id: null })
-        .in('id', Array.from(sessionIdsFromLines));
     }
 
     await supabase

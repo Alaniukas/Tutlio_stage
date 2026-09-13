@@ -1,5 +1,6 @@
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsFi } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsFi } from './schoolTeacherContractTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
@@ -17,6 +18,7 @@ export const fi: Record<string, string> = {
   'common.reloadPageWarning': "Sivun lataaminen uudelleen poistaa tallentamattomat muutokset. Jatketaanko?",
   ...familyCatalogTrialCopy.fi,
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolConsultationsTranslations.fi,
   'compSess.markAttended': 'Oppilas osallistui',
   'att.confirmedManually': 'Läsnäolo vahvistettu',
   'att.unconfirmed': 'Läsnäoloa ei ole vahvistettu',

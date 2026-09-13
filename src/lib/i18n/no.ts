@@ -1,5 +1,6 @@
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsNo } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsNo } from './schoolTeacherContractTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
@@ -17,6 +18,7 @@ export const no: Record<string, string> = {
   'common.reloadPageWarning': "Hvis du laster siden på nytt, går ulagrede endringer tapt. Vil du fortsette?",
   ...familyCatalogTrialCopy.no,
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolConsultationsTranslations.no,
   'compSess.markAttended': 'Eleven deltok',
   'att.confirmedManually': 'Oppmøte bekreftet',
   'att.unconfirmed': 'Oppmøte ikke bekreftet',

@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { releaseBillingBatchForReissue } from './_lib/releaseInvoiceBilling.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -50,46 +51,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    if (batch.paid === true || batch.payment_status === 'paid') {
-      return res.status(400).json({ error: 'Cannot regenerate a paid invoice' });
-    }
-
-    const { data: batchSessions } = await supabase
-      .from('billing_batch_sessions')
-      .select('session_id')
-      .eq('billing_batch_id', billingBatchId);
-
-    const sessionIds = (batchSessions || []).map(bs => bs.session_id).filter(Boolean);
-
-    if (sessionIds.length > 0) {
-      await supabase
-        .from('sessions')
-        .update({ payment_batch_id: null })
-        .in('id', sessionIds);
-    }
-
-    await supabase
-      .from('billing_batch_sessions')
-      .delete()
-      .eq('billing_batch_id', billingBatchId);
-
-    await supabase
-      .from('invoices')
-      .update({ status: 'cancelled' })
-      .eq('billing_batch_id', billingBatchId)
-      .eq('status', 'issued');
-
-    await supabase
-      .from('billing_batches')
-      .delete()
-      .eq('id', billingBatchId);
+    const { sessionIds, wasPaid } = await releaseBillingBatchForReissue(supabase, billingBatchId);
 
     return res.status(200).json({
       success: true,
       freedSessionIds: sessionIds,
+      wasPaid,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Internal server error';
     console.error('[regenerate-monthly-invoice] Error:', err);
-    return res.status(500).json({ error: err.message || 'Internal server error' });
+    return res.status(500).json({ error: message });
   }
 }

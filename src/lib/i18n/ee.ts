@@ -1,5 +1,6 @@
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsEe } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsEe } from './schoolTeacherContractTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
@@ -17,6 +18,7 @@ export const ee: Record<string, string> = {
   'common.reloadPageWarning': "Lehe uuesti laadimisel lähevad salvestamata muudatused kaotsi. Kas jätkata?",
   ...familyCatalogTrialCopy.ee,
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolConsultationsTranslations.ee,
   'compSess.markAttended': 'Õpilane osales',
   'att.confirmedManually': 'Osalemine kinnitatud',
   'att.unconfirmed': 'Osalemine kinnitamata',

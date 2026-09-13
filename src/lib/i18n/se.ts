@@ -1,5 +1,6 @@
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsSe } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsSe } from './schoolTeacherContractTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
@@ -23,6 +24,7 @@ export const se: Record<string, string> = {
   'common.reloadPageWarning': "Om du laddar om sidan går osparade ändringar förlorade. Vill du fortsätta?",
   ...familyCatalogTrialCopy.se,
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolConsultationsTranslations.se,
   'compSess.markAttended': 'Eleven deltog',
   'att.confirmedManually': 'Närvaro bekräftad',
   'att.unconfirmed': 'Närvaro inte bekräftad',

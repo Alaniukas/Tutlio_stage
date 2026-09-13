@@ -463,7 +463,10 @@ export default function CompanyInvoices() {
   const handleRegenerate = async (invoiceId: string) => {
     const target = invoices.find(inv => inv.id === invoiceId);
     if (!target?.billing_batch_id) return;
-    const confirmed = window.confirm(t('invoices.regenerateConfirm'));
+    const isPaid = target.status === 'paid' || target.billing_batches?.paid === true;
+    const confirmed = window.confirm(
+      isPaid ? t('invoices.regeneratePaidConfirm') : t('invoices.regenerateConfirm'),
+    );
     if (!confirmed) return;
     setRegeneratingId(invoiceId);
     try {
@@ -478,7 +481,7 @@ export default function CompanyInvoices() {
         return;
       }
       setInvoices(prev => prev.filter(inv => inv.id !== invoiceId));
-      window.alert(t('invoices.regenerateSuccess'));
+      window.alert(isPaid ? t('invoices.regeneratePaidSuccess') : t('invoices.regenerateSuccess'));
     } catch (e) {
       console.error('[CompanyInvoices] regenerate error:', e);
       window.alert(t('invoices.regenerateFailed'));
@@ -490,8 +493,11 @@ export default function CompanyInvoices() {
   const handleDelete = async (invoiceId: string) => {
     const target = invoices.find((inv) => inv.id === invoiceId);
     if (!target) return;
-    if (target.status === 'paid' || target.billing_batches?.paid) return;
-    const confirmed = window.confirm(t('invoices.deleteConfirm'));
+    if (target.origin === 'external') return;
+    const isPaid = target.status === 'paid' || target.billing_batches?.paid === true;
+    const confirmed = window.confirm(
+      isPaid ? t('invoices.deletePaidConfirm') : t('invoices.deleteConfirm'),
+    );
     if (!confirmed) return;
     setDeletingId(invoiceId);
     try {
@@ -1179,45 +1185,45 @@ export default function CompanyInvoices() {
                         )}
                       </Button>
                       )}
-                      {inv.status === 'issued' && (
+                      {(inv.status === 'issued' || inv.status === 'paid') && inv.origin !== 'external' && (
                         <>
-                          {inv.billing_batch_id && (!inv.billing_batches || !inv.billing_batches.paid) && (
-                            <>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleRemind(inv.id)}
-                                disabled={remindingId === inv.id}
-                                className="rounded-lg text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
-                                title={t('invoices.remindPayer')}
-                              >
-                                {remindingId === inv.id ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <Mail className="w-4 h-4" />
-                                )}
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleRegenerate(inv.id)}
-                                disabled={regeneratingId === inv.id}
-                                className="rounded-lg text-amber-600 hover:text-amber-700 hover:bg-amber-50"
-                                title={t('invoices.regenerate')}
-                              >
-                                {regeneratingId === inv.id ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <RefreshCw className="w-4 h-4" />
-                                )}
-                              </Button>
-                            </>
+                          {inv.billing_batch_id && inv.status === 'issued' && (!inv.billing_batches || !inv.billing_batches.paid) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRemind(inv.id)}
+                              disabled={remindingId === inv.id}
+                              className="rounded-lg text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                              title={t('invoices.remindPayer')}
+                            >
+                              {remindingId === inv.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Mail className="w-4 h-4" />
+                              )}
+                            </Button>
+                          )}
+                          {inv.billing_batch_id && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRegenerate(inv.id)}
+                              disabled={regeneratingId === inv.id}
+                              className="rounded-lg text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                              title={t('invoices.regenerate')}
+                            >
+                              {regeneratingId === inv.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="w-4 h-4" />
+                              )}
+                            </Button>
                           )}
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handleDelete(inv.id)}
-                            disabled={deletingId === inv.id || inv.billing_batches?.paid === true}
+                            disabled={deletingId === inv.id}
                             className="rounded-lg text-red-600 hover:text-red-700 hover:bg-red-50"
                             title={t('invoices.delete')}
                           >
@@ -1227,15 +1233,17 @@ export default function CompanyInvoices() {
                               <Trash2 className="w-4 h-4" />
                             )}
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleMarkPaid(inv.id)}
-                            className="rounded-lg text-green-600 hover:text-green-700 hover:bg-green-50"
-                            title={t('invoices.markPaid')}
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                          </Button>
+                          {inv.status === 'issued' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleMarkPaid(inv.id)}
+                              className="rounded-lg text-green-600 hover:text-green-700 hover:bg-green-50"
+                              title={t('invoices.markPaid')}
+                            >
+                              <CheckCircle2 className="w-4 h-4" />
+                            </Button>
+                          )}
                         </>
                       )}
                     </div>

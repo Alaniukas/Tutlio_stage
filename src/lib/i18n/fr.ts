@@ -1,5 +1,6 @@
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsFr } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsFr } from './schoolTeacherContractTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
@@ -17,6 +18,7 @@ export const fr: Record<string, string> = {
   'common.reloadPageWarning': "Le rechargement entraînera la perte des modifications non enregistrées. Continuer ?",
   ...familyCatalogTrialCopy.fr,
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolConsultationsTranslations.fr,
   'compSess.markAttended': "L'élève était présent",
   'att.confirmedManually': 'Présence confirmée',
   'att.unconfirmed': 'Présence non confirmée',
@@ -4615,7 +4617,8 @@ export const fr: Record<string, string> = {
   'push.session_reminder_payer.body': 'Cours de {studentName} : {date} {time}',
   'push.booking_confirmation.title': 'Cours réservé',
   'push.booking_confirmation.body': '{date} {time} avec {tutorName}',
-  'push.booking_notification.title': 'Nouvelle réservation',  'push.session_cancelled.title': 'Cours annulé',
+  'push.booking_notification.title': 'Nouvelle réservation',
+  'push.session_cancelled.title': 'Cours annulé',
   'push.session_cancelled.body': '{date} {time} — {studentName} / {tutorName}',
   'push.session_cancelled_parent.title': 'Cours annulé',
   'push.session_cancelled_parent.body': 'Le cours de {studentName} du {date} est annulé',
