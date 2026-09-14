@@ -11,7 +11,7 @@ import { createClient } from '@supabase/supabase-js';
 import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { marketFromRequest } from './_lib/market.js';
-import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
+import { chargeCurrency, directChargeApplicationFeeCents, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import {
@@ -183,27 +183,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let checkoutSession: Stripe.Checkout.Session;
 
         if (useSchoolOrgAbsorbedFees) {
-            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
-            const applicationFeeCents = chargeCents - transferToSchoolCents;
+            const { applicationFeeCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
                 customer_creation: 'always',
                 payment_method_types: ['card'],
-                line_items: [
-                    ...itemLineItems,
-                    {
-                        price_data: {
-                            currency,
-                            product_data: {
-                                name: 'Platformos administravimo mokestis',
-                                description: 'Paslaugos teikėjas: MB „Tutlio“',
-                            },
-                            unit_amount: applicationFeeCents,
-                        },
-                        quantity: 1,
-                    },
-                ],
+                line_items: itemLineItems,
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
                     metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
@@ -217,6 +203,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ));
         } else {
             const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
+            const applicationFeeCents = directChargeApplicationFeeCents(basePriceEur, market, feeProfile, feeSplit);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
@@ -227,7 +214,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     { price_data: { currency, product_data: { name: 'Platformos administravimo mokestis', description: 'Paslaugos teikėjas: MB „Tutlio“' }, unit_amount: feesCents }, quantity: 1 },
                 ],
                 payment_intent_data: {
-                    application_fee_amount: feesCents,
+                    ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),
                     metadata: metadataBase,
                 },
                 metadata: { ...metadataBase, ...checkoutBaseMetadata(basePriceEur, market) },

@@ -12,7 +12,7 @@ import { verifyRequestAuth } from './_lib/auth.js';
 import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { marketFromRequest } from './_lib/market.js';
-import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
+import { chargeCurrency, directChargeApplicationFeeCents, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
 import { customerTotalEur } from './_lib/stripeLessonPricing.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
@@ -370,8 +370,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         let checkoutSession: Stripe.Response<Stripe.Checkout.Session>;
         if (useSchoolOrgAbsorbedFees) {
-            const { chargeCents, transferToSchoolCents } = schoolCheckoutBreakdown!;
-            const applicationFeeCents = chargeCents - transferToSchoolCents;
+            const { chargeCents, applicationFeeCents } = schoolCheckoutBreakdown!;
             if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
                 await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
                 return json(res, 400, {
@@ -383,20 +382,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 customer_email: customerEmail,
                 customer_creation: 'always',
                 payment_method_types: ['card'],
-                line_items: [
-                    ...itemLineItems,
-                    {
-                        price_data: {
-                            currency,
-                            product_data: {
-                                name: 'Platformos administravimo mokestis',
-                                description: 'Paslaugos teikėjas: MB „Tutlio“',
-                            },
-                            unit_amount: applicationFeeCents,
-                        },
-                        quantity: 1,
-                    },
-                ],
+                line_items: itemLineItems,
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
                     metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
@@ -407,6 +393,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }, directChargeOptions(stripeAccountId));
         } else {
             const { baseCents, feesCents: feeCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
+            const applicationFeeCents = directChargeApplicationFeeCents(basePriceEur, market, feeProfile, feeSplit);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
@@ -427,7 +414,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     },
                 ],
                 payment_intent_data: {
-                    application_fee_amount: feeCents,
+                    ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),
                     metadata: metadataBase,
                 },
                 metadata: { ...metadataBase, ...checkoutBaseMetadata(basePriceEur, market) },

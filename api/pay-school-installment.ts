@@ -107,7 +107,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const extraEurRaw = Number(contract?.additional_fee_amount || 0);
         const extraEur = installment.installment_number === 1 && extraEurRaw > 0 ? extraEurRaw : 0;
         const fixedEur = Math.max(0, baseEur - extraEur);
-        const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(baseEur, market);
+        const { chargeCents, applicationFeeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(baseEur, market);
 
         if (chargeCents < 50 || transferToSchoolCents < 1) {
             return res.status(400).send(errorPage('Klaida', 'Įmokos suma per maža operacijai su kortele.'));
@@ -118,7 +118,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(400).send(errorPage('Klaida', 'Neteisingas mokyklos Stripe Connect ID. Kreipkitės į mokyklą.'));
         }
 
-        const applicationFeeCents = chargeCents - transferToSchoolCents;
         if (applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
             return res.status(400).send(errorPage('Klaida', 'Neteisingas mokesčių skaidymas įmokai.'));
         }
@@ -184,7 +183,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             lineItems.push({
                 price_data: {
                     currency,
-                    unit_amount: transferToSchoolCents,
+                    unit_amount: chargeCents,
                     product_data: {
                         name: `${org?.name || 'Mokykla'} — Įmoka #${installment.installment_number}`,
                         description: `Metinio mokesčio įmoka: ${student?.full_name || 'Mokinys'}`,
@@ -193,18 +192,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 quantity: 1,
             });
         }
-        lineItems.push({
-            price_data: {
-                currency,
-                unit_amount: applicationFeeCents,
-                product_data: {
-                    name: 'Platformos administravimo mokestis',
-                    description: 'Paslaugos teikėjas: MB „Tutlio“',
-                },
-            },
-            quantity: 1,
-        });
-
         const metadata = {
             tutlio_school_installment_id: installment.id,
             tutlio_school_contract_id: contract.id,

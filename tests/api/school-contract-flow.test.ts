@@ -287,7 +287,7 @@ describe('School contract full flow (API integration)', () => {
     expect(checkoutParams.line_items.reduce(
       (sum: number, item: any) => sum + item.price_data.unit_amount * item.quantity,
       0,
-    )).toBe(30_300);
+    )).toBe(30_000);
     expect(flowDb.installments[0].stripe_checkout_session_id).toBe('cs_test_flow');
 
     // 8) Parent pays — confirm installment

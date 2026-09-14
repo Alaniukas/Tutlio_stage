@@ -33,10 +33,10 @@ describe('localized package fee disclosure', () => {
     fireEvent.click(trigger);
     const details = screen.getByRole('dialog', { name: t(locale, 'package.totalToPay') });
     const format = (amount: number) => new Intl.NumberFormat(LOCALE_FORMAT_TAGS[locale], { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 }).format(amount);
-    // Five lessons at €25; the connected account pays Stripe processing fees.
+    // Five lessons at €25; the payer covers both Tutlio and Stripe fees.
     await waitFor(() => expect(details.textContent).toContain(t(locale, 'package.tooltipTutor', { amount: format(125) })));
     expect(details.textContent).toContain(t(locale, 'package.tooltipPlatform', { amount: format(2.5) }));
-    expect(details.textContent).not.toContain(t(locale, 'package.tooltipStripe', { amount: format(0) }).split(format(0))[0]);
+    expect(details.textContent).toContain(t(locale, 'package.tooltipStripe', { amount: format(2.2) }));
     fireEvent.keyDown(details, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog', { name: t(locale, 'package.totalToPay') })).toBeNull());
     expect(document.activeElement).toBe(trigger);

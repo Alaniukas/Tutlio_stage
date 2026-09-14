@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { lessonCheckoutBreakdownCents } from '../../api/_lib/marketMoney';
+import { directChargeApplicationFeeCents, lessonCheckoutBreakdownCents } from '../../api/_lib/marketMoney';
 
 function expectedTotalCents(priceEur: number): number {
   const { totalCents } = lessonCheckoutBreakdownCents(priceEur);
@@ -8,8 +8,7 @@ function expectedTotalCents(priceEur: number): number {
 }
 
 function expectedFeeCents(priceEur: number): number {
-  const { feesCents } = lessonCheckoutBreakdownCents(priceEur);
-  return feesCents;
+  return directChargeApplicationFeeCents(priceEur);
 }
 
 function mockRes() {

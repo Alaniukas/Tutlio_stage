@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('school manual attendance controls', () => {
   it('lets a tutor confirm either outcome for each ended group participant', () => {
-    const source = readFileSync('src/pages/Calendar.tsx', 'utf8');
+    const source = readFileSync('src/pages/Calendar.tsx', 'utf8').replace(/\r\n/g, '\n');
 
     expect(source).toContain("'completed',\n                                      false,\n                                      { keepModalOpen: true }");
     expect(source).toContain("'no_show',\n                                      false,\n                                      { keepModalOpen: true }");

@@ -10,6 +10,7 @@ import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.j
 import { marketFromRequest } from './_lib/market.js';
 import {
   chargeCurrency,
+  directChargeApplicationFeeCents,
   lessonCheckoutBreakdownCents,
   checkoutBaseMetadata,
   creditNote,
@@ -193,8 +194,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 5. Checkout directly on the connected account; Tutlio collects an application fee.
         let checkoutSession;
         if (useSchoolOrgAbsorbedFees) {
-            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
-            const applicationFeeCents = chargeCents - transferToSchoolCents;
+            const { chargeCents, applicationFeeCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
             if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
                 return res.status(400).json({
                     error: 'Netinkama suma mokėjimo sesijai (per mažai arba suma sugadinta po kreditų).',
@@ -236,6 +236,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }, directChargeOptions(stripeAccountId));
         } else {
             const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
+            const applicationFeeCents = directChargeApplicationFeeCents(basePriceEur, market, feeProfile, feeSplit);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
@@ -266,7 +267,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     },
                 ],
                 payment_intent_data: {
-                    application_fee_amount: feesCents,
+                    ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),
                     metadata: {
                         tutlio_session_id: sessionId,
                         is_penalty_payment: isPenaltyPayment ? 'true' : 'false',

@@ -104,7 +104,7 @@ export default function SchoolHomework() {
   const [loading, setLoading] = useState(true);
   const [busySession, setBusySession] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [section, setSection] = useState<HomeworkSection>('upcoming');
+  const [section, setSection] = useState<HomeworkSection>('past');
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const now = useJoinClock();
 

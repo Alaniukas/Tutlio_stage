@@ -4,7 +4,7 @@ vi.mock('stripe', () => ({ default: class { checkout = { sessions: { create: moc
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ from: mock.from }) }));
 vi.mock('../../api/_lib/public-origin.js', () => ({ publicOriginFromRequest: () => 'https://tutlio.pl' }));
 import handler from '../../api/pay-package';
-import { lessonCheckoutBreakdownCents, orgFeeProfile } from '../../api/_lib/marketMoney';
+import { directChargeApplicationFeeCents, orgFeeProfile } from '../../api/_lib/marketMoney';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -36,7 +36,7 @@ describe('pooled package payment', () => {
       .toEqual([[4, 2700, 'eur'], [5, 2700, 'eur']]);
     expect(checkout.payment_intent_data.transfer_data).toBeUndefined();
     expect(checkout.payment_intent_data.application_fee_amount).toBe(
-      lessonCheckoutBreakdownCents(243, 'default', orgFeeProfile('proklase')).feesCents,
+      directChargeApplicationFeeCents(243, 'default', orgFeeProfile('proklase')),
     );
     expect(checkout.customer_creation).toBe('always');
     expect(options.stripeAccount).toBe('org-account');

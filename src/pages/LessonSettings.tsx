@@ -304,7 +304,6 @@ export default function LessonSettingsPage() {
     }
   };
 
-  const canEditLessonSettings = !orgName || (!orgPolicy.loading && orgPolicy.canEditLessonPricing);
   const canEditSubjects = !orgName || (!orgPolicy.loading && orgPolicy.editSubjects);
   const canEditPricing = !orgName || (!orgPolicy.loading && orgPolicy.editPricing);
   const canEditCancellation = !orgName || (!orgPolicy.loading && orgPolicy.editCancellation);
@@ -317,24 +316,10 @@ export default function LessonSettingsPage() {
   const hideMinBooking = !!(orgName && !canEditMinBooking);
   const hideBreakBetween = !!(orgName && !canEditBreakBetween);
   const hideReminders = !!(orgName && !canEditReminders);
-  const hidePolicySection = hideCancellation && hideMinBooking && hideBreakBetween && hideReminders;
-  /** Profile fields (not subjects) – "Save all" */
-  const canSaveProfileFields =
-    !orgName ||
-    orgPolicy.editCancellation ||
-    orgPolicy.editBreakBetweenLessons ||
-    orgPolicy.editMinBookingHours ||
-    orgPolicy.editReminders;
-
   /** Rodyti € kainas dalykuose ir baudos pavyzdyje */
   const showSubjectPrices = !orgPolicy.isOrgTutor || (!orgPolicy.loading && orgPolicy.editPricing);
 
   const handleSaveAll = async () => {
-    if (orgName && !orgPolicy.canEditLessonPricing) {
-      alert(t('lessonSet.orgBlocked'));
-      return;
-    }
-
     if (!ctxUser) return;
     setSaving(true);
     const user = ctxUser;
@@ -527,7 +512,7 @@ export default function LessonSettingsPage() {
             )}
             <Button
               onClick={handleSaveAll}
-              disabled={saving || loading || !canEditLessonSettings || (Boolean(orgName) && !canSaveProfileFields)}
+              disabled={saving || loading}
               className="rounded-xl gap-2"
             >
               <Save className="w-4 h-4" />
@@ -682,8 +667,7 @@ export default function LessonSettingsPage() {
           </div>
         </SettingsSection>
 
-        {/* === LESSON & NOTIFICATION SETTINGS (hidden when fully org-managed) === */}
-        {!hidePolicySection && (
+        {/* Personal email preferences stay editable even when lesson policy is org-managed. */}
         <SettingsSection
           icon={<Bell className="w-5 h-5 text-violet-600" />}
           iconBg="bg-violet-100"
@@ -800,7 +784,7 @@ export default function LessonSettingsPage() {
             </div>
             )}
 
-            {/* Notifications */}
+            {/* Reminder timing is an organization policy. */}
             {!hideReminders && (
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
@@ -834,41 +818,48 @@ export default function LessonSettingsPage() {
                   customLabel={t('lessonSet.customInput')} changeLabel={t('lessonSet.change')} listLabel={t('lessonSet.listView')}
                 />
               </div>
-              <div className="mt-6 space-y-3">
-                <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-                  <Mail className="w-4 h-4 text-violet-600" /> {t('lessonSet.emailNotificationsTitle')}
-                </h4>
-                <p className="text-xs text-gray-500">{t('lessonSet.emailNotificationsHint')}</p>
-                <label className="flex items-start gap-2 cursor-pointer">
-                  <Checkbox
-                    checked={emailOptOut.includes('lesson_reminder_tutor')}
-                    onChange={() => setEmailOptOut((prev) => toggleEmailOptOut(prev, 'lesson_reminder_tutor'))}
-                  />
-                  <span className="text-sm text-gray-700">{t('lessonSet.emailOptOutLessonReminderTutor')}</span>
-                </label>
-                {!orgName && (
-                  <label className="flex items-start gap-2 cursor-pointer">
-                    <Checkbox
-                      checked={emailOptOut.includes('payment_deadline_warning')}
-                      onChange={() => setEmailOptOut((prev) => toggleEmailOptOut(prev, 'payment_deadline_warning'))}
-                    />
-                    <span className="text-sm text-gray-700">{t('lessonSet.emailOptOutPaymentDeadline')}</span>
-                  </label>
-                )}
-              </div>
               <div className="h-px bg-gray-100 mt-8" />
             </div>
             )}
 
+            {/* Receipt preferences belong to the tutor, not the organization. */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <Mail className="w-4 h-4 text-violet-600" /> {t('lessonSet.emailNotificationsTitle')}
+              </h3>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <Checkbox
+                  checked={!emailOptOut.includes('lesson_reminder_tutor')}
+                  onChange={() => setEmailOptOut((prev) => toggleEmailOptOut(prev, 'lesson_reminder_tutor'))}
+                />
+                <span className="text-sm text-gray-700">{t('lessonSet.emailOptOutLessonReminderTutor')}</span>
+              </label>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <Checkbox
+                  checked={!emailOptOut.includes('org_tutor_availability_notice')}
+                  onChange={() => setEmailOptOut((prev) => toggleEmailOptOut(prev, 'org_tutor_availability_notice'))}
+                />
+                <span className="text-sm text-gray-700">{t('lessonSet.emailAvailabilityChanges')}</span>
+              </label>
+              {!orgName && (
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={!emailOptOut.includes('payment_deadline_warning')}
+                    onChange={() => setEmailOptOut((prev) => toggleEmailOptOut(prev, 'payment_deadline_warning'))}
+                  />
+                  <span className="text-sm text-gray-700">{t('lessonSet.emailOptOutPaymentDeadline')}</span>
+                </label>
+              )}
+            </div>
+
           </div>
         </SettingsSection>
-        )}
 
         {/* Bottom save button (mobile) */}
         <div className="pb-6 flex justify-end">
           <Button
             onClick={handleSaveAll}
-            disabled={saving || loading || !canEditLessonSettings || (Boolean(orgName) && !canSaveProfileFields)}
+            disabled={saving || loading}
             className="rounded-xl gap-2"
           >
             <Save className="w-4 h-4" />

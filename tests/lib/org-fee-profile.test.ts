@@ -8,11 +8,12 @@ import {
   lessonStripeBreakdown,
 } from '../../src/lib/marketMoney';
 import {
+  directChargeApplicationFeeCents,
   orgFeeProfile as serverOrgFeeProfile,
   lessonCheckoutBreakdownCents as serverBreakdown,
 } from '../../api/_lib/marketMoney';
 
-// Pro Klasė payer fees: <= €30 → Stripe only (1.5% + €0.25 gross-up); > €30 → 2% + €0.10 on top.
+// Pro Klasė payer fees: < €30 → Stripe only (1.5% + €0.25 gross-up); >= €30 → 2% + €0.10 on top.
 
 describe('orgFeeProfile resolver', () => {
   it('resolves the Proklasė profile and normalizes the slug', () => {
@@ -36,12 +37,13 @@ describe('orgFeeProfile resolver', () => {
 describe('Proklasė payer fee — customerTotal', () => {
   const p = orgFeeProfile('proklase');
 
-  it('adds only Stripe processing for lessons up to €30', () => {
+  it('adds only Stripe processing for lessons below €30', () => {
     expect(customerTotal(20, 'default', p)).toBeCloseTo((20 + 0.25) / 0.985, 6);
-    expect(customerTotal(30, 'default', p)).toBeCloseTo((30 + 0.25) / 0.985, 6);
+    expect(customerTotal(29.99, 'default', p)).toBeCloseTo((29.99 + 0.25) / 0.985, 6);
   });
 
-  it('adds only 2% + €0.10 for lessons above €30', () => {
+  it('adds 2% + €0.10 starting at exactly €30', () => {
+    expect(customerTotal(30, 'default', p)).toBeCloseTo(30.7, 6);
     expect(customerTotal(50, 'default', p)).toBeCloseTo(51.1, 6);
     expect(customerTotal(100, 'default', p)).toBeCloseTo(102.1, 6);
   });
@@ -53,6 +55,7 @@ describe('Proklasė payer fee — customerTotal', () => {
 
   it('recovers the lesson base from the payer total', () => {
     expect(orgBaseFromPayerChargedTotal(customerTotal(20, 'default', p)!, p)).toBe(20);
+    expect(orgBaseFromPayerChargedTotal(customerTotal(30, 'default', p)!, p)).toBe(30);
     expect(orgBaseFromPayerChargedTotal(customerTotal(50, 'default', p)!, p)).toBe(50);
     expect(orgBaseFromPayerChargedTotal(customerTotal(20, 'default', null)!, null)).toBe(20);
   });
@@ -81,6 +84,22 @@ describe('Proklasė payer fee — checkout breakdown (cents)', () => {
   it('matches the server mirror exactly', () => {
     const sp = serverOrgFeeProfile('proklase');
     expect(serverBreakdown(50, 'default', sp)).toEqual(lessonCheckoutBreakdownCents(50, 'default', p));
+  });
+
+  it('collects no Tutlio fee below €30 and the full custom commission from €30', () => {
+    expect(directChargeApplicationFeeCents(20, 'default', serverOrgFeeProfile('proklase'))).toBe(0);
+    expect(directChargeApplicationFeeCents(30, 'default', serverOrgFeeProfile('proklase'))).toBe(70);
+    expect(directChargeApplicationFeeCents(50, 'default', serverOrgFeeProfile('proklase'))).toBe(110);
+    expect(directChargeApplicationFeeCents(100, 'default', serverOrgFeeProfile('proklase'))).toBe(210);
+  });
+
+  it('keeps the Stripe surcharge out of Tutlio\'s standard application fee', () => {
+    const breakdown = serverBreakdown(100, 'default', null);
+    const applicationFeeCents = directChargeApplicationFeeCents(100, 'default', null);
+    const stripeFeeCents = Math.round((breakdown.totalCents * 0.015) + 25);
+
+    expect(applicationFeeCents).toBe(200);
+    expect(breakdown.totalCents - applicationFeeCents - stripeFeeCents).toBe(10_000);
   });
 });
 

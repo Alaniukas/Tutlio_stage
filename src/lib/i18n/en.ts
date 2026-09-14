@@ -3177,6 +3177,7 @@ export const en: Record<string, string> = {
   'lessonSet.reminders': 'Reminders',
   'lessonSet.emailNotificationsTitle': 'Email notifications',
   'lessonSet.emailNotificationsHint': 'Choose automated emails you do not want to receive.',
+  'lessonSet.emailAvailabilityChanges': 'Availability changes made by an organization administrator',
   'lessonSet.emailOptOutLessonReminderTutor': 'Reminder to me before a session',
   'lessonSet.emailOptOutPaymentDeadline': 'Payment deadline warning',
   'lessonSet.saveAll': 'Save all',

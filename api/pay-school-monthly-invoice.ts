@@ -85,11 +85,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).send(errorPage('Klaida', 'Neteisingas mokyklos Stripe Connect ID. Kreipkitės į mokyklą.'));
     }
 
-    const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(totalEur, market);
+    const { chargeCents, applicationFeeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(totalEur, market);
     if (chargeCents < 50 || transferToSchoolCents < 1) {
       return res.status(400).send(errorPage('Klaida', 'Sąskaitos suma per maža operacijai su kortele.'));
     }
-    const applicationFeeCents = chargeCents - transferToSchoolCents;
     if (applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
       return res.status(400).send(errorPage('Klaida', 'Neteisingas mokesčių skaidymas sąskaitai.'));
     }

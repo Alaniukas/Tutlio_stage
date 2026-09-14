@@ -1018,10 +1018,9 @@ export default function CompanySettings() {
             />
             <div className="pt-2 space-y-2 border-t border-gray-100">
               <p className="text-sm font-medium text-gray-900">{t('compSet.emailNotificationsTitle')}</p>
-              <p className="text-xs text-gray-500">{t('compSet.emailNotificationsHint')}</p>
               <label className="flex items-start gap-2 cursor-pointer">
                 <Checkbox
-                  checked={adminEmailOptOut.includes('payment_deadline_warning')}
+                  checked={!adminEmailOptOut.includes('payment_deadline_warning')}
                   onChange={() => setAdminEmailOptOut((prev) => toggleEmailOptOut(prev, 'payment_deadline_warning'))}
                 />
                 <span className="text-sm text-gray-700">{t('compSet.emailOptOutPaymentDeadline')}</span>

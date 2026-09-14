@@ -100,11 +100,18 @@ describe('GET /api/pay-school-monthly-invoice', () => {
     expect(options).toEqual({ stripeAccount: 'acct_123' });
     // School org: payer pays the list amount; Tutlio + Stripe are absorbed from the school share.
     const charged = params.line_items[0].price_data.unit_amount;
-    const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(162, 'default');
+    const {
+      chargeCents,
+      applicationFeeCents,
+      estimatedStripeFeeCents,
+      transferToSchoolCents,
+    } = schoolInstallmentCheckoutCents(162, 'default');
     expect(charged).toBe(chargeCents);
     expect(charged).toBe(16200);
-    expect(transferToSchoolCents).toBeLessThan(chargeCents);
-    expect(params.payment_intent_data.application_fee_amount).toBe(chargeCents - transferToSchoolCents);
+    expect(applicationFeeCents).toBe(162);
+    expect(estimatedStripeFeeCents).toBe(268);
+    expect(transferToSchoolCents).toBe(15770);
+    expect(params.payment_intent_data.application_fee_amount).toBe(applicationFeeCents);
     expect(params.line_items[0].price_data.product_data.name).toContain('2026 m. rugsėjis');
     expect(params.success_url).toContain(`/school-payment-success?success=1&monthly=${INVOICE_ID}`);
     expect(db.updates[0]).toEqual({ stripe_checkout_session_id: 'cs_1' });

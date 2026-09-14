@@ -13,7 +13,7 @@ import { createClient } from '@supabase/supabase-js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
 import { marketFromRequest } from './_lib/market.js';
-import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
+import { chargeCurrency, directChargeApplicationFeeCents, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import {
@@ -144,8 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let checkoutSession: Stripe.Checkout.Session;
 
         if (useSchoolOrgAbsorbedFees) {
-            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(totalLessonPrice, market);
-            const applicationFeeCents = chargeCents - transferToSchoolCents;
+            const { chargeCents, applicationFeeCents } = schoolInstallmentCheckoutCents(totalLessonPrice, market);
 
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
@@ -174,16 +173,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } else {
             let baseCents = 0;
             let feesCents = 0;
+            let applicationFeeCents = 0;
             if (feeProfile) {
                 // Custom org deals are tiered on the full transaction (invoice total), not per session.
                 const b = lessonCheckoutBreakdownCents(totalLessonPrice, market, feeProfile, feeSplit);
                 baseCents = b.baseCents;
                 feesCents = b.feesCents;
+                applicationFeeCents = directChargeApplicationFeeCents(totalLessonPrice, market, feeProfile, feeSplit);
             } else {
                 for (const s of (batchSessions || [])) {
                     const b = lessonCheckoutBreakdownCents(Number(s.session_price) || 0, market, null, feeSplit);
                     baseCents += b.baseCents;
                     feesCents += b.feesCents;
+                    applicationFeeCents += directChargeApplicationFeeCents(Number(s.session_price) || 0, market, null, feeSplit);
                 }
             }
 
@@ -217,7 +219,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     },
                 ],
                 payment_intent_data: {
-                    application_fee_amount: feesCents,
+                    ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),
                     metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id },
                 },
                 metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, ...checkoutBaseMetadata(baseCents / 100, market) },

@@ -39,6 +39,15 @@ function dictFor(locale: Locale): Record<string, string> | undefined {
 /** Server funkcijose kai kur bundle neįtraukia naujausių raktų – būtiniausi el. pašto fragmentai čia visada. */
 const EMAIL_SERVER_FALLBACKS: Partial<Record<Locale, Record<string, string>>> = {
   lt: {
+    'em.mvPayerPaymentInfoTitle': 'Mokėjimai ir dokumentai vienoje vietoje',
+    'em.mvPayerPaymentInfoLead':
+      'Tutlio sistemoje galite patogiai atlikti mokėjimus ir rasti visą su vaiko pamokomis susijusią informaciją.',
+    'em.mvPayerPaymentInfoBenefit1': 'Apmokėti pamokas ir paketus saugiomis mokėjimo nuorodomis.',
+    'em.mvPayerPaymentInfoBenefit2': 'Matyti mokėjimų būseną ir istoriją.',
+    'em.mvPayerPaymentInfoBenefit3': 'Gauti ir atsisiųsti sąskaitas faktūras.',
+    'em.mvPayerPaymentInfoBenefit4': 'Vienoje vietoje peržiūrėti vaiko pamokas ir dokumentus.',
+    'em.mvPayerPaymentInfoFeeNote':
+      'Galutinė mokėtina suma, įskaitant taikomus aptarnavimo mokesčius, visada aiškiai nurodoma prieš apmokėjimą.',
     'em.manualPayInstructionsLead':
       'Pamoką apmokėkite pagal žemiau pateiktus korepetitoriaus duomenis iki nurodyto termino (kortele per platformą šio korepetitoriaus mokėjimas negalimas).',
     'em.manualPayPortalHint':
@@ -54,6 +63,15 @@ const EMAIL_SERVER_FALLBACKS: Partial<Record<Locale, Record<string, string>>> = 
     'em.packageProKlasePhoneLabel': 'Tel. nr.:',
   },
   en: {
+    'em.mvPayerPaymentInfoTitle': 'Payments and documents in one place',
+    'em.mvPayerPaymentInfoLead':
+      'Tutlio lets you make payments conveniently and find all information related to your child\'s lessons.',
+    'em.mvPayerPaymentInfoBenefit1': 'Pay for lessons and packages through secure payment links.',
+    'em.mvPayerPaymentInfoBenefit2': 'View payment status and history.',
+    'em.mvPayerPaymentInfoBenefit3': 'Receive and download invoices.',
+    'em.mvPayerPaymentInfoBenefit4': 'Review your child\'s lessons and documents in one place.',
+    'em.mvPayerPaymentInfoFeeNote':
+      'The final amount, including any applicable service fees, is always shown clearly before payment.',
     'em.manualPayInstructionsLead':
       'Pay using your tutor\'s instructions below before the deadline. This tutor does not accept card checkout on the platform.',
     'em.manualPayPortalHint':

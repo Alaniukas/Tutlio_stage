@@ -12,9 +12,9 @@ import { useTranslation } from '@/lib/i18n';
 import { LOCALE_FORMAT_TAGS } from '@/lib/i18n/locales';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
-import { customerTotal } from '@/lib/marketMoney';
+import { customerTotal, MARKET_FEES } from '@/lib/marketMoney';
 import { currentMarket } from '@/lib/market';
-import { resolveOrgPayerFeeSplit, type OrgPayerFeeSplit } from '@/lib/orgPayerFeeSplit';
+import { payerFeeSplitShare01, resolveOrgPayerFeeSplit, type OrgPayerFeeSplit } from '@/lib/orgPayerFeeSplit';
 
 interface SendPackageModalProps {
   isOpen: boolean;
@@ -80,10 +80,15 @@ export default function SendPackageModal({
       (acc, it) => acc + (Number(it.totalLessons) || 0) * (Number(it.pricePerLesson) || 0),
       0,
     );
+    const totalWithFees = calcTotalWithFees(basePriceEur, orgFeeSplit);
+    const payerPlatformShare = orgFeeSplit ? payerFeeSplitShare01(orgFeeSplit.platformShare) : 1;
+    const platformFeeEur = basePriceEur * MARKET_FEES.platformPercent * payerPlatformShare;
     return {
       totalLessons,
       basePriceEur,
-      totalWithFees: calcTotalWithFees(basePriceEur, orgFeeSplit),
+      platformFeeEur,
+      stripeFeeEur: Math.max(0, totalWithFees - basePriceEur - platformFeeEur),
+      totalWithFees,
     };
   }, [items, orgFeeSplit]);
 
@@ -316,7 +321,8 @@ export default function SendPackageModal({
                         </PopoverTrigger>
                         <PopoverContent aria-label={t('package.totalToPay')} className="w-64 max-w-[calc(100vw-2rem)] rounded-lg border-violet-200 bg-white p-2.5 text-start text-xs font-medium text-gray-700">
                           {t('package.tooltipTutor', { amount: formatEur(totals.basePriceEur) })}<br />
-                          {t('package.tooltipPlatform', { amount: formatEur(totals.totalWithFees - totals.basePriceEur) })}
+                          {t('package.tooltipPlatform', { amount: formatEur(totals.platformFeeEur) })}<br />
+                          {t('package.tooltipStripe', { amount: formatEur(totals.stripeFeeEur) })}
                         </PopoverContent>
                       </Popover>
                     </span>

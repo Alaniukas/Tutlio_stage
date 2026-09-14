@@ -431,7 +431,8 @@ export default function CompanyStudents() {
     orgEntityType,
     orgFeaturesLoading,
   );
-  const studentCardBookingEnabled = pkFeat('student_card_booking') || (isMvOrg && preActivationSchedulingUi);
+  const proKlaseAvailabilitySearchUi = proKlaseAdminUi && preActivationSchedulingUi;
+  const studentCardBookingEnabled = pkFeat('student_card_booking');
   /** Full contact editing: schools always; other orgs behind full_student_edit (email only until registered). */
   const canFullEditStudent = isSchoolView || (!orgFeaturesLoading && hasFeature('full_student_edit'));
   /** Sutartims / school moduliui: asmens kodas, gimimo data, adresas — ne company / Pro Klasė. */
@@ -3136,7 +3137,7 @@ export default function CompanyStudents() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <Label>{t('compStu.tutorsRequired')}</Label>
-                      {preActivationSchedulingUi && !parentFirstInvite && (
+                      {proKlaseAvailabilitySearchUi && !parentFirstInvite && (
                       <Button
                         type="button"
                         size="sm"
@@ -6306,7 +6307,7 @@ export default function CompanyStudents() {
           }}
         />
 
-        {preActivationSchedulingUi && (
+        {proKlaseAvailabilitySearchUi && (
         <FindTutorModal
           isOpen={addStudentFindTutorOpen}
           onClose={() => setAddStudentFindTutorOpen(false)}

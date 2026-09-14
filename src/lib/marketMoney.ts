@@ -29,16 +29,16 @@ export type OrgFeeProfile = {
  * server mirror in `api/_lib/marketMoney.ts`.
  */
 export const ORG_FEE_PROFILES: Record<string, OrgFeeProfile> = {
-  // Pro Klasė payer fees: <= €30 → Stripe only (1.5% + €0.25 gross-up); > €30 → 2% + €0.10 on top.
+  // Pro Klasė payer fees: < €30 → Stripe only (1.5% + €0.25 gross-up); >= €30 → 2% + €0.10 on top.
   proklase: {
     tiers: [
-      { maxBase: 30, percent: 0.015, fixed: 0.25 },
+      { maxBase: 29.99, percent: 0.015, fixed: 0.25 },
       { maxBase: Infinity, percent: 0.02, fixed: 0.1 },
     ],
   },
 };
 
-const PRO_KLASE_LOW_TIER_MAX_BASE = 30;
+const PRO_KLASE_HIGH_TIER_MIN_BASE = 30;
 const PRO_KLASE_HIGH_TIER_PERCENT = 0.02;
 const PRO_KLASE_HIGH_TIER_FIXED_EUR = 0.1;
 
@@ -50,7 +50,7 @@ export function isProKlaseFeeProfile(profile: OrgFeeProfile | null | undefined):
 
 function proKlaseCustomerTotal(baseAmount: number, market: TutlioMarket): number {
   const fixed = stripeFixedFee(market);
-  if (baseAmount <= PRO_KLASE_LOW_TIER_MAX_BASE) {
+  if (baseAmount < PRO_KLASE_HIGH_TIER_MIN_BASE) {
     return (baseAmount + fixed) / (1 - MARKET_FEES.stripePercent);
   }
   return baseAmount + baseAmount * PRO_KLASE_HIGH_TIER_PERCENT + PRO_KLASE_HIGH_TIER_FIXED_EUR;
@@ -205,15 +205,15 @@ export function orgBaseFromPayerChargedTotal(
   if (isProKlaseFeeProfile(profile)) {
     const baseLow = netBeforeStripe - stripeFixed;
     const roundedLow = Math.round(baseLow * 100) / 100;
-    if (roundedLow > 0 && roundedLow <= PRO_KLASE_LOW_TIER_MAX_BASE
-      && Math.abs(customerTotal(roundedLow, market, profile) - total) <= 0.01) {
-      return roundedLow;
-    }
     const baseHigh = (total - PRO_KLASE_HIGH_TIER_FIXED_EUR) / (1 + PRO_KLASE_HIGH_TIER_PERCENT);
     const roundedHigh = Math.round(baseHigh * 100) / 100;
-    if (roundedHigh > PRO_KLASE_LOW_TIER_MAX_BASE
+    if (roundedHigh >= PRO_KLASE_HIGH_TIER_MIN_BASE
       && Math.abs(customerTotal(roundedHigh, market, profile) - total) <= 0.01) {
       return roundedHigh;
+    }
+    if (roundedLow > 0 && roundedLow < PRO_KLASE_HIGH_TIER_MIN_BASE
+      && Math.abs(customerTotal(roundedLow, market, profile) - total) <= 0.01) {
+      return roundedLow;
     }
     return total;
   }
@@ -269,13 +269,22 @@ export function lessonCheckoutBreakdownCents(
 export function schoolInstallmentCheckoutCents(
   amount: number,
   market: TutlioMarket = 'default',
-): { chargeCents: number; transferToSchoolCents: number } {
-  const tutlioFee = amount * MARKET_FEES.schoolTutlioPercent;
-  const stripeEstimate = amount * MARKET_FEES.stripePercent + stripeFixedFee(market);
-  const schoolNet = amount - tutlioFee - stripeEstimate;
+): {
+  chargeCents: number;
+  applicationFeeCents: number;
+  estimatedStripeFeeCents: number;
+  transferToSchoolCents: number;
+} {
+  const chargeCents = Math.round(amount * 100);
+  const applicationFeeCents = Math.round(amount * MARKET_FEES.schoolTutlioPercent * 100);
+  const estimatedStripeFeeCents = Math.round(
+    (amount * MARKET_FEES.stripePercent + stripeFixedFee(market)) * 100,
+  );
   return {
-    chargeCents: Math.round(amount * 100),
-    transferToSchoolCents: Math.max(0, Math.round(schoolNet * 100)),
+    chargeCents,
+    applicationFeeCents,
+    estimatedStripeFeeCents,
+    transferToSchoolCents: Math.max(0, chargeCents - applicationFeeCents - estimatedStripeFeeCents),
   };
 }
 

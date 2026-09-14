@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { marketFromRequest } from './_lib/market.js';
-import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile } from './_lib/marketMoney.js';
+import { chargeCurrency, directChargeApplicationFeeCents, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile } from './_lib/marketMoney.js';
 import { customerTotalEur } from './_lib/stripeLessonPricing.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
@@ -225,6 +225,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? schoolBreakdown.chargeCents / 100
       : customerTotalEur(basePriceEur, feeProfile, feeSplit);
     const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
+    const directChargeFeeCents = directChargeApplicationFeeCents(basePriceEur, market, feeProfile, feeSplit);
 
     const { data: lessonPackage, error: packageErr } = await supabase
       .from('lesson_packages')
@@ -342,8 +343,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let checkoutSession;
     try {
       if (useSchoolOrgAbsorbedFees) {
-        const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
-        const applicationFeeCents = chargeCents - transferToSchoolCents;
+        const { chargeCents, applicationFeeCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
         if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
           await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
           return json(res, 400, { error: 'Netinkama bandomosios pamokos suma' });
@@ -419,7 +419,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             },
           ],
           payment_intent_data: {
-            application_fee_amount: feesCents,
+            ...(directChargeFeeCents > 0 ? { application_fee_amount: directChargeFeeCents } : {}),
             metadata: {
               tutlio_package_id: lessonPackage.id,
               tutor_id: tutorId,

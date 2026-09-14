@@ -3184,6 +3184,7 @@ export const lt: Record<string, string> = {
   'lessonSet.reminders': 'Priminimai',
   'lessonSet.emailNotificationsTitle': 'El. laiškų pranešimai',
   'lessonSet.emailNotificationsHint': 'Pasirinkite, kurių automatinių laiškų nenorite gauti.',
+  'lessonSet.emailAvailabilityChanges': 'Administratoriaus atlikti mano laisvo laiko pakeitimai',
   'lessonSet.emailOptOutLessonReminderTutor': 'Priminimas man prieš užsiėmimą',
   'lessonSet.emailOptOutPaymentDeadline': 'Mokėjimo termino perspėjimas',
   'lessonSet.saveAll': 'Išsaugoti viską',

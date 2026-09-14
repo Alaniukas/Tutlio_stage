@@ -51,6 +51,7 @@ import {
 } from './_lib/mvPayerFeeNotice.js';
 import { checkSchoolSessionStudentAccess } from './_lib/schoolContractAccess.js';
 import { shouldSkipParentNotification } from './_lib/parentNotificationPreferences.js';
+import { shouldSkipTutorNotification } from './_lib/tutorNotificationPreferences.js';
 
 
 function randomToken() {
@@ -3246,6 +3247,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             success: true,
             skipped: true,
             reason: 'parent_notification_preference',
+          });
+        }
+        if (await shouldSkipTutorNotification(preferenceClient, to, type)) {
+          return res.status(200).json({
+            success: true,
+            skipped: true,
+            reason: 'tutor_notification_preference',
           });
         }
       }

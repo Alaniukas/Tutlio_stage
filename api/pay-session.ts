@@ -13,6 +13,7 @@ import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.j
 import { marketFromRequest } from './_lib/market.js';
 import {
   chargeCurrency,
+  directChargeApplicationFeeCents,
   lessonCheckoutBreakdownCents,
   checkoutBaseMetadata,
   creditNote,
@@ -185,8 +186,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let checkoutSession: Stripe.Checkout.Session;
 
         if (useSchoolOrgAbsorbedFees) {
-            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
-            const applicationFeeCents = chargeCents - transferToSchoolCents;
+            const { chargeCents, applicationFeeCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
@@ -203,6 +203,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }, directChargeOptions(stripeAccountId!));
         } else {
             const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
+            const applicationFeeCents = directChargeApplicationFeeCents(basePriceEur, market, feeProfile, feeSplit);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,
@@ -213,7 +214,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     { price_data: { currency, product_data: { name: 'Platformos administravimo mokestis', description: 'Paslaugos teikėjas: MB „Tutlio“' }, unit_amount: feesCents }, quantity: 1 },
                 ],
                 payment_intent_data: {
-                    application_fee_amount: feesCents,
+                    ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),
                     metadata: { tutlio_session_id: sessionId },
                 },
                 metadata: { tutlio_session_id: sessionId, ...checkoutBaseMetadata(baseCents / 100, market) },

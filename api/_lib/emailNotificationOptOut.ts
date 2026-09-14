@@ -3,6 +3,7 @@ export const EMAIL_OPT_OUT_KEYS = [
   'lesson_reminder_tutor',
   'lesson_reminder_student',
   'payment_deadline_warning',
+  'org_tutor_availability_notice',
 ] as const;
 
 export type EmailOptOutKey = (typeof EMAIL_OPT_OUT_KEYS)[number];

@@ -75,7 +75,13 @@ describe('proKlaseAdminFinance', () => {
   });
 
   it('counts package cash, not cancelled session prices, as client paid', () => {
-    expect(packageClientPaidEur({ tutor_id: 't', total_price: 200, paid: true })).toBe(200);
+    expect(packageClientPaidEur({
+      tutor_id: 't',
+      total_price: 200,
+      price_per_lesson: 25,
+      total_lessons: 8,
+      paid: true,
+    })).toBe(200);
     expect(
       standaloneSessionClientPaidEur(paidLesson({ lesson_package_id: 'pkg-1', status: 'cancelled' })),
     ).toBe(0);

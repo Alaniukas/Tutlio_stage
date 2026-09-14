@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { customerTotal } from '../../src/lib/marketMoney';
+import { directChargeApplicationFeeCents } from '../../api/_lib/marketMoney';
 import { en } from '../../src/lib/i18n/en';
 import { lt } from '../../src/lib/i18n/lt';
 import { nl } from '../../src/lib/i18n/nl';
@@ -58,5 +59,15 @@ describe('org payer fee split', () => {
     expect(orgNetFromPayerFeeSplit(20, 'default', split)).toBeLessThan(20);
     expect(orgNetFromPayerFeeSplit(20, 'default', split)).toBeCloseTo(19.7, 0);
     expect(orgNetFromPayerFeeSplit(20, 'default', parseOrgPayerFeeSplitConfig({ platform_share: 100, stripe_percent_share: 100, stripe_fixed_share: 100 }))).toBe(20);
+  });
+
+  it('keeps Tutlio application fee at 2% while the payer share is configurable', () => {
+    const split = parseOrgPayerFeeSplitConfig({
+      platform_share: 25,
+      stripe_percent_share: 50,
+      stripe_fixed_share: 0,
+    });
+
+    expect(directChargeApplicationFeeCents(100, 'default', null, split)).toBe(200);
   });
 });
