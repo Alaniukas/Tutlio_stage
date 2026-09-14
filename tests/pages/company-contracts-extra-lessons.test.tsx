@@ -47,6 +47,7 @@ const extraContractsFixture = () => [
     student: { full_name: 'Emilija Bar', payer_name: 'Tėvas', payer_email: 'parent@test.lt' },
     signatures: [],
     installments: [],
+    pdf_url: null,
   },
   {
     id: 'c-extra-2',
@@ -66,6 +67,7 @@ const extraContractsFixture = () => [
     student: { full_name: 'Emilija Bar', payer_name: 'Tėvas', payer_email: 'parent@test.lt' },
     signatures: [],
     installments: [],
+    pdf_url: '2dd745fc/contracts/c-extra-2/Sutartis-PP-101.pdf',
   },
 ];
 
@@ -129,5 +131,9 @@ describe('CompanyContracts extra-lessons list', () => {
     ).toBeTruthy();
     expect(screen.queryByText('common.edit')).toBeNull();
     expect(screen.queryByText('school.extra.monthlyFee')).toBeNull();
+    expect(
+      screen.getByText('PDF neparuoštas, todėl tėvai šios sutarties negavo. Sukurkite naują papildomų užsiėmimų pasiūlymą.'),
+    ).toBeTruthy();
+    expect(screen.getAllByText(/PDF neparuoštas/).length).toBe(1);
   });
 });

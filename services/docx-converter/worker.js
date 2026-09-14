@@ -5,7 +5,7 @@ export class BusyError extends Error {
 }
 
 /** Admission happens before decoding/unzipping a document. No unbounded queue. */
-export function createWorker({ maxPending = 2, maxWaitMs = 30000 } = {}) {
+export function createWorker({ maxPending = 2, maxWaitMs = 120000 } = {}) {
   let active = false;
   let healthy = true;
   const pending = [];
@@ -40,7 +40,11 @@ export function createWorker({ maxPending = 2, maxWaitMs = 30000 } = {}) {
   };
 }
 
-/** Linux process group includes soffice wrappers and soffice.bin descendants. */
+/**
+ * Linux process group includes soffice wrappers and soffice.bin descendants.
+ * The wrapper can exit 0 while soffice.bin is still flushing contract.pdf.
+ * Callers must wait for a valid PDF, then invoke `kill` to reap leftovers.
+ */
 export function runProcess(bin, args, { timeoutMs = 12000, env = process.env } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { detached: process.platform !== 'win32', windowsHide: true, env,
@@ -58,12 +62,12 @@ export function runProcess(bin, args, { timeoutMs = 12000, env = process.env } =
     child.once('error', error => { clearTimeout(timer); reject(error); });
     child.once('close', code => {
       clearTimeout(timer);
-      kill(); // Remove descendants even if the wrapper exited successfully.
       if (timedOut || code !== 0) {
+        kill();
         const error = new Error(timedOut ? 'Conversion deadline exceeded' : `LibreOffice exited ${code}: ${stderr}`);
         error.infrastructureFailure = timedOut || /Thread::create|bad_alloc|Cannot allocate memory/i.test(stderr);
         reject(error);
-      } else resolve();
+      } else resolve({ kill });
     });
   });
 }

@@ -39,6 +39,12 @@ test('stopping rejects pending and new jobs', async () => {
   await assert.rejects(worker.run(() => {}), /restarting/);
 });
 
+test('successful processes stay alive until the caller reaps them', async () => {
+  const result = await runProcess(process.execPath, ['-e', 'process.exit(0)']);
+  assert.equal(typeof result.kill, 'function');
+  result.kill();
+});
+
 test('hung process is terminated and the next process can run', async () => {
   await assert.rejects(runProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { timeoutMs: 100 }), /deadline/);
   await runProcess(process.execPath, ['-e', 'process.exit(0)']);

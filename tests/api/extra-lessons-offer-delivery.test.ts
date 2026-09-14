@@ -96,3 +96,81 @@ it('does not send a resend email until a contract PDF exists', async () => {
   expect(result).toMatchObject({ code: 'contract_pdf_generation_failed', emailSent: false });
   expect(fetch).not.toHaveBeenCalled();
 });
+
+it('discards a new offer instead of saving a sent contract without PDF', async () => {
+  const deleted: Array<{ table: string; id?: string; contractId?: string }> = [];
+  const fetch = vi.spyOn(globalThis, 'fetch');
+  state.db = {
+    from: vi.fn((table: string) => {
+      const builder: any = {};
+      for (const method of ['select', 'eq', 'order', 'limit', 'ilike']) {
+        builder[method] = vi.fn(() => builder);
+      }
+      builder.maybeSingle = vi.fn(async () => {
+        if (table === 'organizations') {
+          return {
+            data: {
+              id: 'school-1',
+              name: 'School',
+              features: { school_extra_lessons_contract: true },
+              entity_type: 'school',
+            },
+            error: null,
+          };
+        }
+        if (table === 'students') {
+          return {
+            data: {
+              id: 'student-1',
+              full_name: 'Student',
+              payer_name: 'Parent',
+              payer_email: 'parent@example.com',
+            },
+            error: null,
+          };
+        }
+        if (table === 'school_contract_templates') {
+          return { data: null, error: null };
+        }
+        return { data: null, error: null };
+      });
+      builder.insert = vi.fn(() => {
+        builder.then = (onFulfilled: any, onRejected: any) =>
+          Promise.resolve({ data: null, error: null }).then(onFulfilled, onRejected);
+        return builder;
+      });
+      builder.update = vi.fn(() => builder);
+      builder.single = vi.fn(async () => ({
+        data: table === 'school_contracts' ? { id: 'created-1', contract_number: 'PP-1' } : null,
+        error: null,
+      }));
+      builder.delete = vi.fn(() => {
+        builder.eq = vi.fn((column: string, value: string) => {
+          if (column === 'id') deleted.push({ table, id: value });
+          if (column === 'contract_id') deleted.push({ table, contractId: value });
+          return Promise.resolve({ data: null, error: null });
+        });
+        return builder;
+      });
+      return builder;
+    }),
+  };
+
+  const response: any = {
+    status: vi.fn().mockReturnThis(),
+    json: vi.fn().mockImplementation((value) => value),
+  };
+  const result = await handler({
+    method: 'POST',
+    body: { student_id: 'student-1', unit_price_eur: 6, send: true },
+    headers: {},
+  } as any, response);
+
+  expect(response.status).toHaveBeenCalledWith(503);
+  expect(result).toMatchObject({ code: 'contract_pdf_generation_failed', emailSent: false });
+  expect(deleted).toEqual([
+    { table: 'school_contract_completion_tokens', contractId: 'created-1' },
+    { table: 'school_contracts', id: 'created-1' },
+  ]);
+  expect(fetch).not.toHaveBeenCalled();
+});

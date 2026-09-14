@@ -213,4 +213,7 @@ export const sharedOrganizationWorkflowTranslations: Record<string, string> = {
   'companyFinance.payerFeeSplitPreviewOrgLineAbsorbed': 'The organization receives €{net} from the €{base} lesson price and absorbs €{absorbed} in fees.',
   'companyFinance.payerFeeSplitSave': 'Save fee split',
   'companyFinance.payerFeeSplitSaved': 'Fee split saved',
+  'school.extra.pdfFailed': 'The contract PDF could not be prepared, so nothing was sent to the parents. Wait a minute and send the offer again.',
+  'school.extra.pdfMissing': 'PDF was not prepared, so parents did not receive this contract. Create a new extra-sessions offer.',
+  'school.extra.preparing': 'Preparing the contract… this can take about a minute.',
 };

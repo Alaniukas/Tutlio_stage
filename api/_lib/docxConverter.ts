@@ -55,9 +55,11 @@ async function fetchDocxConverterOnce(base: string, key: string, docxBuffer: Buf
     const json = (await res.json().catch(() => ({}))) as { pdfBase64?: string; error?: string };
     if (!res.ok) {
       const detail = typeof json?.error === 'string' ? json.error : `HTTP ${res.status}`;
-      const err = new Error(detail) as Error & { status?: number; retryable?: boolean };
+      const err = new Error(detail) as Error & { status?: number; retryable?: boolean; retryAfterSec?: number };
       err.status = res.status;
       err.retryable = res.status === 503 || res.status === 429;
+      const retryAfter = Number(res.headers?.get?.('retry-after'));
+      if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfterSec = retryAfter;
       throw err;
     }
     const b64 = typeof json.pdfBase64 === 'string' ? json.pdfBase64 : '';
@@ -77,21 +79,30 @@ async function fetchDocxConverterOnce(base: string, key: string, docxBuffer: Buf
   }
 }
 
+function converterRetryDelayMs(error: unknown, attempt: number): number {
+  const retryAfter = Number((error as { retryAfterSec?: number })?.retryAfterSec);
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return Math.min(Math.max(retryAfter, 1), 30) * 1000;
+  }
+  return Math.min(5000 * 2 ** attempt, 20000);
+}
+
 export async function convertWithDocxConverterService(docxBuffer: Buffer): Promise<Buffer> {
   const base = normalizeDocxConverterBaseUrl(process.env.DOCX_CONVERTER_URL || '');
   const key = (process.env.DOCX_CONVERTER_API_KEY || '').trim();
   if (!base || !key) {
     throw new Error('DOCX_CONVERTER_URL and DOCX_CONVERTER_API_KEY are not both set');
   }
+  const maxAttempts = 4;
   let lastError: unknown = null;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       return await fetchDocxConverterOnce(base, key, docxBuffer);
     } catch (error) {
       lastError = error;
       const retryable = Boolean((error as { retryable?: boolean })?.retryable);
-      if (!retryable || attempt === 1) break;
-      await sleep(5000);
+      if (!retryable || attempt === maxAttempts - 1) break;
+      await sleep(converterRetryDelayMs(error, attempt));
     }
   }
   throw lastError instanceof Error ? lastError : new Error('Remote DOCX converter failed');

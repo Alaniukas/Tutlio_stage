@@ -2,7 +2,7 @@
 
 Linux LibreOffice microservice used by Tutlio school-contract flows (annual + extra-lessons DOCX templates).
 
-Conversions are serialized inside each container and use an isolated LibreOffice profile per request. School contract templates can take 60–120s to convert; v2.2.2 increases PDF wait and LibreOffice timeouts so large filled DOCX files no longer fail with HTTP 422 after ~96s.
+Conversions are serialized inside each container. School contract templates can take 60–120s to convert. v2.2.3 keeps LibreOffice descendants alive until `contract.pdf` is fully written (the soffice wrapper can exit earlier), waits up to 120s in the queue instead of rejecting after 30s, and asks callers to retry busy work after 20s.
 
 ## API
 
@@ -27,7 +27,7 @@ DOCX_CONVERTER_API_KEY=local-dev-key
 
 **Important:** Railway must deploy from subdirectory `services/docx-converter` (not the old root-level `PDF-converteris` branch layout).
 
-Redeploy when the converter version changes. Version `2.2.2` fixes large school contract conversions that failed after ~96s (`waitForPdf` was 45s × prepared+original retry).
+Redeploy when the converter version changes. Version `2.2.3` keeps LibreOffice alive until the PDF is fully written and queues a waiting extra-lessons conversion instead of failing it after 30s.
 
 1. Railway → service → Settings → Root directory: `services/docx-converter`
 2. Set env `DOCX_CONVERTER_API_KEY` to the same value as in Vercel

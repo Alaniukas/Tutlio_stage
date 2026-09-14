@@ -100,7 +100,7 @@
             "maxDuration": 120
         },
         "api/extra-lessons-contract-offer.ts": {
-            "maxDuration": 120,
+            "maxDuration": 180,
             "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
         },
         "api/extra-lessons-contract-accept.ts": {

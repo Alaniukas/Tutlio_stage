@@ -5,6 +5,7 @@ import { isInternalRequest } from './_lib/auth.js';
 import {
   EXTRA_LESSONS_CONTRACT_KIND,
   EXTRA_LESSONS_DEFAULT_BODY,
+  EXTRA_LESSONS_PDF_FAILED_CODE,
   buildExtraLessonsOrderSnapshot,
   parseExtraLessonsServiceType,
   usesBundledExtraLessonsDocx,
@@ -22,6 +23,17 @@ import {
   serviceSupabase,
   snapshotFromRow,
 } from './_lib/extraLessonsContractShared.js';
+
+const EXTRA_LESSONS_PDF_FAILED_ERROR =
+  'Nepavyko paruošti sutarties PDF. Laiškas tėvams neišsiųstas. Palaukite minutę ir siųskite iš naujo.';
+
+async function discardIncompleteExtraLessonsOffer(
+  supabase: SupabaseClient,
+  contractId: string,
+): Promise<void> {
+  await supabase.from('school_contract_completion_tokens').delete().eq('contract_id', contractId);
+  await supabase.from('school_contracts').delete().eq('id', contractId);
+}
 
 async function ensureExtraLessonsCompletionToken(
   supabase: SupabaseClient,
@@ -194,8 +206,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (!contract.pdf_url) {
       return res.status(503).json({
-        error: 'PDF dar neparuoštas. Laiškas neišsiųstas; pakartokite siuntimą iš sutarties kortelės.',
-        code: 'contract_pdf_generation_failed',
+        error: EXTRA_LESSONS_PDF_FAILED_ERROR,
+        code: EXTRA_LESSONS_PDF_FAILED_CODE,
         contractId: contract.id,
         emailSent: false,
       });
@@ -360,8 +372,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     contract_number: contractNumber,
     filled_body: filledBody,
     annual_fee: order.indicative_monthly_eur,
-    signing_status: 'sent',
-    sent_at: new Date().toISOString(),
+    signing_status: 'draft',
+    sent_at: null,
     kind: EXTRA_LESSONS_CONTRACT_KIND,
     order_snapshot: order,
     revision_label: order.revision_label,
@@ -376,13 +388,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select('id, contract_number')
     .single();
   if (error || !created) return res.status(500).json({ error: error?.message || 'Insert failed' });
-
-  if (order.group_id) {
-    await supabase.from('school_class_group_members').upsert({
-      group_id: order.group_id,
-      student_id: studentId,
-    }, { onConflict: 'group_id,student_id' });
-  }
 
   const token = randomToken();
   await supabase.from('school_contract_completion_tokens').insert({
@@ -406,7 +411,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (pdfPath) {
       const { error: pdfSaveError } = await supabase
         .from('school_contracts')
-        .update({ pdf_url: pdfPath })
+        .update({
+          pdf_url: pdfPath,
+          signing_status: 'sent',
+          sent_at: new Date().toISOString(),
+        })
         .eq('id', created.id);
       if (pdfSaveError) {
         pdfPath = null;
@@ -417,11 +426,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('[extra-lessons-contract-offer] pdf', (e as Error).message);
   }
 
+  if (!pdfPath) {
+    await discardIncompleteExtraLessonsOffer(supabase, created.id);
+    return res.status(503).json({
+      error: EXTRA_LESSONS_PDF_FAILED_ERROR,
+      code: EXTRA_LESSONS_PDF_FAILED_CODE,
+      emailSent: false,
+    });
+  }
+
+  if (order.group_id) {
+    await supabase.from('school_class_group_members').upsert({
+      group_id: order.group_id,
+      student_id: studentId,
+    }, { onConflict: 'group_id,student_id' });
+  }
+
   let emailSent = false;
-  let emailError: string | null = pdfPath
-    ? null
-    : 'PDF dar neparuoštas. Sutartis išsaugota, laiškas neišsiųstas. Pakartokite siuntimą iš sutarties kortelės.';
-  if (pdfPath && payerEmail && body.send !== false) {
+  let emailError: string | null = null;
+  if (payerEmail && body.send !== false) {
     const mail = await sendExtraLessonsOfferEmail(req, {
       to: payerEmail,
       organizationId: access.access.organizationId,

@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine, Settings, Save, Search, Download, MoreVertical } from 'lucide-react';
+import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine, Settings, Save, Search, Download, MoreVertical, AlertTriangle } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { sendEmail } from '@/lib/email';
 import { useTranslation } from '@/lib/i18n';
@@ -2221,6 +2221,12 @@ export default function CompanyContracts() {
                         )}
                         {statusBadge(c.signing_status)}
                       </div>
+                      {isExtraLessonsContractKind(c.kind) && !c.pdf_url && (
+                        <div role="alert" className="mt-2 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                          <p>{tr('school.extra.pdfMissing')}</p>
+                        </div>
+                      )}
                       <p className="text-sm text-gray-500 mt-1">
                         {c.contract_number && <span className="mr-3">Sutarties Nr. {c.contract_number}</span>}
                         {isExtraLessonsContractKind(c.kind) ? tr('school.extra.monthlyFee') : tr('school.annualFee')}{' '}

@@ -10,6 +10,8 @@ export { EXTRA_LESSONS_LEGAL_BODY };
 
 export const EXTRA_LESSONS_CONTRACT_KIND = 'extra_lessons' as const;
 export const ANNUAL_CONTRACT_KIND = 'annual' as const;
+/** Offer/resend failed because DOCX→PDF conversion did not produce a file. */
+export const EXTRA_LESSONS_PDF_FAILED_CODE = 'contract_pdf_generation_failed';
 
 export function isExtraLessonsContractKind(kind?: string | null): boolean {
   return kind === EXTRA_LESSONS_CONTRACT_KIND;

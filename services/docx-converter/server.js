@@ -14,7 +14,7 @@ app.use('/convert-docx-to-pdf', (req, res, next) => {
   const auth = checkConvertApiKey(req);
   if (!auth.allowed) return res.status(auth.status).json({ error: auth.error });
   if (admitted >= 3 || restarting) {
-    res.setHeader('Retry-After', '5');
+    res.setHeader('Retry-After', '20');
     return res.status(503).json({ error: 'Converter busy' });
   }
   admitted++;
@@ -33,7 +33,7 @@ app.use((err, req, res, next) => {
   return next(err);
 });
 
-const SERVICE_VERSION = '2.2.2';
+const SERVICE_VERSION = '2.2.3';
 const PDF_WAIT_MS = Number(process.env.PDF_WAIT_MS || 120000);
 const LO_TIMEOUT_MS = Number(process.env.LO_TIMEOUT_MS || 180000);
 const worker = createWorker();
@@ -284,7 +284,6 @@ async function waitForPdf(outputPath, workDir, timeoutMs = PDF_WAIT_MS) {
     await sleep(250);
   }
   const err = lastErr instanceof Error ? lastErr : new Error(`Timed out waiting for ${outputPath}`);
-  err.infrastructureFailure = true;
   throw err;
 }
 
@@ -296,7 +295,7 @@ async function runLibreOfficeOnce(docxBytes) {
     const inputPath = path.join(workDir, 'contract.docx');
     await fs.mkdir(profilePath, { recursive: true });
     await fs.writeFile(inputPath, docxBytes);
-    await runProcess(process.env.LIBREOFFICE_PATH || '/usr/bin/soffice', [
+    const { kill } = await runProcess(process.env.LIBREOFFICE_PATH || '/usr/bin/soffice', [
       '-env:UserInstallation=' + pathToFileURL(profilePath).href,
       '--headless', '--nologo', '--nodefault', '--nofirststartwizard', '--nolockcheck', '--norestore',
       '--convert-to', 'pdf', '--outdir', workDir, inputPath,
@@ -311,7 +310,11 @@ async function runLibreOfficeOnce(docxBytes) {
         OPENBLAS_NUM_THREADS: '1',
       },
     });
-    return await waitForPdf(outputPath, workDir);
+    try {
+      return await waitForPdf(outputPath, workDir);
+    } finally {
+      kill();
+    }
   } catch (error) {
     const listing = await fs.readdir(workDir).catch(() => []);
     const detail = error instanceof Error ? error.message : String(error);
@@ -398,7 +401,7 @@ app.post('/convert-docx-to-pdf', async (req, res) => {
     console.error('[docx-converter] convert failed:', message);
     if (error.infrastructureFailure) restartWorker();
     const status = error.status || (error.infrastructureFailure ? 503 : 422);
-    if (status === 503) res.setHeader('Retry-After', '5');
+    if (status === 503) res.setHeader('Retry-After', '20');
     return res.status(status).json({ error: status === 503 ? 'Converter temporarily unavailable' : 'Document conversion failed' });
   }
 });

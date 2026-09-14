@@ -21,6 +21,9 @@ import {
 } from '@/lib/laisviVaikaiExtraLessonsDefaults';
 import { formatStudentPickerLabel } from '@/lib/orgStudentIdentity';
 import { DateRangeFields, ScheduleSlotPicker } from '@/components/company/ScheduleSlotPicker';
+import { useTranslation } from '@/lib/i18n';
+import { EXTRA_LESSONS_PDF_FAILED_CODE } from '@/lib/extraLessonsContract';
+import { AlertTriangle } from 'lucide-react';
 
 type Student = { id: string; full_name: string; payer_email?: string | null; grade?: string | null };
 type Group = {
@@ -117,6 +120,7 @@ export default function ExtraLessonsOfferDialog(props: {
     emailTo?: string | null;
   }) => void;
 }) {
+  const { t } = useTranslation();
   const styledPrefill = usesLaisviStyleExtraLessonsPrefill(props.organizationId);
   const openDefaults = laisviOpenDefaults(props.organizationId);
   const [studentId, setStudentId] = useState('');
@@ -288,9 +292,13 @@ export default function ExtraLessonsOfferDialog(props: {
           send: true,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || 'Nepavyko sukurti pasiūlymo.');
+        setError(
+          data.code === EXTRA_LESSONS_PDF_FAILED_CODE || data.code === 'missing_payer_email'
+            ? (data.code === EXTRA_LESSONS_PDF_FAILED_CODE ? t('school.extra.pdfFailed') : t('school.extra.needPayerEmail'))
+            : (data.error || 'Nepavyko sukurti pasiūlymo.'),
+        );
         setBusy(false);
         return;
       }
@@ -308,7 +316,7 @@ export default function ExtraLessonsOfferDialog(props: {
   };
 
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+    <Dialog open={props.open} onOpenChange={(open) => { if (!busy) props.onOpenChange(open); }}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Papildomų užsiėmimų sutartis</DialogTitle>
@@ -317,7 +325,12 @@ export default function ExtraLessonsOfferDialog(props: {
           Privaloma: mokinys ir užsiėmimo kaina. Grupinei sutarčiai rinkitės klasės grupę, individualiai — dėstomą dalyką. Grafiką, datas ir kiekius galite palikti tuščius — tėvai juos užpildys priimdami sutartį.
         </p>
         <div className="space-y-3">
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && (
+            <div role="alert" className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>{error}</p>
+            </div>
+          )}
           <div>
             <Label>Mokinys *</Label>
             <Select value={studentId} onValueChange={setStudentId}>
@@ -438,11 +451,12 @@ export default function ExtraLessonsOfferDialog(props: {
             </div>
           </div>
           <p className="text-sm text-gray-600">Orientacinė mėnesio kaina: <strong>{previewMonthly.toFixed(2)} €</strong></p>
+          {busy && <p className="text-sm text-gray-600">{t('school.extra.preparing')}</p>}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => props.onOpenChange(false)}>Atšaukti</Button>
+          <Button variant="outline" onClick={() => props.onOpenChange(false)} disabled={busy}>Atšaukti</Button>
           <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={busy || !studentId || !(Number(unitPrice) > 0)} onClick={submit}>
-            {busy ? 'Siunčiama…' : 'Siųsti tėvams'}
+            {busy ? 'Ruošiama…' : 'Siųsti tėvams'}
           </Button>
         </DialogFooter>
       </DialogContent>

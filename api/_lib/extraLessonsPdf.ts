@@ -162,7 +162,7 @@ export async function renderAndStoreExtraLessonsPdf(
       const templateBytes = readFileSync(resolveExtraLessonsBundledDocxPath());
       pdfBytes = new Uint8Array(await withTimeout(
         renderDocxTemplateBufferToPdfBuffer({ templateBytes, payload }),
-        130000,
+        170000,
       ));
     } catch (e) {
       const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
@@ -188,7 +188,7 @@ export async function renderAndStoreExtraLessonsPdf(
         }
         pdfBytes = await withTimeout(
           createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload }),
-          130000,
+          170000,
         );
       } catch (e) {
         const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
