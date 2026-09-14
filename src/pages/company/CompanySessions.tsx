@@ -134,7 +134,7 @@ const ORG_SESSION_LIST_SELECT =
   '*, student:students(full_name, admin_comment, admin_comment_visible_to_tutor), subjects(is_group)';
 
 const ORG_SESSION_STATS_SELECT =
-  'id, status, start_time, end_time, cancelled_by, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at';
+  'id, tutor_id, student_id, class_group_id, subject_id, status, start_time, end_time, topic, cancelled_by, cancellation_reason, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, no_show_reason, student:students(full_name), subjects(is_group)';
 
 function orgSessionDetailSelect(organizationId: string | null | undefined): string {
   if (isManoKorepetitoriusOrg(organizationId)) {
@@ -307,6 +307,7 @@ export default function CompanySessions() {
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   const initialListLoadDone = useRef(false);
+  const refreshVisibleRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     void loadData({ reset: true }).then(() => {
@@ -318,6 +319,18 @@ export default function CompanySessions() {
     if (!initialListLoadDone.current) return;
     void loadData({ reset: true });
   }, [filterTutor, filterStatus, filterStudent]);
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshVisibleRef.current();
+    };
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, []);
 
   useEffect(() => {
     if (!loadMoreRef.current || loading || loadingMore || !hasMoreSessions) return;
@@ -562,7 +575,6 @@ export default function CompanySessions() {
       const statsRows: Session[] = (statsData || []).map((row: any) => ({
         ...mapOrgSessionRow(row, tutorList),
         tutor_name: tutorList.find((t) => t.id === row.tutor_id)?.full_name || '–',
-        student_name: '–',
       }));
 
       if (request !== loadRequest.current) return;
@@ -584,6 +596,10 @@ export default function CompanySessions() {
     } finally {
       if (request === loadRequest.current) setLoading(false);
     }
+  };
+
+  refreshVisibleRef.current = () => {
+    void loadData({ reset: true });
   };
 
   const loadMoreSessions = async () => {
@@ -1132,6 +1148,16 @@ export default function CompanySessions() {
       : list.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
   }, [sessions, filterTutor, filterStatus, studentIdSetForFilter, search, isFilterActive, filterStartDate, filterEndDate, sortNewest, isSchoolOrgView]);
 
+  const schoolMonitoringSessions = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return statsSessions;
+    return statsSessions.filter((session) => (
+      session.tutor_name.toLowerCase().includes(q)
+      || session.student_name.toLowerCase().includes(q)
+      || (session.topic || '').toLowerCase().includes(q)
+    ));
+  }, [statsSessions, search]);
+
   if (loading) {
     return (
       <>
@@ -1265,7 +1291,7 @@ export default function CompanySessions() {
           </div>
         ) : null}
 
-        {isSchoolOrgView && !loadError ? <SchoolSessionMonitoring sessions={filtered} /> : null}
+        {isSchoolOrgView && !loadError ? <SchoolSessionMonitoring sessions={schoolMonitoringSessions} /> : null}
 
         {/* Stats */}
         {!isSchoolOrgView && statsSessions.length > 0 && (() => {

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { randomBytes } from 'node:crypto';
 import { findAuthUserByEmail, isAuthEmailAlreadyRegistered } from './findAuthUserByEmail.js';
 import { generateTempPassword } from './generateTempPassword.js';
+import { generateStudentLoginName } from './generateStudentLoginName.js';
 import { isMoksloVaisiaiOrg } from './marketMoney.js';
 import { sendMvAccountActivationEmail } from './sendMvFamilyAccountsEmail.js';
 import { inviteEmailLocale, orgAwareOrigin } from './public-origin.js';
@@ -527,10 +527,10 @@ export async function provisionMvFamilyAccounts(
 
   if (doStudent) {
     const studentPassword = generateTempPassword();
-    const studentLoginName = validEmail(studentEmail)
+    let studentLoginName = validEmail(studentEmail)
       ? null
-      : `mv-${randomBytes(8).toString('hex')}`;
-    const studentAuthEmail = studentLoginName
+      : generateStudentLoginName();
+    let studentAuthEmail = studentLoginName
       ? loginIdentifierToEmail(studentLoginName)
       : studentEmail;
     let studentAuth: { userId: string; created: boolean; reused?: boolean } | { error: string; code?: string } = await ensureMvAuthUser(supabase, {
@@ -543,6 +543,22 @@ export async function provisionMvFamilyAccounts(
       studentLoginName,
       studentContactEmail: studentLoginName ? notifyTargets.studentTo : null,
     });
+    // A generated handle has a very large keyspace, but Auth remains the source of
+    // truth for uniqueness. Retry a collision instead of failing the whole flow.
+    for (let attempt = 1; studentLoginName && 'error' in studentAuth && studentAuth.code === 'email_already_registered' && attempt < 5; attempt += 1) {
+      studentLoginName = generateStudentLoginName();
+      studentAuthEmail = loginIdentifierToEmail(studentLoginName);
+      studentAuth = await ensureMvAuthUser(supabase, {
+        email: studentAuthEmail,
+        password: studentPassword,
+        role: 'student',
+        fullName: studentFullName,
+        studentId,
+        organizationId,
+        studentLoginName,
+        studentContactEmail: notifyTargets.studentTo,
+      });
+    }
     if ('error' in studentAuth && studentAuth.code === 'email_already_registered' && validEmail(studentEmail)) {
       const reusable = await reusableStudentUserId(supabase, studentEmail, organizationId || '', studentRows);
       studentAuth = reusable

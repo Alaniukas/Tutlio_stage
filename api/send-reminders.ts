@@ -119,6 +119,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const dateStr = startTime.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz });
         const timeStr = startTime.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit', timeZone: tz });
         const orgId = (tutor as any)?.organization_id || null;
+        const studentOrgId = ((student as any)?.organization_id as string | null) ?? orgId;
+        const schoolFlowForSession = await isSchoolOrg(studentOrgId);
         // sessionId lets /api/send-email swap the link for a tracked /api/join-session URL (attendance).
         // Whiteboard link intentionally omitted: it pointed at the deployment domain and
         // recipients (parents/students) often lack board access — it lives in-app only.
@@ -137,6 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           duration: durationMinutes,
           price: session.price,
           meetingLink: resolvedMeetingLink || null,
+          ...(schoolFlowForSession ? { schoolContractAccessRequired: true } : {}),
           ...(orgId ? { organizationId: orgId } : {}),
         };
 
@@ -179,8 +182,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const flexibleInvites = (await getOrgFeatures(orgId))?.flexible_invitations === true;
           // School org: the payer email on the student row is the parent contact,
           // whether or not that parent ever registered (schools run on emails only).
-          const studentOrgId = ((student as any)?.organization_id as string | null) ?? orgId;
-          const schoolFlow = await isSchoolOrg(studentOrgId);
+          const schoolFlow = schoolFlowForSession;
 
           const candidates: ReminderRecipient[] = [];
 

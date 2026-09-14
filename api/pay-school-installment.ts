@@ -80,6 +80,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (contract.archived_at) {
             return res.status(400).send(errorPage('Sutartis nebegalioja', 'Ši sutartis archyvuota. Kreipkitės į mokyklą.'));
         }
+        if (contract.terminated_at) {
+            return res.status(400).send(errorPage('Sutartis nutraukta', 'Naujų įmokų pagal šią sutartį priimti negalima. Kreipkitės į mokyklą.'));
+        }
         if (!schoolContractAllowsInstallmentPayment(contract.signing_status)) {
             return res.status(403).send(errorPage('Mokėjimas dar negalimas', SCHOOL_INSTALLMENT_PAYMENT_BLOCKED_LT));
         }

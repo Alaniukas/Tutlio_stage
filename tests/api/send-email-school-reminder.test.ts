@@ -3,9 +3,10 @@
 // them into the parent portal (or towards registering).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { sendMock, pushMock } = vi.hoisted(() => ({
+const { sendMock, pushMock, contractAccess } = vi.hoisted(() => ({
   sendMock: vi.fn(),
   pushMock: vi.fn().mockResolvedValue(undefined),
+  contractAccess: { allowed: true },
 }));
 
 vi.mock('resend', () => ({
@@ -17,6 +18,10 @@ vi.mock('resend', () => ({
 
 vi.mock('../../api/_lib/sendPush', () => ({
   sendPushForEmail: pushMock,
+}));
+
+vi.mock('../../api/_lib/schoolContractAccess.js', () => ({
+  checkSchoolSessionStudentAccess: async () => ({ isSchool: true, allowed: contractAccess.allowed }),
 }));
 
 function mockRes() {
@@ -73,6 +78,7 @@ vi.setConfig({ testTimeout: 30_000 });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  contractAccess.allowed = true;
   process.env.RESEND_API_KEY = 'test-resend-key';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-key-test';
   sendMock.mockResolvedValue({ data: { id: 'email-1' }, error: null });
@@ -94,5 +100,23 @@ describe('session_reminder_payer for school parents', () => {
     const { html } = await sendEmail(base);
     expect(html).toContain('/parent/calendar');
     expect(html).not.toContain('Prisijungti prie pamokos');
+  });
+
+  it('suppresses the join email when the school contract is not active', async () => {
+    contractAccess.allowed = false;
+    const { default: handler } = await import('../../api/send-email');
+    const res = mockRes();
+    await handler(mockReq({
+      type: 'session_reminder_payer',
+      to: 'parent@example.com',
+      data: { ...base, schoolFlow: true, schoolContractAccessRequired: true },
+      locale: 'lt',
+    }) as any, res as any);
+
+    expect(res.getResult()).toMatchObject({
+      statusCode: 200,
+      body: { success: true, skipped: true, reason: 'school_contract_not_active' },
+    });
+    expect(sendMock).not.toHaveBeenCalled();
   });
 });

@@ -20,3 +20,5 @@ scripts/_*.mjs
 preview-*.html
 scripts/load/users.staging.json
 load-results/
+.codex-worktrees/
+artifacts/

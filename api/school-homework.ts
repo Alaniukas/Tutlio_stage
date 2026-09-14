@@ -14,6 +14,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { verifyPublicLinkToken } from './_lib/publicLinkToken.js';
 import { buildTrackedJoinUrl } from './_lib/joinLink.js';
+import { schoolSessionContractAllowsAccess, type SchoolAccessContract } from './_lib/schoolContractAccess.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { schoolTerminologyForOrg } from '../src/lib/i18n/schoolTerminology.js';
 import {
@@ -184,6 +185,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .limit(200);
     const memberGroupIds = await loadMemberGroupIds(supabase, studentId);
     const sessions = ((own || []) as SessionRow[]).filter((row) => sessionAllowedForStudent(row, memberGroupIds));
+    const { data: contractRows, error: contractError } = await supabase
+      .from('school_contracts')
+      .select('*')
+      .eq('organization_id', auth.org.id)
+      .eq('student_id', studentId);
+    if (contractError) {
+      console.error('[school-homework] contract access load failed', contractError.message);
+    }
+    const accessContracts = (contractRows || []) as SchoolAccessContract[];
 
     // Parallel group rows (other members) that share a folder set with these lessons.
     const groupIds = [...new Set(sessions.map((s) => s.class_group_id).filter(Boolean))] as string[];
@@ -262,7 +272,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
       let joinUrl: string | null = null;
-      if (s.meeting_link && s.status === 'active') {
+      const contractAllowsJoin = !contractError && schoolSessionContractAllowsAccess(accessContracts, s, now);
+      if (contractAllowsJoin && s.meeting_link && s.status === 'active') {
         try { joinUrl = buildTrackedJoinUrl(origin, s.id, 'student'); } catch { joinUrl = null; }
       }
       return {

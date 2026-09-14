@@ -183,6 +183,13 @@ import {
 import { enrichSessionMeetingLink } from '@/lib/meetingLink';
 import { canDeleteIndividualOrgSession } from '@/lib/orgSessionDeletion';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
+import { useUser } from '@/contexts/UserContext';
+import {
+  readCalendarTutorFilter,
+  reconcileCalendarTutorFilter,
+  selectionContainsEveryTutor,
+  writeCalendarTutorFilter,
+} from '@/lib/calendarTutorFilterPersistence';
 
 const locales = { lt, en: enUS };
 const localizer = dateFnsLocalizer({
@@ -377,6 +384,7 @@ interface Student {
 
 export default function CompanyTvarkarastis() {
   const { t, locale, dateFnsLocale } = useTranslation();
+  const { user: ctxUser } = useUser();
   const rtlLocalizer = useMemo(() => dateFnsLocalizer({
     format, parse, startOfWeek, getDay, locales: { [locale]: dateFnsLocale },
   }), [locale, dateFnsLocale]);
@@ -456,7 +464,11 @@ export default function CompanyTvarkarastis() {
 
   // Filter state
   const [selectedTutorIds, setSelectedTutorIds] = useState<string[]>(
-    () => (tc?.orgTutors ?? []).map((t: { id: string }) => t.id),
+    () => {
+      const cachedTutorIds = (tc?.orgTutors ?? []).map((t: { id: string }) => t.id);
+      const saved = readCalendarTutorFilter(ctxUser?.id, organizationId);
+      return saved ? reconcileCalendarTutorFilter(saved, cachedTutorIds) : cachedTutorIds;
+    },
   );
   const [tutorSearchQuery, setTutorSearchQuery] = useState('');
   const [selectedSubjectIds, setSelectedSubjectIds] = useState<string[]>([]);
@@ -625,7 +637,7 @@ export default function CompanyTvarkarastis() {
       return;
     }
     fetchData();
-  }, [featuresLoading, organizationId]);
+  }, [featuresLoading, organizationId, ctxUser?.id]);
 
   // Org trial defaults (same source as CompanyStudents / create-trial-package).
   useEffect(() => {
@@ -730,6 +742,15 @@ export default function CompanyTvarkarastis() {
       // A cached calendar otherwise keeps only the old IDs and silently filters out
       // lessons created by the new teacher until the whole app cache is cleared.
       setSelectedTutorIds((previous) => {
+        const saved = readCalendarTutorFilter(ctxUser?.id, organizationId);
+        if (saved) {
+          const restored = reconcileCalendarTutorFilter(saved, tutorIds);
+          writeCalendarTutorFilter(ctxUser?.id, organizationId, {
+            selectedTutorIds: restored,
+            allTutorsSelected: saved.allTutorsSelected,
+          });
+          return restored;
+        }
         const previousTutorIds = orgTutors.map((tutor) => tutor.id);
         const hadAllPreviousTutors = previousTutorIds.length === 0
           || previousTutorIds.every((id) => previous.includes(id));
@@ -917,7 +938,7 @@ export default function CompanyTvarkarastis() {
     };
     // `fetchData` intentionally uses the latest filter state from the render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [featuresLoading, organizationId]);
+  }, [featuresLoading, organizationId, ctxUser?.id]);
 
   // Filter data based on selected filters
   const filteredSessions = useMemo(() => {
@@ -2847,23 +2868,43 @@ export default function CompanyTvarkarastis() {
   };
 
   const toggleTutorFilter = (tutorId: string) => {
-    setSelectedTutorIds(prev =>
-      prev.includes(tutorId)
+    setSelectedTutorIds(prev => {
+      const next = prev.includes(tutorId)
         ? prev.filter(id => id !== tutorId)
-        : [...prev, tutorId]
-    );
+        : [...prev, tutorId];
+      const availableTutorIds = orgTutors.map((tutor) => tutor.id);
+      writeCalendarTutorFilter(ctxUser?.id, organizationId, {
+        selectedTutorIds: next,
+        allTutorsSelected: selectionContainsEveryTutor(next, availableTutorIds),
+      });
+      return next;
+    });
   };
 
   const selectAllTutors = () => {
-    setSelectedTutorIds(orgTutors.map(t => t.id));
+    const next = orgTutors.map(t => t.id);
+    setSelectedTutorIds(next);
+    writeCalendarTutorFilter(ctxUser?.id, organizationId, {
+      selectedTutorIds: next,
+      allTutorsSelected: true,
+    });
   };
 
   const selectFilteredTutors = () => {
-    setSelectedTutorIds(filteredOrgTutorsForList.map(t => t.id));
+    const next = filteredOrgTutorsForList.map(t => t.id);
+    setSelectedTutorIds(next);
+    writeCalendarTutorFilter(ctxUser?.id, organizationId, {
+      selectedTutorIds: next,
+      allTutorsSelected: selectionContainsEveryTutor(next, orgTutors.map(tutor => tutor.id)),
+    });
   };
 
   const deselectAllTutors = () => {
     setSelectedTutorIds([]);
+    writeCalendarTutorFilter(ctxUser?.id, organizationId, {
+      selectedTutorIds: [],
+      allTutorsSelected: false,
+    });
   };
 
   const goCalendarPrev = () => {

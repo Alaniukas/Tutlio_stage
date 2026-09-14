@@ -12,6 +12,7 @@ import { isWithinJoinClickWindow } from '../src/lib/attendance.js';
 import { shouldRestoreAutomaticNoShowOnJoin } from '../src/lib/schoolJoinNoShow.js';
 import { removeGeneratedNoShowTutorComment } from '../src/lib/noShowWhen.js';
 import { resolveSessionMeetingLinkFromDb } from './_lib/sessionMeetingLink.js';
+import { checkSchoolSessionStudentAccess } from './_lib/schoolContractAccess.js';
 
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -45,12 +46,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { data: session } = await supabase
       .from('sessions')
-      .select('id, tutor_id, start_time, end_time, status, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, no_show_reason, tutor_comment')
+      .select('id, tutor_id, student_id, class_group_id, subject_id, start_time, end_time, status, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, no_show_reason, tutor_comment')
       .eq('id', sid)
       .maybeSingle();
 
     if (!session || session.status === 'cancelled') {
       return res.redirect(302, appOrigin);
+    }
+
+    if (role === 'student') {
+      const access = await checkSchoolSessionStudentAccess(supabase, session);
+      if (access.isSchool && !access.allowed) {
+        return res.status(403).send(
+          'Prisijungimas sustabdytas. Sutartis dar nepatvirtinta arba nebegalioja. Kreipkitės į mokyklą.',
+        );
+      }
     }
 
     const now = new Date();

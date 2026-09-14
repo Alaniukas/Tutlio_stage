@@ -7,12 +7,16 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   profileUpsert: vi.fn(),
   studentUpdate: vi.fn(),
+  generateLoginName: vi.fn(),
   profileError: null as { message: string } | null,
   studentError: null as { message: string } | null,
 }));
 
 vi.mock('../../api/_lib/sendMvFamilyAccountsEmail.js', () => ({
   sendMvAccountActivationEmail: mocks.send,
+}));
+vi.mock('../../api/_lib/generateStudentLoginName.js', () => ({
+  generateStudentLoginName: mocks.generateLoginName,
 }));
 
 import { provisionMvFamilyAccounts } from '../../api/_lib/mvProvisionFamilyAccounts';
@@ -80,6 +84,8 @@ function database() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.generateLoginName.mockReset();
+  mocks.generateLoginName.mockReturnValue('mv-7k4m-p9qd');
   vi.stubEnv('JOIN_LINK_SECRET', 'test-secret');
   mocks.createUser.mockResolvedValue({ data: { user: { id: 'auth-student' } }, error: null });
   mocks.deleteUser.mockResolvedValue({ error: null });
@@ -101,11 +107,11 @@ describe('Mokslo Vaisiai username provisioning', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.student?.email).toMatch(/^mv-[a-f0-9]{16}$/);
+    expect(result.student?.email).toMatch(/^mv-[a-hj-km-np-z2-9]{4}-[a-hj-km-np-z2-9]{4}$/);
     expect(result.student?.notifyEmail).toBe('parent@example.test');
 
     const created = mocks.createUser.mock.calls[0][0];
-    expect(created.email).toMatch(/^mv-[a-f0-9]{16}@student-login\.tutlio\.invalid$/);
+    expect(created.email).toMatch(/^mv-[a-hj-km-np-z2-9]{4}-[a-hj-km-np-z2-9]{4}@student-login\.tutlio\.invalid$/);
     expect(created.user_metadata).not.toHaveProperty('student_id');
     expect(created.app_metadata).toMatchObject({
       provisioned_by_organization: MOKSLO_VAISIAI_ORG_ID,
@@ -125,6 +131,29 @@ describe('Mokslo Vaisiai username provisioning', () => {
       accountIdentifier: result.student?.email,
       accountEmail: created.email,
     });
+  });
+
+  it('retries the very unlikely generated username collision', async () => {
+    mocks.generateLoginName
+      .mockReturnValueOnce('mv-7k4m-p9qd')
+      .mockReturnValueOnce('mv-abcd-jkmn');
+    mocks.createUser
+      .mockResolvedValueOnce({ data: { user: null }, error: { message: 'Email already registered', code: 'email_exists' } })
+      .mockResolvedValueOnce({ data: { user: { id: 'auth-student' } }, error: null });
+
+    const result = await provisionMvFamilyAccounts(database(), {
+      studentId: 'student-1',
+      studentFullName: 'Child',
+      studentEmail: '',
+      parentEmail: 'parent@example.test',
+      scope: 'student',
+      appOrigin: 'https://tutlio.lt',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mocks.createUser).toHaveBeenCalledTimes(2);
+    expect(mocks.createUser.mock.calls[0][0].email).toBe('mv-7k4m-p9qd@student-login.tutlio.invalid');
+    expect(mocks.createUser.mock.calls[1][0].email).toBe('mv-abcd-jkmn@student-login.tutlio.invalid');
   });
 
   it('removes a newly created auth user when the profile cannot be saved', async () => {

@@ -46,6 +46,7 @@ import {
     dedupeSessionsById,
     linkedStudentProfileIds,
     pickActiveStudentProfile,
+    type StudentLinkedProfileRow,
 } from '@/lib/studentLinkedProfiles';
 
 interface Session {
@@ -678,7 +679,7 @@ export default function StudentSessions() {
             profileStudentArg = picked;
         }
 
-        let st: Record<string, unknown> | null = null;
+        let st: StudentLinkedProfileRow | null = null;
         let sessionStudentIds: string[] = [];
 
         if (isParentLessonsRoute) {
@@ -691,7 +692,7 @@ export default function StudentSessions() {
                 setLoading(false);
                 return;
             }
-            st = (studentRows?.[0] as Record<string, unknown> | undefined) ?? null;
+            st = (studentRows?.[0] as StudentLinkedProfileRow | undefined) ?? null;
             if (st?.id) sessionStudentIds = [String(st.id)];
         } else {
             const { data: allProfileRows, error: rpcError } = await supabase.rpc('get_student_profiles', {
@@ -703,8 +704,9 @@ export default function StudentSessions() {
                 setLoading(false);
                 return;
             }
-            st = pickActiveStudentProfile(allProfileRows as Array<{ id: string }>, selectedStudentId);
-            sessionStudentIds = linkedStudentProfileIds(allProfileRows as Array<{ id: string }>);
+            const linkedProfiles = allProfileRows as StudentLinkedProfileRow[];
+            st = pickActiveStudentProfile(linkedProfiles, selectedStudentId);
+            sessionStudentIds = linkedStudentProfileIds(linkedProfiles);
             if (st && typeof window !== 'undefined' && !selectedStudentId) {
                 localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, String(st.id));
             }

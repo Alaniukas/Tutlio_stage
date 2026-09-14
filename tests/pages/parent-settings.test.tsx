@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+
+const { updateMock } = vi.hoisted(() => ({ updateMock: vi.fn() }));
 
 vi.mock('@/contexts/UserContext', () => ({
   useUser: () => ({
@@ -12,10 +14,17 @@ vi.mock('@/contexts/UserContext', () => ({
 vi.mock('@/lib/supabase', () => ({
   supabase: {
     auth: { updateUser: vi.fn(), signOut: vi.fn() },
+    rpc: (_name: string, args: { p_opt_out?: unknown }) => {
+      updateMock(args.p_opt_out);
+      return Promise.resolve({ data: args.p_opt_out, error: null });
+    },
     from: () => ({
       select: () => ({
         eq: () => ({
-          maybeSingle: () => Promise.resolve({ data: { disable_lesson_reminders: false }, error: null }),
+          maybeSingle: () => Promise.resolve({
+            data: { disable_lesson_reminders: false, email_notification_opt_out: [] },
+            error: null,
+          }),
         }),
       }),
       update: () => ({ eq: () => Promise.resolve({ error: null }) }),
@@ -52,5 +61,25 @@ describe('ParentSettings', () => {
       </MemoryRouter>,
     );
     expect(await screen.findByText(/Nustatymai|Settings/i)).toBeTruthy();
+  });
+
+  it('lets a parent choose notification categories with checkboxes', async () => {
+    updateMock.mockClear();
+    render(
+      <MemoryRouter>
+        <ParentSettings />
+      </MemoryRouter>,
+    );
+
+    const lessonUpdates = await screen.findByRole('checkbox', {
+      name: /Pamokų pakeitimai|Lesson updates/i,
+    });
+    expect((lessonUpdates as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(lessonUpdates);
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalledWith(['lesson_updates']));
+    await waitFor(() => expect((lessonUpdates as HTMLInputElement).checked).toBe(false));
+    expect(screen.getAllByRole('checkbox')).toHaveLength(4);
   });
 });

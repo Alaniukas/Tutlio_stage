@@ -17,6 +17,7 @@ export default function StudentSettings() {
     const { user: ctxUser } = useUser();
     const [studentName, setStudentName] = useState('');
     const [email, setEmail] = useState('');
+    const [contactEmail, setContactEmail] = useState('');
     const [phone, setPhone] = useState('');
     const [age, setAge] = useState('');
     const [grade, setGrade] = useState('');
@@ -93,6 +94,7 @@ export default function StudentSettings() {
         if (data) {
             setStudentId(data.id);
             setStudentName(data.full_name || '');
+            setContactEmail(String(data.email || '').trim());
             setNameEntryRequired(isPendingChildName(data.full_name));
             setPhone(data.phone || '');
             setAge(data.age?.toString() || '');
@@ -344,6 +346,14 @@ export default function StudentSettings() {
                             </label>
                             <p className="px-4 py-3 bg-gray-50 rounded-2xl text-sm text-gray-700 font-medium">{email}</p>
                         </div>
+                        {ctxUser?.app_metadata?.student_login_name && contactEmail ? (
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">
+                                    {t('common.email')}
+                                </label>
+                                <p className="px-4 py-3 bg-gray-50 rounded-2xl text-sm text-gray-700 font-medium">{contactEmail}</p>
+                            </div>
+                        ) : null}
                         <div>
                             <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('common.phone')}</label>
                             <input type="tel" value={phone} onChange={(e) => setPhone(formatLocalizedPhone(e.target.value, locale))} className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-transparent" />

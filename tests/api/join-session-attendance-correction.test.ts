@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({
   patch: null as Record<string, unknown> | null,
   session: null as any,
+  contractAccess: { isSchool: true, allowed: true } as { isSchool: boolean; allowed: boolean },
 }));
 
 vi.mock('@supabase/supabase-js', () => ({
@@ -32,6 +33,9 @@ vi.mock('../../api/_lib/sessionMeetingLink.js', () => ({
   resolveSessionMeetingLinkFromDb: async () => 'https://meet.example.com/class',
 }));
 vi.mock('../../src/lib/attendance.js', () => ({ isWithinJoinClickWindow: () => true }));
+vi.mock('../../api/_lib/schoolContractAccess.js', () => ({
+  checkSchoolSessionStudentAccess: async () => state.contractAccess,
+}));
 
 import handler from '../../api/join-session';
 
@@ -40,6 +44,7 @@ describe('tracked late join correction', () => {
     process.env.VITE_SUPABASE_URL = 'https://example.supabase.co';
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-key';
     state.patch = null;
+    state.contractAccess = { isSchool: true, allowed: true };
     state.session = {
       id: 'session',
       tutor_id: 'teacher',
@@ -77,5 +82,16 @@ describe('tracked late join correction', () => {
     await handler({ method: 'GET', query: { sid: 'session', role: 'student', t: 'token' } } as any, response);
 
     expect(state.patch).toEqual({ student_joined_at: expect.any(String) });
+  });
+
+  it('blocks an old school join link when the contract is unsigned or ended', async () => {
+    state.contractAccess = { isSchool: true, allowed: false };
+    const response: any = { redirect: vi.fn().mockReturnThis(), status: vi.fn().mockReturnThis(), send: vi.fn().mockReturnThis() };
+
+    await handler({ method: 'GET', query: { sid: 'session', role: 'student', t: 'token' } } as any, response);
+
+    expect(response.status).toHaveBeenCalledWith(403);
+    expect(response.redirect).not.toHaveBeenCalled();
+    expect(state.patch).toBeNull();
   });
 });

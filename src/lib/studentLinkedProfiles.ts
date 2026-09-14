@@ -1,8 +1,29 @@
-/** Minimal row from `get_student_profiles` for portal session scoping. */
+/** Typed row returned by `get_student_profiles` for student/parent portals. */
 export type StudentLinkedProfileRow = {
   id: string;
-  tutor_id?: string | null;
   full_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  age?: number | null;
+  grade?: string | null;
+  tutor_id?: string | null;
+  tutor_full_name?: string | null;
+  tutor_email?: string | null;
+  payment_payer?: string | null;
+  payer_name?: string | null;
+  payer_email?: string | null;
+  invite_code?: string | null;
+  tutor_cancellation_hours?: number | null;
+  tutor_cancellation_fee_percent?: number | null;
+  tutor_min_booking_hours?: number | null;
+  tutor_break_between_lessons?: number | null;
+  payment_model?: string | null;
+  payment_override_active?: boolean | null;
+  credit_balance?: number | null;
+  organization_id?: string | null;
+  organization_entity_type?: string | null;
+  tutor_organization_entity_type?: string | null;
+  tutor_organization_slug?: string | null;
 };
 
 /** All student row ids for one auth user (multi-tutor orgs may have several). */

@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine, Settings, Save, Search, Download, MoreVertical, AlertTriangle } from 'lucide-react';
+import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine, Settings, Save, Search, Download, MoreVertical, AlertTriangle, Ban } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { sendEmail } from '@/lib/email';
 import { useTranslation } from '@/lib/i18n';
@@ -108,6 +108,10 @@ interface Contract {
   additional_fee_purpose?: string | null;
   kind?: 'annual' | 'extra_lessons' | null;
   accepted_at?: string | null;
+  terminated_at?: string | null;
+  termination_reason?: string | null;
+  withdrawal_requested_at?: string | null;
+  extra_end_kind?: 'withdrawal' | 'termination' | null;
   unit_price_eur?: number | null;
   order_snapshot?: {
     service_name?: string | null;
@@ -292,6 +296,9 @@ export default function CompanyContracts() {
   const [contractKindFilter, setContractKindFilter] = useState<SchoolContractKindFilter>('all');
   const [contractSearch, setContractSearch] = useState('');
   const [exportingContracts, setExportingContracts] = useState(false);
+  const [terminationContract, setTerminationContract] = useState<Contract | null>(null);
+  const [terminationReason, setTerminationReason] = useState('');
+  const [terminationBusy, setTerminationBusy] = useState(false);
 
   useEffect(() => { if (!getCached(CONTRACTS_CACHE_KEY)) load(); }, []);
   useEffect(() => {
@@ -1689,6 +1696,36 @@ export default function CompanyContracts() {
     reload();
   };
 
+  const terminateContract = async () => {
+    if (!terminationContract || terminationReason.trim().length < 3) return;
+    setTerminationBusy(true);
+    try {
+      const response = await fetch('/api/school-contract-terminate', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          contractId: terminationContract.id,
+          reason: terminationReason.trim(),
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body?.success !== true) {
+        throw new Error(body?.error || `HTTP ${response.status}`);
+      }
+      setTerminationContract(null);
+      setTerminationReason('');
+      setToast({ message: 'Sutartis nutraukta. Mokinio prieiga prie užsiėmimų ir būsimas skaičiavimas sustabdyti.', type: 'success' });
+      reload();
+    } catch (error) {
+      setToast({
+        message: error instanceof Error ? error.message : tr('common.error'),
+        type: 'error',
+      });
+    } finally {
+      setTerminationBusy(false);
+    }
+  };
+
   const openContractFile = async (urlOrPath?: string | null, contractId?: string | null) => {
     if (!urlOrPath?.trim() && !contractId?.trim()) {
       setToast({ message: tr('school.toastFileOpenFail'), type: 'error' });
@@ -2220,6 +2257,13 @@ export default function CompanyContracts() {
                           </span>
                         )}
                         {statusBadge(c.signing_status)}
+                        {(c.terminated_at || c.withdrawal_requested_at) && (
+                          <span className="inline-flex items-center rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-800">
+                            {c.extra_end_kind === 'withdrawal'
+                              ? 'Atsisakyta'
+                              : 'Nutraukta'}
+                          </span>
+                        )}
                       </div>
                       {isExtraLessonsContractKind(c.kind) && !c.pdf_url && (
                         <div role="alert" className="mt-2 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
@@ -2239,6 +2283,11 @@ export default function CompanyContracts() {
                         )}
                         {c.sent_at && <span className="ml-3">{tr('school.sent')} {new Date(c.sent_at).toLocaleDateString('lt-LT')}</span>}
                         {c.signed_at && <span className="ml-3">{tr('school.signed')} {new Date(c.signed_at).toLocaleDateString('lt-LT')}</span>}
+                        {(c.terminated_at || c.withdrawal_requested_at) && (
+                          <span className="ml-3 text-rose-700">
+                            Baigta {new Date(c.terminated_at || c.withdrawal_requested_at || '').toLocaleDateString('lt-LT')}
+                          </span>
+                        )}
                       </p>
                       {isExtraLessonsContractKind(c.kind) && (
                         <p className="mt-1 text-xs text-gray-500">
@@ -2337,6 +2386,7 @@ export default function CompanyContracts() {
                             || c.signing_status === 'signed_by_school'),
                           c.signing_status !== 'draft' && (extra || !eSignEnabled || c.signing_status === 'sent'),
                           !extra && c.signing_status !== 'draft',
+                          isSchoolView && !c.terminated_at && !c.withdrawal_requested_at,
                         ].some(Boolean);
                         if (!menuActions) return null;
                         return (
@@ -2390,6 +2440,19 @@ export default function CompanyContracts() {
                               >
                                 <FileText className="w-4 h-4 shrink-0" />
                                 {tr('school.uploadSignedCopy')}
+                              </button>
+                            )}
+                            {isSchoolView && !c.terminated_at && !c.withdrawal_requested_at && (
+                              <button
+                                type="button"
+                                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left text-rose-700 hover:bg-rose-50"
+                                onClick={() => {
+                                  setTerminationContract(c);
+                                  setTerminationReason('');
+                                }}
+                              >
+                                <Ban className="w-4 h-4 shrink-0" />
+                                Nutraukti sutartį
                               </button>
                             )}
                           </div>
@@ -2458,6 +2521,64 @@ export default function CompanyContracts() {
           )
         )}
       </div>
+
+      <Dialog
+        open={Boolean(terminationContract)}
+        onOpenChange={(open) => {
+          if (!open && !terminationBusy) {
+            setTerminationContract(null);
+            setTerminationReason('');
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Nutraukti sutartį</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Nutraukti sutartį mokiniui {terminationContract?.student?.full_name || '–'}.
+              Pasirašytas dokumentas ir mokėjimų istorija išliks.
+            </p>
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+              Mokinio prisijungimo nuorodos nustos veikti iš karto. Pagal šią sutartį nebebus siunčiami nauji užsiėmimų priminimai ir nebus skaičiuojami būsimi užsiėmimų mokesčiai.
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="school-contract-termination-reason">Nutraukimo priežastis</Label>
+              <Textarea
+                id="school-contract-termination-reason"
+                value={terminationReason}
+                onChange={(event) => setTerminationReason(event.target.value)}
+                placeholder="Trumpai nurodykite, kodėl ir kieno prašymu sutartis nutraukiama."
+                maxLength={1000}
+                className="min-h-24"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={terminationBusy}
+              onClick={() => {
+                setTerminationContract(null);
+                setTerminationReason('');
+              }}
+            >
+              {tr('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={terminationBusy || terminationReason.trim().length < 3}
+              onClick={() => void terminateContract()}
+            >
+              <Ban className="mr-1.5 h-4 w-4" />
+              {terminationBusy ? 'Nutraukiama…' : 'Nutraukti sutartį'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={Boolean(pendingScanUpload)}

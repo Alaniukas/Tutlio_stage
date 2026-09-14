@@ -2619,8 +2619,9 @@ export default function CompanyStudents() {
     const previousEmail = String(selectedStudent.email || '').trim();
     const emailChanged = nextEmail.toLowerCase() !== previousEmail.toLowerCase();
 
-    // Registered students: email changes go through the server first (syncs the
-    // auth account + runs duplicate / org-tutor checks) before the row update.
+    // Registered students: email changes go through the server first. Ordinary
+    // accounts sync Auth; managed username accounts retain their stable handle
+    // and use this value as a contact email.
     if (selectedStudent.linked_user_id && emailChanged) {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -4951,7 +4952,7 @@ export default function CompanyStudents() {
                           <>
                           <div className="grid sm:grid-cols-2 gap-2">
                             <Input value={studentEditDraft.full_name} onChange={(e) => setStudentEditDraft((p) => ({ ...p, full_name: e.target.value }))} placeholder={t('compStu.fullNameRequired')} className="rounded-xl bg-white" />
-                            {/* Registered students' email edits go through /api/admin-update-student-email (auth + row sync). */}
+                            {/* Registered students' email edits go through the server for identity-safe synchronization. */}
                             <Input
                               type="email"
                               value={studentEditDraft.email}

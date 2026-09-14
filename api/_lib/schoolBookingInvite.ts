@@ -49,12 +49,13 @@ export async function sendNextPendingInstallmentAfterSplitFeePaid(
   const { data: contract } = await supabase
     .from('school_contracts')
     .select(
-      'id, organization_id, signing_status, annual_fee, additional_fee_amount, additional_fee_purpose, student:students(full_name, email, payer_email, payer_name), organizations(name, email, features)',
+      'id, organization_id, signing_status, terminated_at, annual_fee, additional_fee_amount, additional_fee_purpose, student:students(full_name, email, payer_email, payer_name), organizations(name, email, features)',
     )
     .eq('id', contractId)
     .maybeSingle();
 
   if (!contract) return false;
+  if ((contract as any).terminated_at) return false;
   if (!schoolContractAllowsInstallmentPayment((contract as any).signing_status)) return false;
 
   const { data: installments } = await supabase

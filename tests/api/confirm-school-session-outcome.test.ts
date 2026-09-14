@@ -46,8 +46,9 @@ describe('explicit school historical outcome confirmation', () => {
     expect(state.move).not.toHaveBeenCalled(); expect(state.refund).not.toHaveBeenCalled();
     expect(state.clearWaitlist).not.toHaveBeenCalled(); expect(state.sync).not.toHaveBeenCalled();
   });
-  it('never stamps an older outcome without the explicit confirmExisting request', async () => {
-    expect((await run({})).status).toHaveBeenCalledWith(409); expect(state.writes).toHaveLength(0);
+  it('accepts a school click from a stale page after auto-completion won the race', async () => {
+    expect((await run({})).status).toHaveBeenCalledWith(200);
+    expect(state.writes).toEqual([{ status: 'completed', status_confirmed_at: expect.any(String), status_confirmed_by: 'admin' }]);
   });
   it('rejects students, view-only admins and administrators of another organization', async () => {
     for (const admin of [null, { organizationId: 'org', role: 'custom', permissions: { 'sessions.view': true, 'sessions.edit': false } }, { organizationId: 'other', role: 'owner', permissions: {} }]) {
@@ -103,6 +104,13 @@ describe('explicit school historical outcome confirmation', () => {
     });
     expect(state.move).toHaveBeenCalledTimes(1);
     expect(state.clearWaitlist).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts a school correction from a stale page without returning already_finalized', async () => {
+    state.session.status = 'no_show';
+    state.session.status_confirmed_at = null;
+    expect((await run({})).status).toHaveBeenCalledWith(200);
+    expect(state.writes[0]).toMatchObject({ status: 'completed', status_confirmed_by: 'admin' });
   });
 
   it('lets the assigned school teacher correct a confirmed outcome', async () => {

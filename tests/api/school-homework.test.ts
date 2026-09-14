@@ -4,6 +4,7 @@ const state = vi.hoisted(() => ({
   student: null as Record<string, unknown> | null,
   org: null as Record<string, unknown> | null,
   sessions: [] as Array<Record<string, unknown>>,
+  contracts: [] as Array<Record<string, unknown>>,
   files: {} as Record<string, Array<{ name: string; metadata: { size: number } | null }>>,
   uploadPaths: [] as string[],
   removed: [] as string[][],
@@ -38,6 +39,7 @@ vi.mock('@supabase/supabase-js', () => {
           const sid = filters.find(([c]) => c === 'student_id')?.[1];
           return resolve({ data: sid === STUDENT ? [{ group_id: 'g1' }] : [], error: null });
         }
+        if (table === 'school_contracts') return resolve({ data: state.contracts, error: null });
         return resolve({ data: [], error: null });
       },
     };
@@ -81,6 +83,7 @@ beforeEach(() => {
     { id: 'sess-1', student_id: STUDENT, start_time: inFuture, end_time: inFuture, status: 'active', meeting_link: 'https://meet.google.com/abc', tutor_id: 't1', class_group_id: 'g1', subject_id: null, topic: null },
     { id: 'sess-2', student_id: 'other', start_time: inFuture, end_time: inFuture, status: 'active', meeting_link: 'https://meet.google.com/abc', tutor_id: 't1', class_group_id: 'g1', subject_id: null, topic: null },
   ];
+  state.contracts = [{ kind: 'annual', signing_status: 'signed', archived_at: null, terminated_at: null }];
   state.files = {
     'sess-2': [
       { name: 'uzduotys.pdf', metadata: { size: 1200 } },
@@ -159,6 +162,14 @@ describe('GET /api/school-homework', () => {
     await handler({ method: 'GET', query: { student: STUDENT, t: token() }, headers: { host: 'tutlio.lt' } } as any, res as any);
     expect(res.getResult().body.sessions).toHaveLength(1);
     expect(res.getResult().body.sessions[0].id).toBe('sess-1');
+  });
+
+  it('keeps materials visible but hides the join action until the contract is active', async () => {
+    state.contracts = [{ kind: 'annual', signing_status: 'sent', archived_at: null, terminated_at: null }];
+    const res = mockRes();
+    await handler({ method: 'GET', query: { student: STUDENT, t: token() }, headers: { host: 'tutlio.lt' } } as any, res as any);
+    expect(res.getResult().body.sessions[0].joinUrl).toBeNull();
+    expect(res.getResult().body.sessions[0].hasMeetingLink).toBe(true);
   });
 });
 

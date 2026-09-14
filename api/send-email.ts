@@ -49,6 +49,8 @@ import {
   finalizeMvPayerFirstFeeNoticeAfterSend,
   maybeMvPayerFirstFeeNoticeFooter,
 } from './_lib/mvPayerFeeNotice.js';
+import { checkSchoolSessionStudentAccess } from './_lib/schoolContractAccess.js';
+import { shouldSkipParentNotification } from './_lib/parentNotificationPreferences.js';
 
 
 function randomToken() {
@@ -228,6 +230,19 @@ function applyTrackedMeetingLink(type: string, d: any): void {
   } catch {
     // No HMAC secret configured — keep the raw link (click just won't be tracked).
   }
+}
+
+async function schoolStudentJoinEmailBlocked(type: string, d: any): Promise<boolean> {
+  if (d?.schoolContractAccessRequired !== true) return false;
+  if (joinRoleForEmailType(type, d) !== 'student') return false;
+  const sessionId = typeof d?.sessionId === 'string' ? d.sessionId.trim() : '';
+  if (!sessionId) return false;
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error('Missing Supabase configuration for school contract access check');
+  const sb = createClient(url, key, supabaseServiceRoleClientOptions() as any);
+  const access = await checkSchoolSessionStudentAccess(sb, sessionId);
+  return access.isSchool && !access.allowed;
 }
 
 /** Already HTML-escaped strings from sanitizeEmailData. */
@@ -3209,6 +3224,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (!isPrivileged && authenticatedUserId && !(await canOrgSeatSendEmail(authenticatedUserId, String(type)))) {
       return res.status(403).json({ error: 'Insufficient organization permission' });
+    }
+    if (await schoolStudentJoinEmailBlocked(String(type), rawData)) {
+      return res.status(200).json({
+        success: true,
+        skipped: true,
+        reason: 'school_contract_not_active',
+      });
+    }
+    if (req.body?.dryRun !== true) {
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+      if (supabaseUrl && serviceKey) {
+        const preferenceClient = createClient(
+          supabaseUrl,
+          serviceKey,
+          supabaseServiceRoleClientOptions(),
+        );
+        if (await shouldSkipParentNotification(preferenceClient, to, type, rawData)) {
+          return res.status(200).json({
+            success: true,
+            skipped: true,
+            reason: 'parent_notification_preference',
+          });
+        }
+      }
     }
     const apiKey = getResendApiKey();
     if (!apiKey) {

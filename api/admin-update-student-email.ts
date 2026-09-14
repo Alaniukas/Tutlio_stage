@@ -1,5 +1,6 @@
-// Org admin corrects a linked student's login email — keeps auth.users,
-// profiles, and students rows in sync.
+// Org admin corrects a linked student's email. Managed username accounts keep
+// their stable login handle and use the real address only for communication.
+// Ordinary email accounts keep auth.users, profiles, and students in sync.
 //
 // POST { studentId, email }
 
@@ -9,6 +10,8 @@ import { verifyRequestAuth } from './_lib/auth.js';
 import { findAuthUserByEmail } from './_lib/findAuthUserByEmail.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { isMoksloVaisiaiOrg } from './_lib/marketMoney.js';
+import { isStudentLoginName, studentLoginNameFromEmail } from '../src/lib/studentLoginIdentity.js';
 
 function json(res: VercelResponse, status: number, body: Record<string, unknown>) {
   return res.status(status).json(body);
@@ -69,9 +72,69 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 409, { error: 'student_not_linked', hint: 'Update students.email directly — no auth account yet.' });
     }
 
+    const { data: authData, error: authReadErr } = await supabase.auth.admin.getUserById(linkedUserId);
+    const authUser = authData.user;
+    if (authReadErr || !authUser?.email) {
+      return json(res, 404, { error: 'linked_auth_user_not_found' });
+    }
+
+    const originalAppMetadata = { ...(authUser.app_metadata || {}) } as Record<string, unknown>;
+    const storedLoginName = typeof originalAppMetadata.student_login_name === 'string'
+      ? originalAppMetadata.student_login_name.trim().toLowerCase()
+      : '';
+    const managedUsernameAccount =
+      isMoksloVaisiaiOrg(student.organization_id)
+      && originalAppMetadata.provisioned_by_organization === student.organization_id
+      && isStudentLoginName(storedLoginName)
+      && studentLoginNameFromEmail(authUser.email) === storedLoginName;
+
     const currentEmail = normalizeEmail(student.email);
     if (nextEmail === currentEmail) {
-      return json(res, 200, { success: true, unchanged: true });
+      // Keep the recovery/notification address synchronized even when the
+      // students row was already changed by an earlier or partial update.
+      if (managedUsernameAccount && originalAppMetadata.student_contact_email !== nextEmail) {
+        const { error: contactRepairError } = await supabase.auth.admin.updateUserById(linkedUserId, {
+          app_metadata: { ...originalAppMetadata, student_contact_email: nextEmail },
+        });
+        if (contactRepairError) {
+          return json(res, 500, { error: 'auth_metadata_repair_failed', details: contactRepairError.message });
+        }
+        return json(res, 200, {
+          success: true,
+          unchanged: true,
+          metadataRepaired: true,
+          loginIdentifier: storedLoginName,
+        });
+      }
+
+      // Repair metadata left by the older flow, which changed Auth to the real
+      // email but left StudentSettings displaying a retired mv-* handle.
+      if (storedLoginName && !managedUsernameAccount) {
+        // GoTrue merges app_metadata updates, so omitted keys can survive.
+        // Explicit nulls retire the stale values reliably.
+        const cleanedAppMetadata = {
+          ...originalAppMetadata,
+          student_login_name: null,
+          student_contact_email: null,
+        };
+        const { error: cleanupError } = await supabase.auth.admin.updateUserById(linkedUserId, {
+          app_metadata: cleanedAppMetadata,
+        });
+        if (cleanupError) {
+          return json(res, 500, { error: 'auth_metadata_cleanup_failed', details: cleanupError.message });
+        }
+        return json(res, 200, {
+          success: true,
+          unchanged: true,
+          metadataRepaired: true,
+          loginIdentifier: authUser.email,
+        });
+      }
+      return json(res, 200, {
+        success: true,
+        unchanged: true,
+        loginIdentifier: managedUsernameAccount ? storedLoginName : authUser.email,
+      });
     }
 
     const { data: tutorConflict } = await supabase
@@ -114,10 +177,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 409, { error: 'email_already_used' });
     }
 
-    const { error: authUpdateErr } = await supabase.auth.admin.updateUserById(linkedUserId, {
-      email: nextEmail,
-      email_confirm: true,
-    });
+    const { data: linkedProfile } = await supabase
+      .from('profiles')
+      .select('email')
+      .eq('id', linkedUserId)
+      .maybeSingle();
+    const previousProfileEmail = linkedProfile?.email ?? null;
+
+    const nextAppMetadata = { ...originalAppMetadata };
+    if (managedUsernameAccount) {
+      nextAppMetadata.student_contact_email = nextEmail;
+    } else {
+      // GoTrue merges app_metadata updates rather than replacing the object.
+      nextAppMetadata.student_login_name = null;
+      nextAppMetadata.student_contact_email = null;
+    }
+
+    const authUpdate = managedUsernameAccount
+      ? { app_metadata: nextAppMetadata }
+      : { email: nextEmail, email_confirm: true, app_metadata: nextAppMetadata };
+    const { error: authUpdateErr } = await supabase.auth.admin.updateUserById(linkedUserId, authUpdate);
     if (authUpdateErr) {
       const msg = authUpdateErr.message || '';
       if (/already|registered|exists/i.test(msg)) {
@@ -126,11 +205,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 500, { error: 'auth_update_failed', details: msg });
     }
 
+    const restoreAuth = async () => {
+      const rollback = managedUsernameAccount
+        ? { app_metadata: originalAppMetadata }
+        : { email: authUser.email!, email_confirm: true, app_metadata: originalAppMetadata };
+      const { error } = await supabase.auth.admin.updateUserById(linkedUserId, rollback);
+      if (error) console.error('[admin-update-student-email] auth rollback failed', error.message);
+    };
+
     const { error: profileErr } = await supabase
       .from('profiles')
       .update({ email: nextEmail })
       .eq('id', linkedUserId);
     if (profileErr) {
+      await restoreAuth();
       return json(res, 500, { error: 'profile_update_failed', details: profileErr.message });
     }
 
@@ -139,10 +227,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .update({ email: nextEmail })
       .eq('id', studentId);
     if (studentUpdateErr) {
+      const { error: profileRollbackError } = await supabase
+        .from('profiles')
+        .update({ email: previousProfileEmail })
+        .eq('id', linkedUserId);
+      if (profileRollbackError) {
+        console.error('[admin-update-student-email] profile rollback failed', profileRollbackError.message);
+      }
+      await restoreAuth();
       return json(res, 500, { error: 'student_update_failed', details: studentUpdateErr.message });
     }
 
-    return json(res, 200, { success: true, email: nextEmail });
+    return json(res, 200, {
+      success: true,
+      email: nextEmail,
+      loginIdentifier: managedUsernameAccount ? storedLoginName : nextEmail,
+      loginChanged: !managedUsernameAccount,
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[admin-update-student-email]', msg);

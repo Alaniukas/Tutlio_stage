@@ -4,3 +4,5 @@ api/_lib/schoolConsultationsAccess.ts
 scripts/_*.ts
 scripts/_*.mjs
 scripts/_last-*
+.codex-worktrees/
+artifacts/

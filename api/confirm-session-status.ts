@@ -120,15 +120,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       organizationEntityType = org?.entity_type || null;
     }
-    const evidenceOnly = existingFinalOutcome && req.body?.confirmExisting === true
+    // The requested status is itself the user's explicit action. School pages
+    // can be stale by a few seconds while auto-completion runs, so do not make a
+    // valid teacher click fail merely because the client still thought the row
+    // was active. Ordinary company/Pro Klase corrections keep their explicit
+    // confirmation flags and stricter policy.
+    const schoolManualRequest = organizationEntityType === 'school' && authorized;
+    const evidenceOnly = existingFinalOutcome
       && status === session.status && ['completed', 'no_show'].includes(status)
-      && (organizationEntityType === 'school' || (isOrgAdminActor && isProKlaseOrg(tutorOrganizationId)));
-    const correction = existingFinalOutcome && req.body?.correctExisting === true
+      && (schoolManualRequest || (
+        req.body?.confirmExisting === true
+        && isOrgAdminActor
+        && isProKlaseOrg(tutorOrganizationId)
+      ));
+    const correction = existingFinalOutcome
       && status !== session.status && ['completed', 'no_show'].includes(status)
       && (
-        (organizationEntityType === 'school' && authorized)
+        schoolManualRequest
         || (isOrgAdminActor && isProKlaseOrg(tutorOrganizationId))
-      );
+      )
+      && (schoolManualRequest || req.body?.correctExisting === true);
     if (session.status !== 'active' && !evidenceOnly && !correction) {
       return json(res, 409, { error: 'already_finalized', currentStatus: session.status });
     }

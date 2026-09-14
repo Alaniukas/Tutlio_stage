@@ -38,7 +38,7 @@ const PUSH_ELIGIBLE: Record<string, (data: any, locale: string) => PushPayload |
       date: d.date,
       time: d.time,
     }),
-    url: '/student/sessions',
+    url: '/parent/calendar',
     tag: `reminder-payer-${d.date}-${d.time}`,
   }),
   booking_confirmation: (d, locale) => ({
@@ -88,7 +88,7 @@ const PUSH_ELIGIBLE: Record<string, (data: any, locale: string) => PushPayload |
       studentName: d.studentName,
       date: d.date,
     }),
-    url: '/student/sessions',
+    url: '/parent/calendar',
     tag: `cancel-parent-${d.date}-${d.time}`,
   }),
   lesson_rescheduled: (d, locale) => ({
@@ -97,7 +97,11 @@ const PUSH_ELIGIBLE: Record<string, (data: any, locale: string) => PushPayload |
       newDate: d.newDate,
       newTime: d.newTime,
     }),
-    url: '/dashboard',
+    url: d.recipientRole === 'payer'
+      ? '/parent/calendar'
+      : d.recipientRole === 'student'
+        ? '/student/sessions'
+        : '/dashboard',
     tag: `reschedule-${d.newDate}-${d.newTime}`,
   }),
   chat_new_message: (d, locale) => ({
@@ -115,7 +119,7 @@ const PUSH_ELIGIBLE: Record<string, (data: any, locale: string) => PushPayload |
       time: d.time,
       tutorName: d.tutorName,
     }),
-    url: '/student/sessions',
+    url: d.forPayer ? '/parent/calendar' : '/student/sessions',
     tag: `waitlist-${d.date}-${d.time}`,
   }),
   waitlist_matched_tutor: (d, locale) => ({
@@ -143,7 +147,7 @@ const PUSH_ELIGIBLE: Record<string, (data: any, locale: string) => PushPayload |
       date: d.date,
       time: d.time,
     }),
-    url: '/student/sessions',
+    url: d.payerIsParent ? '/parent/lessons' : '/student/sessions',
     tag: `pay-remind-${d.date}`,
   }),
   payment_after_lesson_reminder: (d, locale) => ({
@@ -152,7 +156,7 @@ const PUSH_ELIGIBLE: Record<string, (data: any, locale: string) => PushPayload |
       amount: d.amount,
       tutorName: d.tutorName,
     }),
-    url: '/student/sessions',
+    url: d.payerIsParent ? '/parent/lessons' : '/student/sessions',
     tag: `pay-after-${d.date}`,
   }),
 };
@@ -262,7 +266,9 @@ export async function sendPushForEmail(
   const emails = Array.isArray(toEmail) ? toEmail : [toEmail];
   let sent = 0;
 
-  for (const email of emails) {
+  for (const rawEmail of emails) {
+    const email = String(rawEmail || '').trim().toLowerCase();
+    if (!email) continue;
     const { data: profiles } = await sb
       .from('profiles')
       .select('id, preferred_locale')
@@ -280,6 +286,26 @@ export async function sendPushForEmail(
         .not('linked_user_id', 'is', null)
         .limit(1);
       userId = (students as any)?.[0]?.linked_user_id;
+
+      if (userId) {
+        const { data: linkedProfile } = await sb
+          .from('profiles')
+          .select('preferred_locale')
+          .eq('id', userId)
+          .limit(1)
+          .maybeSingle();
+        locale = (linkedProfile as any)?.preferred_locale || 'lt';
+      }
+    }
+
+    if (!userId) {
+      const { data: parentProfile } = await sb
+        .from('parent_profiles')
+        .select('user_id')
+        .eq('email', email)
+        .limit(1)
+        .maybeSingle();
+      userId = (parentProfile as any)?.user_id;
 
       if (userId) {
         const { data: linkedProfile } = await sb
