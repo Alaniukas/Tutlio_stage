@@ -75,6 +75,7 @@ import {
   sessionCommentDeliveryRecipients,
 } from '@/lib/sessionCommentDelivery';
 import { sessionCommentVisibilityLabelKey } from '@/lib/parentLessonComment';
+import SessionCreatedByBadge from '@/components/SessionCreatedByBadge';
 
 interface Session {
   id: string;
@@ -107,6 +108,7 @@ interface Session {
   student_joined_at?: string | null;
   status_confirmed_at?: string | null;
   no_show_reason?: string | null;
+  created_by_role?: string | null;
 }
 
 interface Subject extends OrgSubjectForDefaults {
@@ -199,6 +201,7 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
     student_joined_at: row.student_joined_at ?? null,
     status_confirmed_at: row.status_confirmed_at ?? null,
     no_show_reason: row.no_show_reason ?? null,
+    created_by_role: row.created_by_role ?? null,
   };
 }
 
@@ -1344,7 +1347,10 @@ export default function CompanySessions() {
                         {format(new Date(session.start_time), 'd MMM yyyy', { locale: dateFnsLocale })}{' '}
                         · {format(new Date(session.start_time), 'HH:mm')}–{format(new Date(session.end_time), 'HH:mm')}
                       </p>
-                      <AttendanceBadge session={session} className="mt-1.5" manualConfirmationRequired={supportsManualAttendance} />
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        <AttendanceBadge session={session} manualConfirmationRequired={supportsManualAttendance} />
+                        <SessionCreatedByBadge createdByRole={session.created_by_role} />
+                      </div>
                     </div>
                     <div className="flex flex-col items-end gap-2 flex-shrink-0">
                       <div className="scale-90 origin-top-right">
@@ -1425,6 +1431,7 @@ export default function CompanySessions() {
                           pendingConfirmation={supportsManualAttendance}
                         />
                         <AttendanceBadge session={session} manualConfirmationRequired={supportsManualAttendance} />
+                        <SessionCreatedByBadge createdByRole={session.created_by_role} className="mt-0.5" />
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -1485,6 +1492,7 @@ export default function CompanySessions() {
                   <p className="font-medium text-sm mt-1">{selectedSession.student_name}</p>
                 </div>
               </div>
+              <SessionCreatedByBadge createdByRole={selectedSession.created_by_role} />
 
               {editMode ? (
                 <div className="space-y-4">

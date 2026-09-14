@@ -731,6 +731,7 @@ export default function ParentCalendar() {
         subject_id: subj.id,
         start_time: startISO,
         end_time: endTime.toISOString(),
+        created_by_role: 'parent',
         status: 'active',
         paid: false,
         payment_status: 'pending',

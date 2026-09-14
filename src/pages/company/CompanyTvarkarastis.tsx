@@ -82,8 +82,10 @@ import {
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/lib/orgUi';
 import {
+  buildRecurringSessionCounts,
   calendarSessionTitlePrefix,
   getCalendarSessionEventStyle,
+  isMvRecurringScheduledLesson,
   MOKSLO_VAISIAI_CALENDAR_COLORS,
 } from '@/lib/calendarSessionEventStyle';
 import {
@@ -961,6 +963,11 @@ export default function CompanyTvarkarastis() {
     }) as Session[];
   }, [filteredSessions, classGroupMeta, isLaisviVaikai]);
 
+  const recurringSessionCounts = useMemo(
+    () => buildRecurringSessionCounts(mergedCalendarSessions),
+    [mergedCalendarSessions],
+  );
+
   const filteredAvailability = useMemo(() => {
     let filtered = availability;
 
@@ -1618,6 +1625,14 @@ export default function CompanyTvarkarastis() {
     const isTrialLesson = !!session.subject_id && trialSubjectIds.has(session.subject_id);
     const isMovedLesson =
       pkFeat('monthly_packages') && !!session.original_start_time && !!session.lesson_package_id;
+    const isRecurringScheduled =
+      isMvOrg &&
+      isMvRecurringScheduledLesson({
+        recurringSessionId: session.recurring_session_id,
+        status: session.status,
+        endAt,
+        recurringCounts: recurringSessionCounts,
+      });
 
     const eventStyle = getCalendarSessionEventStyle({
       status: session.status,
@@ -1628,8 +1643,10 @@ export default function CompanyTvarkarastis() {
       isMakeup: isProKlase && session.is_makeup === true,
       cancellationReasonCode: isProKlase ? session.cancellation_reason_code : undefined,
       isMovedLesson,
-      isOrgTutor: isSchoolOrgView || isSchoolBilledSession(session),
+      isRecurringScheduled,
+      isOrgTutor: isMvOrg ? false : isSchoolOrgView || isSchoolBilledSession(session),
       useMoksloVaisiaiPalette: isMvOrg,
+      mvDistinguishPlannedPayment: isMvOrg,
     });
 
     return {
@@ -3247,25 +3264,64 @@ export default function CompanyTvarkarastis() {
               <span className="text-gray-600">{t('compSch.freeTimeUnlicensedTutor')}</span>
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#3b82f6' }}></div>
-            <span>{t('compSch.activeLesson')}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div
-              className="w-4 h-4 rounded"
-              style={{
-                backgroundColor: isMvOrg
-                  ? MOKSLO_VAISIAI_CALENDAR_COLORS.completedBackground
-                  : '#10b981',
-              }}
-            />
-            <span>{t('compSch.completedLesson')}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#ca8a04' }}></div>
-            <span>{t('compSch.unpaidLesson')}</span>
-          </div>
+          {isMvOrg ? (
+            <>
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-4 h-4 rounded"
+                  style={{ backgroundColor: MOKSLO_VAISIAI_CALENDAR_COLORS.plannedPaidBackground }}
+                />
+                <span>{t('compSch.legendPlannedPaid')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-4 h-4 rounded"
+                  style={{ backgroundColor: MOKSLO_VAISIAI_CALENDAR_COLORS.plannedUnpaidBackground }}
+                />
+                <span>{t('compSch.legendPlannedUnpaid')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-4 h-4 rounded"
+                  style={{ backgroundColor: MOKSLO_VAISIAI_CALENDAR_COLORS.recurringBackground }}
+                />
+                <span>{t('compSch.legendRecurringPaid')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-4 h-4 rounded"
+                  style={{ backgroundColor: MOKSLO_VAISIAI_CALENDAR_COLORS.recurringUnpaidBackground }}
+                />
+                <span>{t('compSch.legendRecurringUnpaid')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded" style={{ backgroundColor: '#10b981' }} />
+                <span>{t('compSch.legendCompletedPaid')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-4 h-4 rounded"
+                  style={{ backgroundColor: MOKSLO_VAISIAI_CALENDAR_COLORS.occurredUnpaidBackground }}
+                />
+                <span>{t('compSch.legendCompletedUnpaid')}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded" style={{ backgroundColor: '#3b82f6' }} />
+                <span>{t('compSch.activeLesson')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded" style={{ backgroundColor: '#10b981' }} />
+                <span>{t('compSch.completedLesson')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded" style={{ backgroundColor: '#ca8a04' }} />
+                <span>{t('compSch.unpaidLesson')}</span>
+              </div>
+            </>
+          )}
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 rounded" style={{ backgroundColor: '#ef4444', opacity: 0.5 }}></div>
             <span>{t('compSch.cancelledLesson')}</span>

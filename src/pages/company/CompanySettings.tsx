@@ -153,6 +153,9 @@ export default function CompanySettings() {
   // Package reservation flow only: hours before the first lesson a held package slot waits for payment.
   const [packagePaymentDeadlineHours, setPackagePaymentDeadlineHours] = useState(sc?.packagePaymentDeadlineHours ?? 24);
   const [notifyTutorsOnAssign, setNotifyTutorsOnAssign] = useState(sc?.notifyTutorsOnAssign ?? false);
+  const [orgTutorAvailabilityOnly, setOrgTutorAvailabilityOnly] = useState(
+    sc?.orgTutorAvailabilityOnly ?? false,
+  );
   const [enableManualStudentPayments, setEnableManualStudentPayments] = useState(sc?.enableManualStudentPayments ?? false);
   // Optional address shown to parents (e.g. contract emails) for questions; empty falls back to the org email.
   const [contactEmail, setContactEmail] = useState<string>(sc?.contactEmail ?? '');
@@ -271,6 +274,7 @@ export default function CompanySettings() {
       setTrialReservationDeadlineHours(nextTrialReservationDeadlineHours);
       setPackagePaymentDeadlineHours(nextPackagePaymentDeadlineHours);
       setNotifyTutorsOnAssign(featObj['notify_tutors_on_student_assign'] === true);
+      setOrgTutorAvailabilityOnly(featObj['org_tutor_availability_only'] === true);
       setContactEmail(nextContactEmail);
       setPublicName(nextPublicName);
       setOrgLocale(typeof (orgData as any)?.preferred_locale === 'string' ? (orgData as any).preferred_locale : '');
@@ -786,6 +790,7 @@ export default function CompanySettings() {
       trial_reservation_deadline_hours: Math.max(1, Math.round(Number(trialReservationDeadlineHours) || 24)),
       package_payment_deadline_hours: Math.max(1, Math.round(Number(packagePaymentDeadlineHours) || 24)),
       notify_tutors_on_student_assign: notifyTutorsOnAssign,
+      org_tutor_availability_only: orgTutorAvailabilityOnly,
       enable_manual_student_payments: enableManualStudentPayments,
       contact_email: contactEmail.trim(),
       public_name: publicName.trim(),
@@ -905,6 +910,7 @@ export default function CompanySettings() {
       trialReservationDeadlineHours,
       packagePaymentDeadlineHours,
       notifyTutorsOnAssign,
+      orgTutorAvailabilityOnly,
       enableManualStudentPayments,
       contactEmail,
       publicName,
@@ -1553,6 +1559,20 @@ export default function CompanySettings() {
                     <span>{t('compSet.scopeReminders')}</span>
                   </label>
                 </div>
+                <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer pt-2 border-t border-slate-200">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 w-4 h-4 rounded border-gray-300 text-indigo-600"
+                    checked={orgTutorAvailabilityOnly}
+                    onChange={(e) => setOrgTutorAvailabilityOnly(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium text-gray-900">{t('compSet.orgTutorAvailabilityOnly')}</span>
+                    <span className="block text-xs text-gray-500 mt-0.5">
+                      {t('compSet.orgTutorAvailabilityOnlyDesc')}
+                    </span>
+                  </span>
+                </label>
               </div>
 
               {orgFeaturesSnapshot['manual_payments'] === true && (

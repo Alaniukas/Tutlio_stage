@@ -190,7 +190,7 @@ export function orgTutorPolicyRowDeduped(organizationId: string) {
     supabase
       .from('organizations')
       .select(
-        'org_tutor_lesson_edit, org_tutors_can_edit_lesson_settings, invoice_issuer_mode, tutor_license_count',
+        'org_tutor_lesson_edit, org_tutors_can_edit_lesson_settings, invoice_issuer_mode, tutor_license_count, features',
       )
       .eq('id', organizationId)
       .maybeSingle(),

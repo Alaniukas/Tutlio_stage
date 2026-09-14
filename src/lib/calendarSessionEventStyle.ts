@@ -7,17 +7,69 @@ export type CalendarSessionStyleInput = {
   isMakeup?: boolean;
   cancellationReasonCode?: string | null;
   isMovedLesson?: boolean;
+  /** Active lesson from a recurring series (Mokslo vaisiai: yellow). */
+  isRecurringScheduled?: boolean;
   /** Org tutor: status-only coloring (no payment amber). */
   isOrgTutor?: boolean;
-  /** Mokslo vaisiai use a dedicated trial/completed calendar palette. */
+  /** Mokslo vaisiai use a dedicated trial/recurring calendar palette. */
   useMoksloVaisiaiPalette?: boolean;
+  /** MV admin calendar: planned paid vs unpaid, completed unpaid, recurring unpaid. */
+  mvDistinguishPlannedPayment?: boolean;
   defaultColor?: string;
 };
+
+/** Mokslo vaisiai: geltona „nuolatinė“ tik kai serijoje sukurta daugiau nei 2 pamokos. */
+export const MV_RECURRING_SERIES_MIN_COUNT = 3;
+
+export function buildRecurringSessionCounts(
+  sessions: ReadonlyArray<{ recurring_session_id?: string | null }>,
+): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>();
+  for (const session of sessions) {
+    const recurringId = session.recurring_session_id;
+    if (!recurringId) continue;
+    counts.set(recurringId, (counts.get(recurringId) ?? 0) + 1);
+  }
+  return counts;
+}
+
+export function isMvRecurringScheduledLesson(input: {
+  recurringSessionId?: string | null;
+  status: string;
+  endAt: Date;
+  recurringCounts: ReadonlyMap<string, number>;
+  minSeriesCount?: number;
+  nowMs?: number;
+}): boolean {
+  const {
+    recurringSessionId,
+    status,
+    endAt,
+    recurringCounts,
+    minSeriesCount = MV_RECURRING_SERIES_MIN_COUNT,
+    nowMs = Date.now(),
+  } = input;
+  if (!recurringSessionId || status !== 'active') return false;
+  const endMs = endAt instanceof Date ? endAt.getTime() : new Date(endAt).getTime();
+  if (!Number.isFinite(endMs) || endMs <= nowMs) return false;
+  return (recurringCounts.get(recurringSessionId) ?? 0) >= minSeriesCount;
+}
 
 export const MOKSLO_VAISIAI_CALENDAR_COLORS = {
   trialBackground: '#e5e7eb',
   trialBorder: '#9ca3af',
   trialText: '#374151',
+  recurringBackground: '#facc15',
+  recurringText: '#422006',
+  recurringUnpaidBackground: '#ea580c',
+  recurringUnpaidText: '#ffffff',
+  plannedPaidBackground: '#2563eb',
+  plannedPaidText: '#ffffff',
+  plannedUnpaidBackground: '#f97316',
+  plannedUnpaidText: '#ffffff',
+  occurredUnpaidBackground: '#ca8a04',
+  occurredUnpaidText: '#ffffff',
+  /** @deprecated Use recurringBackground for planned recurring; completed uses default green. */
   completedBackground: '#facc15',
   completedText: '#422006',
 } as const;
@@ -50,8 +102,10 @@ export function getCalendarSessionEventStyle(input: CalendarSessionStyleInput): 
     isMakeup,
     cancellationReasonCode,
     isMovedLesson,
+    isRecurringScheduled,
     isOrgTutor,
     useMoksloVaisiaiPalette,
+    mvDistinguishPlannedPayment,
     defaultColor = ACTIVE_BG,
   } = input;
 
@@ -79,19 +133,41 @@ export function getCalendarSessionEventStyle(input: CalendarSessionStyleInput): 
   const isPaid =
     paid === true || payment_status === 'paid' || payment_status === 'confirmed';
   const isMoksloVaisiaiTrial = useMoksloVaisiaiPalette === true && isTrial === true;
-  const isMoksloVaisiaiEnded =
+  const isMoksloVaisiaiRecurring =
     useMoksloVaisiaiPalette === true &&
-    !isTrial &&
-    (status === 'completed' || (status === 'active' && hasEnded));
+    isRecurringScheduled === true &&
+    status === 'active' &&
+    !hasEnded;
+
+  const useMvPaymentPalette =
+    useMoksloVaisiaiPalette === true && mvDistinguishPlannedPayment === true;
 
   let backgroundColor = defaultColor;
 
-  if (isTrial) {
+  if (useMvPaymentPalette && status !== 'cancelled' && status !== 'no_show') {
+    if (isTrial) {
+      backgroundColor = MOKSLO_VAISIAI_CALENDAR_COLORS.trialBackground;
+    } else if (status === 'completed' || (status === 'active' && hasEnded)) {
+      backgroundColor = isPaid
+        ? PAID_BG
+        : MOKSLO_VAISIAI_CALENDAR_COLORS.occurredUnpaidBackground;
+    } else if (status === 'active' && !hasEnded) {
+      if (isMoksloVaisiaiRecurring) {
+        backgroundColor = isPaid
+          ? MOKSLO_VAISIAI_CALENDAR_COLORS.recurringBackground
+          : MOKSLO_VAISIAI_CALENDAR_COLORS.recurringUnpaidBackground;
+      } else {
+        backgroundColor = isPaid
+          ? MOKSLO_VAISIAI_CALENDAR_COLORS.plannedPaidBackground
+          : MOKSLO_VAISIAI_CALENDAR_COLORS.plannedUnpaidBackground;
+      }
+    }
+  } else if (isTrial) {
     backgroundColor = isMoksloVaisiaiTrial
       ? MOKSLO_VAISIAI_CALENDAR_COLORS.trialBackground
       : TRIAL_BG;
-  } else if (isMoksloVaisiaiEnded) {
-    backgroundColor = MOKSLO_VAISIAI_CALENDAR_COLORS.completedBackground;
+  } else if (isMoksloVaisiaiRecurring) {
+    backgroundColor = MOKSLO_VAISIAI_CALENDAR_COLORS.recurringBackground;
   } else if (isOrgTutor) {
     if (status === 'completed') {
       backgroundColor = isPaid ? PAID_BG : UNPAID_BG;
@@ -130,8 +206,8 @@ export function getCalendarSessionEventStyle(input: CalendarSessionStyleInput): 
       backgroundColor,
       border: '2px dashed #f59e0b',
       boxShadow: 'inset 0 0 0 9999px rgba(245, 158, 11, 0.18)',
-      color: isMoksloVaisiaiEnded
-        ? MOKSLO_VAISIAI_CALENDAR_COLORS.completedText
+      color: isMoksloVaisiaiRecurring
+        ? MOKSLO_VAISIAI_CALENDAR_COLORS.recurringText
         : '#fff',
     };
   }
@@ -154,12 +230,29 @@ export function getCalendarSessionEventStyle(input: CalendarSessionStyleInput): 
     };
   }
 
+  let textColor = '#fff';
+  if (isMoksloVaisiaiTrial) {
+    textColor = MOKSLO_VAISIAI_CALENDAR_COLORS.trialText;
+  } else if (useMvPaymentPalette && status === 'active' && !hasEnded) {
+    if (isMoksloVaisiaiRecurring) {
+      textColor = isPaid
+        ? MOKSLO_VAISIAI_CALENDAR_COLORS.recurringText
+        : MOKSLO_VAISIAI_CALENDAR_COLORS.recurringUnpaidText;
+    } else {
+      textColor = isPaid
+        ? MOKSLO_VAISIAI_CALENDAR_COLORS.plannedPaidText
+        : MOKSLO_VAISIAI_CALENDAR_COLORS.plannedUnpaidText;
+    }
+  } else if (isMoksloVaisiaiRecurring) {
+    textColor = MOKSLO_VAISIAI_CALENDAR_COLORS.recurringText;
+  } else if (useMvPaymentPalette && (status === 'completed' || hasEnded) && !isPaid) {
+    textColor = MOKSLO_VAISIAI_CALENDAR_COLORS.occurredUnpaidText;
+  }
+
   return {
     backgroundColor,
     border: 'none',
-    color: isMoksloVaisiaiEnded
-      ? MOKSLO_VAISIAI_CALENDAR_COLORS.completedText
-      : '#fff',
+    color: textColor,
   };
 }
 

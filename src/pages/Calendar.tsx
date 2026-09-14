@@ -140,8 +140,10 @@ import { resolveOrCreateTrialSubject } from '@/pages/company/orgAdminSessionCrea
 import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import {
+  buildRecurringSessionCounts,
   calendarSessionTitlePrefix,
   getCalendarSessionEventStyle,
+  isMvRecurringScheduledLesson,
   MOKSLO_VAISIAI_CALENDAR_COLORS,
 } from '@/lib/calendarSessionEventStyle';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
@@ -330,6 +332,9 @@ export default function CalendarPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const orgPolicy = useOrgTutorPolicy();
   const licenseFrozen = orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && !orgPolicy.hasActiveLicense;
+  const canCreateSessions =
+    !orgPolicy.loading &&
+    (!orgPolicy.isOrgTutor || orgPolicy.canCreateSessions);
   const { contactVisibility, hasFeature: hasOrgFeature, entityType: orgEntityType, organizationId, loading: orgFeaturesLoading } = useOrgFeatures();
   const { user: ctxUser, profile: ctxProfile } = useUser();
   const isSchoolTutor = orgEntityType === 'school';
@@ -355,6 +360,10 @@ export default function CalendarPage() {
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [eventModalNotice, setEventModalNotice] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const recurringSessionCounts = useMemo(
+    () => buildRecurringSessionCounts(sessions),
+    [sessions],
+  );
   const [students, setStudents] = useState<Student[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [individualPricing, setIndividualPricing] = useState<any[]>([]);
@@ -1253,6 +1262,23 @@ export default function CalendarPage() {
       }
     }
     if (opts?.forceCreate) {
+      if (!canCreateSessions) {
+        setPendingSlot({ start, end });
+        setSlotChoiceStep('free-time');
+        setFreeTimeRepeat(false);
+        setFreeTimeSameTimes(true);
+        setFreeTimeStartDate(format(start, 'yyyy-MM-dd'));
+        setFreeTimeUntilMode('weeks');
+        setFreeTimeUntilDate('');
+        setFreeTimeWeeks(8);
+        const startHm = format(start, 'HH:mm');
+        const endHm = format(end, 'HH:mm');
+        const dow = getDay(start);
+        setFreeTimeDays([dow]);
+        setFreeTimeDayTimes({ [dow]: { start: startHm, end: endHm } });
+        setSlotChoiceOpen(true);
+        return;
+      }
       setPendingSlot({ start, end });
       setSelectedSlot({ start, end });
       setStartTime(format(start, "yyyy-MM-dd'T'HH:mm"));
@@ -1274,7 +1300,7 @@ export default function CalendarPage() {
     }
 
     setPendingSlot({ start, end });
-    setSlotChoiceStep('choice');
+    setSlotChoiceStep(canCreateSessions ? 'choice' : 'free-time');
     setFreeTimeRepeat(false);
     setFreeTimeSameTimes(true);
     setFreeTimeStartDate(format(start, 'yyyy-MM-dd'));
@@ -1287,7 +1313,17 @@ export default function CalendarPage() {
     setFreeTimeDays([dow]);
     setFreeTimeDayTimes({ [dow]: { start: startHm, end: endHm } });
     setSlotChoiceOpen(true);
-  }, [isAvailabilityModalOpen, isEventModalOpen, isCreateModalOpen, isUpcomingListModalOpen, backgroundEvents, stripeConnected, subjects.length, isOrgTutor, licenseFrozen, t]);
+  }, [isAvailabilityModalOpen, isEventModalOpen, isCreateModalOpen, isUpcomingListModalOpen, backgroundEvents, stripeConnected, subjects.length, isOrgTutor, licenseFrozen, canCreateSessions, t]);
+
+  useEffect(() => {
+    if (!canCreateSessions) {
+      setIsCreateModalOpen(false);
+      setIsAssignStudentOpen(false);
+      if (slotChoiceOpen) {
+        setSlotChoiceStep('free-time');
+      }
+    }
+  }, [canCreateSessions, slotChoiceOpen]);
 
   const openCreateLessonFromSlot = () => {
     if (licenseFrozen) {
@@ -1921,6 +1957,7 @@ export default function CalendarPage() {
             subject_id: sessionSubjectId || null,
             start_time: current.toISOString(),
             end_time: sessionEnd.toISOString(),
+            created_by_role: 'tutor',
             status: 'active',
             meeting_link: meetingLink || null,
             topic: topic || null,
@@ -2317,6 +2354,7 @@ export default function CalendarPage() {
           subject_id: sessionSubjectId || null,
           start_time: startDate.toISOString(),
           end_time: endDate.toISOString(),
+          created_by_role: 'tutor',
           status: 'active',
           meeting_link: meetingLink || null,
           topic: topic || null,
@@ -3395,7 +3433,8 @@ export default function CalendarPage() {
         setSaving(false);
         return;
       }
-      if (timeChanged && !rescheduleRequestedBy) {
+      const effectiveRescheduleRequestedBy = rescheduleRequestedBy || 'tutor';
+      if (timeChanged && !effectiveRescheduleRequestedBy) {
         alert(t('cal.rescheduleRequestedByRequired'));
         setSaving(false);
         return;
@@ -3536,7 +3575,7 @@ export default function CalendarPage() {
                 .from('sessions')
                 .update({
                   reschedule_reason: rescheduleReason.trim(),
-                  reschedule_requested_by: rescheduleRequestedBy || null,
+                  reschedule_requested_by: effectiveRescheduleRequestedBy,
                 })
                 .in('id', futureList.map((s) => s.id))
                 .then(({ error: reschedErr }) => {
@@ -3570,7 +3609,7 @@ export default function CalendarPage() {
             original_start_time: (selectedEvent as any).original_start_time ?? oldStart.toISOString(),
             rescheduled_at: new Date().toISOString(),
             reschedule_reason: rescheduleReason.trim(),
-            reschedule_requested_by: rescheduleRequestedBy || null,
+            reschedule_requested_by: effectiveRescheduleRequestedBy,
           }).eq('id', selectedEvent.id)
             .then(({ error: reschedErr }) => {
               if (reschedErr) console.warn('[Calendar] reschedule tracking columns not available:', reschedErr.message);
@@ -3864,7 +3903,7 @@ export default function CalendarPage() {
       setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
       setEditShowCommentToParent(selectedEvent.show_comment_to_parent || false);
       setRescheduleReason('');
-      setRescheduleRequestedBy('');
+      setRescheduleRequestedBy('tutor');
       setIsEditingSession(true);
       return;
     }
@@ -3888,7 +3927,7 @@ export default function CalendarPage() {
     setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
     setEditShowCommentToParent(selectedEvent.show_comment_to_parent || false);
     setRescheduleReason('');
-    setRescheduleRequestedBy('');
+    setRescheduleRequestedBy('tutor');
     setIsEditingSession(true);
   };
 
@@ -4405,6 +4444,14 @@ export default function CalendarPage() {
     const endAt = new Date(event.end ?? event.end_time);
     const isMovedLesson =
       pkMonthlyPackages && !!event.original_start_time && !!event.lesson_package_id;
+    const isRecurringScheduled =
+      isMoksloVaisiaiCalendar &&
+      isMvRecurringScheduledLesson({
+        recurringSessionId: event.recurring_session_id,
+        status: event.status,
+        endAt,
+        recurringCounts: recurringSessionCounts,
+      });
 
     const eventStyle = getCalendarSessionEventStyle({
       status: event.status,
@@ -4415,6 +4462,7 @@ export default function CalendarPage() {
       isMakeup: showProKlaseCalendarFeatures && event.is_makeup === true,
       cancellationReasonCode: showProKlaseCalendarFeatures ? event.cancellation_reason_code : undefined,
       isMovedLesson,
+      isRecurringScheduled,
       isOrgTutor: orgPolicy.isOrgTutor || isSchoolBilledSession(event),
       useMoksloVaisiaiPalette: isMoksloVaisiaiCalendar,
       defaultColor: subj?.color || '#6366f1',
@@ -4550,6 +4598,7 @@ export default function CalendarPage() {
             <span className="hidden sm:inline">{t('cal.cancelLessons')}</span>
           </Button>
           )}
+          {canCreateSessions && (
           <Button
             onClick={() => {
               // Default the new lesson to the date the calendar is currently showing
@@ -4567,6 +4616,7 @@ export default function CalendarPage() {
             <Plus className="w-4 h-4" />
             <span className="hidden sm:inline">{t('cal.createLesson')}</span>
           </Button>
+          )}
         </div>
       </div>
 
@@ -4847,24 +4897,32 @@ export default function CalendarPage() {
           />
           <span className="text-xs text-gray-500">{t('cal.legendFreeTime')}</span>
         </div>
-        {[
-          { color: '#6366f1', label: t('cal.legendReserved') },
-          {
-            color: isMoksloVaisiaiCalendar
-              ? MOKSLO_VAISIAI_CALENDAR_COLORS.completedBackground
-              : '#10b981',
-            label: t('cal.legendCompleted'),
-          },
-          { color: '#ca8a04', label: t('cal.legendUnpaidOccurred') },
-          {
-            color: isMoksloVaisiaiCalendar
-              ? MOKSLO_VAISIAI_CALENDAR_COLORS.trialBackground
-              : '#a855f7',
-            label: t('cal.legendTrial'),
-            border: isMoksloVaisiaiCalendar
-              ? `2px solid ${MOKSLO_VAISIAI_CALENDAR_COLORS.trialBorder}`
-              : '2px solid #7e22ce',
-          },
+        {([
+          ...(isMoksloVaisiaiCalendar
+            ? [
+                { color: '#3b82f6', label: t('cal.legendReserved') },
+                { color: '#10b981', label: t('cal.legendCompleted') },
+                {
+                  color: MOKSLO_VAISIAI_CALENDAR_COLORS.recurringBackground,
+                  label: t('cal.legendRecurringScheduled'),
+                  border: `2px solid ${MOKSLO_VAISIAI_CALENDAR_COLORS.recurringBackground}`,
+                },
+                {
+                  color: MOKSLO_VAISIAI_CALENDAR_COLORS.trialBackground,
+                  label: t('cal.legendTrial'),
+                  border: `2px solid ${MOKSLO_VAISIAI_CALENDAR_COLORS.trialBorder}`,
+                },
+              ]
+            : [
+                { color: '#6366f1', label: t('cal.legendReserved') },
+                { color: '#10b981', label: t('cal.legendCompleted') },
+                { color: '#ca8a04', label: t('cal.legendUnpaidOccurred') },
+                {
+                  color: '#a855f7',
+                  label: t('cal.legendTrial'),
+                  border: '2px solid #7e22ce',
+                },
+              ]),
           ...(showProKlaseCalendarFeatures
             ? [
                 { color: '#8b5cf6', label: t('cal.legendMakeup'), border: '2px solid #6d28d9' },
@@ -4872,7 +4930,7 @@ export default function CalendarPage() {
               ]
             : []),
           { color: '#ef4444', label: t('cal.legendCancelled'), opacity: true },
-        ].map((item) => (
+        ] as Array<{ color: string; label: string; border?: string; opacity?: boolean }>).map((item) => (
           <div key={item.label} className="flex items-center gap-2">
             <span
               className="w-3 h-3 rounded-full"
@@ -4895,7 +4953,7 @@ export default function CalendarPage() {
       </div>
 
       {/* === CREATE SESSION MODAL === */}
-      <Dialog open={isCreateModalOpen} onOpenChange={(open) => {
+      <Dialog open={isCreateModalOpen && canCreateSessions} onOpenChange={(open) => {
         setIsCreateModalOpen(open);
         if (!open) {
           setNewSessionId(null);
@@ -5396,7 +5454,7 @@ export default function CalendarPage() {
                   disabled={saving || (
                     !!editNewStartTime && !!selectedEvent &&
                     Math.floor(new Date(editNewStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) &&
-                    rescheduleReason.trim().length < 5
+                    (rescheduleReason.trim().length < 5 || !rescheduleRequestedBy)
                   )}
                   className="flex-1 rounded-xl"
                 >
@@ -6463,7 +6521,7 @@ export default function CalendarPage() {
                   setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
                   setEditShowCommentToParent(selectedEvent.show_comment_to_parent || false);
                   setRescheduleReason('');
-                  setRescheduleRequestedBy('');
+                  setRescheduleRequestedBy('tutor');
                   setIsEditingSession(true);
                 }
               }}
@@ -6571,6 +6629,7 @@ export default function CalendarPage() {
                 <Clock className="w-5 h-5 text-green-600" />
                 {t('cal.createFreeTime')}
               </Button>
+              {canCreateSessions && (
               <Button
                 variant="outline"
                 className="justify-start gap-3 h-12"
@@ -6581,6 +6640,7 @@ export default function CalendarPage() {
                 <Plus className="w-5 h-5 text-indigo-600" />
                 {t('cal.createLessonOption')}
               </Button>
+              )}
             </div>
           ) : (
             <div className="flex flex-col gap-4 pt-1 min-w-0">
@@ -7018,6 +7078,7 @@ export default function CalendarPage() {
             </div>
 
             {/* Add Student Button */}
+            {canCreateSessions && (
             <div className="pt-2 border-t border-gray-100 space-y-2">
               <Button
                 onClick={() => {
@@ -7038,6 +7099,7 @@ export default function CalendarPage() {
                 {t('cal.addStudentToSlot')}
               </Button>
             </div>
+            )}
 
             <div className="flex gap-2 pt-1">
               <Button

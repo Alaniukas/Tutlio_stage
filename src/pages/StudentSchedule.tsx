@@ -55,6 +55,7 @@ import {
     linkedStudentProfileIds,
     pickActiveStudentProfile,
 } from '@/lib/studentLinkedProfiles';
+import { SESSION_CREATED_BY_ROLE } from '@/lib/sessionCreatedByRole';
 
 // BigCalendar Setup
 const locales = { lt: lt };
@@ -1483,6 +1484,7 @@ export default function StudentSchedule() {
             subject_id: selectedSubjectId || null,
             start_time: selectedTime.toISOString(),
             end_time: endDT.toISOString(),
+            created_by_role: isParentRoute ? SESSION_CREATED_BY_ROLE.parent : SESSION_CREATED_BY_ROLE.student,
             status: 'active',
             paid: usesPackage,
             payment_status: usesPackage

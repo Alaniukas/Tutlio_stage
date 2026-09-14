@@ -309,6 +309,19 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'premium',
   },
 
+  org_tutor_availability_only: {
+    id: 'org_tutor_availability_only',
+    name: 'Korepetitorius kuria tik laisvą laiką',
+    nameEn: 'Org tutors create availability only',
+    description:
+      'Organizacijos korepetitoriai negali kurti pamokų savo kalendoriuje — tik laisvus laikus. Pamokas planuoja administracija.',
+    descriptionEn:
+      'Organization tutors cannot create lessons in their calendar — only free-time slots. Lessons are scheduled by administrators.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
   disable_waitlist: {
     id: 'disable_waitlist',
     name: 'Išjungti laukimo eilę',

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { orgAdminRowByUserDeduped, orgTutorPolicyRowDeduped, tutorSidebarProfileDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 import { parseOrgLessonEditScope, anyOrgLessonEdit, type OrgLessonEditScope } from '@/lib/orgTutorLessonEdit';
+import { orgTutorCanCreateSessions } from '@/lib/orgTutorSessionCreate';
 
 export type { OrgLessonEditScope };
 
@@ -23,6 +24,9 @@ export interface OrgTutorPolicy {
   invoiceIssuerMode: 'company' | 'tutor' | 'both';
   hasActiveLicense: boolean;
   orgUsesLicenses: boolean;
+  /** Org feature org_tutor_availability_only — tutor may not create lessons. */
+  availabilityOnly: boolean;
+  canCreateSessions: boolean;
 }
 
 const defaultPolicy: OrgTutorPolicy = {
@@ -42,6 +46,8 @@ const defaultPolicy: OrgTutorPolicy = {
   invoiceIssuerMode: 'both',
   hasActiveLicense: true,
   orgUsesLicenses: false,
+  availabilityOnly: false,
+  canCreateSessions: true,
 };
 
 export function useOrgTutorPolicy(): OrgTutorPolicy {
@@ -109,6 +115,7 @@ export function useOrgTutorPolicy(): OrgTutorPolicy {
         hideMoney: true,
         canEditLessonPricing: false,
         canToggleSessionPaid: false,
+        canCreateSessions: false,
       });
 
       const { data: org, error } = await orgTutorPolicyRowDeduped(effectiveOrgId);
@@ -133,6 +140,11 @@ export function useOrgTutorPolicy(): OrgTutorPolicy {
       const licenseCount = Number(org?.tutor_license_count) || 0;
       const orgUsesLicenses = licenseCount > 0;
       const hasActiveLicense = prof?.has_active_license !== false;
+      const featObj =
+        org?.features && typeof org.features === 'object' && !Array.isArray(org.features)
+          ? (org.features as Record<string, unknown>)
+          : {};
+      const availabilityOnly = !orgTutorCanCreateSessions(featObj);
 
       setState({
         loading: false,
@@ -151,6 +163,8 @@ export function useOrgTutorPolicy(): OrgTutorPolicy {
         invoiceIssuerMode: issuerMode,
         hasActiveLicense,
         orgUsesLicenses,
+        availabilityOnly,
+        canCreateSessions: !availabilityOnly,
       });
     };
 
