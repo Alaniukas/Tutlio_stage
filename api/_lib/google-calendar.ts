@@ -4,6 +4,10 @@
 import { createClient } from '@supabase/supabase-js';
 import { format, parseISO } from 'date-fns';
 import { buildTrackedJoinUrl } from './joinLink.js';
+import {
+  GOOGLE_CALENDAR_SYNC_STATUSES,
+  googleCalendarSyncTimeMin,
+} from './googleCalendarSyncWindow.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -615,9 +619,25 @@ export async function syncAvailabilityToGoogle(tutorId: string): Promise<{ creat
   return out;
 }
 
-// Include sessions from the last 24h so "today" is covered regardless of server timezone
-function timeMinForSessions(): string {
-  return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+async function upsertSessionGoogleEvent(
+  accessToken: string,
+  session: { id: string; google_calendar_event_id?: string | null },
+  googleEvent: GoogleEvent,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (session.google_calendar_event_id) {
+    const updated = await updateGoogleEvent(accessToken, session.google_calendar_event_id, googleEvent);
+    if (updated) return { ok: true };
+  }
+
+  const result = await createGoogleEvent(accessToken, googleEvent);
+  if ('id' in result) {
+    await supabase
+      .from('sessions')
+      .update({ google_calendar_event_id: result.id })
+      .eq('id', session.id);
+    return { ok: true };
+  }
+  return { ok: false, error: result.error };
 }
 
 // Sync all events (sessions + availability) to Google Calendar
@@ -643,11 +663,9 @@ export async function syncAllEventsToGoogle(userId: string, profile: any) {
     }
   }
 
-  // Then delete all existing synced events and re-create only active ones
-  await deleteAllCalendarEvents(userId, accessToken);
-
-  // Sync all active sessions (from last 24h onward so today's sessions are always included)
-  const timeMin = timeMinForSessions();
+  // Upsert sessions from school-year start (Vilnius) through all future dates.
+  // Keep completed / no_show history — do not wipe Google before syncing.
+  const timeMin = googleCalendarSyncTimeMin();
   const { data: sessions } = await supabase
     .from('sessions')
     .select(`
@@ -656,7 +674,7 @@ export async function syncAllEventsToGoogle(userId: string, profile: any) {
       subject:subjects(name)
     `)
     .eq('tutor_id', userId)
-    .eq('status', 'active')
+    .in('status', [...GOOGLE_CALENDAR_SYNC_STATUSES])
     .gte('start_time', timeMin);
 
   let syncedSessions = 0;
@@ -665,16 +683,12 @@ export async function syncAllEventsToGoogle(userId: string, profile: any) {
 
   for (const session of sessions || []) {
     const googleEvent = formatSessionEvent(session);
-    const result = await createGoogleEvent(accessToken, googleEvent);
-    if ('id' in result) {
-      await supabase
-        .from('sessions')
-        .update({ google_calendar_event_id: result.id })
-        .eq('id', session.id);
+    const result = await upsertSessionGoogleEvent(accessToken, session, googleEvent);
+    if (result.ok) {
       syncedSessions++;
     } else if (result.error) {
       if (!firstSessionError) firstSessionError = result.error;
-      console.error('[google-calendar] Failed to create session event:', session.id, result.error);
+      console.error('[google-calendar] Failed to upsert session event:', session.id, result.error);
     }
   }
 

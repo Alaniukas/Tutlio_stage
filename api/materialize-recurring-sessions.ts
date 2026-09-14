@@ -187,6 +187,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         subject_id: template.subject_id,
         start_time: startIso,
         end_time: end.toISOString(),
+        created_by_role: 'system',
         status: 'active',
         meeting_link: resolveTemplateMeetingLink(template, meetingLinkMaps),
         topic: template.topic,

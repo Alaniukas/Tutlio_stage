@@ -325,6 +325,7 @@ export async function reconcileClassGroupSessions(
         subject_id: group.subject_id || null,
         start_time: want.startIso,
         end_time: want.endIso,
+        created_by_role: 'system',
         status: 'active',
         meeting_link: group.meeting_link || null,
         price: 0,
