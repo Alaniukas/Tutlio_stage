@@ -244,7 +244,7 @@ async function annexPdfFromFilledDocx(params: {
     submitNote: extraLessonsWithdrawalFormSubmitNote(schoolEmail),
   });
   if (annexDocx) {
-    return new Uint8Array(await withTimeout(convertDocxBufferToPdfWithFallbacks(annexDocx), 90000));
+    return new Uint8Array(await withTimeout(convertDocxBufferToPdfWithFallbacks(annexDocx), 170000));
   }
   return createSimpleContractPdf({
     contractNumber: '',

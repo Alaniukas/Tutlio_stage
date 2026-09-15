@@ -4,4 +4,5 @@ services:
     ports:
       - "8080:8080"
     environment:
+      PORT: "8080"
       DOCX_CONVERTER_API_KEY: ${DOCX_CONVERTER_API_KEY:-local-dev-key}
