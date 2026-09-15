@@ -4,7 +4,8 @@
  */
 
 import { BLOG_SCHEMA_LOCALES, type BlogSchemaLocale } from '../../src/lib/i18n/localeRelease.js';
-import { BLOG_AUTHOR_NAME } from '../../src/lib/blogAuthor.js';
+import { BLOG_EDITORIAL_VOICE } from '../../src/lib/blogAuthor.js';
+import { storedBlogTag } from '../../src/lib/blogTag.js';
 import { LOCALE_FORMAT_TAGS } from '../../src/lib/i18n/locales.js';
 import { extractBlogFaqs } from './blogFaq.js';
 import { buildBlogCoverPrompt } from './blogCoverArt.js';
@@ -148,7 +149,7 @@ export function parseBlogAiResponse(raw: unknown): BlogAiGenerateResult {
     }
   }
 
-  const tag = String(body.tag || 'SEO').trim() || 'SEO';
+  const tag = storedBlogTag(body.tag);
   const coverImageUrl = String(body.cover_image_url || '').trim();
   const coverImageBase64 = String(body.cover_image_base64 || '').trim();
   const coverImageContentType = String(body.cover_image_content_type || 'image/webp').trim();
@@ -173,7 +174,7 @@ export interface BlogAiGenerateOptions {
 
 /** Shared people-first SEO + AI-search rules — an education briefing, not a product page. */
 export const BLOG_SEO_WRITING_RULES =
-  `You write as ${BLOG_AUTHOR_NAME}, education-market editor at Tutlio (a tutoring-operations company).\n` +
+  `You write as ${BLOG_EDITORIAL_VOICE} at Tutlio (a tutoring-operations company).\n` +
   'Voice: calm, specific, slightly opinionated — like a briefing note from a school-operations director, not a growth blog.\n' +
   'The article is about education (parents, students, tutors, schools). Software is not the subject.\n\n' +
   'People-first SEO and generative-search visibility:\n' +
@@ -289,7 +290,12 @@ export async function generateGeminiCoverImage(options: {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
           responseModalities: ['IMAGE'],
-          responseFormat: { image: { aspectRatio: '16:9', imageSize: '1K' } },
+          responseFormat: {
+            image: {
+              aspectRatio: 'ASPECT_RATIO_SIXTEEN_BY_NINE',
+              imageSize: 'IMAGE_SIZE_ONE_K',
+            },
+          },
         },
       }),
     }, options.deadline);
@@ -381,7 +387,7 @@ export function parseEditorialBrief(raw: unknown): BlogEditorialBrief {
   const o = raw as Record<string, unknown>;
   const topic = String(o.topic || '').trim();
   if (!topic) throw new Error('Brief missing topic');
-  const tag = String(o.tag || 'Education').trim() || 'Education';
+  const tag = storedBlogTag(o.tag);
   const editorialThesis = String(o.editorialThesis || o.editorial_thesis || '').trim();
   if (editorialThesis.length < 40) throw new Error('Brief missing a defensible editorial thesis');
   const informationGain = String(o.informationGain || o.information_gain || '').trim();
@@ -481,10 +487,10 @@ export async function generateBlogEditorialBrief(
 ): Promise<BlogEditorialBrief> {
   const localeKeys = BLOG_AUTO_LOCALES.join(', ');
   const prompt =
-    `You are ${BLOG_AUTHOR_NAME}, education-market editor at Tutlio. Produce a research brief for native articles (not translations).\n` +
+    `You are ${BLOG_EDITORIAL_VOICE}. Produce a research brief for native articles (not translations).\n` +
     `Topic seed: "${options.keyword}"` +
     (options.tag ? ` (category: ${options.tag})` : '') +
-    `\n\nReturn JSON: { "tag": "short category", "topic": "one English sentence naming the reader problem", "editorialThesis": "one useful, defensible and slightly opinionated answer to the reader problem", "informationGain": "a concrete decision framework, diagnostic, trade-off or tutoring-operations insight that goes beyond generic search summaries without inventing data or experience", "coverConcept": "one specific text-free visual metaphor unique to this topic; no dashboards, icon clouds, calendars, charts, checklists, words, or logos", "angles": { "<locale>": "3-5 compact editor instructions covering the target reader and dominant intent, one natural native query theme plus related entities, the local information gap and decision, realistic examples, units/currency, and what must not be translated literally" } }\n` +
+    `\n\nReturn JSON: { "tag": "one of Parents, Communication, Productivity, Tools, Learning, Platform, Finance, Business, Tips, News", "topic": "one English sentence naming the reader problem", "editorialThesis": "one useful, defensible and slightly opinionated answer to the reader problem", "informationGain": "a concrete decision framework, diagnostic, trade-off or tutoring-operations insight that goes beyond generic search summaries without inventing data or experience", "coverConcept": "one specific text-free visual metaphor unique to this topic; no dashboards, icon clouds, calendars, charts, checklists, words, or logos", "angles": { "<locale>": "3-5 compact editor instructions covering the target reader and dominant intent, one natural native query theme plus related entities, the local information gap and decision, realistic examples, units/currency, and what must not be translated literally" } }\n` +
     `Locales in angles (all required): ${localeKeys}.\n` +
     `No statistics. No product pitch. No Tutlio mention in the brief.`;
 
@@ -505,7 +511,7 @@ export async function generateBlogLocaleArticle(options: {
   const localeSeo = blogLocaleSeoInstructions(loc, angle);
 
   const prompt =
-    `You are ${BLOG_AUTHOR_NAME}, education-market editor at Tutlio. Write ONE original ${language} article.\n` +
+    `You are ${BLOG_EDITORIAL_VOICE}. Write ONE original ${language} article.\n` +
     `Write the entire JSON values (title, excerpt, content) in ${language} only.\n` +
     `Topic seed: "${options.keyword}"\n` +
     `Shared topic: ${options.brief.topic}\n` +

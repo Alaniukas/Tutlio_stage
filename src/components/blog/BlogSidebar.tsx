@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
-import { BLOG_AUTHOR_NAME, blogAuthorRole } from '@/lib/blogAuthor';
+import { blogAuthorForPost } from '@/lib/blogAuthor';
 import { buildLocalizedPath } from '@/lib/i18n';
 import type { BlogTocItem } from '@/lib/blogToc';
 
@@ -62,18 +62,18 @@ export function BlogSidebar({ toc, activeId }: { toc: BlogTocItem[]; activeId?: 
 
 export function BlogInlineCta() {
   const { t, locale } = useTranslation();
-  const registerPath = buildLocalizedPath('/register', locale);
+  const pricingPath = buildLocalizedPath('/pricing', locale);
 
   return (
     <div className="my-10 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-violet-50 p-6 sm:p-8 flex flex-col sm:flex-row gap-5 items-start sm:items-center">
-      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-white text-2xl font-bold shadow-md">
-        T
+      <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-indigo-600 shadow-md">
+        <img src="/pwa-512x512.png" alt="Tutlio" className="h-full w-full object-cover" />
       </div>
       <div className="flex-1 min-w-0">
         <h3 className="text-lg font-bold text-gray-900 mb-1">{t('blog.inlineCtaTitle')}</h3>
         <p className="text-sm text-gray-600 leading-relaxed mb-4">{t('blog.inlineCtaBody')}</p>
         <Link
-          to={registerPath}
+          to={pricingPath}
           className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors"
         >
           {t('blog.ctaPrimary')} <ArrowRight className="w-4 h-4" />
@@ -103,16 +103,19 @@ export function BlogHeroCover({ src, alt, title }: { src: string; alt: string; t
   );
 }
 
-export function BlogAuthorRow() {
+export function BlogAuthorRow({ post }: { post: Record<string, unknown> }) {
   const { locale } = useTranslation();
+  const author = blogAuthorForPost(post, locale);
   return (
     <div className="flex items-center gap-3 mb-8 pb-8 border-b border-gray-100">
-      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-white font-bold text-sm">
-        EN
-      </div>
+      <img
+        src={author.avatar}
+        alt={author.name}
+        className="h-11 w-11 rounded-full object-cover ring-2 ring-indigo-100"
+      />
       <div>
-        <p className="text-sm font-semibold text-gray-900">{BLOG_AUTHOR_NAME}</p>
-        <p className="text-xs text-gray-500">{blogAuthorRole(locale)}</p>
+        <p className="text-sm font-semibold text-gray-900">{author.name}</p>
+        <p className="text-xs text-gray-500">{author.role}</p>
       </div>
     </div>
   );

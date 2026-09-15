@@ -8,6 +8,7 @@ import { resolveField, formatBlogDate, blogPostPath, postSlug } from '@/lib/blog
 import { markdownToHtml } from '@/lib/markdown';
 import { extractBlogToc, injectHeadingIds } from '@/lib/blogToc';
 import { estimateReadingMinutes } from '@/lib/blogReadingTime';
+import { localizedBlogTag } from '@/lib/blogTag';
 import { BlogSidebar, BlogInlineCta, BlogHeroCover, BlogAuthorRow } from '@/components/blog/BlogSidebar';
 import { usePlatform } from '@/contexts/PlatformContext';
 import { applyDefaultDocumentMeta } from '@/lib/documentMeta';
@@ -121,7 +122,7 @@ export default function BlogPost() {
                   <div className="flex flex-wrap items-center gap-3 mb-4">
                     {post.tag && (
                       <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
-                        {String(post.tag)}
+                        {localizedBlogTag(post.tag, locale)}
                       </span>
                     )}
                     <span className="inline-flex items-center gap-1.5 text-sm text-gray-400">
@@ -143,7 +144,7 @@ export default function BlogPost() {
                   {excerpt && <p className="text-lg text-gray-500 leading-relaxed">{excerpt}</p>}
                 </header>
 
-                <BlogAuthorRow />
+                <BlogAuthorRow post={post} />
 
                 {post.cover_image && (
                   <BlogHeroCover src={String(post.cover_image)} alt={title} title={title} />

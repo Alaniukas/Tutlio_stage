@@ -3,6 +3,7 @@ import { ArrowRight, Clock } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { resolveField, formatBlogDate, blogPostPath } from '@/lib/blogLocale';
 import { estimateReadingMinutes } from '@/lib/blogReadingTime';
+import { localizedBlogTag } from '@/lib/blogTag';
 
 export function BlogFeaturedCard({ post }: { post: Record<string, unknown> }) {
   const { t, locale } = useTranslation();
@@ -24,13 +25,15 @@ export function BlogFeaturedCard({ post }: { post: Record<string, unknown> }) {
                 className="relative z-[1] h-full w-full object-contain p-8 transition-transform duration-500 group-hover:scale-[1.02]"
               />
             ) : (
-              <div className="flex h-full items-center justify-center text-indigo-300 text-6xl font-bold">T</div>
+              <div className="flex h-full items-center justify-center p-12">
+                <img src="/logo-icon.png" alt="" className="max-h-32 max-w-[70%] object-contain opacity-60" />
+              </div>
             )}
           </div>
           <div className="flex flex-col justify-center p-6 sm:p-8">
             {post.tag && (
               <span className="inline-block w-fit rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 mb-3">
-                {String(post.tag)}
+                {localizedBlogTag(post.tag, locale)}
               </span>
             )}
             <div className="flex items-center gap-2 text-xs text-gray-400 mb-3">
@@ -79,7 +82,7 @@ export function BlogGridCard({ post }: { post: Record<string, unknown> }) {
           <div className="flex flex-wrap items-center gap-2 mb-2">
             {post.tag && (
               <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-semibold text-gray-600">
-                {String(post.tag)}
+                {localizedBlogTag(post.tag, locale)}
               </span>
             )}
             {post.published_at && (

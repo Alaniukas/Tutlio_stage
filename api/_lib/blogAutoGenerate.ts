@@ -310,6 +310,26 @@ async function finalizeIfComplete(
     };
   }
 
+  // A failed image request must remain resumable instead of silently publishing
+  // a text-only post that the generator will never revisit.
+  if (!String(post.cover_image || '').trim()) {
+    await supabase
+      .from('blog_posts')
+      .update({ generation_status: 'in_progress', updated_at: new Date().toISOString() })
+      .eq('id', post.id);
+    return {
+      ok: true,
+      reason: 'cover image pending',
+      postId: String(post.id),
+      keyword,
+      publishUrl,
+      previewUrl,
+      published: false,
+      partial: true,
+      localesDone,
+    };
+  }
+
   const autoPublish = settings?.auto_publish !== false;
   const notifyOnDraft = settings?.notify_on_draft === true;
   const nowIso = new Date().toISOString();

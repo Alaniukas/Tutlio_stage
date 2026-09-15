@@ -28,7 +28,8 @@ import {
   renderRelatedPostsHtml,
 } from './_lib/blogRelatedLinks.js';
 import { extractBlogFaqs, blogFaqJsonLd } from './_lib/blogFaq.js';
-import { BLOG_AUTHOR_NAME, blogAuthorJsonLd, blogAuthorRole } from '../src/lib/blogAuthor.js';
+import { blogAuthorForPost, blogAuthorJsonLd } from '../src/lib/blogAuthor.js';
+import { localizedBlogTag } from '../src/lib/blogTag.js';
 import { t } from './_lib/i18n.js';
 
 const LOCALES = seoLocalesForPath('/blog');
@@ -170,20 +171,6 @@ function jsonLd(value: unknown): string {
   return JSON.stringify(value).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
 }
 
-const TAG_TRANSLATIONS: Record<string, Partial<Record<Locale, string>>> = {
-  verslas: { en: 'Business', pl: 'Biznes', lv: 'Bizness', ee: 'Äri', fr: 'Entreprise', es: 'Negocio', de: 'Business', se: 'Företag', dk: 'Forretning', fi: 'Liiketoiminta', no: 'Virksomhet', nl: 'Ondernemen' },
-  'įrankiai': { en: 'Tools', pl: 'Narzędzia', lv: 'Rīki', ee: 'Tööriistad', fr: 'Outils', es: 'Herramientas', de: 'Tools', se: 'Verktyg', dk: 'Værktøjer', fi: 'Työkalut', no: 'Verktøy', nl: 'Tools' },
-  patarimai: { en: 'Tips', pl: 'Porady', lv: 'Padomi', ee: 'Nõuanded', fr: 'Conseils', es: 'Consejos', de: 'Tipps', se: 'Tips', dk: 'Tips', fi: 'Vinkit', no: 'Tips', nl: 'Tips' },
-  naujienos: { en: 'News', pl: 'Aktualności', lv: 'Jaunumi', ee: 'Uudised', fr: 'Actualités', es: 'Novedades', de: 'Neuigkeiten', se: 'Nyheter', dk: 'Nyheder', fi: 'Uutiset', no: 'Nyheter', nl: 'Nieuws' },
-};
-
-function localizedTag(tag: unknown, locale: Locale): string {
-  if (typeof tag !== 'string') return '';
-  const value = tag.trim();
-  if (!value || locale === 'lt') return value;
-  return TAG_TRANSLATIONS[value.toLocaleLowerCase('lt-LT')]?.[locale] || value;
-}
-
 /** Crawlable cross-locale links for the footer (mirrors ssr-shell.ts). */
 const LOCALE_NATIVE_NAMES = LOCALE_NAMES;
 
@@ -223,6 +210,7 @@ interface BlogShellOpts {
   hreflangHtml?: string;
   localeLinks?: string;
   ogType?: 'article' | 'website';
+  authorName?: string;
 }
 
 const DEFAULT_OG = 'https://www.tutlio.com/og-image.jpg';
@@ -239,7 +227,7 @@ function shell(opts: BlogShellOpts): string {
     ? [
         `<meta property="article:published_time" content="${esc(publishedTime)}" />`,
         modifiedTime ? `<meta property="article:modified_time" content="${esc(modifiedTime)}" />` : '',
-        `<meta property="article:author" content="${esc(BLOG_AUTHOR_NAME)}" />`,
+        opts.authorName ? `<meta property="article:author" content="${esc(opts.authorName)}" />` : '',
         tag ? `<meta property="article:section" content="${esc(tag)}" />` : '',
       ].filter(Boolean).join('\n')
     : '';
@@ -373,7 +361,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const blogPath = `/blog/${localeSlug}`;
     const url = buildCanonicalUrl(blogPath, locale);
     const image = (post.cover_image as string) || '';
-    const tag = localizedTag(post.tag, locale);
+    const tag = localizedBlogTag(post.tag, locale);
+    const author = blogAuthorForPost(post, locale);
 
     const LANG_MAP = Object.fromEntries(
       Object.keys(LOCALE_FORMAT_TAGS).map((key) => [key, hreflangCode(key as Locale)]),
@@ -391,7 +380,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       datePublished: post.published_at,
       dateModified: post.updated_at || post.published_at,
       inLanguage: LANG_MAP[locale],
-      author: blogAuthorJsonLd(locale),
+      author: blogAuthorJsonLd(locale, post),
       publisher: { '@type': 'Organization', '@id': 'https://www.tutlio.com/#organization', name: 'Tutlio', url: new URL(url).origin, logo: { '@type': 'ImageObject', '@id': 'https://www.tutlio.com/#logo', url: 'https://www.tutlio.com/pwa-512x512.png' } },
       url,
       articleSection: tag || undefined,
@@ -423,7 +412,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 <div class="hero">
   ${image ? `<img class="cover" src="${esc(safeUrl(image))}" alt="${esc(title)}" />` : ''}
   <h1>${esc(title)}</h1>
-  <div class="meta">${tag ? `<span class="tag">${esc(tag)}</span>` : ''}${esc(BLOG_AUTHOR_NAME)}, ${esc(blogAuthorRole(locale))}${date ? ` · ${date}` : ''}</div>
+  <div class="meta">${tag ? `<span class="tag">${esc(tag)}</span>` : ''}${esc(author.name)}, ${esc(author.role)}${date ? ` · ${date}` : ''}</div>
 </div>
 <article class="content">
   ${mdToHtml(content)}
@@ -436,6 +425,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       publishedTime: post.published_at as string,
       modifiedTime: (post.updated_at as string) || undefined,
       tag: tag || undefined,
+      authorName: author.name,
       noindex: !hasNativeTitle,
       hreflangHtml: blogPostHreflangTags(post),
       localeLinks: localeLinksHtml(
@@ -482,7 +472,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const img = (p.cover_image as string) || '';
     const pSlug = postSlug(p, locale);
     const href = `${buildPath(`/blog/${pSlug}`, locale, domain)}`;
-    const cardTag = localizedTag(p.tag, locale);
+    const cardTag = localizedBlogTag(p.tag, locale);
     return `<a href="${href}" class="card" style="text-decoration:none;color:inherit">
   ${img ? `<img src="${esc(safeUrl(img))}" alt="${esc(t)}" loading="lazy" />` : ''}
   <div class="card-body">

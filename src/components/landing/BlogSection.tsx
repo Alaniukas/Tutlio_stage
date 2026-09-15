@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
-import { useTranslation } from '@/lib/i18n';
+import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import { resolveField, formatBlogDate, blogPostPath } from '@/lib/blogLocale';
+import { localizedBlogTag } from '@/lib/blogTag';
 import Reveal from './Reveal';
 
 export default function BlogSection() {
   const { t, locale } = useTranslation();
+  const blogPath = buildLocalizedPath('/blog', locale);
   const [posts, setPosts] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
@@ -38,7 +40,7 @@ export default function BlogSection() {
               {t('landing.blogTitle')}
             </h2>
             <Link
-              to="/blog"
+              to={blogPath}
               className="hidden md:flex items-center gap-1.5 text-[13px] font-semibold text-gray-900 hover:text-gray-600 transition-colors whitespace-nowrap"
             >
               {t('landing.blogSeeAll')} <ArrowRight className="w-4 h-4" />
@@ -63,7 +65,7 @@ export default function BlogSection() {
               <div className="absolute bottom-6 left-6 right-6">
                 {featured.tag && (
                   <span className="inline-block px-3 py-1 rounded-md bg-white/15 backdrop-blur-sm text-[11px] font-semibold text-white/90 mb-3">
-                    {String(featured.tag)}
+                    {localizedBlogTag(featured.tag, locale)}
                   </span>
                 )}
                 <h3 className="font-display text-lg text-white leading-snug font-semibold">
@@ -87,7 +89,7 @@ export default function BlogSection() {
                     <div className="flex items-center gap-3">
                       {second.tag && (
                         <span className="px-3 py-1 rounded-full bg-white/10 text-white/80 text-[11px] font-semibold">
-                          {String(second.tag)}
+                          {localizedBlogTag(second.tag, locale)}
                         </span>
                       )}
                       <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center ml-auto">
@@ -131,7 +133,8 @@ export default function BlogSection() {
 }
 
 function StaticFallback() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  const blogPath = buildLocalizedPath('/blog', locale);
 
   return (
     <section className="py-16 sm:py-24 lg:py-32 bg-white">
@@ -142,7 +145,7 @@ function StaticFallback() {
               {t('landing.blogTitle')}
             </h2>
             <Link
-              to="/blog"
+              to={blogPath}
               className="hidden md:flex items-center gap-1.5 text-[13px] font-semibold text-gray-900 hover:text-gray-600 transition-colors whitespace-nowrap"
             >
               {t('landing.blogSeeAll')} <ArrowRight className="w-4 h-4" />

@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it, afterEach, vi } from 'vitest';
 import {
   BLOG_AUTO_LOCALES,
   DEFAULT_GEMINI_BLOG_MODEL,
@@ -6,6 +6,7 @@ import {
   coerceJsonObject,
   countBlogWords,
   geminiBlogGenerationConfig,
+  generateGeminiCoverImage,
   parseBlogAiResponse,
   parseEditorialBrief,
   resolveBlogAiProvider,
@@ -58,9 +59,12 @@ const prev = {
   BLOG_AI_API_URL: process.env.BLOG_AI_API_URL,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   GEMINI_MODEL: process.env.GEMINI_MODEL,
+  GEMINI_IMAGE_MODEL: process.env.GEMINI_IMAGE_MODEL,
 };
 
 afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   for (const [k, v] of Object.entries(prev)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -107,6 +111,25 @@ describe('Gemini blog model', () => {
     expect(config).not.toHaveProperty('temperature');
     expect(config).not.toHaveProperty('topP');
     expect(config).not.toHaveProperty('topK');
+  });
+
+  it('uses the enum values required by the raw GenerateContent image API', async () => {
+    process.env.GEMINI_API_KEY = 'test-key';
+    delete process.env.GEMINI_IMAGE_MODEL;
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ inlineData: { data: 'image-data', mimeType: 'image/png' } }] } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(generateGeminiCoverImage({ keyword: 'tutoring', title: 'When tutoring helps' }))
+      .resolves.toEqual({ base64: 'image-data', contentType: 'image/png' });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(init.body));
+    expect(body.generationConfig.responseFormat.image).toEqual({
+      aspectRatio: 'ASPECT_RATIO_SIXTEEN_BY_NINE',
+      imageSize: 'IMAGE_SIZE_ONE_K',
+    });
   });
 });
 
