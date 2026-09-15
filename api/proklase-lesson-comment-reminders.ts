@@ -5,6 +5,10 @@ import { createClient } from '@supabase/supabase-js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { isProKlaseOrg, PRO_KLASE_ORG_ID, PRO_KLASE_QA_ORG_ID } from './_lib/marketMoney.js';
 import { PRO_KLASE_MISSING_REPORT_PENALTY_EUR } from './_lib/proKlaseTutorPay.js';
+import {
+  proKlaseSessionEligibleForMissingCommentPenalty,
+  proKlaseSessionEligibleForMissingCommentReminder,
+} from './_lib/proKlaseLessonCommentPenalty.js';
 
 const PRO_KLASE_ORG_IDS = [PRO_KLASE_ORG_ID, PRO_KLASE_QA_ORG_ID];
 
@@ -26,7 +30,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const now = Date.now();
   const reminderCutoff = new Date(now - 24 * 60 * 60 * 1000).toISOString();
-  const penaltyCutoff = new Date(now - 48 * 60 * 60 * 1000).toISOString();
 
   let reminders = 0;
   let penalties = 0;
@@ -44,19 +47,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const { data: sessions } = await supabase
         .from('sessions')
-        .select('id, end_time, tutor_comment, status')
+        .select('id, end_time, tutor_comment, status, status_confirmed_at')
         .eq('tutor_id', tutorId)
         .in('status', ['completed', 'no_show'])
         .lte('end_time', reminderCutoff)
+        .not('status_confirmed_at', 'is', null)
         .is('tutor_comment', null);
 
-      const missing = (sessions || []).filter((s) => !String(s.tutor_comment || '').trim());
+      const missing = (sessions || []).filter(
+        (s) => proKlaseSessionEligibleForMissingCommentPenalty(s as any, now)
+          || proKlaseSessionEligibleForMissingCommentReminder(s as any, now),
+      );
 
       for (const session of missing) {
-        const endMs = new Date(String(session.end_time)).getTime();
-        if (!Number.isFinite(endMs)) continue;
-
-        if (endMs <= new Date(penaltyCutoff).getTime()) {
+        if (proKlaseSessionEligibleForMissingCommentPenalty(session as any, now)) {
           const { data: existing } = await supabase
             .from('tutor_adjustments')
             .select('id')

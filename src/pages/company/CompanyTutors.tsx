@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { COMPANY_TUTORS_CACHE_KEY } from '@/lib/preload';
@@ -444,6 +444,7 @@ export default function CompanyTutors() {
   const [tutors, setTutors] = useState<Tutor[]>(tc?.tutors ?? []);
   const [tutorSort, setTutorSort] = useState<SchoolTutorSort>('alpha');
   const [invites, setInvites] = useState<Invite[]>(tc?.invites ?? []);
+  const loadDataGenerationRef = useRef(0);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [usedInvitesOpen, setUsedInvitesOpen] = useState(false);
   const [licenseBusyTutorIds, setLicenseBusyTutorIds] = useState<Set<string>>(new Set());
@@ -625,6 +626,7 @@ export default function CompanyTutors() {
 
   const loadData = async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
+    const generation = ++loadDataGenerationRef.current;
     if (!silent) setLoading(true);
     try {
     const { data: { user } } = await supabase.auth.getUser();
@@ -640,6 +642,8 @@ export default function CompanyTutors() {
     if (!adminRow) {
       return;
     }
+
+    if (generation !== loadDataGenerationRef.current) return;
 
     setOrgId(adminRow.organization_id);
     let effectiveLicenseCount = 0;
@@ -752,6 +756,8 @@ export default function CompanyTutors() {
       ...tutor,
       joined_at: joinedAtByTutorId.get(tutor.id) ?? null,
     }));
+    if (generation !== loadDataGenerationRef.current) return;
+
     setTutors(tutorsWithJoinedAt);
 
     const catalogOptions: { key: string; preset: SubjectPreset }[] = [];
@@ -799,6 +805,8 @@ export default function CompanyTutors() {
     });
     catalogDeduped.sort((a, b) => a.preset.name.localeCompare(b.preset.name, 'lt'));
     setOrgSubjectCatalogOptions(catalogDeduped);
+
+    if (generation !== loadDataGenerationRef.current) return;
 
     setCache(COMPANY_TUTORS_CACHE_KEY, {
       orgId: adminRow.organization_id,
@@ -1121,14 +1129,22 @@ export default function CompanyTutors() {
         teaching_notes: editTeachingNotes.trim() || null,
       })
         .eq('id', selectedTutor.id)
-        .select('id, company_commission_percent, personal_meeting_link');
+        .select('id, company_commission_percent, company_commission_by_subject, personal_meeting_link');
 
       const savedRow = updatedRows?.[0];
+      const savedSubjectPay = isManoKorepetitoriusAdmin
+        ? compactTutorPayBySubject(editSubjectPay)
+        : null;
+      const persistedSubjectPay = isManoKorepetitoriusAdmin
+        ? (savedRow as { company_commission_by_subject?: Record<string, number> | null })?.company_commission_by_subject
+        : null;
       if (
         error
         || !savedRow
         || Number(savedRow.company_commission_percent) !== editCommissionPercent
         || !meetingLinkWasPersisted(personalLink, savedRow.personal_meeting_link)
+        || (isManoKorepetitoriusAdmin
+          && JSON.stringify(persistedSubjectPay ?? {}) !== JSON.stringify(savedSubjectPay ?? {}))
       ) {
         throw error || new Error('Tutor profile update was not persisted');
       }
@@ -1136,7 +1152,36 @@ export default function CompanyTutors() {
       if (personalLink) {
         await backfillTutorMeetingLinks(supabase, selectedTutor.id, personalLink);
       }
-      await loadData();
+
+      const savedTutorPatch: Partial<Tutor> = {
+        full_name: editName,
+        phone: editPhone,
+        cancellation_hours: editCancellationHours,
+        cancellation_fee_percent: editCancellationFee,
+        reminder_student_hours: editReminderStudent,
+        reminder_tutor_hours: editReminderTutor,
+        break_between_lessons: editBreakBetween,
+        min_booking_hours: editMinBooking,
+        company_commission_percent: editCommissionPercent,
+        personal_meeting_link: personalLink,
+        teaching_notes: editTeachingNotes.trim() || null,
+        ...(isManoKorepetitoriusAdmin
+          ? { company_commission_by_subject: savedSubjectPay }
+          : {}),
+      };
+      setTutors((prev) => {
+        const updated = prev.map((tu) => (
+          tu.id === selectedTutor.id ? { ...tu, ...savedTutorPatch } : tu
+        ));
+        setCache(COMPANY_TUTORS_CACHE_KEY, {
+          orgId,
+          tutorLicenseCount,
+          tutors: updated,
+          invites,
+        });
+        return updated;
+      });
+      void loadData({ silent: true });
       setTutorModalOpen(false);
     } catch (error) {
       console.error('[CompanyTutors] tutor save failed:', error);

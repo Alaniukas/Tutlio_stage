@@ -133,6 +133,21 @@ describe('CompanyStudents Pro Klasė list', () => {
     expect(screen.queryByPlaceholderText(/adresas/i)).toBeNull();
   });
 
+  it('shows admin comment field and tutor visibility checkbox in the add-student dialog', () => {
+    render(
+      <MemoryRouter initialEntries={['/company/students']}>
+        <CompanyStudents />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti mokinį/i }));
+
+    expect(screen.getByText('Pridėti naują mokinį')).toBeTruthy();
+    expect(screen.getByText('Administratoriaus komentaras')).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: /Rodyti komentarą korepetitoriui/i })).toBeTruthy();
+    expect(screen.getByPlaceholderText('Parašykite komentarą apie šį mokinį...')).toBeTruthy();
+  });
+
   it('does not mark a failed meeting-link write as saved and requests the persisted value', async () => {
     const updates = vi.fn();
     const selections = vi.fn();

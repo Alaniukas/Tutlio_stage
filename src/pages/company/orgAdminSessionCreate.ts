@@ -164,23 +164,34 @@ export async function assertTutorSlotsFree(
   tutorId: string,
   slots: Array<{ start: Date; end: Date }>,
 ): Promise<void> {
-  const seen = new Set<string>();
-  for (const { start, end } of slots) {
-    const key = `${start.getTime()}_${end.getTime()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const { data, error } = await supabase
-      .from('sessions')
-      .select('id')
-      .eq('tutor_id', tutorId)
-      .eq('status', 'active')
-      .lt('start_time', end.toISOString())
-      .gt('end_time', start.toISOString())
-      .limit(1);
-    if (error) throw new Error(error.message);
-    if (data?.length) {
+  const uniqueSlots = new Map<string, { start: Date; end: Date }>();
+  for (const slot of slots) {
+    const key = `${slot.start.getTime()}_${slot.end.getTime()}`;
+    if (!uniqueSlots.has(key)) uniqueSlots.set(key, slot);
+  }
+  const slotList = [...uniqueSlots.values()];
+  if (slotList.length === 0) return;
+
+  const earliest = new Date(Math.min(...slotList.map((s) => s.start.getTime())));
+  const latest = new Date(Math.max(...slotList.map((s) => s.end.getTime())));
+  const { data: existingBusy, error } = await supabase
+    .from('sessions')
+    .select('id, start_time, end_time')
+    .eq('tutor_id', tutorId)
+    .eq('status', 'active')
+    .lt('start_time', latest.toISOString())
+    .gt('end_time', earliest.toISOString());
+  if (error) throw new Error(error.message);
+
+  for (const slot of slotList) {
+    const conflict = (existingBusy || []).some((row) => {
+      const rowStart = new Date(row.start_time as string);
+      const rowEnd = new Date(row.end_time as string);
+      return rowStart < slot.end && slot.start < rowEnd;
+    });
+    if (conflict) {
       throw new Error(
-        `Tutor already has a lesson at this time (${format(start, 'yyyy-MM-dd')} ${format(start, 'HH:mm')}–${format(end, 'HH:mm')}). Choose a different time.`,
+        `Tutor already has a lesson at this time (${format(slot.start, 'yyyy-MM-dd')} ${format(slot.start, 'HH:mm')}–${format(slot.end, 'HH:mm')}). Choose a different time.`,
       );
     }
   }

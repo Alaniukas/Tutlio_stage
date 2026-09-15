@@ -42,7 +42,12 @@ import {
   sessionCommentDeliveryRecipients,
 } from '@/lib/sessionCommentDelivery';
 import { sessionCommentVisibilityLabelKey } from '@/lib/parentLessonComment';
-import { assertTutorSlotsFree, runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
+import {
+  assertTutorSlotsFree,
+  runOrgAdminCreateSession,
+  type OrgAdminCreateSessionInput,
+} from '@/pages/company/orgAdminSessionCreate';
+import Toast from '@/components/Toast';
 import { consumeAvailabilityForCreatedSessions } from '@/lib/consumeSessionAvailability';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { planRecurringSeriesPatches, sortSeriesPatchesForApply } from '@/lib/recurringSessions';
@@ -608,6 +613,12 @@ export default function CompanyTvarkarastis() {
   const [tutorSubjectPrices, setTutorSubjectPrices] = useState<Array<{ tutor_id: string; org_subject_template_id: string; price: number; duration_minutes: number }>>([]);
   const [orgSubjectTemplates, setOrgSubjectTemplates] = useState<Array<{ id: string; name: string }>>([]);
   const [saving, setSaving] = useState(false);
+  const [scheduleToast, setScheduleToast] = useState<{
+    message: string;
+    type: 'success' | 'error' | 'warning';
+    duration?: number;
+  } | null>(null);
+  const [backgroundSessionJobs, setBackgroundSessionJobs] = useState(0);
   const [noShowDialogOpen, setNoShowDialogOpen] = useState(false);
   const [noShowSaving, setNoShowSaving] = useState(false);
   const [findLessonOpen, setFindLessonOpen] = useState(false);
@@ -923,6 +934,103 @@ export default function CompanyTvarkarastis() {
       setLoading(false);
     }
   };
+
+  const refreshCalendarSessionsOnly = useCallback(async () => {
+    if (!organizationId) return;
+    const tutorIds = orgTutors.map((tutor) => tutor.id);
+    if (tutorIds.length === 0) return;
+
+    try {
+      const schedulePast = addDays(new Date(), -90).toISOString();
+      const scheduleFuture = addDays(new Date(), 180).toISOString();
+      const sessionsData = await fetchAllRows<any>((from, to) => supabase
+        .from('sessions')
+        .select(TVARKARASTIS_SESSION_SELECT)
+        .in('tutor_id', tutorIds)
+        .not('hidden_from_calendar', 'eq', true)
+        .gte('start_time', schedulePast)
+        .lte('start_time', scheduleFuture)
+        .order('start_time', { ascending: true })
+        .order('id', { ascending: true })
+        .range(from, to));
+
+      const parsedSessions = (sessionsData || []).map((session: any) => ({
+        ...session,
+        start_time: new Date(session.start_time),
+        end_time: new Date(session.end_time),
+      }));
+
+      const tutorNameById = new Map(orgTutors.map((t) => [t.id, t.full_name || '']));
+      const { data: availabilityData } = await supabase
+        .from('availability')
+        .select('*')
+        .in('tutor_id', tutorIds);
+
+      const mappedAvailability = (availabilityData || []).map((row: any) => ({
+        ...row,
+        tutor: { full_name: tutorNameById.get(row.tutor_id) || '' },
+      }));
+
+      const tutorLinksById = new Map(
+        orgTutors.map((t) => [t.id, t.personal_meeting_link]),
+      );
+      const studentsById = new Map(students.map((s) => [s.id, s]));
+      const subjectsById = new Map(subjects.map((s) => [s.id, s]));
+      const enrichedSessions = parsedSessions.map((session) =>
+        enrichSessionMeetingLink(session, {
+          tutorPersonalLink: tutorLinksById.get(session.tutor_id),
+          studentsById,
+          subjectsById,
+        }),
+      );
+
+      setSessions(enrichedSessions);
+      setAvailability(mappedAvailability);
+
+      const prevCache = getCached<any>('company_tvarkarastis');
+      if (prevCache) {
+        setCache('company_tvarkarastis', {
+          ...prevCache,
+          sessions: enrichedSessions,
+          availability: mappedAvailability,
+        });
+      }
+    } catch (error) {
+      console.error('[CompanyTvarkarastis] refreshCalendarSessionsOnly failed:', error);
+    }
+  }, [organizationId, orgTutors, students, subjects]);
+
+  const runSessionCreateInBackground = useCallback((
+    label: string,
+    task: () => Promise<{ createdCount: number }>,
+  ) => {
+    setScheduleToast({
+      message: t('compSch.backgroundCreating'),
+      type: 'warning',
+      duration: 8000,
+    });
+    setBackgroundSessionJobs((count) => count + 1);
+    void (async () => {
+      try {
+        const { createdCount } = await task();
+        await refreshCalendarSessionsOnly();
+        setScheduleToast({
+          message: t('compSch.backgroundCreated', { count: String(createdCount) }),
+          type: 'success',
+        });
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[CompanyTvarkarastis] background create (${label}) failed:`, error);
+        setScheduleToast({
+          message: t('compSch.backgroundCreateFailed', { msg }),
+          type: 'error',
+          duration: 10000,
+        });
+      } finally {
+        setBackgroundSessionJobs((count) => Math.max(0, count - 1));
+      }
+    })();
+  }, [refreshCalendarSessionsOnly, t]);
 
   // The teacher and administrator commonly keep their calendars open in separate
   // tabs. Refresh as soon as the administrator returns to this tab so a lesson
@@ -2636,16 +2744,15 @@ export default function CompanyTvarkarastis() {
     setCreateFromAvailSaving(false);
   };
 
-  const handleFindLessonBookCreate = async () => {
+  const handleFindLessonBookCreate = () => {
     if (!findLessonBook) return;
     if (!canView) {
       alert(t('compSch.noCreatePermission'));
       return;
     }
-    setFindLessonBookSaving(true);
+    const bookContext = findLessonBook;
     try {
-      await assertTutorLicensed(findLessonBook.tutorId);
-      const subj = subjects.find(s => s.id === findLessonBook.subjectId);
+      const subj = subjects.find(s => s.id === bookContext.subjectId);
       const isGroup = Boolean(subj?.is_group);
       const studentIds = isGroup
         ? findLessonBookStudentIds
@@ -2668,16 +2775,13 @@ export default function CompanyTvarkarastis() {
         : undefined;
       const bookTsp = matchedTpl
         ? tutorSubjectPrices.find(
-            p => p.tutor_id === findLessonBook.tutorId && p.org_subject_template_id === matchedTpl.id,
+            p => p.tutor_id === bookContext.tutorId && p.org_subject_template_id === matchedTpl.id,
           )
         : undefined;
 
-      // Route through the shared create path so the tutor is always notified
-      // (booking_notification) and package credits / payment status are handled
-      // consistently with the main "Create session" dialog.
       const priceStudentId = isGroup ? studentIds[0] : findLessonBookStudentId;
       const bookPricing = individualPricing.find(
-        p => p.student_id === priceStudentId && p.subject_id === findLessonBook.subjectId,
+        p => p.student_id === priceStudentId && p.subject_id === bookContext.subjectId,
       );
       const bookStudent = students.find((row) => row.id === priceStudentId);
       const bookPrice = resolveOrganizationLessonPrice({
@@ -2687,10 +2791,10 @@ export default function CompanyTvarkarastis() {
         fallbackPrice: bookTsp?.price ?? subj?.price ?? 0,
       });
 
-      await runOrgAdminCreateSession({
+      const createPayload: OrgAdminCreateSessionInput = {
         supabase,
-        createTutorId: findLessonBook.tutorId,
-        createSubjectId: findLessonBook.subjectId,
+        createTutorId: bookContext.tutorId,
+        createSubjectId: bookContext.subjectId,
         createStudentId: isGroup ? '' : findLessonBookStudentId,
         createStudentIds: studentIds,
         createStartTime: selectedSlot.startIso,
@@ -2709,18 +2813,28 @@ export default function CompanyTvarkarastis() {
         orgSubjectTemplateId: matchedTpl?.id,
         dynamicPricingRules,
         suppressSuccessAlert: true,
-      });
+      };
 
-      setFindLessonBookCreatedIntervals((current) => [
-        ...current,
-        { start: new Date(selectedSlot.startIso).getTime(), end: new Date(selectedSlot.endIso).getTime() },
-      ]);
-      setFindLessonBookSuccess(true);
-      fetchData();
-    } catch (err: any) {
-      alert(t('compSch.errorGeneric', { msg: err.message }));
+      setFindLessonBook(null);
+      setFindLessonBookStudentId('');
+      setFindLessonBookStudentIds([]);
+      setFindLessonBookTopic('');
+      setFindLessonBookSelectedSlot('');
+      setFindLessonBookIsPaid(false);
+      setFindLessonBookMeetingLink('');
+      setFindLessonBookTutorMeetingLink('');
+      setFindLessonBookCreatedIntervals([]);
+      setFindLessonBookSuccess(false);
+
+      runSessionCreateInBackground('find-lesson', async () => {
+        await assertTutorLicensed(createPayload.createTutorId);
+        const createResult = await runOrgAdminCreateSession(createPayload);
+        return { createdCount: createResult.createdSessionIds.length };
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(t('compSch.errorGeneric', { msg }));
     }
-    setFindLessonBookSaving(false);
   };
 
   // Reservation flow (req 2): hold the selected slot as a trial and send the
@@ -2772,7 +2886,7 @@ export default function CompanyTvarkarastis() {
     setFindLessonBookTrialSending(false);
   };
 
-  const handleCreateSession = async () => {
+  const handleCreateSession = () => {
     if (!canView) {
       alert(t('compSch.noCreatePermission'));
       return;
@@ -2793,94 +2907,95 @@ export default function CompanyTvarkarastis() {
       }
     }
 
-    setSaving(true);
-    try {
-      await assertTutorLicensed(createTutorId);
-      const selectedSubj = subjects.find(s => s.id === createSubjectId);
-      const matchedTemplate = selectedSubj
-        ? orgSubjectTemplates.find(t => t.name.toLowerCase() === (selectedSubj.name || '').toLowerCase())
-        : undefined;
+    const selectedSubj = subjects.find(s => s.id === createSubjectId);
+    const matchedTemplate = selectedSubj
+      ? orgSubjectTemplates.find(tp => tp.name.toLowerCase() === (selectedSubj.name || '').toLowerCase())
+      : undefined;
 
-      const createResult = await runOrgAdminCreateSession({
-        supabase,
-        createTutorId,
-        createSubjectId,
-        createStudentId,
-        createStudentIds,
-        createStartTime,
-        createEndTime,
-        createTopic,
-        createMeetingLink,
-        createIsRecurring,
-        createRecurringEndDate,
-        createRecurringFrequency,
-        createRecurringWeekdays,
-        createIsPaid,
-        createPrice,
-        createIsTrial,
-        createFirstLessonIsTrial: createIsRecurring && createFirstLessonIsTrial,
-        createTutorComment,
-        createShowCommentToStudent,
-        createShowCommentToParent: canChooseParentComment && createShowCommentToParent,
-        createIsMakeup: isProKlaseOrg(organizationId) && createIsMakeup,
-        subjects,
-        individualPricing,
-        tutorSubjectPrices,
-        orgSubjectTemplateId: matchedTemplate?.id,
-        dynamicPricingRules,
-        classGroupId: createClassGroupId || null,
-      });
+    const createPayload: OrgAdminCreateSessionInput = {
+      supabase,
+      createTutorId,
+      createSubjectId,
+      createStudentId,
+      createStudentIds,
+      createStartTime,
+      createEndTime,
+      createTopic,
+      createMeetingLink,
+      createIsRecurring,
+      createRecurringEndDate,
+      createRecurringFrequency,
+      createRecurringWeekdays,
+      createIsPaid,
+      createPrice,
+      createIsTrial,
+      createFirstLessonIsTrial: createIsRecurring && createFirstLessonIsTrial,
+      createTutorComment,
+      createShowCommentToStudent,
+      createShowCommentToParent: canChooseParentComment && createShowCommentToParent,
+      createIsMakeup: isProKlaseOrg(organizationId) && createIsMakeup,
+      subjects,
+      individualPricing,
+      tutorSubjectPrices,
+      orgSubjectTemplateId: matchedTemplate?.id,
+      dynamicPricingRules,
+      classGroupId: createClassGroupId || null,
+      suppressSuccessAlert: true,
+    };
 
-      // Trial payment email on creation: attach a 1-lesson package to the new
-      // trial lesson and email the payer a one-time pay link.
-      if (
-        (createIsTrial || (createIsRecurring && createFirstLessonIsTrial)) &&
-        !createIsPaid &&
-        createPrice > 0 &&
-        pkFeat('trial_creation_payment_email') &&
-        createResult.createdSessionIds.length > 0
-      ) {
-        const trialDurationMin = createIsTrial
-          ? (() => {
-              const start = new Date(createStartTime);
-              const end = new Date(createEndTime);
-              if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return trialDefaults.durationMinutes;
-              return Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000));
-            })()
-          : trialDefaults.durationMinutes;
+    const trialFollowUp = {
+      enabled:
+        (createIsTrial || (createIsRecurring && createFirstLessonIsTrial))
+        && !createIsPaid
+        && createPrice > 0
+        && pkFeat('trial_creation_payment_email'),
+      studentId: createStudentId,
+      tutorId: createTutorId,
+      topic: createTopic,
+      price: createPrice,
+      durationMinutes: createIsTrial
+        ? (() => {
+            const start = new Date(createStartTime);
+            const end = new Date(createEndTime);
+            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return trialDefaults.durationMinutes;
+            return Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000));
+          })()
+        : trialDefaults.durationMinutes,
+      fallbackTopic: trialDefaults.topic || undefined,
+    };
+
+    setIsCreateSessionOpen(false);
+    resetCreateForm();
+
+    runSessionCreateInBackground('create-dialog', async () => {
+      await assertTutorLicensed(createPayload.createTutorId);
+      const createResult = await runOrgAdminCreateSession(createPayload);
+
+      if (trialFollowUp.enabled && createResult.createdSessionIds.length > 0) {
         try {
           const resp = await fetch('/api/create-trial-package', {
             method: 'POST',
             headers: await authHeaders(),
             body: JSON.stringify({
-              studentId: createStudentId,
-              tutorId: createTutorId,
+              studentId: trialFollowUp.studentId,
+              tutorId: trialFollowUp.tutorId,
               sessionId: createResult.createdSessionIds[0],
-              topic: createTopic || trialDefaults.topic || undefined,
-              durationMinutes: trialDurationMin,
-              priceEur: createPrice,
+              topic: trialFollowUp.topic || trialFollowUp.fallbackTopic,
+              durationMinutes: trialFollowUp.durationMinutes,
+              priceEur: trialFollowUp.price,
             }),
           });
           if (!resp.ok) {
             const txt = await resp.text().catch(() => '');
             console.error('[CompanyTvarkarastis] trial payment email failed:', resp.status, txt);
-            alert(t('compSch.trialPaymentEmailFailed'));
           }
         } catch (trialErr) {
           console.error('[CompanyTvarkarastis] trial payment email failed:', trialErr);
-          alert(t('compSch.trialPaymentEmailFailed'));
         }
       }
 
-      setIsCreateSessionOpen(false);
-      resetCreateForm();
-      fetchData();
-    } catch (error: any) {
-      console.error('Error creating session:', error);
-      alert(t('compSch.errorGeneric', { msg: error.message }));
-    } finally {
-      setSaving(false);
-    }
+      return { createdCount: createResult.createdSessionIds.length };
+    });
   };
 
   const resetCreateForm = () => {
@@ -3017,6 +3132,12 @@ export default function CompanyTvarkarastis() {
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{t('compSch.title')}</h1>
             <p className="text-sm text-gray-600 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
               <span>{t('compSch.subtitle')}</span>
+              {backgroundSessionJobs > 0 && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  {t('compSch.backgroundJobs', { count: String(backgroundSessionJobs) })}
+                </span>
+              )}
               {canFullControl && (
                 <span className="inline-flex px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded whitespace-nowrap">
                   {t('compSch.fullControl')}
@@ -5343,6 +5464,15 @@ export default function CompanyTvarkarastis() {
           setFindLessonBookSuccess(false);
         }}
       />
+
+      {scheduleToast && (
+        <Toast
+          message={scheduleToast.message}
+          type={scheduleToast.type}
+          duration={scheduleToast.duration}
+          onClose={() => setScheduleToast(null)}
+        />
+      )}
     </>
   );
 }

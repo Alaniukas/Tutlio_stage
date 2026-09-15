@@ -428,7 +428,10 @@ export default function DashboardPage() {
                 .filter((s: any) => {
                     const needsComment = ['completed', 'no_show'].includes(String(s.status));
                     if (!needsComment || String(s.tutor_comment || '').trim()) return false;
-                    if (proKlaseCommentRequired) return true;
+                    if (proKlaseCommentRequired) {
+                        return Boolean(s.status_confirmed_at)
+                            && Date.parse(String(s.end_time || '')) <= Date.now();
+                    }
                     return sessionNeedsOrgTrialComment({
                         policy: trialPolicy,
                         isTrial: s.subjects?.is_trial === true,

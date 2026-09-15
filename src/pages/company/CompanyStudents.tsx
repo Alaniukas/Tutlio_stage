@@ -476,6 +476,8 @@ export default function CompanyStudents() {
     student_city: '',
     child_birth_date: '',
     tutor_ids: [] as string[],
+    admin_comment: '',
+    admin_comment_visible_to_tutor: false,
     // Flexible invitations (req 7): who to invite on create when enabled.
     invite_target: (isMoksloVaisiaiOrg(membership?.organizationId) ? 'provision' : 'student') as OrgStudentInviteTarget,
     payment_payer: isMoksloVaisiaiOrg(membership?.organizationId) ? 'parent' : 'self',
@@ -2111,6 +2113,12 @@ export default function CompanyStudents() {
           student_address: showSchoolContractFields ? (newStudent.student_address?.trim() || null) : null,
           student_city: showSchoolContractFields ? (newStudent.student_city?.trim() || null) : null,
           child_birth_date: showSchoolContractFields ? (newStudent.child_birth_date?.trim() || null) : null,
+          ...(proKlaseAdminUi
+            ? {
+                admin_comment: newStudent.admin_comment.trim() || null,
+                admin_comment_visible_to_tutor: newStudent.admin_comment_visible_to_tutor,
+              }
+            : {}),
           invite_code: inviteCode,
           payment_payer: newStudent.payment_payer,
           ...(() => {
@@ -2518,6 +2526,8 @@ export default function CompanyStudents() {
       student_city: '',
       child_birth_date: '',
       tutor_ids: [],
+      admin_comment: '',
+      admin_comment_visible_to_tutor: false,
       invite_target: isMvOrg ? 'provision' : 'student',
       payment_payer: isMvOrg ? 'parent' : 'self',
     });
@@ -3368,6 +3378,32 @@ export default function CompanyStudents() {
                       </SelectContent>
                     </Select>
                   </div>
+                  {proKlaseAdminUi && (
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label>{t('compStu.adminComment')}</Label>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+                        <textarea
+                          value={newStudent.admin_comment}
+                          onChange={(e) => setNewStudent({ ...newStudent, admin_comment: e.target.value })}
+                          rows={2}
+                          className="min-h-[2.75rem] flex-1 rounded-xl border border-gray-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 resize-y"
+                          placeholder={t('compStu.commentPlaceholder')}
+                        />
+                        <label className="flex shrink-0 items-center gap-2 text-xs text-gray-600 cursor-pointer sm:pt-3">
+                          <input
+                            type="checkbox"
+                            checked={newStudent.admin_comment_visible_to_tutor}
+                            onChange={(e) => setNewStudent({
+                              ...newStudent,
+                              admin_comment_visible_to_tutor: e.target.checked,
+                            })}
+                            className="rounded border-gray-300"
+                          />
+                          <span className="max-w-[11rem] leading-snug">{t('compStu.commentVisibleToTutor')}</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
                   {isSchoolView && (
                     <div className="grid sm:grid-cols-3 gap-4 sm:col-span-2">
                       <div className="space-y-2">

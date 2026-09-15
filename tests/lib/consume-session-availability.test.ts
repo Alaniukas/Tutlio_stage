@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { consumeSessionSlotAvailability } from '@/lib/consumeSessionAvailability';
+import {
+  consumeAvailabilityForCreatedSessions,
+  consumeSessionSlotAvailability,
+} from '@/lib/consumeSessionAvailability';
 
 type Row = Record<string, unknown>;
 
 function mockSupabase(rows: Row[]) {
-  const state = { rows: [...rows] };
+  const state = { rows: [...rows], selectCalls: 0 };
   const from = vi.fn((table: string) => {
     if (table !== 'availability') throw new Error(`unexpected table ${table}`);
     const filters: Record<string, unknown> = {};
@@ -26,7 +29,10 @@ function mockSupabase(rows: Row[]) {
       },
     });
     return {
-      select: vi.fn(() => selectApi),
+      select: vi.fn(() => {
+        state.selectCalls += 1;
+        return selectApi;
+      }),
       update: vi.fn((patch: Row) => ({
         eq: vi.fn(async (col: string, id: string) => {
           const idx = state.rows.findIndex((r) => r[col] === id);
@@ -34,12 +40,17 @@ function mockSupabase(rows: Row[]) {
           return { error: null };
         }),
       })),
-      insert: vi.fn(async (payload: Row | Row[]) => {
+      insert: vi.fn((payload: Row | Row[]) => {
         const list = Array.isArray(payload) ? payload : [payload];
-        for (const row of list) {
-          state.rows.push({ id: `new-${state.rows.length}`, ...row });
+        const inserted = list.map((row, index) => ({ id: `new-${state.rows.length + index}`, ...row }));
+        for (const row of inserted) {
+          state.rows.push(row);
         }
-        return { error: null };
+        return {
+          select: vi.fn(() => ({
+            single: vi.fn(async () => ({ data: inserted[0] ?? null, error: null })),
+          })),
+        };
       }),
       delete: vi.fn(() => ({
         eq: vi.fn(async (col: string, id: string) => {
@@ -108,5 +119,27 @@ describe('consumeSessionSlotAvailability', () => {
     expect(added?.specific_date).toBe('2026-05-21');
     expect(added?.start_time).toBe('12:45');
     expect(added?.end_time).toBe('13:00');
+  });
+
+  it('loads tutor availability once when consuming multiple sessions', async () => {
+    const { supabase, state } = mockSupabase([
+      {
+        id: 'a1',
+        tutor_id: 't1',
+        is_recurring: false,
+        specific_date: '2026-05-21',
+        start_time: '08:00',
+        end_time: '18:00',
+        subject_ids: [],
+      },
+    ]);
+
+    await consumeAvailabilityForCreatedSessions(supabase as never, 't1', [
+      { start_time: '2026-05-21T09:00:00.000Z', end_time: '2026-05-21T09:45:00.000Z' },
+      { start_time: '2026-05-21T10:00:00.000Z', end_time: '2026-05-21T10:45:00.000Z' },
+    ]);
+
+    expect(state.selectCalls).toBe(1);
+    expect(state.rows).toHaveLength(3);
   });
 });

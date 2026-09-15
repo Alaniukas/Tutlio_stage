@@ -24,12 +24,6 @@ function timeToMinutes(t: string): number | null {
   return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
 }
 
-function minutesToTime(totalMinutes: number): string {
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
 function rangesOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
   const as = timeToMinutes(aStart);
   const ae = timeToMinutes(aEnd);
@@ -65,14 +59,26 @@ function remainingSegments(
   });
 }
 
+function removeRowFromState(rows: AvailabilityRow[], id: string): void {
+  const idx = rows.findIndex((r) => r.id === id);
+  if (idx >= 0) rows.splice(idx, 1);
+}
+
+function updateRowInState(rows: AvailabilityRow[], id: string, patch: Partial<AvailabilityRow>): void {
+  const idx = rows.findIndex((r) => r.id === id);
+  if (idx >= 0) rows[idx] = { ...rows[idx], ...patch };
+}
+
 async function applySegmentsToOneTimeRow(
   supabase: SupabaseClient,
   row: AvailabilityRow,
   segments: Array<{ start: string; end: string }>,
+  rows: AvailabilityRow[],
 ): Promise<void> {
   if (segments.length === 0) {
     const { error } = await supabase.from('availability').delete().eq('id', row.id);
     if (error) throw error;
+    removeRowFromState(rows, row.id);
     return;
   }
   if (segments.length === 1) {
@@ -81,6 +87,7 @@ async function applySegmentsToOneTimeRow(
       .update({ start_time: segments[0].start, end_time: segments[0].end })
       .eq('id', row.id);
     if (error) throw error;
+    updateRowInState(rows, row.id, { start_time: segments[0].start, end_time: segments[0].end });
     return;
   }
   const { error: updateErr } = await supabase
@@ -88,7 +95,8 @@ async function applySegmentsToOneTimeRow(
     .update({ start_time: segments[0].start, end_time: segments[0].end })
     .eq('id', row.id);
   if (updateErr) throw updateErr;
-  const { error: insertErr } = await supabase.from('availability').insert({
+  updateRowInState(rows, row.id, { start_time: segments[0].start, end_time: segments[0].end });
+  const { data: inserted, error: insertErr } = await supabase.from('availability').insert({
     tutor_id: row.tutor_id,
     specific_date: row.specific_date,
     start_time: segments[1].start,
@@ -97,8 +105,18 @@ async function applySegmentsToOneTimeRow(
     subject_ids: row.subject_ids ?? [],
     meeting_link: row.meeting_link,
     public_bookable: row.public_bookable,
-  });
+  }).select('id').single();
   if (insertErr) throw insertErr;
+  if (inserted?.id) {
+    rows.push({
+      ...row,
+      id: inserted.id as string,
+      specific_date: row.specific_date,
+      start_time: segments[1].start,
+      end_time: segments[1].end,
+      is_recurring: false,
+    });
+  }
 }
 
 async function insertSpecificDateSegments(
@@ -106,20 +124,18 @@ async function insertSpecificDateSegments(
   row: AvailabilityRow,
   specificDate: string,
   segments: Array<{ start: string; end: string }>,
+  rows: AvailabilityRow[],
 ): Promise<void> {
   if (segments.length === 0) return;
-  const { data: existingSpecific } = await supabase
-    .from('availability')
-    .select('id, start_time, end_time')
-    .eq('tutor_id', row.tutor_id)
-    .eq('is_recurring', false)
-    .eq('specific_date', specificDate);
+  const existingSpecific = rows.filter(
+    (r) => r.tutor_id === row.tutor_id && !r.is_recurring && r.specific_date === specificDate,
+  );
   for (const seg of segments) {
-    const overlapsExisting = (existingSpecific || []).some((s) =>
-      rangesOverlap(seg.start, seg.end, s.start_time as string, s.end_time as string),
+    const overlapsExisting = existingSpecific.some((s) =>
+      rangesOverlap(seg.start, seg.end, s.start_time, s.end_time),
     );
     if (overlapsExisting) continue;
-    const { error } = await supabase.from('availability').insert({
+    const { data: inserted, error } = await supabase.from('availability').insert({
       tutor_id: row.tutor_id,
       specific_date: specificDate,
       start_time: seg.start,
@@ -128,8 +144,24 @@ async function insertSpecificDateSegments(
       subject_ids: row.subject_ids ?? [],
       meeting_link: row.meeting_link,
       public_bookable: row.public_bookable,
-    });
+    }).select('id').single();
     if (error) throw error;
+    if (inserted?.id) {
+      const newRow: AvailabilityRow = {
+        id: inserted.id as string,
+        tutor_id: row.tutor_id,
+        is_recurring: false,
+        specific_date: specificDate,
+        day_of_week: null,
+        start_time: seg.start,
+        end_time: seg.end,
+        subject_ids: row.subject_ids ?? [],
+        meeting_link: row.meeting_link,
+        public_bookable: row.public_bookable,
+      };
+      rows.push(newRow);
+      existingSpecific.push(newRow);
+    }
   }
 }
 
@@ -139,13 +171,10 @@ export type ConsumeSessionSlotParams = {
   endTime: string;
 };
 
-/**
- * Shortens overlapping availability when a lesson is booked inside free time.
- * One-time rows are trimmed in place; recurring rules get date-specific remainder rows.
- */
-export async function consumeSessionSlotAvailability(
+async function consumeSessionSlotAvailabilityOnRows(
   supabase: SupabaseClient,
   params: ConsumeSessionSlotParams,
+  rows: AvailabilityRow[],
 ): Promise<void> {
   const { specificDate, startTime, endTime } = sessionInstantToAvailabilityFields(
     params.startTime,
@@ -153,13 +182,8 @@ export async function consumeSessionSlotAvailability(
   );
   const dayOfWeek = dayOfWeekFromDateStr(specificDate);
 
-  const { data: rows, error } = await supabase
-    .from('availability')
-    .select('*')
-    .eq('tutor_id', params.tutorId);
-  if (error) throw error;
-
-  for (const row of (rows || []) as AvailabilityRow[]) {
+  for (const row of rows) {
+    if (row.tutor_id !== params.tutorId) continue;
     const applies = row.is_recurring
       ? recurringAvailabilityAppliesOnDate(row, specificDate, dayOfWeek)
       : row.specific_date === specificDate;
@@ -168,11 +192,32 @@ export async function consumeSessionSlotAvailability(
 
     const segments = remainingSegments(row.start_time, row.end_time, startTime, endTime);
     if (row.is_recurring) {
-      await insertSpecificDateSegments(supabase, row, specificDate, segments);
+      await insertSpecificDateSegments(supabase, row, specificDate, segments, rows);
     } else {
-      await applySegmentsToOneTimeRow(supabase, row, segments);
+      await applySegmentsToOneTimeRow(supabase, row, segments, rows);
     }
   }
+}
+
+/**
+ * Shortens overlapping availability when a lesson is booked inside free time.
+ * One-time rows are trimmed in place; recurring rules get date-specific remainder rows.
+ */
+export async function consumeSessionSlotAvailability(
+  supabase: SupabaseClient,
+  params: ConsumeSessionSlotParams,
+): Promise<void> {
+  const { data: rows, error } = await supabase
+    .from('availability')
+    .select('*')
+    .eq('tutor_id', params.tutorId);
+  if (error) throw error;
+
+  await consumeSessionSlotAvailabilityOnRows(
+    supabase,
+    params,
+    [...((rows || []) as AvailabilityRow[])],
+  );
 }
 
 export async function consumeAvailabilityForCreatedSessions(
@@ -180,13 +225,22 @@ export async function consumeAvailabilityForCreatedSessions(
   tutorId: string,
   sessions: Array<{ start_time: string; end_time: string }>,
 ): Promise<void> {
+  if (sessions.length === 0) return;
+
+  const { data: rows, error } = await supabase
+    .from('availability')
+    .select('*')
+    .eq('tutor_id', tutorId);
+  if (error) throw error;
+
+  const state = [...((rows || []) as AvailabilityRow[])];
   for (const session of sessions) {
     try {
-      await consumeSessionSlotAvailability(supabase, {
+      await consumeSessionSlotAvailabilityOnRows(supabase, {
         tutorId,
         startTime: session.start_time,
         endTime: session.end_time,
-      });
+      }, state);
     } catch (err) {
       console.error('[consumeAvailabilityForCreatedSessions]', err);
     }
