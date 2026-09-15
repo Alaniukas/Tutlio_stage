@@ -684,11 +684,11 @@ export async function syncAllEventsToGoogle(userId: string, profile: any) {
   for (const session of sessions || []) {
     const googleEvent = formatSessionEvent(session);
     const result = await upsertSessionGoogleEvent(accessToken, session, googleEvent);
-    if (result.ok) {
-      syncedSessions++;
-    } else if (result.error) {
+    if ('error' in result) {
       if (!firstSessionError) firstSessionError = result.error;
       console.error('[google-calendar] Failed to upsert session event:', session.id, result.error);
+    } else {
+      syncedSessions++;
     }
   }
 

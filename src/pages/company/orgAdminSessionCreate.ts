@@ -48,6 +48,12 @@ type CreatedSessionRow = {
   end_time: string;
 };
 
+type SessionInsertRow = Record<string, unknown> & {
+  start_time: string;
+  end_time: string;
+  lesson_package_id?: string | null;
+};
+
 type TrialSubjectMeta = {
   subject: SubjectLite;
   price: number;
@@ -823,7 +829,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       }
     }
 
-    const sessionsRows: Record<string, unknown>[] = [];
+    const sessionsRows: SessionInsertRow[] = [];
     const packagesUsage = new Map<string, number>();
     const endLimit = recurringMaterializeEndDate(createRecurringEndDate, startDate);
 
@@ -1396,7 +1402,7 @@ export async function convertOrgAdminSessionToRecurring(
     }
   }
 
-  const sessionsRows: Record<string, unknown>[] = [];
+  const sessionsRows: SessionInsertRow[] = [];
   const packagesUsage = new Map<string, number>();
   const endLimit = recurringMaterializeEndDate(recurringEndDate, newStart);
 

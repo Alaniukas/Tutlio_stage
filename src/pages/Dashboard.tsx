@@ -84,6 +84,7 @@ interface Session {
     meeting_link?: string | null;
     cancellation_reason?: string | null;
     payment_status?: string;
+    status_confirmed_at?: string | null;
     tutor_comment?: string | null;
     show_comment_to_student?: boolean;
     show_comment_to_parent?: boolean;
