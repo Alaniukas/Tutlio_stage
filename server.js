@@ -41,7 +41,7 @@ app.use((err, req, res, next) => {
 const SERVICE_VERSION = '2.3.0';
 const PDF_WAIT_MS = Number(process.env.PDF_WAIT_MS || 180000);
 const LO_TIMEOUT_MS = Number(process.env.LO_TIMEOUT_MS || 180000);
-const PDF_GRACE_MS = Number(process.env.PDF_GRACE_MS || 3000);
+const PDF_GRACE_MS = Number(process.env.PDF_GRACE_MS || 20000);
 const PROBE_EVERY_MS = Number(process.env.PROBE_EVERY_MS || 10 * 60 * 1000);
 const worker = createWorker();
 let lastProbe = null;
@@ -73,8 +73,8 @@ function noteSuccess() {
 function libreOfficeBin() {
   if (process.env.LIBREOFFICE_PATH) return process.env.LIBREOFFICE_PATH;
   const candidates = [
-    '/usr/lib/libreoffice/program/soffice.bin',
     '/usr/bin/soffice',
+    '/usr/lib/libreoffice/program/soffice.bin',
     'soffice',
   ];
   return candidates.find((bin) => bin === 'soffice' || existsSync(bin)) || 'soffice';
@@ -469,7 +469,7 @@ app.post('/convert-docx-to-pdf', async (req, res) => {
 const port = Number(process.env.PORT || 3001);
 const host = '0.0.0.0';
 app.listen(port, host, () => {
-  console.log(`tutlio-docx-converter ${SERVICE_VERSION} listening on ${host}:${port}`);
+  console.log(`tutlio-docx-converter ${SERVICE_VERSION} listening on ${host}:${port} using ${libreOfficeBin()}`);
   void probeConversion();
   setInterval(() => void probeConversion(), PROBE_EVERY_MS).unref();
 });
