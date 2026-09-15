@@ -8,12 +8,13 @@ vi.mock('../../api/_lib/orgAdminAccess.js', () => ({
   getOrgAdminAccessByUserId: vi.fn(async () => state.admin),
 }));
 
-import { resolveRecordingViewerAccess } from '../../api/_lib/schoolRecordingAccess';
+import { resolveHomeworkRecordingGroup, resolveRecordingViewerAccess } from '../../api/_lib/schoolRecordingAccess';
 
 type Fixture = {
   profile?: { id: string; organization_id: string | null } | null;
   directStudents?: Array<{ id: string; organization_id: string | null }>;
-  parentProfile?: { id: string } | null;
+  payerStudents?: Array<{ id: string; organization_id: string | null }>;
+  parentProfile?: { id: string; email?: string | null } | null;
   parentLinks?: Array<{ parent_id: string; student_id: string }>;
   groups?: Array<{ id: string; organization_id: string; name: string; tutor_id: string | null }>;
   members?: Array<{ student_id: string; group_id: string }>;
@@ -26,6 +27,7 @@ function supabaseFixture(fixture: Fixture) {
       const eqs = new Map<string, unknown>();
       const ins = new Map<string, unknown[]>();
       let hasOr = false;
+      let orExpr = '';
       const result = () => {
         if (table === 'profiles') return { data: fixture.profile ?? null, error: null };
         if (table === 'organization_admins') return { data: null, error: null };
@@ -36,6 +38,7 @@ function supabaseFixture(fixture: Fixture) {
           return { data: rows, error: null };
         }
         if (table === 'students') {
+          if (orExpr.includes('payer_email')) return { data: fixture.payerStudents || [], error: null };
           let rows = fixture.directStudents || [];
           if (!hasOr && ins.has('id')) rows = rows.filter((row) => ins.get('id')!.includes(row.id));
           return { data: rows, error: null };
@@ -66,7 +69,7 @@ function supabaseFixture(fixture: Fixture) {
         select: () => query,
         eq: (column: string, value: unknown) => { eqs.set(column, value); return query; },
         in: (column: string, values: unknown[]) => { ins.set(column, values); return query; },
-        or: () => { hasOr = true; return query; },
+        or: (expr?: string) => { hasOr = true; orExpr = String(expr || ''); return query; },
         maybeSingle: async () => result(),
         then: (resolve: (value: unknown) => unknown) => resolve(result()),
       };
@@ -122,6 +125,19 @@ describe('school recording relationship authorization', () => {
     expect(access.groups.map((group) => group.id)).toEqual(['group-b']);
   });
 
+  it('lets a parent whose payer email matches the student row watch that child\'s groups', async () => {
+    const access = await resolveRecordingViewerAccess(supabaseFixture({
+      parentProfile: { id: 'parent-1', email: 'parent@school.lt' },
+      payerStudents: [{ id: 'student-a', organization_id: 'org-1' }],
+      groups,
+      members: [{ student_id: 'student-a', group_id: 'group-a' }],
+      organizations: [org()],
+    }), 'parent-user');
+
+    expect(access.groups.map((group) => group.id)).toEqual(['group-a']);
+    expect(access.isStudentOrParent).toBe(true);
+  });
+
   it('gives a teacher only assigned groups and denies all groups when the feature is off', async () => {
     const fixture: Fixture = {
       profile: { id: 'teacher-a', organization_id: 'org-1' },
@@ -134,6 +150,34 @@ describe('school recording relationship authorization', () => {
     fixture.organizations = [org(false)];
     const disabled = await resolveRecordingViewerAccess(supabaseFixture(fixture), 'teacher-a');
     expect(disabled.groups).toEqual([]);
+  });
+
+  it('lets an email homework link authorize only a live group member when recordings are on', async () => {
+    const student = { id: 'student-a', organization_id: 'org-1', detached_at: null };
+    const org = { id: 'org-1', entity_type: 'school', features: { school_lesson_recordings: true } };
+    const group = { id: 'group-a', organization_id: 'org-1' };
+    const client = {
+      from(table: string) {
+        const query: any = {
+          select: () => query,
+          eq: () => query,
+          maybeSingle: async () => {
+            if (table === 'students') return { data: student, error: null };
+            if (table === 'organizations') return { data: org, error: null };
+            if (table === 'school_class_group_members') return { data: { group_id: 'group-a' }, error: null };
+            if (table === 'school_class_groups') return { data: group, error: null };
+            return { data: null, error: null };
+          },
+        };
+        return query;
+      },
+    } as any;
+
+    await expect(resolveHomeworkRecordingGroup(client, 'student-a', 'group-a'))
+      .resolves.toEqual({ id: 'group-a', organizationId: 'org-1' });
+
+    org.features = {};
+    await expect(resolveHomeworkRecordingGroup(client, 'student-a', 'group-a')).resolves.toBeNull();
   });
 
   it('lets an active owner manage every group in their own organization', async () => {

@@ -8,6 +8,16 @@ export function defaultStatsDateRange(): { start: Date; end: Date } {
   return { start, end };
 }
 
+/** Company/school stats landing window: this calendar month (matches dashboard). */
+export function currentMonthStatsDateRange(): { start: Date; end: Date } {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
 export function normalizeStatsDateRange(start: Date, end: Date): { startIso: string; endIso: string } {
   const startBound = new Date(start);
   startBound.setHours(0, 0, 0, 0);

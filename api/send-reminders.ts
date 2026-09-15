@@ -179,10 +179,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             studentEmail: student?.email,
             linkedUserId: (student as any)?.linked_user_id,
           });
-          const flexibleInvites = (await getOrgFeatures(orgId))?.flexible_invitations === true;
+          const orgFeatures = await getOrgFeatures(orgId);
+          const studentOrgFeatures = studentOrgId && studentOrgId !== orgId
+            ? await getOrgFeatures(studentOrgId)
+            : orgFeatures;
+          const flexibleInvites = orgFeatures?.flexible_invitations === true;
           // School org: the payer email on the student row is the parent contact,
           // whether or not that parent ever registered (schools run on emails only).
           const schoolFlow = schoolFlowForSession;
+          const homeworkUrl = schoolFlow && student?.id
+            ? buildSchoolHomeworkUrl(publicAppOrigin(), String(student.id))
+            : undefined;
+          const recordingsUrl = homeworkUrl && studentOrgFeatures?.school_lesson_recordings === true
+            ? `${homeworkUrl}#recordings`
+            : undefined;
 
           const candidates: ReminderRecipient[] = [];
 
@@ -255,7 +265,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         organizationId: studentOrgId,
                         schoolFlow: true,
                         // Homework / materials page — the only "portal" a parent without an account has.
-                        homeworkUrl: student?.id ? buildSchoolHomeworkUrl(publicAppOrigin(), String(student.id)) : undefined,
+                        homeworkUrl,
+                        recordingsUrl,
                       }
                       : {}),
                     recipientName: r.name || undefined,

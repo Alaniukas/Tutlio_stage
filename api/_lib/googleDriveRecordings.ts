@@ -202,6 +202,12 @@ export function normalizeDriveByteRange(
 }
 
 const FILE_FIELDS = 'id,name,mimeType,createdTime,modifiedTime,size,parents,capabilities(canDownload),videoMediaMetadata(durationMillis)';
+export const DRIVE_LIST_CACHE_MS = 90_000;
+const driveListCache = new Map<string, { expiresAt: number; files: DriveRecordingFile[] }>();
+
+export function clearDriveRecordingListCache(): void {
+  driveListCache.clear();
+}
 
 export async function getDriveFileMetadata(fileId: string): Promise<DriveRecordingFile> {
   const safeId = extractGoogleDriveId(fileId);
@@ -214,6 +220,8 @@ export async function getDriveFileMetadata(fileId: string): Promise<DriveRecordi
 export async function listDriveRecordings(folderId: string): Promise<DriveRecordingFile[]> {
   const safeId = extractGoogleDriveId(folderId);
   if (!safeId) throw new Error('Invalid Google Drive folder ID');
+  const cached = driveListCache.get(safeId);
+  if (cached && cached.expiresAt > Date.now()) return cached.files;
   const files: DriveRecordingFile[] = [];
   let pageToken = '';
   do {
@@ -233,12 +241,14 @@ export async function listDriveRecordings(folderId: string): Promise<DriveRecord
     pageToken = payload.nextPageToken || '';
   } while (pageToken && files.length < 300);
 
-  return files.filter((file) =>
+  const listed = files.filter((file) =>
     file.mimeType.startsWith('video/')
     && file.canDownload
     && file.parents.includes(safeId)
     && isRecordingWithinRetention(file.createdTime),
   );
+  driveListCache.set(safeId, { expiresAt: Date.now() + DRIVE_LIST_CACHE_MS, files: listed });
+  return listed;
 }
 
 export async function fetchDriveRecordingRange(

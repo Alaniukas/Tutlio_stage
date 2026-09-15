@@ -1,8 +1,9 @@
 // ─── Public homework page for school parents without an account ─────────────
 // GET  /api/school-homework?student=<id>&t=<token>
 //      → child's lessons (last 60 / next 45 days), teacher materials per lesson
-//        (files of every parallel group row), the parent's own uploads, and a
-//        tracked join link per lesson.
+//        (files of every parallel group row), the parent's own uploads, a
+//        tracked join link per lesson, and Drive recordings for groups the
+//        child currently belongs to (no Tutlio account).
 // POST /api/school-homework { student, t, action: 'upload-url' | 'delete', sessionId, fileName, ... }
 //      → signed direct-to-storage upload of a homework file into the lesson's
 //        folder (`nd-<student>-<file>`, visible to the teacher in SessionFiles),
@@ -22,6 +23,10 @@ import {
   isHomeworkSubmissionFile,
   studentMaySeeGroupFile,
 } from '../src/lib/sessionFileVisibility.js';
+import {
+  listHomeworkGroupRecordings,
+  schoolRecordingsFeatureOn,
+} from './_lib/schoolHomeworkRecordings.js';
 
 const BUCKET = 'session-files';
 export const HOMEWORK_MAX_BYTES = 10 * 1024 * 1024;
@@ -171,6 +176,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const auth = await authorize(supabase, studentId, token);
     if (auth.ok === false) return res.status(auth.status).json({ error: auth.error });
 
+    const requestedGroupId = String(req.query?.group || '').trim();
+    if (requestedGroupId) {
+      const memberGroupIds = await loadMemberGroupIds(supabase, studentId);
+      let recordingGroups: Awaited<ReturnType<typeof listHomeworkGroupRecordings>> = {
+        retentionDays: 30,
+        groups: [],
+      };
+      try {
+        recordingGroups = await listHomeworkGroupRecordings(supabase, {
+          studentId: auth.student.id,
+          organizationId: auth.org.id,
+          memberGroupIds,
+          recordingsEnabled: schoolRecordingsFeatureOn(auth.org.features),
+          listFiles: true,
+          groupId: requestedGroupId,
+        });
+      } catch (error) {
+        console.error('[school-homework] recordings list failed', (error as Error)?.message);
+      }
+      return res.status(200).json({
+        ok: true,
+        retentionDays: recordingGroups.retentionDays,
+        recordingGroups: recordingGroups.groups,
+      });
+    }
+
     const now = new Date();
     const from = new Date(now.getTime() - PAST_DAYS * 86_400_000);
     const to = new Date(now.getTime() + FUTURE_DAYS * 86_400_000);
@@ -249,6 +280,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       for (const row of data || []) if (row.path && row.signedUrl) signed.set(row.path, row.signedUrl);
     }
 
+    let recordingGroups: Awaited<ReturnType<typeof listHomeworkGroupRecordings>> = {
+      retentionDays: 30,
+      groups: [],
+    };
+    try {
+      recordingGroups = await listHomeworkGroupRecordings(supabase, {
+        studentId: auth.student.id,
+        organizationId: auth.org.id,
+        memberGroupIds,
+        recordingsEnabled: schoolRecordingsFeatureOn(auth.org.features),
+        listFiles: false,
+      });
+    } catch (error) {
+      console.error('[school-homework] recordings list failed', (error as Error)?.message);
+    }
+
     const origin = publicOriginFromRequest(req);
     const mySlug = studentSlug(auth.student.full_name);
     const out = sessions.map((s) => {
@@ -299,6 +346,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       terminology: schoolTerminologyForOrg(auth.org.entity_type, auth.org.features),
       limits: { maxBytes: HOMEWORK_MAX_BYTES, allowedExt: HOMEWORK_ALLOWED_EXT },
       sessions: out,
+      retentionDays: recordingGroups.retentionDays,
+      recordingGroups: recordingGroups.groups,
     });
   }
 

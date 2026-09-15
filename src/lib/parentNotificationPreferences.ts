@@ -70,3 +70,9 @@ export function isParentNotificationEnabled(
 ): boolean {
   return !new Set(optOut).has(key);
 }
+
+/** Org-level master switch: which optional parent emails this organization sends. */
+export function parseOrgParentNotificationOptOut(features: unknown): ParentNotificationKey[] {
+  if (!features || typeof features !== 'object' || Array.isArray(features)) return [];
+  return parseParentNotificationOptOut((features as Record<string, unknown>).parent_email_opt_out);
+}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Download, Loader2, Paperclip, Play, Trash2, Upload } from 'lucide-react';
+import { Download, Loader2, Paperclip, Play, Trash2, Upload, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { isWithinJoinClickWindow } from '@/lib/attendance';
@@ -10,9 +10,10 @@ import { applySchoolTerminology, type SchoolTerminology } from '@/lib/i18n/schoo
 /**
  * Public homework page for school parents without a Tutlio account. Reached
  * from the signed link in the invitation / reminder emails: the child's
- * lessons, the teacher's materials per lesson, a join link that opens 30 min
- * before the lesson, and a place to hand homework in (uploads land in the
- * lesson's folder where the teacher already looks for files).
+ * lessons, Drive recordings of their groups, the teacher's materials per
+ * lesson, a join link that opens 30 min before the lesson, and a place to
+ * hand homework in (uploads land in the lesson's folder where the teacher
+ * already looks for files).
  */
 
 type HomeworkFile = {
@@ -38,6 +39,23 @@ type HomeworkSession = {
   files: HomeworkFile[];
 };
 
+type HomeworkRecording = {
+  id: string;
+  name: string;
+  recordedAt: string | null;
+  durationMillis: number | null;
+  size: number | null;
+  streamUrl: string;
+};
+
+type HomeworkRecordingGroup = {
+  id: string;
+  name: string;
+  recordings: HomeworkRecording[];
+  loadError: string | null;
+  pending?: boolean;
+};
+
 type Payload = {
   ok: boolean;
   now: string;
@@ -46,6 +64,8 @@ type Payload = {
   terminology: SchoolTerminology;
   limits: { maxBytes: number; allowedExt: string[] };
   sessions: HomeworkSession[];
+  retentionDays?: number;
+  recordingGroups?: HomeworkRecordingGroup[];
 };
 
 type HomeworkSection = 'past' | 'upcoming';
@@ -75,6 +95,15 @@ const COPY = {
   uploadFailed: 'Nepavyko įkelti failo. Bandykite dar kartą.',
   child: 'Mokinys',
   remove: 'Pašalinti',
+  recordingsTitle: 'Pamokų įrašai',
+  recordingsLead: 'Čia rodomi vaiko grupės įrašai. Juos gali žiūrėti tėvai ir mokinys.',
+  recordingsEmpty: 'Per paskutines {days} dienų šios grupės įrašų nėra.',
+  recordingsUnavailable: 'Įrašai laikinai nepasiekiami.',
+  recordingsUnsupported: 'Jūsų naršyklė nepalaiko vaizdo įrašų atkūrimo.',
+  recordingsCount: '{count} įrašų',
+  recordingsPick: 'Pasirinkite įrašą',
+  recordingsPickGroup: 'Pasirinkite grupę',
+  recordingsLoading: 'Įrašai kraunami…',
 };
 
 function formatBytes(bytes: number | null): string {
@@ -95,6 +124,175 @@ function timeLabel(iso: string | null): string {
   return new Date(iso).toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
 }
 
+function durationLabel(durationMillis: number | null): string | null {
+  if (!durationMillis || durationMillis <= 0) return null;
+  const minutes = Math.floor(durationMillis / 60_000);
+  const seconds = Math.floor((durationMillis % 60_000) / 1000);
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function recordingMeta(recording: HomeworkRecording): string | null {
+  const recorded = recording.recordedAt
+    ? new Intl.DateTimeFormat('lt-LT', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(recording.recordedAt))
+    : null;
+  return [recorded, durationLabel(recording.durationMillis), formatBytes(recording.size) || null].filter(Boolean).join(' · ') || null;
+}
+
+function HomeworkGroupRecordings({
+  group,
+  hideName,
+  emptyLabel,
+  unavailableLabel,
+  unsupportedLabel,
+  countLabel,
+  pickLabel,
+}: {
+  group: HomeworkRecordingGroup;
+  hideName?: boolean;
+  emptyLabel: string;
+  unavailableLabel: string;
+  unsupportedLabel: string;
+  countLabel: string;
+  pickLabel: string;
+}) {
+  const [selectedId, setSelectedId] = useState(group.recordings[0]?.id ?? '');
+  useEffect(() => {
+    if (!group.recordings.some((row) => row.id === selectedId)) {
+      setSelectedId(group.recordings[0]?.id ?? '');
+    }
+  }, [group.recordings, selectedId]);
+  const selected = group.recordings.find((row) => row.id === selectedId) ?? group.recordings[0];
+
+  return (
+    <section className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5 shadow-sm space-y-3">
+      {(!hideName || group.recordings.length > 0) && (
+        <div>
+          {!hideName && (
+            <h3 className="text-lg font-bold text-gray-900 leading-tight">{group.name}</h3>
+          )}
+          {group.recordings.length > 0 && (
+            <p className={hideName ? 'text-xs text-gray-500' : 'mt-1 text-xs text-gray-500'}>
+              {countLabel.replace('{count}', String(group.recordings.length))}
+            </p>
+          )}
+        </div>
+      )}
+      {group.pending ? (
+        <p className="text-sm text-gray-500 flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin" /> {emptyLabel}
+        </p>
+      ) : group.loadError ? (
+        <p className="text-sm text-red-600">{unavailableLabel}</p>
+      ) : !selected ? (
+        <p className="text-sm text-gray-500">{emptyLabel}</p>
+      ) : (
+        <div className="space-y-3">
+          {group.recordings.length > 1 && (
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-gray-500">{pickLabel}</span>
+              <select
+                className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800"
+                value={selected.id}
+                onChange={(event) => setSelectedId(event.target.value)}
+              >
+                {group.recordings.map((recording) => {
+                  const meta = recordingMeta(recording);
+                  return (
+                    <option key={recording.id} value={recording.id}>
+                      {meta ? `${meta} · ${recording.name}` : recording.name}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+          )}
+          <div>
+            <p className="font-medium text-gray-900 break-words">{selected.name}</p>
+            {recordingMeta(selected) && (
+              <p className="mt-1 text-xs text-gray-500">{recordingMeta(selected)}</p>
+            )}
+          </div>
+          <video
+            key={selected.id}
+            className="w-full aspect-video rounded-lg bg-black"
+            controls
+            controlsList="nodownload"
+            preload="none"
+            src={selected.streamUrl}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            {unsupportedLabel}
+          </video>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HomeworkRecordingsBlock({
+  groups,
+  emptyLabel,
+  unavailableLabel,
+  unsupportedLabel,
+  countLabel,
+  pickLabel,
+  pickGroupLabel,
+  loadingLabel,
+  onNeedFiles,
+}: {
+  groups: HomeworkRecordingGroup[];
+  emptyLabel: string;
+  unavailableLabel: string;
+  unsupportedLabel: string;
+  countLabel: string;
+  pickLabel: string;
+  pickGroupLabel: string;
+  loadingLabel: string;
+  onNeedFiles: (groupId: string) => void;
+}) {
+  const [groupId, setGroupId] = useState(groups[0]?.id ?? '');
+  useEffect(() => {
+    if (!groups.some((row) => row.id === groupId)) {
+      setGroupId(groups[0]?.id ?? '');
+    }
+  }, [groups, groupId]);
+  const group = groups.find((row) => row.id === groupId) ?? groups[0];
+  useEffect(() => {
+    if (group?.pending) onNeedFiles(group.id);
+  }, [group?.id, group?.pending, onNeedFiles]);
+  if (!group) return null;
+
+  return (
+    <>
+      {groups.length > 1 && (
+        <label className="block space-y-1.5" htmlFor="homework-recording-group">
+          <span className="text-xs font-medium text-gray-500">{pickGroupLabel}</span>
+          <select
+            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800"
+            id="homework-recording-group"
+            value={group.id}
+            onChange={(event) => setGroupId(event.target.value)}
+          >
+            {groups.map((row) => (
+              <option key={row.id} value={row.id}>{row.name || row.id}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      <HomeworkGroupRecordings
+        key={group.id}
+        group={group}
+        hideName={groups.length > 1}
+        emptyLabel={group.pending ? loadingLabel : emptyLabel}
+        unavailableLabel={unavailableLabel}
+        unsupportedLabel={unsupportedLabel}
+        countLabel={countLabel}
+        pickLabel={pickLabel}
+      />
+    </>
+  );
+}
+
 export default function SchoolHomework() {
   const [params] = useSearchParams();
   const studentId = params.get('student') || '';
@@ -106,6 +304,8 @@ export default function SchoolHomework() {
   const [notice, setNotice] = useState<string | null>(null);
   const [section, setSection] = useState<HomeworkSection>('past');
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const recordingsRef = useRef<HTMLElement | null>(null);
+  const [recordingById, setRecordingById] = useState<Record<string, HomeworkRecordingGroup>>({});
   const now = useJoinClock();
 
   const terminology = payload?.terminology ?? { staff: true, activity: true };
@@ -134,6 +334,7 @@ export default function SchoolHomework() {
       } else {
         setPayload(json);
         setError(null);
+        if (!silent) setRecordingById({});
       }
     } catch {
       setError(COPY.invalid);
@@ -148,6 +349,59 @@ export default function SchoolHomework() {
   useEffect(() => {
     if (payload) document.title = `${applySchoolTerminology(COPY.title, 'lt', payload.terminology)} – ${payload.school.name || 'Tutlio'}`;
   }, [payload]);
+
+  useEffect(() => {
+    if (!payload || window.location.hash !== '#recordings') return;
+    recordingsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [payload]);
+
+  const recordingsLoading = useRef<Set<string>>(new Set());
+  const loadGroupRecordings = useCallback(async (groupId: string) => {
+    if (!studentId || !token || !groupId || recordingsLoading.current.has(groupId)) return;
+    recordingsLoading.current.add(groupId);
+    try {
+      const res = await fetch(
+        `/api/school-homework?student=${encodeURIComponent(studentId)}&t=${encodeURIComponent(token)}&group=${encodeURIComponent(groupId)}`,
+      );
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; recordingGroups?: HomeworkRecordingGroup[] };
+      const loaded = json.ok && Array.isArray(json.recordingGroups)
+        ? json.recordingGroups.find((row) => row.id === groupId)
+        : null;
+      setRecordingById((current) => ({
+        ...current,
+        [groupId]: loaded
+          ? { ...loaded, pending: false }
+          : {
+            id: groupId,
+            name: current[groupId]?.name || '',
+            recordings: [],
+            loadError: COPY.recordingsUnavailable,
+            pending: false,
+          },
+      }));
+    } catch {
+      setRecordingById((current) => ({
+        ...current,
+        [groupId]: {
+          id: groupId,
+          name: current[groupId]?.name || '',
+          recordings: [],
+          loadError: COPY.recordingsUnavailable,
+          pending: false,
+        },
+      }));
+    } finally {
+      recordingsLoading.current.delete(groupId);
+    }
+  }, [studentId, token]);
+
+  const recordingGroups = useMemo(() => {
+    return (payload?.recordingGroups ?? []).map((group) => {
+      const loaded = recordingById[group.id];
+      return loaded && loaded.pending === false ? loaded : group;
+    });
+  }, [payload, recordingById]);
+  const hasRecordings = recordingGroups.length > 0;
 
   const { upcoming, past } = useMemo(() => {
     const rows = payload?.sessions ?? [];
@@ -361,50 +615,74 @@ export default function SchoolHomework() {
           <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="w-4 h-4 animate-spin" /> {tx('loading')}</div>
         ) : error ? (
           <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-6 text-sm text-red-800">{error}</div>
-        ) : payload && payload.sessions.length === 0 ? (
+        ) : payload && payload.sessions.length === 0 && !hasRecordings ? (
           <p className="text-sm text-gray-500">{tx('none')}</p>
-        ) : (
+        ) : payload ? (
           <>
-            <div
-              role="tablist"
-              aria-label={tx('sectionsIntro')}
-              className="grid grid-cols-2 gap-2 rounded-2xl border-2 border-violet-100 bg-white p-1.5 shadow-sm"
-            >
-              {(['upcoming', 'past'] as const).map((key) => {
-                const count = key === 'past' ? past.length : upcoming.length;
-                const selected = visibleSection === key;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    role="tab"
-                    id={`homework-${key}-tab`}
-                    aria-controls={`homework-${key}-panel`}
-                    aria-selected={selected}
-                    disabled={count === 0}
-                    onClick={() => setSection(key)}
-                    className={`rounded-xl px-3 py-2.5 text-sm font-bold transition-colors ${
-                      selected
-                        ? 'bg-violet-600 text-white shadow-sm'
-                        : 'text-gray-600 hover:bg-violet-50 disabled:cursor-not-allowed disabled:text-gray-300'
-                    }`}
-                  >
-                    {tx(key)} <span className="ml-1 opacity-75">({count})</span>
-                  </button>
-                );
-              })}
-            </div>
-            <section
-              role="tabpanel"
-              id={`homework-${visibleSection}-panel`}
-              aria-labelledby={`homework-${visibleSection}-tab`}
-              className="space-y-3"
-            >
-              <h2 className="text-base font-bold text-gray-800">{tx(visibleSection)}</h2>
-              {visibleSessions.map((s) => renderSession(s, visibleSection === 'upcoming'))}
-            </section>
+            {payload.sessions.length > 0 && (
+              <>
+                <div
+                  role="tablist"
+                  aria-label={tx('sectionsIntro')}
+                  className="grid grid-cols-2 gap-2 rounded-2xl border-2 border-violet-100 bg-white p-1.5 shadow-sm"
+                >
+                  {(['upcoming', 'past'] as const).map((key) => {
+                    const count = key === 'past' ? past.length : upcoming.length;
+                    const selected = visibleSection === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        role="tab"
+                        id={`homework-${key}-tab`}
+                        aria-controls={`homework-${key}-panel`}
+                        aria-selected={selected}
+                        disabled={count === 0}
+                        onClick={() => setSection(key)}
+                        className={`rounded-xl px-3 py-2.5 text-sm font-bold transition-colors ${
+                          selected
+                            ? 'bg-violet-600 text-white shadow-sm'
+                            : 'text-gray-600 hover:bg-violet-50 disabled:cursor-not-allowed disabled:text-gray-300'
+                        }`}
+                      >
+                        {tx(key)} <span className="ml-1 opacity-75">({count})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <section
+                  role="tabpanel"
+                  id={`homework-${visibleSection}-panel`}
+                  aria-labelledby={`homework-${visibleSection}-tab`}
+                  className="space-y-3"
+                >
+                  <h2 className="text-base font-bold text-gray-800">{tx(visibleSection)}</h2>
+                  {visibleSessions.map((s) => renderSession(s, visibleSection === 'upcoming'))}
+                </section>
+              </>
+            )}
+            {hasRecordings && (
+              <section ref={recordingsRef} id="recordings" className="space-y-3 scroll-mt-6">
+                <div className="flex items-center gap-2">
+                  <Video className="w-5 h-5 text-violet-600" />
+                  <h2 className="text-base font-bold text-gray-800">{tx('recordingsTitle')}</h2>
+                </div>
+                <p className="text-sm text-gray-600">{tx('recordingsLead')}</p>
+                <HomeworkRecordingsBlock
+                  groups={recordingGroups}
+                  emptyLabel={tx('recordingsEmpty', { days: String(payload.retentionDays || 30) })}
+                  unavailableLabel={tx('recordingsUnavailable')}
+                  unsupportedLabel={tx('recordingsUnsupported')}
+                  countLabel={tx('recordingsCount')}
+                  pickLabel={tx('recordingsPick')}
+                  pickGroupLabel={tx('recordingsPickGroup')}
+                  loadingLabel={tx('recordingsLoading')}
+                  onNeedFiles={loadGroupRecordings}
+                />
+              </section>
+            )}
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );

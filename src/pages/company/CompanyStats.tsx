@@ -40,7 +40,7 @@ import {
   formatCancellationBreakdown,
 } from '@/lib/session-stats';
 import {
-  defaultStatsDateRange,
+  currentMonthStatsDateRange,
   normalizeStatsDateRange,
   statsDateRangeKey,
 } from '@/lib/statsDateRange';
@@ -118,7 +118,7 @@ export default function CompanyStats() {
   );
   const [filterStartDate, setFilterStartDate] = useState<Date | null>(null);
   const [filterEndDate, setFilterEndDate] = useState<Date | null>(null);
-  const effectiveRange = appliedRange ?? defaultStatsDateRange();
+  const effectiveRange = appliedRange ?? currentMonthStatsDateRange();
   const rangeKey = statsDateRangeKey(effectiveRange);
 
   useEffect(() => {

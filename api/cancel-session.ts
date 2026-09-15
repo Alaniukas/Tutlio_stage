@@ -13,7 +13,7 @@ import { lt } from 'date-fns/locale';
 import { deleteSessionFromGoogle, syncSessionToGoogle } from './_lib/google-calendar.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { canStudentSideCancelSession, canTutorSideCancelSession } from './_lib/cancel-session-access.js';
-import { collectCancellationNotifyRecipients } from './_lib/cancelSessionNotify.js';
+import { collectCancellationNotifyRecipients, shouldSendCancellationEmails } from './_lib/cancelSessionNotify.js';
 import { isProKlaseOrg, isWaitlistHiddenForOrg } from './_lib/marketMoney.js';
 import { releaseSessionSlotAsAvailability } from './_lib/release-session-availability.js';
 import { PRO_KLASE_TUTOR_NO_SHOW_PENALTY_EUR } from './_lib/proKlaseTutorPay.js';
@@ -104,7 +104,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: existingSession, error: loadSessionError } = await supabase
         .from('sessions')
-        .select('tutor_id, student_id')
+        .select('tutor_id, student_id, status, start_time, end_time')
         .eq('id', sessionId)
         .maybeSingle();
 
@@ -389,13 +389,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         paymentModelEarly === 'per_lesson';
     const hideStudentRefund = willHavePendingPenalty || willHaveEarlyRefundChoice;
 
+    const notifyAboutThisCancel = shouldSendCancellationEmails({
+        previousStatus: (existingSession as { status?: string | null }).status,
+        startTime: (existingSession as { start_time?: string | null }).start_time ?? session.start_time,
+        endTime: (existingSession as { end_time?: string | null }).end_time ?? session.end_time,
+    });
+
     const cancellationEmailTasks: Promise<unknown>[] = [];
-    const notifyRecipients = collectCancellationNotifyRecipients({
+    const notifyRecipients = notifyAboutThisCancel
+        ? collectCancellationNotifyRecipients({
         tutorEmail: resolvedTutorEmail,
         studentEmail: resolvedStudentEmail,
         payerEmail: resolvedPayerEmail,
         parentSecondaryEmail: resolvedSecondaryEmail,
-    });
+    })
+        : [];
     const orgPayload = orgId ? { organizationId: orgId } : {};
     for (const recipient of notifyRecipients) {
         if (recipient.kind === 'parent') {

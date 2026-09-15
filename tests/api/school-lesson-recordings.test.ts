@@ -79,13 +79,26 @@ describe('GET /api/school-lesson-recordings', () => {
     mocks.createViewerSession.mockReset().mockReturnValue('signed-viewer-session');
   });
 
-  it('returns only the resolved group and a Tutlio stream URL, never the private Drive location', async () => {
+  it('returns only the resolved group names without listing Drive until a group is requested', async () => {
     const res = mockRes();
     await handler({ method: 'GET', query: {}, headers: {} } as any, res as any);
 
     const result = res.getResult();
     expect(result.statusCode).toBe(200);
     expect(result.body.groups).toHaveLength(1);
+    expect(result.body.groups[0].recordings).toEqual([]);
+    expect(result.body.groups[0].recordingsPending).toBe(true);
+    expect(result.body.groups[0].driveFolderId).toBeUndefined();
+    expect(JSON.stringify(result.body)).not.toContain('private-folder-id');
+    expect(mocks.listRecordings).not.toHaveBeenCalled();
+  });
+
+  it('lists Drive files only for the requested group and returns a Tutlio stream URL', async () => {
+    const res = mockRes();
+    await handler({ method: 'GET', query: { groupId: 'group-allowed' }, headers: {} } as any, res as any);
+
+    const result = res.getResult();
+    expect(result.statusCode).toBe(200);
     expect(result.body.groups[0].recordings[0].streamUrl).toContain('/api/school-lesson-recording-stream?t=');
     expect(result.body.groups[0].driveFolderId).toBeUndefined();
     expect(JSON.stringify(result.body)).not.toContain('private-folder-id');

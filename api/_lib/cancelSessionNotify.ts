@@ -47,3 +47,25 @@ export function collectCancellationNotifyRecipients(opts: {
   add(opts.tutorEmail, 'tutor');
   return out;
 }
+
+/**
+ * Past / already-cancelled rows can still be marked cancelled in the calendar
+ * (school leftover completed slots), but parents must not get a late email
+ * about last week's lesson.
+ */
+export function shouldSendCancellationEmails(opts: {
+  previousStatus?: string | null;
+  startTime?: string | Date | null;
+  endTime?: string | Date | null;
+  now?: Date;
+}): boolean {
+  const status = String(opts.previousStatus || '');
+  if (status === 'cancelled' || status === 'canceled') return false;
+
+  const nowMs = (opts.now ?? new Date()).getTime();
+  const endRaw = opts.endTime ?? opts.startTime;
+  if (!endRaw) return true;
+  const end = new Date(endRaw);
+  if (!Number.isFinite(end.getTime())) return true;
+  return end.getTime() > nowMs;
+}

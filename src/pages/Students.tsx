@@ -39,6 +39,7 @@ import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isPlMarket } from '@/lib/market';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { orgTutorStudentInsertFields } from '@/lib/orgStudentOrganization';
 import { canChooseParentLessonComment } from '@/lib/parentLessonComment';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
@@ -847,7 +848,10 @@ export default function StudentsPage() {
 
     const { data: insertedStudent, error } = await supabase.from('students').insert([
       {
-        tutor_id: user.id,
+        ...orgTutorStudentInsertFields({
+          tutorId: user.id,
+          organizationId: profile?.organization_id,
+        }),
         full_name: newStudent.full_name,
         email: newStudent.email,
         phone: newStudent.phone?.trim() || null,

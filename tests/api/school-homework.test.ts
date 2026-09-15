@@ -8,6 +8,13 @@ const state = vi.hoisted(() => ({
   files: {} as Record<string, Array<{ name: string; metadata: { size: number } | null }>>,
   uploadPaths: [] as string[],
   removed: [] as string[][],
+  recordingGroups: [] as Array<Record<string, unknown>>,
+}));
+
+vi.mock('../../api/_lib/schoolHomeworkRecordings.js', () => ({
+  schoolRecordingsFeatureOn: (features: Record<string, unknown> | null | undefined) =>
+    features?.school_lesson_recordings === true,
+  listHomeworkGroupRecordings: async () => ({ retentionDays: 30, groups: state.recordingGroups }),
 }));
 
 vi.mock('@supabase/supabase-js', () => {
@@ -93,6 +100,7 @@ beforeEach(() => {
   };
   state.uploadPaths = [];
   state.removed = [];
+  state.recordingGroups = [];
 });
 
 describe('helpers', () => {
@@ -151,6 +159,28 @@ describe('GET /api/school-homework', () => {
     ]));
     expect(s.files.map((f: any) => f.name)).not.toContain('nd-klasemate-svetimas.pdf');
     expect(s.files.find((f: any) => f.name === 'uzduotys.pdf').url).toBe('https://signed/sess-2/uzduotys.pdf');
+    expect(out.body.recordingGroups).toEqual([]);
+  });
+
+  it('returns group Drive recordings on the public homework page', async () => {
+    state.recordingGroups = [{
+      id: 'g1',
+      name: 'QA Legal Matematika',
+      recordings: [{
+        id: 'file-1',
+        name: 'Pamoka.mp4',
+        recordedAt: '2026-09-10T10:00:00Z',
+        durationMillis: 60_000,
+        size: 1_000,
+        streamUrl: '/api/school-lesson-recording-stream?t=homework-ticket',
+      }],
+      loadError: null,
+    }];
+    const res = mockRes();
+    await handler({ method: 'GET', query: { student: STUDENT, t: token() }, headers: { host: 'tutlio.lt' } } as any, res as any);
+    const groups = res.getResult().body.recordingGroups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0].recordings[0].streamUrl).toContain('/api/school-lesson-recording-stream?t=');
   });
 
   it('hides sessions for groups the child is not enrolled in', async () => {

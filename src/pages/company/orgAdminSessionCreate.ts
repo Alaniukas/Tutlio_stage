@@ -158,20 +158,61 @@ function normEmailAddr(e: string | null | undefined): string {
   return (e ?? '').trim().toLowerCase();
 }
 
-/** Excluding cancelled; only active sessions block the new slot. */
-export async function assertTutorSlotsFree(
+export const ORG_ADMIN_SESSION_INSERT_CHUNK = 20;
+
+const SESSION_INSERT_SELECT =
+  'id, student_id, paid, lesson_package_id, payment_status, price, start_time, end_time';
+
+function slotKey(start: Date, end: Date): string {
+  return `${start.getTime()}_${end.getTime()}`;
+}
+
+export function tutorSlotOverlapError(slot: { start: Date; end: Date }): Error {
+  return new Error(
+    `Tutor already has a lesson at this time (${format(slot.start, 'yyyy-MM-dd')} ${format(slot.start, 'HH:mm')}–${format(slot.end, 'HH:mm')}). Choose a different time.`,
+  );
+}
+
+type TutorBusyRow = { id: string; start_time: string; end_time: string };
+
+export function slotConflictsWithBusyRows(
+  slot: { start: Date; end: Date },
+  busyRows: TutorBusyRow[],
+  excludedIds: ReadonlySet<string>,
+): boolean {
+  return busyRows.some((row) => {
+    if (excludedIds.has(String(row.id))) return false;
+    const rowStart = new Date(row.start_time);
+    const rowEnd = new Date(row.end_time);
+    return rowStart < slot.end && slot.start < rowEnd;
+  });
+}
+
+/** Keep series rows whose slot is still free; skip weeks the tutor already teaches. */
+export function filterRowsAgainstBusyTutorSlots<T extends { start_time: unknown; end_time: unknown }>(
+  rows: T[],
+  busyRows: TutorBusyRow[],
+  excludedIds: ReadonlySet<string> = new Set(),
+): T[] {
+  return rows.filter((row) => {
+    const start = new Date(String(row.start_time));
+    const end = new Date(String(row.end_time));
+    return !slotConflictsWithBusyRows({ start, end }, busyRows, excludedIds);
+  });
+}
+
+export async function loadTutorBusyRowsInRange(
   supabase: SupabaseClient,
   tutorId: string,
   slots: Array<{ start: Date; end: Date }>,
-  excludeSessionIds: string[] = [],
-): Promise<void> {
+): Promise<TutorBusyRow[]> {
   const uniqueSlots = new Map<string, { start: Date; end: Date }>();
   for (const slot of slots) {
-    const key = `${slot.start.getTime()}_${slot.end.getTime()}`;
+    const key = slotKey(slot.start, slot.end);
     if (!uniqueSlots.has(key)) uniqueSlots.set(key, slot);
   }
   const slotList = [...uniqueSlots.values()];
-  if (slotList.length === 0) return;
+  if (slotList.length === 0) return [];
 
   const earliest = new Date(Math.min(...slotList.map((s) => s.start.getTime())));
   const latest = new Date(Math.max(...slotList.map((s) => s.end.getTime())));
@@ -183,19 +224,49 @@ export async function assertTutorSlotsFree(
     .lt('start_time', latest.toISOString())
     .gt('end_time', earliest.toISOString());
   if (error) throw new Error(error.message);
+  return (existingBusy || []) as TutorBusyRow[];
+}
 
+export async function insertSessionRowsInChunks<T extends Record<string, unknown>>(
+  supabase: SupabaseClient,
+  rows: T[],
+  chunkSize = ORG_ADMIN_SESSION_INSERT_CHUNK,
+): Promise<CreatedSessionRow[]> {
+  if (rows.length === 0) return [];
+  const inserted: CreatedSessionRow[] = [];
+  const size = Math.max(1, chunkSize);
+  for (let i = 0; i < rows.length; i += size) {
+    const chunk = rows.slice(i, i + size);
+    const { data, error } = await supabase
+      .from('sessions')
+      .insert(chunk)
+      .select(SESSION_INSERT_SELECT);
+    if (error) throw new Error(error.message);
+    inserted.push(...((data || []) as CreatedSessionRow[]));
+  }
+  return inserted;
+}
+
+/** Excluding cancelled; only active sessions block the new slot. */
+export async function assertTutorSlotsFree(
+  supabase: SupabaseClient,
+  tutorId: string,
+  slots: Array<{ start: Date; end: Date }>,
+  excludeSessionIds: string[] = [],
+): Promise<void> {
+  const uniqueSlots = new Map<string, { start: Date; end: Date }>();
+  for (const slot of slots) {
+    const key = slotKey(slot.start, slot.end);
+    if (!uniqueSlots.has(key)) uniqueSlots.set(key, slot);
+  }
+  const slotList = [...uniqueSlots.values()];
+  if (slotList.length === 0) return;
+
+  const existingBusy = await loadTutorBusyRowsInRange(supabase, tutorId, slotList);
   const excluded = new Set(excludeSessionIds.filter(Boolean));
   for (const slot of slotList) {
-    const conflict = (existingBusy || []).some((row) => {
-      if (excluded.has(String(row.id))) return false;
-      const rowStart = new Date(row.start_time as string);
-      const rowEnd = new Date(row.end_time as string);
-      return rowStart < slot.end && slot.start < rowEnd;
-    });
-    if (conflict) {
-      throw new Error(
-        `Tutor already has a lesson at this time (${format(slot.start, 'yyyy-MM-dd')} ${format(slot.start, 'HH:mm')}–${format(slot.end, 'HH:mm')}). Choose a different time.`,
-      );
+    if (slotConflictsWithBusyRows(slot, existingBusy, excluded)) {
+      throw tutorSlotOverlapError(slot);
     }
   }
 }
@@ -836,31 +907,40 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     }
 
     if (sessionsRows.length === 0) throw new Error('Failed to generate lessons.');
-    try {
-      await assertTutorSlotsFree(
-        supabase,
-        createTutorId,
-        sessionsRows.map((row) => ({
-          start: new Date(row.start_time as string),
-          end: new Date(row.end_time as string),
-        })),
-      );
-    } catch (overlapErr) {
+    const candidateSlots = sessionsRows.map((row) => ({
+      start: new Date(row.start_time as string),
+      end: new Date(row.end_time as string),
+    }));
+    const existingBusy = await loadTutorBusyRowsInRange(supabase, createTutorId, candidateSlots);
+    const freeRows = filterRowsAgainstBusyTutorSlots(sessionsRows, existingBusy);
+    if (freeRows.length === 0) {
       const tplIds = recurringTemplates.map((t) => t.id);
       if (tplIds.length) {
         await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
       }
-      throw overlapErr;
+      throw tutorSlotOverlapError(candidateSlots[0]);
     }
-    const { data: inserted, error: insErr } = await supabase
-      .from('sessions')
-      .insert(sessionsRows)
-      .select('id, student_id, paid, lesson_package_id, payment_status, price, start_time, end_time');
-    if (insErr) throw new Error(insErr.message);
+    let inserted: CreatedSessionRow[] = [];
+    try {
+      inserted = await insertSessionRowsInChunks(supabase, freeRows);
+    } catch (insErr) {
+      const tplIds = recurringTemplates.map((t) => t.id);
+      if (tplIds.length) {
+        await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
+      }
+      throw insErr;
+    }
 
     await consumeAvailabilityForCreatedSessions(supabase, createTutorId, inserted || []);
 
-    for (const [pkgId, usedCount] of packagesUsage.entries()) {
+    const remainingPackageUsage = new Map<string, number>();
+    for (const row of freeRows) {
+      const pkgId = typeof row.lesson_package_id === 'string' ? row.lesson_package_id : '';
+      if (!pkgId) continue;
+      remainingPackageUsage.set(pkgId, (remainingPackageUsage.get(pkgId) || 0) + 1);
+    }
+
+    for (const [pkgId, usedCount] of remainingPackageUsage.entries()) {
       const pkg = Array.from(packagesByStudent.values()).find((x) => x.id === pkgId);
       if (!pkg || pkg.pool_organization_id || usedCount <= 0) continue;
       const { error: itemErr } = await supabase
@@ -1382,39 +1462,39 @@ export async function convertOrgAdminSessionToRecurring(
 
   let createdSessionIds: string[] = [];
   if (sessionsRows.length > 0) {
-    try {
-      await assertTutorSlotsFree(
-        supabase,
-        tutorId,
-        sessionsRows.map((row) => ({
-          start: new Date(String(row.start_time)),
-          end: new Date(String(row.end_time)),
-        })),
-        [sessionId],
-      );
-    } catch (overlapErr) {
+    const rollbackConvert = async () => {
       const tplIds = recurringTemplates.map((t) => t.id);
       if (tplIds.length) await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
       await supabase.from('sessions').update({ recurring_session_id: null }).eq('id', sessionId);
-      throw overlapErr;
+    };
+    const candidateSlots = sessionsRows.map((row) => ({
+      start: new Date(String(row.start_time)),
+      end: new Date(String(row.end_time)),
+    }));
+    const existingBusy = await loadTutorBusyRowsInRange(supabase, tutorId, candidateSlots);
+    const freeRows = filterRowsAgainstBusyTutorSlots(
+      sessionsRows,
+      existingBusy,
+      new Set([sessionId]),
+    );
+    if (freeRows.length === 0) {
+      await rollbackConvert();
+      throw tutorSlotOverlapError(candidateSlots[0]);
     }
 
-    const { data: inserted, error: insErr } = await supabase
-      .from('sessions')
-      .insert(sessionsRows)
-      .select('id, student_id, paid, lesson_package_id, payment_status, price, start_time, end_time');
-    if (insErr) {
-      const tplIds = recurringTemplates.map((t) => t.id);
-      if (tplIds.length) await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
-      await supabase.from('sessions').update({ recurring_session_id: null }).eq('id', sessionId);
-      throw new Error(insErr.message);
+    let inserted: CreatedSessionRow[] = [];
+    try {
+      inserted = await insertSessionRowsInChunks(supabase, freeRows);
+    } catch (insErr) {
+      await rollbackConvert();
+      throw insErr;
     }
 
     await consumeAvailabilityForCreatedSessions(supabase, tutorId, inserted || []);
     createdSessionIds = ((inserted || []) as Array<{ id: string }>).map((row) => row.id);
 
     if (pkg && !pkg.pool_organization_id) {
-      const usedCount = packagesUsage.get(pkg.id) || 0;
+      const usedCount = freeRows.filter((row) => row.lesson_package_id === pkg.id).length;
       if (usedCount > 0) {
         await supabase
           .from('lesson_package_items')

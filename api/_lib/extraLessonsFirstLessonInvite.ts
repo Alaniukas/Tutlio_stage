@@ -132,6 +132,14 @@ export async function sendFirstLessonInvite(
   }
 
   const publicOrigin = publicOriginFromRequest(req);
+  const homeworkUrl = buildSchoolHomeworkUrl(publicOrigin, input.studentId);
+  const { data: orgRow } = await supabase
+    .from('organizations')
+    .select('features')
+    .eq('id', input.organizationId)
+    .maybeSingle();
+  const recordingsEnabled = ((orgRow as { features?: Record<string, unknown> | null } | null)?.features || {})
+    .school_lesson_recordings === true;
   const data: Record<string, unknown> = {
     organizationId: input.organizationId,
     schoolName: input.schoolName || '',
@@ -145,7 +153,8 @@ export async function sendFirstLessonInvite(
     scheduleLabel: formatScheduleLabel(input.order.schedule_slots || []),
     groupName,
     tutorName,
-    homeworkUrl: buildSchoolHomeworkUrl(publicOrigin, input.studentId),
+    homeworkUrl,
+    ...(recordingsEnabled ? { recordingsUrl: `${homeworkUrl}#recordings` } : {}),
   };
   if (session) {
     data.sessionId = session.id;

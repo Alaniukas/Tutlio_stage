@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectCancellationNotifyRecipients } from '../../api/_lib/cancelSessionNotify';
+import { collectCancellationNotifyRecipients, shouldSendCancellationEmails } from '../../api/_lib/cancelSessionNotify';
 
 describe('collectCancellationNotifyRecipients', () => {
   it('notifies payer when the student has no email (school cards)', () => {
@@ -51,5 +51,42 @@ describe('collectCancellationNotifyRecipients', () => {
         tutorEmail: undefined,
       }),
     ).toEqual([]);
+  });
+});
+
+describe('shouldSendCancellationEmails', () => {
+  const now = new Date('2026-09-15T11:16:00+03:00');
+
+  it('does not email when the lesson already ended (late school leftover cancel)', () => {
+    expect(
+      shouldSendCancellationEmails({
+        previousStatus: 'completed',
+        startTime: '2026-09-07T12:00:00+03:00',
+        endTime: '2026-09-07T13:00:00+03:00',
+        now,
+      }),
+    ).toBe(false);
+  });
+
+  it('does not email a second time for an already cancelled row', () => {
+    expect(
+      shouldSendCancellationEmails({
+        previousStatus: 'cancelled',
+        startTime: '2026-09-16T16:00:00+03:00',
+        endTime: '2026-09-16T17:00:00+03:00',
+        now,
+      }),
+    ).toBe(false);
+  });
+
+  it('emails parents when a future lesson is cancelled', () => {
+    expect(
+      shouldSendCancellationEmails({
+        previousStatus: 'active',
+        startTime: '2026-09-16T16:00:00+03:00',
+        endTime: '2026-09-16T17:00:00+03:00',
+        now,
+      }),
+    ).toBe(true);
   });
 });

@@ -35,10 +35,17 @@ export function orgIdentityPricingFrequency(
 export async function fetchOrgStudentDynamicPrice(supabase: SupabaseClient, studentId: string): Promise<{
   price: number | null; lessonsPerWeek: number | null; studentIds: string[];
 }> {
-  const fields = 'id, organization_id, linked_user_id, full_name, email, grade, detached_at, pricing_lessons_per_week, pricing_lessons_per_week_is_manual';
-  const { data: student, error } = await supabase.from('students').select(fields).eq('id', studentId).single();
+  const fields = 'id, organization_id, tutor_id, linked_user_id, full_name, email, grade, detached_at, pricing_lessons_per_week, pricing_lessons_per_week_is_manual';
+  const { data: row, error } = await supabase.from('students').select(fields).eq('id', studentId).single();
   if (error) throw new Error(error.message);
-  if (!student.organization_id) return { price: null, lessonsPerWeek: null, studentIds: [studentId] };
+  let student = row as PricingIdentityStudent & { tutor_id?: string | null };
+  if (!student.organization_id) {
+    if (!student.tutor_id) return { price: null, lessonsPerWeek: null, studentIds: [studentId] };
+    const tutor = await supabase.from('profiles').select('organization_id').eq('id', student.tutor_id).maybeSingle();
+    const tutorOrganizationId = (tutor.data as { organization_id?: string | null } | null)?.organization_id ?? null;
+    if (!tutorOrganizationId) return { price: null, lessonsPerWeek: null, studentIds: [studentId] };
+    student = { ...student, organization_id: tutorOrganizationId };
+  }
   const [rows, rules] = await Promise.all([
     supabase.from('students').select(fields).eq('organization_id', student.organization_id).is('detached_at', null),
     supabase.from('organization_dynamic_pricing').select('grade_min, grade_max, lessons_per_week, price').eq('organization_id', student.organization_id),
@@ -47,7 +54,8 @@ export async function fetchOrgStudentDynamicPrice(supabase: SupabaseClient, stud
   if (rules.error) throw new Error(rules.error.message);
   const identity = (rows.data || []).filter(row => isProKlaseOrg(student.organization_id)
     ? sameOrgStudentIdentity(student, row) : row.id === student.id);
-  const studentIds = identity.map(row => row.id);
+  const identityIds = identity.map(row => row.id);
+  const studentIds = identityIds.includes(student.id) ? identityIds : [student.id, ...identityIds];
   if (!studentIds.length) return { price: null, lessonsPerWeek: null, studentIds };
   const recurring = await supabase.from('recurring_individual_sessions').select('id, student_id, active, end_date, frequency').in('student_id', studentIds).eq('active', true);
   if (recurring.error) throw new Error(recurring.error.message);

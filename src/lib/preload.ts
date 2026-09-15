@@ -12,7 +12,8 @@ import {
   filterConductedOrgSessions,
 } from '@/lib/orgTutorConductedSessions';
 import { countCancellationAttribution } from '@/lib/session-stats';
-import { defaultStatsDateRange, normalizeStatsDateRange } from '@/lib/statsDateRange';
+import { currentMonthStatsDateRange, normalizeStatsDateRange } from '@/lib/statsDateRange';
+import { orgDashboardMonthMetrics } from '@/lib/orgDashboardMetrics';
 import {
   packageClientPaidEur,
   standaloneSessionClientPaidEur,
@@ -468,22 +469,17 @@ async function preloadDashboard(
     const monthStart = startOfMonth(new Date()).toISOString();
     const monthEnd = endOfMonth(new Date()).toISOString();
     const now = new Date();
-    const next7days = addDays(now, 7);
 
     const { data: monthSessions } = await supabase
       .from('sessions')
-      .select('price, status, payment_status, start_time, end_time')
+      .select('price, status, payment_status, paid, start_time, end_time, is_complimentary')
       .in('tutor_id', tutorIds)
       .gte('start_time', monthStart)
       .lte('start_time', monthEnd)
       .neq('status', 'cancelled')
-      .limit(1000);
+      .limit(5000);
 
-    const isPaid = (s: any) => s.paid || ['paid', 'confirmed'].includes(s.payment_status);
-    const completed = (monthSessions || []).filter((s: any) => s.status === 'completed' || isPaid(s));
-    const upcoming = (monthSessions || []).filter(
-      (s: any) => s.status === 'active' && isAfter(new Date(s.end_time), now) && isBefore(new Date(s.start_time), next7days)
-    );
+    const monthMetrics = orgDashboardMonthMetrics(monthSessions || [], now);
 
     const licensedApprox = (tutorProfiles || []).filter((p: any) => p.has_active_license !== false).length;
     setCache('company_dashboard', {
@@ -492,8 +488,8 @@ async function preloadDashboard(
       tutorLicenseCap: Number(org?.tutor_license_count) || 0,
       licensedTutors: licensedApprox,
       activeTutors: tutorIds.length, pendingInvites: pendingCount || 0,
-      sessionsThisMonth: completed.length, upcomingSessions: upcoming.length,
-      earningsThisMonth: completed.reduce((sum: number, s: any) => sum + (s.price || 0), 0),
+      sessionsThisMonth: monthMetrics.occurredCount, upcomingSessions: monthMetrics.plannedCount,
+      earningsThisMonth: monthMetrics.paidRevenueEur,
       earningsTotal: 0,
       upcomingList: [], attentionList: [], cancelledList: [], recentPayments: [],
     });
@@ -504,7 +500,7 @@ async function preloadDashboard(
 
 async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: string) {
   try {
-    const defaultRange = defaultStatsDateRange();
+    const defaultRange = currentMonthStatsDateRange();
     const { startIso, endIso } = normalizeStatsDateRange(defaultRange.start, defaultRange.end);
     const { data: sessionsData } = await supabase
       .from('sessions')

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  currentMonthStatsDateRange,
   defaultStatsDateRange,
   normalizeStatsDateRange,
   statsDateRangeKey,
@@ -11,6 +12,15 @@ describe('statsDateRange', () => {
     const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
     expect(diffDays).toBeGreaterThan(360);
     expect(diffDays).toBeLessThan(367);
+  });
+
+  it('current month range stays inside this calendar month', () => {
+    const now = new Date();
+    const { start, end } = currentMonthStatsDateRange();
+    expect(start.getMonth()).toBe(now.getMonth());
+    expect(end.getMonth()).toBe(now.getMonth());
+    expect(start.getDate()).toBe(1);
+    expect(end.getDate()).toBeGreaterThanOrEqual(28);
   });
 
   it('normalizes local day bounds for queries', () => {

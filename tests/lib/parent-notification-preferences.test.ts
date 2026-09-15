@@ -66,4 +66,33 @@ describe('parent notification preferences', () => {
       'session_cancelled_parent',
     )).resolves.toBe(false);
   });
+
+  it('lets an organization admin disable a parent notification category for every parent', async () => {
+    let table = '';
+    const client = {
+      from(name: string) {
+        table = name;
+        return {
+          select: () => ({
+            eq: () => ({
+              limit: () => ({
+                maybeSingle: async () => ({ data: { email_notification_opt_out: [], disable_lesson_reminders: false }, error: null }),
+              }),
+              maybeSingle: async () => (
+                table === 'organizations'
+                  ? { data: { features: { parent_email_opt_out: ['lesson_reminders'] } }, error: null }
+                  : { data: { email_notification_opt_out: [], disable_lesson_reminders: false }, error: null }
+              ),
+            }),
+          }),
+        };
+      },
+    } as any;
+    await expect(shouldSkipParentNotification(
+      client,
+      'parent@example.com',
+      'session_reminder_payer',
+      { organizationId: 'org-1' },
+    )).resolves.toBe(true);
+  });
 });
