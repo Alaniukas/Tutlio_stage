@@ -2009,7 +2009,12 @@ export default function CompanyTvarkarastis() {
           weekdays: editRecurringWeekdays,
           recurringEndDate: editRecurringEndDate,
         });
-        if (result.createdSessionIds.length > 0) {
+        if (result.skippedOccurrenceStarts.length > 0) {
+          const skippedDates = result.skippedOccurrenceStarts
+            .map((value) => format(new Date(value), 'yyyy-MM-dd HH:mm'))
+            .join(', ');
+          alert(`${t('findLesson.recurringCreatedKeepOpen')}\n${t('cal.createOverlapDates', { dates: skippedDates })}`);
+        } else if (result.createdSessionIds.length > 0) {
           alert(t('findLesson.recurringCreatedKeepOpen'));
         } else {
           alert(t('compSch.recurringLesson'));

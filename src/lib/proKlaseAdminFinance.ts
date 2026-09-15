@@ -1,5 +1,5 @@
 import { orgBaseFromPayerChargedTotal, type OrgFeeProfile } from '@/lib/marketMoney';
-import { isComplimentarySession, sessionClientRevenueEur } from '@/lib/sessionComplimentary';
+import { sessionClientRevenueEur } from '@/lib/sessionComplimentary';
 import {
   PRO_KLASE_STUDENT_NO_SHOW_PAY_EUR,
   PRO_KLASE_TRIAL_PAY_EUR,
@@ -17,6 +17,7 @@ export type ProKlaseAdminSession = {
   paid?: boolean | null;
   price?: number | null;
   is_complimentary?: boolean | null;
+  exclude_from_lesson_count?: boolean | null;
   lesson_package_id?: string | null;
   subjects?: { is_trial?: boolean | null } | null;
 };
@@ -46,7 +47,6 @@ export function proKlaseAccruedTutorCostEur(
   tutorPayRate: number | null | undefined,
 ): number {
   if (isCancelled(session.status)) return 0;
-  if (isComplimentarySession(session)) return 0;
   if (!isPaidLike(session)) return 0;
   if (session.status === 'active') {
     const subjects = normalizeProKlaseSubject(session.subjects);

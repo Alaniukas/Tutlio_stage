@@ -247,10 +247,20 @@ export async function insertSessionRowsInChunks<T extends Record<string, unknown
       .from('sessions')
       .insert(chunk)
       .select(SESSION_INSERT_SELECT);
-    if (error) throw new Error(error.message);
+    if (error) throw new SessionRowsInsertError(error.message, inserted);
     inserted.push(...((data || []) as CreatedSessionRow[]));
   }
   return inserted;
+}
+
+export class SessionRowsInsertError extends Error {
+  readonly insertedRows: CreatedSessionRow[];
+
+  constructor(message: string, insertedRows: CreatedSessionRow[]) {
+    super(message);
+    this.name = 'SessionRowsInsertError';
+    this.insertedRows = [...insertedRows];
+  }
 }
 
 /** Excluding cancelled; only active sessions block the new slot. */
@@ -757,6 +767,15 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
 
     type RecurringTpl = { id: string; student_id: string; firstOccurrence: Date };
     const recurringTemplates: RecurringTpl[] = [];
+    const cleanupRecurringTemplates = async () => {
+      const templateIds = recurringTemplates.map((template) => template.id).filter(Boolean);
+      if (!templateIds.length) return;
+      const { error } = await supabase
+        .from('recurring_individual_sessions')
+        .delete()
+        .in('id', templateIds);
+      if (error) console.error('[OrgSchedule] recurring template cleanup failed:', error);
+    };
 
     for (const dayOfWeek of daysToCreate) {
       let firstOccurrence = new Date(startDate);
@@ -786,7 +805,10 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           })
           .select('id, student_id')
           .single();
-        if (tErr) throw new Error(tErr.message);
+        if (tErr || !template) {
+          await cleanupRecurringTemplates();
+          throw new Error(tErr?.message || 'Failed to create recurring schedule.');
+        }
         if (template) {
           recurringTemplates.push({
             id: template.id,
@@ -920,20 +942,22 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     const existingBusy = await loadTutorBusyRowsInRange(supabase, createTutorId, candidateSlots);
     const freeRows = filterRowsAgainstBusyTutorSlots(sessionsRows, existingBusy);
     if (freeRows.length === 0) {
-      const tplIds = recurringTemplates.map((t) => t.id);
-      if (tplIds.length) {
-        await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
-      }
+      await cleanupRecurringTemplates();
       throw tutorSlotOverlapError(candidateSlots[0]);
     }
     let inserted: CreatedSessionRow[] = [];
     try {
       inserted = await insertSessionRowsInChunks(supabase, freeRows);
     } catch (insErr) {
-      const tplIds = recurringTemplates.map((t) => t.id);
-      if (tplIds.length) {
-        await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
+      const partiallyInserted = insErr instanceof SessionRowsInsertError ? insErr.insertedRows : [];
+      const insertedIds = partiallyInserted.map((row) => row.id).filter(Boolean);
+      if (insertedIds.length) {
+        const { error: cleanupErr } = await supabase.from('sessions').delete().in('id', insertedIds);
+        if (cleanupErr) {
+          console.error('[OrgSchedule] recurring session cleanup failed:', cleanupErr);
+        }
       }
+      await cleanupRecurringTemplates();
       throw insErr;
     }
 
@@ -1229,7 +1253,49 @@ export interface ConvertOrgAdminSessionToRecurringResult {
   recurringSessionId: string;
   createdSessionIds: string[];
   updatedSessionId: string;
+  /** Future occurrences omitted because the tutor already had an active lesson. */
+  skippedOccurrenceStarts: string[];
 }
+
+type SessionAnchorSnapshot = {
+  tutor_id: string;
+  student_id: string;
+  subject_id: string | null;
+  start_time: string;
+  end_time: string;
+  topic: string | null;
+  meeting_link: string | null;
+  price: number | null;
+  paid: boolean;
+  payment_status: string | null;
+  lesson_package_id: string | null;
+  status: string;
+  tutor_comment: string | null;
+  show_comment_to_student: boolean | null;
+  show_comment_to_parent: boolean | null;
+  recurring_session_id: string | null;
+  created_by_role: string | null;
+};
+
+const SESSION_ANCHOR_SNAPSHOT_SELECT = [
+  'tutor_id',
+  'student_id',
+  'subject_id',
+  'start_time',
+  'end_time',
+  'topic',
+  'meeting_link',
+  'price',
+  'paid',
+  'payment_status',
+  'lesson_package_id',
+  'status',
+  'tutor_comment',
+  'show_comment_to_student',
+  'show_comment_to_parent',
+  'recurring_session_id',
+  'created_by_role',
+].join(', ');
 
 /** Pro Klasė: turn a one-off org-admin lesson into a recurring series (anchor row is updated, future rows inserted). */
 export async function convertOrgAdminSessionToRecurring(
@@ -1282,6 +1348,18 @@ export async function convertOrgAdminSessionToRecurring(
     throw new Error('Pasirinkite bent vieną savaitės dieną.');
   }
 
+  const { data: originalAnchorRow, error: anchorReadError } = await supabase
+    .from('sessions')
+    .select(SESSION_ANCHOR_SNAPSHOT_SELECT)
+    .eq('id', sessionId)
+    .maybeSingle();
+  if (anchorReadError) throw new Error(anchorReadError.message);
+  if (!originalAnchorRow) throw new Error('Pamoka nerasta arba nebeturite teisės jos redaguoti.');
+  const originalAnchor = originalAnchorRow as unknown as SessionAnchorSnapshot;
+  if (originalAnchor.recurring_session_id) {
+    throw new Error('Ši pamoka jau priklauso pasikartojančiam grafikui.');
+  }
+
   const durationMs = newEnd.getTime() - newStart.getTime();
   const timeStr = format(newStart, 'HH:mm:ss');
   const endTimeStr = format(newEnd, 'HH:mm:ss');
@@ -1292,6 +1370,15 @@ export async function convertOrgAdminSessionToRecurring(
 
   type RecurringTpl = { id: string; student_id: string; dayOfWeek: number; firstOccurrence: Date };
   const recurringTemplates: RecurringTpl[] = [];
+  const cleanupRecurringTemplates = async (): Promise<string[]> => {
+    const templateIds = recurringTemplates.map((template) => template.id).filter(Boolean);
+    if (!templateIds.length) return [];
+    const { error } = await supabase
+      .from('recurring_individual_sessions')
+      .delete()
+      .in('id', templateIds);
+    return error ? [`templates: ${error.message}`] : [];
+  };
 
   for (const dayOfWeek of daysToCreate) {
     let firstOccurrence = new Date(newStart);
@@ -1320,7 +1407,11 @@ export async function convertOrgAdminSessionToRecurring(
       })
       .select('id, student_id')
       .single();
-    if (tErr) throw new Error(tErr.message);
+    if (tErr || !template) {
+      const cleanupErrors = await cleanupRecurringTemplates();
+      const suffix = cleanupErrors.length ? ` Automatic cleanup failed (${cleanupErrors.join('; ')}).` : '';
+      throw new Error(`${tErr?.message || 'Failed to create recurring schedule.'}${suffix}`);
+    }
     if (template) {
       recurringTemplates.push({
         id: template.id as string,
@@ -1333,7 +1424,10 @@ export async function convertOrgAdminSessionToRecurring(
 
   const anchorTemplate =
     recurringTemplates.find((t) => t.dayOfWeek === anchorDay) ?? recurringTemplates[0];
-  if (!anchorTemplate) throw new Error('Nepavyko sukurti pasikartojančio grafiko.');
+  if (!anchorTemplate) {
+    await cleanupRecurringTemplates();
+    throw new Error('Nepavyko sukurti pasikartojančio grafiko.');
+  }
 
   const updatePayload: Record<string, unknown> = {
     tutor_id: tutorId,
@@ -1354,17 +1448,6 @@ export async function convertOrgAdminSessionToRecurring(
     recurring_session_id: anchorTemplate.id,
     created_by_role: 'org_admin',
   };
-
-  const { error: updateErr } = await supabase.from('sessions').update(updatePayload).eq('id', sessionId);
-  if (updateErr) {
-    const tplIds = recurringTemplates.map((t) => t.id);
-    if (tplIds.length) await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
-    throw new Error(updateErr.message);
-  }
-
-  await consumeAvailabilityForCreatedSessions(supabase, tutorId, [
-    { start_time: newStart.toISOString(), end_time: newEnd.toISOString() },
-  ]);
 
   const { data: studentRow } = await supabase
     .from('students')
@@ -1466,61 +1549,149 @@ export async function convertOrgAdminSessionToRecurring(
     }
   }
 
-  let createdSessionIds: string[] = [];
-  if (sessionsRows.length > 0) {
-    const rollbackConvert = async () => {
-      const tplIds = recurringTemplates.map((t) => t.id);
-      if (tplIds.length) await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
-      await supabase.from('sessions').update({ recurring_session_id: null }).eq('id', sessionId);
-    };
-    const candidateSlots = sessionsRows.map((row) => ({
-      start: new Date(String(row.start_time)),
-      end: new Date(String(row.end_time)),
-    }));
-    const existingBusy = await loadTutorBusyRowsInRange(supabase, tutorId, candidateSlots);
-    const freeRows = filterRowsAgainstBusyTutorSlots(
-      sessionsRows,
-      existingBusy,
-      new Set([sessionId]),
-    );
-    if (freeRows.length === 0) {
-      await rollbackConvert();
-      throw tutorSlotOverlapError(candidateSlots[0]);
+  const originalAnchorPayload: Record<string, unknown> = {
+    tutor_id: originalAnchor.tutor_id,
+    student_id: originalAnchor.student_id,
+    subject_id: originalAnchor.subject_id,
+    start_time: originalAnchor.start_time,
+    end_time: originalAnchor.end_time,
+    topic: originalAnchor.topic,
+    meeting_link: originalAnchor.meeting_link,
+    price: originalAnchor.price,
+    paid: originalAnchor.paid,
+    payment_status: originalAnchor.payment_status,
+    lesson_package_id: originalAnchor.lesson_package_id,
+    status: originalAnchor.status,
+    tutor_comment: originalAnchor.tutor_comment,
+    show_comment_to_student: originalAnchor.show_comment_to_student,
+    show_comment_to_parent: originalAnchor.show_comment_to_parent,
+    recurring_session_id: originalAnchor.recurring_session_id,
+    created_by_role: originalAnchor.created_by_role,
+  };
+  const rollbackConvert = async (
+    insertedRows: CreatedSessionRow[],
+    options: { restoreAnchor?: boolean; restorePackageItem?: boolean } = {},
+  ): Promise<string[]> => {
+    const rollbackErrors: string[] = [];
+    const insertedIds = insertedRows.map((row) => row.id).filter(Boolean);
+    if (insertedIds.length) {
+      const { error } = await supabase.from('sessions').delete().in('id', insertedIds);
+      if (error) rollbackErrors.push(`sessions: ${error.message}`);
     }
-
-    let inserted: CreatedSessionRow[] = [];
-    try {
-      inserted = await insertSessionRowsInChunks(supabase, freeRows);
-    } catch (insErr) {
-      await rollbackConvert();
-      throw insErr;
+    if (options.restoreAnchor) {
+      const { error } = await supabase.from('sessions').update(originalAnchorPayload).eq('id', sessionId);
+      if (error) rollbackErrors.push(`anchor: ${error.message}`);
     }
+    if (options.restorePackageItem && pkg) {
+      const { error } = await supabase
+        .from('lesson_package_items')
+        .update({
+          available_lessons: pkg.item_available_lessons,
+          reserved_lessons: pkg.item_reserved_lessons,
+        })
+        .eq('id', pkg.item_id);
+      if (error) rollbackErrors.push(`package item: ${error.message}`);
+    }
+    rollbackErrors.push(...await cleanupRecurringTemplates());
+    return rollbackErrors;
+  };
+  const failAfterRollback = async (
+    error: unknown,
+    insertedRows: CreatedSessionRow[],
+    options: { restoreAnchor?: boolean; restorePackageItem?: boolean } = {},
+  ): Promise<never> => {
+    const message = error instanceof Error
+      ? error.message
+      : typeof (error as { message?: unknown })?.message === 'string'
+        ? String((error as { message: string }).message)
+        : String(error);
+    const rollbackErrors = await rollbackConvert(insertedRows, options);
+    if (rollbackErrors.length) {
+      throw new Error(`${message} Automatic rollback was incomplete (${rollbackErrors.join('; ')}).`);
+    }
+    throw error instanceof Error ? error : new Error(message);
+  };
 
-    await consumeAvailabilityForCreatedSessions(supabase, tutorId, inserted || []);
-    createdSessionIds = ((inserted || []) as Array<{ id: string }>).map((row) => row.id);
+  const anchorSlot = { start: newStart, end: newEnd };
+  const futureSlots = sessionsRows.map((row) => ({
+    start: new Date(String(row.start_time)),
+    end: new Date(String(row.end_time)),
+  }));
+  let existingBusy: TutorBusyRow[];
+  try {
+    existingBusy = await loadTutorBusyRowsInRange(supabase, tutorId, [anchorSlot, ...futureSlots]);
+  } catch (error) {
+    await failAfterRollback(error, []);
+  }
+  const excludedAnchor = new Set([sessionId]);
+  if (slotConflictsWithBusyRows(anchorSlot, existingBusy!, excludedAnchor)) {
+    await failAfterRollback(tutorSlotOverlapError(anchorSlot), []);
+  }
 
-    if (pkg && !pkg.pool_organization_id) {
-      const usedCount = freeRows.filter((row) => row.lesson_package_id === pkg.id).length;
-      if (usedCount > 0) {
-        await supabase
-          .from('lesson_package_items')
-          .update({
-            available_lessons: pkg.item_available_lessons - usedCount,
-            reserved_lessons: pkg.item_reserved_lessons + usedCount,
-          })
-          .eq('id', pkg.item_id);
-        await supabase
-          .from('lesson_packages')
-          .update({
-            available_lessons: pkg.available_lessons - usedCount,
-            reserved_lessons: (pkg.reserved_lessons || 0) + usedCount,
-          })
-          .eq('id', pkg.id);
+  const freeRows = filterRowsAgainstBusyTutorSlots(sessionsRows, existingBusy!, excludedAnchor);
+  const freeRowSet = new Set(freeRows);
+  const skippedOccurrenceStarts = sessionsRows
+    .filter((row) => !freeRowSet.has(row))
+    .map((row) => row.start_time);
+  if (sessionsRows.length > 0 && freeRows.length === 0) {
+    await failAfterRollback(tutorSlotOverlapError(futureSlots[0]), []);
+  }
+
+  let inserted: CreatedSessionRow[] = [];
+  try {
+    inserted = await insertSessionRowsInChunks(supabase, freeRows);
+  } catch (error) {
+    const partiallyInserted = error instanceof SessionRowsInsertError ? error.insertedRows : [];
+    await failAfterRollback(error, partiallyInserted);
+  }
+
+  const { error: updateErr } = await supabase.from('sessions').update(updatePayload).eq('id', sessionId);
+  if (updateErr) await failAfterRollback(updateErr, inserted);
+
+  if (pkg && !pkg.pool_organization_id) {
+    const usedCount = freeRows.filter((row) => row.lesson_package_id === pkg.id).length;
+    if (usedCount > 0) {
+      const { error: itemErr } = await supabase
+        .from('lesson_package_items')
+        .update({
+          available_lessons: pkg.item_available_lessons - usedCount,
+          reserved_lessons: pkg.item_reserved_lessons + usedCount,
+        })
+        .eq('id', pkg.item_id);
+      if (itemErr) await failAfterRollback(itemErr, inserted, { restoreAnchor: true });
+
+      const { error: packageErr } = await supabase
+        .from('lesson_packages')
+        .update({
+          available_lessons: pkg.available_lessons - usedCount,
+          reserved_lessons: (pkg.reserved_lessons || 0) + usedCount,
+        })
+        .eq('id', pkg.id);
+      if (packageErr) {
+        await failAfterRollback(packageErr, inserted, {
+          restoreAnchor: true,
+          restorePackageItem: true,
+        });
       }
     }
+  }
 
+  try {
+    await consumeAvailabilityForCreatedSessions(supabase, tutorId, [
+      { start_time: newStart.toISOString(), end_time: newEnd.toISOString() },
+      ...inserted,
+    ]);
+  } catch (error) {
+    // The recurring schedule is already committed. Availability is ancillary,
+    // so a read failure must not report the whole conversion as failed and
+    // invite the administrator to retry a conversion that actually succeeded.
+    console.error('[OrgSchedule] availability consumption failed after recurring conversion:', error);
+  }
+  const createdSessionIds = inserted.map((row) => row.id);
+
+  if (inserted.length > 0) {
     const allCreated = ([{ id: sessionId, student_id: studentId, paid, payment_status: paymentStatus, price, start_time: startTime, end_time: endTime }] as CreatedSessionRow[])
-      .concat((inserted || []) as CreatedSessionRow[])
+      .concat(inserted)
       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
     await notifyAfterOrgAdminSessionsCreated(
       supabase,
@@ -1542,5 +1713,6 @@ export async function convertOrgAdminSessionToRecurring(
     recurringSessionId: anchorTemplate.id,
     createdSessionIds,
     updatedSessionId: sessionId,
+    skippedOccurrenceStarts,
   };
 }

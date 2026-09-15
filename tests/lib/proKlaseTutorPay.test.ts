@@ -35,6 +35,35 @@ describe('proKlaseSessionPayEur', () => {
     ).toBe(25);
   });
 
+  it('pays the standard tutor rate when the lesson is complimentary only for the client', () => {
+    expect(
+      proKlaseSessionPayEur(
+        {
+          status: 'completed',
+          price: 0,
+          is_complimentary: true,
+          status_confirmed_at: confirmedAt,
+        },
+        25,
+      ),
+    ).toBe(25);
+  });
+
+  it('keeps the trial tariff when a trial lesson is complimentary for the client', () => {
+    expect(
+      proKlaseSessionPayEur(
+        {
+          status: 'completed',
+          price: 0,
+          is_complimentary: true,
+          subjects: { is_trial: true },
+          status_confirmed_at: confirmedAt,
+        },
+        25,
+      ),
+    ).toBe(PRO_KLASE_TRIAL_PAY_EUR);
+  });
+
   it('returns 0 for completed lesson when tutor rate is 0 (never session.price)', () => {
     expect(
       proKlaseSessionPayEur({ status: 'completed', price: 33, status_confirmed_at: confirmedAt }, 0),
@@ -106,6 +135,20 @@ describe('Pro Klasė outcome confirmation', () => {
     expect(countProKlaseConfirmedCompleted(sessions)).toBe(1);
     expect(countProKlaseConfirmedNoShows(sessions)).toBe(1);
     expect(countProKlaseRealizedSessions(sessions)).toBe(2);
+  });
+
+  it('can hide one administrative duplicate from lesson counts without changing tutor pay', () => {
+    const transferredPaymentRow = {
+      status: 'completed',
+      price: 33,
+      status_confirmed_at: confirmedAt,
+      exclude_from_lesson_count: true,
+    };
+
+    expect(countProKlaseConfirmedCompleted([transferredPaymentRow])).toBe(0);
+    expect(countProKlaseRealizedSessions([transferredPaymentRow])).toBe(0);
+    expect(proKlaseSessionPayEur(transferredPaymentRow, 25)).toBe(25);
+    expect(sumProKlasePayBreakdown([transferredPaymentRow], 25).totalEur).toBe(25);
   });
 
   it('queues ended unmarked lessons, including leftover completed rows', () => {

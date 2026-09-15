@@ -161,7 +161,7 @@ export default function OrgTutorFinanceSummary() {
       if (proKlasePayMode) {
         const { data: sessionRows, error: sessionErr } = await supabase
           .from('sessions')
-          .select('id, status, price, is_complimentary, status_confirmed_at, subjects(is_trial)')
+          .select('id, status, price, is_complimentary, exclude_from_lesson_count, status_confirmed_at, subjects(is_trial)')
           .eq('tutor_id', user.id)
           .in('status', ['completed', 'no_show'])
           .lte('end_time', new Date().toISOString())
@@ -189,7 +189,8 @@ export default function OrgTutorFinanceSummary() {
           adjustmentsEur,
         );
         conductedCount = (sessionRows || []).filter((row) =>
-          Boolean((row as { status_confirmed_at?: string | null }).status_confirmed_at),
+          (row as { exclude_from_lesson_count?: boolean | null }).exclude_from_lesson_count !== true
+            && Boolean((row as { status_confirmed_at?: string | null }).status_confirmed_at),
         ).length;
         if (cancelled) return;
         if (sessionErr) {

@@ -95,6 +95,19 @@ describe('proKlaseAdminFinance', () => {
     expect(sumProKlaseRealizedPaidTutorPayEur(sessions, 25)).toBe(25);
   });
 
+  it('keeps a complimentary lesson free for the client while paying the tutor standard rate', () => {
+    const lesson = paidLesson({
+      status: 'completed',
+      lesson_package_id: null,
+      is_complimentary: true,
+      status_confirmed_at: '2026-09-10T18:00:00Z',
+    });
+
+    expect(standaloneSessionClientPaidEur(lesson)).toBe(0);
+    expect(sumProKlaseRealizedPaidTutorPayEur([lesson], 25)).toBe(25);
+    expect(proKlaseAccruedTutorCostEur(lesson, 25)).toBe(25);
+  });
+
   it('does not realize tutor pay for completed lessons until attendance is marked', () => {
     expect(sumProKlaseRealizedPaidTutorPayEur([
       paidLesson({ status: 'completed', status_confirmed_at: null }),

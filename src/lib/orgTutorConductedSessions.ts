@@ -6,12 +6,20 @@ export function isConductedOrgSession(status: string): boolean {
   return status === 'completed' || status === 'no_show';
 }
 
-export function filterConductedOrgSessions<T extends { status?: string | null }>(
+export function filterConductedOrgSessions<T extends {
+  status?: string | null;
+  exclude_from_lesson_count?: boolean | null;
+}>(
   sessions: T[],
 ): T[] {
   return sessions.filter((s) => isConductedOrgSession(String(s.status || '')));
 }
 
-export function countConductedOrgSessions(sessions: Array<{ status?: string | null }>): number {
-  return filterConductedOrgSessions(sessions).length;
+export function countConductedOrgSessions(sessions: Array<{
+  status?: string | null;
+  exclude_from_lesson_count?: boolean | null;
+}>): number {
+  return sessions.filter(
+    (s) => s.exclude_from_lesson_count !== true && isConductedOrgSession(String(s.status || '')),
+  ).length;
 }

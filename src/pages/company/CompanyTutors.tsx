@@ -1045,7 +1045,7 @@ export default function CompanyTutors() {
 
     const sessions = await fetchAllRows<any>((from, to) => supabase
       .from('sessions')
-      .select('id, tutor_id, class_group_id, start_time, price, status, subject_id, is_complimentary, subjects(is_trial, is_group)')
+      .select('id, tutor_id, class_group_id, start_time, price, status, subject_id, is_complimentary, exclude_from_lesson_count, subjects(is_trial, is_group)')
       .eq('tutor_id', tutor.id)
       .in('status', ['completed', 'no_show'])
       .gte('start_time', oneYearAgo.toISOString())

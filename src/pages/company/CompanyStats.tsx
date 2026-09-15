@@ -160,7 +160,7 @@ export default function CompanyStats() {
     const tutorIds = tutorList.map(t => t.id);
     const sessionQuery = () => supabase
       .from('sessions')
-      .select('id, class_group_id, start_time, end_time, tutor_id, student_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subject_id, student_joined_at, status_confirmed_at, subjects(is_trial, is_group)')
+      .select('id, class_group_id, start_time, end_time, tutor_id, student_id, status, payment_status, price, cancelled_by, paid, is_complimentary, exclude_from_lesson_count, lesson_package_id, subject_id, student_joined_at, status_confirmed_at, subjects(is_trial, is_group)')
       .in('tutor_id', tutorIds)
       .gte('start_time', startIso)
       .lte('start_time', endIso);
@@ -226,6 +226,7 @@ export default function CompanyStats() {
           paid: s.paid,
           price: s.price,
           is_complimentary: s.is_complimentary,
+          exclude_from_lesson_count: s.exclude_from_lesson_count,
           lesson_package_id: s.lesson_package_id,
           subjects: Array.isArray(s.subjects) ? s.subjects[0] : s.subjects,
         }));

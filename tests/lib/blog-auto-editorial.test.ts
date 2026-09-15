@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { extractBlogFaqs, blogFaqJsonLd } from '../../api/_lib/blogFaq.js';
 import { BLOG_LOCALE_WRITE_ORDER, isBlogAutoPublishWeekday } from '../../api/_lib/blogMarkets.js';
-import { missingBlogLocales } from '../../api/_lib/blogAutoGenerate.js';
+import {
+  buildInProgressBlogDraftRow,
+  missingBlogLocales,
+} from '../../api/_lib/blogAutoGenerate.js';
 import { BLOG_SCHEMA_LOCALES, blogLocaleColumn } from '../../src/lib/i18n/localeRelease.js';
 import { BLOG_FAQ_LABEL, BLOG_LOCALE_LANGUAGE, BLOG_MARKET_NOTES } from '../../api/_lib/blogMarkets.js';
 
@@ -58,5 +61,21 @@ describe('missingBlogLocales', () => {
     }
     expect(BLOG_LOCALE_WRITE_ORDER).toHaveLength(BLOG_SCHEMA_LOCALES.length);
     expect(new Set(BLOG_LOCALE_WRITE_ORDER)).toEqual(new Set(BLOG_SCHEMA_LOCALES));
+  });
+});
+
+describe('buildInProgressBlogDraftRow', () => {
+  it('supplies the required legacy Lithuanian title while leaving it incomplete', () => {
+    const row = buildInProgressBlogDraftRow({
+      draftSlug: 'draft-example',
+      tag: 'Parents',
+      keyword: 'when a child needs a private tutor',
+      generationBrief: '{"angle":"example"}',
+      nowIso: '2026-09-16T00:00:00.000Z',
+    });
+
+    expect(row).toHaveProperty('title_lt', '');
+    expect(row.generation_status).toBe('in_progress');
+    expect(missingBlogLocales(row)).toContain('lt');
   });
 });

@@ -63,6 +63,30 @@ export interface RunBlogAutoGenerateResult {
   localesDone?: number;
 }
 
+export function buildInProgressBlogDraftRow(input: {
+  draftSlug: string;
+  tag: string;
+  keyword: string;
+  generationBrief: string;
+  nowIso: string;
+}): Record<string, unknown> {
+  return {
+    slug: input.draftSlug,
+    slug_lt: input.draftSlug,
+    // The legacy Lithuanian title column is NOT NULL without a database default.
+    // Keep the resumable draft incomplete so missingBlogLocales still generates it.
+    title_lt: '',
+    tag: input.tag,
+    status: 'draft',
+    published_at: null,
+    source: 'auto',
+    generation_keyword: input.keyword,
+    generation_status: 'in_progress',
+    generation_brief: input.generationBrief,
+    updated_at: input.nowIso,
+  };
+}
+
 function blogNotifyEmails(): string[] {
   const raw = (process.env.BLOG_NOTIFY_EMAILS || '').trim();
   if (raw) {
@@ -545,18 +569,13 @@ export async function runBlogAutoGenerate(
     );
     const nowIso = new Date().toISOString();
     const draftSlug = `draft-${slugify(keyword).slice(0, 40) || 'topic'}-${Date.now().toString(36)}`;
-    const insertRow: Record<string, unknown> = {
-      slug: draftSlug,
-      slug_lt: draftSlug,
+    const insertRow = buildInProgressBlogDraftRow({
+      draftSlug,
       tag: brief.tag || keywordRow.tag || 'Education',
-      status: 'draft',
-      published_at: null,
-      source: 'auto',
-      generation_keyword: keyword,
-      generation_status: 'in_progress',
-      generation_brief: JSON.stringify(brief),
-      updated_at: nowIso,
-    };
+      keyword,
+      generationBrief: JSON.stringify(brief),
+      nowIso,
+    });
 
     const { data: post, error: insertErr } = await supabase
       .from('blog_posts')

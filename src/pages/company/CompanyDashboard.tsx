@@ -262,7 +262,7 @@ export default function CompanyDashboard() {
 
       const { data: monthSessions } = await supabase
       .from('sessions')
-      .select('price, status, payment_status, paid, start_time, end_time, is_complimentary')
+      .select('price, status, payment_status, paid, start_time, end_time, is_complimentary, exclude_from_lesson_count')
       .in('tutor_id', tutorIds)
       .gte('start_time', monthStart)
       .lte('start_time', monthEnd)
@@ -280,7 +280,7 @@ export default function CompanyDashboard() {
       const twoYearsAgo = subDays(now, 730).toISOString();
       const { data: allSessions } = await supabase
       .from('sessions')
-      .select('price, status, payment_status, paid, is_complimentary')
+      .select('price, status, payment_status, paid, is_complimentary, exclude_from_lesson_count')
       .in('tutor_id', tutorIds)
       .gte('start_time', twoYearsAgo)
       .neq('status', 'cancelled')

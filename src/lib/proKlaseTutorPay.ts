@@ -1,5 +1,3 @@
-import { isComplimentarySession } from '@/lib/sessionComplimentary';
-
 /** Fixed EUR pay for a completed trial lesson (Pro Klasė). */
 export const PRO_KLASE_TRIAL_PAY_EUR = 10;
 
@@ -19,6 +17,12 @@ export type ProKlaseSessionPayInput = {
   price?: number | null;
   is_complimentary?: boolean | null;
   subjects?: { is_trial?: boolean | null } | Array<{ is_trial?: boolean | null }> | null;
+};
+
+type ProKlaseSessionCountInput = {
+  status?: string | null;
+  status_confirmed_at?: string | Date | null;
+  exclude_from_lesson_count?: boolean | null;
 };
 
 export function hasProKlaseOutcomeConfirmation(
@@ -78,18 +82,22 @@ export function isProKlaseRealizedSession(
 }
 
 export function countProKlaseConfirmedCompleted(
-  sessions: Array<{ status?: string | null; status_confirmed_at?: string | Date | null }>,
+  sessions: ProKlaseSessionCountInput[],
 ): number {
   return sessions.filter(
-    (s) => String(s.status || '') === 'completed' && hasProKlaseOutcomeConfirmation(s),
+    (s) => s.exclude_from_lesson_count !== true
+      && String(s.status || '') === 'completed'
+      && hasProKlaseOutcomeConfirmation(s),
   ).length;
 }
 
 export function countProKlaseConfirmedNoShows(
-  sessions: Array<{ status?: string | null; status_confirmed_at?: string | Date | null }>,
+  sessions: ProKlaseSessionCountInput[],
 ): number {
   return sessions.filter(
-    (s) => String(s.status || '') === 'no_show' && hasProKlaseOutcomeConfirmation(s),
+    (s) => s.exclude_from_lesson_count !== true
+      && String(s.status || '') === 'no_show'
+      && hasProKlaseOutcomeConfirmation(s),
   ).length;
 }
 
@@ -98,7 +106,7 @@ export function proKlaseSessionPayEur(
   tutorPayRate: number | null | undefined,
 ): number {
   const normalized = normalizeProKlaseSessionForPay(session);
-  if (isComplimentarySession(normalized)) return 0;
+  // Complimentary is a client-side discount; the tutor still earns the normal rate.
   if (!hasProKlaseOutcomeConfirmation(normalized)) return 0;
   if (normalized.status === 'no_show') return PRO_KLASE_STUDENT_NO_SHOW_PAY_EUR;
   if (normalized.status === 'completed') {
@@ -172,7 +180,9 @@ export function sumProKlaseRealizedPayEur(
 }
 
 export function countProKlaseRealizedSessions(
-  sessions: Array<{ status?: string | null; status_confirmed_at?: string | Date | null }>,
+  sessions: ProKlaseSessionCountInput[],
 ): number {
-  return sessions.filter((s) => isProKlaseRealizedSession(s)).length;
+  return sessions.filter(
+    (s) => s.exclude_from_lesson_count !== true && isProKlaseRealizedSession(s),
+  ).length;
 }

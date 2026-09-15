@@ -545,7 +545,7 @@ Išėję / baigę (`left`, `graduated`) — archyvas (šiukšlinė), ne pagrindi
 | Korep negali | atšaukti (`cancel-session`), trinti (`delete-session`); **ne** gali rankinio „Palikti laisvą laiką“ atšaukiant/perkeliant (`hideProKlaseOrgTutorFreeTime`) — bet **gali** kurti laisvą laiką per kalendoriaus slot drag |
 | Komentarai | privalomi po kiekvienos pamokos; cron `api/proklase-lesson-comment-reminders.ts` |
 | Kompensacinė pamoka | `sessions.is_makeup`, admin create `CompanyTvarkarastis.tsx` |
-| Complimentary (nemokama) | `sessions.is_complimentary` — klientui vis tiek „įvyko“, bet **0 € pajamoms / paketui / mokėtojo S.F.**; API `mark-session-complimentary.ts`, UI `CompanySessions` / `CompanyTvarkarastis` |
+| Complimentary (nemokama) | `sessions.is_complimentary` — klientui vis tiek „įvyko“, bet **0 € pajamoms / paketui / mokėtojo S.F.**; korepetitoriui mokama pagal įprastas atlygio taisykles (bandomoji = 10 €); API `mark-session-complimentary.ts`, UI `CompanySessions` / `CompanyTvarkarastis` |
 | PVM pastaba ant S.F. | `api/_lib/proKlaseInvoice.ts` — `PVM neapmokestinama pagal LR PVMĮ 22 str.` kai Pro Klasė yra pardavėjas |
 | Legal PDF | `src/lib/proKlaseLegal.ts` — `public/legal/proklase-paslaugu-teikimo-salygos.pdf`, `proklase-privatumo-politika.pdf`; tėvų registracijoje privalomas abu checkbox (`parentLegalAcceptanceMissing`) |
 | Neapmokėto paketo redagavimas | `pendingPackageEdit.ts` — 7 d. langas, tik `pending`; API `update-pending-package.ts` (expirina seną Stripe checkout), `resend-package-email.ts`. QA seed: `scripts/seed-proklase-package-edit-qa.mjs` |
@@ -565,7 +565,7 @@ Numatytasis atlygis lieka `profiles.company_commission_percent` (€ / pamoka). 
 
 ### Complimentary pamokos (ne tik Pro Klasė)
 
-Admin gali pažymėti pamoką nemokama (`compSess.markComplimentary`). Klientas / statistika neskaito kainos (`sessionClientRevenueEur()`). Pažymėjus kaip neapmokėtą complimentary nuimamas.
+Admin gali pažymėti pamoką nemokama (`compSess.markComplimentary`). Nemokama reiškia nemokama tik klientui: klientas / pajamų statistika neskaito kainos (`sessionClientRevenueEur()`), o korepetitoriui mokama pagal įprastas atlygio taisykles (pvz., Pro Klasės bandomoji lieka 10 €). Pažymėjus kaip neapmokėtą complimentary nuimamas.
 
 **Failai:** `src/lib/sessionComplimentary.ts`, `src/lib/setSessionComplimentary.ts`, `api/mark-session-complimentary.ts`, migracija `20260819120000_sessions_is_complimentary.sql`.
 

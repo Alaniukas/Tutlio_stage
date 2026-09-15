@@ -25,10 +25,6 @@ function hasOutcomeConfirmation(session: { status_confirmed_at?: string | Date |
   return String(stamp).trim().length > 0;
 }
 
-function isComplimentary(session: { is_complimentary?: boolean | null }): boolean {
-  return session.is_complimentary === true;
-}
-
 export function normalizeProKlaseSubject(
   subjects: ProKlaseSessionPayInput['subjects'],
 ): { is_trial?: boolean | null } | null {
@@ -46,7 +42,7 @@ export function proKlaseSessionPayEur(
   session: ProKlaseSessionPayInput,
   tutorPayRate: number | null | undefined,
 ): number {
-  if (isComplimentary(session)) return 0;
+  // Complimentary is a client-side discount; the tutor still earns the normal rate.
   if (!hasOutcomeConfirmation(session)) return 0;
   const subjects = normalizeProKlaseSubject(session.subjects);
   if (session.status === 'no_show') return PRO_KLASE_STUDENT_NO_SHOW_PAY_EUR;

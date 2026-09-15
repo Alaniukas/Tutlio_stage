@@ -9,6 +9,7 @@ export type OrgDashboardSession = {
   payment_status?: string | null;
   price?: number | null;
   is_complimentary?: boolean | null;
+  exclude_from_lesson_count?: boolean | null;
   end_time?: string | Date | null;
 };
 
@@ -48,7 +49,9 @@ export function orgDashboardMonthMetrics(
     const status = String(session.status || '');
     if (status === 'cancelled' || status === 'canceled') continue;
 
-    if (isOccurredOrgSession(status)) occurredCount += 1;
+    if (session.exclude_from_lesson_count !== true && isOccurredOrgSession(status)) {
+      occurredCount += 1;
+    }
 
     if (status === 'active') {
       const end = session.end_time ? new Date(session.end_time) : null;

@@ -5,6 +5,7 @@ import {
   filterRowsAgainstBusyTutorSlots,
   insertSessionRowsInChunks,
   ORG_ADMIN_SESSION_INSERT_CHUNK,
+  SessionRowsInsertError,
 } from '@/pages/company/orgAdminSessionCreate';
 import { PRO_KLASE_QA_ORG_ID } from '@/lib/marketMoney';
 
@@ -124,7 +125,157 @@ describe('insertSessionRowsInChunks', () => {
     expect(insertSizes).toEqual([ORG_ADMIN_SESSION_INSERT_CHUNK, ORG_ADMIN_SESSION_INSERT_CHUNK, 5]);
     expect(inserted).toHaveLength(45);
   });
+
+  it('keeps the successfully inserted rows on a later chunk error so callers can compensate', async () => {
+    let call = 0;
+    const from = vi.fn(() => ({
+      insert: vi.fn((chunk: Array<{ start_time: string }>) => ({
+        select: vi.fn(async () => {
+          call += 1;
+          if (call === 2) return { data: null, error: { message: 'second chunk failed' } };
+          return {
+            data: chunk.map((row, index) => ({
+              id: `inserted-${index}`,
+              student_id: 'student-1',
+              paid: false,
+              start_time: row.start_time,
+              end_time: row.start_time,
+            })),
+            error: null,
+          };
+        }),
+      })),
+    }));
+    const rows = Array.from({ length: 25 }, (_, index) => ({
+      start_time: new Date(Date.UTC(2026, 8, 1 + index, 13)).toISOString(),
+      end_time: new Date(Date.UTC(2026, 8, 1 + index, 14)).toISOString(),
+    }));
+
+    try {
+      await insertSessionRowsInChunks(
+        { from } as unknown as import('@supabase/supabase-js').SupabaseClient,
+        rows,
+      );
+      throw new Error('Expected the second chunk to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SessionRowsInsertError);
+      expect((error as SessionRowsInsertError).insertedRows).toHaveLength(ORG_ADMIN_SESSION_INSERT_CHUNK);
+    }
+  });
 });
+
+function mockSupabaseForConversionInsertFailure(
+  busyRows: Array<{ id: string; start_time: string; end_time: string }> = [],
+) {
+  const deletedSessionIds: string[][] = [];
+  const deletedTemplateIds: string[][] = [];
+  let anchorUpdates = 0;
+  let sessionInsertCalls = 0;
+  let templateIndex = 0;
+
+  const originalAnchor = {
+    tutor_id: 'tutor-1',
+    student_id: 'student-1',
+    subject_id: 'subj-1',
+    start_time: '2026-09-17T15:00:00.000Z',
+    end_time: '2026-09-17T16:00:00.000Z',
+    topic: 'Original lesson',
+    meeting_link: null,
+    price: 29,
+    paid: true,
+    payment_status: 'paid',
+    lesson_package_id: null,
+    status: 'active',
+    tutor_comment: null,
+    show_comment_to_student: false,
+    show_comment_to_parent: false,
+    recurring_session_id: null,
+    created_by_role: 'org_admin',
+  };
+
+  const from = vi.fn((table: string) => {
+    if (table === 'sessions') {
+      return {
+        select: vi.fn((columns: string) => {
+          if (columns.includes('recurring_session_id')) {
+            return {
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({ data: originalAnchor, error: null })),
+              })),
+            };
+          }
+          const busyChain: any = {};
+          busyChain.eq = vi.fn(() => busyChain);
+          busyChain.lt = vi.fn(() => busyChain);
+          busyChain.gt = vi.fn(async () => ({ data: busyRows, error: null }));
+          return busyChain;
+        }),
+        insert: vi.fn((rows: Array<Record<string, unknown>>) => ({
+          select: vi.fn(async () => {
+            sessionInsertCalls += 1;
+            if (sessionInsertCalls === 2) {
+              return { data: null, error: { message: 'future insert failed' } };
+            }
+            return {
+              data: rows.map((row, index) => ({
+                ...row,
+                id: `future-${index}`,
+              })),
+              error: null,
+            };
+          }),
+        })),
+        update: vi.fn(() => ({
+          eq: vi.fn(async () => {
+            anchorUpdates += 1;
+            return { error: null };
+          }),
+        })),
+        delete: vi.fn(() => ({
+          in: vi.fn(async (_column: string, ids: string[]) => {
+            deletedSessionIds.push(ids);
+            return { error: null };
+          }),
+        })),
+      };
+    }
+    if (table === 'recurring_individual_sessions') {
+      return {
+        insert: vi.fn(() => ({
+          select: vi.fn(() => ({
+            single: vi.fn(async () => {
+              templateIndex += 1;
+              return { data: { id: `template-${templateIndex}`, student_id: 'student-1' }, error: null };
+            }),
+          })),
+        })),
+        delete: vi.fn(() => ({
+          in: vi.fn(async (_column: string, ids: string[]) => {
+            deletedTemplateIds.push(ids);
+            return { error: null };
+          }),
+        })),
+      };
+    }
+    if (table === 'students') {
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle: vi.fn(async () => ({ data: { payment_model: null }, error: null })),
+          })),
+        })),
+      };
+    }
+    throw new Error(`unexpected table ${table}`);
+  });
+
+  return {
+    supabase: { from } as unknown as import('@supabase/supabase-js').SupabaseClient,
+    deletedSessionIds,
+    deletedTemplateIds,
+    anchorUpdates: () => anchorUpdates,
+  };
+}
 
 describe('convertOrgAdminSessionToRecurring', () => {
   const baseInput = {
@@ -167,5 +318,40 @@ describe('convertOrgAdminSessionToRecurring', () => {
         weekdays: [],
       }),
     ).rejects.toThrow(/savaitės dieną/);
+  });
+
+  it('removes partially inserted future rows without mutating the anchor when a later chunk fails', async () => {
+    const mock = mockSupabaseForConversionInsertFailure();
+
+    await expect(convertOrgAdminSessionToRecurring({
+      ...baseInput,
+      supabase: mock.supabase,
+      paid: true,
+      paymentStatus: 'paid',
+      weekdays: [1, 2, 3, 4, 5],
+    })).rejects.toThrow('future insert failed');
+
+    expect(mock.anchorUpdates()).toBe(0);
+    expect(mock.deletedSessionIds.flat()).toHaveLength(ORG_ADMIN_SESSION_INSERT_CHUNK);
+    expect(mock.deletedTemplateIds.flat()).toHaveLength(5);
+  });
+
+  it('rejects an edited anchor collision before inserting or mutating sessions and cleans its template', async () => {
+    const mock = mockSupabaseForConversionInsertFailure([{
+      id: 'other-session',
+      start_time: '2026-09-17T15:30:00.000Z',
+      end_time: '2026-09-17T16:30:00.000Z',
+    }]);
+
+    await expect(convertOrgAdminSessionToRecurring({
+      ...baseInput,
+      supabase: mock.supabase,
+      paid: true,
+      paymentStatus: 'paid',
+    })).rejects.toThrow(/already has a lesson/i);
+
+    expect(mock.anchorUpdates()).toBe(0);
+    expect(mock.deletedSessionIds).toHaveLength(0);
+    expect(mock.deletedTemplateIds.flat()).toEqual(['template-1']);
   });
 });

@@ -49,4 +49,23 @@ describe('orgDashboardMonthMetrics', () => {
     expect(metrics.occurredCount).toBe(1);
     expect(metrics.paidRevenueEur).toBe(0);
   });
+
+  it('keeps transferred payment revenue but excludes its duplicate lesson count', () => {
+    const metrics = orgDashboardMonthMetrics(
+      [
+        {
+          status: 'completed',
+          paid: true,
+          payment_status: 'paid',
+          price: 33,
+          exclude_from_lesson_count: true,
+          end_time: '2026-09-12T14:00:00+03:00',
+        },
+      ],
+      now,
+    );
+
+    expect(metrics.occurredCount).toBe(0);
+    expect(metrics.paidRevenueEur).toBe(33);
+  });
 });

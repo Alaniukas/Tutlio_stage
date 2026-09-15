@@ -472,7 +472,7 @@ async function preloadDashboard(
 
     const { data: monthSessions } = await supabase
       .from('sessions')
-      .select('price, status, payment_status, paid, start_time, end_time, is_complimentary')
+      .select('price, status, payment_status, paid, start_time, end_time, is_complimentary, exclude_from_lesson_count')
       .in('tutor_id', tutorIds)
       .gte('start_time', monthStart)
       .lte('start_time', monthEnd)
@@ -504,7 +504,7 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
     const { startIso, endIso } = normalizeStatsDateRange(defaultRange.start, defaultRange.end);
     const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subject_id, subjects(is_trial)')
+      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, exclude_from_lesson_count, lesson_package_id, subject_id, status_confirmed_at, subjects(is_trial)')
       .in('tutor_id', tutorIds)
       .gte('start_time', startIso)
       .lte('start_time', endIso);
@@ -542,7 +542,9 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
           paid: s.paid,
           price: s.price,
           is_complimentary: s.is_complimentary,
+          exclude_from_lesson_count: s.exclude_from_lesson_count,
           lesson_package_id: s.lesson_package_id,
+          status_confirmed_at: s.status_confirmed_at,
           subjects: Array.isArray(s.subjects) ? s.subjects[0] : s.subjects,
         }));
         const clientPaidEur =
