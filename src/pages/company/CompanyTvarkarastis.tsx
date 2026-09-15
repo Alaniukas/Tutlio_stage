@@ -178,6 +178,10 @@ import StatusBadge from '@/components/StatusBadge';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import FindTutorModal from '@/components/FindTutorModal';
 import RecurrenceFields from '@/components/RecurrenceFields';
+import {
+  orgAdminShowsConvertToRecurringFields,
+  orgAdminShowsCreateRecurrenceFields,
+} from '@/lib/orgAdminRecurrenceUi';
 import { buildNoShowSessionPatch, noShowWhenLabelLt, type NoShowWhen } from '@/lib/noShowWhen';
 import {
   contractedLessonsPerWeek,
@@ -1967,10 +1971,11 @@ export default function CompanyTvarkarastis() {
       }
 
       const canConvertToRecurring =
-        isProKlase &&
-        editMakeRecurring &&
-        !isClassGroupSession &&
-        !selectedEvent.recurring_session_id;
+        orgAdminShowsConvertToRecurringFields({
+          organizationId,
+          isClassGroupSession,
+          alreadyRecurring: Boolean(selectedEvent.recurring_session_id),
+        }) && editMakeRecurring;
 
       if (canConvertToRecurring) {
         const showCommentToParent = canChooseParentComment && editShowCommentToParent;
@@ -3994,7 +3999,7 @@ export default function CompanyTvarkarastis() {
               )}
             </div>
 
-            {isProKlase && (
+            {orgAdminShowsCreateRecurrenceFields() && (
               <RecurrenceFields
                 enabled={createIsRecurring}
                 onEnabledChange={(enabled) => {
@@ -4956,7 +4961,11 @@ export default function CompanyTvarkarastis() {
                 )}
               </div>
 
-              {isProKlase && !isClassGroupSession && !selectedEvent.recurring_session_id && (
+              {orgAdminShowsConvertToRecurringFields({
+                organizationId,
+                isClassGroupSession,
+                alreadyRecurring: Boolean(selectedEvent.recurring_session_id),
+              }) && (
                 <RecurrenceFields
                   enabled={editMakeRecurring}
                   onEnabledChange={setEditMakeRecurring}

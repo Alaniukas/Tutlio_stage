@@ -103,6 +103,19 @@ describe('school_extra_first_lesson_invite', () => {
     expect(html).not.toContain('/parent/');
     expect(html).not.toMatch(/registr/i);
     expect(html).toContain('Paskyros kurti nereikia');
+    expect(html).not.toContain('Grupės įrašai');
+  });
+
+  it('adds the recordings shortcut when the school has the Drive flag', async () => {
+    const { html } = await sendEmail('school_extra_first_lesson_invite', {
+      schoolName: 'Demo Mokykla',
+      studentName: 'Austėja Mockutė',
+      homeworkUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc',
+      recordingsUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc#recordings',
+    });
+    expect(html).toContain('Grupės įrašai');
+    expect(html).toContain('#recordings');
+    expect(html).not.toContain('drive.google.com');
   });
 
   it('falls back to the planned schedule when no lesson row exists yet and explains the 14-day wait', async () => {

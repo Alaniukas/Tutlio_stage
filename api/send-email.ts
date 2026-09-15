@@ -640,10 +640,13 @@ function sessionReminderPayer(d: any, locale: Locale) {
   const homeworkButton = schoolFlow && d.homeworkUrl
     ? `<div style="text-align:center; margin-top:10px;">${outlookEmailButton(String(d.homeworkUrl), 'Namų darbai ir užsiėmimo medžiaga', '#059669', { fontWeight: '600', fontSize: '13px', padding: '11px 24px' })}</div>`
     : '';
+  const recordingsButton = schoolFlow && d.recordingsUrl
+    ? `<div style="text-align:center; margin-top:8px;">${outlookEmailButton(String(d.recordingsUrl), 'Grupės įrašai', '#0f766e', { fontWeight: '600', fontSize: '13px', padding: '11px 24px' })}</div>`
+    : '';
   const cta = schoolFlow
     ? (d.meetingLink
       ? `<div style="text-align:center; margin-top:20px;">${outlookEmailButton(String(d.meetingLink), t(locale, 'em.reminderPayerJoinBtn'), '#4f46e5', { fontWeight: '600', fontSize: '15px', padding: '14px 32px' })}</div>`
-      : '') + homeworkButton
+      : '') + homeworkButton + recordingsButton
     : (sessionId ? `<div style="text-align:center; margin-top:20px;">${outlookEmailButton(calendarUrl, t(locale, 'em.btnOpenLesson'), '#ea580c', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}</div>` : '');
   return {
     subject: t(locale, 'em.reminderPayerSub', { date: d.date, time: d.time }),
@@ -2455,6 +2458,9 @@ function schoolExtraFirstLessonInvite(d: any, locale: Locale) {
   const homeworkButton = d.homeworkUrl
     ? `<div style="text-align:center; margin:6px 0 4px;">${outlookEmailButton(String(d.homeworkUrl), 'Namų darbai ir užsiėmimo medžiaga', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}</div>`
     : '';
+  const recordingsButton = d.recordingsUrl
+    ? `<div style="text-align:center; margin:6px 0 4px;">${outlookEmailButton(String(d.recordingsUrl), 'Grupės įrašai', '#0f766e', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}</div>`
+    : '';
   const rows = hasSession
     ? [
       td('Data', String(d.date)),
@@ -2488,6 +2494,7 @@ function schoolExtraFirstLessonInvite(d: any, locale: Locale) {
         ${waitNote}
         ${joinButton}
         ${homeworkButton}
+        ${recordingsButton}
         <p style="color:#6b7280; font-size:13px; line-height:1.6; margin-top:16px; text-align:center;">
           Prieš kiekvieną kitą užsiėmimą gausite atskirą priminimą su data, laiku ir prisijungimo nuoroda. Užsiėmimų nenumeruojame. Namų darbus ir mokytojo medžiagą rasite pagal aukščiau esančią nuorodą. Paskyros kurti nereikia.
         </p>

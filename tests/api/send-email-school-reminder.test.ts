@@ -94,6 +94,20 @@ describe('session_reminder_payer for school parents', () => {
     expect(html).not.toMatch(/paskyr/i);
     expect(html).not.toMatch(/registr/i);
     expect(html).toContain('Austėja Mockutė');
+    expect(html).not.toContain('Grupės įrašai');
+  });
+
+  it('adds a group recordings button next to homework when the school has recordings', async () => {
+    const { html } = await sendEmail({
+      ...base,
+      schoolFlow: true,
+      homeworkUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc',
+      recordingsUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc#recordings',
+    });
+    expect(html).toContain('Namų darbai ir užsiėmimo medžiaga');
+    expect(html).toContain('Grupės įrašai');
+    expect(html).toContain('#recordings');
+    expect(html).not.toContain('drive.google.com');
   });
 
   it('keeps the portal button for non-school payers', async () => {

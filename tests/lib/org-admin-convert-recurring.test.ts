@@ -1,7 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   assertTutorSlotsFree,
   convertOrgAdminSessionToRecurring,
+  filterRowsAgainstBusyTutorSlots,
+  insertSessionRowsInChunks,
+  ORG_ADMIN_SESSION_INSERT_CHUNK,
 } from '@/pages/company/orgAdminSessionCreate';
 import { PRO_KLASE_QA_ORG_ID } from '@/lib/marketMoney';
 
@@ -54,6 +57,72 @@ describe('assertTutorSlotsFree excludeSessionIds', () => {
         ['anchor-session'],
       ),
     ).rejects.toThrow();
+  });
+});
+
+describe('filterRowsAgainstBusyTutorSlots', () => {
+  it('keeps free weeks and skips only the overlapping occurrence', () => {
+    const rows = [
+      { start_time: '2026-09-15T13:00:00.000Z', end_time: '2026-09-15T14:00:00.000Z', topic: 'week1' },
+      { start_time: '2026-09-22T13:00:00.000Z', end_time: '2026-09-22T14:00:00.000Z', topic: 'week2' },
+    ];
+    const kept = filterRowsAgainstBusyTutorSlots(rows, [
+      {
+        id: 'busy',
+        start_time: '2026-09-15T13:00:00.000Z',
+        end_time: '2026-09-15T14:00:00.000Z',
+      },
+    ]);
+    expect(kept.map((row) => row.topic)).toEqual(['week2']);
+  });
+
+  it('ignores the excluded anchor lesson when converting a series', () => {
+    const rows = [
+      { start_time: '2026-09-22T13:00:00.000Z', end_time: '2026-09-22T14:00:00.000Z' },
+    ];
+    const kept = filterRowsAgainstBusyTutorSlots(
+      rows,
+      [{
+        id: 'anchor-session',
+        start_time: '2026-09-22T13:00:00.000Z',
+        end_time: '2026-09-22T14:00:00.000Z',
+      }],
+      new Set(['anchor-session']),
+    );
+    expect(kept).toHaveLength(1);
+  });
+});
+
+describe('insertSessionRowsInChunks', () => {
+  it('splits a long series into several inserts', async () => {
+    const insertSizes: number[] = [];
+    const from = vi.fn(() => ({
+      insert: vi.fn((chunk: Array<{ start_time: string }>) => {
+        insertSizes.push(chunk.length);
+        return {
+          select: vi.fn(async () => ({
+            data: chunk.map((row, index) => ({
+              id: `id-${insertSizes.length}-${index}`,
+              student_id: 'st',
+              paid: false,
+              start_time: row.start_time,
+              end_time: row.start_time,
+            })),
+            error: null,
+          })),
+        };
+      }),
+    }));
+    const rows = Array.from({ length: 45 }, (_, i) => ({
+      start_time: `2026-09-${String(10 + (i % 20)).padStart(2, '0')}T13:00:00.000Z`,
+      end_time: `2026-09-${String(10 + (i % 20)).padStart(2, '0')}T14:00:00.000Z`,
+    }));
+    const inserted = await insertSessionRowsInChunks(
+      { from } as unknown as import('@supabase/supabase-js').SupabaseClient,
+      rows,
+    );
+    expect(insertSizes).toEqual([ORG_ADMIN_SESSION_INSERT_CHUNK, ORG_ADMIN_SESSION_INSERT_CHUNK, 5]);
+    expect(inserted).toHaveLength(45);
   });
 });
 

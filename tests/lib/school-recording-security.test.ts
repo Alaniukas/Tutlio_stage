@@ -5,8 +5,10 @@ import {
   normalizeDriveByteRange,
 } from '../../api/_lib/googleDriveRecordings';
 import {
+  createSchoolHomeworkRecordingTicket,
   createSchoolRecordingTicket,
   createSchoolRecordingViewerSession,
+  verifySchoolHomeworkRecordingTicket,
   verifySchoolRecordingTicket,
   verifySchoolRecordingViewerSession,
 } from '../../api/_lib/schoolRecordingTicket';
@@ -63,5 +65,27 @@ describe('school recording playback security helpers', () => {
     expect(verifySchoolRecordingViewerSession(playback, { signingSecret, nowMs })).toBeNull();
     expect(verifySchoolRecordingViewerSession(viewer, { signingSecret, nowMs })).toMatchObject({ userId: 'user-1' });
     expect(verifySchoolRecordingTicket(viewer, { signingSecret, nowMs })).toBeNull();
+  });
+
+  it('signs homework playback against the student row and does not accept a login ticket in its place', async () => {
+    const signingSecret = 'test-secret-that-is-not-used-outside-tests';
+    const nowMs = Date.parse('2026-09-11T12:00:00Z');
+    const homework = createSchoolHomeworkRecordingTicket(
+      { studentId: 'student-row', groupId: 'group-1', fileId: 'file-1' },
+      { signingSecret, nowMs, ttlSeconds: 60 },
+    );
+    const login = createSchoolRecordingTicket(
+      { userId: 'user-1', groupId: 'group-1', fileId: 'file-1' },
+      { signingSecret, nowMs },
+    );
+
+    expect(verifySchoolHomeworkRecordingTicket(homework, { signingSecret, nowMs })).toMatchObject({
+      studentId: 'student-row',
+      groupId: 'group-1',
+      fileId: 'file-1',
+    });
+    expect(verifySchoolRecordingTicket(homework, { signingSecret, nowMs })).toBeNull();
+    expect(verifySchoolHomeworkRecordingTicket(login, { signingSecret, nowMs })).toBeNull();
+    expect(verifySchoolHomeworkRecordingTicket(homework, { signingSecret, nowMs: nowMs + 61_000 })).toBeNull();
   });
 });

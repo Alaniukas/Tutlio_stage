@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Save, Trash2, Video } from 'lucide-react';
+import { Loader2, RefreshCw, Save, Trash2, Video } from 'lucide-react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,6 +34,7 @@ type RecordingGroup = {
   driveFolderId?: string;
   driveFolderName?: string | null;
   loadError?: string | null;
+  recordingsPending?: boolean;
   recordings: Recording[];
 };
 
@@ -187,6 +188,7 @@ export default function SchoolLessonRecordings() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingGroupId, setSavingGroupId] = useState<string | null>(null);
+  const [playbackGroupId, setPlaybackGroupId] = useState('');
   const [folderInputs, setFolderInputs] = useState<Record<string, string>>({});
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   const [silentRefreshing, setSilentRefreshing] = useState(false);
@@ -219,9 +221,59 @@ export default function SchoolLessonRecordings() {
     }
   }, [endpoint, t]);
 
+  const loadGroupVideos = useCallback(async (groupId: string) => {
+    if (!groupId) return;
+    try {
+      const headers = await authHeaders();
+      const url = `${endpoint}${endpoint.includes('?') ? '&' : '?'}groupId=${encodeURIComponent(groupId)}`;
+      const response = await fetch(url, { headers });
+      const payload = await response.json() as RecordingsResponse;
+      if (!response.ok) throw new Error(payload.error || t('school.recordings.error'));
+      const loaded = (payload.groups || []).find((group) => group.id === groupId);
+      if (!loaded) return;
+      setData((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          groups: current.groups.map((group) => (
+            group.id === groupId
+              ? { ...group, ...loaded, recordingsPending: false }
+              : group
+          )),
+        };
+      });
+      setLastFetchedAt(new Date());
+    } catch (loadError) {
+      setData((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          groups: current.groups.map((group) => (
+            group.id === groupId
+              ? { ...group, recordingsPending: false, loadError: (loadError as Error)?.message || t('school.recordings.error') }
+              : group
+          )),
+        };
+      });
+    }
+  }, [endpoint, t]);
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!data?.groups.length) return;
+    setPlaybackGroupId((current) => {
+      if (current && data.groups.some((group) => group.id === current)) return current;
+      return (data.groups.find((group) => group.configured) || data.groups[0])?.id || '';
+    });
+  }, [data]);
+
+  useEffect(() => {
+    const group = data?.groups.find((row) => row.id === playbackGroupId);
+    if (group?.recordingsPending) void loadGroupVideos(group.id);
+  }, [data, playbackGroupId, loadGroupVideos]);
 
   useEffect(() => {
     const poll = window.setInterval(() => void load({ silent: true }), 5 * 60 * 1000);
@@ -316,7 +368,25 @@ export default function SchoolLessonRecordings() {
         </div>
       ) : (
         <div className="space-y-5">
-          {(data?.groups || []).map((group) => (
+          {!data?.canManage && (data?.groups || []).length > 1 && (
+            <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 space-y-1.5">
+              <Label>{t('school.recordings.pickGroup')}</Label>
+              <Select value={playbackGroupId} onValueChange={setPlaybackGroupId}>
+                <SelectTrigger className="w-full sm:max-w-xl">
+                  <SelectValue placeholder={t('school.recordings.pickGroup')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {(data?.groups || []).map((group) => (
+                    <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {(data?.canManage
+            ? (data?.groups || [])
+            : (data?.groups || []).filter((group) => group.id === playbackGroupId || (data?.groups || []).length === 1)
+          ).map((group) => (
             <section key={group.id} className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
               <div className="p-4 sm:p-5 border-b border-gray-100">
                 <h2 className="text-lg font-semibold text-gray-900">{group.name}</h2>
@@ -359,17 +429,31 @@ export default function SchoolLessonRecordings() {
                         {t('school.recordings.connectedFolder')}: {group.driveFolderName}
                       </p>
                     )}
+                    {group.configured && (
+                      <Button
+                        type="button"
+                        variant={playbackGroupId === group.id ? 'default' : 'outline'}
+                        className="mt-3"
+                        onClick={() => setPlaybackGroupId(group.id)}
+                      >
+                        {t('school.recordings.watch')}
+                      </Button>
+                    )}
                   </div>
                 )}
                 {!data?.canManage && !group.configured && (
                   <p className="mt-2 text-sm text-gray-500">{t('school.recordings.notConfigured')}</p>
                 )}
-                {group.loadError && (
+                {group.id === playbackGroupId && group.loadError && (
                   <p role="alert" className="mt-2 text-sm text-red-600">{group.loadError}</p>
                 )}
               </div>
 
-              {group.recordings.length > 0 ? (
+              {group.id !== playbackGroupId ? null : group.recordingsPending ? (
+                <p className="p-5 text-sm text-gray-500 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}
+                </p>
+              ) : group.recordings.length > 0 ? (
                 <GroupRecordingsList
                   recordings={group.recordings}
                   locale={locale}

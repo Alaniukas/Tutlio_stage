@@ -56,4 +56,24 @@ describe('organization identity pricing', () => {
     const refreshed = await fetchOrgStudentDynamicPrice(db as any, child.id);
     expect(refreshed).toEqual({ price: 27, lessonsPerWeek: 2, studentIds: ['a', 'b'] });
   });
+  it('uses the tutor organization when the student row was never stamped', async () => {
+    const unstamped = { ...child, organization_id: null as string | null, tutor_id: 'tutor-1' };
+    const db = { from(table: string) {
+      const query: any = {
+        select: () => query, eq: () => query, is: () => query, in: () => query,
+        single: async () => ({ data: unstamped, error: null }),
+        maybeSingle: async () => ({ data: { organization_id: child.organization_id }, error: null }),
+        then(resolve: any) {
+          return Promise.resolve({
+            data: table === 'students' ? [child, otherTutor] : table === 'organization_dynamic_pricing' ? rules : templates,
+            error: null,
+          }).then(resolve);
+        },
+      };
+      return query;
+    } };
+    await expect(fetchOrgStudentDynamicPrice(db as any, unstamped.id)).resolves.toEqual({
+      price: 27, lessonsPerWeek: 2, studentIds: ['a', 'b'],
+    });
+  });
 });

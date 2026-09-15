@@ -76,14 +76,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const mappingByGroup = new Map(mappings.map((mapping) => [mapping.group_id, mapping]));
+    const requestedGroupId = firstQueryValue(req.query?.groupId);
+    if (requestedGroupId && !access.groups.some((group) => group.id === requestedGroupId)) {
+      return res.status(404).json({ error: 'Grupė nerasta.' });
+    }
     const groups = await Promise.all(access.groups.map(async (group) => {
       const mapping = mappingByGroup.get(group.id);
       const base = publicGroup(group, mapping);
+      const manageFields = access.canManage ? {
+        driveFolderId: mapping?.drive_folder_id || '',
+        driveFolderName: mapping?.drive_folder_name || null,
+      } : {};
       if (!mapping) {
         return {
           ...base,
-          ...(access.canManage ? { driveFolderId: '', driveFolderName: null } : {}),
+          ...manageFields,
           recordings: [],
+          recordingsPending: false,
+        };
+      }
+      if (!requestedGroupId || group.id !== requestedGroupId) {
+        return {
+          ...base,
+          ...(access.canManage ? {
+            driveFolderId: mapping.drive_folder_id,
+            driveFolderName: mapping.drive_folder_name,
+          } : {}),
+          recordings: [],
+          recordingsPending: true,
         };
       }
       try {
@@ -110,6 +130,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             };
           }),
           loadError: null,
+          recordingsPending: false,
         };
       } catch (error) {
         console.error('[school-recordings] Drive list failed', group.id, (error as Error)?.message);
@@ -123,6 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           loadError: access.canManage
             ? 'Nepavyko perskaityti šio Drive aplanko. Patikrinkite, ar jis bendrinamas su tarnybine paskyra.'
             : 'Įrašai laikinai nepasiekiami.',
+          recordingsPending: false,
         };
       }
     }));

@@ -7,8 +7,12 @@ import {
   isRecordingWithinRetention,
   normalizeDriveByteRange,
 } from './_lib/googleDriveRecordings.js';
-import { resolveRecordingViewerAccess } from './_lib/schoolRecordingAccess.js';
 import {
+  resolveHomeworkRecordingGroup,
+  resolveRecordingViewerAccess,
+} from './_lib/schoolRecordingAccess.js';
+import {
+  verifySchoolHomeworkRecordingTicket,
   verifySchoolRecordingTicket,
   verifySchoolRecordingViewerSession,
 } from './_lib/schoolRecordingTicket.js';
@@ -38,22 +42,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
   res.setHeader('X-Content-Type-Options', 'nosniff');
 
-  const ticket = verifySchoolRecordingTicket(firstQueryValue(req.query?.t));
-  if (!ticket) return res.status(401).json({ error: 'Įrašo nuoroda nebegalioja.' });
-  const viewerSession = verifySchoolRecordingViewerSession(
-    recordingViewerCookie(typeof req.headers.cookie === 'string' ? req.headers.cookie : undefined),
-  );
-  if (!viewerSession || viewerSession.userId !== ticket.userId) {
-    return res.status(401).json({ error: 'Atidarykite įrašą prisijungę prie Tutlio.' });
+  const rawTicket = firstQueryValue(req.query?.t);
+  const homeworkTicket = verifySchoolHomeworkRecordingTicket(rawTicket);
+  const loginTicket = homeworkTicket ? null : verifySchoolRecordingTicket(rawTicket);
+  if (!homeworkTicket && !loginTicket) {
+    return res.status(401).json({ error: 'Įrašo nuoroda nebegalioja.' });
+  }
+
+  if (loginTicket) {
+    const viewerSession = verifySchoolRecordingViewerSession(
+      recordingViewerCookie(typeof req.headers.cookie === 'string' ? req.headers.cookie : undefined),
+    );
+    if (!viewerSession || viewerSession.userId !== loginTicket.userId) {
+      return res.status(401).json({ error: 'Atidarykite įrašą prisijungę prie Tutlio.' });
+    }
   }
 
   const supabase = serviceSupabase();
   try {
     // Re-check current relationships on every media request. Removing a
     // member, teacher, folder mapping, or feature flag revokes the next range.
-    const access = await resolveRecordingViewerAccess(supabase, ticket.userId);
-    const group = access.groups.find((candidate) => candidate.id === ticket.groupId);
+    const group = homeworkTicket
+      ? await resolveHomeworkRecordingGroup(supabase, homeworkTicket.studentId, homeworkTicket.groupId)
+      : (await resolveRecordingViewerAccess(supabase, loginTicket!.userId))
+        .groups.find((candidate) => candidate.id === loginTicket!.groupId) || null;
     if (!group) return res.status(403).json({ error: 'Prieiga prie šio įrašo neleidžiama.' });
+    const fileId = (homeworkTicket || loginTicket)!.fileId;
 
     const { data: mapping, error: mappingError } = await supabase
       .from('school_recording_drive_folders')
@@ -65,7 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'Įrašo aplankas nerastas.' });
     }
 
-    const file = await getDriveFileMetadata(ticket.fileId);
+    const file = await getDriveFileMetadata(fileId);
     if (
       !file.mimeType.startsWith('video/')
       || !file.canDownload

@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   verifyTicket: vi.fn(),
   verifyViewerSession: vi.fn(),
+  verifyHomeworkTicket: vi.fn(),
   resolveAccess: vi.fn(),
+  resolveHomeworkGroup: vi.fn(),
   getMetadata: vi.fn(),
   fetchRange: vi.fn(),
   mapping: { drive_folder_id: 'folder-allowed' } as Record<string, unknown> | null,
@@ -12,9 +14,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../api/_lib/schoolRecordingTicket.js', () => ({
   verifySchoolRecordingTicket: mocks.verifyTicket,
   verifySchoolRecordingViewerSession: mocks.verifyViewerSession,
+  verifySchoolHomeworkRecordingTicket: mocks.verifyHomeworkTicket,
 }));
 vi.mock('../../api/_lib/schoolRecordingAccess.js', () => ({
   resolveRecordingViewerAccess: mocks.resolveAccess,
+  resolveHomeworkRecordingGroup: mocks.resolveHomeworkGroup,
 }));
 vi.mock('../../api/_lib/googleDriveRecordings.js', () => ({
   getDriveFileMetadata: mocks.getMetadata,
@@ -63,6 +67,11 @@ describe('GET /api/school-lesson-recording-stream', () => {
     mocks.verifyViewerSession.mockReset().mockReturnValue({
       userId: 'student-user',
       expiresAt: 9999999999,
+    });
+    mocks.verifyHomeworkTicket.mockReset().mockReturnValue(null);
+    mocks.resolveHomeworkGroup.mockReset().mockResolvedValue({
+      id: 'group-a',
+      organizationId: 'org-a',
     });
     mocks.resolveAccess.mockReset().mockResolvedValue({
       groups: [{ id: 'group-a', organizationId: 'org-a', name: 'A', tutorId: 'teacher-a' }],
@@ -135,5 +144,36 @@ describe('GET /api/school-lesson-recording-stream', () => {
       },
     });
     expect(mocks.fetchRange).not.toHaveBeenCalled();
+  });
+
+  it('lets a homework HMAC ticket stream without a Tutlio login cookie', async () => {
+    mocks.verifyHomeworkTicket.mockReturnValue({
+      studentId: 'student-row',
+      groupId: 'group-a',
+      fileId: 'file-a',
+      expiresAt: 9999999999,
+    });
+    const res = mockRes();
+    await handler({ method: 'HEAD', query: { t: 'homework' }, headers: {} } as any, res);
+
+    expect(res.getResult().statusCode).toBe(206);
+    expect(mocks.verifyViewerSession).not.toHaveBeenCalled();
+    expect(mocks.resolveAccess).not.toHaveBeenCalled();
+    expect(mocks.resolveHomeworkGroup).toHaveBeenCalledWith(expect.anything(), 'student-row', 'group-a');
+  });
+
+  it('revokes a homework ticket after the student leaves the group', async () => {
+    mocks.verifyHomeworkTicket.mockReturnValue({
+      studentId: 'student-row',
+      groupId: 'group-a',
+      fileId: 'file-a',
+      expiresAt: 9999999999,
+    });
+    mocks.resolveHomeworkGroup.mockResolvedValue(null);
+    const res = mockRes();
+    await handler({ method: 'GET', query: { t: 'homework' }, headers: {} } as any, res);
+
+    expect(res.getResult().statusCode).toBe(403);
+    expect(mocks.getMetadata).not.toHaveBeenCalled();
   });
 });

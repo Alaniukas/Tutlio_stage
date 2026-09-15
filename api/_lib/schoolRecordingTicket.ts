@@ -7,6 +7,14 @@ export interface SchoolRecordingTicket {
   expiresAt: number;
 }
 
+/** Public homework page: student row, not a Tutlio login. */
+export interface SchoolHomeworkRecordingTicket {
+  studentId: string;
+  groupId: string;
+  fileId: string;
+  expiresAt: number;
+}
+
 export interface SchoolRecordingViewerSession {
   userId: string;
   expiresAt: number;
@@ -81,6 +89,41 @@ export function verifySchoolRecordingTicket(
       || parsed.expiresAt <= Math.floor((options.nowMs ?? Date.now()) / 1000)
   ) return null;
   return parsed as unknown as SchoolRecordingTicket;
+}
+
+export function createSchoolHomeworkRecordingTicket(
+  values: Omit<SchoolHomeworkRecordingTicket, 'expiresAt'>,
+  options: { nowMs?: number; ttlSeconds?: number; signingSecret?: string } = {},
+): string {
+  const signingSecret = options.signingSecret ?? secret();
+  if (!signingSecret) throw new Error('Missing SCHOOL_RECORDING_STREAM_SECRET');
+  const ttlSeconds = Math.min(
+    MAX_TTL_SECONDS,
+    Math.max(60, options.ttlSeconds ?? DEFAULT_TTL_SECONDS),
+  );
+  return encodeSignedPayload({
+    purpose: 'recording-homework',
+    ...values,
+    expiresAt: Math.floor((options.nowMs ?? Date.now()) / 1000) + ttlSeconds,
+  }, signingSecret);
+}
+
+export function verifySchoolHomeworkRecordingTicket(
+  token: string,
+  options: { nowMs?: number; signingSecret?: string } = {},
+): SchoolHomeworkRecordingTicket | null {
+  const signingSecret = options.signingSecret ?? secret();
+  const parsed = decodeSignedPayload(token, signingSecret);
+  if (
+    !parsed
+    || parsed.purpose !== 'recording-homework'
+    || typeof parsed.studentId !== 'string'
+    || typeof parsed.groupId !== 'string'
+    || typeof parsed.fileId !== 'string'
+    || typeof parsed.expiresAt !== 'number'
+    || parsed.expiresAt <= Math.floor((options.nowMs ?? Date.now()) / 1000)
+  ) return null;
+  return parsed as unknown as SchoolHomeworkRecordingTicket;
 }
 
 export function createSchoolRecordingViewerSession(

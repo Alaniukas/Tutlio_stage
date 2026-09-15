@@ -42,6 +42,12 @@ import { parseOrgTrialPolicy } from '@/lib/orgTrialPolicy';
 import { Checkbox } from '@/components/ui/checkbox';
 import { parseEmailOptOutList, toggleEmailOptOut, type EmailOptOutKey } from '@/lib/emailNotificationOptOut';
 import {
+  isParentNotificationEnabled,
+  parseParentNotificationOptOut,
+  setParentNotificationEnabled,
+  type ParentNotificationKey,
+} from '@/lib/parentNotificationPreferences';
+import {
   resolveDefaultTutorPayForSave,
   tutorIdsUsingPreviousDefaultPay,
 } from '@/lib/orgTutorDefaultPay';
@@ -161,6 +167,7 @@ export default function CompanySettings() {
   const [contactEmail, setContactEmail] = useState<string>(sc?.contactEmail ?? '');
   const [publicName, setPublicName] = useState<string>(sc?.publicName ?? '');
   const [adminEmailOptOut, setAdminEmailOptOut] = useState<EmailOptOutKey[]>([]);
+  const [parentEmailOptOut, setParentEmailOptOut] = useState<ParentNotificationKey[]>([]);
   const [orgLocale, setOrgLocale] = useState<string>(sc?.orgLocale ?? '');
 
   useEffect(() => { void fetchSettings({ silent: Boolean(sc) }); }, []);
@@ -243,6 +250,7 @@ export default function CompanySettings() {
       const fpn = featObj['public_name'];
       if (typeof fpn === 'string') nextPublicName = fpn.trim();
       setAdminEmailOptOut(parseEmailOptOutList(featObj['admin_email_opt_out']));
+      setParentEmailOptOut(parseParentNotificationOptOut(featObj['parent_email_opt_out']));
       setEnableManualStudentPayments(
         featObj['manual_payments'] === true || featObj['enable_manual_student_payments'] === true,
       );
@@ -795,6 +803,7 @@ export default function CompanySettings() {
       contact_email: contactEmail.trim(),
       public_name: publicName.trim(),
       admin_email_opt_out: adminEmailOptOut,
+      parent_email_opt_out: parentEmailOptOut,
     };
 
     const { data: savedOrg, error } = await supabase
@@ -1031,6 +1040,28 @@ export default function CompanySettings() {
                 />
                 <span className="text-sm text-gray-700">{t('compSet.emailOptOutPaymentDeadline')}</span>
               </label>
+            </div>
+            <div className="pt-3 space-y-2 border-t border-gray-100">
+              <p className="text-sm font-medium text-gray-900">{t('compSet.parentNotificationsTitle')}</p>
+              <p className="text-xs text-gray-500">{t('compSet.parentNotificationsDesc')}</p>
+              {([
+                ['lesson_reminders', 'compSet.parentNotifyLessonReminders'],
+                ['lesson_updates', 'compSet.parentNotifyLessonUpdates'],
+                ['attendance_updates', 'compSet.parentNotifyAttendanceUpdates'],
+                ['payment_reminders', 'compSet.parentNotifyPaymentReminders'],
+              ] as const).map(([key, labelKey]) => (
+                <label key={key} className="flex items-start gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={isParentNotificationEnabled(parentEmailOptOut, key)}
+                    onChange={() => setParentEmailOptOut((prev) => setParentNotificationEnabled(
+                      prev,
+                      key,
+                      !isParentNotificationEnabled(prev, key),
+                    ))}
+                  />
+                  <span className="text-sm text-gray-700">{t(labelKey)}</span>
+                </label>
+              ))}
             </div>
           </div>
 

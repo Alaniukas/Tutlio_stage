@@ -30,6 +30,7 @@ import { buildNoShowSessionPatch, defaultNoShowWhenForNow } from '@/lib/noShowWh
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
+import { orgDashboardMonthMetrics } from '@/lib/orgDashboardMetrics';
 
 interface StatCard {
   label: string;
@@ -88,8 +89,11 @@ function attendanceAttentionSummary(
   manualConfirmationRequired = false,
 ): string {
   const info = deriveAttendance(session);
-  if (manualConfirmationRequired && !session.status_confirmed_at && info.flagged) {
-    return t('att.unconfirmed');
+  if (manualConfirmationRequired && !session.status_confirmed_at) {
+    const endMs = session.end_time ? Date.parse(String(session.end_time)) : NaN;
+    if (Number.isFinite(endMs) && endMs <= Date.now()) {
+      return t('att.unconfirmed');
+    }
   }
   const time = (iso: string | null | undefined) =>
     iso ? new Date(iso).toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -257,41 +261,31 @@ export default function CompanyDashboard() {
 
       const { data: monthSessions } = await supabase
       .from('sessions')
-      .select('price, status, payment_status, start_time, end_time, is_complimentary')
+      .select('price, status, payment_status, paid, start_time, end_time, is_complimentary')
       .in('tutor_id', tutorIds)
       .gte('start_time', monthStart)
       .lte('start_time', monthEnd)
       .neq('status', 'cancelled')
-      .limit(1000);
+      .limit(5000);
 
       const now = new Date();
       const next7days = addDays(now, 7);
 
-      const isPaid = (s: any) => s.paid || ['paid', 'confirmed'].includes(s.payment_status);
-      const billablePrice = (s: any) => (s.is_complimentary === true ? 0 : Number(s.price || 0));
-      const completed = (monthSessions || []).filter((s) => s.status === 'completed' || isPaid(s));
-      const upcoming = (monthSessions || []).filter(
-      (s) =>
-        s.status === 'active' &&
-        isAfter(new Date(s.end_time), now) &&
-        isBefore(new Date(s.start_time), next7days)
-    );
-      setSessionsThisMonth(completed.length);
-      setUpcomingSessions(upcoming.length);
-      setEarningsThisMonth(completed.reduce((sum, s) => sum + billablePrice(s), 0));
+      const monthMetrics = orgDashboardMonthMetrics(monthSessions || [], now);
+      setSessionsThisMonth(monthMetrics.occurredCount);
+      setUpcomingSessions(monthMetrics.plannedCount);
+      setEarningsThisMonth(monthMetrics.paidRevenueEur);
 
       const twoYearsAgo = subDays(now, 730).toISOString();
       const { data: allSessions } = await supabase
       .from('sessions')
-      .select('price, status, payment_status, is_complimentary')
+      .select('price, status, payment_status, paid, is_complimentary')
       .in('tutor_id', tutorIds)
       .gte('start_time', twoYearsAgo)
       .neq('status', 'cancelled')
       .limit(5000);
-      const totalPaid = (allSessions || []).filter(
-      (s: any) => s.status === 'completed' || ['paid', 'confirmed'].includes(s.payment_status)
-      );
-      setEarningsTotal(totalPaid.reduce((sum: number, s: any) => sum + (s.is_complimentary === true ? 0 : Number(s.price || 0)), 0));
+      const lifetimeMetrics = orgDashboardMonthMetrics(allSessions || [], now);
+      setEarningsTotal(lifetimeMetrics.paidRevenueEur);
 
       const { data: sessionsData } = await supabase
       .from('sessions')
@@ -419,10 +413,10 @@ export default function CompanyDashboard() {
       setUpcomingList(upcomingFiltered);
       setAttentionList(attentionFiltered);
       setCancelledList(cancelledFiltered);
-      cacheSessionsMonth = completed.length;
-      cacheUpcomingCount = upcoming.length;
-      cacheEarningsMonth = completed.reduce((sum: number, s: any) => sum + (s.is_complimentary === true ? 0 : Number(s.price || 0)), 0);
-      cacheEarningsTotal = totalPaid.reduce((sum: number, s: any) => sum + (s.is_complimentary === true ? 0 : Number(s.price || 0)), 0);
+      cacheSessionsMonth = monthMetrics.occurredCount;
+      cacheUpcomingCount = monthMetrics.plannedCount;
+      cacheEarningsMonth = monthMetrics.paidRevenueEur;
+      cacheEarningsTotal = lifetimeMetrics.paidRevenueEur;
       cacheUpcomingList = upcomingFiltered;
       cacheAttentionList = attentionFiltered;
       cacheCancelledList = cancelledFiltered;

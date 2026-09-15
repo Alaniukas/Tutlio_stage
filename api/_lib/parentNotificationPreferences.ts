@@ -1,7 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   parentNotificationKeyForEmailType,
+  parseOrgParentNotificationOptOut,
   parseParentNotificationOptOut,
+  type ParentNotificationKey,
 } from '../../src/lib/parentNotificationPreferences.js';
 
 function normalizedSingleRecipient(to: unknown): string | null {
@@ -10,10 +12,25 @@ function normalizedSingleRecipient(to: unknown): string | null {
   return email && email.includes('@') ? email : null;
 }
 
+async function orgParentOptOut(
+  supabase: SupabaseClient,
+  payload?: Record<string, unknown> | null,
+): Promise<ParentNotificationKey[]> {
+  const orgId = String(payload?.organizationId || payload?.organization_id || '').trim();
+  if (!orgId) return [];
+  const { data, error } = await supabase
+    .from('organizations')
+    .select('features')
+    .eq('id', orgId)
+    .maybeSingle();
+  if (error || !data) return [];
+  return parseOrgParentNotificationOptOut((data as { features?: unknown }).features);
+}
+
 /**
- * Registered parents can opt out of optional email/push categories. A missing
- * preference row or a database error fails open so operational mail is not
- * accidentally lost during a migration or outage.
+ * Org admins can disable a parent-email category for everyone. Registered
+ * parents can still opt out of the remaining categories. A missing preference
+ * row or a database error fails open so operational mail is not lost.
  */
 export async function shouldSkipParentNotification(
   supabase: SupabaseClient,
@@ -24,6 +41,9 @@ export async function shouldSkipParentNotification(
   const key = parentNotificationKeyForEmailType(emailType, payload);
   const email = normalizedSingleRecipient(to);
   if (!key || !email) return false;
+
+  const orgOptOut = await orgParentOptOut(supabase, payload);
+  if (orgOptOut.includes(key)) return true;
 
   const { data, error } = await supabase
     .from('parent_profiles')
