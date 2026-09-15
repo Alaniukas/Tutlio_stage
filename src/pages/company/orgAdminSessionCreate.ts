@@ -7,7 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendEmail } from '@/lib/email';
 import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
 import { sessionCommentDeliveryRecipients } from '@/lib/sessionCommentDelivery';
-import { isManoKorepetitoriusOrg, isMoksloVaisiaiOrg } from '@/lib/marketMoney';
+import { isManoKorepetitoriusOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
 import {
   countNonCancelledSessionsForPair,
   isFirstLessonForStudentTutorPair,
@@ -163,6 +163,7 @@ export async function assertTutorSlotsFree(
   supabase: SupabaseClient,
   tutorId: string,
   slots: Array<{ start: Date; end: Date }>,
+  excludeSessionIds: string[] = [],
 ): Promise<void> {
   const uniqueSlots = new Map<string, { start: Date; end: Date }>();
   for (const slot of slots) {
@@ -183,8 +184,10 @@ export async function assertTutorSlotsFree(
     .gt('end_time', earliest.toISOString());
   if (error) throw new Error(error.message);
 
+  const excluded = new Set(excludeSessionIds.filter(Boolean));
   for (const slot of slotList) {
     const conflict = (existingBusy || []).some((row) => {
+      if (excluded.has(String(row.id))) return false;
       const rowStart = new Date(row.start_time as string);
       const rowEnd = new Date(row.end_time as string);
       return rowStart < slot.end && slot.start < rowEnd;
@@ -1109,5 +1112,349 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       .slice()
       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
       .map((row) => row.id),
+  };
+}
+
+export type ConvertOrgAdminSessionToRecurringInput = {
+  supabase: SupabaseClient;
+  organizationId: string;
+  sessionId: string;
+  tutorId: string;
+  studentId: string;
+  subjectId: string | null;
+  startTime: string;
+  endTime: string;
+  topic: string | null;
+  meetingLink: string | null;
+  price: number;
+  paid: boolean;
+  paymentStatus: string;
+  lessonPackageId?: string | null;
+  tutorComment: string | null;
+  showCommentToStudent: boolean;
+  showCommentToParent: boolean;
+  status: string;
+  frequency: 'weekly' | 'biweekly' | 'monthly';
+  weekdays: number[];
+  recurringEndDate: string;
+};
+
+export interface ConvertOrgAdminSessionToRecurringResult {
+  recurringSessionId: string;
+  createdSessionIds: string[];
+  updatedSessionId: string;
+}
+
+/** Pro Klasė: turn a one-off org-admin lesson into a recurring series (anchor row is updated, future rows inserted). */
+export async function convertOrgAdminSessionToRecurring(
+  p: ConvertOrgAdminSessionToRecurringInput,
+): Promise<ConvertOrgAdminSessionToRecurringResult> {
+  const {
+    supabase,
+    organizationId,
+    sessionId,
+    tutorId,
+    studentId,
+    subjectId,
+    startTime,
+    endTime,
+    topic,
+    meetingLink,
+    price,
+    paid,
+    paymentStatus,
+    lessonPackageId = null,
+    tutorComment,
+    showCommentToStudent,
+    showCommentToParent,
+    status,
+    frequency,
+    weekdays,
+    recurringEndDate,
+  } = p;
+
+  if (!isProKlaseOrg(organizationId)) {
+    throw new Error('Pasikartojančios pamokos redagavimas galimas tik Pro Klasė organizacijai.');
+  }
+
+  const newStart = new Date(startTime);
+  const newEnd = new Date(endTime);
+  if (Number.isNaN(newStart.getTime()) || Number.isNaN(newEnd.getTime())) {
+    throw new Error('Neteisinga data ar laikas.');
+  }
+  if (format(newStart, 'yyyy-MM-dd') !== format(newEnd, 'yyyy-MM-dd')) {
+    throw new Error('Lesson must start and end on the same day.');
+  }
+  if (newEnd.getTime() <= newStart.getTime()) {
+    throw new Error('End time must be later than start time.');
+  }
+  const endTrim = (recurringEndDate || '').trim();
+  if (endTrim && isBefore(parseISO(endTrim), newStart)) {
+    throw new Error('"Repeat until" date must not be earlier than the first lesson.');
+  }
+  if (frequency !== 'monthly' && weekdays.length === 0) {
+    throw new Error('Pasirinkite bent vieną savaitės dieną.');
+  }
+
+  const durationMs = newEnd.getTime() - newStart.getTime();
+  const timeStr = format(newStart, 'HH:mm:ss');
+  const endTimeStr = format(newEnd, 'HH:mm:ss');
+  const daysToCreate =
+    frequency !== 'monthly' && weekdays.length > 0 ? weekdays : [getDay(newStart)];
+  const anchorDay = getDay(newStart);
+  const anchorMinute = Math.floor(newStart.getTime() / 60000);
+
+  type RecurringTpl = { id: string; student_id: string; dayOfWeek: number; firstOccurrence: Date };
+  const recurringTemplates: RecurringTpl[] = [];
+
+  for (const dayOfWeek of daysToCreate) {
+    let firstOccurrence = new Date(newStart);
+    const startDow = firstOccurrence.getDay();
+    if (startDow !== dayOfWeek) {
+      const diff = (dayOfWeek - startDow + 7) % 7;
+      firstOccurrence = addDays(firstOccurrence, diff);
+    }
+
+    const { data: template, error: tErr } = await supabase
+      .from('recurring_individual_sessions')
+      .insert({
+        tutor_id: tutorId,
+        student_id: studentId,
+        subject_id: subjectId,
+        day_of_week: dayOfWeek,
+        start_time: timeStr,
+        end_time: endTimeStr,
+        start_date: format(firstOccurrence, 'yyyy-MM-dd'),
+        end_date: endTrim || null,
+        meeting_link: meetingLink || null,
+        topic: topic || null,
+        price,
+        active: true,
+        frequency,
+      })
+      .select('id, student_id')
+      .single();
+    if (tErr) throw new Error(tErr.message);
+    if (template) {
+      recurringTemplates.push({
+        id: template.id as string,
+        student_id: template.student_id as string,
+        dayOfWeek,
+        firstOccurrence,
+      });
+    }
+  }
+
+  const anchorTemplate =
+    recurringTemplates.find((t) => t.dayOfWeek === anchorDay) ?? recurringTemplates[0];
+  if (!anchorTemplate) throw new Error('Nepavyko sukurti pasikartojančio grafiko.');
+
+  const updatePayload: Record<string, unknown> = {
+    tutor_id: tutorId,
+    student_id: studentId,
+    subject_id: subjectId,
+    start_time: newStart.toISOString(),
+    end_time: newEnd.toISOString(),
+    topic: topic || null,
+    meeting_link: meetingLink || null,
+    price,
+    paid,
+    payment_status: paymentStatus,
+    lesson_package_id: lessonPackageId,
+    status,
+    tutor_comment: tutorComment || null,
+    show_comment_to_student: showCommentToStudent,
+    show_comment_to_parent: showCommentToParent,
+    recurring_session_id: anchorTemplate.id,
+    created_by_role: 'org_admin',
+  };
+
+  const { error: updateErr } = await supabase.from('sessions').update(updatePayload).eq('id', sessionId);
+  if (updateErr) {
+    const tplIds = recurringTemplates.map((t) => t.id);
+    if (tplIds.length) await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
+    throw new Error(updateErr.message);
+  }
+
+  await consumeAvailabilityForCreatedSessions(supabase, tutorId, [
+    { start_time: newStart.toISOString(), end_time: newEnd.toISOString() },
+  ]);
+
+  const { data: studentRow } = await supabase
+    .from('students')
+    .select('payment_model')
+    .eq('id', studentId)
+    .maybeSingle();
+  const studentPaymentModel = (studentRow as { payment_model?: string | null } | null)?.payment_model ?? null;
+
+  type PackageForRecurring = {
+    id: string;
+    available_lessons: number;
+    reserved_lessons: number;
+    item_id: string;
+    pool_organization_id?: string | null;
+    billing_period_start?: string | null;
+    billing_period_end?: string | null;
+    item_available_lessons: number;
+    item_reserved_lessons: number;
+  };
+  let pkg: PackageForRecurring | null = null;
+  if (!paid && subjectId) {
+    const match = await findActivePackageForBooking(supabase, { studentId, subjectId });
+    if (match) {
+      pkg = {
+        id: match.pkg.id,
+        pool_organization_id: match.pkg.pool_organization_id,
+        billing_period_start: match.pkg.billing_period_start,
+        billing_period_end: match.pkg.billing_period_end,
+        available_lessons: match.pkg.available_lessons,
+        reserved_lessons: match.pkg.reserved_lessons,
+        item_id: match.item.id,
+        item_available_lessons: match.item.available_lessons,
+        item_reserved_lessons: match.item.reserved_lessons,
+      };
+    }
+  }
+
+  const sessionsRows: Record<string, unknown>[] = [];
+  const packagesUsage = new Map<string, number>();
+  const endLimit = recurringMaterializeEndDate(recurringEndDate, newStart);
+
+  for (const template of recurringTemplates) {
+    const isAnchorDay = template.dayOfWeek === anchorDay;
+    let current = isAnchorDay
+      ? advanceRecurringOccurrence(newStart, frequency)
+      : new Date(template.firstOccurrence);
+    if (!isAnchorDay && current.getTime() < newStart.getTime()) {
+      while (current.getTime() < newStart.getTime() && !isBefore(endLimit, current)) {
+        const next = advanceRecurringOccurrence(current, frequency);
+        if (next.getTime() === current.getTime()) break;
+        current = next;
+      }
+    }
+
+    while (!isBefore(endLimit, current)) {
+      if (Math.floor(current.getTime() / 60000) === anchorMinute) {
+        current = advanceRecurringOccurrence(current, frequency);
+        continue;
+      }
+      const sessionEnd = new Date(current.getTime() + durationMs);
+      let sessionPaid = paid;
+      let sessionPaymentStatus = paymentStatus;
+      let rowPackageId: string | null = null;
+      if (!paid && pkg) {
+        const used = packagesUsage.get(pkg.id) || 0;
+        const remaining = Math.min(pkg.available_lessons, pkg.item_available_lessons) - used;
+        if (remaining > 0 && packageCoversLessonDate(pkg, current)) {
+          rowPackageId = pkg.id;
+          sessionPaid = true;
+          sessionPaymentStatus = 'confirmed';
+          packagesUsage.set(pkg.id, used + 1);
+        } else {
+          sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentPaymentModel, {
+            paid: false,
+            hasPackage: false,
+          });
+        }
+      }
+      sessionsRows.push({
+        tutor_id: tutorId,
+        student_id: studentId,
+        subject_id: subjectId,
+        start_time: current.toISOString(),
+        end_time: sessionEnd.toISOString(),
+        status: 'active',
+        meeting_link: meetingLink || null,
+        topic: topic || null,
+        price,
+        paid: sessionPaid,
+        payment_status: sessionPaymentStatus,
+        lesson_package_id: rowPackageId,
+        tutor_comment: tutorComment || null,
+        show_comment_to_student: showCommentToStudent,
+        show_comment_to_parent: showCommentToParent,
+        recurring_session_id: template.id,
+        created_by_role: 'org_admin',
+      });
+      current = advanceRecurringOccurrence(current, frequency);
+    }
+  }
+
+  let createdSessionIds: string[] = [];
+  if (sessionsRows.length > 0) {
+    try {
+      await assertTutorSlotsFree(
+        supabase,
+        tutorId,
+        sessionsRows.map((row) => ({
+          start: new Date(String(row.start_time)),
+          end: new Date(String(row.end_time)),
+        })),
+        [sessionId],
+      );
+    } catch (overlapErr) {
+      const tplIds = recurringTemplates.map((t) => t.id);
+      if (tplIds.length) await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
+      await supabase.from('sessions').update({ recurring_session_id: null }).eq('id', sessionId);
+      throw overlapErr;
+    }
+
+    const { data: inserted, error: insErr } = await supabase
+      .from('sessions')
+      .insert(sessionsRows)
+      .select('id, student_id, paid, lesson_package_id, payment_status, price, start_time, end_time');
+    if (insErr) {
+      const tplIds = recurringTemplates.map((t) => t.id);
+      if (tplIds.length) await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
+      await supabase.from('sessions').update({ recurring_session_id: null }).eq('id', sessionId);
+      throw new Error(insErr.message);
+    }
+
+    await consumeAvailabilityForCreatedSessions(supabase, tutorId, inserted || []);
+    createdSessionIds = ((inserted || []) as Array<{ id: string }>).map((row) => row.id);
+
+    if (pkg && !pkg.pool_organization_id) {
+      const usedCount = packagesUsage.get(pkg.id) || 0;
+      if (usedCount > 0) {
+        await supabase
+          .from('lesson_package_items')
+          .update({
+            available_lessons: pkg.item_available_lessons - usedCount,
+            reserved_lessons: pkg.item_reserved_lessons + usedCount,
+          })
+          .eq('id', pkg.item_id);
+        await supabase
+          .from('lesson_packages')
+          .update({
+            available_lessons: pkg.available_lessons - usedCount,
+            reserved_lessons: (pkg.reserved_lessons || 0) + usedCount,
+          })
+          .eq('id', pkg.id);
+      }
+    }
+
+    const allCreated = ([{ id: sessionId, student_id: studentId, paid, payment_status: paymentStatus, price, start_time: startTime, end_time: endTime }] as CreatedSessionRow[])
+      .concat((inserted || []) as CreatedSessionRow[])
+      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+    await notifyAfterOrgAdminSessionsCreated(
+      supabase,
+      tutorId,
+      allCreated,
+      topic || 'Pamoka',
+      true,
+      !endTrim,
+    );
+  }
+
+  await persistRecurringPlanFrequency(
+    supabase,
+    [studentId],
+    contractedLessonsPerWeek(true, weekdays, null),
+  );
+
+  return {
+    recurringSessionId: anchorTemplate.id,
+    createdSessionIds,
+    updatedSessionId: sessionId,
   };
 }

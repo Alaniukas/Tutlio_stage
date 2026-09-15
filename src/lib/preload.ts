@@ -337,7 +337,7 @@ export async function preloadOrgAdminData() {
     const [{ data: tutorData }, { data: inviteData }] = await Promise.all([
       supabase
         .from('profiles')
-        .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, has_active_license')
+        .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, personal_meeting_link, has_active_license')
         .eq('organization_id', orgId),
       supabase
         .from('tutor_invites')

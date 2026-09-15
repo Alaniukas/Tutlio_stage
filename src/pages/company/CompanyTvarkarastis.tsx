@@ -44,6 +44,7 @@ import {
 import { sessionCommentVisibilityLabelKey } from '@/lib/parentLessonComment';
 import {
   assertTutorSlotsFree,
+  convertOrgAdminSessionToRecurring,
   runOrgAdminCreateSession,
   type OrgAdminCreateSessionInput,
 } from '@/pages/company/orgAdminSessionCreate';
@@ -526,6 +527,10 @@ export default function CompanyTvarkarastis() {
   /** "Kieno prašymu perkelta?" — required whenever the start time moves. */
   const [rescheduleRequestedBy, setRescheduleRequestedBy] = useState<'' | 'student' | 'tutor'>('');
   const [isDeleteRecurringDialogOpen, setIsDeleteRecurringDialogOpen] = useState(false);
+  const [editMakeRecurring, setEditMakeRecurring] = useState(false);
+  const [editRecurringFrequency, setEditRecurringFrequency] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
+  const [editRecurringWeekdays, setEditRecurringWeekdays] = useState<number[]>([]);
+  const [editRecurringEndDate, setEditRecurringEndDate] = useState('');
 
   // Availability edit state
   const [isAvailabilityEditOpen, setIsAvailabilityEditOpen] = useState(false);
@@ -1924,6 +1929,10 @@ export default function CompanyTvarkarastis() {
     setGroupEditChoice('single');
     setRescheduleReason('');
     setRescheduleRequestedBy('');
+    setEditMakeRecurring(false);
+    setEditRecurringFrequency('weekly');
+    setEditRecurringWeekdays([]);
+    setEditRecurringEndDate('');
     setIsEditingSession(true);
   };
 
@@ -1955,6 +1964,56 @@ export default function CompanyTvarkarastis() {
       }
       if (startChangedForReason && !rescheduleRequestedBy) {
         throw new Error(t('cal.rescheduleRequestedByRequired'));
+      }
+
+      const canConvertToRecurring =
+        isProKlase &&
+        editMakeRecurring &&
+        !isClassGroupSession &&
+        !selectedEvent.recurring_session_id;
+
+      if (canConvertToRecurring) {
+        const showCommentToParent = canChooseParentComment && editShowCommentToParent;
+        const paidChanged = editPaid !== selectedEvent.paid;
+        const paymentStatus = paidChanged
+          ? (editPaid ? 'paid' : 'pending')
+          : ((selectedEvent as Session & { payment_status?: string }).payment_status
+            || (editPaid ? 'paid' : 'pending'));
+        const tutorId = editTutorId || selectedEvent.tutor_id;
+        await assertTutorLicensed(tutorId);
+        const result = await convertOrgAdminSessionToRecurring({
+          supabase,
+          organizationId,
+          sessionId: selectedEvent.id,
+          tutorId,
+          studentId: editStudentId || selectedEvent.student_id,
+          subjectId: editSubjectId || selectedEvent.subject_id || null,
+          startTime: newStart.toISOString(),
+          endTime: newEnd.toISOString(),
+          topic: editTopic || null,
+          meetingLink: editMeetingLink || null,
+          price: editPrice,
+          paid: editPaid,
+          paymentStatus,
+          lessonPackageId: (selectedEvent as Session & { lesson_package_id?: string | null }).lesson_package_id ?? null,
+          tutorComment: editTutorComment || null,
+          showCommentToStudent: editShowCommentToStudent,
+          showCommentToParent,
+          status: editStatus,
+          frequency: editRecurringFrequency,
+          weekdays: editRecurringWeekdays,
+          recurringEndDate: editRecurringEndDate,
+        });
+        if (result.createdSessionIds.length > 0) {
+          alert(t('findLesson.recurringCreatedKeepOpen'));
+        } else {
+          alert(t('compSch.recurringLesson'));
+        }
+        setEditMakeRecurring(false);
+        setIsEditingSession(false);
+        setIsEventDetailOpen(false);
+        fetchData();
+        return;
       }
 
       // Monthly packages (req 6): a package lesson can only be moved within the
@@ -3935,23 +3994,25 @@ export default function CompanyTvarkarastis() {
               )}
             </div>
 
-            <RecurrenceFields
-              enabled={createIsRecurring}
-              onEnabledChange={(enabled) => {
-                setCreateIsRecurring(enabled);
-                if (enabled) {
-                  setCreateIsTrial(false);
-                  setAutoTrialStudentId(null);
-                }
-              }}
-              frequency={createRecurringFrequency}
-              onFrequencyChange={setCreateRecurringFrequency}
-              weekdays={createRecurringWeekdays}
-              onWeekdaysChange={setCreateRecurringWeekdays}
-              endDate={createRecurringEndDate}
-              onEndDateChange={setCreateRecurringEndDate}
-              startTime={createStartTime}
-            />
+            {isProKlase && (
+              <RecurrenceFields
+                enabled={createIsRecurring}
+                onEnabledChange={(enabled) => {
+                  setCreateIsRecurring(enabled);
+                  if (enabled) {
+                    setCreateIsTrial(false);
+                    setAutoTrialStudentId(null);
+                  }
+                }}
+                frequency={createRecurringFrequency}
+                onFrequencyChange={setCreateRecurringFrequency}
+                weekdays={createRecurringWeekdays}
+                onWeekdaysChange={setCreateRecurringWeekdays}
+                endDate={createRecurringEndDate}
+                onEndDateChange={setCreateRecurringEndDate}
+                startTime={createStartTime}
+              />
+            )}
 
             {createIsRecurring && !subjects.find(s => s.id === createSubjectId)?.is_group && (
               <div className="border border-amber-100 rounded-xl p-3 sm:p-4 bg-amber-50/50">
@@ -4895,6 +4956,22 @@ export default function CompanyTvarkarastis() {
                 )}
               </div>
 
+              {isProKlase && !isClassGroupSession && !selectedEvent.recurring_session_id && (
+                <RecurrenceFields
+                  enabled={editMakeRecurring}
+                  onEnabledChange={setEditMakeRecurring}
+                  frequency={editRecurringFrequency}
+                  onFrequencyChange={setEditRecurringFrequency}
+                  weekdays={editRecurringWeekdays}
+                  onWeekdaysChange={setEditRecurringWeekdays}
+                  endDate={editRecurringEndDate}
+                  onEndDateChange={setEditRecurringEndDate}
+                  startTime={editStartTime}
+                  showEstimate
+                  compact
+                />
+              )}
+
               {!isClassGroupSession && (
               <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
                 <div>
@@ -4941,6 +5018,10 @@ export default function CompanyTvarkarastis() {
                     !!editStartTime && !!selectedEvent &&
                     Math.floor(new Date(editStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) &&
                     (rescheduleReason.trim().length < 5 || !rescheduleRequestedBy)
+                  ) || (
+                    editMakeRecurring &&
+                    editRecurringFrequency !== 'monthly' &&
+                    editRecurringWeekdays.length === 0
                   )}
                 >
                   {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('compSch.saving')}</> : t('compSch.save')}

@@ -15,6 +15,22 @@ export function meetingLinkWasPersisted(
   return normalizeMeetingLinkValue(requested) === normalizeMeetingLinkValue(persisted);
 }
 
+/**
+ * Prefer a freshly fetched profile row over the org-tutors list cache.
+ * The list is hydrated from a 5-minute in-memory cache, so the modal can
+ * otherwise show an empty meeting-link field while DB already has a URL.
+ * When the fresh row exists, empty DB values win over stale cache.
+ */
+export function meetingLinkFromTutorRows(
+  freshProfile?: { personal_meeting_link?: string | null } | null,
+  listRow?: { personal_meeting_link?: string | null } | null,
+): string {
+  if (freshProfile) {
+    return normalizeMeetingLinkValue(freshProfile.personal_meeting_link) || '';
+  }
+  return normalizeMeetingLinkValue(listRow?.personal_meeting_link) || '';
+}
+
 export function resolveLessonMeetingLink(opts: {
   subjectLink?: string | null;
   tutorPersonalLink?: string | null;

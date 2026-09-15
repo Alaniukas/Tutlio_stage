@@ -10,3 +10,12 @@ describe('LessonSettings tutor meeting-link persistence', () => {
     expect(source).toContain('setPersonalMeetingLink(link || \'\')');
   });
 });
+
+describe('CompanyTutors meeting-link editor', () => {
+  it('refetches the tutor profile before filling the meeting-link field', () => {
+    const source = readFileSync('src/pages/company/CompanyTutors.tsx', 'utf8');
+    expect(source).toContain('meetingLinkFromTutorRows(freshProfile, tutor)');
+    expect(source).toContain('setMeetingLinkHydrated(Boolean(freshProfile && !profileErr))');
+    expect(source).toContain("...(meetingLinkHydrated ? { personal_meeting_link: personalLink } : {})");
+  });
+});

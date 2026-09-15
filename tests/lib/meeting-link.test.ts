@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   enrichSessionMeetingLink,
+  meetingLinkFromTutorRows,
   meetingLinkWasPersisted,
   normalizeMeetingLinkValue,
   resolveLessonMeetingLink,
@@ -16,6 +17,33 @@ describe('meeting-link persistence', () => {
 
   it('rejects a stale value returned after an update', () => {
     expect(meetingLinkWasPersisted('https://meet.example/new', 'https://meet.example/old')).toBe(false);
+  });
+
+  it('prefers a freshly fetched profile over a stale list-cache row', () => {
+    expect(
+      meetingLinkFromTutorRows(
+        { personal_meeting_link: 'https://meet.google.com/sba-jpxq-fre' },
+        { personal_meeting_link: null },
+      ),
+    ).toBe('https://meet.google.com/sba-jpxq-fre');
+  });
+
+  it('uses the list-cache link only when the fresh fetch failed', () => {
+    expect(
+      meetingLinkFromTutorRows(
+        null,
+        { personal_meeting_link: 'https://meet.google.com/cached' },
+      ),
+    ).toBe('https://meet.google.com/cached');
+  });
+
+  it('shows empty when the fresh profile has no link', () => {
+    expect(
+      meetingLinkFromTutorRows(
+        { personal_meeting_link: null },
+        { personal_meeting_link: 'https://meet.google.com/cached' },
+      ),
+    ).toBe('');
   });
 });
 

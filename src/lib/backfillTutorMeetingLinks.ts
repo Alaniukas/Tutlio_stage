@@ -9,19 +9,25 @@ export async function backfillTutorMeetingLinks(
   const link = (meetingLink || '').trim();
   if (!link) return;
   const nowIso = new Date().toISOString();
-  await Promise.all([
+  const [sessionsRes, templatesRes] = await Promise.all([
     supabase
       .from('sessions')
       .update({ meeting_link: link })
       .eq('tutor_id', tutorId)
       .eq('status', 'active')
       .gte('start_time', nowIso)
-      .is('meeting_link', null),
+      .or('meeting_link.is.null,meeting_link.eq.""'),
     supabase
       .from('recurring_individual_sessions')
       .update({ meeting_link: link })
       .eq('tutor_id', tutorId)
       .eq('active', true)
-      .is('meeting_link', null),
+      .or('meeting_link.is.null,meeting_link.eq.""'),
   ]);
+  if (sessionsRes.error) {
+    console.error('[backfillTutorMeetingLinks] sessions', sessionsRes.error.message);
+  }
+  if (templatesRes.error) {
+    console.error('[backfillTutorMeetingLinks] templates', templatesRes.error.message);
+  }
 }

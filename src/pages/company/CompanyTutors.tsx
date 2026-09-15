@@ -5,7 +5,7 @@ import { COMPANY_TUTORS_CACHE_KEY } from '@/lib/preload';
 import {
   Users, Plus, Copy, Check, Trash2, UserCheck, UserX,
   ChevronRight, ChevronDown, X, Pencil, Mail, Send, AlertCircle,
-  CreditCard, Loader2
+  CreditCard, Loader2, Link2
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
@@ -44,7 +44,7 @@ import { sumProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
 import { authHeaders } from '@/lib/apiHelpers';
 import { isPlMarket } from '@/lib/market';
 import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
-import { meetingLinkWasPersisted } from '@/lib/meetingLink';
+import { meetingLinkFromTutorRows, meetingLinkWasPersisted } from '@/lib/meetingLink';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -530,6 +530,8 @@ export default function CompanyTutors() {
   const [tutorSaveError, setTutorSaveError] = useState<string | null>(null);
   const [editSubjectPay, setEditSubjectPay] = useState<Record<string, string>>({});
   const [editMeetingLink, setEditMeetingLink] = useState('');
+  /** False until the editor has a fresh (or confirmed cached) meeting-link value — avoids wiping DB on save. */
+  const [meetingLinkHydrated, setMeetingLinkHydrated] = useState(false);
   const [tutorInvoiceProfile, setTutorInvoiceProfile] = useState<Record<string, string | null> | null>(null);
   const [penaltyManualAmount, setPenaltyManualAmount] = useState('');
   const [penaltyManualReason, setPenaltyManualReason] = useState('');
@@ -1022,7 +1024,19 @@ export default function CompanyTutors() {
   // ── Tutor detail modal helpers ──
 
   const openTutor = async (tutor: Tutor) => {
-    const { data: subjects } = await supabase.from('subjects').select('*').eq('tutor_id', tutor.id);
+    setMeetingLinkHydrated(false);
+    const [{ data: subjects }, { data: freshProfile, error: profileErr }] = await Promise.all([
+      supabase.from('subjects').select('*').eq('tutor_id', tutor.id),
+      supabase
+        .from('profiles')
+        .select('full_name, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, personal_meeting_link, teaching_notes')
+        .eq('id', tutor.id)
+        .maybeSingle(),
+    ]);
+    const tutorRow: Tutor = freshProfile && !profileErr
+      ? { ...tutor, ...(freshProfile as Partial<Tutor>) }
+      : tutor;
+    const hydratedMeetingLink = meetingLinkFromTutorRows(freshProfile, tutor);
 
     // OPTIMIZED: Limit sessions query to last year for stats
     const oneYearAgo = isSchoolView ? schoolDate() : new Date();
@@ -1047,44 +1061,48 @@ export default function CompanyTutors() {
 
     const conducted = filterConductedOrgSessions(isSchoolView ? schoolMeetings(sessions) : sessions);
     const sessionCount = isSchoolView ? schoolMeetingCounts(sessions).completed : countConductedOrgSessions(conducted);
-    const tutorRate = tutor.company_commission_percent ?? orgDefaults.company_commission_percent;
+    const tutorRate = tutorRow.company_commission_percent ?? orgDefaults.company_commission_percent;
     const earnings = isProKlaseAdmin
       ? sumProKlasePayBreakdown(conducted as any[], tutorRate).totalEur
       : sumOrgTutorLessonsPayEur(
           conducted,
           tutorRate,
-          tutor.company_commission_by_subject,
+          tutorRow.company_commission_by_subject,
           orgId,
         );
     setTutorSubjectPrices((tspData || []).map((r: any) => ({
       id: r.id, tutor_id: r.tutor_id, org_subject_template_id: r.org_subject_template_id,
       price: Number(r.price), duration_minutes: r.duration_minutes,
     })));
-    setSelectedTutor({ ...tutor, subjects: subjects || [], sessionCount, earnings });
-    setEditName(tutor.full_name);
-    setEditPhone(tutor.phone || '');
-    setEditTeachingNotes(tutor.teaching_notes || '');
+    setSelectedTutor({ ...tutorRow, subjects: subjects || [], sessionCount, earnings });
+    setEditName(tutorRow.full_name);
+    setEditPhone(tutorRow.phone || '');
+    setEditTeachingNotes(tutorRow.teaching_notes || '');
     setTutorSaveError(null);
     setShowAddSubject(false);
     setNewSubjectName('');
     setAddSubjectCatalogPick('');
 
     // Set extended settings
-    setEditCancellationHours(tutor.cancellation_hours ?? orgDefaults.cancellation_hours);
-    setEditCancellationFee(tutor.cancellation_fee_percent ?? orgDefaults.cancellation_fee_percent);
-    setEditReminderStudent(tutor.reminder_student_hours ?? orgDefaults.reminder_student_hours);
-    setEditReminderTutor(tutor.reminder_tutor_hours ?? orgDefaults.reminder_tutor_hours);
-    setEditBreakBetween(tutor.break_between_lessons ?? orgDefaults.break_between_lessons);
-    setEditMinBooking(tutor.min_booking_hours ?? orgDefaults.min_booking_hours);
-    setEditCommissionPercent(tutor.company_commission_percent ?? orgDefaults.company_commission_percent);
-    const parsedPay = parseTutorPayBySubject(tutor.company_commission_by_subject);
+    setEditCancellationHours(tutorRow.cancellation_hours ?? orgDefaults.cancellation_hours);
+    setEditCancellationFee(tutorRow.cancellation_fee_percent ?? orgDefaults.cancellation_fee_percent);
+    setEditReminderStudent(tutorRow.reminder_student_hours ?? orgDefaults.reminder_student_hours);
+    setEditReminderTutor(tutorRow.reminder_tutor_hours ?? orgDefaults.reminder_tutor_hours);
+    setEditBreakBetween(tutorRow.break_between_lessons ?? orgDefaults.break_between_lessons);
+    setEditMinBooking(tutorRow.min_booking_hours ?? orgDefaults.min_booking_hours);
+    setEditCommissionPercent(tutorRow.company_commission_percent ?? orgDefaults.company_commission_percent);
+    const parsedPay = parseTutorPayBySubject(tutorRow.company_commission_by_subject);
     const nextPay: Record<string, string> = {};
     for (const subj of (subjects || []) as Subject[]) {
       if (subj.is_trial) continue;
       nextPay[subj.id] = parsedPay[subj.id] != null ? String(parsedPay[subj.id]) : '';
     }
     setEditSubjectPay(nextPay);
-    setEditMeetingLink(tutor.personal_meeting_link || '');
+    setEditMeetingLink(hydratedMeetingLink);
+    setMeetingLinkHydrated(Boolean(freshProfile && !profileErr));
+    if (freshProfile && !profileErr) {
+      setTutors((prev) => prev.map((tu) => (tu.id === tutor.id ? { ...tu, ...tutorRow } : tu)));
+    }
     setTutorInvoiceProfile(null);
     setPenaltyFeedback(null);
     setTutorModalOpen(true);
@@ -1125,7 +1143,7 @@ export default function CompanyTutors() {
         ...(isManoKorepetitoriusAdmin
           ? { company_commission_by_subject: compactTutorPayBySubject(editSubjectPay) }
           : {}),
-        personal_meeting_link: personalLink,
+        ...(meetingLinkHydrated ? { personal_meeting_link: personalLink } : {}),
         teaching_notes: editTeachingNotes.trim() || null,
       })
         .eq('id', selectedTutor.id)
@@ -1142,7 +1160,7 @@ export default function CompanyTutors() {
         error
         || !savedRow
         || Number(savedRow.company_commission_percent) !== editCommissionPercent
-        || !meetingLinkWasPersisted(personalLink, savedRow.personal_meeting_link)
+        || (meetingLinkHydrated && !meetingLinkWasPersisted(personalLink, savedRow.personal_meeting_link))
         || (isManoKorepetitoriusAdmin
           && JSON.stringify(persistedSubjectPay ?? {}) !== JSON.stringify(savedSubjectPay ?? {}))
       ) {
@@ -1163,7 +1181,7 @@ export default function CompanyTutors() {
         break_between_lessons: editBreakBetween,
         min_booking_hours: editMinBooking,
         company_commission_percent: editCommissionPercent,
-        personal_meeting_link: personalLink,
+        ...(meetingLinkHydrated ? { personal_meeting_link: personalLink } : {}),
         teaching_notes: editTeachingNotes.trim() || null,
         ...(isManoKorepetitoriusAdmin
           ? { company_commission_by_subject: savedSubjectPay }
@@ -1476,6 +1494,12 @@ export default function CompanyTutors() {
                       <TutorTeachingNotesBadge notes={tutor.teaching_notes} />
                     </div>
                     <p className="text-xs text-gray-500 truncate">{tutor.email}</p>
+                    {tutor.personal_meeting_link ? (
+                      <p className="flex items-center gap-1 text-[11px] text-emerald-700 truncate mt-0.5">
+                        <Link2 className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{tutor.personal_meeting_link}</span>
+                      </p>
+                    ) : null}
                   </div>
                   {showLicenseUi && (() => {
                     const licensed = tutor.has_active_license !== false;
