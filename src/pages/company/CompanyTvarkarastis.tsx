@@ -409,7 +409,7 @@ export default function CompanyTvarkarastis() {
   const canView = isOwner || hasFeature('org_admin_calendar_view') || hasFeature('org_admin_calendar_full_control');
   const canFullControl = isOwner || hasFeature('org_admin_calendar_full_control');
   const canEditSessions = canOrgAdmin('sessions.edit');
-  const canManageAvailability = isSchoolOrgView ? canFullControl : canView;
+  const canManageAvailability = canFullControl;
   /** Pamokų paieška — visoms įmonėms su kalendoriaus prieiga; Pro Klasė frequency tik su flag'u. */
   const showFindLesson = canView;
   const showTrialToggleInCreate =
@@ -1657,13 +1657,34 @@ export default function CompanyTvarkarastis() {
     };
   };
 
+  const openAvailabilityEditor = useCallback((avail: Availability, eventStart?: Date) => {
+    setEditingAvailability(avail);
+    setAvailEditStart(avail.start_time);
+    setAvailEditEnd(avail.end_time);
+    setAvailEditDayOfWeek(String(avail.day_of_week ?? 1));
+    setAvailEditSpecificDate(avail.specific_date || '');
+    setAvailEditStartDate(String(avail.start_date || ''));
+    setAvailEditEndDate(String(avail.end_date || ''));
+    setAvailEditSubjectIds(avail.subject_ids || []);
+    setCreateFromAvailOpen(false);
+    setCreateFromAvailStudentId('');
+    setCreateFromAvailStudentIds([]);
+    setCreateFromAvailSubjectId('');
+    setCreateFromAvailTopic('');
+    setCreateFromAvailSelectedSlot('');
+    if (eventStart) {
+      setCreateFromAvailBaseDate(format(eventStart, 'yyyy-MM-dd'));
+    } else if (avail.specific_date) {
+      setCreateFromAvailBaseDate(avail.specific_date);
+    } else {
+      setCreateFromAvailBaseDate(format(new Date(), 'yyyy-MM-dd'));
+    }
+    setIsAvailabilityEditOpen(true);
+  }, []);
+
   const handleSelectSlot = (slotInfo: { start: Date; end: Date }) => {
     if (!canView) return;
 
-    // Marking a range that exactly matches an availability block used to divert
-    // to the availability editor and lose the marked time. Now the create-lesson
-    // modal opens prefilled with that time (+ the block's tutor); availability
-    // editing stays one click away via the link inside the modal.
     if (canManageAvailability && !showOnlySessions) {
       const match = availabilityBlocks.find((b: any) => (
         b.start?.getTime?.() === slotInfo.start.getTime() &&
@@ -1672,15 +1693,11 @@ export default function CompanyTvarkarastis() {
       ));
 
       if (match) {
-        availabilityClickGuardRef.current = { id: match.availabilityId, at: Date.now() };
-        resetCreateForm();
-        setSelectedSlot(slotInfo);
-        setCreateTutorId(match.tutorId || '');
-        setCreateFromAvailabilityBlock({ availabilityId: match.availabilityId, tutorId: match.tutorId || '' });
-        setCreateStartTime(format(slotInfo.start, "yyyy-MM-dd'T'HH:mm"));
-        setCreateEndTime(format(slotInfo.end, "yyyy-MM-dd'T'HH:mm"));
-        setIsCreateSessionOpen(true);
-        return;
+        const avail = availability.find((a) => a.id === match.availabilityId);
+        if (avail) {
+          openAvailabilityEditor(avail, slotInfo.start);
+          return;
+        }
       }
     }
 
@@ -1697,35 +1714,9 @@ export default function CompanyTvarkarastis() {
   const handleSelectEvent = (event: any) => {
     if (event.resource?.type === 'availability') {
       if (!canManageAvailability) return;
-      // One physical click can fire both onSelectSlot (→ prefilled create
-      // modal) and onSelectEvent for the same block — don't stack the editor
-      // on top of the just-opened create modal.
-      const guard = availabilityClickGuardRef.current;
-      if (guard && guard.id === event.availabilityId && Date.now() - guard.at < 500) return;
       const avail = availability.find(a => a.id === event.availabilityId);
       if (avail) {
-        setEditingAvailability(avail);
-        setAvailEditStart(avail.start_time);
-        setAvailEditEnd(avail.end_time);
-        setAvailEditDayOfWeek(String(avail.day_of_week ?? 1));
-        setAvailEditSpecificDate(avail.specific_date || '');
-        setAvailEditStartDate(String(avail.start_date || ''));
-        setAvailEditEndDate(String(avail.end_date || ''));
-        setAvailEditSubjectIds(avail.subject_ids || []);
-        setCreateFromAvailOpen(false);
-        setCreateFromAvailStudentId('');
-        setCreateFromAvailStudentIds([]);
-        setCreateFromAvailSubjectId('');
-        setCreateFromAvailTopic('');
-        setCreateFromAvailSelectedSlot('');
-        if (event.start) {
-          setCreateFromAvailBaseDate(format(new Date(event.start), 'yyyy-MM-dd'));
-        } else if (avail.specific_date) {
-          setCreateFromAvailBaseDate(avail.specific_date);
-        } else {
-          setCreateFromAvailBaseDate(format(new Date(), 'yyyy-MM-dd'));
-        }
-        setIsAvailabilityEditOpen(true);
+        openAvailabilityEditor(avail, event.start ? new Date(event.start) : undefined);
       }
       return;
     }
@@ -2494,6 +2485,40 @@ export default function CompanyTvarkarastis() {
       console.error(err);
     }
     setAvailEditSaving(false);
+  };
+
+  const handleDeleteAvailability = async () => {
+    if (!editingAvailability) return;
+    if (!window.confirm(t('avail.confirmDeleteSlot'))) return;
+    setAvailEditSaving(true);
+    try {
+      const tutorId = editingAvailability.tutor_id;
+      const { error } = await supabase
+        .from('availability')
+        .delete()
+        .eq('id', editingAvailability.id);
+      if (error) {
+        alert(error.message || t('compSch.availSaveFailed'));
+        return;
+      }
+      if (tutorId) {
+        try {
+          await fetch('/api/google-calendar-sync', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({ userId: tutorId }),
+          });
+        } catch (_) {}
+      }
+      setIsAvailabilityEditOpen(false);
+      setEditingAvailability(null);
+      fetchData();
+    } catch (err) {
+      console.error(err);
+      alert(t('compSch.availSaveFailed'));
+    } finally {
+      setAvailEditSaving(false);
+    }
   };
 
   const handleCreateAvailability = async () => {
@@ -5056,11 +5081,23 @@ export default function CompanyTvarkarastis() {
                 </>
               )}
             </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAvailabilityEditOpen(false)}>{t('compSch.cancel')}</Button>
-            <Button onClick={handleSaveAvailability} disabled={availEditSaving}>
-              {availEditSaving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('compSch.saving')}</> : t('compSch.save')}
+          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              className="border-red-200 text-red-600 hover:bg-red-50 sm:mr-auto"
+              onClick={handleDeleteAvailability}
+              disabled={availEditSaving}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              {t('cal.delete')}
             </Button>
+            <div className="flex gap-2 w-full sm:w-auto">
+              <Button variant="outline" onClick={() => setIsAvailabilityEditOpen(false)}>{t('compSch.cancel')}</Button>
+              <Button onClick={handleSaveAvailability} disabled={availEditSaving}>
+                {availEditSaving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('compSch.saving')}</> : t('compSch.save')}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
