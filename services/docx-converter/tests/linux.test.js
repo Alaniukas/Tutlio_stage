@@ -17,12 +17,8 @@ test('real LibreOffice survives sequential and burst traffic', {
   const base = `http://127.0.0.1:${port}`;
   try {
     let ready = false;
-    for (let i = 0; i < 150; i++) {
-      try {
-        const health = await fetch(`${base}/health`);
-        const body = await health.json();
-        ready = Boolean(body.ready);
-      } catch {}
+    for (let i = 0; i < 100; i++) {
+      try { ready = (await fetch(`${base}/health`)).ok; } catch {}
       if (ready) break;
       await delay(200);
     }

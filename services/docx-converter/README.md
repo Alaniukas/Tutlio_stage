@@ -2,14 +2,12 @@
 
 Linux LibreOffice microservice used by Tutlio school-contract flows (annual + extra-lessons DOCX templates).
 
-Conversions are serialized inside each container. School contract templates can take 60–120s to convert.
-
-v2.3.0 waits for `contract.pdf` **while LibreOffice is still running**, then fails in a few seconds if the process tree is dead instead of polling for two minutes. It also reaps leftover `soffice.bin` daemons after every job, aborts work when the caller disconnects, and uses a lightweight Railway liveness check so a failed conversion cannot take the container out of rotation.
+Conversions are serialized inside each container. School contract templates can take 60–120s to convert. v2.2.3 keeps LibreOffice descendants alive until `contract.pdf` is fully written (the soffice wrapper can exit earlier), waits up to 120s in the queue instead of rejecting after 30s, and asks callers to retry busy work after 20s.
 
 ## API
 
-- `GET /` — liveness (`{ ok, service, version }`). Railway healthcheck.
-- `GET /health` — liveness plus diagnostics (`ok`, `ready`, `lastSuccessfulConversion`, `lastError`)
+- `GET /` — lightweight health (`{ ok, service, version }`)
+- `GET /health` — deep health (requires a recent successful probe conversion)
 - `POST /convert-docx-to-pdf` — body `{ fileBase64 }`, header `Authorization: Bearer <DOCX_CONVERTER_API_KEY>`, response `{ pdfBase64, meta? }`
 
 ## Local
@@ -29,13 +27,12 @@ DOCX_CONVERTER_API_KEY=local-dev-key
 
 **Important:** Railway must deploy from subdirectory `services/docx-converter` (not the old root-level `PDF-converteris` branch layout).
 
-Redeploy when the converter version changes. Version `2.3.0` is the reliability release: do not keep bumping wait timeouts as a substitute for killing leftover LibreOffice processes.
+Redeploy when the converter version changes. Version `2.2.3` keeps LibreOffice alive until the PDF is fully written and queues a waiting extra-lessons conversion instead of failing it after 30s.
 
 1. Railway → service → Settings → Root directory: `services/docx-converter`
 2. Set env `DOCX_CONVERTER_API_KEY` to the same value as in Vercel
-3. Optional tuning: `PDF_WAIT_MS=180000`, `LO_TIMEOUT_MS=180000`, `PDF_GRACE_MS=3000`
+3. Optional tuning: `PDF_WAIT_MS=120000`, `LO_TIMEOUT_MS=180000`
 4. Public URL stays `https://tutliostage-production.up.railway.app/` (or update Vercel `DOCX_CONVERTER_URL`)
-5. Keep the service in a region close to Vercel (EU). Southeast Asia adds latency on every 2–3 MB JSON body.
 
 ## Test
 
