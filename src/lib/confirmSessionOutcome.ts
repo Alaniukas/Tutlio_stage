@@ -9,6 +9,7 @@ type ConfirmSessionOutcomeInput = {
   status: ConfirmedSessionOutcome;
   startTime: string | Date;
   endTime: string | Date;
+  late?: boolean;
 };
 
 /**
@@ -21,6 +22,7 @@ export async function confirmSessionOutcome({
   status,
   startTime,
   endTime,
+  late = false,
 }: ConfirmSessionOutcomeInput): Promise<void> {
   const existingOutcome = currentStatus === 'completed' || currentStatus === 'no_show';
   const response = await fetch('/api/confirm-session-status', {
@@ -29,6 +31,7 @@ export async function confirmSessionOutcome({
     body: JSON.stringify({
       sessionId,
       status,
+      ...(late && status === 'completed' ? { late: true } : {}),
       ...(status === 'no_show'
         ? { noShowWhen: defaultNoShowWhenForNow(new Date(startTime), new Date(endTime)) }
         : {}),

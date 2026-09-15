@@ -4,8 +4,12 @@ import {
   calculateOrgSessionListStats,
   countCancellationAttribution,
   countUserInitiatedCancellations,
+  countPastUnpaidSessions,
   formatCancellationBreakdown,
   isStudentNoShowSession,
+  matchesOrgSessionStatChip,
+  toggleOrgSessionStatChip,
+  type Session,
 } from '@/lib/session-stats';
 
 const base = {
@@ -141,5 +145,28 @@ describe('calculateOrgSessionListStats', () => {
     expect(stats.totalCancelled).toBe(1);
     expect(stats.cancelledByTutor).toBe(1);
     expect(stats.totalSuccessful).toBe(0);
+  });
+});
+
+describe('past unpaid session chip', () => {
+  const now = new Date('2026-09-15T12:00:00.000Z');
+
+  it('counts ended unpaid lessons and ignores future, paid, cancelled, complimentary', () => {
+    const rows = [
+      { ...base, id: 'past-unpaid', start_time: '2026-09-10T10:00:00.000Z', end_time: '2026-09-10T11:00:00.000Z', status: 'active' as const, paid: false, payment_status: 'pending' },
+      { ...base, id: 'past-paid', start_time: '2026-09-10T10:00:00.000Z', end_time: '2026-09-10T11:00:00.000Z', status: 'completed' as const, paid: true, payment_status: 'paid' },
+      { ...base, id: 'future', start_time: '2026-09-20T10:00:00.000Z', end_time: '2026-09-20T11:00:00.000Z', status: 'active' as const, paid: false },
+      { ...base, id: 'cancelled', start_time: '2026-09-10T10:00:00.000Z', end_time: '2026-09-10T11:00:00.000Z', status: 'cancelled' as const, paid: false },
+      { ...base, id: 'free', start_time: '2026-09-10T10:00:00.000Z', end_time: '2026-09-10T11:00:00.000Z', status: 'completed' as const, paid: false, is_complimentary: true },
+    ];
+    expect(countPastUnpaidSessions(rows, now)).toBe(1);
+    expect(matchesOrgSessionStatChip(rows[0] as Session, 'unpaid_past', now)).toBe(true);
+    expect(matchesOrgSessionStatChip(rows[1] as Session, 'unpaid_past', now)).toBe(false);
+  });
+
+  it('clicking the same chip again clears the filter', () => {
+    expect(toggleOrgSessionStatChip(null, 'unpaid_past')).toBe('unpaid_past');
+    expect(toggleOrgSessionStatChip('unpaid_past', 'unpaid_past')).toBeNull();
+    expect(toggleOrgSessionStatChip('unpaid_past', 'no_show')).toBe('no_show');
   });
 });

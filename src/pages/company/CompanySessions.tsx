@@ -1,7 +1,14 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { SessionStatCards } from '@/components/SessionStatCards';
-import { calculateSessionStats, calculateOrgSessionListStats } from '@/lib/session-stats';
+import {
+  calculateSessionStats,
+  calculateOrgSessionListStats,
+  countPastUnpaidSessions,
+  matchesOrgSessionStatChip,
+  toggleOrgSessionStatChip,
+  type OrgSessionStatChip,
+} from '@/lib/session-stats';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -136,7 +143,7 @@ const ORG_SESSION_LIST_SELECT =
   '*, student:students(full_name, admin_comment, admin_comment_visible_to_tutor), subjects(is_group)';
 
 const ORG_SESSION_STATS_SELECT =
-  'id, tutor_id, student_id, class_group_id, subject_id, status, start_time, end_time, topic, cancelled_by, cancellation_reason, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, no_show_reason, student:students(full_name), subjects(is_group)';
+  'id, tutor_id, student_id, class_group_id, subject_id, status, start_time, end_time, topic, cancelled_by, cancellation_reason, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, no_show_reason, paid, payment_status, is_complimentary, price, student:students(full_name), subjects(is_group)';
 
 function orgSessionDetailSelect(organizationId: string | null | undefined): string {
   if (isManoKorepetitoriusOrg(organizationId)) {
@@ -302,6 +309,7 @@ export default function CompanySessions() {
     priceEur: 0,
   });
   const [filterStudent, setFilterStudent] = useState('');
+  const [statChip, setStatChip] = useState<OrgSessionStatChip | null>(null);
   const [statsSessions, setStatsSessions] = useState<Session[]>([]);
   const [hasMoreSessions, setHasMoreSessions] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -336,7 +344,7 @@ export default function CompanySessions() {
   }, []);
 
   useEffect(() => {
-    if (!loadMoreRef.current || loading || loadingMore || !hasMoreSessions) return;
+    if (!loadMoreRef.current || loading || loadingMore || !hasMoreSessions || statChip) return;
     const node = loadMoreRef.current;
     const observer = new IntersectionObserver(
       (entries) => {
@@ -346,7 +354,7 @@ export default function CompanySessions() {
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [loading, loadingMore, hasMoreSessions, sessions.length]);
+  }, [loading, loadingMore, hasMoreSessions, sessions.length, statChip]);
 
   useEffect(() => {
     if (!organizationId) return;
@@ -756,9 +764,13 @@ export default function CompanySessions() {
         payment_status: newPaid ? 'paid' : 'pending',
         is_complimentary: newPaid ? selectedSession.is_complimentary : false,
       });
-      setSessions(prev => prev.map(s => s.id === selectedSession.id
-        ? { ...s, paid: newPaid, payment_status: newPaid ? 'paid' : 'pending', is_complimentary: newPaid ? s.is_complimentary : false }
-        : s));
+      const paidPatch = {
+        paid: newPaid,
+        payment_status: newPaid ? 'paid' : 'pending' as const,
+        is_complimentary: newPaid ? selectedSession.is_complimentary : false,
+      };
+      setSessions(prev => prev.map(s => s.id === selectedSession.id ? { ...s, ...paidPatch } : s));
+      setStatsSessions(prev => prev.map(s => s.id === selectedSession.id ? { ...s, ...paidPatch } : s));
     }
   };
 
@@ -779,6 +791,7 @@ export default function CompanySessions() {
     };
     setSelectedSession({ ...selectedSession, ...patch });
     setSessions(prev => prev.map(s => s.id === selectedSession.id ? { ...s, ...patch } : s));
+    setStatsSessions(prev => prev.map(s => s.id === selectedSession.id ? { ...s, ...patch } : s));
   };
 
   const hardDeleteCompanySession = async (sessionId: string, deleteScope: 'single' | 'future' = 'single') => {
@@ -1119,7 +1132,9 @@ export default function CompanySessions() {
   }, [filterStudent, uniqueStudents]);
 
   const filtered = useMemo(() => {
-    const list = sessions.filter(s => {
+    const source = statChip ? statsSessions : sessions;
+    const statsOptions = { requireExplicitNoShow: isProKlase };
+    const list = source.filter(s => {
       if (isFilterActive) {
         const when = new Date(s.start_time);
         if (filterStartDate) {
@@ -1134,7 +1149,7 @@ export default function CompanySessions() {
         }
       }
       if (filterTutor && s.tutor_id !== filterTutor) return false;
-      if (filterStatus && s.status !== filterStatus) return false;
+      if (filterStatus && statChip !== 'unpaid_past' && s.status !== filterStatus) return false;
       if (studentIdSetForFilter && !studentIdSetForFilter.has(s.student_id)) return false;
       if (search) {
         const q = search.toLowerCase();
@@ -1144,12 +1159,13 @@ export default function CompanySessions() {
           !(s.topic || '').toLowerCase().includes(q)
         ) return false;
       }
+      if (!matchesOrgSessionStatChip(s as any, statChip, new Date(), statsOptions)) return false;
       return true;
     });
     return sortNewest
       ? list.sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
       : list.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
-  }, [sessions, filterTutor, filterStatus, studentIdSetForFilter, search, isFilterActive, filterStartDate, filterEndDate, sortNewest, isSchoolOrgView]);
+  }, [sessions, statsSessions, statChip, isProKlase, filterTutor, filterStatus, studentIdSetForFilter, search, isFilterActive, filterStartDate, filterEndDate, sortNewest, isSchoolOrgView]);
 
   const schoolMonitoringSessions = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1298,9 +1314,10 @@ export default function CompanySessions() {
 
         {/* Stats */}
         {!isSchoolOrgView && statsSessions.length > 0 && (() => {
+          const statsOptions = { requireExplicitNoShow: isProKlase };
           const stats = isLaisviVaikai
-            ? calculateOrgSessionListStats(statsSessions as any)
-            : calculateSessionStats(statsSessions as any, null, null, { requireExplicitNoShow: isProKlase });
+            ? calculateOrgSessionListStats(statsSessions as any, statsOptions)
+            : calculateSessionStats(statsSessions as any, null, null, statsOptions);
           return (
             <SessionStatCards
               totalUpcoming={isLaisviVaikai ? (stats as { totalUpcoming?: number }).totalUpcoming : undefined}
@@ -1310,6 +1327,16 @@ export default function CompanySessions() {
               showCancellationDetails={true}
               cancelledByTutor={stats.cancelledByTutor}
               cancelledByStudent={stats.cancelledByStudent}
+              showUnpaidPast={isProKlase}
+              totalUnpaidPast={isProKlase ? countPastUnpaidSessions(statsSessions) : 0}
+              activeFilter={statChip}
+              onFilterClick={(chip) => {
+                setStatChip((current) => {
+                  const next = toggleOrgSessionStatChip(current, chip);
+                  if (next === 'unpaid_past' && filterStatus) setFilterStatus('');
+                  return next;
+                });
+              }}
             />
           );
         })()}
@@ -1458,7 +1485,7 @@ export default function CompanySessions() {
               </tbody>
             </table>
           </div>
-          {(hasMoreSessions || loadingMore) && (
+          {(!statChip && (hasMoreSessions || loadingMore)) && (
             <div ref={loadMoreRef} className="border-t border-gray-100 px-4 py-3 text-center text-sm text-gray-500">
               {loadingMore ? (
                 <span className="inline-flex items-center gap-2">

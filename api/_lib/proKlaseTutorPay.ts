@@ -12,10 +12,18 @@ export const PRO_KLASE_MISSING_REPORT_PENALTY_EUR = -10;
 
 export type ProKlaseSessionPayInput = {
   status: string;
+  status_confirmed_at?: string | Date | null;
   price?: number | null;
   is_complimentary?: boolean | null;
   subjects?: { is_trial?: boolean | null } | Array<{ is_trial?: boolean | null }> | null;
 };
+
+function hasOutcomeConfirmation(session: { status_confirmed_at?: string | Date | null }): boolean {
+  const stamp = session.status_confirmed_at;
+  if (stamp == null || stamp === '') return false;
+  if (stamp instanceof Date) return Number.isFinite(stamp.getTime());
+  return String(stamp).trim().length > 0;
+}
 
 function isComplimentary(session: { is_complimentary?: boolean | null }): boolean {
   return session.is_complimentary === true;
@@ -39,6 +47,7 @@ export function proKlaseSessionPayEur(
   tutorPayRate: number | null | undefined,
 ): number {
   if (isComplimentary(session)) return 0;
+  if (!hasOutcomeConfirmation(session)) return 0;
   const subjects = normalizeProKlaseSubject(session.subjects);
   if (session.status === 'no_show') return PRO_KLASE_STUDENT_NO_SHOW_PAY_EUR;
   if (session.status === 'completed') {

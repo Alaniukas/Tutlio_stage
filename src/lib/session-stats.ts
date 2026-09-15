@@ -23,6 +23,9 @@ export interface Session {
   tutor?: {
     full_name: string;
   };
+  paid?: boolean | null;
+  payment_status?: string | null;
+  is_complimentary?: boolean | null;
 }
 
 export interface SessionStats {
@@ -397,4 +400,87 @@ export function getStudentRecentPastSessions(
   return Array.from(byId.values())
     .sort((a, b) => new Date(b.end_time).getTime() - new Date(a.end_time).getTime())
     .slice(0, limit);
+}
+
+export type OrgSessionStatChip =
+  | 'occurred'
+  | 'no_show'
+  | 'cancelled'
+  | 'cancelled_tutor'
+  | 'cancelled_student'
+  | 'unpaid_past';
+
+export function isPaidLikeSession(session: {
+  paid?: boolean | null;
+  payment_status?: string | null;
+}): boolean {
+  if (session.paid === true) return true;
+  const ps = String(session.payment_status || '');
+  return ps === 'paid' || ps === 'confirmed';
+}
+
+/** Ended, still billable, not paid — the call list for unpaid lessons. */
+export function isPastUnpaidSession(
+  session: {
+    status?: string | null;
+    end_time?: string | Date | null;
+    paid?: boolean | null;
+    payment_status?: string | null;
+    is_complimentary?: boolean | null;
+  },
+  now: Date = new Date(),
+): boolean {
+  const status = String(session.status || '');
+  if (status === 'cancelled' || status === 'canceled') return false;
+  if (session.is_complimentary === true) return false;
+  if (isPaidLikeSession(session)) return false;
+  const end = session.end_time ? new Date(session.end_time) : null;
+  if (!end || !Number.isFinite(end.getTime()) || end.getTime() > now.getTime()) return false;
+  return true;
+}
+
+export function countPastUnpaidSessions(
+  sessions: Array<{
+    status?: string | null;
+    end_time?: string | Date | null;
+    paid?: boolean | null;
+    payment_status?: string | null;
+    is_complimentary?: boolean | null;
+  }>,
+  now: Date = new Date(),
+): number {
+  return sessions.filter((session) => isPastUnpaidSession(session, now)).length;
+}
+
+export function isOccurredSession(
+  session: Session,
+  now: Date = new Date(),
+  options: SessionStatsOptions = {},
+): boolean {
+  if (session.status === 'cancelled') return false;
+  if (isStudentNoShowSession(session, now, options)) return false;
+  const end = new Date(session.end_time);
+  return session.status === 'completed' || (session.status === 'active' && end.getTime() < now.getTime());
+}
+
+export function matchesOrgSessionStatChip(
+  session: Session,
+  chip: OrgSessionStatChip | null,
+  now: Date = new Date(),
+  options: SessionStatsOptions = {},
+): boolean {
+  if (!chip) return true;
+  if (chip === 'unpaid_past') return isPastUnpaidSession(session, now);
+  if (chip === 'cancelled') return session.status === 'cancelled';
+  if (chip === 'cancelled_tutor') return session.status === 'cancelled' && session.cancelled_by === 'tutor';
+  if (chip === 'cancelled_student') return session.status === 'cancelled' && session.cancelled_by === 'student';
+  if (chip === 'no_show') return isStudentNoShowSession(session, now, options);
+  return isOccurredSession(session, now, options);
+}
+
+export function toggleOrgSessionStatChip(
+  current: OrgSessionStatChip | null,
+  clicked: OrgSessionStatChip,
+): OrgSessionStatChip | null {
+  return current === clicked ? null : clicked;
 }

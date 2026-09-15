@@ -246,7 +246,7 @@ export default function CreateInvoiceModal({
           supabase.from('profiles').select('organization_id, company_commission_percent, company_commission_by_subject').eq('id', tutorId).maybeSingle(),
           supabase
             .from('sessions')
-            .select('id, tutor_id, start_time, end_time, status, subject_id, price, is_complimentary, students(full_name, email), subjects(name, is_trial)')
+            .select('id, tutor_id, start_time, end_time, status, subject_id, price, is_complimentary, status_confirmed_at, students(full_name, email), subjects(name, is_trial)')
             .eq('tutor_id', tutorId)
             .in('status', ['completed', 'no_show'])
             .gte('start_time', periodStart + 'T00:00:00')
@@ -258,7 +258,9 @@ export default function CreateInvoiceModal({
         const orgId = (prof as any)?.organization_id as string | undefined;
         const tutorPayRate = Number((prof as any)?.company_commission_percent) || 0;
         const proKlasePay = isProKlaseOrg(orgId);
-        const rows = (sessRows || []).map((s: any) => ({
+        const rows = (sessRows || [])
+          .filter((s: any) => !proKlasePay || Boolean(s.status_confirmed_at))
+          .map((s: any) => ({
           ...s,
           price: proKlasePay
             ? proKlaseSessionPayEur(
@@ -267,6 +269,7 @@ export default function CreateInvoiceModal({
                   price: s.price,
                   is_complimentary: s.is_complimentary,
                   subjects: s.subjects,
+                  status_confirmed_at: s.status_confirmed_at,
                 },
                 tutorPayRate,
               )

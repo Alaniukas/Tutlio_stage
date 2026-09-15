@@ -58,6 +58,8 @@ import {
 } from '@/lib/preload';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
+import { isProKlaseAwaitingOutcomeConfirmation } from '@/lib/proKlaseTutorPay';
 import { canChooseParentLessonComment } from '@/lib/parentLessonComment';
 import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
@@ -941,17 +943,28 @@ export default function DashboardPage() {
         if (status === 'cancelled' && !window.confirm(t('dash.confirmCancelPrompt'))) return;
         setConfirmingStatusId(session.id);
         try {
-            const resp = await fetch('/api/confirm-session-status', {
-                method: 'POST',
-                headers: await authHeaders(),
-                body: JSON.stringify({ sessionId: session.id, status, late }),
-            });
-            const json = await resp.json().catch(() => ({} as Record<string, unknown>));
-            if (!resp.ok) {
-                setToastMessage({ message: t('dash.confirmStatusError', { msg: String((json as any).error || resp.status) }), type: 'error' });
-                return;
+            if (status === 'completed' || status === 'no_show') {
+                await confirmSessionOutcome({
+                    sessionId: session.id,
+                    currentStatus: session.status,
+                    status,
+                    startTime: session.start_time,
+                    endTime: session.end_time,
+                    late,
+                });
+            } else {
+                const resp = await fetch('/api/confirm-session-status', {
+                    method: 'POST',
+                    headers: await authHeaders(),
+                    body: JSON.stringify({ sessionId: session.id, status, late }),
+                });
+                const json = await resp.json().catch(() => ({} as Record<string, unknown>));
+                if (!resp.ok) {
+                    setToastMessage({ message: t('dash.confirmStatusError', { msg: String((json as any).error || resp.status) }), type: 'error' });
+                    return;
+                }
             }
-            setSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, status } : s)));
+            setSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, status, status_confirmed_at: s.status_confirmed_at || new Date().toISOString() } : s)));
             if (selectedSession?.id === session.id) {
                 setSelectedSession({ ...selectedSession, status });
                 setIsModalOpen(false);
@@ -966,6 +979,11 @@ export default function DashboardPage() {
                     });
                 })().catch(() => {});
             }
+        } catch (error) {
+            setToastMessage({
+                message: t('dash.confirmStatusError', { msg: error instanceof Error ? error.message : String(error) }),
+                type: 'error',
+            });
         } finally {
             setConfirmingStatusId(null);
         }
@@ -1138,7 +1156,7 @@ export default function DashboardPage() {
     // the tutor has not confirmed yet. Newest first; not dismissible by design.
     const pendingStatusSessions = requiresStatusConfirmation
         ? sessions
-              .filter((s) => s.status === 'active' && isBefore(new Date(s.end_time), now))
+              .filter((s) => isProKlaseAwaitingOutcomeConfirmation(s, now))
               .sort((a, b) => new Date(b.end_time).getTime() - new Date(a.end_time).getTime())
         : [];
 

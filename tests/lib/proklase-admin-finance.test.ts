@@ -89,9 +89,19 @@ describe('proKlaseAdminFinance', () => {
 
   it('stats tutor pay ignores completed lessons that are still unpaid', () => {
     const sessions = [
-      paidLesson({ status: 'completed', paid: false, payment_status: 'unpaid', lesson_package_id: null, price: 27 }),
-      paidLesson({ status: 'completed', paid: true, payment_status: 'paid', lesson_package_id: null, price: 29 }),
+      paidLesson({ status: 'completed', paid: false, payment_status: 'unpaid', lesson_package_id: null, price: 27, status_confirmed_at: '2026-09-10T18:00:00Z' }),
+      paidLesson({ status: 'completed', paid: true, payment_status: 'paid', lesson_package_id: null, price: 29, status_confirmed_at: '2026-09-10T18:00:00Z' }),
     ];
     expect(sumProKlaseRealizedPaidTutorPayEur(sessions, 25)).toBe(25);
+  });
+
+  it('does not realize tutor pay for completed lessons until attendance is marked', () => {
+    expect(sumProKlaseRealizedPaidTutorPayEur([
+      paidLesson({ status: 'completed', status_confirmed_at: null }),
+    ], 25)).toBe(0);
+    expect(proKlaseAccruedTutorCostEur(
+      paidLesson({ status: 'completed', status_confirmed_at: null }),
+      tutorRate,
+    )).toBe(0);
   });
 });

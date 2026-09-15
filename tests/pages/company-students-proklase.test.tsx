@@ -114,6 +114,10 @@ describe('CompanyStudents Pro Klasė list', () => {
 
     expect(screen.getByText('(2)')).toBeTruthy();
     expect(screen.getAllByText(/Pro Klasė Mokinys/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: /^Aktyvūs klientai/ }));
+    expect(screen.queryByText(/Pro Klasė Mokinys/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Aktyvūs klientai/ }));
+    expect(screen.getAllByText(/Pro Klasė Mokinys/).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
     expect(screen.getByText('Mokinio informacija')).toBeTruthy();
@@ -140,7 +144,7 @@ describe('CompanyStudents Pro Klasė list', () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /Pridėti mokinį/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
 
     expect(screen.getByText('Pridėti naują mokinį')).toBeTruthy();
     expect(screen.getByText('Administratoriaus komentaras')).toBeTruthy();

@@ -38,11 +38,12 @@ beforeEach(() => {
   mocks.deliver.mockResolvedValue({ status: 'sent' });
   mocks.renewal.mockResolvedValue(undefined);
   mocks.from.mockImplementation((table: string) => {
-    const result = table === 'students' ? { data: { id: 'student', tutor_id: 'tutor' }, error: null }
+    const result = table === 'students' ? { data: { id: 'student', tutor_id: 'tutor', organization_id: 'org', detached_at: null }, error: null }
+      : table === 'profiles' ? { data: { organization_id: 'org' }, error: null }
       : table === 'organizations' ? { data: { features: { monthly_packages: true }, stripe_account_id: 'acct', stripe_onboarding_complete: true }, error: null }
         : { data: [], error: null };
     const chain: any = { then: (resolve: any) => Promise.resolve(result).then(resolve) };
-    for (const method of ['select','eq','is','single','update']) chain[method] = vi.fn(() => chain);
+    for (const method of ['select','eq','is','single','maybeSingle','update']) chain[method] = vi.fn(() => chain);
     return chain;
   });
 });
@@ -87,5 +88,19 @@ describe('consolidated monthly endpoint', () => {
     mocks.isPro.mockReturnValue(false);
     expect((await call({ studentId: 'student', preview: true })).status).toHaveBeenCalledWith(403);
     expect(mocks.preview).not.toHaveBeenCalled();
+  });
+  it('accepts an org-tutor client whose student.organization_id was never stamped', async () => {
+    mocks.from.mockImplementation((table: string) => {
+      const result = table === 'students'
+        ? { data: { id: 'student', tutor_id: 'tutor', organization_id: null, detached_at: null }, error: null }
+        : table === 'profiles' ? { data: { organization_id: 'org' }, error: null }
+        : table === 'organizations' ? { data: { features: { monthly_packages: true }, stripe_account_id: 'acct', stripe_onboarding_complete: true }, error: null }
+          : { data: [], error: null };
+      const chain: any = { then: (resolve: any) => Promise.resolve(result).then(resolve) };
+      for (const method of ['select','eq','is','single','maybeSingle','update']) chain[method] = vi.fn(() => chain);
+      return chain;
+    });
+    expect((await call({ studentId: 'student', preview: true })).status).toHaveBeenCalledWith(200);
+    expect(mocks.preview).toHaveBeenCalled();
   });
 });

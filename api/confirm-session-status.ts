@@ -126,20 +126,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // was active. Ordinary company/Pro Klase corrections keep their explicit
     // confirmation flags and stricter policy.
     const schoolManualRequest = organizationEntityType === 'school' && authorized;
+    const isProKlase = isProKlaseOrg(tutorOrganizationId);
+    const unstamped = !session.status_confirmed_at;
+    // Pro Klasė tutors must be able to mark attended / no-show even if cron or
+    // an older path already left the row as completed/no_show without a stamp.
+    // After the first stamp, only an org admin may correct the outcome.
     const evidenceOnly = existingFinalOutcome
       && status === session.status && ['completed', 'no_show'].includes(status)
       && (schoolManualRequest || (
-        req.body?.confirmExisting === true
-        && isOrgAdminActor
-        && isProKlaseOrg(tutorOrganizationId)
+        isProKlase && authorized && (
+          unstamped
+          || (isOrgAdminActor && req.body?.confirmExisting === true)
+        )
       ));
     const correction = existingFinalOutcome
       && status !== session.status && ['completed', 'no_show'].includes(status)
       && (
         schoolManualRequest
-        || (isOrgAdminActor && isProKlaseOrg(tutorOrganizationId))
-      )
-      && (schoolManualRequest || req.body?.correctExisting === true);
+        || (isProKlase && authorized && (
+          unstamped
+          || (isOrgAdminActor && req.body?.correctExisting === true)
+        ))
+      );
     if (session.status !== 'active' && !evidenceOnly && !correction) {
       return json(res, 409, { error: 'already_finalized', currentStatus: session.status });
     }

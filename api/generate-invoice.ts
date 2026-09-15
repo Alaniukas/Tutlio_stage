@@ -179,7 +179,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const sessionSelect = `
-        id, tutor_id, price, start_time, subject_id, student_id, status, is_complimentary,
+        id, tutor_id, price, start_time, subject_id, student_id, status, is_complimentary, status_confirmed_at,
         students!inner(id, full_name, email, payer_email, payer_name, payer_phone, grade),
         subjects(name, is_trial)
       `;
@@ -378,6 +378,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!isOrgTutor) {
       sessions = sessions.filter((s: any) => s.__fromPackage || s.is_complimentary !== true);
     }
+    if (isOrgTutor && isProKlaseOrg(profile.organization_id)) {
+      sessions = sessions.filter((s: any) => s.__fromPackage || Boolean(s.status_confirmed_at));
+    }
     if (!sessions.length) {
       if (precheckOnly) {
         return res.status(200).json({ canGenerate: false, reason: 'no_sessions' });
@@ -495,7 +498,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const lessonPayEur = (s: { status?: string; price?: number | null; subject_id?: string | null; subjects?: unknown }) =>
         proKlasePay
           ? proKlaseSessionPayEur(
-              { status: String(s.status || ''), price: s.price, subjects: s.subjects as { is_trial?: boolean | null } | null },
+              { status: String(s.status || ''), price: s.price, subjects: s.subjects as { is_trial?: boolean | null } | null, status_confirmed_at: (s as any).status_confirmed_at },
               orgTutorRateEur,
             )
           : orgTutorSessionPayEur({
@@ -830,7 +833,7 @@ function buildLineItems(
         ? opts.lessonPayEur(s)
         : opts?.proKlasePay
           ? proKlaseSessionPayEur(
-              { status: s.status, price: s.price, subjects: s.subjects },
+              { status: s.status, price: s.price, subjects: s.subjects, status_confirmed_at: s.status_confirmed_at },
               orgTutorPayRate,
             )
           : orgTutorSessionPayEur({

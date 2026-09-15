@@ -14,10 +14,38 @@ export const PRO_KLASE_MISSING_REPORT_PENALTY_EUR = -10;
 
 export type ProKlaseSessionPayInput = {
   status: string;
+  /** Tutor/admin must stamp the outcome before pay is realized. */
+  status_confirmed_at?: string | Date | null;
   price?: number | null;
   is_complimentary?: boolean | null;
   subjects?: { is_trial?: boolean | null } | Array<{ is_trial?: boolean | null }> | null;
 };
+
+export function hasProKlaseOutcomeConfirmation(
+  session: { status_confirmed_at?: string | Date | null },
+): boolean {
+  const stamp = session.status_confirmed_at;
+  if (stamp == null || stamp === '') return false;
+  if (stamp instanceof Date) return Number.isFinite(stamp.getTime());
+  return String(stamp).trim().length > 0;
+}
+
+/** Ended Pro Klasė lesson that still needs the tutor to mark attended / no-show. */
+export function isProKlaseAwaitingOutcomeConfirmation(
+  session: {
+    status?: string | null;
+    end_time?: string | Date | null;
+    status_confirmed_at?: string | Date | null;
+  },
+  now: Date = new Date(),
+): boolean {
+  const status = String(session.status || '');
+  if (status === 'cancelled' || status === 'canceled') return false;
+  if (hasProKlaseOutcomeConfirmation(session)) return false;
+  const end = session.end_time ? new Date(session.end_time) : null;
+  if (!end || !Number.isFinite(end.getTime()) || end.getTime() > now.getTime()) return false;
+  return true;
+}
 
 export function normalizeProKlaseSubject(
   subjects: ProKlaseSessionPayInput['subjects'],
@@ -42,8 +70,27 @@ export function normalizeProKlaseSessionForPay(
   };
 }
 
-export function isProKlaseRealizedSession(status: string): boolean {
-  return status === 'completed' || status === 'no_show';
+export function isProKlaseRealizedSession(
+  session: { status?: string | null; status_confirmed_at?: string | Date | null },
+): boolean {
+  const status = String(session.status || '');
+  return (status === 'completed' || status === 'no_show') && hasProKlaseOutcomeConfirmation(session);
+}
+
+export function countProKlaseConfirmedCompleted(
+  sessions: Array<{ status?: string | null; status_confirmed_at?: string | Date | null }>,
+): number {
+  return sessions.filter(
+    (s) => String(s.status || '') === 'completed' && hasProKlaseOutcomeConfirmation(s),
+  ).length;
+}
+
+export function countProKlaseConfirmedNoShows(
+  sessions: Array<{ status?: string | null; status_confirmed_at?: string | Date | null }>,
+): number {
+  return sessions.filter(
+    (s) => String(s.status || '') === 'no_show' && hasProKlaseOutcomeConfirmation(s),
+  ).length;
 }
 
 export function proKlaseSessionPayEur(
@@ -52,6 +99,7 @@ export function proKlaseSessionPayEur(
 ): number {
   const normalized = normalizeProKlaseSessionForPay(session);
   if (isComplimentarySession(normalized)) return 0;
+  if (!hasProKlaseOutcomeConfirmation(normalized)) return 0;
   if (normalized.status === 'no_show') return PRO_KLASE_STUDENT_NO_SHOW_PAY_EUR;
   if (normalized.status === 'completed') {
     if (normalized.subjects?.is_trial) return PRO_KLASE_TRIAL_PAY_EUR;
@@ -118,11 +166,13 @@ export function sumProKlaseRealizedPayEur(
 ): number {
   return Math.round(
     sessions
-      .filter((s) => isProKlaseRealizedSession(String(s.status || '')))
+      .filter((s) => isProKlaseRealizedSession(s))
       .reduce((sum, s) => sum + proKlaseSessionPayEur(s, tutorPayRate), 0) * 100,
   ) / 100;
 }
 
-export function countProKlaseRealizedSessions(sessions: Array<{ status?: string | null }>): number {
-  return sessions.filter((s) => isProKlaseRealizedSession(String(s.status || ''))).length;
+export function countProKlaseRealizedSessions(
+  sessions: Array<{ status?: string | null; status_confirmed_at?: string | Date | null }>,
+): number {
+  return sessions.filter((s) => isProKlaseRealizedSession(s)).length;
 }

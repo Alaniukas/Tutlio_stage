@@ -26,7 +26,8 @@ import {
   filterConductedOrgSessions,
 } from '@/lib/orgTutorConductedSessions';
 import {
-  countProKlaseRealizedSessions,
+  countProKlaseConfirmedCompleted,
+  countProKlaseConfirmedNoShows,
 } from '@/lib/proKlaseTutorPay';
 import {
   packageClientPaidEur,
@@ -116,6 +117,8 @@ export default function CompanyStats() {
   const [schoolActivity, setSchoolActivity] = useState<SchoolActivitySummary>(
     stCache?.schoolActivity ?? EMPTY_SCHOOL_ACTIVITY,
   );
+  const [isProKlaseStats, setIsProKlaseStats] = useState(Boolean(stCache?.isProKlaseStats));
+  const [totalNoShows, setTotalNoShows] = useState(stCache?.totalNoShows ?? 0);
   const [filterStartDate, setFilterStartDate] = useState<Date | null>(null);
   const [filterEndDate, setFilterEndDate] = useState<Date | null>(null);
   const effectiveRange = appliedRange ?? currentMonthStatsDateRange();
@@ -218,6 +221,7 @@ export default function CompanyStats() {
       if (proKlase) {
         const mapped: ProKlaseAdminSession[] = tutorSessions.map((s: any) => ({
           status: s.status,
+          status_confirmed_at: s.status_confirmed_at,
           payment_status: s.payment_status,
           paid: s.paid,
           price: s.price,
@@ -229,16 +233,17 @@ export default function CompanyStats() {
           (packagesByTutor.get(tutor.id) || 0) +
           mapped.reduce((sum, session) => sum + standaloneSessionClientPaidEur(session), 0);
         const netEarnings = sumProKlaseRealizedPaidTutorPayEur(mapped, tutorPayPerSession);
-        const completedSessions = countProKlaseRealizedSessions(mapped);
+        const completedSessions = countProKlaseConfirmedCompleted(mapped);
+        const noShowMeetings = countProKlaseConfirmedNoShows(mapped);
         return {
           id: tutor.id,
           full_name: tutor.full_name,
           scheduledSessions: tutorSessions.filter(s => s.status !== 'cancelled').length,
           completedSessions,
           upcomingSessions: 0,
-          noShowMeetings: 0,
+          noShowMeetings,
           attendanceJoined: 0,
-          attendanceAbsent: 0,
+          attendanceAbsent: noShowMeetings,
           attendanceUnconfirmed: 0,
           attendanceRate: null,
           cancelledByTutor: cancellation.cancelledByTutor,
@@ -291,20 +296,24 @@ export default function CompanyStats() {
     const tne = stats.reduce((sum, s) => sum + s.netEarnings, 0);
     const ts = isSchool ? schoolSummary.completed : stats.reduce((sum, s) => sum + s.completedSessions, 0);
     const tcn = isSchool ? schoolSummary.cancelled : stats.reduce((sum, s) => sum + s.totalCancelled, 0);
+    const tns = isSchool ? schoolSummary.noShowMeetings : stats.reduce((sum, s) => sum + s.noShowMeetings, 0);
 
     if (request !== loadRequest.current) return;
     setSchoolActivity(schoolSummary);
+    setIsProKlaseStats(proKlase);
     setTutorStats(sorted);
     setTotalEarnings(te);
     setTotalCompanyCommission(tcc);
     setTotalNetEarnings(tne);
     setTotalSessions(ts);
     setTotalCancelled(tcn);
+    setTotalNoShows(tns);
 
     if (cacheResult) {
       setCache(companyStatsCacheKey(adminRow.organization_id), {
         tutorStats: sorted, totalEarnings: te, totalCompanyCommission: tcc,
-        totalNetEarnings: tne, totalSessions: ts, totalCancelled: tcn, schoolActivity: schoolSummary,
+        totalNetEarnings: tne, totalSessions: ts, totalCancelled: tcn, totalNoShows: tns,
+        schoolActivity: schoolSummary, isProKlaseStats: proKlase,
       });
     }
     } catch (error) {
@@ -434,6 +443,17 @@ export default function CompanyStats() {
               <p className="text-xs text-gray-500">{t('compStats.lessonsCompleted')}</p>
             </div>
           </div>
+          {isProKlaseStats ? (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center gap-4">
+            <div className="w-11 h-11 rounded-xl bg-rose-100 flex items-center justify-center flex-shrink-0">
+              <UserX className="w-5 h-5 text-rose-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{totalNoShows}</p>
+              <p className="text-xs text-gray-500">{t('status.noShow')}</p>
+            </div>
+          </div>
+          ) : null}
           {!showFinanceTotals || isSchool ? (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center gap-4">
             <div className="w-11 h-11 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0">
@@ -502,6 +522,12 @@ export default function CompanyStats() {
                         <p className="text-xs text-gray-500 mt-1">
                           {t('compStats.lessonsColon')}{' '}
                           <span className="font-semibold text-gray-800">{stat.completedSessions}</span>
+                          {isProKlaseStats ? (
+                            <>
+                              {' '}· {t('status.noShow')}{' '}
+                              <span className="font-semibold text-rose-700">{stat.noShowMeetings}</span>
+                            </>
+                          ) : null}
                           {stat.totalCancelled > 0 ? (
                             <>
                               {' '}· {t('compStats.cancellationsColon')}{' '}
@@ -533,6 +559,9 @@ export default function CompanyStats() {
                   <tr className="border-b border-gray-100 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                     <th className="text-left px-5 py-3">{t('compStats.tutorNameColumn')}</th>
                     <th className="text-right px-5 py-3">{t('compStats.lessons')}</th>
+                    {isProKlaseStats ? (
+                    <th className="text-right px-5 py-3">{t('status.noShow')}</th>
+                    ) : null}
                     {showFinanceTotals ? (
                       <>
                     {!isSchool ? <th className="text-right px-5 py-3">{t('compStats.totalRevenue')}</th> : null}
@@ -560,6 +589,9 @@ export default function CompanyStats() {
                         </div>
                       </td>
                       <td className="px-5 py-3 text-right font-semibold text-gray-900">{stat.completedSessions}</td>
+                      {isProKlaseStats ? (
+                      <td className="px-5 py-3 text-right font-semibold text-rose-700">{stat.noShowMeetings}</td>
+                      ) : null}
                       {showFinanceTotals ? (
                         <>
                       {!isSchool ? <td className="px-5 py-3 text-right font-semibold text-gray-700">{fmt(stat.earnings)}</td> : null}

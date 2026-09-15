@@ -126,6 +126,30 @@ describe('explicit school historical outcome confirmation', () => {
     expect(state.move).not.toHaveBeenCalled();
   });
 
+  it('lets a Pro Klase tutor stamp an auto-completed lesson and mark no-show instead', async () => {
+    state.userId = 'teacher';
+    state.admin = null;
+    state.tutorOrganizationId = PRO_KLASE_ORG_ID;
+    state.entityType = 'company';
+    expect((await run({})).status).toHaveBeenCalledWith(200);
+    expect(state.writes).toEqual([{ status: 'completed', status_confirmed_at: expect.any(String), status_confirmed_by: 'teacher' }]);
+
+    state.session.status_confirmed_at = null;
+    state.writes = [];
+    expect((await run({ status: 'no_show' })).status).toHaveBeenCalledWith(200);
+    expect(state.writes[0]).toMatchObject({ status: 'no_show', status_confirmed_by: 'teacher' });
+  });
+
+  it('does not let a Pro Klase tutor correct a lesson after it is already stamped', async () => {
+    state.userId = 'teacher';
+    state.admin = null;
+    state.tutorOrganizationId = PRO_KLASE_ORG_ID;
+    state.entityType = 'company';
+    state.session.status_confirmed_at = '2020-01-01T12:00:00Z';
+    expect((await run({ status: 'no_show', correctExisting: true })).status).toHaveBeenCalledWith(409);
+    expect(state.writes).toHaveLength(0);
+  });
+
   it('lets a Pro Klase admin confirm an older completed lesson', async () => {
     state.tutorOrganizationId = PRO_KLASE_ORG_ID;
     state.admin = { organizationId: PRO_KLASE_ORG_ID, role: 'admin', permissions: { 'sessions.edit': true } };

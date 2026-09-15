@@ -10,6 +10,7 @@ import {
   deliverPooledPackageOffer,
   ensurePooledMonthlyRenewal,
 } from './_lib/pooledMonthlyGeneration.js';
+import { resolveLiveOrgStudent } from './_lib/orgAdminStudent.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -28,8 +29,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!access || !hasOrgAdminPermission(access.role, access.permissions, 'finance.edit')) return res.status(403).json({ error: 'Forbidden' });
     const orgId = access.organizationId;
     if (!isProKlaseOrg(orgId)) return res.status(403).json({ error: 'This package flow is not enabled for this organization' });
-    const student = await db.from('students').select('id,tutor_id').eq('id', body.studentId).eq('organization_id', orgId).is('detached_at', null).single();
-    if (student.error || !student.data) return res.status(404).json({ error: 'Student not found' });
+    const student = await resolveLiveOrgStudent(db, body.studentId, orgId);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
     const org = await db.from('organizations').select('features,stripe_account_id,stripe_onboarding_complete').eq('id', orgId).single();
     if (org.error) throw new Error(org.error.message);
     if (org.data?.features?.monthly_packages !== true) return res.status(403).json({ error: 'Monthly packages are disabled' });
@@ -37,12 +38,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Vilnius', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     const periodStart = body.periodStart ?? `${today.slice(0, 7)}-01`;
     if (typeof periodStart !== 'string') return res.status(400).json({ error: 'Invalid period start' });
-    const preview = await previewMonthlyStudentPackage(db, body.studentId, orgId, periodStart);
+    const preview = await previewMonthlyStudentPackage(db, student.id, orgId, periodStart);
     if (body.preview) return res.status(200).json(preview);
     if (body.previewToken !== preview.previewToken) return res.status(409).json({ error: 'The schedule or price changed. Refresh the preview.', code: 'stale_preview' });
     if (!org.data.stripe_account_id || !org.data.stripe_onboarding_complete) return res.status(409).json({ error: 'Organization payment account is not connected' });
     const created = await db.rpc('create_org_student_package', {
-      p_student_id: body.studentId, p_org_id: orgId, p_student_ids: preview.studentIds,
+      p_student_id: student.id, p_org_id: orgId, p_student_ids: preview.studentIds,
       p_items: preview.items, p_unit_price: preview.pricePerLesson, p_period_start: preview.periodStart,
       p_period_end: preview.periodEnd, p_preview_token: preview.previewToken,
       p_session_ids: preview.sessionIds,

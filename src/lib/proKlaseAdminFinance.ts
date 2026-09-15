@@ -3,6 +3,7 @@ import { isComplimentarySession, sessionClientRevenueEur } from '@/lib/sessionCo
 import {
   PRO_KLASE_STUDENT_NO_SHOW_PAY_EUR,
   PRO_KLASE_TRIAL_PAY_EUR,
+  hasProKlaseOutcomeConfirmation,
   isProKlaseRealizedSession,
   proKlaseIndividualRatePayEur,
   proKlaseSessionPayEur,
@@ -11,6 +12,7 @@ import {
 
 export type ProKlaseAdminSession = {
   status: string;
+  status_confirmed_at?: string | Date | null;
   payment_status?: string | null;
   paid?: boolean | null;
   price?: number | null;
@@ -46,10 +48,16 @@ export function proKlaseAccruedTutorCostEur(
   if (isCancelled(session.status)) return 0;
   if (isComplimentarySession(session)) return 0;
   if (!isPaidLike(session)) return 0;
+  if (session.status === 'active') {
+    const subjects = normalizeProKlaseSubject(session.subjects);
+    if (subjects?.is_trial) return PRO_KLASE_TRIAL_PAY_EUR;
+    return proKlaseIndividualRatePayEur(tutorPayRate);
+  }
+  if (!hasProKlaseOutcomeConfirmation(session)) return 0;
   if (session.status === 'no_show') return PRO_KLASE_STUDENT_NO_SHOW_PAY_EUR;
   const subjects = normalizeProKlaseSubject(session.subjects);
   if (subjects?.is_trial) return PRO_KLASE_TRIAL_PAY_EUR;
-  if (session.status === 'active' || session.status === 'completed') {
+  if (session.status === 'completed') {
     return proKlaseIndividualRatePayEur(tutorPayRate);
   }
   return 0;
@@ -86,7 +94,7 @@ export function sumProKlaseRealizedPaidTutorPayEur(
 ): number {
   return Math.round(
     sessions
-      .filter((session) => isProKlaseRealizedSession(String(session.status || '')) && isPaidLike(session))
+      .filter((session) => isProKlaseRealizedSession(session) && isPaidLike(session))
       .reduce((sum, session) => sum + proKlaseSessionPayEur(session, tutorPayRate), 0) * 100,
   ) / 100;
 }

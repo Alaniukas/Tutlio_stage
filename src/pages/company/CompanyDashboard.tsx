@@ -24,6 +24,7 @@ import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { fetchOrganizationRow } from '@/lib/orgLookup';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { isProKlaseAwaitingOutcomeConfirmation } from '@/lib/proKlaseTutorPay';
 import { authHeaders } from '@/lib/apiHelpers';
 import { deriveAttendance, isAttendanceFlagged } from '@/lib/attendance';
 import { buildNoShowSessionPatch, defaultNoShowWhenForNow } from '@/lib/noShowWhen';
@@ -347,7 +348,13 @@ export default function CompanyDashboard() {
         .forEach((s) => addAttentionReason(s, 'payment'));
 
       rows
-        .filter((s) => isAttendanceFlagged(s, now) && isAfter(new Date(s.start_time), past30))
+        .filter((s) => {
+          if (!isAfter(new Date(s.start_time), past30)) return false;
+          if (isProKlaseOrg(organizationId)) {
+            return isProKlaseAwaitingOutcomeConfirmation(s, now);
+          }
+          return isAttendanceFlagged(s, now);
+        })
         .forEach((s) => addAttentionReason(s, 'attendance'));
 
       // Req 8 (flag-gated): students whose trial lesson is done but no real
