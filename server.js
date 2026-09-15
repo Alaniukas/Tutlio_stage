@@ -1,11 +1,16 @@
 import crypto from 'crypto';
 import express from 'express';
-import { promises as fs } from 'fs';
+import { existsSync, promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import PizZip from 'pizzip';
-import { createWorker, runProcess } from './worker.js';
+import {
+  createWorker,
+  spawnOfficeProcess,
+  waitForOutputFile,
+  reapOfficeProcesses,
+} from './worker.js';
 
 const app = express();
 
@@ -14,7 +19,7 @@ app.use('/convert-docx-to-pdf', (req, res, next) => {
   const auth = checkConvertApiKey(req);
   if (!auth.allowed) return res.status(auth.status).json({ error: auth.error });
   if (admitted >= 3 || restarting) {
-    res.setHeader('Retry-After', '5');
+    res.setHeader('Retry-After', '20');
     return res.status(503).json({ error: 'Converter busy' });
   }
   admitted++;
@@ -24,7 +29,7 @@ app.use('/convert-docx-to-pdf', (req, res, next) => {
   res.once('close', release);
   next();
 });
-app.use(express.json({ limit: '8mb' }));
+app.use(express.json({ limit: '50mb' }));
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && 'body' in err) {
     console.warn('[docx-converter] invalid JSON body');
@@ -33,16 +38,51 @@ app.use((err, req, res, next) => {
   return next(err);
 });
 
-const SERVICE_VERSION = '2.2.1';
+const SERVICE_VERSION = '2.3.0';
+const PDF_WAIT_MS = Number(process.env.PDF_WAIT_MS || 180000);
+const LO_TIMEOUT_MS = Number(process.env.LO_TIMEOUT_MS || 180000);
+const PDF_GRACE_MS = Number(process.env.PDF_GRACE_MS || 3000);
+const PROBE_EVERY_MS = Number(process.env.PROBE_EVERY_MS || 10 * 60 * 1000);
 const worker = createWorker();
 let lastProbe = null;
+let lastError = null;
 let restarting = false;
+let consecutiveInfraFailures = 0;
+let consecutiveProbeFailures = 0;
 function restartWorker() {
   if (restarting) return;
   restarting = true;
   worker.stop();
-  // Non-zero exit triggers Railway ON_FAILURE restart; do not accept more work.
+  reapOfficeProcesses();
+  // Non-zero exit; Railway restartPolicy ALWAYS brings the container back.
   setTimeout(() => process.exit(1), 250).unref();
+}
+
+function noteInfraFailure() {
+  consecutiveInfraFailures += 1;
+  reapOfficeProcesses();
+  if (consecutiveInfraFailures >= 5) restartWorker();
+}
+
+function noteSuccess() {
+  consecutiveInfraFailures = 0;
+  consecutiveProbeFailures = 0;
+  lastError = null;
+}
+
+function libreOfficeBin() {
+  if (process.env.LIBREOFFICE_PATH) return process.env.LIBREOFFICE_PATH;
+  const candidates = [
+    '/usr/lib/libreoffice/program/soffice.bin',
+    '/usr/bin/soffice',
+    'soffice',
+  ];
+  return candidates.find((bin) => bin === 'soffice' || existsSync(bin)) || 'soffice';
+}
+
+function shouldRetryOriginal(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /xml|parse|corrupt|SAX|not well-formed|invalid document/i.test(message);
 }
 
 /** Calibrated on Railway Linux LO vs Word Save-as-PDF for annex table "Dalykas" x=120. */
@@ -249,66 +289,90 @@ function checkConvertApiKey(req) {
   return { allowed: true };
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** LibreOffice can return before contract.pdf is fully written (fresh UserInstallation). */
-async function waitForPdf(outputPath, timeoutMs = 45000) {
-  const started = Date.now();
-  let lastErr = null;
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const pdf = await fs.readFile(outputPath);
-      if (pdf.length > 0 && pdf.subarray(0, 5).toString() === '%PDF-') return pdf;
-    } catch (error) {
-      lastErr = error;
-    }
-    await sleep(250);
+async function runLibreOfficeOnce(docxBytes, signal) {
+  if (signal?.aborted) {
+    const aborted = new Error('Client disconnected');
+    aborted.status = 499;
+    throw aborted;
   }
-  throw lastErr || new Error(`Timed out waiting for ${outputPath}`);
-}
-
-async function runLibreOfficeOnce(docxBytes) {
+  reapOfficeProcesses();
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tutlio-docx-'));
   const outputPath = path.join(workDir, 'contract.pdf');
+  const profilePath = path.join(workDir, 'profile');
+  let handle;
+  const onAbort = () => { handle?.kill(); };
   try {
     const inputPath = path.join(workDir, 'contract.docx');
+    await fs.mkdir(profilePath, { recursive: true });
     await fs.writeFile(inputPath, docxBytes);
-    await runProcess(process.env.LIBREOFFICE_PATH || '/usr/bin/soffice', [
-      '-env:UserInstallation=' + pathToFileURL(path.join(workDir, 'profile')).href,
-      '--headless', '--nologo', '--nodefault', '--nofirststartwizard', '--norestore',
+    handle = await spawnOfficeProcess(libreOfficeBin(), [
+      '-env:UserInstallation=' + pathToFileURL(profilePath).href,
+      '--headless', '--nologo', '--nodefault', '--nofirststartwizard', '--nolockcheck', '--norestore',
       '--convert-to', 'pdf', '--outdir', workDir, inputPath,
     ], {
-      timeoutMs: 120000,
-      env: { ...process.env, HOME: workDir, TMPDIR: workDir,
-        SAL_USE_VCLPLUGIN: 'gen', OMP_NUM_THREADS: '1', OPENBLAS_NUM_THREADS: '1' },
+      timeoutMs: LO_TIMEOUT_MS,
+      env: {
+        ...process.env,
+        HOME: workDir,
+        TMPDIR: workDir,
+        SAL_USE_VCLPLUGIN: 'gen',
+        SAL_DISABLE_OPENCL: '1',
+        OMP_NUM_THREADS: '1',
+        OPENBLAS_NUM_THREADS: '1',
+      },
     });
-    return await waitForPdf(outputPath);
+    signal?.addEventListener('abort', onAbort);
+    const pdfPromise = waitForOutputFile(outputPath, workDir, {
+      timeoutMs: PDF_WAIT_MS,
+      graceMs: PDF_GRACE_MS,
+      isAlive: handle.isAlive,
+    });
+    try {
+      const pdf = await pdfPromise;
+      return pdf;
+    } catch (pdfError) {
+      const closed = await handle.close.catch(() => ({ stderr: handle.getStderr(), timedOut: false }));
+      if (closed.timedOut) {
+        const timeoutErr = new Error('Conversion deadline exceeded');
+        timeoutErr.infrastructureFailure = true;
+        throw timeoutErr;
+      }
+      const stderr = handle.getStderr() || closed.stderr || '';
+      const detail = pdfError instanceof Error ? pdfError.message : String(pdfError);
+      const wrapped = new Error(`${detail}${stderr ? `: ${stderr.replace(/\s+/g, ' ').slice(0, 500)}` : ''}`);
+      wrapped.infrastructureFailure = /Thread::create|bad_alloc|Cannot allocate memory/i.test(stderr);
+      throw wrapped;
+    }
   } catch (error) {
     const listing = await fs.readdir(workDir).catch(() => []);
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(
+    const wrapped = new Error(
       `convert failed: ${detail}${listing.length ? ` (dir: ${listing.join(', ')})` : ''}`,
     );
+    if (error instanceof Error && error.infrastructureFailure) wrapped.infrastructureFailure = true;
+    if (error instanceof Error && error.status) wrapped.status = error.status;
+    throw wrapped;
   } finally {
+    signal?.removeEventListener('abort', onAbort);
+    handle?.kill();
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-async function convertWithLibreOffice(docxBuffer) {
+async function convertWithLibreOffice(docxBuffer, signal) {
   const prepared = safePrepareDocxForLibreOffice(docxBuffer);
   try {
-    const pdf = await runLibreOfficeOnce(prepared.buffer);
+    const pdf = await runLibreOfficeOnce(prepared.buffer, signal);
     return { pdf, meta: prepared.meta };
   } catch (firstError) {
     const original = Buffer.from(docxBuffer);
     if (original.equals(Buffer.from(prepared.buffer))) throw firstError;
+    if (!shouldRetryOriginal(firstError)) throw firstError;
     console.error(
       '[docx-converter] prepared DOCX failed, retrying original bytes:',
       firstError instanceof Error ? firstError.message : firstError,
     );
-    const pdf = await runLibreOfficeOnce(original);
+    const pdf = await runLibreOfficeOnce(original, signal);
     return { pdf, meta: { ...prepared.meta, retriedOriginal: true } };
   }
 }
@@ -323,14 +387,27 @@ async function probeConversion() {
       zip.file('word/document.xml', '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Tutlio health check</w:t></w:r></w:p></w:body></w:document>');
       await runLibreOfficeOnce(zip.generate({ type: 'nodebuffer' }));
       lastProbe = new Date().toISOString();
+      noteSuccess();
     });
-  } catch (error) { console.error('[worker] health conversion failed', error.message); restartWorker(); }
+  } catch (error) {
+    consecutiveProbeFailures += 1;
+    lastError = error instanceof Error ? error.message : String(error);
+    console.error('[worker] health conversion failed', lastError, { consecutiveProbeFailures });
+    if (consecutiveProbeFailures >= 3) restartWorker();
+  }
 }
 
 app.get('/health', (_req, res) => {
   const state = worker.state();
-  const ok = Boolean(lastProbe) && state.healthy;
-  res.status(ok ? 200 : 503).json({ ok, version: SERVICE_VERSION, lastSuccessfulConversion: lastProbe, ...state });
+  const live = state.healthy && !restarting;
+  res.status(live ? 200 : 503).json({
+    ok: live,
+    ready: Boolean(lastProbe) && live,
+    version: SERVICE_VERSION,
+    lastSuccessfulConversion: lastProbe,
+    lastError,
+    ...state,
+  });
 });
 
 app.get('/', (_req, res) => {
@@ -348,13 +425,19 @@ app.post('/convert-docx-to-pdf', async (req, res) => {
     return res.status(400).json({ error: 'Missing fileBase64' });
   }
 
+  const ac = new AbortController();
+  const abortOnDisconnect = () => { if (!res.writableEnded) ac.abort(); };
+  res.once('close', abortOnDisconnect);
+  const started = Date.now();
   try {
     const { pdf, meta } = await worker.run(async () => {
       const docxBuffer = Buffer.from(fileBase64, 'base64');
-      const result = await convertWithLibreOffice(docxBuffer);
+      const result = await convertWithLibreOffice(docxBuffer, ac.signal);
       lastProbe = new Date().toISOString();
+      noteSuccess();
       return result;
     });
+    console.log('[docx-converter] converted', { ms: Date.now() - started, pdfBytes: pdf.length, version: SERVICE_VERSION });
     return res.status(200).json({
       pdfBase64: pdf.toString('base64'),
       meta: {
@@ -366,18 +449,27 @@ app.post('/convert-docx-to-pdf', async (req, res) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'DOCX to PDF conversion failed';
-    console.error('[docx-converter] convert failed:', message);
-    if (error.infrastructureFailure) restartWorker();
+    lastError = message;
+    console.error('[docx-converter] convert failed:', message, { ms: Date.now() - started });
+    if (error.infrastructureFailure) noteInfraFailure();
     const status = error.status || (error.infrastructureFailure ? 503 : 422);
-    if (status === 503) res.setHeader('Retry-After', '5');
+    if (status === 503) res.setHeader('Retry-After', '20');
+    if (ac.signal.aborted) {
+      if (!res.headersSent && res.writable) {
+        try { return res.status(499).json({ error: 'Client disconnected' }); } catch { return; }
+      }
+      return;
+    }
     return res.status(status).json({ error: status === 503 ? 'Converter temporarily unavailable' : 'Document conversion failed' });
+  } finally {
+    res.off('close', abortOnDisconnect);
   }
 });
 
 const port = Number(process.env.PORT || 3001);
 const host = '0.0.0.0';
 app.listen(port, host, () => {
-  console.log(`tutlio-docx-converter listening on ${host}:${port}`);
+  console.log(`tutlio-docx-converter ${SERVICE_VERSION} listening on ${host}:${port}`);
   void probeConversion();
-  setInterval(() => void probeConversion(), 60000).unref();
+  setInterval(() => void probeConversion(), PROBE_EVERY_MS).unref();
 });
