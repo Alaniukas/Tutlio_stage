@@ -1,5 +1,6 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
+import { IN_APP_SUPPORT_ENABLED } from '@/lib/inAppSupportAvailability';
 
 export type SupportPopoverAnchor = {
   left: number;
@@ -31,6 +32,7 @@ export default function InAppSupportProvider({ children }: { children: ReactNode
   const [anchor, setAnchor] = useState<SupportPopoverAnchor | null>(null);
 
   const openSupportAgent = useCallback((element?: HTMLElement | null) => {
+    if (!IN_APP_SUPPORT_ENABLED) return;
     const rect = element?.getBoundingClientRect();
     setAnchor(rect ? {
       left: rect.left,
@@ -46,7 +48,7 @@ export default function InAppSupportProvider({ children }: { children: ReactNode
   return (
     <SupportAgentContext.Provider value={contextValue}>
       {children}
-      {open && (
+      {IN_APP_SUPPORT_ENABLED && open ? (
         <Suspense fallback={null}>
           <InAppSupportPopover
             anchor={anchor}
@@ -54,7 +56,7 @@ export default function InAppSupportProvider({ children }: { children: ReactNode
             onClose={() => setOpen(false)}
           />
         </Suspense>
-      )}
+      ) : null}
     </SupportAgentContext.Provider>
   );
 }

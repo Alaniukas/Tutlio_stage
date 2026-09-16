@@ -5,6 +5,10 @@ import {
   IN_APP_SUPPORT_MAX_ATTACHMENT_BYTES,
 } from '../src/lib/inAppSupport.js';
 import { createInAppSupportUpload, validInAppAttachmentType } from './_lib/inAppSupport.js';
+import {
+  isLocalInAppSupportPreview,
+  LOCAL_IN_APP_SUPPORT_PREVIEW_USER_ID,
+} from './_lib/inAppSupportPreview.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -12,7 +16,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   if (!allowSupportRequest(req, res, 'attachment', 30)) return;
-  const auth = await verifyRequestAuth(req);
+  const auth = isLocalInAppSupportPreview(req)
+    ? { userId: LOCAL_IN_APP_SUPPORT_PREVIEW_USER_ID, isInternal: false }
+    : await verifyRequestAuth(req);
   if (!auth?.userId || auth.isInternal) return res.status(401).json({ error: 'Unauthorized' });
 
   let body: Record<string, unknown>;

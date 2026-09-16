@@ -23,6 +23,7 @@ import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/market
 import SupportRobotIcon from '@/components/support/SupportRobotIcon';
 import { useInAppSupportAgent } from '@/components/support/InAppSupportProvider';
 import { inAppSupportLabel } from '@/lib/inAppSupport';
+import { IN_APP_SUPPORT_ENABLED } from '@/lib/inAppSupportAvailability';
 
 interface StudentLayoutProps {
     children: React.ReactNode;
@@ -345,15 +346,17 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                         {packageCountLabel}
                     </span>
                 )}
-                <button
-                    type="button"
-                    onClick={(event) => openSupportAgent(event.currentTarget)}
-                    aria-label={inAppSupportLabel(locale)}
-                    title={inAppSupportLabel(locale)}
-                    className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-indigo-100 bg-indigo-50 text-indigo-700 transition hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                >
-                    <SupportRobotIcon className="h-7 w-7" />
-                </button>
+                {IN_APP_SUPPORT_ENABLED ? (
+                    <button
+                        type="button"
+                        onClick={(event) => openSupportAgent(event.currentTarget)}
+                        aria-label={inAppSupportLabel(locale)}
+                        title={inAppSupportLabel(locale)}
+                        className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-indigo-100 bg-indigo-50 text-indigo-700 transition hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                    >
+                        <SupportRobotIcon className="h-7 w-7" />
+                    </button>
+                ) : null}
             </header>
 
             <Dialog open={isTutorModalOpen} onOpenChange={setIsTutorModalOpen}>

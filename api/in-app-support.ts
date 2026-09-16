@@ -7,6 +7,12 @@ import {
   resolveInAppSupportReporter,
   verifyInAppSupportAttachments,
 } from './_lib/inAppSupport.js';
+import { sendInAppSupportNotification } from './_lib/inAppSupportEmail.js';
+import { INTERNAL_NOTIFY_EMAILS } from './_lib/resendConfig.js';
+import {
+  isLocalInAppSupportPreview,
+  LOCAL_IN_APP_SUPPORT_PREVIEW_USER_ID,
+} from './_lib/inAppSupportPreview.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -14,7 +20,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   if (!allowSupportRequest(req, res, 'contact', 8)) return;
-  const auth = await verifyRequestAuth(req);
+  const localPreview = isLocalInAppSupportPreview(req);
+  const auth = localPreview
+    ? { userId: LOCAL_IN_APP_SUPPORT_PREVIEW_USER_ID, isInternal: false }
+    : await verifyRequestAuth(req);
   if (!auth?.userId || auth.isInternal) return res.status(401).json({ error: 'Unauthorized' });
 
   let raw: unknown;
@@ -28,13 +37,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const [reporter, attachments] = await Promise.all([
-      resolveInAppSupportReporter(auth.userId, input.portal),
+      localPreview
+        ? Promise.resolve({
+          name: 'Tutlio local support preview',
+          email: INTERNAL_NOTIFY_EMAILS[0],
+          role: 'tutor' as const,
+          organizationId: null,
+          organizationName: null,
+        })
+        : resolveInAppSupportReporter(auth.userId, input.portal),
       verifyInAppSupportAttachments(auth.userId, input.requestId, input.attachments),
     ]);
     const db = getSupportServiceClient();
+    const reporterUserId = localPreview ? null : auth.userId;
     const row = {
         request_id: input.requestId,
-        reporter_user_id: auth.userId,
+        reporter_user_id: reporterUserId,
         reporter_name: reporter.name,
         reporter_email: reporter.email,
         reporter_role: reporter.role,
@@ -60,7 +78,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('request_id', input.requestId)
       .maybeSingle();
     if (existingError) throw existingError;
-    if (existing && existing.reporter_user_id !== auth.userId) {
+    if (existing && existing.reporter_user_id !== reporterUserId) {
       return res.status(409).json({ error: 'This support request reference is already in use.' });
     }
 
@@ -72,12 +90,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .single();
     if (error || !data) throw error || new Error('Could not save support request.');
 
+    const reference = `SUP-${String(data.id).replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+    try {
+      await sendInAppSupportNotification({
+        db,
+        id: String(data.id),
+        reference,
+        createdAt: String(data.created_at),
+        reporter: { userId: auth.userId, ...reporter },
+        report: { ...input, attachments },
+      });
+    } catch (notificationError) {
+      console.error('[in-app-support] Team notification failed:', notificationError);
+      return res.status(502).json({
+        error: 'The report was saved, but the team notification could not be delivered yet.',
+        code: 'TEAM_NOTIFICATION_FAILED',
+        saved: true,
+        reference,
+      });
+    }
+
     return res.status(200).json({
       ok: true,
       id: data.id,
-      reference: `SUP-${String(data.id).replace(/-/g, '').slice(0, 8).toUpperCase()}`,
+      reference,
       status: data.status,
       createdAt: data.created_at,
+      notificationSent: true,
     });
   } catch (error) {
     console.error('[in-app-support] Failed:', error);

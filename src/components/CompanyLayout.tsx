@@ -45,6 +45,7 @@ import type { OrgAdminPermission } from '@/lib/orgAdminPermissions';
 import SupportRobotIcon from '@/components/support/SupportRobotIcon';
 import { useInAppSupportAgent } from '@/components/support/InAppSupportProvider';
 import { inAppSupportLabel } from '@/lib/inAppSupport';
+import { IN_APP_SUPPORT_ENABLED } from '@/lib/inAppSupportAvailability';
 
 /** Drive proxy is ready; the per-organization feature flag remains the rollout switch. */
 const SCHOOL_LESSON_RECORDINGS_NAV_READY = true;
@@ -310,19 +311,21 @@ export default function CompanyLayout() {
       </div>
 
       <div className={cn('px-2 pb-3 border-t pt-2 flex-shrink-0 space-y-0.5', borderColor, sidebarBg)}>
-        <button
-          type="button"
-          onClick={(event) => { setMobileOpen(false); openSupportAgent(event.currentTarget); }}
-          title={sidebarCollapsed && !mobile ? inAppSupportLabel(locale) : undefined}
-          className={cn(
-            'flex w-full items-center rounded-md text-indigo-200 transition-colors hover:bg-white/8 hover:text-white',
-            sidebarCollapsed && !mobile ? 'justify-center px-2 py-2.5' : 'gap-2.5 px-2.5',
-            mobile ? 'min-h-[44px] py-2 text-sm touch-manipulation' : 'py-2 text-[13px] leading-snug',
-          )}
-        >
-          <SupportRobotIcon className="h-[23px] w-[23px] flex-shrink-0" />
-          {(!sidebarCollapsed || mobile) && <span className="truncate font-semibold">{inAppSupportLabel(locale)}</span>}
-        </button>
+        {IN_APP_SUPPORT_ENABLED ? (
+          <button
+            type="button"
+            onClick={(event) => { setMobileOpen(false); openSupportAgent(event.currentTarget); }}
+            title={sidebarCollapsed && !mobile ? inAppSupportLabel(locale) : undefined}
+            className={cn(
+              'flex w-full items-center rounded-md text-indigo-200 transition-colors hover:bg-white/8 hover:text-white',
+              sidebarCollapsed && !mobile ? 'justify-center px-2 py-2.5' : 'gap-2.5 px-2.5',
+              mobile ? 'min-h-[44px] py-2 text-sm touch-manipulation' : 'py-2 text-[13px] leading-snug',
+            )}
+          >
+            <SupportRobotIcon className="h-[23px] w-[23px] flex-shrink-0" />
+            {(!sidebarCollapsed || mobile) && <span className="truncate font-semibold">{inAppSupportLabel(locale)}</span>}
+          </button>
+        ) : null}
         <button
           onClick={handleLogout}
           title={sidebarCollapsed && !mobile ? t('common.logout') : undefined}

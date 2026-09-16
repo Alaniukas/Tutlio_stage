@@ -38,6 +38,7 @@ import { useSchoolTerminology } from '@/hooks/useSchoolTerminology';
 import SupportRobotIcon from '@/components/support/SupportRobotIcon';
 import { useInAppSupportAgent } from '@/components/support/InAppSupportProvider';
 import { inAppSupportLabel } from '@/lib/inAppSupport';
+import { IN_APP_SUPPORT_ENABLED } from '@/lib/inAppSupportAvailability';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -237,18 +238,20 @@ export default function Layout({ children }: LayoutProps) {
         </nav>
 
         <div className="relative border-t border-gray-100 p-3 space-y-2" ref={menuRef}>
-          <button
-            type="button"
-            onClick={(event) => openSupportAgent(event.currentTarget)}
-            className={cn(
-              'relative flex w-full items-center rounded-xl text-sm font-semibold text-indigo-700 transition-all duration-150 min-h-[44px] touch-manipulation hover:bg-indigo-50',
-              sidebarExpanded ? 'px-3 gap-2.5' : 'px-0 justify-center',
-            )}
-            title={!sidebarExpanded ? inAppSupportLabel(locale) : undefined}
-          >
-            <SupportRobotIcon className="h-6 w-6 flex-shrink-0" />
-            {sidebarExpanded && <span>{inAppSupportLabel(locale)}</span>}
-          </button>
+          {IN_APP_SUPPORT_ENABLED ? (
+            <button
+              type="button"
+              onClick={(event) => openSupportAgent(event.currentTarget)}
+              className={cn(
+                'relative flex w-full items-center rounded-xl text-sm font-semibold text-indigo-700 transition-all duration-150 min-h-[44px] touch-manipulation hover:bg-indigo-50',
+                sidebarExpanded ? 'px-3 gap-2.5' : 'px-0 justify-center',
+              )}
+              title={!sidebarExpanded ? inAppSupportLabel(locale) : undefined}
+            >
+              <SupportRobotIcon className="h-6 w-6 flex-shrink-0" />
+              {sidebarExpanded && <span>{inAppSupportLabel(locale)}</span>}
+            </button>
+          ) : null}
           <button
             onClick={() => setMenuOpen((prev) => !prev)}
             className={cn(
@@ -356,14 +359,16 @@ export default function Layout({ children }: LayoutProps) {
             </nav>
 
             <div className="border-t border-gray-100 p-3 space-y-2">
-              <button
-                type="button"
-                onClick={(event) => { setMobileOpen(false); openSupportAgent(event.currentTarget); }}
-                className="relative flex min-h-[44px] w-full items-center gap-2.5 rounded-xl px-3 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 touch-manipulation"
-              >
-                <SupportRobotIcon className="h-6 w-6 flex-shrink-0" />
-                <span>{inAppSupportLabel(locale)}</span>
-              </button>
+              {IN_APP_SUPPORT_ENABLED ? (
+                <button
+                  type="button"
+                  onClick={(event) => { setMobileOpen(false); openSupportAgent(event.currentTarget); }}
+                  className="relative flex min-h-[44px] w-full items-center gap-2.5 rounded-xl px-3 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 touch-manipulation"
+                >
+                  <SupportRobotIcon className="h-6 w-6 flex-shrink-0" />
+                  <span>{inAppSupportLabel(locale)}</span>
+                </button>
+              ) : null}
               <div className="flex items-center gap-2 px-2 py-1">
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--org-brand)] to-[var(--org-brand-secondary)] flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
                   {initials}

@@ -1,11 +1,139 @@
 import { describe, expect, it } from 'vitest';
 import {
+  inAppSupportDraftMissingFields,
+  isInAppSupportSendCommand,
+  isInAppSupportDraftComplete,
+  normalizeInAppSupportAgentReply,
+  prepareInAppSupportDraftForSubmission,
+  parseInAppSupportAiConversation,
+  parseInAppSupportAiIntake,
   parseInAppSupportAiReview,
   parseInAppSupportSubmission,
   supportHomeForPath,
   supportPageForPath,
   supportPortalForPath,
 } from '@/lib/inAppSupport';
+
+describe('in-app support conversational agent output', () => {
+  it('removes em dashes from agent-authored replies', () => {
+    const reply = normalizeInAppSupportAgentReply('Thanks—that explains it — I can help.');
+    expect(reply).toBe('Thanks - that explains it - I can help.');
+    expect(reply).not.toContain('—');
+  });
+
+  it('keeps an actionable evolving report and readiness decision', () => {
+    expect(parseInAppSupportAiConversation({
+      reply: 'I have enough detail now. Type “send it” when you want me to notify the team.',
+      title: 'Recurring lesson creates only one session',
+      context: 'An organization administrator creates a weekly recurring lesson from the calendar.',
+      steps: ['Open Calendar', 'Create a weekly recurring lesson', 'Save it'],
+      expectedOutcome: 'All weekly lessons should be created.',
+      actualOutcome: 'Only the first lesson is created.',
+      impact: 'high',
+      impactDetails: 'Three tutors are affected every week and there is no workaround.',
+      ready: true,
+      missingTopics: [],
+    })?.ready).toBe(true);
+  });
+
+  it('keeps the model readiness signal separate from deterministic submission validation', () => {
+    const parsed = parseInAppSupportAiConversation({
+      reply: 'Which action caused the message to appear?',
+      title: 'Unexpected message',
+      context: 'A message appeared.',
+      steps: [],
+      expectedOutcome: '',
+      actualOutcome: 'Unexpected message appeared.',
+      impact: 'high',
+      impactDetails: '',
+      ready: true,
+      missingTopics: ['triggering action'],
+    });
+
+    expect(parsed?.ready).toBe(true);
+    expect(isInAppSupportDraftComplete('bug', parsed!)).toBe(false);
+    expect(inAppSupportDraftMissingFields('bug', parsed!)).toEqual([
+      'steps',
+      'expectedOutcome',
+      'impactDetails',
+    ]);
+  });
+
+  it('does not require bug-style reproduction steps for a feature idea', () => {
+    const draft = {
+      title: 'AI generated tests',
+      context: 'Teachers want Tutlio to help create and manage tests.',
+      steps: [],
+      expectedOutcome: 'Tutlio should generate a test from teacher instructions.',
+      actualOutcome: '',
+      impact: 'medium' as const,
+      impactDetails: 'Teachers would use it every week.',
+    };
+
+    expect(inAppSupportDraftMissingFields('feature', draft)).toEqual([]);
+    expect(isInAppSupportDraftComplete('feature', draft)).toBe(true);
+  });
+});
+
+describe('in-app support send confirmation', () => {
+  it('accepts explicit send commands in supported languages', () => {
+    expect(isInAppSupportSendCommand('Send it to the team')).toBe(true);
+    expect(isInAppSupportSendCommand('Can you just send already?')).toBe(true);
+    expect(isInAppSupportSendCommand('Please send it.')).toBe(true);
+    expect(isInAppSupportSendCommand('Taip, siųskite komandai!')).toBe(true);
+    expect(isInAppSupportSendCommand('siųsti, pridėk nuotraukas')).toBe(true);
+    expect(isInAppSupportSendCommand('Wyślij to')).toBe(true);
+  });
+
+  it('does not treat vague confirmation as permission to submit', () => {
+    expect(isInAppSupportSendCommand('yes')).toBe(false);
+    expect(isInAppSupportSendCommand('looks good')).toBe(false);
+    expect(isInAppSupportSendCommand('maybe later')).toBe(false);
+  });
+
+  it('prepares an explicitly submitted incomplete request without inventing user facts', () => {
+    const prepared = prepareInAppSupportDraftForSubmission('feature', {
+      title: 'Testų funkcija',
+      context: 'Reikia testų funkcijos.',
+      steps: [],
+      expectedOutcome: '',
+      actualOutcome: '',
+      impact: null,
+      impactDetails: '',
+    }, [
+      { role: 'user', content: 'hey, reikia testų' },
+      { role: 'user', content: 'siųsti' },
+    ]);
+
+    expect(prepared.completeness).toBe('user_confirmed_incomplete');
+    expect(prepared.draft.steps[0]).toContain('not provided');
+    expect(prepared.draft.expectedOutcome).toContain('not specified');
+    expect(prepared.draft.impactDetails).toContain('triage');
+  });
+});
+
+describe('in-app support adaptive intake', () => {
+  it('keeps extracted details and the next contextual question', () => {
+    expect(parseInAppSupportAiIntake({
+      acknowledgement: 'Supratau - iš kalendoriaus sukuriama tik viena pamoka.',
+      title: 'Pasikartojanti pamoka sukuriama tik vieną kartą',
+      context: 'Kuriant pasikartojančią pamoką iš kalendoriaus sukuriama tik viena.',
+      steps: ['Atidaryti kalendorių', 'Kurti pasikartojančią pamoką'],
+      expectedOutcome: '',
+      actualOutcome: 'Sukuriama tik viena pamoka.',
+      nextStage: 'expected',
+      nextQuestion: 'Kiek pamokų turėjo būti sukurta?',
+    })).toMatchObject({
+      nextStage: 'expected',
+      actualOutcome: 'Sukuriama tik viena pamoka.',
+      steps: ['Atidaryti kalendorių', 'Kurti pasikartojančią pamoką'],
+    });
+  });
+
+  it('rejects an intake answer without a usable follow-up', () => {
+    expect(parseInAppSupportAiIntake({ acknowledgement: 'OK', nextStage: 'other', nextQuestion: '' })).toBeNull();
+  });
+});
 
 describe('in-app support AI review', () => {
   it('keeps a concise structured review and at most three questions', () => {

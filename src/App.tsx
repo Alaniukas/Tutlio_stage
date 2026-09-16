@@ -10,6 +10,7 @@ import CompanyProtectedRoute from '@/components/CompanyProtectedRoute';
 import ParentProtectedRoute from '@/components/ParentProtectedRoute';
 import OrgPermissionRoute from '@/components/OrgPermissionRoute';
 import { OrgAdminAccessProvider } from '@/contexts/OrgAdminAccessContext';
+import { IN_APP_SUPPORT_ENABLED } from '@/lib/inAppSupportAvailability';
 
 // Keep only the homepage in the entry bundle. Every other public route has its
 // own chunk: direct visitors download the page they requested, while crawler
@@ -149,6 +150,12 @@ function ProtectedWithUser() {
       </InAppSupportProvider>
     </UserProvider>
   );
+}
+
+function InAppSupportRoute({ fallbackPath }: { fallbackPath: string }) {
+  return IN_APP_SUPPORT_ENABLED
+    ? <InAppSupport />
+    : <Navigate to={fallbackPath} replace />;
 }
 
 function StudentProtectedWithUser() {
@@ -422,7 +429,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/students" element={<StudentsPage />} />
           <Route path="/waitlist" element={<WaitlistPage />} />
           <Route path="/messages" element={<Messages />} />
-          <Route path="/support" element={<InAppSupport />} />
+          <Route path="/support" element={<InAppSupportRoute fallbackPath="/dashboard" />} />
           <Route path="/finance" element={<FinancePage />} />
           <Route path="/invoices" element={<InvoicesPage />} />
           <Route path="/instructions" element={<Instructions />} />
@@ -445,7 +452,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/student/payments" element={<RequireStudentPayments><StudentPayments /></RequireStudentPayments>} />
           <Route path="/student/instructions" element={<StudentInstructions />} />
           <Route path="/student/settings" element={<StudentSettings />} />
-          <Route path="/student/support" element={<InAppSupport />} />
+          <Route path="/student/support" element={<InAppSupportRoute fallbackPath="/student" />} />
         </Route>
 
         {/* Parent routes */}
@@ -469,7 +476,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/parent/messages" element={<ParentMessages />} />
           <Route path="/parent/settings" element={<ParentSettings />} />
           <Route path="/parent/instructions" element={<ParentInstructions />} />
-          <Route path="/parent/support" element={<InAppSupport />} />
+          <Route path="/parent/support" element={<InAppSupportRoute fallbackPath="/parent" />} />
           {/* Catch-all for /parent/* – stay inside the parent portal instead of bouncing to /login. */}
           <Route path="/parent/*" element={<Navigate to="/parent" replace />} />
         </Route>
@@ -504,7 +511,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/contracts" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyContracts /></OrgPermissionRoute>} />
             <Route path="/company/team" element={<OrgPermissionRoute permission="team.view" editPermission="team.edit"><CompanyTeam /></OrgPermissionRoute>} />
             <Route path="/company/groups" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyClassGroups /></OrgPermissionRoute>} />
-            <Route path="/company/support" element={<InAppSupport />} />
+            <Route path="/company/support" element={<InAppSupportRoute fallbackPath="/company" />} />
 
             <Route path="/school" element={<OrgPermissionRoute permission="dashboard.view"><SchoolDashboard /></OrgPermissionRoute>} />
             <Route path="/school/tutors" element={<OrgPermissionRoute permission="tutors.view" editPermission="tutors.edit"><CompanyTutors /></OrgPermissionRoute>} />
@@ -522,7 +529,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/finance" element={<OrgPermissionRoute permission="finance.view" editPermission="finance.edit"><CompanyFinanceHub /></OrgPermissionRoute>} />
             <Route path="/school/contracts" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyContracts /></OrgPermissionRoute>} />
             <Route path="/school/team" element={<OrgPermissionRoute permission="team.view" editPermission="team.edit"><CompanyTeam /></OrgPermissionRoute>} />
-            <Route path="/school/support" element={<InAppSupport />} />
+            <Route path="/school/support" element={<InAppSupportRoute fallbackPath="/school" />} />
           </Route>
         </Route>
 

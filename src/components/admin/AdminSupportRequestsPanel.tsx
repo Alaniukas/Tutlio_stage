@@ -313,6 +313,12 @@ export default function AdminSupportRequestsPanel({
                 </div>
               </div>
 
+              {selected.environment?.reportCompleteness === 'user_confirmed_incomplete' && (
+                <div className="mt-5 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm leading-6 text-amber-100">
+                  <strong>Pateikta naudotojo prašymu.</strong> Dalis struktūrizuotos informacijos nepateikta, todėl prieš nustatant prioritetą peržiūrėkite visą pokalbį ir ekrano nuotraukas.
+                </div>
+              )}
+
               <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_220px]">
                 <div className="space-y-5">
                   <DetailSection label="Problema ir kontekstas" value={selected.context} />
@@ -325,7 +331,7 @@ export default function AdminSupportRequestsPanel({
                   <DetailSection label="Tikėtinas rezultatas" value={selected.expected_outcome} />
                   {selected.actual_outcome && <DetailSection label="Faktinis rezultatas" value={selected.actual_outcome} />}
                   <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-                    <DetailLabel>Poveikis: {IMPACT[selected.impact]}</DetailLabel>
+                    <DetailLabel>Poveikis: {selected.environment?.reportCompleteness === 'user_confirmed_incomplete' ? 'Nenurodytas, reikia įvertinti' : IMPACT[selected.impact]}</DetailLabel>
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{selected.impact_details}</p>
                   </div>
 
