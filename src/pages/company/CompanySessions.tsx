@@ -74,6 +74,7 @@ import {
   schoolStudentAttendance,
 } from '@/lib/schoolSessionMonitoring';
 import { isUnconfirmedAutomaticNoShow } from '@/lib/schoolJoinNoShow';
+import { sessionPaymentDisplayKind } from '@/lib/sessionPaymentDisplay';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 import { sendEmail } from '@/lib/email';
 import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
@@ -1187,6 +1188,10 @@ export default function CompanySessions() {
     );
   }
 
+  const selectedPaymentKind = selectedSession
+    ? sessionPaymentDisplayKind(selectedSession)
+    : null;
+
   return (
     <>
       <div className="max-w-5xl mx-auto space-y-5">
@@ -1352,7 +1357,7 @@ export default function CompanySessions() {
           {/* Mobile cards */}
           <div className="md:hidden divide-y divide-gray-100">
             {filtered.map((session) => {
-              const paid = session.paid || session.payment_status === 'paid' || session.payment_status === 'confirmed';
+              const paymentKind = sessionPaymentDisplayKind(session);
               return (
                 <button
                   key={session.id}
@@ -1393,12 +1398,22 @@ export default function CompanySessions() {
                       <span
                         className={cn(
                           'inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border',
-                          session.is_complimentary
+                          paymentKind === 'complimentary'
                             ? 'bg-sky-50 text-sky-800 border-sky-100'
-                            : paid ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'
+                            : paymentKind === 'paid'
+                              ? 'bg-green-50 text-green-700 border-green-100'
+                              : paymentKind === 'reserved'
+                                ? 'bg-indigo-50 text-indigo-700 border-indigo-100'
+                                : 'bg-amber-50 text-amber-700 border-amber-100'
                         )}
                       >
-                        {session.is_complimentary ? t('status.complimentary') : paid ? t('compSess.paidShort') : t('compSess.pendingShort')}
+                        {paymentKind === 'complimentary'
+                          ? t('status.complimentary')
+                          : paymentKind === 'paid'
+                            ? t('compSess.paidShort')
+                            : paymentKind === 'reserved'
+                              ? t('status.reserved')
+                              : t('compSess.pendingShort')}
                       </span>
                       <span className="text-sm font-semibold text-gray-900">
                         {session.price != null ? fmt(session.price) : '–'}
@@ -1425,7 +1440,9 @@ export default function CompanySessions() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map(session => (
+                {filtered.map(session => {
+                  const paymentKind = sessionPaymentDisplayKind(session);
+                  return (
                   <tr key={session.id} className="hover:bg-gray-50/70 transition-colors cursor-pointer" onClick={() => openSessionDialog(session)}>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <p className="font-medium text-gray-900">
@@ -1462,7 +1479,7 @@ export default function CompanySessions() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      {session.paid || session.payment_status === 'paid' || session.payment_status === 'confirmed' ? (
+                      {paymentKind === 'paid' || paymentKind === 'complimentary' ? (
                         <span className={cn(
                           'inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border',
                           session.is_complimentary
@@ -1470,6 +1487,10 @@ export default function CompanySessions() {
                             : 'bg-green-50 text-green-700 border-green-100',
                         )}>
                           {session.is_complimentary ? t('status.complimentary') : t('compSess.paidShort')}
+                        </span>
+                      ) : paymentKind === 'reserved' ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">
+                          {t('status.reserved')}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100">
@@ -1481,7 +1502,8 @@ export default function CompanySessions() {
                       {session.price != null ? fmt(session.price) : '–'}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1732,10 +1754,14 @@ export default function CompanySessions() {
 
                   <div>
                     <Label className="text-xs text-gray-500">{t('compSess.labelPayment')}</Label>
-                    <p className={`text-sm mt-1 font-medium ${selectedSession.paid ? 'text-green-600' : 'text-amber-600'}`}>
-                      {selectedSession.paid || selectedSession.payment_status === 'paid' || selectedSession.payment_status === 'confirmed'
+                    <p className={`text-sm mt-1 font-medium ${selectedPaymentKind === 'paid' ? 'text-green-600' : selectedPaymentKind === 'reserved' ? 'text-indigo-600' : 'text-amber-600'}`}>
+                      {selectedPaymentKind === 'paid'
                         ? t('compSess.paid')
-                        : t('compSess.paymentPending')}
+                        : selectedPaymentKind === 'complimentary'
+                          ? t('status.complimentary')
+                          : selectedPaymentKind === 'reserved'
+                            ? t('status.reserved')
+                            : t('compSess.paymentPending')}
                     </p>
                   </div>
 

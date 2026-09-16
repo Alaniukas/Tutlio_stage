@@ -4834,6 +4834,7 @@ export const de: Record<string, string> = {
   'compStu.scheduleTitle': 'Stundenplan',
   'compStu.scheduleEmpty': 'Keine wiederkehrenden Stunden.',
   'compStu.effectivePerWeek': 'Insgesamt ~{count} Std. pro Woche',
+  'compStu.lessonsHadCount': 'Bereits absolvierte Stunden: {count}',
   'compStu.movedByStudentCount': 'Vom Schüler verschoben: {count}',
   'compStu.movedByTutorCount': 'Vom Nachhilfelehrer verschoben: {count}',
   'compStu.cancelledByStudentCount': 'Vom Schüler abgesagt: {count}',

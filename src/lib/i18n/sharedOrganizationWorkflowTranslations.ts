@@ -71,6 +71,7 @@ export const sharedOrganizationWorkflowTranslations: Record<string, string> = {
   'findLesson.oneOffTrialHint': 'One-off trial lesson ({duration} min, €{price}). The payer will receive a payment email.',
   'compStu.studentAddedWithLessonsTrial': 'Student added: {total} lessons planned (1 trial + {regular} regular).',
   'compStu.studentAddedWithLessonsFull': 'Student added: {total} lessons planned (all full price).',
+  'compStu.lessonsHadCount': 'Lessons already had: {count}',
   'findLesson.createAnotherLesson': 'Create another lesson',
   'findLesson.windowFullyBooked': 'No more lessons fit in this free window. Close it and choose another time.',
   'compStu.confirmAndSendWithoutDate': 'Send without a date',

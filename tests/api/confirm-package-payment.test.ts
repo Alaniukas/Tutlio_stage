@@ -54,8 +54,10 @@ const chain: Chain = {
 const updateChain: any = {
   update: vi.fn(),
   eq: vi.fn(),
+  neq: vi.fn(),
   select: vi.fn(),
   single: vi.fn(),
+  maybeSingle: vi.fn(),
 };
 
 const from = vi.fn((_table: string) => {
@@ -115,7 +117,9 @@ describe('POST /api/confirm-package-payment', () => {
     chain.select.mockReturnThis();
     chain.eq.mockReturnThis();
     updateChain.eq.mockReturnThis();
+    updateChain.neq.mockReturnThis();
     updateChain.select.mockReturnThis();
+    updateChain.maybeSingle.mockResolvedValue({ data: null, error: null });
   });
 
   it('activates package when Stripe checkout is paid', async () => {
@@ -130,7 +134,7 @@ describe('POST /api/confirm-package-payment', () => {
     });
 
     updateChain.update.mockReturnValue(updateChain);
-    updateChain.single.mockResolvedValue({
+    updateChain.maybeSingle.mockResolvedValue({
       data: { id: 'pkg-1', available_lessons: 1, total_lessons: 1, subjects: { name: 'Bandomoji pamoka' } },
       error: null,
     });
@@ -163,6 +167,27 @@ describe('POST /api/confirm-package-payment', () => {
     const result = (res as any).getResult();
     expect(result.statusCode).toBe(400);
     expect(result.body?.error).toBeTruthy();
+  });
+
+  it('does not reactivate a cancelled package after a late success redirect', async () => {
+    stripeRetrieve.mockResolvedValue({
+      payment_status: 'paid',
+      metadata: { tutlio_package_id: 'pkg-1' },
+    });
+    chain.single.mockResolvedValue({
+      data: { id: 'pkg-1', paid: false, active: false, payment_status: 'cancelled' },
+      error: null,
+    });
+
+    const handler = (await import('../../api/confirm-package-payment')).default;
+    const res = mockRes();
+    await handler(mockReq({ sessionId: 'cs_test_cancelled' }) as any, res as any);
+
+    expect(res.getResult()).toMatchObject({
+      statusCode: 409,
+      body: { code: 'cancelled' },
+    });
+    expect(updateChain.update).not.toHaveBeenCalled();
   });
 });
 

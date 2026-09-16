@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText, Users, BarChart3, Landmark, Mail, Calculator, UserCheck } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText, Users, BarChart3, Landmark, Mail, Calculator, UserCheck, LifeBuoy } from 'lucide-react';
 import { FEATURE_REGISTRY, FEATURE_CATEGORIES } from '@/lib/featureRegistry';
 import { getFeaturesByCategoryForOrg, stripProKlaseOnlyFeatures } from '@/lib/orgIntakeMode';
 import { useTranslation } from '@/lib/i18n';
@@ -11,6 +11,7 @@ import AdminPerlasPayoutsPanel from '@/components/admin/AdminPerlasPayoutsPanel'
 import AdminEnterpriseContactsPanel from '@/components/admin/AdminEnterpriseContactsPanel';
 import AdminBillingPanel from '@/components/admin/AdminBillingPanel';
 import AdminAttendancePanel from '@/components/admin/AdminAttendancePanel';
+import AdminSupportRequestsPanel from '@/components/admin/AdminSupportRequestsPanel';
 import { fmtMoney } from '@/lib/marketMoney';
 import { isPlMarket } from '@/lib/market';
 import { normalizeUrl } from '@/lib/utils';
@@ -82,7 +83,7 @@ interface AuditRow {
   details: Record<string, unknown>;
 }
 
-type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog' | 'soloTutors' | 'statistics' | 'perlasPayouts' | 'enterpriseContacts' | 'billing' | 'attendance';
+type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog' | 'soloTutors' | 'statistics' | 'perlasPayouts' | 'enterpriseContacts' | 'billing' | 'attendance' | 'support';
 
 interface SoloTutorAdminRow {
   id: string;
@@ -741,6 +742,14 @@ export default function AdminPanel() {
           >
             <UserCheck className="w-4 h-4" />
             Lankomumas
+          </button>
+          <button
+            type="button"
+            onClick={() => { setPanelView('support'); setDetailId(null); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'support' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            <LifeBuoy className="w-4 h-4" />
+            Pagalba
           </button>
         </div>
 
@@ -1527,6 +1536,10 @@ export default function AdminPanel() {
 
         {panelView === 'attendance' && (
           <AdminAttendancePanel adminSecret={platformAdminSecret} />
+        )}
+
+        {panelView === 'support' && (
+          <AdminSupportRequestsPanel adminSecret={platformAdminSecret} />
         )}
 
         {panelView === 'createSchool' && (

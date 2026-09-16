@@ -11,7 +11,12 @@ import { listHomeworkGroupRecordings } from '../../api/_lib/schoolHomeworkRecord
 
 function supabaseFixture(opts: {
   groups: Array<{ id: string; name: string; organization_id: string }>;
-  mappings: Array<{ group_id: string; organization_id: string; drive_folder_id: string }>;
+  mappings: Array<{ group_id?: string | null; subject_id?: string | null; organization_id: string; drive_folder_id: string }>;
+  recurring?: Array<{
+    subject_id: string;
+    subject: { id: string; name: string };
+    tutor: { organization_id: string };
+  }>;
 }) {
   return {
     from(table: string) {
@@ -21,6 +26,7 @@ function supabaseFixture(opts: {
         in: () => query,
         then: (resolve: (value: unknown) => unknown) => {
           if (table === 'school_class_groups') return resolve({ data: opts.groups, error: null });
+          if (table === 'recurring_individual_sessions') return resolve({ data: opts.recurring || [], error: null });
           if (table === 'school_recording_drive_folders') return resolve({ data: opts.mappings, error: null });
           return resolve({ data: [], error: null });
         },
@@ -85,6 +91,39 @@ describe('listHomeworkGroupRecordings', () => {
     expect(result.groups[0].recordings[0].name).toBe('Pamoka.mp4');
     expect(result.groups[0].recordings[0].streamUrl).toMatch(/^\/api\/school-lesson-recording-stream\?t=/);
     expect(listDrive).toHaveBeenCalledWith('folder-1');
+  });
+
+  it('lists a mapped individual recurring subject for that student', async () => {
+    listDrive.mockResolvedValue([{
+      id: 'file-1',
+      name: 'Solo.mp4',
+      createdTime: '2026-09-10T10:00:00Z',
+      durationMillis: 60_000,
+      size: 1_000,
+    }]);
+    const result = await listHomeworkGroupRecordings(supabaseFixture({
+      groups: [],
+      recurring: [{
+        subject_id: 'subject-1',
+        subject: { id: 'subject-1', name: 'Solo muzika' },
+        tutor: { organization_id: 'org-1' },
+      }],
+      mappings: [{
+        subject_id: 'subject-1',
+        organization_id: 'org-1',
+        drive_folder_id: 'folder-individual',
+      }],
+    }), {
+      studentId: 'student-1',
+      organizationId: 'org-1',
+      memberGroupIds: [],
+      recordingsEnabled: true,
+      listFiles: true,
+    });
+
+    expect(result.groups.map((group) => group.id)).toEqual(['subject:subject-1']);
+    expect(result.groups[0].name).toBe('Solo muzika');
+    expect(listDrive).toHaveBeenCalledWith('folder-individual');
   });
 
   it('omits mapped groups that have no videos so the homework page stays quiet', async () => {

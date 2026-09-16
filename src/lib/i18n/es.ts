@@ -4913,6 +4913,7 @@ export const es: Record<string, string> = {
   'compStu.scheduleTitle': 'Horario de clases',
   'compStu.scheduleEmpty': 'No hay clases recurrentes.',
   'compStu.effectivePerWeek': 'Total ~{count} clases por semana',
+  'compStu.lessonsHadCount': 'Clases ya realizadas: {count}',
   'compStu.movedByStudentCount': 'Movidas por el alumno: {count}',
   'compStu.movedByTutorCount': 'Movidas por el tutor: {count}',
   'compStu.cancelledByStudentCount': 'Canceladas por el alumno: {count}',

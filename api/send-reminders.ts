@@ -15,6 +15,11 @@ import { isMissingPostgrestRpc } from './_lib/postgrestRpc.js';
 import { moksloVaisiaiRoutesLessonCommsToPayer } from './_lib/moksloVaisiaiLessonComms.js';
 import { buildSchoolHomeworkUrl, publicAppOrigin } from './_lib/publicLinkToken.js';
 import { resolveSessionMeetingLink } from '../src/lib/meetingLink.js';
+import {
+  sessionReminderDeliveryKey,
+  sessionReminderDeliveryOutcome,
+  type SessionReminderDeliveryOutcome,
+} from './_lib/sessionReminderDelivery.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -27,6 +32,42 @@ const API_URL = process.env.VERCEL_URL
 
 export const SESSION_REMINDER_BATCH_SIZE = 250;
 export const SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT = 100;
+
+async function confirmedReminderOutcome(
+  response: Response,
+  context: { sessionId: string; recipientKind: 'student' | 'payer' | 'tutor' },
+): Promise<SessionReminderDeliveryOutcome> {
+  const body = await response.json().catch(() => null) as { reason?: unknown } | null;
+  const outcome = sessionReminderDeliveryOutcome(response.ok, body);
+  if (outcome === 'retry') {
+    console.warn('[send-reminders] reminder delivery not confirmed', {
+      ...context,
+      status: response.status,
+      reason: typeof body?.reason === 'string' ? body.reason : 'missing_provider_confirmation',
+    });
+  }
+  return outcome;
+}
+
+export function tutorReminderOccurrenceScope(session: {
+  id: string;
+  tutor_id?: string | null;
+  class_group_id?: string | null;
+  subject_id?: string | null;
+  start_time: string;
+  tutor?: { id?: string | null } | null;
+  subjects?: { is_group?: boolean | null } | null;
+}): string {
+  const tutorId = String(session.tutor_id || session.tutor?.id || '').trim();
+  const instant = new Date(session.start_time).toISOString();
+  if (tutorId && session.class_group_id) {
+    return `tutor-group:${tutorId}:${session.class_group_id}:${instant}`;
+  }
+  if (tutorId && session.subject_id && session.subjects?.is_group) {
+    return `tutor-subject:${tutorId}:${session.subject_id}:${instant}`;
+  }
+  return `tutor-session:${session.id}`;
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -63,11 +104,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const now = new Date();
     const sessionSelect = `
-          id, start_time, end_time, topic, price, meeting_link,
+          id, tutor_id, subject_id, class_group_id, start_time, end_time, topic, price, meeting_link,
           reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
           student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name, organization_id, linked_user_id, personal_meeting_link),
           tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id, email_notification_opt_out, personal_meeting_link),
-          subjects(meeting_link)
+          subjects(meeting_link, name, is_group),
+          class_group:school_class_groups!sessions_class_group_id_fkey(name)
         `;
     const { data: dueSessionRows, error: dueSessionError } = await supabase.rpc(
       'get_due_session_reminder_ids',
@@ -103,6 +145,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error) {
       console.error('[send-reminders] Session query error:', error);
     } else if (sessions?.length) {
+      // A school group occurrence has one session row per student. Choose one
+      // deterministic row per tutor/time slot so the teacher gets one reminder.
+      const tutorReminderLeaderByOccurrence = new Map<string, string>();
+      for (const session of sessions) {
+        if (session.reminder_tutor_sent) continue;
+        const scope = tutorReminderOccurrenceScope(session as any);
+        if (!tutorReminderLeaderByOccurrence.has(scope)) {
+          tutorReminderLeaderByOccurrence.set(scope, String(session.id));
+        }
+      }
+
       for (const session of sessions) {
         if (emailAttempts >= SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) break;
         const startTime = new Date(session.start_time);
@@ -146,18 +199,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
           try {
             emailAttempts += 1;
+            const reminderDeliveryScope = `student:${session.id}`;
             const resp = await fetch(`${API_URL}/api/send-email`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
               body: JSON.stringify({
                 type: 'session_reminder',
                 to: student.email,
-                data: { ...baseData, recipientName: student.full_name, otherName: tutor?.full_name, isTutor: false },
+                idempotencyKey: sessionReminderDeliveryKey('session_reminder', student.email, reminderDeliveryScope),
+                data: {
+                  ...baseData,
+                  reminderDeliveryScope,
+                  recipientName: student.full_name,
+                  otherName: tutor?.full_name,
+                  isTutor: false,
+                },
               }),
             });
-            if (resp.ok) {
+            const outcome = await confirmedReminderOutcome(resp, {
+              sessionId: String(session.id),
+              recipientKind: 'student',
+            });
+            if (outcome !== 'retry') {
               await supabase.from('sessions').update({ reminder_student_sent: true }).eq('id', session.id);
-              totalSent++;
+              if (outcome === 'sent') totalSent++;
             }
           } catch (e) {
             console.error('[send-reminders] student email error:', e);
@@ -247,19 +312,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             optedOutEmails: optedOut,
           });
 
-          let anyParentSent = false;
+          // A session is complete only when every intended parent recipient was
+          // either provider-confirmed or intentionally opted out. With
+          // idempotency enabled, a partial failure can safely retry the whole
+          // recipient set without duplicating already accepted messages.
+          let allParentHandled = candidates.length > 0 && recipients.length === 0;
+          if (recipients.length > 0) allParentHandled = true;
           for (const r of recipients) {
-            if (emailAttempts >= SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) break;
+            if (emailAttempts >= SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) {
+              allParentHandled = false;
+              break;
+            }
             try {
               emailAttempts += 1;
+              const reminderDeliveryScope = `payer:${session.id}`;
               const resp = await fetch(`${API_URL}/api/send-email`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
                 body: JSON.stringify({
                   type: 'session_reminder_payer',
                   to: r.email,
+                  idempotencyKey: sessionReminderDeliveryKey('session_reminder_payer', r.email, reminderDeliveryScope),
                   data: {
                     ...baseData,
+                    reminderDeliveryScope,
                     ...(schoolFlow && studentOrgId
                       ? {
                         organizationId: studentOrgId,
@@ -277,26 +353,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   },
                 }),
               });
-              if (resp.ok) {
-                anyParentSent = true;
-                totalSent++;
-              }
+              const outcome = await confirmedReminderOutcome(resp, {
+                sessionId: String(session.id),
+                recipientKind: 'payer',
+              });
+              if (outcome === 'retry') allParentHandled = false;
+              if (outcome === 'sent') totalSent++;
             } catch (e) {
+              allParentHandled = false;
               console.error('[send-reminders] parent reminder error:', e);
             }
           }
-          if (anyParentSent) {
+          if (allParentHandled) {
             await supabase.from('sessions').update({ reminder_payer_sent: true }).eq('id', session.id);
           }
         }
 
-        if (reminderTutorHours > 0 && !session.reminder_tutor_sent && diffHours <= reminderTutorHours && diffHours >= 0 && tutor?.email && emailAttempts < SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) {
+        const tutorReminderScope = tutorReminderOccurrenceScope(session as any);
+        const isTutorReminderLeader = tutorReminderLeaderByOccurrence.get(tutorReminderScope) === String(session.id);
+        if (isTutorReminderLeader && reminderTutorHours > 0 && !session.reminder_tutor_sent && diffHours <= reminderTutorHours && diffHours >= 0 && tutor?.email && emailAttempts < SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) {
+          const markTutorOccurrenceSent = async () => {
+            const tutorId = String(session.tutor_id || tutor?.id || '').trim();
+            const update = supabase.from('sessions').update({ reminder_tutor_sent: true });
+            let result;
+            if (tutorId && session.class_group_id) {
+              result = await update
+                .eq('tutor_id', tutorId)
+                .eq('class_group_id', session.class_group_id)
+                .eq('start_time', session.start_time);
+            } else if (tutorId && session.subject_id && (session as any)?.subjects?.is_group) {
+              result = await update
+                .eq('tutor_id', tutorId)
+                .eq('subject_id', session.subject_id)
+                .is('class_group_id', null)
+                .eq('start_time', session.start_time);
+            } else {
+              result = await update.eq('id', session.id);
+            }
+            if (result.error) throw result.error;
+          };
           const tutorOptOut = parseEmailOptOutList(tutor?.email_notification_opt_out);
           if (isEmailOptedOut(tutorOptOut, 'lesson_reminder_tutor')) {
-            await supabase.from('sessions').update({ reminder_tutor_sent: true }).eq('id', session.id);
+            await markTutorOccurrenceSent();
           } else {
           try {
             emailAttempts += 1;
+            const groupName = (session as any)?.class_group?.name
+              || ((session as any)?.subjects?.is_group ? (session as any)?.subjects?.name : null);
             const tutorReminderCore = {
               sessionId: session.id,
               studentId: student?.id || undefined,
@@ -305,6 +408,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               topic: session.topic,
               duration: durationMinutes,
               meetingLink: session.meeting_link,
+              reminderDeliveryScope: tutorReminderScope,
             };
             const tutorReminderData = isOrgTutor(tutor.organization_id)
               ? { ...tutorReminderCore, ...(orgId ? { organizationId: orgId } : {}) }
@@ -315,17 +419,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               body: JSON.stringify({
                 type: 'session_reminder',
                 to: tutor.email,
+                idempotencyKey: sessionReminderDeliveryKey('session_reminder', tutor.email, tutorReminderScope),
                 data: {
                   ...tutorReminderData,
                   recipientName: tutor.full_name,
-                  otherName: student?.full_name,
+                  otherName: groupName || student?.full_name,
                   isTutor: true,
                 },
               }),
             });
-            if (resp.ok) {
-              await supabase.from('sessions').update({ reminder_tutor_sent: true }).eq('id', session.id);
-              totalSent++;
+            const outcome = await confirmedReminderOutcome(resp, {
+              sessionId: String(session.id),
+              recipientKind: 'tutor',
+            });
+            if (outcome !== 'retry') {
+              await markTutorOccurrenceSent();
+              if (outcome === 'sent') totalSent++;
             }
           } catch (e) {
             console.error('[send-reminders] tutor email error:', e);

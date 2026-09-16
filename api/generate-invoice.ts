@@ -179,7 +179,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const sessionSelect = `
-        id, tutor_id, price, start_time, subject_id, student_id, status, is_complimentary, status_confirmed_at,
+        id, tutor_id, price, start_time, subject_id, student_id, status, is_complimentary, status_confirmed_at, tutor_pay_eur_snapshot,
         students!inner(id, full_name, email, payer_email, payer_name, payer_phone, grade),
         subjects(name, is_trial)
       `;
@@ -507,6 +507,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               bySubject: (profile as any)?.company_commission_by_subject,
               subjectId: s.subject_id,
               sessionPrice: s.price,
+              tutorPaySnapshot: (s as any).tutor_pay_eur_snapshot,
             });
       let lineItems = buildLineItems(group.sessions, groupingType, {
         orgTutorRateEur,
@@ -841,6 +842,7 @@ function buildLineItems(
               defaultRate: orgTutorPayRate,
               subjectId: s.subject_id,
               sessionPrice: s.price,
+              tutorPaySnapshot: s.tutor_pay_eur_snapshot,
             });
 
     if (groupingType === 'per_payment') {

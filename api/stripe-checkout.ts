@@ -22,6 +22,10 @@ import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasAnyOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { directChargeOptions } from './_lib/stripeDirectCharge.js';
+import {
+    allowsPerLessonBilling,
+    loadPerLessonBillingFlags,
+} from './_lib/perLessonBillingEligibility.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -64,7 +68,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     stripe_account_id, stripe_onboarding_complete,
                     payment_timing, payment_deadline_hours, organization_id,
                     full_name,
-                    subscription_plan, manual_subscription_exempt, enable_manual_student_payments
+                    subscription_plan, manual_subscription_exempt, enable_manual_student_payments,
+                    enable_per_lesson, enable_monthly_billing
                 )
             `)
             .eq('id', sessionId)
@@ -89,13 +94,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         const isPenaltyPayment = typeof penaltyAmountOverride === 'number' && penaltyAmountOverride > 0;
-        const studentPaymentModelRaw = String(student?.payment_model || '').trim();
-        const allowsPerLessonPayment =
-            !studentPaymentModelRaw ||
-            studentPaymentModelRaw
-                .split(',')
-                .map((part: string) => part.trim())
-                .includes('per_lesson');
+        const billingFlags = String(student?.payment_model || '').trim()
+            ? tutor
+            : await loadPerLessonBillingFlags(supabase, tutor);
+        const allowsPerLessonPayment = allowsPerLessonBilling(student?.payment_model, billingFlags);
 
         if (!isPenaltyPayment && !allowsPerLessonPayment) {
             return res.status(400).json({

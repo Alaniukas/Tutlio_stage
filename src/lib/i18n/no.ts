@@ -4715,6 +4715,7 @@ export const no: Record<string, string> = {
   'compStu.scheduleTitle': 'Timeplan',
   'compStu.scheduleEmpty': 'Ingen gjentakende timer.',
   'compStu.effectivePerWeek': 'Omtrentlig antall timer per uke: {count}',
+  'compStu.lessonsHadCount': 'Allerede gjennomførte timer: {count}',
   'compStu.movedByStudentCount': 'Flyttet av eleven: {count}',
   'compStu.movedByTutorCount': 'Flyttet av læreren: {count}',
   'compStu.cancelledByStudentCount': 'Avlyst av eleven: {count}',

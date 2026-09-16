@@ -10,6 +10,10 @@ import { LOCALE_FORMAT_TAGS } from '../../src/lib/i18n/locales.js';
 import { extractBlogFaqs } from './blogFaq.js';
 import { buildBlogCoverPrompt } from './blogCoverArt.js';
 import {
+  DEFAULT_GEMINI_TEXT_MODEL,
+  resolveGeminiTextModel,
+} from './geminiConfig.js';
+import {
   BLOG_FAQ_LABEL,
   BLOG_LOCALE_LANGUAGE,
   blogLocaleInternalPath,
@@ -202,14 +206,12 @@ export const BLOG_SEO_WRITING_RULES =
 
 export type BlogAiProviderName = 'custom' | 'gemini';
 
-export const DEFAULT_GEMINI_BLOG_MODEL = 'gemini-3.8-flash';
+export const DEFAULT_GEMINI_BLOG_MODEL = DEFAULT_GEMINI_TEXT_MODEL;
 export const DEFAULT_GEMINI_IMAGE_MODEL = 'gemini-3.1-flash-image';
 const GEMINI_REQUEST_TIMEOUT_MS = 75_000;
 const GEMINI_DEADLINE_BUFFER_MS = 5_000;
 
-export function resolveGeminiTextModel(): string {
-  return (process.env.GEMINI_MODEL || DEFAULT_GEMINI_BLOG_MODEL).trim();
-}
+export { resolveGeminiTextModel };
 
 async function fetchGemini(
   url: string,

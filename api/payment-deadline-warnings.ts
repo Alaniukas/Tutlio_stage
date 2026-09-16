@@ -23,6 +23,7 @@ import { shouldSkipPerLessonPaymentReminders } from './_lib/schoolSessionBilling
 import { orgAdminEmailOptOut, isEmailOptedOut, parseEmailOptOutList } from './_lib/emailNotificationOptOut.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import type { OrgAdminRole } from '../src/lib/orgAdminPermissions.js';
+import { allowsPerLessonBillingForOwner } from './_lib/perLessonBillingEligibility.js';
 
 const supabase = createClient(
     process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
@@ -30,14 +31,6 @@ const supabase = createClient(
 );
 
 const BASE_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
-
-function hasPerLessonModel(value: string | null | undefined): boolean {
-    if (!value) return false;
-    return value
-        .split(',')
-        .map((v) => v.trim())
-        .includes('per_lesson');
-}
 
 async function sendWarningEmail(payload: any) {
     const url = `${BASE_URL}/api/send-email`;
@@ -149,7 +142,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           manual_subscription_exempt,
           enable_manual_student_payments,
           manual_payment_bank_details,
-          perlas_finance_enabled
+          perlas_finance_enabled,
+          enable_per_lesson,
+          enable_monthly_billing
         )
       `)
             .eq('status', 'active')
@@ -176,15 +171,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const orgPerlasMap = new Map<string, boolean>();
         const orgEntityTypeMap = new Map<string, string>();
         const orgAdminOptOutMap = new Map<string, ReturnType<typeof orgAdminEmailOptOut>>();
+        const orgPaymentFlagsMap = new Map<string, {
+            enable_per_lesson: boolean;
+            enable_monthly_billing: boolean;
+            payment_timing: string | null;
+            payment_deadline_hours: number | null;
+        }>();
         if (orgIdsForLookup.length > 0) {
             const { data: orgs } = await supabase
                 .from('organizations')
-                .select('id, perlas_finance_enabled, entity_type, features')
+                .select('id, perlas_finance_enabled, entity_type, features, enable_per_lesson, enable_monthly_billing, payment_timing, payment_deadline_hours')
                 .in('id', orgIdsForLookup);
             for (const o of orgs ?? []) {
                 orgPerlasMap.set(o.id, !!(o as any).perlas_finance_enabled);
                 orgEntityTypeMap.set(o.id, String((o as any).entity_type || ''));
                 orgAdminOptOutMap.set(o.id, orgAdminEmailOptOut((o as any).features));
+                orgPaymentFlagsMap.set(o.id, {
+                    enable_per_lesson: (o as any).enable_per_lesson === true,
+                    enable_monthly_billing: (o as any).enable_monthly_billing === true,
+                    payment_timing: (o as any).payment_timing ?? null,
+                    payment_deadline_hours: (o as any).payment_deadline_hours ?? null,
+                });
             }
         }
 
@@ -199,15 +206,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 continue;
             }
 
-            const studentPaymentModelRaw = String(student?.payment_model || '').trim();
-
-            // Per-student payment override: monthly/package students must not get per-lesson payment reminders.
-            if (studentPaymentModelRaw && !hasPerLessonModel(studentPaymentModelRaw)) {
-                skipped.push(session.id);
+            // An explicit student choice wins. Otherwise inherit the current
+            // organization/solo-tutor per-lesson toggle instead of assuming
+            // that a newly-created NULL payment_model means per-lesson billing.
+            if (!allowsPerLessonBillingForOwner(student?.payment_model, tutor, orgPaymentFlagsMap)) {
+                silenced.push(session.id);
                 continue;
             }
 
-            const baseHours = tutor?.payment_deadline_hours ?? (tutor?.cancellation_hours ?? 24);
+            const ownerPaymentDefaults = orgId ? orgPaymentFlagsMap.get(orgId) : tutor;
+            const baseHours = ownerPaymentDefaults?.payment_deadline_hours
+                ?? tutor?.payment_deadline_hours
+                ?? (tutor?.cancellation_hours ?? 24);
             const resolved = resolvePerLessonPaymentRules(
                 {
                     payment_model: student?.payment_model,
@@ -215,7 +225,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     per_lesson_payment_deadline_hours: student?.per_lesson_payment_deadline_hours,
                 },
                 {
-                    payment_timing: tutor?.payment_timing ?? 'before_lesson',
+                    payment_timing: ownerPaymentDefaults?.payment_timing ?? tutor?.payment_timing ?? 'before_lesson',
                     payment_deadline_hours: baseHours,
                 },
             );

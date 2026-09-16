@@ -55,6 +55,7 @@ const FinancePage = lazy(() => import('@/pages/Finance'));
 const InvoicesPage = lazy(() => import('@/pages/Invoices'));
 const Instructions = lazy(() => import('@/pages/Instructions'));
 const Messages = lazy(() => import('@/pages/Messages'));
+const InAppSupport = lazy(() => import('@/pages/InAppSupport'));
 const StudentOnboarding = lazy(() => import('@/pages/StudentOnboarding'));
 const StudentDashboard = lazy(() => import('@/pages/StudentDashboard'));
 const StudentSchedule = lazy(() => import('@/pages/StudentSchedule'));
@@ -91,6 +92,15 @@ const PreviewAssignStudentModal = import.meta.env.DEV
 const PreviewComplimentaryLesson = import.meta.env.DEV
   ? lazy(() => import('@/pages/dev/PreviewComplimentaryLesson'))
   : null;
+const PreviewStaffContracts = import.meta.env.DEV
+  ? lazy(() => import('@/pages/dev/PreviewStaffContracts'))
+  : null;
+const PreviewInAppSupport = import.meta.env.DEV
+  ? lazy(() => import('@/pages/dev/PreviewInAppSupport'))
+  : null;
+const PreviewAdminSupport = import.meta.env.DEV
+  ? lazy(() => import('@/pages/dev/PreviewAdminSupport'))
+  : null;
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
 const ParentInvoices = lazy(() => import('@/pages/ParentInvoices'));
@@ -112,6 +122,7 @@ const SchoolPaymentSuccess = lazy(() => import('@/pages/SchoolPaymentSuccess'));
 const TutorSubscribe = lazy(() => import('@/pages/TutorSubscribe'));
 const WhiteboardPage = lazy(() => import('@/pages/Whiteboard'));
 const SupportWidget = lazy(() => import('@/components/support/SupportWidget'));
+const InAppSupportProvider = lazy(() => import('@/components/support/InAppSupportProvider'));
 import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
 import ThemeColorManager from '@/hooks/useThemeColor';
 import LocaleRouteSync from '@/components/LocaleRouteSync';
@@ -131,9 +142,11 @@ function ScrollToTopOnRouteChange() {
 function ProtectedWithUser() {
   return (
     <UserProvider>
-      <OrgBrandingProvider scope="tutor">
-        <ProtectedRoute />
-      </OrgBrandingProvider>
+      <InAppSupportProvider>
+        <OrgBrandingProvider scope="tutor">
+          <ProtectedRoute />
+        </OrgBrandingProvider>
+      </InAppSupportProvider>
     </UserProvider>
   );
 }
@@ -141,11 +154,13 @@ function ProtectedWithUser() {
 function StudentProtectedWithUser() {
   return (
     <UserProvider>
-      <OrgBrandingProvider scope="student">
-        <StudentPolicyProvider>
-          <StudentProtectedRoute />
-        </StudentPolicyProvider>
-      </OrgBrandingProvider>
+      <InAppSupportProvider>
+        <OrgBrandingProvider scope="student">
+          <StudentPolicyProvider>
+            <StudentProtectedRoute />
+          </StudentPolicyProvider>
+        </OrgBrandingProvider>
+      </InAppSupportProvider>
     </UserProvider>
   );
 }
@@ -184,9 +199,11 @@ function RequireStudentPayments({ children }: { children: React.ReactElement }) 
 function ParentProtectedWithUser() {
   return (
     <UserProvider>
-      <OrgBrandingProvider scope="parent">
-        <ParentProtectedRoute />
-      </OrgBrandingProvider>
+      <InAppSupportProvider>
+        <OrgBrandingProvider scope="parent">
+          <ParentProtectedRoute />
+        </OrgBrandingProvider>
+      </InAppSupportProvider>
     </UserProvider>
   );
 }
@@ -211,9 +228,11 @@ function ParentLegacyChildToLessonsRedirect() {
 function CompanyProtectedWithUser() {
   return (
     <UserProvider>
-      <OrgAdminAccessProvider>
-        <CompanyProtectedRoute />
-      </OrgAdminAccessProvider>
+      <InAppSupportProvider>
+        <OrgAdminAccessProvider>
+          <CompanyProtectedRoute />
+        </OrgAdminAccessProvider>
+      </InAppSupportProvider>
     </UserProvider>
   );
 }
@@ -267,6 +286,36 @@ export default function App({ basename }: { basename: string }) {
               element={<Navigate to="/preview/complimentary-lesson" replace />}
             />
           </>
+        )}
+        {import.meta.env.DEV && PreviewStaffContracts && (
+          <Route
+            path="/preview/staff-contracts"
+            element={
+              <StaticLocaleProvider locale="lt">
+                <PreviewStaffContracts />
+              </StaticLocaleProvider>
+            }
+          />
+        )}
+        {import.meta.env.DEV && PreviewInAppSupport && (
+          <Route
+            path="/preview/support-agent"
+            element={
+              <StaticLocaleProvider locale="en">
+                <PreviewInAppSupport />
+              </StaticLocaleProvider>
+            }
+          />
+        )}
+        {import.meta.env.DEV && PreviewAdminSupport && (
+          <Route
+            path="/preview/support-admin"
+            element={
+              <StaticLocaleProvider locale="lt">
+                <PreviewAdminSupport />
+              </StaticLocaleProvider>
+            }
+          />
         )}
 
         {/* Public Landing Pages - NO UserProvider wrapper */}
@@ -373,6 +422,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/students" element={<StudentsPage />} />
           <Route path="/waitlist" element={<WaitlistPage />} />
           <Route path="/messages" element={<Messages />} />
+          <Route path="/support" element={<InAppSupport />} />
           <Route path="/finance" element={<FinancePage />} />
           <Route path="/invoices" element={<InvoicesPage />} />
           <Route path="/instructions" element={<Instructions />} />
@@ -395,6 +445,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/student/payments" element={<RequireStudentPayments><StudentPayments /></RequireStudentPayments>} />
           <Route path="/student/instructions" element={<StudentInstructions />} />
           <Route path="/student/settings" element={<StudentSettings />} />
+          <Route path="/student/support" element={<InAppSupport />} />
         </Route>
 
         {/* Parent routes */}
@@ -418,6 +469,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/parent/messages" element={<ParentMessages />} />
           <Route path="/parent/settings" element={<ParentSettings />} />
           <Route path="/parent/instructions" element={<ParentInstructions />} />
+          <Route path="/parent/support" element={<InAppSupport />} />
           {/* Catch-all for /parent/* – stay inside the parent portal instead of bouncing to /login. */}
           <Route path="/parent/*" element={<Navigate to="/parent" replace />} />
         </Route>
@@ -452,6 +504,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/contracts" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyContracts /></OrgPermissionRoute>} />
             <Route path="/company/team" element={<OrgPermissionRoute permission="team.view" editPermission="team.edit"><CompanyTeam /></OrgPermissionRoute>} />
             <Route path="/company/groups" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyClassGroups /></OrgPermissionRoute>} />
+            <Route path="/company/support" element={<InAppSupport />} />
 
             <Route path="/school" element={<OrgPermissionRoute permission="dashboard.view"><SchoolDashboard /></OrgPermissionRoute>} />
             <Route path="/school/tutors" element={<OrgPermissionRoute permission="tutors.view" editPermission="tutors.edit"><CompanyTutors /></OrgPermissionRoute>} />
@@ -469,6 +522,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/finance" element={<OrgPermissionRoute permission="finance.view" editPermission="finance.edit"><CompanyFinanceHub /></OrgPermissionRoute>} />
             <Route path="/school/contracts" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyContracts /></OrgPermissionRoute>} />
             <Route path="/school/team" element={<OrgPermissionRoute permission="team.view" editPermission="team.edit"><CompanyTeam /></OrgPermissionRoute>} />
+            <Route path="/school/support" element={<InAppSupport />} />
           </Route>
         </Route>
 

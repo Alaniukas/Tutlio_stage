@@ -118,6 +118,7 @@ import {
 } from '@/lib/schoolClassGroupSessions';
 import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
 import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
+import { sessionPaymentDisplayKind } from '@/lib/sessionPaymentDisplay';
 import {
   formatOrgStudentPickerLabel,
   matchesOrgStudentPickerSearch,
@@ -2479,6 +2480,9 @@ export default function CompanyTvarkarastis() {
   const selectedEventEnded = Boolean(
     selectedEvent && selectedEvent.end_time.getTime() <= Date.now(),
   );
+  const selectedEventPaymentKind = selectedEvent
+    ? sessionPaymentDisplayKind(selectedEvent)
+    : null;
   const selectedEventSubject = selectedEvent?.subject_id
     ? subjects.find((subject) => subject.id === selectedEvent.subject_id)
     : undefined;
@@ -4426,12 +4430,14 @@ export default function CompanyTvarkarastis() {
 
               <div>
                 <Label className="text-xs text-gray-500">{t('compSess.labelPayment')}</Label>
-                <p className={`text-sm mt-1 font-medium ${selectedEvent.is_complimentary ? 'text-sky-700' : selectedEvent.paid ? 'text-green-600' : 'text-amber-600'}`}>
-                  {selectedEvent.is_complimentary
+                <p className={`text-sm mt-1 font-medium ${selectedEventPaymentKind === 'complimentary' ? 'text-sky-700' : selectedEventPaymentKind === 'paid' ? 'text-green-600' : selectedEventPaymentKind === 'reserved' ? 'text-indigo-600' : 'text-amber-600'}`}>
+                  {selectedEventPaymentKind === 'complimentary'
                     ? t('status.complimentary')
-                    : selectedEvent.paid || selectedEvent.payment_status === 'paid' || selectedEvent.payment_status === 'confirmed'
+                    : selectedEventPaymentKind === 'paid'
                     ? t('compSess.paid')
-                    : t('compSess.paymentPending')}
+                    : selectedEventPaymentKind === 'reserved'
+                      ? t('status.reserved')
+                      : t('compSess.paymentPending')}
                 </p>
               </div>
 

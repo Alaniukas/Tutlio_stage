@@ -191,9 +191,18 @@ export function defaultSessionPaymentStatusForStudent(
  */
 export function studentPerLessonDebtBlocksBooking(
   studentPaymentModel: string | null | undefined,
+  tutorFlags?: Pick<TutorPaymentFlags, 'enable_per_lesson' | 'enable_monthly_billing'>,
 ): boolean {
   const selectedModels = parseStudentPaymentModels(studentPaymentModel);
-  if (selectedModels.size === 0) return true;
+  if (selectedModels.size === 0) {
+    return tutorFlags
+      ? allowsPerLessonPaymentForStudent(
+          null,
+          tutorFlags.enable_per_lesson,
+          tutorFlags.enable_monthly_billing,
+        )
+      : true;
+  }
   return selectedModels.has('per_lesson');
 }
 

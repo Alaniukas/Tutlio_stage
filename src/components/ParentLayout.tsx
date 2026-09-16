@@ -21,13 +21,17 @@ import {
   getParentActiveChildId,
   PARENT_ACTIVE_CHILD_EVENT,
 } from '@/lib/parentActiveChild';
+import SupportRobotIcon from '@/components/support/SupportRobotIcon';
+import { useInAppSupportAgent } from '@/components/support/InAppSupportProvider';
+import { inAppSupportLabel } from '@/lib/inAppSupport';
 
 interface ParentLayoutProps {
   children: ReactNode;
 }
 
 export default function ParentLayout({ children }: ParentLayoutProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  const { openSupportAgent } = useInAppSupportAgent();
   const location = useLocation();
   const chatUnreadTotal = useTotalChatUnread();
   const { hasSchoolOrg, lessonRecordingsEnabled, terminology } = useParentSchoolOrg();
@@ -88,9 +92,20 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
         <Link to="/parent" className="flex items-center gap-2 min-w-0">
           <BrandedLogo size="sm" nameClassName="text-sm sm:text-base" />
         </Link>
-        <span className="hidden sm:inline text-[11px] font-semibold tracking-wide text-[color-mix(in_srgb,var(--org-brand)_55%,#64748b)] shrink-0">
-          {t('parent.portalLabel')}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="hidden sm:inline text-[11px] font-semibold tracking-wide text-[color-mix(in_srgb,var(--org-brand)_55%,#64748b)] shrink-0">
+            {t('parent.portalLabel')}
+          </span>
+          <button
+            type="button"
+            onClick={(event) => openSupportAgent(event.currentTarget)}
+            aria-label={inAppSupportLabel(locale)}
+            title={inAppSupportLabel(locale)}
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-indigo-100 bg-indigo-50 text-indigo-700 transition hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          >
+            <SupportRobotIcon className="h-7 w-7" />
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 pb-24 relative z-10 flex flex-col min-h-0">{children}</main>

@@ -20,6 +20,9 @@ import { useOrgTerminologyMode } from '@/hooks/useOrgTerminologyMode';
 import { useSchoolTerminology } from '@/hooks/useSchoolTerminology';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/marketMoney';
+import SupportRobotIcon from '@/components/support/SupportRobotIcon';
+import { useInAppSupportAgent } from '@/components/support/InAppSupportProvider';
+import { inAppSupportLabel } from '@/lib/inAppSupport';
 
 interface StudentLayoutProps {
     children: React.ReactNode;
@@ -64,7 +67,8 @@ function setCachedLayoutData(
 }
 
 export default function StudentLayout({ children, embed }: StudentLayoutProps) {
-    const { t } = useTranslation();
+    const { t, locale } = useTranslation();
+    const { openSupportAgent } = useInAppSupportAgent();
     const chatUnreadTotal = useTotalChatUnread();
     usePushSubscription();
     const location = useLocation();
@@ -341,6 +345,15 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                         {packageCountLabel}
                     </span>
                 )}
+                <button
+                    type="button"
+                    onClick={(event) => openSupportAgent(event.currentTarget)}
+                    aria-label={inAppSupportLabel(locale)}
+                    title={inAppSupportLabel(locale)}
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-indigo-100 bg-indigo-50 text-indigo-700 transition hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                >
+                    <SupportRobotIcon className="h-7 w-7" />
+                </button>
             </header>
 
             <Dialog open={isTutorModalOpen} onOpenChange={setIsTutorModalOpen}>

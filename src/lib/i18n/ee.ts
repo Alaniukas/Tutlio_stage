@@ -5463,6 +5463,7 @@ export const ee: Record<string, string> = {
   'compStu.scheduleTitle': 'Tundide graafik',
   'compStu.scheduleEmpty': 'Korduvaid tunde pole.',
   'compStu.effectivePerWeek': 'Tunde nädalas kokku: ~{count}',
+  'compStu.lessonsHadCount': 'Toimunud tunnid: {count}',
   'compStu.movedByStudentCount': 'Õpilane tõstis ümber: {count}',
   'compStu.movedByTutorCount': 'Juhendaja tõstis ümber: {count}',
   'compStu.cancelledByStudentCount': 'Õpilane tühistas: {count}',

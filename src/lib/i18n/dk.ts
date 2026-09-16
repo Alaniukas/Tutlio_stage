@@ -4885,6 +4885,7 @@ export const dk: Record<string, string> = {
   'compStu.scheduleTitle': 'Lektionsskema',
   'compStu.scheduleEmpty': 'Ingen tilbagevendende lektioner.',
   'compStu.effectivePerWeek': 'Lektioner om ugen, ca.: {count}',
+  'compStu.lessonsHadCount': 'Allerede afholdte lektioner: {count}',
   'compStu.movedByStudentCount': 'Flyttet af eleven: {count}',
   'compStu.movedByTutorCount': 'Flyttet af underviseren: {count}',
   'compStu.cancelledByStudentCount': 'Aflyst af eleven: {count}',

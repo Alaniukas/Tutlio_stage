@@ -246,7 +246,7 @@ export default function CreateInvoiceModal({
           supabase.from('profiles').select('organization_id, company_commission_percent, company_commission_by_subject').eq('id', tutorId).maybeSingle(),
           supabase
             .from('sessions')
-            .select('id, tutor_id, start_time, end_time, status, subject_id, price, is_complimentary, status_confirmed_at, students(full_name, email), subjects(name, is_trial)')
+            .select('id, tutor_id, start_time, end_time, status, subject_id, price, tutor_pay_eur_snapshot, is_complimentary, status_confirmed_at, students(full_name, email), subjects(name, is_trial)')
             .eq('tutor_id', tutorId)
             .in('status', ['completed', 'no_show'])
             .gte('start_time', periodStart + 'T00:00:00')
@@ -279,6 +279,7 @@ export default function CreateInvoiceModal({
                 bySubject: (prof as any)?.company_commission_by_subject,
                 subjectId: s.subject_id,
                 sessionPrice: s.price,
+                tutorPaySnapshot: s.tutor_pay_eur_snapshot,
               }),
         }));
         if (!rows.length) {

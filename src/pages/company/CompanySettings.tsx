@@ -47,10 +47,7 @@ import {
   setParentNotificationEnabled,
   type ParentNotificationKey,
 } from '@/lib/parentNotificationPreferences';
-import {
-  resolveDefaultTutorPayForSave,
-  tutorIdsUsingPreviousDefaultPay,
-} from '@/lib/orgTutorDefaultPay';
+import { resolveDefaultTutorPayForSave } from '@/lib/orgTutorDefaultPay';
 
 type TrialCommentMode = 'student_and_parent' | 'internal_only';
 
@@ -840,10 +837,9 @@ export default function CompanySettings() {
     const tutorRows = await getOrgVisibleTutors(
       supabase as any,
       orgId,
-      'id, email, company_commission_percent',
+      'id, email',
     );
     const tutorIds = tutorRows.map((p) => p.id);
-    const tutorIdsFollowingDefault = tutorIdsUsingPreviousDefaultPay(tutorRows, previousDefaultTutorPay);
 
     if (tutorIds.length > 0) {
       const { error: tutorsUpdateError } = await supabase
@@ -869,21 +865,9 @@ export default function CompanySettings() {
       }
     }
 
-    if (
-      nextDefaultTutorPay !== previousDefaultTutorPay
-      && tutorIdsFollowingDefault.length > 0
-    ) {
-      const { error: tutorPayUpdateError } = await supabase
-        .from('profiles')
-        .update({ company_commission_percent: nextDefaultTutorPay })
-        .in('id', tutorIdsFollowingDefault);
-
-      if (tutorPayUpdateError) {
-        setToastMessage({ message: t('compSet.savedButTutorsFailed'), type: 'error' });
-        setSaving(false);
-        return;
-      }
-    }
+    // The organization default is a fallback for new/unconfigured tutors.
+    // Never rewrite concrete per-tutor pay here: a rate equal to the previous
+    // default is indistinguishable from an explicitly agreed individual rate.
 
     setToastMessage({
       message: t('compSet.savedAndApplied'),

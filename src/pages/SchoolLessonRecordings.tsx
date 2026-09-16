@@ -29,6 +29,7 @@ type Recording = {
 
 type RecordingGroup = {
   id: string;
+  kind: 'class_group' | 'individual';
   name: string;
   configured: boolean;
   driveFolderId?: string;
@@ -389,6 +390,11 @@ export default function SchoolLessonRecordings() {
           ).map((group) => (
             <section key={group.id} className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
               <div className="p-4 sm:p-5 border-b border-gray-100">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  {group.kind === 'individual'
+                    ? t('orgFinance.individualLessons')
+                    : t('companyNav.groups')}
+                </p>
                 <h2 className="text-lg font-semibold text-gray-900">{group.name}</h2>
                 {data?.canManage && (
                   <div className="mt-4 max-w-3xl">

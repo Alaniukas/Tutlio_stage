@@ -51,7 +51,14 @@ describe('GET /api/school-lesson-recordings', () => {
   beforeEach(() => {
     mocks.verifyAuth.mockReset().mockResolvedValue({ userId: 'student-user', isInternal: false });
     mocks.resolveAccess.mockReset().mockResolvedValue({
-      groups: [{ id: 'group-allowed', organizationId: 'org-1', name: '7 klasė', tutorId: 'teacher-1' }],
+      groups: [{
+        id: 'group-allowed',
+        sourceId: 'group-allowed',
+        kind: 'class_group',
+        organizationId: 'org-1',
+        name: '7 klasė',
+        tutorId: 'teacher-1',
+      }],
       organizationIds: ['org-1'],
       canManage: false,
       isAdmin: false,
@@ -60,6 +67,7 @@ describe('GET /api/school-lesson-recordings', () => {
     });
     mocks.mappings = [{
       group_id: 'group-allowed',
+      subject_id: null,
       organization_id: 'org-1',
       drive_folder_id: 'private-folder-id',
       drive_folder_name: 'Private group folder',
@@ -109,6 +117,51 @@ describe('GET /api/school-lesson-recordings', () => {
     expect(mocks.createTicket).toHaveBeenCalledWith({
       userId: 'student-user',
       groupId: 'group-allowed',
+      fileId: 'drive-file-id',
+    });
+  });
+
+  it('lists a Drive folder mapped to an authorized individual recurring subject', async () => {
+    mocks.resolveAccess.mockResolvedValue({
+      groups: [{
+        id: 'subject:subject-allowed',
+        sourceId: 'subject-allowed',
+        kind: 'individual',
+        organizationId: 'org-1',
+        name: 'Solo muzika',
+        tutorId: 'teacher-1',
+      }],
+      organizationIds: ['org-1'],
+      canManage: false,
+      isAdmin: false,
+      isTutor: false,
+      isStudentOrParent: true,
+    });
+    mocks.mappings = [{
+      group_id: null,
+      subject_id: 'subject-allowed',
+      organization_id: 'org-1',
+      drive_folder_id: 'private-folder-id',
+      drive_folder_name: 'Solo muzika (recurring)',
+    }];
+
+    const res = mockRes();
+    await handler({
+      method: 'GET',
+      query: { groupId: 'subject:subject-allowed' },
+      headers: {},
+    } as any, res as any);
+
+    const result = res.getResult();
+    expect(result.statusCode).toBe(200);
+    expect(result.body.groups[0]).toMatchObject({
+      id: 'subject:subject-allowed',
+      kind: 'individual',
+      configured: true,
+    });
+    expect(mocks.createTicket).toHaveBeenCalledWith({
+      userId: 'student-user',
+      groupId: 'subject:subject-allowed',
       fileId: 'drive-file-id',
     });
   });

@@ -14,7 +14,8 @@ import {
 } from './_lib/schoolRecordingTicket.js';
 
 type FolderMapping = {
-  group_id: string;
+  group_id: string | null;
+  subject_id: string | null;
   organization_id: string;
   drive_folder_id: string;
   drive_folder_name: string | null;
@@ -24,9 +25,19 @@ function firstQueryValue(value: string | string[] | undefined): string {
   return String(Array.isArray(value) ? value[0] || '' : value || '').trim();
 }
 
-function publicGroup(group: { id: string; organizationId: string; name: string }, mapping?: FolderMapping) {
+function mappingTargetId(mapping: FolderMapping): string {
+  return mapping.subject_id ? `subject:${mapping.subject_id}` : String(mapping.group_id || '');
+}
+
+function publicGroup(group: {
+  id: string;
+  kind: 'class_group' | 'individual';
+  organizationId: string;
+  name: string;
+}, mapping?: FolderMapping) {
   return {
     id: group.id,
+    kind: group.kind,
     organizationId: group.organizationId,
     name: group.name,
     configured: Boolean(mapping),
@@ -56,13 +67,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'Set-Cookie',
       `tutlio_recording_viewer=${encodeURIComponent(viewerSession)}; HttpOnly; SameSite=Strict; Path=/api/school-lesson-recording-stream; Max-Age=7200${secure}`,
     );
-    const groupIds = access.groups.map((group) => group.id);
     let mappings: FolderMapping[] = [];
-    if (groupIds.length) {
+    if (access.organizationIds.length) {
       const { data, error } = await supabase
         .from('school_recording_drive_folders')
-        .select('group_id, organization_id, drive_folder_id, drive_folder_name')
-        .in('group_id', groupIds);
+        .select('group_id, subject_id, organization_id, drive_folder_id, drive_folder_name')
+        .in('organization_id', access.organizationIds);
       if (error) {
         const setupMissing = error.code === '42P01' || /school_recording_drive_folders/i.test(error.message || '');
         return res.status(setupMissing ? 503 : 500).json({
@@ -75,10 +85,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       mappings = (data || []) as FolderMapping[];
     }
 
-    const mappingByGroup = new Map(mappings.map((mapping) => [mapping.group_id, mapping]));
+    const allowedTargetIds = new Set(access.groups.map((group) => group.id));
+    const mappingByGroup = new Map(
+      mappings
+        .map((mapping) => [mappingTargetId(mapping), mapping] as const)
+        .filter(([targetId]) => allowedTargetIds.has(targetId)),
+    );
     const requestedGroupId = firstQueryValue(req.query?.groupId);
     if (requestedGroupId && !access.groups.some((group) => group.id === requestedGroupId)) {
-      return res.status(404).json({ error: 'Grupė nerasta.' });
+      return res.status(404).json({ error: 'Grupė arba individuali pamoka nerasta.' });
     }
     const groups = await Promise.all(access.groups.map(async (group) => {
       const mapping = mappingByGroup.get(group.id);
@@ -163,14 +178,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const body = (req.body || {}) as Record<string, unknown>;
     const groupId = String(body.groupId || '').trim();
     const group = access.groups.find((candidate) => candidate.id === groupId);
-    if (!group) return res.status(404).json({ error: 'Grupė nerasta.' });
+    if (!group) return res.status(404).json({ error: 'Grupė arba individuali pamoka nerasta.' });
 
     const rawFolder = String(body.driveFolderId || '').trim();
     if (!rawFolder) {
+      const column = group.kind === 'individual' ? 'subject_id' : 'group_id';
       const { error } = await supabase
         .from('school_recording_drive_folders')
         .delete()
-        .eq('group_id', group.id)
+        .eq(column, group.sourceId)
         .eq('organization_id', group.organizationId);
       if (error) return res.status(500).json({ error: 'Nepavyko pašalinti Drive aplanko priskyrimo.' });
       return res.status(200).json({ ok: true, removed: true });
@@ -191,21 +207,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Nurodyta nuoroda nėra Google Drive aplankas.' });
     }
 
+    const conflictColumn = group.kind === 'individual' ? 'subject_id' : 'group_id';
     const { error } = await supabase
       .from('school_recording_drive_folders')
       .upsert({
-        group_id: group.id,
+        group_id: group.kind === 'class_group' ? group.sourceId : null,
+        subject_id: group.kind === 'individual' ? group.sourceId : null,
         organization_id: group.organizationId,
         drive_folder_id: folder.id,
         drive_folder_name: folder.name,
         configured_by: auth.userId,
         updated_at: new Date().toISOString(),
-      }, { onConflict: 'group_id' });
+      }, { onConflict: conflictColumn });
     if (error) {
       const duplicate = error.code === '23505';
       return res.status(duplicate ? 409 : 500).json({
         error: duplicate
-          ? 'Šis Drive aplankas jau priskirtas kitai grupei.'
+          ? 'Šis Drive aplankas jau priskirtas kitai grupei arba individualiai pamokai.'
           : 'Nepavyko išsaugoti Drive aplanko priskyrimo.',
       });
     }

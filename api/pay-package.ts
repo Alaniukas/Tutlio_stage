@@ -226,8 +226,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ));
         }
 
-        // 6. Update package with new checkout session ID
-        await supabase.from('lesson_packages').update({ stripe_checkout_session_id: checkoutSession.id }).eq('id', packageId);
+        // 6. Publish the Checkout Session only while the package is still payable.
+        // Cancellation can race this request after the initial read; in that case
+        // expire the new session before its URL is returned to the payer.
+        const { data: checkoutClaim, error: checkoutClaimError } = await supabase
+            .from('lesson_packages')
+            .update({ stripe_checkout_session_id: checkoutSession.id })
+            .eq('id', packageId)
+            .eq('paid', false)
+            .eq('payment_status', 'pending')
+            .eq('active', true)
+            .select('id')
+            .maybeSingle();
+        if (checkoutClaimError) {
+            await expireConnectCheckoutSession(stripe, checkoutSession.id, stripeAccountId).catch(() => {});
+            return res.status(500).send(errorPage('Klaida', 'Nepavyko paruošti mokėjimo. Bandykite dar kartą.'));
+        }
+        if (!checkoutClaim) {
+            await expireConnectCheckoutSession(stripe, checkoutSession.id, stripeAccountId).catch(() => {});
+            return res.status(200).send(errorPage('Paketas atšauktas', 'Šis paketas buvo atšauktas. Jei tai netikėta, susisiekite su administracija.'));
+        }
 
         return res.redirect(303, checkoutSession.url!);
     } catch (err: any) {

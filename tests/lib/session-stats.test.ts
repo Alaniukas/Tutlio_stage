@@ -164,6 +164,19 @@ describe('past unpaid session chip', () => {
     expect(matchesOrgSessionStatChip(rows[1] as Session, 'unpaid_past', now)).toBe(false);
   });
 
+  it('counts confirmed-only monthly lessons as unpaid after they end', () => {
+    const row = {
+      ...base,
+      id: 'past-monthly',
+      start_time: '2026-09-10T10:00:00.000Z',
+      end_time: '2026-09-10T11:00:00.000Z',
+      status: 'completed' as const,
+      paid: false,
+      payment_status: 'confirmed',
+    };
+    expect(countPastUnpaidSessions([row], now)).toBe(1);
+  });
+
   it('clicking the same chip again clears the filter', () => {
     expect(toggleOrgSessionStatChip(null, 'unpaid_past')).toBe('unpaid_past');
     expect(toggleOrgSessionStatChip('unpaid_past', 'unpaid_past')).toBeNull();

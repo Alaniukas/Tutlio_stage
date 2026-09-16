@@ -1,9 +1,16 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -11,22 +18,28 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, FileText, Send, CheckCircle, Trash2, PenLine, MoreVertical } from 'lucide-react';
+import { Plus, FileText, Send, Trash2, PenLine, LockKeyhole } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { schoolContractPdfStoragePath } from '@/lib/schoolContractPdfPath';
 import { uploadContractFile } from '@/lib/contractStorage';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 
-export type StaffContractStatus = 'draft' | 'sent' | 'awaiting_school_signature' | 'signed_by_school' | 'signed';
+export type TeacherContractStatus = 'draft' | 'sent' | 'awaiting_school_signature' | 'signed_by_school' | 'signed';
 
-export interface StaffContract {
+export type TeacherContractOption = {
+  id: string;
+  full_name: string;
+  email?: string | null;
+};
+
+export interface TeacherContract {
   id: string;
   organization_id: string;
   contract_number?: string | null;
   party_kind?: string | null;
   counterparty_name?: string | null;
   counterparty_email?: string | null;
-  signing_status: StaffContractStatus;
+  signing_status: TeacherContractStatus;
   signed_at: string | null;
   sent_at: string | null;
   created_at: string;
@@ -42,16 +55,15 @@ function isPdfFile(file: File): boolean {
 export default function CompanyStaffContracts(props: {
   orgId: string;
   eSignEnabled: boolean;
-  contracts: StaffContract[];
+  contracts: TeacherContract[];
   saving: boolean;
-  onSignAsSchool: (contract: StaffContract) => void;
+  onSignAsSchool: (contract: TeacherContract) => void;
   onReload: () => void;
   onDelete: (id: string) => void;
-  onUploadSigned: (contract: StaffContract) => void;
-  onOpenManualMark: (contract: StaffContract) => void;
   onOpenFile: (url?: string | null) => void;
-  statusBadge: (status: StaffContractStatus) => ReactNode;
+  statusBadge: (status: TeacherContractStatus) => ReactNode;
   onToast: (message: string, type: 'success' | 'error') => void;
+  availableTeachers?: TeacherContractOption[];
 }) {
   const { t: tr } = useTranslation();
   const {
@@ -62,15 +74,14 @@ export default function CompanyStaffContracts(props: {
     onSignAsSchool,
     onReload,
     onDelete,
-    onUploadSigned,
-    onOpenManualMark,
     onOpenFile,
     statusBadge,
     onToast,
+    availableTeachers,
   } = props;
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [inviteOpen, setInviteOpen] = useState<StaffContract | null>(null);
+  const [inviteOpen, setInviteOpen] = useState<TeacherContract | null>(null);
   const [creating, setCreating] = useState(false);
   const [inviting, setInviting] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -79,6 +90,33 @@ export default function CompanyStaffContracts(props: {
   const [contractNumber, setContractNumber] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
+  const [selectedTeacherId, setSelectedTeacherId] = useState('');
+  const [teacherOptions, setTeacherOptions] = useState<TeacherContractOption[]>(availableTeachers || []);
+  const [teachersLoading, setTeachersLoading] = useState(false);
+
+  useEffect(() => {
+    if (availableTeachers) {
+      setTeacherOptions(availableTeachers);
+      return;
+    }
+    if (!createOpen || !orgId) return;
+    let cancelled = false;
+    setTeachersLoading(true);
+    void getOrgVisibleTutors(supabase, orgId, 'id, full_name, email')
+      .then((rows) => {
+        if (cancelled) return;
+        setTeacherOptions(rows.map((row) => ({ id: row.id, full_name: row.full_name, email: row.email })));
+      })
+      .catch(() => {
+        if (!cancelled) setTeacherOptions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setTeachersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [availableTeachers, createOpen, orgId]);
 
   const generateContractNumber = () => {
     const now = new Date();
@@ -95,6 +133,7 @@ export default function CompanyStaffContracts(props: {
     setTeacherName('');
     setTeacherEmail('');
     setContractNumber('');
+    setSelectedTeacherId('');
   };
 
   const createContract = async () => {
@@ -106,8 +145,17 @@ export default function CompanyStaffContracts(props: {
       onToast(tr('school.teacherContractPdfOnly'), 'error');
       return;
     }
+    const name = teacherName.trim();
     const email = teacherEmail.trim();
-    if (email && !/^\S+@\S+\.\S+$/.test(email)) {
+    if (!selectedTeacherId) {
+      onToast(tr('school.teacherContractTeacherRequired'), 'error');
+      return;
+    }
+    if (!name) {
+      onToast(tr('school.teacherContractNameRequired'), 'error');
+      return;
+    }
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
       onToast(tr('school.teacherContractEmailInvalid'), 'error');
       return;
     }
@@ -125,7 +173,6 @@ export default function CompanyStaffContracts(props: {
         onToast(uploaded.error || tr('school.teacherContractUploadFail'), 'error');
         return;
       }
-      const name = teacherName.trim() || file.name.replace(/\.pdf$/i, '');
       const { error } = await supabase.from('school_contracts').insert({
         id,
         organization_id: orgId,
@@ -134,7 +181,7 @@ export default function CompanyStaffContracts(props: {
         student_id: null,
         party_kind: 'teacher',
         counterparty_name: name,
-        counterparty_email: email || null,
+        counterparty_email: email,
         filled_body: name,
         pdf_url: uploaded.path,
         annual_fee: 0,
@@ -155,7 +202,7 @@ export default function CompanyStaffContracts(props: {
     }
   };
 
-  const openInvite = (contract: StaffContract) => {
+  const openInvite = (contract: TeacherContract) => {
     setInviteName(contract.counterparty_name || '');
     setInviteEmail(contract.counterparty_email || '');
     setInviteOpen(contract);
@@ -206,6 +253,10 @@ export default function CompanyStaffContracts(props: {
         <Button onClick={() => { resetCreate(); setCreateOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
           <Plus className="w-4 h-4 mr-2" /> {tr('school.newTeacherContract')}
         </Button>
+      </div>
+      <div className="flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-4 text-sm text-emerald-950">
+        <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+        <p>{tr('school.teacherContractPrivateHint')}</p>
       </div>
 
       {contracts.length === 0 ? (
@@ -261,50 +312,6 @@ export default function CompanyStaffContracts(props: {
                   <span className="text-xs text-blue-700 font-medium">{tr('school.waitingTeacherSignature')}</span>
                 )}
 
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button size="sm" variant="outline" className="gap-1.5">
-                      <MoreVertical className="w-4 h-4" />
-                      {tr('school.contractActions')}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent align="end" className="w-64 p-1">
-                    <div className="flex flex-col">
-                      {eSignEnabled && c.signing_status === 'signed_by_school' && (
-                        <button
-                          type="button"
-                          className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left hover:bg-gray-50 text-green-700"
-                          onClick={() => onOpenManualMark(c)}
-                        >
-                          <CheckCircle className="w-4 h-4 shrink-0" />
-                          {tr('school.markSigned')}
-                        </button>
-                      )}
-                      {!eSignEnabled && c.signing_status !== 'signed' && (
-                        <button
-                          type="button"
-                          className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left hover:bg-gray-50 text-green-700"
-                          onClick={() => onUploadSigned(c)}
-                        >
-                          <CheckCircle className="w-4 h-4 shrink-0" />
-                          {tr('school.uploadSignedCopy')}
-                        </button>
-                      )}
-                      {c.signing_status !== 'draft' && (
-                        <button
-                          type="button"
-                          className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left hover:bg-gray-50"
-                          onClick={() => onUploadSigned(c)}
-                          disabled={saving}
-                        >
-                          <FileText className="w-4 h-4 shrink-0" />
-                          {tr('school.uploadSignedCopy')}
-                        </button>
-                      )}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-
                 <button
                   onClick={() => onDelete(c.id)}
                   className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors ml-auto"
@@ -326,6 +333,34 @@ export default function CompanyStaffContracts(props: {
           <div className="space-y-3">
             <p className="text-sm text-gray-600">{tr('school.teacherContractCreateHint')}</p>
             <div className="space-y-1.5">
+              <Label>{tr('school.teacherContractTeacherPicker')}</Label>
+              <Select
+                value={selectedTeacherId}
+                onValueChange={(value) => {
+                  const selected = teacherOptions.find((teacher) => teacher.id === value);
+                  setSelectedTeacherId(value);
+                  if (selected) {
+                    setTeacherName(selected.full_name || '');
+                    setTeacherEmail(selected.email || '');
+                  }
+                }}
+              >
+                <SelectTrigger disabled={teachersLoading || teacherOptions.length === 0}>
+                  <SelectValue placeholder={teachersLoading ? tr('school.loadingTeachers') : tr('school.teacherContractTeacherPlaceholder')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {teacherOptions.length === 0 ? (
+                    <SelectItem value="no-teachers" disabled>{tr('school.teacherContractNoTeachers')}</SelectItem>
+                  ) : teacherOptions.map((teacher) => (
+                    <SelectItem key={teacher.id} value={teacher.id}>
+                      {teacher.full_name}{teacher.email ? ` · ${teacher.email}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">{tr('school.teacherContractTeacherPickerHint')}</p>
+            </div>
+            <div className="space-y-1.5">
               <Label>{tr('school.teacherContractFile')}</Label>
               <Input
                 type="file"
@@ -335,11 +370,11 @@ export default function CompanyStaffContracts(props: {
             </div>
             <div className="space-y-1.5">
               <Label>{tr('school.teacherName')}</Label>
-              <Input value={teacherName} onChange={(e) => setTeacherName(e.target.value)} placeholder={tr('school.teacherNamePlaceholder')} />
+              <Input value={teacherName} readOnly={Boolean(selectedTeacherId)} onChange={(e) => setTeacherName(e.target.value)} placeholder={tr('school.teacherNamePlaceholder')} />
             </div>
             <div className="space-y-1.5">
               <Label>{tr('school.teacherEmail')}</Label>
-              <Input type="email" value={teacherEmail} onChange={(e) => setTeacherEmail(e.target.value)} placeholder="mokytojas@mokykla.lt" />
+              <Input type="email" value={teacherEmail} readOnly={Boolean(selectedTeacherId)} onChange={(e) => setTeacherEmail(e.target.value)} placeholder="mokytojas@mokykla.lt" />
             </div>
             <div className="space-y-1.5">
               <Label>{tr('school.contractNumberOptional')}</Label>
@@ -348,7 +383,7 @@ export default function CompanyStaffContracts(props: {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>{tr('common.cancel')}</Button>
-            <Button onClick={() => void createContract()} disabled={creating} className="bg-emerald-600 hover:bg-emerald-700">
+            <Button onClick={() => void createContract()} disabled={creating || !file || !selectedTeacherId || !teacherName.trim() || !teacherEmail.trim()} className="bg-emerald-600 hover:bg-emerald-700">
               {creating ? tr('school.creating') : tr('school.createContract')}
             </Button>
           </DialogFooter>

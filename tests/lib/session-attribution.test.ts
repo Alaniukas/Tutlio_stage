@@ -36,6 +36,7 @@ describe('countStudentSessionStats', () => {
       { status: 'completed' },
     ]);
     expect(counters).toEqual({
+      lessonsHad: 1,
       cancelledByStudent: 1,
       cancelledByTutor: 1,
       movedByStudent: 1,
@@ -48,10 +49,23 @@ describe('countStudentSessionStats', () => {
       { status: 'cancelled', cancelled_by: 'tutor', rescheduled_at: '2026-07-01T10:00:00Z', reschedule_requested_by: 'student' },
     ]);
     expect(counters).toEqual({
+      lessonsHad: 0,
       cancelledByStudent: 0,
       cancelledByTutor: 1,
       movedByStudent: 1,
       movedByTutor: 0,
     });
+  });
+
+  it('counts completed and no-show lessons, excluding non-lesson accounting rows', () => {
+    const counters = countStudentSessionStats([
+      { status: 'completed' },
+      { status: 'no_show' },
+      { status: 'completed', exclude_from_lesson_count: true },
+      { status: 'active' },
+      { status: 'cancelled' },
+    ]);
+
+    expect(counters.lessonsHad).toBe(2);
   });
 });

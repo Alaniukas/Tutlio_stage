@@ -70,6 +70,16 @@ describe('getCalendarSessionEventStyle (Mokslo vaisiai)', () => {
     expect(style.backgroundColor).toBe('#10b981');
   });
 
+  it('does not color an unpaid confirmed monthly lesson as paid', () => {
+    const style = getCalendarSessionEventStyle({
+      status: 'completed',
+      endAt: past,
+      paid: false,
+      payment_status: 'confirmed',
+    });
+    expect(style.backgroundColor).toBe('#ca8a04');
+  });
+
   it('uses blue vs orange for MV admin planned paid vs unpaid', () => {
     const paid = getCalendarSessionEventStyle({
       status: 'active',

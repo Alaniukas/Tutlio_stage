@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mock = vi.hoisted(() => ({ create: vi.fn(), from: vi.fn(), pkg: {} as any }));
+const mock = vi.hoisted(() => ({ create: vi.fn(), from: vi.fn(), pkg: {} as any, checkoutClaim: {} as any }));
 vi.mock('stripe', () => ({ default: class { checkout = { sessions: { create: mock.create } }; } }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ from: mock.from }) }));
 vi.mock('../../api/_lib/public-origin.js', () => ({ publicOriginFromRequest: () => 'https://tutlio.pl' }));
@@ -12,6 +12,7 @@ beforeEach(() => {
     pool_organization_id: '3422031d-6e21-424d-980b-35a9c6d7b8f1', paid: false, active: true, payment_status: 'pending',
     payment_method: 'stripe', expires_at: '2099-10-01T00:00Z', students: { full_name: 'Student' },
     profiles: { full_name: 'Tutor', organization_id: 'changed-org' } };
+  mock.checkoutClaim = mock.pkg;
   mock.create.mockResolvedValue({ id: 'checkout', url: 'https://checkout.stripe.com/test' });
   mock.from.mockImplementation((table: string) => {
     const data = table === 'lesson_packages' ? mock.pkg : table === 'organizations'
@@ -19,6 +20,7 @@ beforeEach(() => {
       : [{ total_lessons: 4, price_per_lesson: 27, subjects: { name: 'Lithuanian' } }, { total_lessons: 5, price_per_lesson: 27, subjects: { name: 'Maths' } }];
     const q: any = { then: (resolve: any) => Promise.resolve({ data, error: null }).then(resolve) };
     for (const method of ['select','eq','single','order','update']) q[method] = vi.fn(() => q);
+    q.maybeSingle = vi.fn(async () => ({ data: table === 'lesson_packages' ? mock.checkoutClaim : data, error: null }));
     return q;
   });
 });
@@ -55,5 +57,17 @@ describe('pooled package payment', () => {
     mock.pkg.expires_at = '2000-01-01T00:00Z';
     expect((await pay()).status).toHaveBeenCalledWith(409);
     expect(mock.create).not.toHaveBeenCalled();
+  });
+  it('never creates a checkout for a cancelled package', async () => {
+    mock.pkg.payment_status = 'cancelled';
+    expect((await pay()).status).toHaveBeenCalledWith(200);
+    expect(mock.create).not.toHaveBeenCalled();
+  });
+  it('does not reveal a newly created checkout if cancellation wins the DB race', async () => {
+    mock.checkoutClaim = null;
+    const res = await pay();
+    expect(mock.create).toHaveBeenCalledOnce();
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.redirect).not.toHaveBeenCalled();
   });
 });

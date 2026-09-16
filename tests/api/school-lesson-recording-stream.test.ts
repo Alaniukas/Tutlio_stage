@@ -71,10 +71,19 @@ describe('GET /api/school-lesson-recording-stream', () => {
     mocks.verifyHomeworkTicket.mockReset().mockReturnValue(null);
     mocks.resolveHomeworkGroup.mockReset().mockResolvedValue({
       id: 'group-a',
+      sourceId: 'group-a',
+      kind: 'class_group',
       organizationId: 'org-a',
     });
     mocks.resolveAccess.mockReset().mockResolvedValue({
-      groups: [{ id: 'group-a', organizationId: 'org-a', name: 'A', tutorId: 'teacher-a' }],
+      groups: [{
+        id: 'group-a',
+        sourceId: 'group-a',
+        kind: 'class_group',
+        organizationId: 'org-a',
+        name: 'A',
+        tutorId: 'teacher-a',
+      }],
       organizationIds: ['org-a'],
       canManage: false,
       isAdmin: false,

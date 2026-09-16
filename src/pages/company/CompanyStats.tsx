@@ -160,7 +160,7 @@ export default function CompanyStats() {
     const tutorIds = tutorList.map(t => t.id);
     const sessionQuery = () => supabase
       .from('sessions')
-      .select('id, class_group_id, start_time, end_time, tutor_id, student_id, status, payment_status, price, cancelled_by, paid, is_complimentary, exclude_from_lesson_count, lesson_package_id, subject_id, student_joined_at, status_confirmed_at, subjects(is_trial, is_group)')
+      .select('id, class_group_id, start_time, end_time, tutor_id, student_id, status, payment_status, price, cancelled_by, paid, is_complimentary, exclude_from_lesson_count, lesson_package_id, subject_id, tutor_pay_eur_snapshot, student_joined_at, status_confirmed_at, subjects(is_trial, is_group)')
       .in('tutor_id', tutorIds)
       .gte('start_time', startIso)
       .lte('start_time', endIso);
@@ -260,7 +260,11 @@ export default function CompanyStats() {
       const conducted = filterConductedOrgSessions(tutorSessions);
       const earnings = conducted.reduce((sum, s) => sum + (Number((s as any).price) || 0), 0);
       const netEarnings = sumOrgTutorLessonsPayEur(
-        conducted as Array<{ subject_id?: string | null; price?: number | null }>,
+        conducted as Array<{
+          subject_id?: string | null;
+          price?: number | null;
+          tutor_pay_eur_snapshot?: number | null;
+        }>,
         tutorPayPerSession,
         (tutor as any).company_commission_by_subject,
         adminRow.organization_id,

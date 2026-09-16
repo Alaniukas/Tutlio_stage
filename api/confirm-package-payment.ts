@@ -57,6 +57,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (packageFetchErr || !existingPackage) {
       return res.status(404).json({ error: 'Paketas nerastas', details: packageFetchErr?.message });
     }
+    if ((existingPackage as any).payment_status === 'cancelled') {
+      return res.status(409).json({ error: 'Paketas atšauktas', code: 'cancelled' });
+    }
 
     const expectedStripeAccountId = await resolveTutorStripeAccount(
       supabase,
@@ -85,9 +88,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           active: true,
         })
         .eq('id', packageId)
+        .neq('payment_status', 'cancelled')
         .select('*, students(full_name, email, payer_email, payer_name), subjects(name)')
-        .single();
-      if (updateErr || !updatedPackage) {
+        .maybeSingle();
+      if (!updateErr && !updatedPackage) {
+        return res.status(409).json({ error: 'Paketas atšauktas', code: 'cancelled' });
+      }
+      if (updateErr) {
         return res.status(500).json({ error: 'Nepavyko aktyvuoti paketo', details: updateErr?.message });
       }
       finalPackage = updatedPackage as any;

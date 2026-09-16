@@ -223,7 +223,7 @@ export default function CompanyInvoices() {
     const [{ data: sessions }, { data: tutorProfiles }] = await Promise.all([
       supabase
         .from('sessions')
-        .select('tutor_id, price, status, paid, payment_status, subject_id')
+        .select('tutor_id, price, status, paid, payment_status, subject_id, tutor_pay_eur_snapshot')
         .in('tutor_id', tutorIds)
         .gte('start_time', tutorEffectiveRange.start)
         .lte('start_time', tutorEffectiveRange.end + 'T23:59:59')
@@ -256,6 +256,7 @@ export default function CompanyInvoices() {
         bySubject: pay?.bySubject,
         subjectId: (s as { subject_id?: string | null }).subject_id,
         sessionPrice: s.price,
+        tutorPaySnapshot: (s as { tutor_pay_eur_snapshot?: number | null }).tutor_pay_eur_snapshot,
       });
     }
     setTutorSessions(map);

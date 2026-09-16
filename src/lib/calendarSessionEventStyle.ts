@@ -1,3 +1,5 @@
+import { isSessionActuallyPaid } from '@/lib/sessionPaymentDisplay';
+
 export type CalendarSessionStyleInput = {
   status: string;
   paid?: boolean;
@@ -130,8 +132,7 @@ export function getCalendarSessionEventStyle(input: CalendarSessionStyleInput): 
 
   const endMs = endAt instanceof Date ? endAt.getTime() : new Date(endAt as Date).getTime();
   const hasEnded = Number.isFinite(endMs) && endMs <= Date.now();
-  const isPaid =
-    paid === true || payment_status === 'paid' || payment_status === 'confirmed';
+  const isPaid = isSessionActuallyPaid({ paid, payment_status });
   const isMoksloVaisiaiTrial = useMoksloVaisiaiPalette === true && isTrial === true;
   const isMoksloVaisiaiRecurring =
     useMoksloVaisiaiPalette === true &&

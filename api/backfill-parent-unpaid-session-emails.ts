@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { resolvePerLessonPaymentRules } from './_lib/perLessonPaymentRules.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
+import { allowsPerLessonBillingForOwner } from './_lib/perLessonBillingEligibility.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -87,7 +88,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           full_name,
           organization_id,
           payment_timing,
-          payment_deadline_hours
+          payment_deadline_hours,
+          enable_per_lesson,
+          enable_monthly_billing
         )
       `)
       .in('status', ['active', 'completed', 'no_show'])
@@ -106,6 +109,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const payer = (s?.student?.payer_email || '').trim();
       return payer.length > 0;
     });
+
+    const organizationIds = [...new Set(
+      candidates
+        .map((session: any) => String(session?.tutor?.organization_id || '').trim())
+        .filter(Boolean),
+    )];
+    const organizationFlags = new Map<string, {
+      enable_per_lesson: boolean;
+      enable_monthly_billing: boolean;
+      payment_timing: string | null;
+      payment_deadline_hours: number | null;
+    }>();
+    if (organizationIds.length > 0) {
+      const { data: organizations, error: organizationsError } = await supabase
+        .from('organizations')
+        .select('id, enable_per_lesson, enable_monthly_billing, payment_timing, payment_deadline_hours')
+        .in('id', organizationIds);
+      if (organizationsError) {
+        return res.status(500).json({
+          error: 'Failed to load organization billing settings',
+          details: organizationsError.message,
+        });
+      }
+      for (const organization of organizations || []) {
+        organizationFlags.set(organization.id, {
+          enable_per_lesson: organization.enable_per_lesson === true,
+          enable_monthly_billing: organization.enable_monthly_billing === true,
+          payment_timing: organization.payment_timing ?? null,
+          payment_deadline_hours: organization.payment_deadline_hours ?? null,
+        });
+      }
+    }
+
+    candidates = candidates.filter((session: any) =>
+      allowsPerLessonBillingForOwner(
+        session?.student?.payment_model,
+        session?.tutor || {},
+        organizationFlags,
+      ),
+    );
     if (emailFilterSet.size > 0) {
       candidates = candidates.filter((s: any) =>
         emailFilterSet.has(String(s?.student?.payer_email || '').trim().toLowerCase())
@@ -163,6 +206,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const start = new Date(session.start_time);
       const end = new Date(session.end_time);
+      const ownerPaymentDefaults = tutor.organization_id
+        ? organizationFlags.get(tutor.organization_id)
+        : tutor;
       const resolved = resolvePerLessonPaymentRules(
         {
           payment_model: student.payment_model,
@@ -170,8 +216,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           per_lesson_payment_deadline_hours: student.per_lesson_payment_deadline_hours,
         },
         {
-          payment_timing: tutor.payment_timing ?? 'before_lesson',
-          payment_deadline_hours: Number(tutor.payment_deadline_hours ?? 24),
+          payment_timing: ownerPaymentDefaults?.payment_timing ?? tutor.payment_timing ?? 'before_lesson',
+          payment_deadline_hours: Number(
+            ownerPaymentDefaults?.payment_deadline_hours ?? tutor.payment_deadline_hours ?? 24,
+          ),
         },
       );
       if (resolved.payment_timing !== 'after_lesson') {

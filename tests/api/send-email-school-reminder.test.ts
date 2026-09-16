@@ -2,6 +2,7 @@
 // account: the school variant must lead with the join link and must not push
 // them into the parent portal (or towards registering).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { sessionReminderDeliveryKey } from '../../api/_lib/sessionReminderDelivery';
 
 const { sendMock, pushMock, contractAccess } = vi.hoisted(() => ({
   sendMock: vi.fn(),
@@ -132,5 +133,27 @@ describe('session_reminder_payer for school parents', () => {
       body: { success: true, skipped: true, reason: 'school_contract_not_active' },
     });
     expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('does not confirm a reminder when the provider omits its message id', async () => {
+    sendMock.mockResolvedValue({ data: null, error: null });
+    const scope = `payer:${base.sessionId}`;
+    const { default: handler } = await import('../../api/send-email');
+    const res = mockRes();
+    await handler(mockReq({
+      type: 'session_reminder_payer',
+      to: 'parent@example.com',
+      idempotencyKey: sessionReminderDeliveryKey('session_reminder_payer', 'parent@example.com', scope),
+      data: {
+        ...base,
+        reminderDeliveryScope: scope,
+      },
+      locale: 'lt',
+    }) as any, res as any);
+
+    expect(res.getResult()).toMatchObject({
+      statusCode: 503,
+      body: { error: 'Reminder delivery was not confirmed' },
+    });
   });
 });

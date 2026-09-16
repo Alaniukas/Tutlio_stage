@@ -5382,6 +5382,7 @@ export const nl: Record<string, string> = {
   "compStu.scheduleTitle": "Lesrooster",
   "compStu.scheduleEmpty": "Geen terugkerende lessen.",
   "compStu.effectivePerWeek": "Totaal ~{count} les(sen) per week",
+  "compStu.lessonsHadCount": "Reeds gevolgde lessen: {count}",
   "compStu.movedByStudentCount": "Verplaatst door leerling: {count}",
   "compStu.movedByTutorCount": "Verplaatst door docent: {count}",
   "compStu.cancelledByStudentCount": "Geannuleerd door leerling: {count}",

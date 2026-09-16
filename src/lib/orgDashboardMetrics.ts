@@ -3,6 +3,8 @@
  * Stats page uses conducted-lesson revenue separately — do not mix the two.
  */
 
+import { isSessionActuallyPaid } from '@/lib/sessionPaymentDisplay';
+
 export type OrgDashboardSession = {
   status?: string | null;
   paid?: boolean | null;
@@ -17,9 +19,7 @@ export function isPaidLikeOrgSession(session: {
   paid?: boolean | null;
   payment_status?: string | null;
 }): boolean {
-  if (session.paid === true) return true;
-  const ps = String(session.payment_status || '');
-  return ps === 'paid' || ps === 'confirmed';
+  return isSessionActuallyPaid(session);
 }
 
 export function isOccurredOrgSession(status: string | null | undefined): boolean {

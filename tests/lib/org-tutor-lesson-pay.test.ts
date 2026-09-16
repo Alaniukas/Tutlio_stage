@@ -60,6 +60,28 @@ describe('resolveOrgTutorLessonPayEur', () => {
 });
 
 describe('orgTutorSessionPayEur', () => {
+  it('uses the lesson pay snapshot before the current tutor profile rate', () => {
+    expect(
+      orgTutorSessionPayEur({
+        organizationId: MANO_KOREPETITORIUS_ORG_ID,
+        defaultRate: 0,
+        bySubject: {},
+        subjectId: 'sub-a',
+        tutorPaySnapshot: 15,
+      }),
+    ).toBe(15);
+  });
+
+  it('keeps an explicit zero snapshot instead of applying a later profile rate', () => {
+    expect(
+      orgTutorSessionPayEur({
+        organizationId: MANO_KOREPETITORIUS_ORG_ID,
+        defaultRate: 15,
+        tutorPaySnapshot: 0,
+      }),
+    ).toBe(0);
+  });
+
   it('uses subject rates only for Mano korepetitorius', () => {
     expect(
       orgTutorSessionPayEur({
@@ -109,6 +131,19 @@ describe('sumOrgTutorLessonsPayEur', () => {
       MANO_KOREPETITORIUS_ORG_ID,
     );
     expect(total).toBe(10 + 20 + 12);
+  });
+
+  it('sums historical snapshots and falls back only for unsnapshotted lessons', () => {
+    const total = sumOrgTutorLessonsPayEur(
+      [
+        { subject_id: 'a', tutor_pay_eur_snapshot: 15 },
+        { subject_id: 'b', tutor_pay_eur_snapshot: null },
+      ],
+      20,
+      {},
+      MANO_KOREPETITORIUS_ORG_ID,
+    );
+    expect(total).toBe(35);
   });
 });
 

@@ -504,7 +504,7 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
     const { startIso, endIso } = normalizeStatsDateRange(defaultRange.start, defaultRange.end);
     const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, exclude_from_lesson_count, lesson_package_id, subject_id, status_confirmed_at, subjects(is_trial)')
+      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, exclude_from_lesson_count, lesson_package_id, subject_id, tutor_pay_eur_snapshot, status_confirmed_at, subjects(is_trial)')
       .in('tutor_id', tutorIds)
       .gte('start_time', startIso)
       .lte('start_time', endIso);

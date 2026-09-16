@@ -42,6 +42,7 @@ import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { sanitizeStudentNameForEmail } from './_lib/pendingChildName.js';
 import { hasOrgAdminPermission, type OrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { deliverAcceptanceOnce, validAcceptanceDeliveryKey } from './_lib/schoolAcceptanceDelivery.js';
+import { validSessionReminderDeliveryKey } from './_lib/sessionReminderDelivery.js';
 import { deliverSchoolMonthlyInvoiceOnce, schoolMonthlyInvoiceIdempotencyKey } from './_lib/schoolMonthlyInvoiceDelivery.js';
 import { pooledPackageEmailIdempotencyKey } from './_lib/sendPendingPackageEmail.js';
 import {
@@ -3211,6 +3212,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { type, to, data: rawData, locale: bodyLocale } = req.body;
     const requestedIdempotencyKey = req.body?.idempotencyKey;
     const acceptanceDelivery = validAcceptanceDeliveryKey(type, rawData?.acceptanceJobId, requestedIdempotencyKey);
+    const sessionReminderDelivery = validSessionReminderDeliveryKey(type, to, rawData, requestedIdempotencyKey);
     const invoiceDelivery = type === 'school_monthly_invoice' && typeof rawData?.invoiceId === 'string'
       && requestedIdempotencyKey === schoolMonthlyInvoiceIdempotencyKey(rawData.invoiceId);
     const pooledPackageDelivery = type === 'prepaid_package_request'
@@ -3218,7 +3220,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       && typeof rawData?.packageId === 'string'
       && requestedIdempotencyKey === pooledPackageEmailIdempotencyKey(rawData.packageId);
     if (requestedIdempotencyKey !== undefined
-      && (!isInternalRequest(req) || (!acceptanceDelivery && !invoiceDelivery && !pooledPackageDelivery))) {
+      && (!isInternalRequest(req) || (!acceptanceDelivery && !invoiceDelivery && !pooledPackageDelivery && !sessionReminderDelivery))) {
       return res.status(403).json({ error: 'Invalid internal delivery key' });
     }
     if (type === 'school_monthly_invoice' && !requestedIdempotencyKey) {
@@ -3728,7 +3730,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ success: true, ...delivery });
     }
 
-    const { data: result, error } = pooledPackageDelivery
+    const { data: result, error } = pooledPackageDelivery || sessionReminderDelivery
       ? await resend.emails.send(emailPayload, { idempotencyKey: requestedIdempotencyKey })
       : await resend.emails.send(emailPayload);
 
@@ -3736,6 +3738,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[send-email] Resend error:', error);
       const msg = error && typeof error === 'object' && 'message' in error ? String((error as any).message) : 'Failed to send email';
       return res.status(500).json({ error: msg });
+    }
+
+    // Reminder flags are used to suppress every later cron attempt. Never let
+    // the caller stamp one as sent unless Resend confirmed a provider message
+    // id; a bare HTTP 200 is not delivery evidence.
+    if (sessionReminderDelivery && !result?.id) {
+      console.error('[send-email] Reminder provider response missing message id');
+      return res.status(503).json({ error: 'Reminder delivery was not confirmed' });
     }
 
     if (mvPayerFeeNoticeIncluded && mvPayerFeeNoticeRecipient) {

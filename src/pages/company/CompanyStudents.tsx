@@ -690,6 +690,35 @@ export default function CompanyStudents() {
   const monthlyPackageMode = proKlaseAdminUi && hasFeature('monthly_packages');
   const classGroupsEnabled = isSchoolView && !orgFeaturesLoading && hasFeature('school_class_groups');
 
+  const loadVisibleStudentPackages = async (studentId: string) => {
+    if (monthlyPackageMode) {
+      const response = await fetch(`/api/proklase-student-packages?studentId=${encodeURIComponent(studentId)}`, {
+        headers: await authHeaders(),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((body as any).error || t('common.error'));
+      return Array.isArray((body as any).packages) ? (body as any).packages : [];
+    }
+    const { data, error } = await supabase
+      .from('lesson_packages')
+      .select('*, subject:subjects(name, color, is_trial), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color, is_trial))')
+      .eq('student_id', studentId)
+      .or('active.eq.true,payment_status.eq.pending')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  };
+
+  const reloadTrialFollowupStatus = async () => {
+    if (!orgId || !isProKlaseOrg(orgId) || !hasFeature('trial_followup_alert')) return;
+    const response = await fetch('/api/proklase-student-packages?summary=trial-followup', {
+      headers: await authHeaders(),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error((body as any).error || t('common.error'));
+    setTrialNoPackageStudentIds(new Set(Array.isArray((body as any).studentIds) ? (body as any).studentIds : []));
+  };
+
   useEffect(() => {
     if (!classGroupsEnabled) {
       setClassGroups([]);
@@ -1009,14 +1038,8 @@ export default function CompanyStudents() {
     let cancelled = false;
     (async () => {
       setLoadingPackages(true);
-      const [pkgRes, subjRes, pricingRes, dynamicPricingRes] = await Promise.all([
-        supabase
-          .from('lesson_packages')
-          .select('*, subject:subjects(name, color, is_trial), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color, is_trial))')
-          .eq('student_id', selectedStudent.id)
-          // Show both "active" and "pending" packages (org admin wants to see what is sent vs paid)
-          .or('active.eq.true,payment_status.eq.pending')
-          .order('created_at', { ascending: false }),
+      const [packages, subjRes, pricingRes, dynamicPricingRes] = await Promise.all([
+        loadVisibleStudentPackages(selectedStudent.id),
         supabase
           .from('subjects')
           .select('id, name, color, price, duration_minutes')
@@ -1035,7 +1058,7 @@ export default function CompanyStudents() {
           : Promise.resolve({ data: [] as OrganizationDynamicPricingRule[] }),
       ]);
       if (!cancelled) {
-        setStudentPackages(pkgRes.data || []);
+        setStudentPackages(packages);
         setPackageSubjects(subjRes.data || []);
         const pricingMap: Record<string, number> = {};
         (pricingRes.data || []).forEach((p: any) => { pricingMap[p.subject_id] = Number(p.price); });
@@ -1068,7 +1091,13 @@ export default function CompanyStudents() {
         }
         setLoadingPackages(false);
       }
-    })();
+    })().catch((error) => {
+      if (!cancelled) {
+        console.error('Error loading student packages:', error);
+        setStudentPackages([]);
+        setLoadingPackages(false);
+      }
+    });
     return () => { cancelled = true; };
   }, [selectedStudent, isStudentModalOpen, orgId, monthlyPackageMode, packagesRefreshKey, selectedStudentGroupIds]);
 
@@ -1439,30 +1468,17 @@ export default function CompanyStudents() {
         feats.trial_followup_alert === true &&
         fetchedStudents.length > 0
       ) {
-        const studentIds = fetchedStudents.map((s) => s.id);
-        const thirtyAgo = new Date();
-        thirtyAgo.setDate(thirtyAgo.getDate() - 30);
-        const [trialRes, pkgRes] = await Promise.all([
-          supabase
-            .from('sessions')
-            .select('student_id, subjects!inner(is_trial)')
-            .in('student_id', studentIds)
-            .eq('status', 'completed')
-            .eq('subjects.is_trial', true)
-            .gte('start_time', thirtyAgo.toISOString()),
-          supabase
-            .from('lesson_packages')
-            .select('student_id, subjects(is_trial)')
-            .in('student_id', studentIds),
-        ]);
-        const withRealPackage = new Set<string>();
-        for (const p of pkgRes.data || []) {
-          const subj = Array.isArray((p as any).subjects) ? (p as any).subjects[0] : (p as any).subjects;
-          if (subj?.is_trial !== true) withRealPackage.add((p as any).student_id);
-        }
-        for (const row of trialRes.data || []) {
-          const sid = (row as any).student_id;
-          if (sid && !withRealPackage.has(sid)) trialNoPackageIds.add(sid);
+        try {
+          const response = await fetch('/api/proklase-student-packages?summary=trial-followup', {
+            headers: await authHeaders(),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error((body as any).error || String(response.status));
+          for (const studentId of Array.isArray((body as any).studentIds) ? (body as any).studentIds : []) {
+            trialNoPackageIds.add(String(studentId));
+          }
+        } catch (error) {
+          console.error('Error fetching Pro Klasė package follow-up status:', error);
         }
       }
     }
@@ -1527,6 +1543,9 @@ export default function CompanyStudents() {
       }
       setSendPackageOpen(false);
       setPackagesRefreshKey((value) => value + 1);
+      await reloadTrialFollowupStatus().catch((error) => {
+        console.error('Error refreshing Pro Klasė package follow-up status:', error);
+      });
       setToastMessage(result.emailSent === true
         ? { message: t('compStu.packageSent', { name: selectedStudent.full_name }), type: 'success' }
         : { message: t('compStu.packageCreatedEmailNotSent'), type: 'error' });
@@ -1598,13 +1617,10 @@ export default function CompanyStudents() {
       setPkgSlotSubjectId('');
       setPkgSlotDate('');
       setPkgSlotTime('16:00');
-      const { data } = await supabase
-        .from('lesson_packages')
-        .select('*, subject:subjects(name, color, is_trial), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color, is_trial))')
-        .eq('student_id', selectedStudent.id)
-        .or('active.eq.true,payment_status.eq.pending')
-        .order('created_at', { ascending: false });
-      setStudentPackages(data || []);
+      await reloadStudentPackages();
+      await reloadTrialFollowupStatus().catch((error) => {
+        console.error('Error refreshing Pro Klasė package follow-up status:', error);
+      });
     } catch (err: any) {
       setToastMessage({ message: err.message, type: 'error' });
     }
@@ -1633,13 +1649,7 @@ export default function CompanyStudents() {
 
   const reloadStudentPackages = async () => {
     if (!selectedStudent) return;
-    const { data } = await supabase
-      .from('lesson_packages')
-      .select('*, subject:subjects(name, color, is_trial), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color, is_trial))')
-      .eq('student_id', selectedStudent.id)
-      .or('active.eq.true,payment_status.eq.pending')
-      .order('created_at', { ascending: false });
-    setStudentPackages(data || []);
+    setStudentPackages(await loadVisibleStudentPackages(selectedStudent.id));
   };
 
   const handleDeactivatePackage = async (packageId: string) => {
@@ -1665,44 +1675,23 @@ export default function CompanyStudents() {
     if (!window.confirm(t('compStu.pkgAnnulConfirm'))) return;
     setAnnullingPackageId(pkg.id);
     try {
-      const { data: linkedSessions } = await supabase
-        .from('sessions')
-        .select('id, paid, payment_status, status')
-        .eq('lesson_package_id', pkg.id);
-      const linked = linkedSessions || [];
-      if (linked.some((s: any) => s.paid === true)) {
-        throw new Error(t('compStu.pkgAnnulHasPaidSessions'));
+      const response = await fetch('/api/cancel-pending-package', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ packageId: pkg.id }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if ((result as any).code === 'paid') throw new Error(t('compStu.pkgAnnulHasPaidSessions'));
+        throw new Error((result as any).error || t('common.error'));
       }
-      // Reservation holds die with the package; regular scheduled lessons are
-      // just unlinked and become billable again.
-      const reservedIds = linked.filter((s: any) => s.payment_status === 'reserved').map((s: any) => s.id);
-      const otherIds = linked.filter((s: any) => s.payment_status !== 'reserved').map((s: any) => s.id);
-      if (reservedIds.length > 0) {
-        await supabase
-          .from('sessions')
-          .update({ status: 'cancelled', lesson_package_id: null, payment_status: 'pending' })
-          .in('id', reservedIds);
-      }
-      if (otherIds.length > 0) {
-        await supabase
-          .from('sessions')
-          .update({ lesson_package_id: null, payment_status: 'pending' })
-          .in('id', otherIds);
-      }
-      const { error } = await supabase
-        .from('lesson_packages')
-        .update({
-          active: false,
-          payment_status: 'cancelled',
-          cancelled_at: new Date().toISOString(),
-        })
-        .eq('id', pkg.id)
-        .eq('paid', false);
-      if (error) throw error;
       await reloadStudentPackages();
+      await reloadTrialFollowupStatus().catch((error) => {
+        console.error('Error refreshing Pro Klasė package follow-up status:', error);
+      });
       setToastMessage({ message: t('compStu.pkgAnnulled'), type: 'success' });
     } catch (e: any) {
-      setToastMessage({ message: t('common.error'), type: 'error' });
+      setToastMessage({ message: e?.message || t('common.error'), type: 'error' });
     }
     setAnnullingPackageId(null);
   };
@@ -1718,6 +1707,10 @@ export default function CompanyStudents() {
       });
       const result = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error((result as any).error || String(resp.status));
+      await reloadStudentPackages();
+      await reloadTrialFollowupStatus().catch((error) => {
+        console.error('Error refreshing Pro Klasė package follow-up status:', error);
+      });
       setToastMessage({ message: t('compStu.pkgResent'), type: 'success' });
     } catch (e: any) {
       setToastMessage({ message: t('common.error'), type: 'error' });

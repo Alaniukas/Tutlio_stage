@@ -4881,6 +4881,7 @@ export const fi: Record<string, string> = {
   'compStu.scheduleTitle': 'Tuntien aikataulu',
   'compStu.scheduleEmpty': 'Ei toistuvia tunteja.',
   'compStu.effectivePerWeek': 'Yhteensä ~{count} tuntia viikossa',
+  'compStu.lessonsHadCount': 'Jo pidetyt tunnit: {count}',
   'compStu.movedByStudentCount': 'Oppilaan siirtämät: {count}',
   'compStu.movedByTutorCount': 'Opettajan siirtämät: {count}',
   'compStu.cancelledByStudentCount': 'Oppilaan perumat: {count}',

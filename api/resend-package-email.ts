@@ -50,6 +50,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (emailed.ok === false) {
       return json(res, emailed.status, { error: emailed.error, details: emailed.details });
     }
+    const sentAt = new Date().toISOString();
+    const recorded = await supabase
+      .from('lesson_packages')
+      .update({ pool_email_sent_at: sentAt, pool_email_claimed_at: null })
+      .eq('id', packageId)
+      .eq('pool_organization_id', adminAccess.organizationId)
+      .is('pool_email_sent_at', null);
+    if (recorded.error) {
+      console.error('[resend-package-email] failed to record pooled delivery:', recorded.error);
+      return json(res, 500, { error: 'Laiškas išsiųstas, bet nepavyko atnaujinti paketo būsenos' });
+    }
     return json(res, 200, { success: true });
   } catch (err: any) {
     console.error('[resend-package-email] error:', err);

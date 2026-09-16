@@ -108,7 +108,7 @@ export function clientIp(req: VercelRequest): string {
 export function allowSupportRequest(
   req: VercelRequest,
   res: VercelResponse,
-  scope: 'chat' | 'contact' | 'attachment' | 'close',
+  scope: 'chat' | 'contact' | 'attachment' | 'close' | 'in-app-assist',
   limit: number,
   windowMs = 10 * 60_000,
 ): boolean {

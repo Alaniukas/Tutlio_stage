@@ -57,6 +57,7 @@ export const DRAFT_LOCALE_ALANO_FALLBACK_KEYS = new Set<string>([
   'compSess.scrollForMore',
   'compStu.student',
   'compStu.grade',
+  'compStu.lessonsHadCount',
   'companyFinance.payerFeeSplitTitle',
   'companyFinance.payerFeeSplitDesc',
   'companyFinance.payerFeeSplitPlatform',

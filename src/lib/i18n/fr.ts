@@ -4822,6 +4822,7 @@ export const fr: Record<string, string> = {
   'compStu.scheduleTitle': 'Emploi du temps',
   'compStu.scheduleEmpty': 'Aucun cours récurrent.',
   'compStu.effectivePerWeek': 'Total ~{count} cours par semaine',
+  'compStu.lessonsHadCount': 'Cours déjà suivis : {count}',
   'compStu.movedByStudentCount': 'Déplacés par l\'élève : {count}',
   'compStu.movedByTutorCount': 'Déplacés par le tuteur : {count}',
   'compStu.cancelledByStudentCount': 'Annulés par l\'élève : {count}',

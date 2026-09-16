@@ -5055,6 +5055,7 @@ export const se: Record<string, string> = {
   'compStu.scheduleTitle': 'Lektionsschema',
   'compStu.scheduleEmpty': 'Inga återkommande lektioner.',
   'compStu.effectivePerWeek': 'Totalt ~{count} lektioner per vecka',
+  'compStu.lessonsHadCount': 'Redan genomförda lektioner: {count}',
   'compStu.movedByStudentCount': 'Flyttade av eleven: {count}',
   'compStu.movedByTutorCount': 'Flyttade av läraren: {count}',
   'compStu.cancelledByStudentCount': 'Avbokade av eleven: {count}',

@@ -1,5 +1,6 @@
 import { isAfter, isBefore, startOfDay, endOfDay } from 'date-fns';
 import { deriveAttendance, type AttendanceSessionLike } from './attendance';
+import { isSessionActuallyPaid } from './sessionPaymentDisplay';
 
 export interface Session {
   id: string;
@@ -273,6 +274,7 @@ export function getStudentSessions(
 
 export interface SessionAttributionRow {
   status?: string | null;
+  exclude_from_lesson_count?: boolean | null;
   cancelled_by?: string | null;
   rescheduled_at?: string | null;
   reschedule_reason?: string | null;
@@ -350,21 +352,29 @@ export function countUserInitiatedCancellations(counters: CancellationCounters):
 }
 
 export interface StudentSessionCounters {
+  lessonsHad: number;
   cancelledByStudent: number;
   cancelledByTutor: number;
   movedByStudent: number;
   movedByTutor: number;
 }
 
-/** Move/cancel counters for the org student card, split by who initiated. */
+/** Conducted lesson total plus move/cancel counters for the org student card. */
 export function countStudentSessionStats(rows: SessionAttributionRow[]): StudentSessionCounters {
   const counters: StudentSessionCounters = {
+    lessonsHad: 0,
     cancelledByStudent: 0,
     cancelledByTutor: 0,
     movedByStudent: 0,
     movedByTutor: 0,
   };
   for (const row of rows) {
+    if (
+      row.exclude_from_lesson_count !== true
+      && (row.status === 'completed' || row.status === 'no_show')
+    ) {
+      counters.lessonsHad += 1;
+    }
     if (row.status === 'cancelled') {
       if (row.cancelled_by === 'student') counters.cancelledByStudent += 1;
       else if (row.cancelled_by === 'tutor') counters.cancelledByTutor += 1;
@@ -414,9 +424,7 @@ export function isPaidLikeSession(session: {
   paid?: boolean | null;
   payment_status?: string | null;
 }): boolean {
-  if (session.paid === true) return true;
-  const ps = String(session.payment_status || '');
-  return ps === 'paid' || ps === 'confirmed';
+  return isSessionActuallyPaid(session);
 }
 
 /** Ended, still billable, not paid — the call list for unpaid lessons. */

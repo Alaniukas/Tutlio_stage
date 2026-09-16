@@ -18,6 +18,9 @@ type Fixture = {
   parentLinks?: Array<{ parent_id: string; student_id: string }>;
   groups?: Array<{ id: string; organization_id: string; name: string; tutor_id: string | null }>;
   members?: Array<{ student_id: string; group_id: string }>;
+  profiles?: Array<{ id: string; organization_id: string | null }>;
+  subjects?: Array<{ id: string; name: string; tutor_id: string }>;
+  recurring?: Array<{ subject_id: string; tutor_id: string; student_id: string; active: boolean }>;
   organizations?: Array<{ id: string; entity_type: string; features: Record<string, unknown> }>;
 };
 
@@ -29,7 +32,14 @@ function supabaseFixture(fixture: Fixture) {
       let hasOr = false;
       let orExpr = '';
       const result = () => {
-        if (table === 'profiles') return { data: fixture.profile ?? null, error: null };
+        if (table === 'profiles') {
+          let rows = [...(fixture.profiles || [])];
+          if (fixture.profile && !rows.some((row) => row.id === fixture.profile!.id)) rows.push(fixture.profile);
+          if (eqs.has('id')) rows = rows.filter((row) => row.id === eqs.get('id'));
+          if (eqs.has('organization_id')) rows = rows.filter((row) => row.organization_id === eqs.get('organization_id'));
+          if (ins.has('id')) rows = rows.filter((row) => ins.get('id')!.includes(row.id));
+          return { data: rows, error: null };
+        }
         if (table === 'organization_admins') return { data: null, error: null };
         if (table === 'parent_profiles') return { data: fixture.parentProfile ?? null, error: null };
         if (table === 'parent_students') {
@@ -59,6 +69,21 @@ function supabaseFixture(fixture: Fixture) {
             error: null,
           };
         }
+        if (table === 'recurring_individual_sessions') {
+          let rows = fixture.recurring || [];
+          if (ins.has('tutor_id')) rows = rows.filter((row) => ins.get('tutor_id')!.includes(row.tutor_id));
+          if (ins.has('student_id')) rows = rows.filter((row) => ins.get('student_id')!.includes(row.student_id));
+          if (eqs.has('student_id')) rows = rows.filter((row) => row.student_id === eqs.get('student_id'));
+          if (eqs.has('subject_id')) rows = rows.filter((row) => row.subject_id === eqs.get('subject_id'));
+          if (eqs.has('active')) rows = rows.filter((row) => row.active === eqs.get('active'));
+          return { data: rows, error: null };
+        }
+        if (table === 'subjects') {
+          let rows = fixture.subjects || [];
+          if (ins.has('id')) rows = rows.filter((row) => ins.get('id')!.includes(row.id));
+          if (eqs.has('id')) rows = rows.filter((row) => row.id === eqs.get('id'));
+          return { data: rows, error: null };
+        }
         if (table === 'organizations') {
           const ids = ins.get('id') || [];
           return { data: (fixture.organizations || []).filter((org) => ids.includes(org.id)), error: null };
@@ -70,7 +95,13 @@ function supabaseFixture(fixture: Fixture) {
         eq: (column: string, value: unknown) => { eqs.set(column, value); return query; },
         in: (column: string, values: unknown[]) => { ins.set(column, values); return query; },
         or: (expr?: string) => { hasOr = true; orExpr = String(expr || ''); return query; },
-        maybeSingle: async () => result(),
+        limit: () => query,
+        maybeSingle: async () => {
+          const value = result();
+          if (table !== 'profiles' && table !== 'subjects') return value;
+          const rows = value.data as unknown[];
+          return { ...value, data: rows[0] || null };
+        },
         then: (resolve: (value: unknown) => unknown) => resolve(result()),
       };
       return query;
@@ -152,6 +183,34 @@ describe('school recording relationship authorization', () => {
     expect(disabled.groups).toEqual([]);
   });
 
+  it('shows an individual recurring subject only to its teacher and enrolled student', async () => {
+    const fixture: Fixture = {
+      directStudents: [{ id: 'student-a', organization_id: 'org-1' }],
+      profiles: [{ id: 'teacher-a', organization_id: 'org-1' }],
+      subjects: [{ id: 'subject-a', name: 'Solo muzika', tutor_id: 'teacher-a' }],
+      recurring: [{ subject_id: 'subject-a', tutor_id: 'teacher-a', student_id: 'student-a', active: true }],
+      organizations: [org()],
+    };
+    const studentAccess = await resolveRecordingViewerAccess(
+      supabaseFixture(fixture),
+      'student-user',
+    );
+    expect(studentAccess.groups).toEqual([expect.objectContaining({
+      id: 'subject:subject-a',
+      sourceId: 'subject-a',
+      kind: 'individual',
+      name: 'Solo muzika',
+    })]);
+
+    fixture.profile = { id: 'teacher-a', organization_id: 'org-1' };
+    fixture.directStudents = [];
+    const teacherAccess = await resolveRecordingViewerAccess(
+      supabaseFixture(fixture),
+      'teacher-a',
+    );
+    expect(teacherAccess.groups.map((group) => group.id)).toEqual(['subject:subject-a']);
+  });
+
   it('lets an email homework link authorize only a live group member when recordings are on', async () => {
     const student = { id: 'student-a', organization_id: 'org-1', detached_at: null };
     const org = { id: 'org-1', entity_type: 'school', features: { school_lesson_recordings: true } };
@@ -174,7 +233,12 @@ describe('school recording relationship authorization', () => {
     } as any;
 
     await expect(resolveHomeworkRecordingGroup(client, 'student-a', 'group-a'))
-      .resolves.toEqual({ id: 'group-a', organizationId: 'org-1' });
+      .resolves.toEqual(expect.objectContaining({
+        id: 'group-a',
+        sourceId: 'group-a',
+        kind: 'class_group',
+        organizationId: 'org-1',
+      }));
 
     org.features = {};
     await expect(resolveHomeworkRecordingGroup(client, 'student-a', 'group-a')).resolves.toBeNull();

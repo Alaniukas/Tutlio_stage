@@ -193,7 +193,9 @@ export const schoolTeacherContractTranslationsDe: Record<string, string> = {
 };
 
 export const schoolTeacherContractTranslationsSe: Record<string, string> = {
+  'school.tabTeacherContracts': 'Läraravtal',
   'school.teacherContractsHint': 'Ladda upp läraravtalet som PDF, signera det för skolan och skicka det till läraren för underskrift.',
+  'school.teacherContractPrivateHint': 'Dessa PDF-filer är privata. Varje lärare får en personlig signeringslänk och kan inte se andra lärares avtal.',
   'school.newTeacherContract': 'Nytt läraravtal',
   'school.noTeacherContracts': 'Det finns inga läraravtal ännu.',
   'school.teacherContractUnnamed': 'Läraravtal',
@@ -202,6 +204,8 @@ export const schoolTeacherContractTranslationsSe: Record<string, string> = {
   'school.teacherContractFileRequired': 'Välj avtalets PDF-fil.',
   'school.teacherContractPdfOnly': 'Avtalet måste vara en PDF-fil.',
   'school.teacherContractEmailInvalid': 'Ange en giltig e-postadress till läraren.',
+  'school.teacherContractTeacherRequired': 'Välj en lärare från skolans lärarlista.',
+  'school.teacherContractNameRequired': 'Ange lärarens fullständiga namn.',
   'school.teacherContractUploadFail': 'Det gick inte att ladda upp avtalets PDF.',
   'school.teacherContractCreated': 'Läraravtalet har skapats.',
   'school.teacherContractCreateFail': 'Det gick inte att skapa läraravtalet.',
@@ -212,6 +216,11 @@ export const schoolTeacherContractTranslationsSe: Record<string, string> = {
   'school.teacherContractSendInvite': 'Skicka till läraren för underskrift',
   'school.waitingTeacherSignature': 'Väntar på lärarens underskrift',
   'school.teacherContractCreateHint': 'Ladda upp den slutliga PDF-filen som skolan ska signera först.',
+  'school.teacherContractTeacherPicker': 'Lärare',
+  'school.teacherContractTeacherPlaceholder': 'Välj en lärare',
+  'school.teacherContractTeacherPickerHint': 'Välj en lärare från skolans lärarlista. Skapa ett separat avtal för varje lärare.',
+  'school.teacherContractNoTeachers': 'Det finns inga tillgängliga lärare.',
+  'school.loadingTeachers': 'Laddar…',
   'school.teacherContractFile': 'Avtal i PDF',
   'school.teacherName': 'Lärarens namn',
   'school.teacherNamePlaceholder': 'Fullständigt namn',
@@ -321,7 +330,9 @@ export const schoolTeacherContractTranslationsNo: Record<string, string> = {
 };
 
 export const schoolTeacherContractTranslationsNl: Record<string, string> = {
+  'school.tabTeacherContracts': 'Lerarencontracten',
   'school.teacherContractsHint': 'Upload het lerarencontract als pdf, onderteken het namens de school en stuur het ter ondertekening naar de leraar.',
+  'school.teacherContractPrivateHint': 'Deze pdf-bestanden zijn privé. Elke leraar ontvangt een persoonlijke ondertekeningslink en kan de contracten van andere leraren niet bekijken.',
   'school.newTeacherContract': 'Nieuw lerarencontract',
   'school.noTeacherContracts': 'Er zijn nog geen lerarencontracten.',
   'school.teacherContractUnnamed': 'Lerarencontract',
@@ -330,6 +341,8 @@ export const schoolTeacherContractTranslationsNl: Record<string, string> = {
   'school.teacherContractFileRequired': 'Selecteer het pdf-bestand van het contract.',
   'school.teacherContractPdfOnly': 'Het contract moet een pdf-bestand zijn.',
   'school.teacherContractEmailInvalid': 'Voer een geldig e-mailadres van de leraar in.',
+  'school.teacherContractTeacherRequired': 'Selecteer een leraar uit de lerarenlijst van de school.',
+  'school.teacherContractNameRequired': 'Voer de volledige naam van de leraar in.',
   'school.teacherContractUploadFail': 'De contract-pdf kon niet worden geüpload.',
   'school.teacherContractCreated': 'Lerarencontract aangemaakt.',
   'school.teacherContractCreateFail': 'Het lerarencontract kon niet worden aangemaakt.',
@@ -340,6 +353,11 @@ export const schoolTeacherContractTranslationsNl: Record<string, string> = {
   'school.teacherContractSendInvite': 'Naar leraar sturen voor ondertekening',
   'school.waitingTeacherSignature': 'Wacht op handtekening van de leraar',
   'school.teacherContractCreateHint': 'Upload de definitieve pdf die eerst door de school wordt ondertekend.',
+  'school.teacherContractTeacherPicker': 'Leraar',
+  'school.teacherContractTeacherPlaceholder': 'Selecteer een leraar',
+  'school.teacherContractTeacherPickerHint': 'Selecteer een leraar uit de lerarenlijst van de school. Maak voor elke leraar een apart contract.',
+  'school.teacherContractNoTeachers': 'Er zijn geen leraren beschikbaar.',
+  'school.loadingTeachers': 'Laden…',
   'school.teacherContractFile': 'Contract-pdf',
   'school.teacherName': 'Naam van de leraar',
   'school.teacherNamePlaceholder': 'Volledige naam',

@@ -55,6 +55,7 @@ import { buildSchoolContractExportRows, schoolContractsExportFilename } from '@/
 import { downloadSchoolContractsXlsx } from '@/lib/schoolContractsXlsxExport';
 import { fetchOrganizationRow } from '@/lib/orgLookup';
 import ExtraLessonsOfferDialog, { type ExtraLessonsTaughtSubject } from '@/components/company/ExtraLessonsOfferDialog';
+import CompanyStaffContracts from '@/pages/company/CompanyStaffContracts';
 import { isExtraLessonsContractKind } from '@/lib/extraLessonsContract';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 
@@ -91,7 +92,10 @@ interface Contract {
   organization_id: string;
   template_id: string | null;
   contract_number?: string | null;
-  student_id: string;
+  student_id: string | null;
+  party_kind?: 'student' | 'teacher' | null;
+  counterparty_name?: string | null;
+  counterparty_email?: string | null;
   filled_body: string;
   annual_fee: number;
   signing_status: 'draft' | 'sent' | 'awaiting_school_signature' | 'signed_by_school' | 'signed';
@@ -288,7 +292,7 @@ export default function CompanyContracts() {
   const [applyFeeDiscount, setApplyFeeDiscount] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const [tab, setTab] = useState<'contracts' | 'templates'>('contracts');
+  const [tab, setTab] = useState<'contracts' | 'teachers' | 'templates'>('contracts');
 
   const [consentFilter, setConsentFilter] = useState<SchoolConsentFilter>('all');
   // Contract list filter (schools accumulate many contracts — no more scrolling).
@@ -301,6 +305,11 @@ export default function CompanyContracts() {
   const [terminationBusy, setTerminationBusy] = useState(false);
 
   useEffect(() => { if (!getCached(CONTRACTS_CACHE_KEY)) load(); }, []);
+  useEffect(() => {
+    if (!isSchoolView || !eSignEnabled) {
+      setTab((current) => current === 'teachers' ? 'contracts' : current);
+    }
+  }, [isSchoolView, eSignEnabled]);
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get('success') === '1' || params.get('cancelled') === '1' || params.get('installment')) {
@@ -1872,7 +1881,7 @@ export default function CompanyContracts() {
 
   // GoSign: directorė initiates her (in-app) signature, then is redirected to
   // the GoSign signing page. Only shown for contracts in 'awaiting_school_signature'.
-  const signAsSchool = async (contract: Contract) => {
+  const signAsSchool = async (contract: { id: string }) => {
     const signingWindow = window.open('', `tutlio-contract-sign-${contract.id}`, 'popup,width=1100,height=820');
     if (!signingWindow) {
       setToast({ message: 'Naršyklė užblokavo pasirašymo langą. Leiskite iššokančius langus ir bandykite dar kartą.', type: 'error' });
@@ -1913,8 +1922,13 @@ export default function CompanyContracts() {
 
   // Diacritics-insensitive match (Vėgėlė findable as "vegele" and vice versa).
   const searchable = (value: string) => normalizePdfText(value).toLowerCase();
-  const contractFilterCounts = countContractsByFilter(contracts, isSchoolView, { eSignEnabled });
-  const visibleContracts = contracts.filter((c) => {
+  // Teacher contracts use the same table but have a different party and flow.
+  // Keep them out of the student/parent list so they cannot be mistaken for
+  // an education contract or enter the school finance workflow.
+  const studentContracts = contracts.filter((contract) => contract.party_kind !== 'teacher');
+  const teacherContracts = contracts.filter((contract) => contract.party_kind === 'teacher');
+  const contractFilterCounts = countContractsByFilter(studentContracts, isSchoolView, { eSignEnabled });
+  const visibleContracts = studentContracts.filter((c) => {
     if (isSchoolView) {
       if (!matchesSchoolConsent(consentFilter, c)) return false;
       if (!matchesContractFilter(contractFilter as SchoolContractFilter, c, isSchoolView, { eSignEnabled })) return false;
@@ -1981,6 +1995,11 @@ export default function CompanyContracts() {
               <button onClick={() => setTab('contracts')} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'contracts' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
                 {tr('school.tabContracts')}
               </button>
+              {isSchoolView && eSignEnabled && (
+                <button onClick={() => setTab('teachers')} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'teachers' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
+                  {tr('school.tabTeacherContracts')}
+                </button>
+              )}
               <button onClick={() => setTab('templates')} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'templates' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
                 {tr('school.tabTemplates')}
               </button>
@@ -2052,11 +2071,11 @@ export default function CompanyContracts() {
                   <Plus className="w-4 h-4 mr-2" /> {tr('school.newContract')}
                 </Button>
               </div>
-            ) : (
+            ) : tab === 'templates' ? (
               <Button onClick={() => { setEditTemplate(null); setTemplatePdfFile(null); setTForm({ name: '', body: tr('school.contract.defaultBody'), annual_fee_default: '', pdf_url: '' }); setTemplateOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
                 <Plus className="w-4 h-4 mr-2" /> {tr('school.newTemplate')}
               </Button>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -2128,7 +2147,7 @@ export default function CompanyContracts() {
             <div className="w-8 h-8 border-2 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
           </div>
         ) : tab === 'contracts' ? (
-          contracts.length === 0 ? (
+          studentContracts.length === 0 ? (
             <div className="text-center py-20">
               <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-500">{tr('school.noContracts')}</p>
@@ -2158,12 +2177,12 @@ export default function CompanyContracts() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">{tr('school.filterKindAll')} ({contracts.length})</SelectItem>
+                      <SelectItem value="all">{tr('school.filterKindAll')} ({studentContracts.length})</SelectItem>
                       <SelectItem value="annual">
-                        {tr('school.filterKindAnnual')} ({contracts.filter((c) => matchesContractKindFilter('annual', c.kind)).length})
+                        {tr('school.filterKindAnnual')} ({studentContracts.filter((c) => matchesContractKindFilter('annual', c.kind)).length})
                       </SelectItem>
                       <SelectItem value="extra_lessons">
-                        {tr('school.filterKindExtra')} ({contracts.filter((c) => matchesContractKindFilter('extra_lessons', c.kind)).length})
+                        {tr('school.filterKindExtra')} ({studentContracts.filter((c) => matchesContractKindFilter('extra_lessons', c.kind)).length})
                       </SelectItem>
                     </SelectContent>
                   </Select>
@@ -2194,8 +2213,8 @@ export default function CompanyContracts() {
                 ) : (
                   <div className="bg-gray-100 rounded-lg p-1 flex gap-1 flex-wrap">
                     {([
-                      ['all', tr('school.filterAll'), contracts.length],
-                      ['unsigned', tr('school.filterUnsigned'), contracts.length - contractFilterCounts.signed],
+                      ['all', tr('school.filterAll'), studentContracts.length],
+                      ['unsigned', tr('school.filterUnsigned'), studentContracts.length - contractFilterCounts.signed],
                       ['signed', tr('school.filterSigned'), contractFilterCounts.signed],
                     ] as const).map(([key, label, count]) => (
                       <button
@@ -2486,6 +2505,19 @@ export default function CompanyContracts() {
               )}
             </>
           )
+        ) : tab === 'teachers' ? (
+          <CompanyStaffContracts
+            orgId={orgId || ''}
+            eSignEnabled={eSignEnabled}
+            contracts={teacherContracts}
+            saving={saving}
+            onSignAsSchool={(contract) => { void signAsSchool(contract); }}
+            onReload={reload}
+            onDelete={deleteContract}
+            onOpenFile={(url) => { void openContractFile(url); }}
+            statusBadge={(status) => statusBadge(status as Contract['signing_status'])}
+            onToast={(message, type) => setToast({ message, type })}
+          />
         ) : (
           templates.length === 0 ? (
             <div className="text-center py-20">

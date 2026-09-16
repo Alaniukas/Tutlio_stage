@@ -25,8 +25,8 @@ const hhmm = (value: string | null | undefined) => String(value || '').slice(0, 
 
 /**
  * Student card block: the recurring lesson schedule (weekday/time/subject/
- * tutor + effective times per week) and move/cancel counters split by who
- * initiated them (req: "pamokų tvarkaraštis ... kiek mokinys perkėlė/atšaukė").
+ * tutor + effective times per week), completed lesson total, and move/cancel
+ * counters split by who initiated them.
  */
 export default function StudentScheduleSummary({ studentRowIds, refreshKey }: StudentScheduleSummaryProps) {
   const { t } = useTranslation();
@@ -54,7 +54,7 @@ export default function StudentScheduleSummary({ studentRowIds, refreshKey }: St
             .eq('active', true),
           supabase
             .from('sessions')
-            .select('id, status, cancelled_by, rescheduled_at, reschedule_reason, reschedule_requested_by')
+            .select('id, status, exclude_from_lesson_count, cancelled_by, rescheduled_at, reschedule_reason, reschedule_requested_by')
             .in('student_id', studentRowIds),
         ]);
         if (cancelled) return;
@@ -146,6 +146,9 @@ export default function StudentScheduleSummary({ studentRowIds, refreshKey }: St
 
       {counters && (
         <div className="grid grid-cols-2 gap-1.5 text-xs">
+          <div className="col-span-2 rounded-lg border border-indigo-100 bg-indigo-50 px-2.5 py-1.5 font-medium text-indigo-700">
+            {t('compStu.lessonsHadCount', { count: String(counters.lessonsHad) })}
+          </div>
           <div className="rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-1.5 text-gray-600">
             {t('compStu.movedByStudentCount', { count: String(counters.movedByStudent) })}
           </div>

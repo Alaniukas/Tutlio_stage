@@ -370,9 +370,9 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     name: 'Mokinio tvarkaraščio santrauka ir statistika',
     nameEn: 'Student schedule overview & stats',
     description:
-      'Mokinio kortelėje rodomas pamokų tvarkaraštis (savaitės dienos, laikai, dalykai, korepetitoriai, kartai/sav.) ir skaitliukai, kiek pamokų perkėlė/atšaukė mokinys ir kiek – korepetitorius.',
+      'Mokinio kortelėje rodomas pamokų tvarkaraštis (savaitės dienos, laikai, dalykai, korepetitoriai, kartai/sav.), kiek pamokų mokinys jau turėjo ir kiek pamokų perkėlė/atšaukė mokinys bei korepetitorius.',
     descriptionEn:
-      'The student card shows the recurring lesson schedule (weekdays, times, subjects, tutors, times/week) and counters of lessons moved/cancelled by the student vs by the tutor.',
+      'The student card shows the recurring lesson schedule (weekdays, times, subjects, tutors, times/week), lessons already held, and counters of lessons moved/cancelled by the student vs by the tutor.',
     category: 'analytics',
     defaultValue: false,
     pricingTier: 'premium',

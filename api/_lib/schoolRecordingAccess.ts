@@ -4,6 +4,8 @@ import { hasOrgAdminPermission } from '../../src/lib/orgAdminPermissions.js';
 
 export interface RecordingViewerGroup {
   id: string;
+  sourceId: string;
+  kind: 'class_group' | 'individual';
   organizationId: string;
   name: string;
   tutorId: string | null;
@@ -24,6 +26,42 @@ type GroupRow = {
   name: string;
   tutor_id: string | null;
 };
+
+type RecurringRow = {
+  subject_id: string | null;
+  tutor_id: string;
+  student_id: string;
+};
+
+type SubjectRow = {
+  id: string;
+  name: string;
+  tutor_id: string;
+};
+
+type TutorOrgRow = {
+  id: string;
+  organization_id: string | null;
+};
+
+const INDIVIDUAL_TARGET_PREFIX = 'subject:';
+
+export function individualRecordingTargetId(subjectId: string): string {
+  return `${INDIVIDUAL_TARGET_PREFIX}${subjectId}`;
+}
+
+export function parseRecordingTargetId(value: string): {
+  kind: 'class_group' | 'individual';
+  sourceId: string;
+} | null {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith(INDIVIDUAL_TARGET_PREFIX)) {
+    const sourceId = trimmed.slice(INDIVIDUAL_TARGET_PREFIX.length).trim();
+    return sourceId ? { kind: 'individual', sourceId } : null;
+  }
+  return { kind: 'class_group', sourceId: trimmed };
+}
 
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
@@ -142,6 +180,75 @@ async function groupRowsForViewer(
   return [...byId.values()];
 }
 
+async function individualRowsForViewer(
+  supabase: SupabaseClient,
+  params: {
+    adminOrgId?: string | null;
+    tutorId?: string | null;
+    studentIds: string[];
+  },
+): Promise<Array<SubjectRow & { organization_id: string }>> {
+  let adminTutorIds: string[] = [];
+  if (params.adminOrgId) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('organization_id', params.adminOrgId);
+    if (error) throw error;
+    adminTutorIds = (data || []).map((row: { id: string }) => row.id);
+  }
+
+  const recurringQueries: Array<PromiseLike<{ data: unknown; error: { message?: string } | null }>> = [];
+  const tutorIds = uniqueStrings([...adminTutorIds, params.tutorId]);
+  if (tutorIds.length) {
+    recurringQueries.push(
+      supabase.from('recurring_individual_sessions')
+        .select('subject_id, tutor_id, student_id')
+        .in('tutor_id', tutorIds)
+        .eq('active', true),
+    );
+  }
+  if (params.studentIds.length) {
+    recurringQueries.push(
+      supabase.from('recurring_individual_sessions')
+        .select('subject_id, tutor_id, student_id')
+        .in('student_id', params.studentIds)
+        .eq('active', true),
+    );
+  }
+  if (!recurringQueries.length) return [];
+
+  const recurringResults = await Promise.all(recurringQueries);
+  const recurringBySubject = new Map<string, RecurringRow>();
+  for (const result of recurringResults) {
+    if (result.error) throw result.error;
+    for (const row of (result.data || []) as RecurringRow[]) {
+      if (row.subject_id && row.tutor_id) recurringBySubject.set(row.subject_id, row);
+    }
+  }
+  const subjectIds = [...recurringBySubject.keys()];
+  if (!subjectIds.length) return [];
+
+  const recurringTutorIds = uniqueStrings(
+    [...recurringBySubject.values()].map((row) => row.tutor_id),
+  );
+  const [{ data: subjects, error: subjectError }, { data: tutors, error: tutorError }] = await Promise.all([
+    supabase.from('subjects').select('id, name, tutor_id').in('id', subjectIds),
+    supabase.from('profiles').select('id, organization_id').in('id', recurringTutorIds),
+  ]);
+  if (subjectError || tutorError) throw subjectError || tutorError;
+
+  const orgByTutor = new Map(
+    ((tutors || []) as TutorOrgRow[]).map((row) => [row.id, row.organization_id]),
+  );
+  return ((subjects || []) as SubjectRow[]).flatMap((subject) => {
+    const recurring = recurringBySubject.get(subject.id);
+    const organizationId = recurring ? orgByTutor.get(recurring.tutor_id) : null;
+    if (!recurring || !organizationId || subject.tutor_id !== recurring.tutor_id) return [];
+    return [{ ...subject, organization_id: organizationId }];
+  });
+}
+
 /**
  * Resolve access from live relationships, using the service-role client only
  * inside an authenticated API. This deliberately does not trust a role or
@@ -162,11 +269,15 @@ export async function resolveRecordingViewerAccess(
   const adminCanView = Boolean(
     admin && hasOrgAdminPermission(admin.role, admin.permissions, 'sessions.view'),
   );
-  const rows = await groupRowsForViewer(supabase, {
+  const accessParams = {
     adminOrgId: adminCanView ? admin?.organizationId : null,
     tutorId: profile.data?.id || null,
     studentIds,
-  });
+  };
+  const [rows, individualRows] = await Promise.all([
+    groupRowsForViewer(supabase, accessParams),
+    individualRowsForViewer(supabase, accessParams),
+  ]);
   let studentOrganizationIds: string[] = [];
   if (studentIds.length) {
     const { data: studentOrganizations, error } = await supabase
@@ -180,6 +291,7 @@ export async function resolveRecordingViewerAccess(
   }
   const candidateOrgIds = uniqueStrings([
     ...(rows || []).map((row) => row.organization_id),
+    ...individualRows.map((row) => row.organization_id),
     adminCanView ? admin?.organizationId : null,
     profile.data?.organization_id,
     ...studentOrganizationIds,
@@ -203,14 +315,27 @@ export async function resolveRecordingViewerAccess(
     );
   }
 
-  const groups = rows
+  const groups: RecordingViewerGroup[] = rows
     .filter((row) => enabledOrgIds.has(row.organization_id))
     .map((row) => ({
       id: row.id,
+      sourceId: row.id,
+      kind: 'class_group' as const,
       organizationId: row.organization_id,
       name: row.name,
       tutorId: row.tutor_id,
-    }))
+    }));
+  groups.push(...individualRows
+    .filter((row) => enabledOrgIds.has(row.organization_id))
+    .map((row) => ({
+      id: individualRecordingTargetId(row.id),
+      sourceId: row.id,
+      kind: 'individual' as const,
+      organizationId: row.organization_id,
+      name: row.name,
+      tutorId: row.tutor_id,
+    })));
+  groups
     .sort((a, b) => a.name.localeCompare(b.name, 'lt'));
   const canManage = Boolean(
     admin
@@ -237,7 +362,7 @@ export async function resolveHomeworkRecordingGroup(
   supabase: SupabaseClient,
   studentId: string,
   groupId: string,
-): Promise<{ id: string; organizationId: string } | null> {
+): Promise<RecordingViewerGroup | null> {
   if (!studentId || !groupId) return null;
   const { data: student, error: studentError } = await supabase
     .from('students')
@@ -261,22 +386,63 @@ export async function resolveHomeworkRecordingGroup(
     || features?.school_lesson_recordings !== true
   ) return null;
 
+  const target = parseRecordingTargetId(groupId);
+  if (!target) return null;
+  if (target.kind === 'individual') {
+    const { data: recurringRows, error: recurringError } = await supabase
+      .from('recurring_individual_sessions')
+      .select('subject_id, tutor_id')
+      .eq('student_id', studentId)
+      .eq('subject_id', target.sourceId)
+      .eq('active', true)
+      .limit(1);
+    if (recurringError) throw recurringError;
+    const recurring = (recurringRows || [])[0] as { subject_id?: string; tutor_id?: string } | undefined;
+    if (!recurring?.subject_id || !recurring.tutor_id) return null;
+
+    const [{ data: subject, error: subjectError }, { data: tutor, error: tutorError }] = await Promise.all([
+      supabase.from('subjects').select('id, name, tutor_id').eq('id', target.sourceId).maybeSingle(),
+      supabase.from('profiles').select('id, organization_id').eq('id', recurring.tutor_id).maybeSingle(),
+    ]);
+    if (subjectError || tutorError) throw subjectError || tutorError;
+    if (
+      !subject?.id
+      || subject.tutor_id !== recurring.tutor_id
+      || tutor?.organization_id !== organizationId
+    ) return null;
+    return {
+      id: individualRecordingTargetId(subject.id),
+      sourceId: subject.id,
+      kind: 'individual',
+      organizationId,
+      name: subject.name || '',
+      tutorId: recurring.tutor_id,
+    };
+  }
+
   const { data: member, error: memberError } = await supabase
     .from('school_class_group_members')
     .select('group_id')
     .eq('student_id', studentId)
-    .eq('group_id', groupId)
+    .eq('group_id', target.sourceId)
     .maybeSingle();
   if (memberError) throw memberError;
   if (!member) return null;
 
   const { data: group, error: groupError } = await supabase
     .from('school_class_groups')
-    .select('id, organization_id')
-    .eq('id', groupId)
+    .select('id, organization_id, name, tutor_id')
+    .eq('id', target.sourceId)
     .eq('organization_id', organizationId)
     .maybeSingle();
   if (groupError) throw groupError;
   if (!group?.id || !group.organization_id) return null;
-  return { id: group.id, organizationId: group.organization_id };
+  return {
+    id: group.id,
+    sourceId: group.id,
+    kind: 'class_group',
+    organizationId: group.organization_id,
+    name: group.name || '',
+    tutorId: group.tutor_id || null,
+  };
 }

@@ -51,7 +51,14 @@ export function orgTutorSessionPayEur(opts: {
   bySubject?: unknown;
   subjectId?: string | null;
   sessionPrice?: number | null;
+  tutorPaySnapshot?: number | null;
 }): number {
+  if (opts.tutorPaySnapshot != null) {
+    const snapshot = Number(opts.tutorPaySnapshot);
+    if (Number.isFinite(snapshot) && snapshot >= 0) {
+      return Math.round(snapshot * 100) / 100;
+    }
+  }
   if (isManoKorepetitoriusOrg(opts.organizationId)) {
     return resolveOrgTutorLessonPayEur(opts);
   }
@@ -59,7 +66,11 @@ export function orgTutorSessionPayEur(opts: {
 }
 
 export function sumOrgTutorLessonsPayEur(
-  sessions: Array<{ subject_id?: string | null; price?: number | null }>,
+  sessions: Array<{
+    subject_id?: string | null;
+    price?: number | null;
+    tutor_pay_eur_snapshot?: number | null;
+  }>,
   defaultRate: number | null | undefined,
   bySubject: unknown,
   organizationId?: string | null,
@@ -74,6 +85,7 @@ export function sumOrgTutorLessonsPayEur(
           bySubject,
           subjectId: session.subject_id,
           sessionPrice: session.price,
+          tutorPaySnapshot: session.tutor_pay_eur_snapshot,
         }),
       0,
     ) * 100,

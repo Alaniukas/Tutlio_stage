@@ -45,6 +45,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { isPlMarket } from '@/lib/market';
 import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
 import { meetingLinkFromTutorRows, meetingLinkWasPersisted } from '@/lib/meetingLink';
+import { buildTutorPayUpdatePatch } from '@/lib/orgTutorDefaultPay';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -529,6 +530,8 @@ export default function CompanyTutors() {
   const [editCommissionPercent, setEditCommissionPercent] = useState(0);
   const [tutorSaveError, setTutorSaveError] = useState<string | null>(null);
   const [editSubjectPay, setEditSubjectPay] = useState<Record<string, string>>({});
+  const baseTutorPayEditedRef = useRef(false);
+  const subjectTutorPayEditedRef = useRef(false);
   const [editMeetingLink, setEditMeetingLink] = useState('');
   /** False until the editor has a fresh (or confirmed cached) meeting-link value — avoids wiping DB on save. */
   const [meetingLinkHydrated, setMeetingLinkHydrated] = useState(false);
@@ -1025,6 +1028,8 @@ export default function CompanyTutors() {
 
   const openTutor = async (tutor: Tutor) => {
     setMeetingLinkHydrated(false);
+    baseTutorPayEditedRef.current = false;
+    subjectTutorPayEditedRef.current = false;
     const [{ data: subjects }, { data: freshProfile, error: profileErr }] = await Promise.all([
       supabase.from('subjects').select('*').eq('tutor_id', tutor.id),
       supabase
@@ -1045,7 +1050,7 @@ export default function CompanyTutors() {
 
     const sessions = await fetchAllRows<any>((from, to) => supabase
       .from('sessions')
-      .select('id, tutor_id, class_group_id, start_time, price, status, subject_id, is_complimentary, exclude_from_lesson_count, subjects(is_trial, is_group)')
+      .select('id, tutor_id, class_group_id, start_time, price, status, subject_id, tutor_pay_eur_snapshot, is_complimentary, exclude_from_lesson_count, subjects(is_trial, is_group)')
       .eq('tutor_id', tutor.id)
       .in('status', ['completed', 'no_show'])
       .gte('start_time', oneYearAgo.toISOString())
@@ -1098,6 +1103,8 @@ export default function CompanyTutors() {
       nextPay[subj.id] = parsedPay[subj.id] != null ? String(parsedPay[subj.id]) : '';
     }
     setEditSubjectPay(nextPay);
+    baseTutorPayEditedRef.current = false;
+    subjectTutorPayEditedRef.current = false;
     setEditMeetingLink(hydratedMeetingLink);
     setMeetingLinkHydrated(Boolean(freshProfile && !profileErr));
     if (freshProfile && !profileErr) {
@@ -1129,6 +1136,16 @@ export default function CompanyTutors() {
     setSavingTutor(true);
     setTutorSaveError(null);
     const personalLink = editMeetingLink.trim() || null;
+    const basePayEdited = baseTutorPayEditedRef.current;
+    const subjectPayEdited = subjectTutorPayEditedRef.current;
+    const savedSubjectPay = compactTutorPayBySubject(editSubjectPay);
+    const tutorPayPatch = buildTutorPayUpdatePatch({
+      basePayEdited,
+      basePay: editCommissionPercent,
+      subjectPayEdited,
+      subjectPay: savedSubjectPay,
+      subjectPayEnabled: isManoKorepetitoriusAdmin,
+    });
     try {
       const { data: updatedRows, error } = await supabase.from('profiles').update({
         full_name: editName,
@@ -1139,10 +1156,7 @@ export default function CompanyTutors() {
         reminder_tutor_hours: editReminderTutor,
         break_between_lessons: editBreakBetween,
         min_booking_hours: editMinBooking,
-        company_commission_percent: editCommissionPercent,
-        ...(isManoKorepetitoriusAdmin
-          ? { company_commission_by_subject: compactTutorPayBySubject(editSubjectPay) }
-          : {}),
+        ...tutorPayPatch,
         ...(meetingLinkHydrated ? { personal_meeting_link: personalLink } : {}),
         teaching_notes: editTeachingNotes.trim() || null,
       })
@@ -1150,18 +1164,15 @@ export default function CompanyTutors() {
         .select('id, company_commission_percent, company_commission_by_subject, personal_meeting_link');
 
       const savedRow = updatedRows?.[0];
-      const savedSubjectPay = isManoKorepetitoriusAdmin
-        ? compactTutorPayBySubject(editSubjectPay)
-        : null;
       const persistedSubjectPay = isManoKorepetitoriusAdmin
         ? (savedRow as { company_commission_by_subject?: Record<string, number> | null })?.company_commission_by_subject
         : null;
       if (
         error
         || !savedRow
-        || Number(savedRow.company_commission_percent) !== editCommissionPercent
+        || (basePayEdited && Number(savedRow.company_commission_percent) !== editCommissionPercent)
         || (meetingLinkHydrated && !meetingLinkWasPersisted(personalLink, savedRow.personal_meeting_link))
-        || (isManoKorepetitoriusAdmin
+        || (isManoKorepetitoriusAdmin && subjectPayEdited
           && JSON.stringify(persistedSubjectPay ?? {}) !== JSON.stringify(savedSubjectPay ?? {}))
       ) {
         throw error || new Error('Tutor profile update was not persisted');
@@ -1180,10 +1191,10 @@ export default function CompanyTutors() {
         reminder_tutor_hours: editReminderTutor,
         break_between_lessons: editBreakBetween,
         min_booking_hours: editMinBooking,
-        company_commission_percent: editCommissionPercent,
+        ...(basePayEdited ? { company_commission_percent: editCommissionPercent } : {}),
         ...(meetingLinkHydrated ? { personal_meeting_link: personalLink } : {}),
         teaching_notes: editTeachingNotes.trim() || null,
-        ...(isManoKorepetitoriusAdmin
+        ...(isManoKorepetitoriusAdmin && subjectPayEdited
           ? { company_commission_by_subject: savedSubjectPay }
           : {}),
       };
@@ -1916,7 +1927,10 @@ export default function CompanyTutors() {
                       min={0}
                       step={0.5}
                       value={editCommissionPercent}
-                      onChange={e => setEditCommissionPercent(Number(e.target.value) || 0)}
+                      onChange={(e) => {
+                        baseTutorPayEditedRef.current = true;
+                        setEditCommissionPercent(Number(e.target.value) || 0);
+                      }}
                       className="rounded-xl w-28"
                     />
                     <span className="text-xs text-gray-500">{t('compTut.eurPerLesson')}</span>
@@ -1938,7 +1952,10 @@ export default function CompanyTutors() {
                               step={0.5}
                               placeholder={String(editCommissionPercent || '')}
                               value={editSubjectPay[subj.id] ?? ''}
-                              onChange={(e) => setEditSubjectPay((prev) => ({ ...prev, [subj.id]: e.target.value }))}
+                              onChange={(e) => {
+                                subjectTutorPayEditedRef.current = true;
+                                setEditSubjectPay((prev) => ({ ...prev, [subj.id]: e.target.value }));
+                              }}
                               className="rounded-xl w-24 h-9 bg-white"
                             />
                             <span className="text-xs text-gray-500 shrink-0">{t('compTut.eurPerLesson')}</span>

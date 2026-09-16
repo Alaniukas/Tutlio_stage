@@ -426,6 +426,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     })
                     .eq('id', packageId)
                     .eq('paid', false)
+                    .neq('payment_status', 'cancelled')
                     .select(
                         'id, tutor_id, total_lessons, available_lessons, total_price, payment_method, manual_sales_invoice_id, paid_at, pool_organization_id, students(full_name, email, payer_email, payer_name), subject:subjects(name), lesson_package_items(subject_id, total_lessons, price_per_lesson, position, subjects!inner(name))'
                     )

@@ -153,6 +153,8 @@ describe('POST /api/stripe-checkout', () => {
           stripe_onboarding_complete: true,
           organization_id: null,
           full_name: 'Tutor Name',
+          enable_per_lesson: true,
+          enable_monthly_billing: false,
         },
       },
       error: null,
@@ -185,6 +187,42 @@ describe('POST /api/stripe-checkout', () => {
     expect(sessionsUpdateEq).toHaveBeenCalledWith('id', 'sess-1');
   });
 
+  it('rejects checkout for an empty student model under monthly billing', async () => {
+    sessionsSingle.mockResolvedValue({
+      data: {
+        id: 'sess-monthly',
+        price: 25,
+        tutor_id: 'tutor-1',
+        student_id: 'student-1',
+        students: {
+          id: 'student-1',
+          full_name: 'Mokinys',
+          payer_email: 'parent@example.com',
+          credit_balance: 0,
+          payment_model: null,
+        },
+        profiles: {
+          stripe_account_id: 'acct_individual',
+          stripe_onboarding_complete: true,
+          organization_id: null,
+          full_name: 'Tutor Name',
+          enable_per_lesson: false,
+          enable_monthly_billing: true,
+        },
+      },
+      error: null,
+    });
+
+    const handler = (await import('../../api/stripe-checkout')).default;
+    const res = mockRes();
+    await handler(mockReq('POST', { sessionId: 'sess-monthly' }) as any, res as any);
+
+    const result = (res as any).getResult();
+    expect(result.statusCode).toBe(400);
+    expect(result.body?.code).toBe('PER_LESSON_DISABLED_FOR_STUDENT');
+    expect(stripeCreate).not.toHaveBeenCalled();
+  });
+
   it('returns 400 when organization stripe onboarding is incomplete', async () => {
     sessionsSingle.mockResolvedValue({
       data: {
@@ -198,6 +236,8 @@ describe('POST /api/stripe-checkout', () => {
           stripe_onboarding_complete: false,
           organization_id: 'org-1',
           full_name: 'Org Tutor',
+          enable_per_lesson: true,
+          enable_monthly_billing: false,
         },
       },
       error: null,
@@ -208,6 +248,8 @@ describe('POST /api/stripe-checkout', () => {
         stripe_account_id: null,
         stripe_onboarding_complete: false,
         name: 'Test Org',
+        enable_per_lesson: true,
+        enable_monthly_billing: false,
       },
       error: null,
     });
@@ -275,6 +317,8 @@ describe('POST /api/stripe-checkout', () => {
           stripe_onboarding_complete: true,
           organization_id: null,
           full_name: 'Tutor Name',
+          enable_per_lesson: true,
+          enable_monthly_billing: false,
         },
       },
       error: null,
@@ -312,6 +356,8 @@ describe('POST /api/stripe-checkout', () => {
           stripe_onboarding_complete: true,
           organization_id: null,
           full_name: 'Tutor Name',
+          enable_per_lesson: true,
+          enable_monthly_billing: false,
         },
       },
       error: null,
@@ -360,6 +406,8 @@ describe('POST /api/stripe-checkout', () => {
           stripe_onboarding_complete: true,
           organization_id: null,
           full_name: 'Tutor Name',
+          enable_per_lesson: true,
+          enable_monthly_billing: false,
         },
       },
       error: null,

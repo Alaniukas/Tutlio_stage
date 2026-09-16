@@ -92,6 +92,8 @@ function sessionRow(overrides: Record<string, unknown> = {}) {
       subscription_plan: null,
       manual_subscription_exempt: false,
       enable_manual_student_payments: false,
+      enable_per_lesson: true,
+      enable_monthly_billing: false,
     },
     ...overrides,
   };
@@ -165,5 +167,33 @@ describe('GET /api/pay-session', () => {
     expect(stripeCreate).not.toHaveBeenCalled();
     expect(result.redirectStatus).toBe(303);
     expect(result.redirectedTo).toBe('https://checkout.stripe.test/cs_old');
+  });
+
+  it('rejects a legacy empty student model when the tutor uses monthly billing', async () => {
+    sessionsSingle.mockResolvedValue({
+      data: sessionRow({
+        profiles: {
+          stripe_account_id: 'acct_individual',
+          stripe_onboarding_complete: true,
+          organization_id: null,
+          full_name: 'Tutor Name',
+          subscription_plan: null,
+          manual_subscription_exempt: false,
+          enable_manual_student_payments: false,
+          enable_per_lesson: false,
+          enable_monthly_billing: true,
+        },
+      }),
+      error: null,
+    });
+
+    const handler = (await import('../../api/pay-session')).default;
+    const res = mockRes();
+    await handler(mockReq('GET', 'sess-1') as any, res as any);
+
+    const result = (res as any).getResult();
+    expect(result.statusCode).toBe(400);
+    expect(String(result.body)).toContain('Apmokėjimas nereikalingas');
+    expect(stripeCreate).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import { orgBaseFromPayerChargedTotal, type OrgFeeProfile } from '@/lib/marketMoney';
 import { sessionClientRevenueEur } from '@/lib/sessionComplimentary';
+import { isSessionActuallyPaid } from '@/lib/sessionPaymentDisplay';
 import {
   PRO_KLASE_STUDENT_NO_SHOW_PAY_EUR,
   PRO_KLASE_TRIAL_PAY_EUR,
@@ -36,9 +37,7 @@ function isCancelled(status: string): boolean {
 }
 
 function isPaidLike(session: ProKlaseAdminSession): boolean {
-  if (session.paid === true) return true;
-  const ps = String(session.payment_status || '');
-  return ps === 'paid' || ps === 'confirmed';
+  return isSessionActuallyPaid(session);
 }
 
 /** Expected tutor cost for a remaining (not cancelled) paid calendar lesson. */

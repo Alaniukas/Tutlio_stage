@@ -212,7 +212,7 @@ export default function OrgTutorFinanceSummary() {
       if (manoPayMode) {
         const { data: sessionRows, error: sessionErr } = await supabase
           .from('sessions')
-          .select('id, status, price, subject_id')
+          .select('id, status, price, subject_id, tutor_pay_eur_snapshot')
           .eq('tutor_id', user.id)
           .in('status', ['completed', 'no_show'])
           .lte('end_time', new Date().toISOString())
@@ -226,7 +226,11 @@ export default function OrgTutorFinanceSummary() {
         const bySubject = parseTutorPayBySubject((payProfile as any)?.company_commission_by_subject);
         manoHasSubjectRatesLocal = Object.keys(bySubject).length > 0;
         manoTotal = sumOrgTutorLessonsPayEur(
-          (sessionRows || []) as Array<{ subject_id?: string | null; price?: number | null }>,
+          (sessionRows || []) as Array<{
+            subject_id?: string | null;
+            price?: number | null;
+            tutor_pay_eur_snapshot?: number | null;
+          }>,
           payPerLessonEur,
           bySubject,
           profile?.organization_id,

@@ -72,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: mapping, error: mappingError } = await supabase
       .from('school_recording_drive_folders')
       .select('drive_folder_id')
-      .eq('group_id', group.id)
+      .eq(group.kind === 'individual' ? 'subject_id' : 'group_id', group.sourceId)
       .eq('organization_id', group.organizationId)
       .maybeSingle();
     if (mappingError || !mapping?.drive_folder_id) {

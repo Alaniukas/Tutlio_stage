@@ -24,6 +24,17 @@ describe('studentPerLessonDebtBlocksBooking', () => {
     expect(studentPerLessonDebtBlocksBooking('')).toBe(true);
   });
 
+  it('inherits current owner flags for an empty legacy model', () => {
+    expect(studentPerLessonDebtBlocksBooking(null, {
+      enable_per_lesson: false,
+      enable_monthly_billing: true,
+    })).toBe(false);
+    expect(studentPerLessonDebtBlocksBooking(null, {
+      enable_per_lesson: true,
+      enable_monthly_billing: false,
+    })).toBe(true);
+  });
+
   it('does not block for monthly_billing only', () => {
     expect(studentPerLessonDebtBlocksBooking('monthly_billing')).toBe(false);
   });
@@ -73,6 +84,7 @@ describe('allowsPerLessonPaymentForStudent', () => {
   it('uses tutor flags when student model unset', () => {
     expect(allowsPerLessonPaymentForStudent(null, true, false)).toBe(true);
     expect(allowsPerLessonPaymentForStudent(null, false, true)).toBe(false);
+    expect(allowsPerLessonPaymentForStudent(null, true, true)).toBe(false);
   });
 
   it('respects explicit monthly_billing on student', () => {

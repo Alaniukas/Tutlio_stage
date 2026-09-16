@@ -5483,6 +5483,7 @@ export const lv: Record<string, string> = {
   'compStu.scheduleTitle': 'Nodarbību grafiks',
   'compStu.scheduleEmpty': 'Nav atkārtotu nodarbību.',
   'compStu.effectivePerWeek': 'Kopā ~{count} nodarbības nedēļā',
+  'compStu.lessonsHadCount': 'Jau notikušas nodarbības: {count}',
   'compStu.movedByStudentCount': 'Skolēns pārcēla: {count}',
   'compStu.movedByTutorCount': 'Pasniedzējs pārcēla: {count}',
   'compStu.cancelledByStudentCount': 'Skolēns atcēla: {count}',

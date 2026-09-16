@@ -50,6 +50,16 @@ describe('orgDashboardMonthMetrics', () => {
     expect(metrics.paidRevenueEur).toBe(0);
   });
 
+  it('does not count a reserved monthly lesson as cash collected', () => {
+    const metrics = orgDashboardMonthMetrics(
+      [
+        { status: 'completed', paid: false, payment_status: 'confirmed', price: 380, end_time: '2026-09-10T10:00:00+03:00' },
+      ],
+      now,
+    );
+    expect(metrics.paidRevenueEur).toBe(0);
+  });
+
   it('keeps transferred payment revenue but excludes its duplicate lesson count', () => {
     const metrics = orgDashboardMonthMetrics(
       [
