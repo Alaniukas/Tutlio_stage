@@ -14,9 +14,10 @@ import { isStandalonePwa } from '@/lib/pwaPortal';
 
 interface PwaInstallPromptProps {
   settingsPath: string;
+  avoidBottomNavigation?: boolean;
 }
 
-export default function PwaInstallPrompt({ settingsPath }: PwaInstallPromptProps) {
+export default function PwaInstallPrompt({ settingsPath, avoidBottomNavigation = false }: PwaInstallPromptProps) {
   const { t } = useTranslation();
   const { user } = useUser();
   const navigate = useNavigate();
@@ -74,35 +75,42 @@ export default function PwaInstallPrompt({ settingsPath }: PwaInstallPromptProps
   };
 
   return (
-    <div className="fixed left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-md animate-fade-in top-[max(1rem,env(safe-area-inset-top))] pointer-events-auto">
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-200/80 px-4 py-3 space-y-2.5">
-        <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+    <div
+      className={`fixed inset-x-3 z-40 mx-auto max-w-md animate-fade-in pointer-events-auto sm:inset-x-auto sm:left-1/2 sm:top-[max(1rem,env(safe-area-inset-top))] sm:bottom-auto sm:w-[calc(100%-2rem)] sm:-translate-x-1/2 ${
+        avoidBottomNavigation
+          ? 'bottom-[calc(5.75rem+env(safe-area-inset-bottom))]'
+          : 'bottom-[max(1rem,env(safe-area-inset-bottom))]'
+      }`}
+    >
+      <div className="space-y-2.5 rounded-2xl border border-gray-200/80 bg-white px-3 py-3 shadow-xl sm:px-4">
+        <div className="relative flex items-start gap-3 pr-10 sm:pr-0">
+          <div className="mt-0.5 hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-100 sm:flex">
             <Smartphone className="w-4 h-4 text-indigo-600" />
           </div>
-          <p className="text-sm text-gray-700 font-medium flex-1 min-w-0 leading-snug">
+          <p className="min-w-0 flex-1 text-xs font-medium leading-snug text-gray-700 sm:text-sm">
             {t('pwa.bannerText')}
           </p>
           <button
             type="button"
             onClick={handleDismiss}
-            className="p-1 text-gray-300 hover:text-gray-500 transition-colors flex-shrink-0 -mr-1 -mt-0.5"
+            className="absolute -right-1 -top-1 flex min-h-[44px] min-w-[44px] flex-shrink-0 touch-manipulation items-center justify-center rounded-xl text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600 sm:static sm:-my-1 sm:-mr-1"
+            aria-label={t('common.close')}
           >
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="flex items-center gap-2 pl-11">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:pl-11">
           <button
             type="button"
             onClick={handleHowTo}
-            className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition-colors"
+            className="flex min-h-[44px] touch-manipulation items-center justify-center rounded-xl bg-indigo-600 px-3 py-2 text-center text-xs font-semibold text-white transition-colors hover:bg-indigo-700"
           >
             {t('pwa.howToInstall')}
           </button>
           <button
             type="button"
             onClick={handleDontShowAgain}
-            className="text-[11px] text-gray-400 hover:text-gray-600 font-medium whitespace-nowrap transition-colors"
+            className="flex min-h-[44px] touch-manipulation items-center justify-center rounded-xl px-2 py-2 text-center text-xs font-medium text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-700"
           >
             {t('pwa.dontShowAgain')}
           </button>

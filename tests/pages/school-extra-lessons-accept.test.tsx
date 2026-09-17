@@ -130,7 +130,10 @@ describe('SchoolExtraLessonsAccept', () => {
         parentEditableFields: [],
         order: {
           ...preview.order,
-          start_date: '2026-10-01',
+          // Keep this deterministically beyond the 14-day window regardless of
+          // the calendar date on which the suite runs.
+          start_date: '2099-10-01',
+          end_date: '2100-06-30',
           schedule_slots: [{ weekday: 4, start_time: '16:00', end_time: '16:45' }],
           schedule_label: 'ketvirtadienis 16:00–16:45',
         },

@@ -102,6 +102,12 @@ const PreviewInAppSupport = import.meta.env.DEV
 const PreviewAdminSupport = import.meta.env.DEV
   ? lazy(() => import('@/pages/dev/PreviewAdminSupport'))
   : null;
+const PreviewSchoolMonthlyInvoice = import.meta.env.DEV
+  ? lazy(() => import('@/pages/dev/PreviewSchoolMonthlyInvoice'))
+  : null;
+const PreviewSchoolDiscountAccept = import.meta.env.DEV
+  ? lazy(() => import('@/pages/dev/PreviewSchoolDiscountAccept'))
+  : null;
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
 const ParentInvoices = lazy(() => import('@/pages/ParentInvoices'));
@@ -112,6 +118,7 @@ const ParentSettings = lazy(() => import('@/pages/ParentSettings'));
 const ParentRegister = lazy(() => import('@/pages/ParentRegister'));
 const SchoolContractComplete = lazy(() => import('@/pages/SchoolContractComplete'));
 const SchoolExtraLessonsAccept = lazy(() => import('@/pages/SchoolExtraLessonsAccept'));
+const SchoolDiscountAccept = lazy(() => import('@/pages/SchoolDiscountAccept'));
 const MvAccountActivate = lazy(() => import('@/pages/MvAccountActivate'));
 const SchoolHomework = lazy(() => import('@/pages/SchoolHomework'));
 const StripeSuccess = lazy(() => import('@/pages/StripeSuccess'));
@@ -324,6 +331,26 @@ export default function App({ basename }: { basename: string }) {
             }
           />
         )}
+        {import.meta.env.DEV && PreviewSchoolMonthlyInvoice && (
+          <Route
+            path="/preview/school-monthly-invoice"
+            element={
+              <StaticLocaleProvider locale="lt">
+                <PreviewSchoolMonthlyInvoice />
+              </StaticLocaleProvider>
+            }
+          />
+        )}
+        {import.meta.env.DEV && PreviewSchoolDiscountAccept && (
+          <Route
+            path="/preview/school-discount-accept"
+            element={
+              <StaticLocaleProvider locale="lt">
+                <PreviewSchoolDiscountAccept />
+              </StaticLocaleProvider>
+            }
+          />
+        )}
 
         {/* Public Landing Pages - NO UserProvider wrapper */}
         <Route path="/" element={<Landing />} />
@@ -396,6 +423,7 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/:locale/mv-account-activate" element={<MvAccountActivate />} />
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
         <Route path="/school-extra-lessons-accept" element={<SchoolExtraLessonsAccept />} />
+        <Route path="/school-discount-accept" element={<SchoolDiscountAccept />} />
         <Route path="/school-homework" element={<SchoolHomework />} />
         <Route path="/school-sign" element={<SchoolSign />} />
         <Route path="/school-sign/return" element={<SchoolSignReturn />} />

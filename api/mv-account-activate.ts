@@ -5,7 +5,7 @@ import {
   verifyMvAccountActivationToken,
 } from './_lib/mvAccountActivationToken.js';
 import { findAuthUserByEmail } from './_lib/findAuthUserByEmail.js';
-import { isMoksloVaisiaiOrg } from './_lib/marketMoney.js';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from './_lib/marketMoney.js';
 import { orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
 import { loginIdentifierToEmail } from '../src/lib/studentLoginIdentity.js';
 
@@ -60,8 +60,8 @@ async function loadPreview(
   }
 
   const organizationId = student.organization_id ?? null;
-  if (!isMoksloVaisiaiOrg(organizationId)) {
-    return { status: 403 as const, body: { error: 'Invalid organization', code: 'org_not_mv' } };
+  if (!isMoksloVaisiaiOrg(organizationId) && !isProKlaseOrg(organizationId)) {
+    return { status: 403 as const, body: { error: 'Invalid organization', code: 'org_not_supported' } };
   }
 
   let orgName: string | null = null;

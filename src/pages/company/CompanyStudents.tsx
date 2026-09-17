@@ -90,6 +90,7 @@ import {
   type StudentPreferredWindow,
 } from '@/lib/studentAvailability';
 import PickedAvailabilityTimeEditor from '@/components/company/PickedAvailabilityTimeEditor';
+import type { RecurrenceFrequency } from '@/components/RecurrenceFields';
 import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
 import {
   markFirstChronologicalLessonAsTrial,
@@ -158,6 +159,7 @@ import { formatLocalYmd, monthlyPackagePeriodFrom } from '@/lib/monthlyPackagePl
 import { canEditPendingPackage } from '@/lib/pendingPackageEdit';
 import { displayStudentGrade, normalizeStudentGrade1to12, proKlaseGradeSelectValue } from '@/lib/studentGrade';
 import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
+import { proKlaseSchoolYearEndDate } from '@/lib/proKlaseBooking';
 import {
   matchesOrgStudentPickerSearch,
   orgStudentDisplayName,
@@ -233,6 +235,7 @@ type AddStudentLessonPick = {
   pick: FindLessonBookPick;
   lessonStartIso: string;
   lessonEndIso: string;
+  recurringFrequency: Extract<RecurrenceFrequency, 'weekly' | 'biweekly'>;
 };
 
 type MvAdditionalChildDraft = {
@@ -433,6 +436,7 @@ export default function CompanyStudents() {
     proKlaseFeatureEnabled(orgId, orgEntityType, hasFeature, flagId, orgFeaturesLoading);
   const orgUsesManualPackages = !orgFeaturesLoading && hasFeature('manual_payments');
   const isMvOrg = isMoksloVaisiaiOrg(orgId);
+  const supportsManagedFamilyAccounts = isMvOrg || isProKlaseOrg(orgId);
   const preActivationSchedulingUi = canScheduleStudentBeforeActivation(
     orgId,
     orgEntityType,
@@ -486,12 +490,19 @@ export default function CompanyStudents() {
     admin_comment: '',
     admin_comment_visible_to_tutor: false,
     // Flexible invitations (req 7): who to invite on create when enabled.
-    invite_target: (isMoksloVaisiaiOrg(membership?.organizationId) ? 'provision' : 'student') as OrgStudentInviteTarget,
-    payment_payer: isMoksloVaisiaiOrg(membership?.organizationId) ? 'parent' : 'self',
+    invite_target: (
+      isMoksloVaisiaiOrg(membership?.organizationId) || isProKlaseOrg(membership?.organizationId)
+        ? 'provision'
+        : 'student'
+    ) as OrgStudentInviteTarget,
+    payment_payer:
+      isMoksloVaisiaiOrg(membership?.organizationId) || isProKlaseOrg(membership?.organizationId)
+        ? 'parent'
+        : 'self',
   });
   const [mvAdditionalChildren, setMvAdditionalChildren] = useState<MvAdditionalChildDraft[]>([]);
   const parentFirstInvite = isMvOrg && !isSchoolView && newStudent.invite_target === 'parent';
-  const provisionAccounts = isMvOrg && !isSchoolView && newStudent.invite_target === 'provision';
+  const provisionAccounts = supportsManagedFamilyAccounts && !isSchoolView && newStudent.invite_target === 'provision';
   const [provisionCredentialsOpen, setProvisionCredentialsOpen] = useState(false);
   const [provisionCredentials, setProvisionCredentials] = useState<MvProvisionCredentialsView | null>(null);
   const [mvProvisionDialogOpen, setMvProvisionDialogOpen] = useState(false);
@@ -1955,7 +1966,7 @@ export default function CompanyStudents() {
     }
     if (
       !isSchoolView &&
-      isMvOrg &&
+      supportsManagedFamilyAccounts &&
       newStudent.invite_target === 'provision' &&
       !newStudent.full_name.trim()
     ) {
@@ -1964,7 +1975,7 @@ export default function CompanyStudents() {
     }
     if (
       !isSchoolView &&
-      isMvOrg &&
+      supportsManagedFamilyAccounts &&
       newStudent.invite_target === 'provision' &&
       !newStudent.payer_name.trim()
     ) {
@@ -1973,7 +1984,7 @@ export default function CompanyStudents() {
     }
     if (
       !isSchoolView &&
-      isMvOrg &&
+      supportsManagedFamilyAccounts &&
       newStudent.invite_target === 'provision' &&
       !newStudent.payer_email.trim()
     ) {
@@ -1982,7 +1993,7 @@ export default function CompanyStudents() {
     }
     if (
       !isSchoolView &&
-      isMvOrg &&
+      supportsManagedFamilyAccounts &&
       newStudent.invite_target === 'provision' &&
       newStudent.email.trim() &&
       newStudent.payer_email.trim().toLowerCase() === newStudent.email.trim().toLowerCase()
@@ -2230,9 +2241,12 @@ export default function CompanyStudents() {
             .eq('id', item.pick.subjectId)
             .maybeSingle();
           if (!subj || !lessonRow.id) continue;
-          const price = item.isTrial
-            ? trialPrice
-            : Number((subj as { price?: number | null }).price ?? 0);
+          const regularPrice = Number((subj as { price?: number | null }).price ?? 0);
+          const trialCharge = item.isTrial ? trialPrice : regularPrice;
+          const recurringEndDate = proKlaseAdminUi
+            ? proKlaseSchoolYearEndDate(new Date(item.lessonStartIso))
+            : '';
+          const createRecurring = Boolean(recurringEndDate);
           const result = await runOrgAdminCreateSession({
             supabase,
             createTutorId: item.pick.tutorId,
@@ -2241,18 +2255,18 @@ export default function CompanyStudents() {
             createStudentIds: [lessonRow.id],
             createStartTime: item.lessonStartIso,
             createEndTime: item.lessonEndIso,
-            createTopic: item.isTrial
+            createTopic: item.isTrial && !createRecurring
               ? trialTopic || item.pick.subjectName || (subj as { name?: string | null }).name || ''
               : item.pick.subjectName || (subj as { name?: string | null }).name || '',
             createMeetingLink: String((subj as { meeting_link?: string | null }).meeting_link || ''),
-            createIsRecurring: false,
-            createRecurringEndDate: '',
-            createRecurringFrequency: 'weekly',
-            createRecurringWeekdays: [],
+            createIsRecurring: createRecurring,
+            createRecurringEndDate: recurringEndDate,
+            createRecurringFrequency: item.recurringFrequency,
+            createRecurringWeekdays: [new Date(item.lessonStartIso).getDay()],
             createIsPaid: false,
-            createPrice: price,
-            createIsTrial: item.isTrial,
-            createFirstLessonIsTrial: false,
+            createPrice: createRecurring ? regularPrice : trialCharge,
+            createIsTrial: item.isTrial && !createRecurring,
+            createFirstLessonIsTrial: item.isTrial && createRecurring,
             createTutorComment: '',
             createShowCommentToStudent: false,
             subjects: [
@@ -2270,7 +2284,7 @@ export default function CompanyStudents() {
           });
           if (
             item.isTrial &&
-            price > 0 &&
+            trialCharge > 0 &&
             pkFeat('trial_creation_payment_email') &&
             result.createdSessionIds.length > 0
           ) {
@@ -2283,7 +2297,7 @@ export default function CompanyStudents() {
                 sessionId: result.createdSessionIds[0],
                 topic: trialTopic || undefined,
                 durationMinutes: trialDuration,
-                priceEur: price,
+                priceEur: trialCharge,
               }),
             });
             if (!resp.ok) {
@@ -2541,8 +2555,8 @@ export default function CompanyStudents() {
       tutor_ids: [],
       admin_comment: '',
       admin_comment_visible_to_tutor: false,
-      invite_target: isMvOrg ? 'provision' : 'student',
-      payment_payer: isMvOrg ? 'parent' : 'self',
+      invite_target: supportsManagedFamilyAccounts ? 'provision' : 'student',
+      payment_payer: supportsManagedFamilyAccounts ? 'parent' : 'self',
     });
     const provisionDefaults = defaultMvProvisionDelivery();
     setMvCreateProvisionDelivery(provisionDefaults.emailDelivery);
@@ -3293,6 +3307,36 @@ export default function CompanyStudents() {
                             );
                           }}
                         />
+                        {proKlaseAdminUi && (
+                          <div className="grid gap-2 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 sm:grid-cols-2 sm:items-end">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">{t('cal.recurringFrequencyLabel')}</Label>
+                              <Select
+                                value={item.recurringFrequency}
+                                onValueChange={(value: 'weekly' | 'biweekly') => {
+                                  setAddStudentPickedLessons((current) =>
+                                    current.map((row) =>
+                                      lessonPickKey(row) === lessonPickKey(item)
+                                        ? { ...row, recurringFrequency: value }
+                                        : row,
+                                    ),
+                                  );
+                                }}
+                              >
+                                <SelectTrigger className="rounded-xl bg-white">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="weekly">{t('cal.freqWeekly')}</SelectItem>
+                                  <SelectItem value="biweekly">{t('cal.freqBiweekly')}</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <p className="text-xs text-indigo-800">
+                              {t('compSch.repeatsUntil')}: {proKlaseSchoolYearEndDate(new Date(item.lessonStartIso))}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     ))}
                     {addStudentPickedLessons.length > 0 && proKlaseAdminUi && (
@@ -3358,8 +3402,10 @@ export default function CompanyStudents() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label>{t('compStu.phoneLabel')}</Label>
+                    <Label htmlFor="company-new-student-phone">{t('compStu.phoneLabel')}</Label>
                     <Input
+                      id="company-new-student-phone"
+                      type="tel"
                       value={newStudent.phone}
                       onChange={(e) => setNewStudent({ ...newStudent, phone: formatLocalizedPhone(e.target.value, locale) })}
                       placeholder={getLocalizedPhonePlaceholder(locale)}
@@ -3680,6 +3726,17 @@ export default function CompanyStudents() {
                             className="rounded-xl"
                           />
                         </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="company-new-student-parent-phone">{t('compStu.parentContactLabel')} · {t('common.phone')}</Label>
+                          <Input
+                            id="company-new-student-parent-phone"
+                            type="tel"
+                            value={newStudent.payer_phone}
+                            onChange={(e) => setNewStudent({ ...newStudent, payer_phone: formatLocalizedPhone(e.target.value, locale) })}
+                            placeholder={getLocalizedPhonePlaceholder(locale)}
+                            className="rounded-xl"
+                          />
+                        </div>
                       </div>
                       <div className="space-y-2">
                         <Label>{t('compStu.inviteTargetLabel')}</Label>
@@ -3708,7 +3765,7 @@ export default function CompanyStudents() {
                           >
                             {t('compStu.inviteStudentAndParent')}
                           </Button>
-                          {isMvOrg && (
+                          {supportsManagedFamilyAccounts && (
                             <>
                               <Button
                                 type="button"
@@ -3725,31 +3782,33 @@ export default function CompanyStudents() {
                               >
                                 {t('compStu.provisionAccounts')}
                               </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant={newStudent.invite_target === 'parent' ? 'default' : 'outline'}
-                                className="rounded-xl text-xs"
-                                onClick={() => {
-                                  setAddStudentPickedLessons([]);
-                                  setMvAdditionalChildren([]);
-                                  setNewStudent({
-                                    ...newStudent,
-                                    invite_target: 'parent',
-                                    payment_payer: 'parent',
-                                    full_name: '',
-                                    email: '',
-                                    phone: '',
-                                    grade: '',
-                                  });
-                                }}
-                              >
-                                {t('compStu.inviteParentFirst')}
-                              </Button>
+                              {isMvOrg && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={newStudent.invite_target === 'parent' ? 'default' : 'outline'}
+                                  className="rounded-xl text-xs"
+                                  onClick={() => {
+                                    setAddStudentPickedLessons([]);
+                                    setMvAdditionalChildren([]);
+                                    setNewStudent({
+                                      ...newStudent,
+                                      invite_target: 'parent',
+                                      payment_payer: 'parent',
+                                      full_name: '',
+                                      email: '',
+                                      phone: '',
+                                      grade: '',
+                                    });
+                                  }}
+                                >
+                                  {t('compStu.inviteParentFirst')}
+                                </Button>
+                              )}
                             </>
                           )}
                         </div>
-                        {isMvOrg && newStudent.invite_target === 'provision' && (
+                        {supportsManagedFamilyAccounts && newStudent.invite_target === 'provision' && (
                           <>
                             <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2.5 text-sm font-medium text-emerald-900">
                               {t('compStu.provisionAccountsNotice')}
@@ -5269,7 +5328,7 @@ export default function CompanyStudents() {
                           </Button>
                         );
                       })()}
-                      {isMvOrg
+                      {supportsManagedFamilyAccounts
                         && selectedStudent
                         && mvNeedsAnyAccountProvisioning(selectedMvAccountStatus)
                         && (
@@ -5284,7 +5343,7 @@ export default function CompanyStudents() {
                           {provisioningExistingStudent ? t('common.loading') : t('compStu.provisionAccountsExisting')}
                         </Button>
                       )}
-                      {!isMvOrg && (selectedStudent.payer_email || selectedStudent.parent_secondary_email) && (
+                      {!supportsManagedFamilyAccounts && (selectedStudent.payer_email || selectedStudent.parent_secondary_email) && (
                         <Button
                           type="button"
                           size="sm"
@@ -5296,7 +5355,7 @@ export default function CompanyStudents() {
                           {sendingParentInvites ? t('common.loading') : t('compStu.inviteParent')}
                         </Button>
                       )}
-                      {isMvOrg ? (
+                      {supportsManagedFamilyAccounts ? (
                         <>
                           <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs ${selectedMvAccountStatus.linked_user_id ? 'border-green-200 bg-green-50 text-green-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
                             {selectedMvAccountStatus.linked_user_id ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
@@ -6414,6 +6473,7 @@ export default function CompanyStudents() {
                 },
                 lessonStartIso: range.start.toISOString(),
                 lessonEndIso: range.end.toISOString(),
+                recurringFrequency: 'weekly',
               };
             });
             setAddStudentPickedLessons((current) => appendStudentLessonPicks(current, nextItems));

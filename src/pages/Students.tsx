@@ -150,7 +150,7 @@ export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>(stcache?.students ?? []);
   const [loading, setLoading] = useState(!stcache);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [newStudent, setNewStudent] = useState({ full_name: '', email: '', phone: '' });
+  const [newStudent, setNewStudent] = useState({ full_name: '', email: '', phone: '', payer_phone: '' });
   const [saving, setSaving] = useState(false);
 
   // Individual pricing for invite creation
@@ -167,6 +167,8 @@ export default function StudentsPage() {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [isEditingStudentName, setIsEditingStudentName] = useState(false);
   const [studentNameDraft, setStudentNameDraft] = useState('');
+  const [studentPhoneDraft, setStudentPhoneDraft] = useState('');
+  const [studentPayerPhoneDraft, setStudentPayerPhoneDraft] = useState('');
   const [savingStudentName, setSavingStudentName] = useState(false);
   const [selectedStudentPackages, setSelectedStudentPackages] = useState<any[]>([]);
   const [studentSessions, setStudentSessions] = useState<any[]>([]);
@@ -261,6 +263,8 @@ export default function StudentsPage() {
     if (!selectedStudent) return;
     setIsEditingStudentName(false);
     setStudentNameDraft(selectedStudent.full_name || '');
+    setStudentPhoneDraft(selectedStudent.phone || '');
+    setStudentPayerPhoneDraft(selectedStudent.payer_phone || '');
   }, [selectedStudent?.id]);
 
   // Refetch when tutor is available and when opening /students so cards are not stuck on stale tutor_students cache.
@@ -842,6 +846,11 @@ export default function StudentsPage() {
       setSaving(false);
       return;
     }
+    if (newStudent.payer_phone?.trim() && !validateLocalizedPhone(newStudent.payer_phone, locale)) {
+      alert(t('stu.phoneFormat'));
+      setSaving(false);
+      return;
+    }
 
     const inviteCode = generateInviteCode();
     const bookingUrl = `${baseUrl}/book/${inviteCode}`;
@@ -855,6 +864,7 @@ export default function StudentsPage() {
         full_name: newStudent.full_name,
         email: newStudent.email,
         phone: newStudent.phone?.trim() || null,
+        payer_phone: newStudent.payer_phone?.trim() || null,
         invite_code: inviteCode,
       },
     ]).select().single();
@@ -894,7 +904,7 @@ export default function StudentsPage() {
       }
 
       setIsDialogOpen(false);
-      setNewStudent({ full_name: '', email: '', phone: '' });
+      setNewStudent({ full_name: '', email: '', phone: '', payer_phone: '' });
       setSelectedSubjectForInvite('');
       setCustomPrice('');
       setCustomDuration('');
@@ -1489,10 +1499,23 @@ export default function StudentsPage() {
                         </p>
                       </div>
                       <div className="space-y-2">
-                        <Label>{t('common.phone')}</Label>
+                        <Label htmlFor="solo-new-student-phone">{t('compStu.studentLabel')} · {t('common.phone')}</Label>
                         <Input
+                          id="solo-new-student-phone"
+                          type="tel"
                           value={newStudent.phone}
                           onChange={(e) => setNewStudent({ ...newStudent, phone: formatLocalizedPhone(e.target.value, locale) })}
+                          placeholder={getLocalizedPhonePlaceholder(locale)}
+                          className="rounded-xl"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="solo-new-student-parent-phone">{t('stu.payerParent')} · {t('common.phone')}</Label>
+                        <Input
+                          id="solo-new-student-parent-phone"
+                          type="tel"
+                          value={newStudent.payer_phone}
+                          onChange={(e) => setNewStudent({ ...newStudent, payer_phone: formatLocalizedPhone(e.target.value, locale) })}
                           placeholder={getLocalizedPhonePlaceholder(locale)}
                           className="rounded-xl"
                         />
@@ -1983,6 +2006,22 @@ export default function StudentsPage() {
                             placeholder={t('common.name')}
                             className="rounded-xl"
                           />
+                          <Input
+                            type="tel"
+                            aria-label={`${t('compStu.studentLabel')} · ${t('common.phone')}`}
+                            value={studentPhoneDraft}
+                            onChange={(e) => setStudentPhoneDraft(formatLocalizedPhone(e.target.value, locale))}
+                            placeholder={`${t('compStu.studentLabel')} · ${t('common.phone')}`}
+                            className="rounded-xl"
+                          />
+                          <Input
+                            type="tel"
+                            aria-label={`${t('stu.payerParent')} · ${t('common.phone')}`}
+                            value={studentPayerPhoneDraft}
+                            onChange={(e) => setStudentPayerPhoneDraft(formatLocalizedPhone(e.target.value, locale))}
+                            placeholder={`${t('stu.payerParent')} · ${t('common.phone')}`}
+                            className="rounded-xl"
+                          />
                           <div className="flex gap-2">
                             <Button
                               type="button"
@@ -1991,6 +2030,8 @@ export default function StudentsPage() {
                               onClick={() => {
                                 setIsEditingStudentName(false);
                                 setStudentNameDraft(selectedStudent.full_name || '');
+                                setStudentPhoneDraft(selectedStudent.phone || '');
+                                setStudentPayerPhoneDraft(selectedStudent.payer_phone || '');
                               }}
                               disabled={savingStudentName}
                             >
@@ -2005,19 +2046,38 @@ export default function StudentsPage() {
                                   setToastMessage({ message: t('students.enterFullName'), type: 'error' });
                                   return;
                                 }
+                                if (studentPhoneDraft.trim() && !validateLocalizedPhone(studentPhoneDraft, locale)) {
+                                  setToastMessage({ message: t('stu.phoneFormat'), type: 'error' });
+                                  return;
+                                }
+                                if (studentPayerPhoneDraft.trim() && !validateLocalizedPhone(studentPayerPhoneDraft, locale)) {
+                                  setToastMessage({ message: t('stu.phoneFormat'), type: 'error' });
+                                  return;
+                                }
+                                const nextPhone = studentPhoneDraft.trim() || null;
+                                const nextPayerPhone = studentPayerPhoneDraft.trim() || null;
                                 setSavingStudentName(true);
                                 const { error } = await supabase
                                   .from('students')
-                                  .update({ full_name: nextName })
+                                  .update({
+                                    full_name: nextName,
+                                    phone: nextPhone,
+                                    payer_phone: nextPayerPhone,
+                                  })
                                   .eq('id', selectedStudent.id);
                                 if (error) {
                                   setToastMessage({ message: error.message || t('common.saveFailed'), type: 'error' });
                                   setSavingStudentName(false);
                                   return;
                                 }
-                                setSelectedStudent((s) => (s ? { ...s, full_name: nextName } : s));
-                                setStudents((prev) => prev.map((st) => (st.id === selectedStudent.id ? { ...st, full_name: nextName } : st)));
-                                setToastMessage({ message: t('students.nameUpdated'), type: 'success' });
+                                const contactPatch = {
+                                  full_name: nextName,
+                                  phone: nextPhone || '',
+                                  payer_phone: nextPayerPhone,
+                                };
+                                setSelectedStudent((s) => (s ? { ...s, ...contactPatch } : s));
+                                setStudents((prev) => prev.map((st) => (st.id === selectedStudent.id ? { ...st, ...contactPatch } : st)));
+                                setToastMessage({ message: t('common.saved'), type: 'success' });
                                 setIsEditingStudentName(false);
                                 setSavingStudentName(false);
                               }}

@@ -73,6 +73,10 @@ export const PRO_KLASE_QA_ORG_ID = 'b0a00000-7e57-4000-8000-000000000001';
 export const MANO_KOREPETITORIUS_ORG_ID = '2c4e4c2a-4e12-44ca-b327-d605bbb0d50b';
 export const MANO_KOREPETITORIUS_SLUG = 'mb-mano-korepetitorius';
 
+/** Production VšĮ Laisvi vaikai (slug `laisvi-vaikai`). */
+export const LAISVI_VAIKIAI_ORG_ID = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
+export const LAISVI_VAIKIAI_SLUG = 'laisvi-vaikai';
+
 /** Production IĮ Mokslo vaisiai (slug `mokslovaisiai`). */
 export const MOKSLO_VAISIAI_ORG_ID = 'c1f36796-c281-4650-bed2-1bd6874764f1';
 export const MOKSLO_VAISIAI_SLUG = 'mokslovaisiai';
@@ -221,6 +225,12 @@ export function lessonCheckoutBreakdownCents(
   const totalCents = Math.round(total * 100);
   const baseCents = Math.round(baseAmount * 100);
   return { baseCents, feesCents: totalCents - baseCents, totalCents };
+}
+
+export function isLaisviVaikaiOrg(orgIdOrSlug?: string | null): boolean {
+  if (!orgIdOrSlug) return false;
+  const key = orgIdOrSlug.trim().toLowerCase();
+  return key === LAISVI_VAIKIAI_ORG_ID || key === LAISVI_VAIKIAI_SLUG;
 }
 
 /**

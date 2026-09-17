@@ -48,3 +48,24 @@ it('retries busy converter responses using Retry-After', async () => {
   expect((await pending).toString()).toContain('%PDF-');
   expect(fetch).toHaveBeenCalledTimes(2);
 });
+
+it('aborts a hung conversion within one total caller budget', async () => {
+  vi.useFakeTimers();
+  vi.stubEnv('DOCX_CONVERTER_URL', 'https://converter.example');
+  vi.stubEnv('DOCX_CONVERTER_API_KEY', 'test');
+  const fetch = vi.fn().mockImplementation((_url: string, init: { signal: AbortSignal }) =>
+    new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        reject(error);
+      }, { once: true });
+    }));
+  vi.stubGlobal('fetch', fetch);
+
+  const pending = expect(convertWithDocxConverterService(Buffer.from('docx'), { timeoutMs: 1000 }))
+    .rejects.toThrow('timed out after 1000ms');
+  await vi.advanceTimersByTimeAsync(1000);
+  await pending;
+  expect(fetch).toHaveBeenCalledTimes(1);
+});

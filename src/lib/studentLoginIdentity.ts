@@ -4,7 +4,7 @@ const STUDENT_LOGIN_DOMAIN = 'student-login.tutlio.invalid';
 // Keep accepting the original 16-character hex handles already issued in production.
 // New handles are shorter and omit characters that are easy to misread (i/l/o/0/1).
 const LEGACY_STUDENT_LOGIN_NAME = /^mv-[a-f0-9]{16}$/;
-const READABLE_STUDENT_LOGIN_NAME = /^mv-[a-hj-km-np-z2-9]{4}-[a-hj-km-np-z2-9]{4}$/;
+const READABLE_STUDENT_LOGIN_NAME = /^(?:mv|pk)-[a-hj-km-np-z2-9]{4}-[a-hj-km-np-z2-9]{4}$/;
 
 export function isStudentLoginName(value: string): boolean {
   const normalized = value.trim().toLowerCase();

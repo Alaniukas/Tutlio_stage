@@ -1,4 +1,4 @@
-import { isMoksloVaisiaiOrg } from './marketMoney.js';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from './marketMoney.js';
 
 /** MV-only: a child without a contact email receives lesson information through the payer. */
 export function moksloVaisiaiRoutesLessonCommsToPayer(opts: {
@@ -14,6 +14,22 @@ export function moksloVaisiaiRoutesLessonCommsToPayer(opts: {
     isMoksloVaisiaiOrg(opts.tutorOrganizationSlug);
   if (!isMv) return false;
   return !String(opts.studentEmail ?? '').trim();
+}
+
+/** Managed child usernames in MV and Pro Klasė use the parent's real inbox. */
+export function managedFamilyRoutesLessonCommsToPayer(opts: {
+  organizationId?: string | null;
+  tutorOrganizationId?: string | null;
+  tutorOrganizationSlug?: string | null;
+  studentEmail?: string | null;
+  linkedUserId?: string | null;
+}): boolean {
+  const isManagedFamilyOrg = [
+    opts.organizationId,
+    opts.tutorOrganizationId,
+    opts.tutorOrganizationSlug,
+  ].some((value) => isMoksloVaisiaiOrg(value) || isProKlaseOrg(value));
+  return isManagedFamilyOrg && !String(opts.studentEmail ?? '').trim();
 }
 
 export function moksloVaisiaiPayerInboxEmail(row: {

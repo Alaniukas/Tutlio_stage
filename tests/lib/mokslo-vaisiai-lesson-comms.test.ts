@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  managedFamilyRoutesLessonCommsToPayer,
   moksloVaisiaiPayerInboxEmail,
   moksloVaisiaiRoutesLessonCommsToPayer,
 } from '@/lib/moksloVaisiaiLessonComms';
-import { MOKSLO_VAISIAI_ORG_ID } from '@/lib/marketMoney';
+import { MOKSLO_VAISIAI_ORG_ID, PRO_KLASE_ORG_ID } from '@/lib/marketMoney';
 
 describe('Mokslo vaisiai lesson comms routing', () => {
   it('routes to payer inbox for MV students without a contact email, including username accounts', () => {
@@ -38,6 +39,19 @@ describe('Mokslo vaisiai lesson comms routing', () => {
         linkedUserId: null,
       }),
     ).toBe(false);
+  });
+
+  it('routes managed Pro Klasė username accounts to the payer inbox', () => {
+    expect(managedFamilyRoutesLessonCommsToPayer({
+      organizationId: PRO_KLASE_ORG_ID,
+      studentEmail: null,
+      linkedUserId: 'student-user',
+    })).toBe(true);
+    expect(managedFamilyRoutesLessonCommsToPayer({
+      organizationId: PRO_KLASE_ORG_ID,
+      studentEmail: 'child@example.com',
+      linkedUserId: 'student-user',
+    })).toBe(false);
   });
 
   it('reads payer inbox email', () => {

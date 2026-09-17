@@ -113,6 +113,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           base_amount_eur: 0,
           extra_lessons: 0,
           extra_amount_eur: 0,
+          subtotal_eur: total,
+          discount_amount_eur: 0,
           total_eur: total,
           extra_session_ids: [],
           payment_status: total > 0 ? 'pending' : 'paid',
@@ -134,10 +136,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         description: l.description,
         unit_price_eur: l.unitPriceEur,
         quantity: l.quantity,
+        original_amount_eur: l.originalAmountEur ?? l.amountEur,
+        discount_type: l.discountType || null,
+        discount_value: l.discountValue ?? null,
+        discount_amount_eur: l.discountAmountEur || 0,
+        discount_note: l.discountNote || null,
         amount_eur: l.amountEur,
         source: l.source,
         consultation_id: l.consultationId || null,
         session_id: l.sessionId || null,
+        session_ids: l.sessionIds || (l.sessionId ? [l.sessionId] : []),
       }));
       await supabase.from('school_monthly_invoice_lines').insert(lineRows);
       created += 1;

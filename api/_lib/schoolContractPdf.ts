@@ -3,8 +3,11 @@
  * Used by the parent-completion flow (parent confirms supplemented data and the
  * final contract PDF is regenerated from the student's current data and sent).
  */
+import { readFileSync } from 'node:fs';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
+import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib';
+import { resolveInvoiceFontPath } from './invoicePdf.js';
 import { renderDocxTemplateUrlToPdfBuffer } from './renderSchoolContractDocxToPdf.js';
 import {
   schoolContractPdfStoragePath,
@@ -53,8 +56,9 @@ function wrapPdfLine(
   font: { widthOfTextAtSize: (t: string, size: number) => number },
   size: number,
   maxWidth: number,
+  normalizeText: (value: string) => string = safePdfText,
 ): string[] {
-  const raw = safePdfText(text);
+  const raw = normalizeText(text);
   if (!raw) return [''];
   if (font.widthOfTextAtSize(raw, size) <= maxWidth) return [raw];
   const words = raw.split(/\s+/);
@@ -102,8 +106,21 @@ export async function createSimpleContractPdf(params: {
   variant?: 'contract' | 'annex';
 }): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
-  const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
-  const bold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+  let font: PDFFont;
+  let bold: PDFFont;
+  let normalizeText = safePdfText;
+  try {
+    pdfDoc.registerFontkit(fontkit);
+    font = await pdfDoc.embedFont(new Uint8Array(readFileSync(resolveInvoiceFontPath('regular'))), { subset: true });
+    bold = await pdfDoc.embedFont(new Uint8Array(readFileSync(resolveInvoiceFontPath('bold'))), { subset: true });
+    normalizeText = (value) => String(value || '');
+  } catch (error) {
+    console.warn('[school-contract-pdf] Unicode fonts unavailable; using transliterated standard fonts', {
+      detail: error instanceof Error ? error.message : String(error),
+    });
+    font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+    bold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+  }
   const pageSize: [number, number] = [595, 842];
   const left = 44;
   const maxWidth = 507;
@@ -118,7 +135,7 @@ export async function createSimpleContractPdf(params: {
 
   const drawWrapped = (text: string, size: number, useBold = false, color = rgb(0.23, 0.23, 0.23)) => {
     const f = useBold ? bold : font;
-    for (const line of wrapPdfLine(text, f, size, maxWidth)) {
+    for (const line of wrapPdfLine(text, f, size, maxWidth, normalizeText)) {
       if (y < bottom) newPage();
       page.drawText(line, { x: left, y, size, font: f, color });
       y -= size + 4;
@@ -131,7 +148,7 @@ export async function createSimpleContractPdf(params: {
     const rows = [
       params.contractNumber ? `Sutarties Nr.: ${params.contractNumber}` : '',
       params.studentName ? `Mokinys: ${params.studentName}` : '',
-      params.parentName ? `Tevai: ${params.parentName}` : '',
+      params.parentName ? `Tėvai: ${params.parentName}` : '',
     ].filter(Boolean);
     for (const row of rows) drawWrapped(row, 11, false, rgb(0.2, 0.2, 0.2));
     y -= 8;
@@ -147,10 +164,10 @@ export async function createSimpleContractPdf(params: {
   const rows = [
     `Sutarties Nr.: ${params.contractNumber || ''}`,
     `Mokinys: ${params.studentName || ''}`,
-    `Tevai: ${params.parentName || ''}`,
-    `Tevu el. pastas: ${params.parentEmail || ''}`,
-    `Tevu tel.: ${params.parentPhone || ''}`,
-    params.parentPersonalCode ? `Tevu asm. kodas: ${params.parentPersonalCode}` : '',
+    `Tėvai: ${params.parentName || ''}`,
+    `Tėvų el. paštas: ${params.parentEmail || ''}`,
+    `Tėvų tel.: ${params.parentPhone || ''}`,
+    params.parentPersonalCode ? `Tėvų asm. kodas: ${params.parentPersonalCode}` : '',
     params.childBirthDate ? `Vaiko gimimo data: ${params.childBirthDate}` : '',
     params.address ? `Adresas: ${params.address}` : '',
     `${feeLabel}: EUR ${Number(params.annualFee || 0).toFixed(2)}`,
@@ -170,8 +187,13 @@ export async function createSimpleContractPdf(params: {
 export async function createDocxTemplatePdf(params: {
   fetchUrl: string;
   payload: Record<string, string | number | boolean | null>;
+  timeoutMs?: number;
 }): Promise<Uint8Array> {
-  const pdfBuffer = await renderDocxTemplateUrlToPdfBuffer({ templateUrl: params.fetchUrl, payload: params.payload });
+  const pdfBuffer = await renderDocxTemplateUrlToPdfBuffer({
+    templateUrl: params.fetchUrl,
+    payload: params.payload,
+    timeoutMs: params.timeoutMs,
+  });
   return new Uint8Array(pdfBuffer);
 }
 

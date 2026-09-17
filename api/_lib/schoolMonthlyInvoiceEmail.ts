@@ -25,6 +25,23 @@ export type SchoolMonthlyInvoiceRow = {
   payment_status: string;
   invoice_email_sent_at?: string | null;
   billing_model?: string;
+  invoice_number?: string | null;
+  pdf_path?: string | null;
+  subtotal_eur?: number | string;
+  discount_amount_eur?: number | string;
+  discount_note?: string | null;
+  lines?: SchoolMonthlyInvoiceEmailLine[];
+};
+
+export type SchoolMonthlyInvoiceEmailLine = {
+  description: string;
+  unit_price_eur?: number | string;
+  quantity?: number | string;
+  original_amount_eur?: number | string;
+  discount_type?: 'percent' | 'amount' | null;
+  discount_value?: number | string | null;
+  discount_amount_eur?: number | string;
+  amount_eur: number | string;
 };
 
 export type SchoolMonthlyInvoiceEmailContext = {
@@ -43,6 +60,7 @@ export type SchoolMonthlyInvoiceEmailContext = {
     stripe_onboarding_complete?: boolean | null;
   };
   contract: { contract_number?: string | null };
+  lines?: SchoolMonthlyInvoiceEmailLine[];
 };
 
 const LT_MONTHS_NOMINATIVE = [
@@ -82,9 +100,10 @@ export function schoolOrgCanTakeCardPayments(org: SchoolMonthlyInvoiceEmailConte
 /** Payload for the `school_monthly_invoice` email (pure — unit-tested). */
 export function buildSchoolMonthlyInvoiceEmailData(
   invoice: SchoolMonthlyInvoiceRow,
-  ctx: Pick<SchoolMonthlyInvoiceEmailContext, 'publicOrigin' | 'student' | 'org' | 'contract'>,
+  ctx: Pick<SchoolMonthlyInvoiceEmailContext, 'publicOrigin' | 'student' | 'org' | 'contract' | 'lines'>,
 ): Record<string, unknown> {
-  const cardPayments = schoolOrgCanTakeCardPayments(ctx.org);
+  const cardPayments = schoolOrgCanTakeCardPayments(ctx.org) && Number(invoice.total_eur) > 0;
+  const lines = ctx.lines || invoice.lines || [];
   return {
     organizationId: ctx.org.id,
     schoolName: ctx.org.name || '',
@@ -94,6 +113,7 @@ export function buildSchoolMonthlyInvoiceEmailData(
     recipientName: ctx.student.payer_name || ctx.student.full_name || '',
     contractNumber: ctx.contract.contract_number || '',
     invoiceId: invoice.id,
+    invoiceNumber: invoice.invoice_number || '',
     billingModel: invoice.billing_model || 'fixed',
     periodLabel: monthLabelLt(invoice.period_start),
     periodStart: ltDate(invoice.period_start),
@@ -104,6 +124,19 @@ export function buildSchoolMonthlyInvoiceEmailData(
     extraLessons: Number(invoice.extra_lessons || 0),
     extraAmount: Number(invoice.extra_amount_eur || 0).toFixed(2),
     totalAmount: Number(invoice.total_eur || 0).toFixed(2),
+    subtotalAmount: Number(invoice.subtotal_eur ?? invoice.total_eur ?? 0).toFixed(2),
+    discountAmount: Number(invoice.discount_amount_eur || 0).toFixed(2),
+    discountNote: invoice.discount_note || '',
+    lines: lines.map((line) => ({
+      description: line.description,
+      quantity: Number(line.quantity || 0),
+      unitPrice: Number(line.unit_price_eur || 0).toFixed(2),
+      originalAmount: Number(line.original_amount_eur ?? line.amount_eur ?? 0).toFixed(2),
+      discountType: line.discount_type || null,
+      discountValue: line.discount_value == null ? null : Number(line.discount_value),
+      discountAmount: Number(line.discount_amount_eur || 0).toFixed(2),
+      amount: Number(line.amount_eur || 0).toFixed(2),
+    })),
     dueDate: ltDate(invoice.due_date),
     payUrl: cardPayments ? buildSchoolMonthlyInvoicePayUrl(ctx.publicOrigin, invoice.id) : undefined,
   };
@@ -119,12 +152,28 @@ export async function sendSchoolMonthlyInvoiceEmail(
   const to = String(ctx.student.payer_email || ctx.student.email || '').trim();
   if (!to) return { sent: false, reason: 'no payer email' };
   const data = buildSchoolMonthlyInvoiceEmailData(invoice, ctx);
+  let attachments: { filename: string; content: string }[] | undefined;
+  if (invoice.pdf_path) {
+    const { data: blob, error } = await supabase.storage.from('invoices').download(invoice.pdf_path);
+    if (!error && blob) {
+      attachments = [{
+        filename: `${invoice.invoice_number || 'saskaita'}.pdf`,
+        content: Buffer.from(await blob.arrayBuffer()).toString('base64'),
+      }];
+    }
+  }
   let resp: Response;
   try {
     resp = await fetch(`${ctx.apiOrigin.replace(/\/$/, '')}/api/send-email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-internal-key': ctx.serviceRoleKey },
-      body: JSON.stringify({ type: 'school_monthly_invoice', to, data, idempotencyKey: schoolMonthlyInvoiceIdempotencyKey(invoice.id) }),
+      body: JSON.stringify({
+        type: 'school_monthly_invoice',
+        to,
+        data,
+        attachments,
+        idempotencyKey: schoolMonthlyInvoiceIdempotencyKey(invoice.id),
+      }),
       signal: AbortSignal.timeout(20_000),
     });
   } catch (e) {

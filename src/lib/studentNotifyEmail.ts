@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import {
   moksloVaisiaiPayerInboxEmail,
-  moksloVaisiaiRoutesLessonCommsToPayer,
+  managedFamilyRoutesLessonCommsToPayer,
 } from '@/lib/moksloVaisiaiLessonComms';
 import { studentLoginNameFromEmail } from '@/lib/studentLoginIdentity';
 
@@ -51,7 +51,7 @@ export async function resolveStudentNotificationEmail(
 
   const organizationId = opts?.organizationId ?? row.organization_id ?? null;
   if (
-    moksloVaisiaiRoutesLessonCommsToPayer({
+    managedFamilyRoutesLessonCommsToPayer({
       organizationId,
       tutorOrganizationId,
       studentEmail: direct || null,

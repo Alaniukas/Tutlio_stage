@@ -433,15 +433,15 @@ export default function ParentDashboard() {
   return (
     <ParentLayout>
       <div className="w-full max-w-2xl mx-auto px-4 sm:px-6 pt-6 pb-8 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
             <p className="text-gray-500 font-medium text-sm mb-0.5">{getGreeting()},</p>
-            <h1 className="text-3xl font-black text-gray-900 leading-tight">
+            <h1 className="break-words text-2xl font-black leading-tight text-gray-900 sm:text-3xl">
               {greetingName} 👋
             </h1>
           </div>
           {selectedChild && (
-            <div className="bg-violet-100/80 text-violet-700 px-3 py-1.5 rounded-2xl text-xs font-black shadow-sm border border-violet-200/50">
+            <div className="shrink-0 bg-violet-100/80 text-violet-700 px-3 py-1.5 rounded-2xl text-xs font-black shadow-sm border border-violet-200/50">
               {totalUpcoming} {t('parent.upcoming')}
             </div>
           )}
@@ -602,7 +602,7 @@ function ChildBlock({
         <button
           type="button"
           onClick={() => navigate(lessonsPath)}
-          className="text-xs font-bold text-violet-600 hover:text-violet-700 inline-flex items-center gap-0.5 shrink-0"
+          className="inline-flex min-h-[44px] shrink-0 touch-manipulation items-center gap-0.5 rounded-xl px-2 text-xs font-bold text-violet-600 hover:bg-violet-50 hover:text-violet-700"
         >
           {t('parent.viewAll')}
           <ChevronRight className="w-3.5 h-3.5" />
@@ -719,7 +719,7 @@ function ChildBlock({
                       session={next as any}
                       showHint={false}
                       stopPropagation
-                      className="w-10 h-10 rounded-full bg-white text-violet-600 flex items-center justify-center hover:scale-105 transition-transform shadow-lg"
+                      className="flex min-h-[44px] min-w-[44px] touch-manipulation items-center justify-center rounded-full bg-white text-violet-600 shadow-lg transition-transform hover:scale-105"
                     >
                       <Play className="w-4 h-4 ml-0.5 fill-current" />
                     </JoinLessonButton>
@@ -853,7 +853,7 @@ function ChildBlock({
                       onClick={() => {
                         window.location.href = `/api/pay-school-installment?installment=${i.id}`;
                       }}
-                      className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-violet-600 text-white hover:bg-violet-700 transition-colors"
+                      className="inline-flex min-h-[44px] touch-manipulation items-center gap-1.5 rounded-full bg-violet-600 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-violet-700"
                     >
                       <CreditCard className="w-3.5 h-3.5" /> {t('school.payNowBtn')}
                     </button>

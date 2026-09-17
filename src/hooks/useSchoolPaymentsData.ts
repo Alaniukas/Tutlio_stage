@@ -36,6 +36,7 @@ export function useSchoolPaymentsData() {
   const [orgEmail, setOrgEmail] = useState(pc?.orgEmail ?? '');
   const [orgContactEmail, setOrgContactEmail] = useState(pc?.orgContactEmail ?? '');
   const [orgStripeConnected, setOrgStripeConnected] = useState<boolean>(pc?.orgStripeConnected ?? false);
+  const [orgFeatures, setOrgFeatures] = useState<Record<string, unknown>>(pc?.orgFeatures ?? {});
   const [contracts, setContracts] = useState<SchoolPaymentContract[]>(pc?.contracts ?? []);
   const [installments, setInstallments] = useState<SchoolPaymentInstallment[]>(pc?.installments ?? []);
   const [loading, setLoading] = useState(!pc);
@@ -58,6 +59,7 @@ export function useSchoolPaymentsData() {
     let email = '';
     let contactEmail = '';
     let stripeConnected = false;
+    let featuresObj: Record<string, unknown> = {};
     try {
       const org = await supabase
         .from('organizations')
@@ -67,14 +69,15 @@ export function useSchoolPaymentsData() {
       name = org.data?.name || '';
       email = org.data?.email || '';
       const features = org.data?.features;
-      const featObj = (
+      featuresObj = (
         features && typeof features === 'object' && !Array.isArray(features)
           ? features
           : {}
       ) as Record<string, unknown>;
+      setOrgFeatures(featuresObj);
       contactEmail =
-        (typeof featObj.contact_email === 'string' && featObj.contact_email.trim()) ||
-        (typeof featObj.school_contract_signing_email === 'string' && featObj.school_contract_signing_email.trim()) ||
+        (typeof featuresObj.contact_email === 'string' && featuresObj.contact_email.trim()) ||
+        (typeof featuresObj.school_contract_signing_email === 'string' && featuresObj.school_contract_signing_email.trim()) ||
         email;
       stripeConnected = !!org.data?.stripe_onboarding_complete && !!org.data?.stripe_account_id;
     } catch (err) {
@@ -122,6 +125,7 @@ export function useSchoolPaymentsData() {
       orgEmail: email,
       orgContactEmail: contactEmail,
       orgStripeConnected: stripeConnected,
+      orgFeatures: featuresObj,
       contracts: cData,
       installments: filtered,
     });
@@ -141,6 +145,7 @@ export function useSchoolPaymentsData() {
     orgEmail,
     orgContactEmail,
     orgStripeConnected,
+    orgFeatures,
     contracts,
     installments,
     loading,

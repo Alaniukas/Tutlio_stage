@@ -116,7 +116,121 @@ describe('in-app support AI conversation stream', () => {
     });
     expect(JSON.stringify(events)).not.toContain('—');
     expect(mocks.streamText).toHaveBeenCalledWith(expect.objectContaining({
-      instructions: expect.stringContaining('Never use an em dash'),
+      instructions: expect.stringContaining('First extract every usable fact from latestMessage'),
     }));
+    const instructions = mocks.streamText.mock.calls[0][0].instructions as string;
+    expect(instructions).toContain('Treat the supplied page as known location context');
+    expect(instructions).toContain('Never ask a feature requester what happened immediately before an error');
+    expect(instructions).toContain('must not contain bundled alternatives');
+    expect(instructions).toContain('Never use an em dash');
+    const prompt = JSON.parse(mocks.streamText.mock.calls[0][0].prompt as string);
+    expect(prompt.verifiedSupportContext).toContain('Verified customer function scope');
+    expect(prompt.verifiedSupportContext).toContain('Never describe an optional function that is not listed');
+  });
+
+  it('replaces an inconsistent ready response with one question about a genuinely missing field', async () => {
+    const inconsistentConversation = {
+      reply: 'That is ready to send.',
+      title: 'Recurring lessons do not appear',
+      context: 'An organization admin saves a recurring lesson from the calendar.',
+      steps: ['Open the calendar', 'Create a recurring lesson', 'Select Save'],
+      expectedOutcome: 'Every weekly lesson should appear.',
+      actualOutcome: '',
+      impact: null,
+      impactDetails: '',
+      ready: true,
+      missingTopics: [],
+    };
+    mocks.streamText.mockReturnValueOnce({
+      partialOutputStream: (async function* () {
+        yield { reply: inconsistentConversation.reply };
+      }()),
+      output: Promise.resolve(inconsistentConversation),
+    });
+
+    const { res, result } = response();
+    await handler({
+      method: 'POST',
+      headers: { 'x-in-app-support-preview': '1' },
+      body: {
+        mode: 'conversation',
+        submitRequested: false,
+        category: 'bug',
+        latestMessage: 'I select Save after setting it to repeat every Monday.',
+        conversation: [
+          { role: 'assistant', content: 'What was the last action you took?' },
+          { role: 'user', content: 'I select Save after setting it to repeat every Monday.' },
+        ],
+        draft: inconsistentConversation,
+        attachmentNames: [],
+        page: '/company/calendar',
+        locale: 'en',
+      },
+    } as any, res as any);
+
+    const events = result.chunks.join('').trim().split('\n').map((line) => JSON.parse(line));
+    expect(events.at(-1)).toMatchObject({
+      type: 'result',
+      conversation: {
+        reply: 'What appeared on screen instead?',
+        ready: false,
+        missingTopics: ['actualOutcome'],
+      },
+    });
+  });
+
+  it('preserves known draft facts and does not ask for them again when model output drops them', async () => {
+    const existingDraft = {
+      title: 'Recurring lessons do not appear',
+      context: 'An organization admin saves a recurring lesson from the calendar.',
+      steps: ['Open the calendar', 'Create a recurring lesson', 'Select Save'],
+      expectedOutcome: 'Every weekly lesson should appear.',
+      actualOutcome: 'Only the first Monday appears.',
+      impact: null,
+      impactDetails: '',
+    };
+    const forgetfulConversation = {
+      reply: 'What appeared on screen instead?',
+      ...existingDraft,
+      actualOutcome: '',
+      ready: false,
+      missingTopics: ['actualOutcome'],
+    };
+    mocks.streamText.mockReturnValueOnce({
+      partialOutputStream: (async function* () {
+        yield { reply: forgetfulConversation.reply };
+      }()),
+      output: Promise.resolve(forgetfulConversation),
+    });
+
+    const { res, result } = response();
+    await handler({
+      method: 'POST',
+      headers: { 'x-in-app-support-preview': '1' },
+      body: {
+        mode: 'conversation',
+        submitRequested: false,
+        category: 'bug',
+        latestMessage: 'Only the first Monday appears.',
+        conversation: [
+          { role: 'assistant', content: 'What appeared after you selected Save?' },
+          { role: 'user', content: 'Only the first Monday appears.' },
+        ],
+        draft: existingDraft,
+        attachmentNames: [],
+        page: '/company/calendar',
+        locale: 'en',
+      },
+    } as any, res as any);
+
+    const events = result.chunks.join('').trim().split('\n').map((line) => JSON.parse(line));
+    expect(events.at(-1)).toMatchObject({
+      type: 'result',
+      conversation: {
+        actualOutcome: 'Only the first Monday appears.',
+        reply: 'How often does this problem happen?',
+        missingTopics: ['impactDetails'],
+      },
+    });
   });
 });

@@ -31,5 +31,11 @@ describe('org admin recurrence UI', () => {
       isClassGroupSession: false,
       alreadyRecurring: true,
     })).toBe(false);
+    expect(orgAdminShowsConvertToRecurringFields({
+      organizationId: PRO_KLASE_ORG_ID,
+      isClassGroupSession: false,
+      alreadyRecurring: false,
+      isTrialSession: true,
+    })).toBe(false);
   });
 });

@@ -28,11 +28,13 @@ describe('in-app support mobile shell', () => {
     );
 
     const panel = screen.getByLabelText('Tutlio pagalbos agentas').parentElement;
-    expect(panel?.classList.contains('inset-0')).toBe(true);
-    expect(panel?.classList.contains('h-[100dvh]')).toBe(true);
+    expect(panel?.classList.contains('inset-x-0')).toBe(true);
+    expect(panel?.classList.contains('h-dvh')).toBe(true);
     expect(panel?.classList.contains('w-screen')).toBe(true);
     expect(panel?.classList.contains('rounded-none')).toBe(true);
     expect(panel?.classList.contains('shadow-none')).toBe(true);
+    expect(panel?.style.top).toBe('0px');
+    expect(panel?.style.height).toBe('844px');
     expect(screen.getByRole('button', { name: 'Close support agent' }).classList.contains('bg-transparent')).toBe(true);
   });
 

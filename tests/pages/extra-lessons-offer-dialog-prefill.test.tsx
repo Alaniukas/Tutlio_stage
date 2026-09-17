@@ -85,6 +85,43 @@ describe('ExtraLessonsOfferDialog Laisvi vaikai prefill', () => {
     expect(screen.getByText('Grupė')).toBeTruthy();
   });
 
+  it('allows a group-backed subject to be selected for an individual contract and reused', async () => {
+    const subject = {
+      id: 'subject-group-math',
+      name: 'matematika',
+      tutor_name: 'Ona Mokytoja',
+      is_group: true,
+    };
+    const renderDialog = () => render(
+      <ExtraLessonsOfferDialog
+        open
+        onOpenChange={() => {}}
+        organizationId={LAISVI_VAIKIAI_ORG_ID}
+        students={[{ id: 's1', full_name: 'Emilija Bar', payer_email: 'a@test.lt' }]}
+        groups={[{ id: 'g1', name: 'Matematikos grupė' }]}
+        individualSubjects={[subject]}
+        onCreated={() => {}}
+      />,
+    );
+
+    const first = renderDialog();
+    const firstTypeSelect = screen.getAllByRole('combobox').find((el) => {
+      const options = Array.from((el as HTMLSelectElement).options || []);
+      return options.some((o) => o.textContent === 'Individuali');
+    }) as HTMLSelectElement;
+    fireEvent.change(firstTypeSelect, { target: { value: 'individual' } });
+    expect(screen.getByRole('option', { name: 'matematika — Ona Mokytoja' })).toBeTruthy();
+
+    first.unmount();
+    renderDialog();
+    const secondTypeSelect = screen.getAllByRole('combobox').find((el) => {
+      const options = Array.from((el as HTMLSelectElement).options || []);
+      return options.some((o) => o.textContent === 'Individuali');
+    }) as HTMLSelectElement;
+    fireEvent.change(secondTypeSelect, { target: { value: 'individual' } });
+    expect(screen.getByRole('option', { name: 'matematika — Ona Mokytoja' })).toBeTruthy();
+  });
+
   it('prefills group slots and keeps 6 EUR when a group is selected (Demo Mokykla)', async () => {
     render(
       <ExtraLessonsOfferDialog

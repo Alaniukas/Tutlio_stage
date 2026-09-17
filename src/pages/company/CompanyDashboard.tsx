@@ -713,7 +713,7 @@ export default function CompanyDashboard() {
 
   return (
     <>
-      <div className="max-w-5xl mx-auto space-y-6">
+      <div className="max-w-5xl mx-auto space-y-5 sm:space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Sveiki, {orgName}</h1>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -721,28 +721,28 @@ export default function CompanyDashboard() {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           {stats.map((s) => (
-            <div key={s.label} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <div key={s.label} className="min-w-0 bg-white rounded-2xl border border-gray-100 shadow-sm p-3.5 sm:p-4">
               <div className={`w-10 h-10 rounded-xl ${s.iconBg} ${s.iconColor} flex items-center justify-center mb-3`}>
                 {s.icon}
               </div>
               <p className="text-2xl font-bold text-gray-900">{s.value}</p>
-              <p className="text-xs font-medium text-gray-500 mt-0.5">{s.label}</p>
-              {s.sub && <p className="text-xs text-gray-400 mt-0.5">{s.sub}</p>}
+              <p className="mt-0.5 text-xs font-medium leading-snug text-gray-500">{s.label}</p>
+              {s.sub && <p className="mt-0.5 text-xs leading-snug text-gray-400">{s.sub}</p>}
             </div>
           ))}
         </div>
 
         {activeTutors > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2">
                   <CalendarDays className="w-5 h-5 text-blue-600" />
-                  <h2 className="text-lg font-bold text-gray-900">{t('companyDash.upcomingLessons')}</h2>
+                  <h2 className="text-base font-bold leading-snug text-gray-900 sm:text-lg">{t('companyDash.upcomingLessons')}</h2>
                 </div>
-                <Link to={`${orgBasePath}/sessions`} className="text-xs text-indigo-600 hover:underline flex items-center gap-1">
+                <Link to={`${orgBasePath}/sessions`} className="flex min-h-[44px] shrink-0 touch-manipulation items-center gap-1 text-right text-xs text-indigo-600 hover:underline">
                   {t('companyDash.allLabel')} <ChevronRight className="w-3 h-3" />
                 </Link>
               </div>
@@ -786,11 +786,11 @@ export default function CompanyDashboard() {
               )}
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2">
                   <AlertCircle className="w-5 h-5 text-amber-500" />
-                  <h2 className="text-lg font-bold text-gray-900">{t('companyDash.needsAttention')}</h2>
+                  <h2 className="text-base font-bold leading-snug text-gray-900 sm:text-lg">{t('companyDash.needsAttention')}</h2>
                 </div>
                 <div className="flex items-center gap-1">
                   <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded-md">
@@ -835,123 +835,121 @@ export default function CompanyDashboard() {
                     return (
                       <div
                         key={s.id}
-                        className="flex items-center gap-2 p-2.5 rounded-xl border border-amber-100/80 bg-amber-50/40 hover:bg-amber-50/70 hover:border-amber-200/80 transition-colors group"
+                        className="relative rounded-xl border border-amber-100/80 bg-amber-50/40 p-3 pl-5 transition-colors hover:border-amber-200/80 hover:bg-amber-50/70"
                       >
                         <div
-                          className={`w-1 self-stretch min-h-[2.75rem] rounded-full flex-shrink-0 ${
+                          className={`absolute bottom-3 left-2 top-3 w-1 rounded-full ${
                             hasAttendanceReason
                               ? (isProKlaseAdmin ? 'bg-amber-400' : 'bg-rose-400')
                               : hasTrialNoPackageReason
                                 ? 'bg-red-500'
                                 : isPendingConfirm
                                   ? 'bg-amber-400'
-                                  : 'bg-red-400'
+                                : 'bg-red-400'
                           }`}
                         />
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => openCompanyLessonModal(s.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              openCompanyLessonModal(s.id);
-                            }
-                          }}
-                          className="flex-1 min-w-0 cursor-pointer"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <p className="text-sm font-semibold text-gray-900 truncate">
-                              {s.student?.full_name || t('common.student')}
+                        <div className="flex items-start gap-2">
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => openCompanyLessonModal(s.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                openCompanyLessonModal(s.id);
+                              }
+                            }}
+                            className="min-w-0 flex-1 cursor-pointer py-1"
+                          >
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p className="truncate text-sm font-semibold text-gray-900">
+                                {s.student?.full_name || t('common.student')}
+                              </p>
+                              {hasPaymentReason && !hasAttendanceReason && (
+                                <div className="origin-left scale-[0.85] shrink-0">
+                                  <StatusBadge
+                                    status={s.status}
+                                    paymentStatus={s.payment_status}
+                                    paid={s.paid}
+                                    endTime={s.end_time}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                            <p className="mt-0.5 text-xs leading-relaxed text-gray-500 sm:truncate">
+                              {format(start, 'd MMM, HH:mm', { locale: dateFnsLocale })}
+                              {' · '}
+                              {s.tutor_name || '—'}
+                              {hasTrialNoPackageReason && (
+                                <>
+                                  {' · '}
+                                  <span className="text-red-600 font-medium">{t('dash.trialNoPackage')}</span>
+                                </>
+                              )}
+                              {hasAttendanceReason && (
+                                <>
+                                  {' · '}
+                                  <span className={isProKlaseAdmin ? 'text-amber-700 font-medium' : 'text-rose-600 font-medium'}>
+                                    {attendanceAttentionSummary(s, t, isProKlaseAdmin)}
+                                  </span>
+                                </>
+                              )}
+                              {hasPaymentReason && (
+                                <>
+                                  {' · '}
+                                  <span className="font-medium">
+                                    {isPendingConfirm ? (
+                                      <span className="text-amber-700">{t('dash.reasonPendingConfirm')}</span>
+                                    ) : diffMs <= 0 ? (
+                                      <span className="text-red-600">{t('dash.deadlinePassed')}</span>
+                                    ) : (
+                                      <span className="text-orange-600">
+                                        {t('dash.hoursLeft').replace('{n}', String(remainingHours))}
+                                      </span>
+                                    )}
+                                  </span>
+                                </>
+                              )}
                             </p>
-                            {hasPaymentReason && !hasAttendanceReason && (
-                              <div className="scale-[0.85] origin-left shrink-0">
-                                <StatusBadge
-                                  status={s.status}
-                                  paymentStatus={s.payment_status}
-                                  paid={s.paid}
-                                  endTime={s.end_time}
-                                />
-                              </div>
-                            )}
                           </div>
-                          <p className="text-xs text-gray-500 truncate mt-0.5">
-                            {format(start, 'd MMM, HH:mm', { locale: dateFnsLocale })}
-                            {' · '}
-                            {s.tutor_name || '—'}
-                            {hasTrialNoPackageReason && (
-                              <>
-                                {' · '}
-                                <span className="text-red-600 font-medium">{t('dash.trialNoPackage')}</span>
-                              </>
-                            )}
-                            {hasAttendanceReason && (
-                              <>
-                                {' · '}
-                                <span className={isProKlaseAdmin ? 'text-amber-700 font-medium' : 'text-rose-600 font-medium'}>
-                                  {attendanceAttentionSummary(s, t, isProKlaseAdmin)}
-                                </span>
-                              </>
-                            )}
-                            {hasPaymentReason && (
-                              <>
-                                {' · '}
-                                <span className="font-medium">
-                                  {isPendingConfirm ? (
-                                    <span className="text-amber-700">{t('dash.reasonPendingConfirm')}</span>
-                                  ) : diffMs <= 0 ? (
-                                    <span className="text-red-600">{t('dash.deadlinePassed')}</span>
-                                  ) : (
-                                    <span className="text-orange-600">
-                                      {t('dash.hoursLeft').replace('{n}', String(remainingHours))}
-                                    </span>
-                                  )}
-                                </span>
-                              </>
-                            )}
-                          </p>
+                          {companyAttentionRowsKey && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                dismissCompanyAttentionRow(s.id);
+                              }}
+                              className="flex min-h-[44px] min-w-[44px] flex-shrink-0 touch-manipulation items-center justify-center rounded-xl text-gray-400 hover:bg-white/70 hover:text-gray-600"
+                              aria-label={t('dash.dismissRow')}
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                         {hasAttendanceReason
-                          && isProKlaseAdmin
-                          && end.getTime() <= Date.now() && (
-                          <button
-                            type="button"
-                            disabled={markingNoShow}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void handleConfirmAttended(s);
-                            }}
-                            className="shrink-0 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 px-2 py-1 rounded-lg hover:bg-emerald-50 transition-colors disabled:opacity-50"
-                          >
-                            {t('compSess.markAttended')}
-                          </button>
-                        )}
-                        {hasAttendanceReason && s.status !== 'no_show'
-                          && (!isProKlaseAdmin || end.getTime() <= Date.now()) && (
-                          <button
-                            type="button"
-                            disabled={markingNoShow}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setNoShowTarget(s);
-                            }}
-                            className="shrink-0 text-[11px] font-semibold text-rose-700 hover:text-rose-800 px-2 py-1 rounded-lg hover:bg-rose-50 transition-colors disabled:opacity-50"
-                          >
-                            {t('companyDash.confirmNoShowShort')}
-                          </button>
-                        )}
-                        {companyAttentionRowsKey && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              dismissCompanyAttentionRow(s.id);
-                            }}
-                            className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-white/70 flex-shrink-0"
-                            aria-label={t('dash.dismissRow')}
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
+                          && (isProKlaseAdmin ? end.getTime() <= Date.now() : s.status !== 'no_show') && (
+                          <div className="mt-2 flex gap-2">
+                            {isProKlaseAdmin && (
+                              <button
+                                type="button"
+                                disabled={markingNoShow}
+                                onClick={() => void handleConfirmAttended(s)}
+                                className="flex min-h-[44px] flex-1 touch-manipulation items-center justify-center rounded-xl px-3 py-2 text-center text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-50 disabled:opacity-50"
+                              >
+                                {t('compSess.markAttended')}
+                              </button>
+                            )}
+                            {s.status !== 'no_show' && (
+                              <button
+                                type="button"
+                                disabled={markingNoShow}
+                                onClick={() => setNoShowTarget(s)}
+                                className="flex min-h-[44px] flex-1 touch-manipulation items-center justify-center rounded-xl px-3 py-2 text-center text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:opacity-50"
+                              >
+                                {t('companyDash.confirmNoShowShort')}
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     );
@@ -977,15 +975,15 @@ export default function CompanyDashboard() {
         {(activeTutors > 0 || (showFinanceTotals && recentPayments.length > 0)) && (
           <div className={`grid gap-6 ${activeTutors > 0 && showFinanceTotals && recentPayments.length > 0 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
             {showFinanceTotals && (
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2">
                   <CreditCard className="w-5 h-5 text-emerald-600" />
-                  <h2 className="text-lg font-bold text-gray-900">{t('companyDash.recentPayments')}</h2>
+                  <h2 className="text-base font-bold leading-snug text-gray-900 sm:text-lg">{t('companyDash.recentPayments')}</h2>
                 </div>
                 <Link
                   to={orgBasePath === '/school' ? `${orgBasePath}/finance?tab=payments` : `${orgBasePath}/finance`}
-                  className="text-xs text-indigo-600 hover:underline flex items-center gap-1"
+                  className="flex min-h-[44px] shrink-0 touch-manipulation items-center gap-1 text-right text-xs text-indigo-600 hover:underline"
                 >
                   {t('common.finance')} <ChevronRight className="w-3 h-3" />
                 </Link>
@@ -1008,8 +1006,8 @@ export default function CompanyDashboard() {
               ) : (
                 <div className="space-y-2">
                   {visibleCompanyPayments.map((p) => (
-                    <div key={p.id} className="flex items-center gap-1 p-3 rounded-xl bg-gray-50">
-                      <div className="flex items-center justify-between gap-3 flex-1 min-w-0">
+                    <div key={p.id} className="flex items-center gap-1 rounded-xl bg-gray-50 p-3 pr-1.5">
+                      <div className="flex min-w-0 flex-1 items-center justify-between gap-2 sm:gap-3">
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-gray-900 truncate">{p.title}</p>
                           <p className="text-xs text-gray-500 mt-0.5">{p.subtitle}</p>
@@ -1025,7 +1023,7 @@ export default function CompanyDashboard() {
                         <button
                           type="button"
                           onClick={() => dismissCompanyPaymentRow(p.id)}
-                          className="p-1.5 h-fit rounded-lg text-gray-400 hover:text-gray-700 hover:bg-white flex-shrink-0 self-center"
+                          className="flex min-h-[44px] min-w-[44px] flex-shrink-0 touch-manipulation items-center justify-center self-center rounded-xl text-gray-400 hover:bg-white hover:text-gray-700"
                           aria-label={t('dash.dismissRow')}
                         >
                           <X className="w-4 h-4" />
@@ -1051,13 +1049,13 @@ export default function CompanyDashboard() {
             )}
 
             {activeTutors > 0 ? (
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-2">
                     <CheckCircle className="w-5 h-5 text-red-400" />
-                    <h2 className="text-lg font-bold text-gray-900">{t('companyDash.cancelledPaid')}</h2>
+                    <h2 className="text-base font-bold leading-snug text-gray-900 sm:text-lg">{t('companyDash.cancelledPaid')}</h2>
                   </div>
-                  <Link to={`${orgBasePath}/sessions`} className="text-xs text-indigo-600 hover:underline flex items-center gap-1">
+                  <Link to={`${orgBasePath}/sessions`} className="flex min-h-[44px] shrink-0 touch-manipulation items-center gap-1 text-right text-xs text-indigo-600 hover:underline">
                     {t('companyDash.allLabel')} <ChevronRight className="w-3 h-3" />
                   </Link>
                 </div>

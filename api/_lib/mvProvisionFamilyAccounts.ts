@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { findAuthUserByEmail, isAuthEmailAlreadyRegistered } from './findAuthUserByEmail.js';
 import { generateTempPassword } from './generateTempPassword.js';
 import { generateStudentLoginName } from './generateStudentLoginName.js';
-import { isMoksloVaisiaiOrg } from './marketMoney.js';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from './marketMoney.js';
 import { sendMvAccountActivationEmail } from './sendMvFamilyAccountsEmail.js';
 import { inviteEmailLocale, orgAwareOrigin } from './public-origin.js';
 import {
@@ -357,9 +357,10 @@ export async function provisionMvFamilyAccounts(
   }
 
   const organizationId = selectedStudent.organization_id;
-  if (!isMoksloVaisiaiOrg(organizationId)) {
-    return { ok: false, status: 403, error: 'Only Mokslo vaisiai org supports account provisioning', code: 'org_not_mv' };
+  if (!isMoksloVaisiaiOrg(organizationId) && !isProKlaseOrg(organizationId)) {
+    return { ok: false, status: 403, error: 'This organization does not support managed family accounts', code: 'org_not_supported' };
   }
+  const studentLoginPrefix = isProKlaseOrg(organizationId) ? 'pk' : 'mv';
 
   const loadedStudents = await loadProvisionStudents(supabase, selectedStudent, input.studentIds);
   if ('error' in loadedStudents) {
@@ -529,7 +530,7 @@ export async function provisionMvFamilyAccounts(
     const studentPassword = generateTempPassword();
     let studentLoginName = validEmail(studentEmail)
       ? null
-      : generateStudentLoginName();
+      : generateStudentLoginName(studentLoginPrefix);
     let studentAuthEmail = studentLoginName
       ? loginIdentifierToEmail(studentLoginName)
       : studentEmail;
@@ -546,7 +547,7 @@ export async function provisionMvFamilyAccounts(
     // A generated handle has a very large keyspace, but Auth remains the source of
     // truth for uniqueness. Retry a collision instead of failing the whole flow.
     for (let attempt = 1; studentLoginName && 'error' in studentAuth && studentAuth.code === 'email_already_registered' && attempt < 5; attempt += 1) {
-      studentLoginName = generateStudentLoginName();
+      studentLoginName = generateStudentLoginName(studentLoginPrefix);
       studentAuthEmail = loginIdentifierToEmail(studentLoginName);
       studentAuth = await ensureMvAuthUser(supabase, {
         email: studentAuthEmail,

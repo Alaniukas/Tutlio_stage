@@ -383,7 +383,7 @@ export default function SchoolDashboard() {
 
   return (
     <>
-      <div className="mx-auto max-w-6xl space-y-6">
+      <div className="mx-auto max-w-6xl space-y-5 sm:space-y-6">
         <header>
           <h1 className="text-2xl font-bold text-gray-900">{t('schoolDash.greeting', { name: membership?.organizationName || '' })}</h1>
           <p className="mt-0.5 text-sm text-gray-500">
@@ -391,15 +391,15 @@ export default function SchoolDashboard() {
           </p>
         </header>
 
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
           {summaryCards.map(({ label, value, sub, icon: Icon, tone }) => (
-            <div key={label} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+            <div key={label} className="min-w-0 rounded-2xl border border-gray-100 bg-white p-3.5 shadow-sm sm:p-4">
               <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-xl ${tone}`}>
                 <Icon className="h-5 w-5" />
               </div>
               <p className="text-2xl font-bold text-gray-900">{value}</p>
-              <p className="mt-0.5 text-xs font-medium text-gray-600">{label}</p>
-              <p className="mt-0.5 text-xs text-gray-400">{sub}</p>
+              <p className="mt-0.5 text-xs font-medium leading-snug text-gray-600">{label}</p>
+              <p className="mt-0.5 text-xs leading-snug text-gray-400">{sub}</p>
             </div>
           ))}
         </div>
@@ -514,36 +514,38 @@ export default function SchoolDashboard() {
               ) : (
                 <div className="space-y-2">
                   {visibleAttention.map(row => (
-                    <div key={row.id} className="flex items-center gap-2 rounded-xl border border-amber-100 bg-amber-50/40 p-3">
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/school/sessions?open=${encodeURIComponent(row.id)}`)}
-                        className="min-w-0 flex-1 text-left"
-                      >
-                        <p className="truncate text-sm font-semibold text-gray-900">{row.student_name}</p>
-                        <p className="mt-0.5 truncate text-xs text-gray-500">
-                          {format(schoolDate(row.start_time), 'd MMM, HH:mm', { locale: dateFnsLocale })}
-                          {' · '}{row.tutor_name}
-                        </p>
-                        <p className="mt-1 text-xs font-medium text-rose-700">{attendanceIssueLabel(row, t)}</p>
-                      </button>
+                    <div key={row.id} className="rounded-xl border border-amber-100 bg-amber-50/40 p-3">
+                      <div className="flex items-start gap-2">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/school/sessions?open=${encodeURIComponent(row.id)}`)}
+                          className="min-w-0 flex-1 py-1 text-left"
+                        >
+                          <p className="truncate text-sm font-semibold text-gray-900">{row.student_name}</p>
+                          <p className="mt-0.5 text-xs leading-relaxed text-gray-500 sm:truncate">
+                            {format(schoolDate(row.start_time), 'd MMM, HH:mm', { locale: dateFnsLocale })}
+                            {' · '}{row.tutor_name}
+                          </p>
+                          <p className="mt-1 text-xs font-medium leading-relaxed text-rose-700">{attendanceIssueLabel(row, t)}</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => dismiss(row.id)}
+                          className="flex min-h-[44px] min-w-[44px] shrink-0 touch-manipulation items-center justify-center rounded-xl text-gray-400 hover:bg-white hover:text-gray-700"
+                          aria-label={t('dash.dismissRow')}
+                        >
+                          ×
+                        </button>
+                      </div>
                       {row.status !== 'no_show' ? (
                         <button
                           type="button"
                           onClick={() => setNoShowTarget(row)}
-                          className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50"
+                          className="mt-2 flex min-h-[44px] w-full touch-manipulation items-center justify-center rounded-xl px-3 py-2 text-center text-xs font-semibold text-rose-700 hover:bg-rose-50"
                         >
                           {t('companyDash.confirmNoShowShort')}
                         </button>
                       ) : null}
-                      <button
-                        type="button"
-                        onClick={() => dismiss(row.id)}
-                        className="shrink-0 rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-white hover:text-gray-700"
-                        aria-label={t('dash.dismissRow')}
-                      >
-                        ×
-                      </button>
                     </div>
                   ))}
                   {dismissedIds.size > 0 && visibleAttention.length > 0 ? (
@@ -661,14 +663,14 @@ function DashboardSection({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
+    <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:p-5">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2">
           <Icon className={`h-5 w-5 shrink-0 ${iconClassName}`} />
-          <h2 className="truncate text-lg font-bold text-gray-900">{title}</h2>
+          <h2 className="text-base font-bold leading-snug text-gray-900 sm:text-lg">{title}</h2>
         </div>
         {link && linkLabel ? (
-          <Link to={link} className="flex shrink-0 items-center gap-1 text-xs font-medium text-indigo-600 hover:underline">
+          <Link to={link} className="flex min-h-[44px] shrink-0 touch-manipulation items-center gap-1 text-right text-xs font-medium text-indigo-600 hover:underline">
             {linkLabel}<ChevronRight className="h-3 w-3" />
           </Link>
         ) : null}

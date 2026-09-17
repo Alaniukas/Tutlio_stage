@@ -116,6 +116,10 @@ import {
   sessionStatusI18nKey,
   type MergedClassGroupSession,
 } from '@/lib/schoolClassGroupSessions';
+import {
+  isMergedGroupSubjectSession,
+  mergeGroupSubjectSessions,
+} from '@/lib/groupSubjectSessions';
 import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
 import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
 import { sessionPaymentDisplayKind } from '@/lib/sessionPaymentDisplay';
@@ -283,6 +287,8 @@ interface Session {
   _classGroupName?: string;
   _classGroupSessions?: Session[];
   _classGroupMembers?: Array<{ student_id: string; full_name: string; grade?: string | null }>;
+  _isGroup?: boolean;
+  _groupSessions?: Session[];
   student?: {
     full_name: string;
     email?: string;
@@ -1076,10 +1082,14 @@ export default function CompanyTvarkarastis() {
   const classGroupMeta = useMemo(() => buildClassGroupMetaMap(classGroups), [classGroups]);
 
   const mergedCalendarSessions = useMemo(() => {
-    return mergeSchoolClassGroupSessions(filteredSessions, classGroupMeta, {
+    const classGroupSessions = mergeSchoolClassGroupSessions(filteredSessions, classGroupMeta, {
       preferCancelledOccurrence: isLaisviVaikai,
     }) as Session[];
-  }, [filteredSessions, classGroupMeta, isLaisviVaikai]);
+    return mergeGroupSubjectSessions(classGroupSessions, subjects, {
+      groupLesson: t('cal.groupLesson'),
+      seats: t('cal.seatsMany'),
+    }) as Session[];
+  }, [filteredSessions, classGroupMeta, isLaisviVaikai, subjects, t]);
 
   const recurringSessionCounts = useMemo(
     () => buildRecurringSessionCounts(mergedCalendarSessions),
@@ -1854,6 +1864,21 @@ export default function CompanyTvarkarastis() {
           topic: base._classGroupName || displayRow.topic,
           tutor: base.tutor,
         });
+      } else if (isMergedGroupSubjectSession(base) && base._groupSessions) {
+        setIsGroupSession(true);
+        setIsClassGroupSession(false);
+        setClassGroupParticipants([]);
+        setSelectedGroupSessions(base._groupSessions);
+        const displayRow = (
+          isLaisviVaikai
+            ? pickClassGroupOccurrenceSession(base._groupSessions)
+            : base._groupSessions.find((row) => row.status === base.status)
+        ) ?? base._groupSessions[0];
+        setSelectedEvent({
+          ...displayRow,
+          topic: displayRow.topic || base.topic,
+          tutor: base.tutor,
+        });
       } else {
         setIsGroupSession(false);
         setIsClassGroupSession(false);
@@ -1864,7 +1889,7 @@ export default function CompanyTvarkarastis() {
       setIsEditingSession(false);
       setIsEventDetailOpen(true);
 
-      if (isMergedClassGroupSession(base)) return;
+      if (isMergedClassGroupSession(base) || isMergedGroupSubjectSession(base)) return;
 
       const sid = base.id;
       void (async () => {
@@ -1976,6 +2001,7 @@ export default function CompanyTvarkarastis() {
           organizationId,
           isClassGroupSession,
           alreadyRecurring: Boolean(selectedEvent.recurring_session_id),
+          isTrialSession: Boolean(selectedEvent.subject_id && trialSubjectIds.has(selectedEvent.subject_id)),
         }) && editMakeRecurring;
 
       if (canConvertToRecurring) {
@@ -2863,7 +2889,6 @@ export default function CompanyTvarkarastis() {
         individualPrice: bookPricing?.price,
         fallbackPrice: bookTsp?.price ?? subj?.price ?? 0,
       });
-
       const createPayload: OrgAdminCreateSessionInput = {
         supabase,
         createTutorId: bookContext.tutorId,
@@ -4976,6 +5001,7 @@ export default function CompanyTvarkarastis() {
                 organizationId,
                 isClassGroupSession,
                 alreadyRecurring: Boolean(selectedEvent.recurring_session_id),
+                isTrialSession: Boolean(selectedEvent.subject_id && trialSubjectIds.has(selectedEvent.subject_id)),
               }) && (
                 <RecurrenceFields
                   enabled={editMakeRecurring}

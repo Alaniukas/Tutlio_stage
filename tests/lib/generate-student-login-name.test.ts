@@ -11,4 +11,10 @@ describe('generateStudentLoginName', () => {
       expect(isStudentLoginName(loginName)).toBe(true);
     }
   });
+
+  it('creates Pro Klasė usernames with the same safe alphabet', () => {
+    const loginName = generateStudentLoginName('pk');
+    expect(loginName).toMatch(/^pk-[a-hj-km-np-z2-9]{4}-[a-hj-km-np-z2-9]{4}$/);
+    expect(isStudentLoginName(loginName)).toBe(true);
+  });
 });

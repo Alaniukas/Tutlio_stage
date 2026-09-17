@@ -69,6 +69,7 @@ import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import { buildNoShowSessionPatch, noShowWhenLabelLt, type NoShowWhen } from '@/lib/noShowWhen';
 import { useDismissibleDashboardItemIds } from '@/hooks/useDismissibleDashboardItemIds';
 import { sessionCommentDeliveryNeeded, sessionCommentDeliveryRecipients } from '@/lib/sessionCommentDelivery';
+import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
 
 interface Session {
     id: string;
@@ -686,11 +687,16 @@ export default function DashboardPage() {
 
         if (!error) {
             // Send email to student
-            const studentEmail = await supabase.from('students').select('email').eq('id', selectedSession.student_id).single();
-            if (studentEmail?.data?.email && selectedSession.student) {
+            const { data: studentRow } = await supabase
+                .from('students')
+                .select('email, payer_email, linked_user_id, organization_id, tutor_id')
+                .eq('id', selectedSession.student_id)
+                .single();
+            const studentNotifyTo = await resolveStudentNotificationEmail(studentRow);
+            if (studentNotifyTo && selectedSession.student) {
                 await sendEmail({
                     type: 'payment_rejection_reminder',
-                    to: studentEmail.data.email,
+                    to: studentNotifyTo,
                     data: {
                         studentName: selectedSession.student.full_name,
                         tutorName: tutorName,
@@ -722,7 +728,12 @@ export default function DashboardPage() {
 
         setSaving(true);
         const { data: { user } } = await supabase.auth.getUser();
-        const { data: studentData } = await supabase.from('students').select('email').eq('id', selectedSession.student_id || '').single();
+        const { data: studentData } = await supabase
+            .from('students')
+            .select('email, payer_email, linked_user_id, organization_id, tutor_id')
+            .eq('id', selectedSession.student_id || '')
+            .single();
+        const studentNotifyTo = await resolveStudentNotificationEmail(studentData);
         const studentName = selectedSession.student?.full_name || '';
 
         const { success, error } = await cancelSessionAndFillWaitlist({
@@ -732,7 +743,7 @@ export default function DashboardPage() {
             cancelledBy: 'tutor',
             studentName,
             tutorName,
-            studentEmail: studentData?.email || null,
+            studentEmail: studentNotifyTo,
             tutorEmail: user?.email || null,
             leaveFreeTime: leaveFreeTimeOnCancel,
         });
@@ -854,13 +865,18 @@ export default function DashboardPage() {
                     }
                 }
 
-                // Notify only student about lesson reschedule
-                const { data: studentData } = await supabase.from('students').select('email').eq('id', selectedSession.student_id).single();
+                // Managed child username accounts receive email through the parent inbox.
+                const { data: studentData } = await supabase
+                    .from('students')
+                    .select('email, payer_email, linked_user_id, organization_id, tutor_id')
+                    .eq('id', selectedSession.student_id)
+                    .single();
+                const studentNotifyTo = await resolveStudentNotificationEmail(studentData);
 
-                if (studentData?.email) {
+                if (studentNotifyTo) {
                     await sendEmail({
                         type: 'lesson_rescheduled',
-                        to: studentData.email,
+                        to: studentNotifyTo,
                         data: {
                             studentName: selectedSession.student?.full_name || '',
                             tutorName,
@@ -1236,7 +1252,7 @@ export default function DashboardPage() {
                     <div className="w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
                 </div>
             ) : (
-            <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
+            <div className="max-w-5xl mx-auto space-y-5 sm:space-y-6 animate-fade-in">
                 {/* Greeting – centered */}
                 <div className="mb-2 text-center">
                     <h1 className="text-2xl font-bold text-gray-900">
@@ -1277,7 +1293,7 @@ export default function DashboardPage() {
 
                 {/* Top stats – centered when few cards (e.g. org_tutor) */}
                 <div className={cn(
-                  'grid gap-4',
+                  'grid gap-3 sm:gap-4',
                   isOrgTutor === true ? 'grid-cols-2 max-w-md mx-auto' : 'grid-cols-2 md:grid-cols-4'
                 )}>
                     <div className="stat-card">
@@ -1330,9 +1346,9 @@ export default function DashboardPage() {
                 </div>
 
                 {requiresStatusConfirmation && pendingStatusSessions.length > 0 && (
-                    <div className="bg-white rounded-2xl shadow-sm border-2 border-amber-300 p-5 mb-6">
-                        <div className="flex items-center justify-between mb-1">
-                            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <div className="bg-white rounded-2xl shadow-sm border-2 border-amber-300 p-4 sm:p-5 mb-6">
+                        <div className="flex items-start justify-between gap-3 mb-1">
+                            <h2 className="text-base sm:text-lg font-bold text-gray-900 flex items-start gap-2 leading-snug">
                                 <AlertCircle className="w-5 h-5 text-amber-600" />
                                 {t('dash.confirmStatusesTitle')}
                             </h2>
@@ -1353,12 +1369,12 @@ export default function DashboardPage() {
                                             {s.subjects?.name ? ` · ${s.subjects.name}` : s.topic ? ` · ${s.topic}` : ''}
                                         </p>
                                     </div>
-                                    <div className="flex flex-wrap gap-1.5">
+                                    <div className="grid w-full grid-cols-2 gap-2 sm:w-auto sm:flex sm:flex-wrap">
                                         <Button
                                             size="sm"
                                             disabled={confirmingStatusId === s.id}
                                             onClick={() => void confirmLessonStatus(s, 'completed')}
-                                            className="rounded-lg h-8 px-2.5 text-xs bg-green-600 hover:bg-green-700 text-white"
+                                            className="min-h-[44px] rounded-xl px-3 py-2 text-xs bg-green-600 hover:bg-green-700 text-white touch-manipulation"
                                         >
                                             <CheckCircle className="w-3.5 h-3.5 mr-1" />
                                             {t('dash.statusHappened')}
@@ -1369,7 +1385,7 @@ export default function DashboardPage() {
                                             variant="outline"
                                             disabled={confirmingStatusId === s.id}
                                             onClick={() => void confirmLessonStatus(s, 'completed', true)}
-                                            className="rounded-lg h-8 px-2.5 text-xs text-amber-800 border-amber-300 hover:bg-amber-100"
+                                            className="min-h-[44px] rounded-xl px-3 py-2 text-xs text-amber-800 border-amber-300 hover:bg-amber-100 touch-manipulation"
                                         >
                                             <Clock className="w-3.5 h-3.5 mr-1" />
                                             {t('dash.statusHappenedLate')}
@@ -1380,7 +1396,7 @@ export default function DashboardPage() {
                                             variant="outline"
                                             disabled={confirmingStatusId === s.id}
                                             onClick={() => void confirmLessonStatus(s, 'no_show')}
-                                            className="rounded-lg h-8 px-2.5 text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
+                                            className="min-h-[44px] rounded-xl px-3 py-2 text-xs text-rose-700 border-rose-200 hover:bg-rose-50 touch-manipulation"
                                         >
                                             <UserX className="w-3.5 h-3.5 mr-1" />
                                             {t('dash.statusNoShow')}
@@ -1391,7 +1407,7 @@ export default function DashboardPage() {
                                             variant="outline"
                                             disabled={confirmingStatusId === s.id}
                                             onClick={() => void confirmLessonStatus(s, 'cancelled')}
-                                            className="rounded-lg h-8 px-2.5 text-xs text-gray-700 border-gray-300 hover:bg-gray-100"
+                                            className="min-h-[44px] rounded-xl px-3 py-2 text-xs text-gray-700 border-gray-300 hover:bg-gray-100 touch-manipulation"
                                         >
                                             <XCircle className="w-3.5 h-3.5 mr-1" />
                                             {t('dash.statusCancelled')}

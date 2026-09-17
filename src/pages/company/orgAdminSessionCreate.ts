@@ -122,6 +122,24 @@ export async function resolveOrCreateTrialSubject(
       throw new Error(trialErr?.message || 'Nepavyko sukurti bandomosios pamokos dalyko.');
     }
     trialSubject = createdTrial as SubjectLite;
+  } else {
+    const { error: updateTrialError } = await supabase
+      .from('subjects')
+      .update({
+        name: trialName,
+        duration_minutes: trialDuration,
+        price: trialPriceDefault,
+      })
+      .eq('id', trialSubject.id);
+    if (updateTrialError) {
+      console.error('[OrgSchedule] trial subject defaults refresh failed:', updateTrialError.message);
+    }
+    trialSubject = {
+      ...trialSubject,
+      name: trialName,
+      duration_minutes: trialDuration,
+      price: trialPriceDefault,
+    };
   }
 
   const requestedPrice = Number(priceOverride);
@@ -679,6 +697,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       ),
     ),
   ];
+  if (createFirstLessonIsTrial && (isGroupLesson || studentIdsToCreate.length !== 1)) {
+    throw new Error('Pirma bandomoji pamoka galima tik individualiam pasikartojančiam grafikui.');
+  }
 
   const startDate = new Date(createStartTime);
   const endDate = new Date(createEndTime);
@@ -819,6 +840,18 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       }
     }
 
+    const firstTrialTemplate = createFirstLessonIsTrial
+      ? recurringTemplates.reduce<RecurringTpl | null>((earliest, template) => {
+          if (!earliest) return template;
+          return template.firstOccurrence.getTime() < earliest.firstOccurrence.getTime()
+            ? template
+            : earliest;
+        }, null)
+      : null;
+    const firstTrialMeta = firstTrialTemplate
+      ? await resolveOrCreateTrialSubject(supabase, createTutorId, undefined, { useOrgPriceOnly: true })
+      : null;
+
     type PackageForRecurring = {
       id: string;
       available_lessons: number;
@@ -858,7 +891,16 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     for (const template of recurringTemplates) {
       let current = new Date(template.firstOccurrence);
       while (!isBefore(endLimit, current)) {
-        const sessionEnd = new Date(current.getTime() + durationMs);
+        const trialMetaForOccurrence =
+          firstTrialMeta &&
+          firstTrialTemplate?.id === template.id &&
+          current.getTime() === firstTrialTemplate.firstOccurrence.getTime()
+            ? firstTrialMeta
+            : null;
+        const occurrenceDurationMs = trialMetaForOccurrence
+          ? trialMetaForOccurrence.durationMinutes * 60_000
+          : durationMs;
+        const sessionEnd = new Date(current.getTime() + occurrenceDurationMs);
         const studentPaymentModel = paymentModelByStudentId.get(template.student_id) ?? null;
         let sessionPaid = createIsPaid;
         let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentPaymentModel, {
@@ -866,7 +908,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           hasPackage: false,
         });
         let lessonPackageId: string | null = null;
-        if (!createIsPaid) {
+        if (!createIsPaid && !trialMetaForOccurrence) {
           const pkg = packagesByStudent.get(template.student_id);
           if (pkg) {
             const used = packagesUsage.get(pkg.id) || 0;
@@ -892,13 +934,15 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
         sessionsRows.push({
           tutor_id: createTutorId,
           student_id: template.student_id,
-          subject_id: createSubjectId || null,
+          subject_id: trialMetaForOccurrence ? trialMetaForOccurrence.subject.id : (createSubjectId || null),
           start_time: current.toISOString(),
           end_time: sessionEnd.toISOString(),
           status: 'active',
           meeting_link: createMeetingLink || null,
-          topic: createTopic || null,
-          price: priceByStudentId.get(template.student_id) ?? createPrice,
+          topic: trialMetaForOccurrence ? trialMetaForOccurrence.topic : (createTopic || null),
+          price: trialMetaForOccurrence
+            ? trialMetaForOccurrence.price
+            : (priceByStudentId.get(template.student_id) ?? createPrice),
           paid: sessionPaid,
           payment_status: sessionPaymentStatus,
           lesson_package_id: lessonPackageId,
@@ -913,24 +957,6 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
             : {}),
         });
         current = advanceRecurringOccurrence(current, freq);
-      }
-    }
-
-    if (createFirstLessonIsTrial && sessionsRows.length > 0) {
-      const trialMeta = await resolveOrCreateTrialSubject(supabase, createTutorId, undefined, {
-        useOrgPriceOnly: true,
-      });
-      const firstRow = [...sessionsRows].sort(
-        (a, b) => new Date(String(a.start_time)).getTime() - new Date(String(b.start_time)).getTime(),
-      )[0];
-      if (firstRow) {
-        const firstStart = new Date(String(firstRow.start_time));
-        firstRow.subject_id = trialMeta.subject.id;
-        firstRow.price = trialMeta.price;
-        firstRow.end_time = new Date(firstStart.getTime() + trialMeta.durationMinutes * 60 * 1000).toISOString();
-        if (!String(firstRow.topic || '').trim()) {
-          firstRow.topic = trialMeta.topic;
-        }
       }
     }
 
@@ -1275,6 +1301,7 @@ type SessionAnchorSnapshot = {
   show_comment_to_parent: boolean | null;
   recurring_session_id: string | null;
   created_by_role: string | null;
+  subjects?: { is_trial?: boolean | null } | Array<{ is_trial?: boolean | null }> | null;
 };
 
 const SESSION_ANCHOR_SNAPSHOT_SELECT = [
@@ -1295,6 +1322,7 @@ const SESSION_ANCHOR_SNAPSHOT_SELECT = [
   'show_comment_to_parent',
   'recurring_session_id',
   'created_by_role',
+  'subjects(is_trial)',
 ].join(', ');
 
 /** Pro Klasė: turn a one-off org-admin lesson into a recurring series (anchor row is updated, future rows inserted). */
@@ -1358,6 +1386,12 @@ export async function convertOrgAdminSessionToRecurring(
   const originalAnchor = originalAnchorRow as unknown as SessionAnchorSnapshot;
   if (originalAnchor.recurring_session_id) {
     throw new Error('Ši pamoka jau priklauso pasikartojančiam grafikui.');
+  }
+  const originalSubject = Array.isArray(originalAnchor.subjects)
+    ? originalAnchor.subjects[0]
+    : originalAnchor.subjects;
+  if (originalSubject?.is_trial === true) {
+    throw new Error('Bandomosios pamokos negalima paversti pasikartojančiu grafiku.');
   }
 
   const durationMs = newEnd.getTime() - newStart.getTime();

@@ -14,6 +14,7 @@ import {
   isTrialReservationFlowEnabled,
   getTrialReservationDeadlineHours,
   trialReservationExpiryIso,
+  trialReservationRange,
   sendTrialRegistrationInvites,
 } from './_lib/trialReservation.js';
 import { isProKlaseOrg } from './_lib/marketMoney.js';
@@ -290,12 +291,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // (status='active' so it blocks the calendar; payment_status='reserved' until
     // paid). An unpaid hold auto-releases after the org's deadline via cron.
     if (!linkedSession && isTrialReservationFlowEnabled(features, org?.id, orgEntityType) && startIso && endIso) {
-      const start = new Date(startIso);
-      const end = new Date(endIso);
-      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) {
+      const requestedEnd = new Date(endIso);
+      const trialRange = trialReservationRange(startIso, trialDuration);
+      if (!trialRange || Number.isNaN(requestedEnd.getTime()) || requestedEnd.getTime() <= trialRange.start.getTime()) {
         await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
         return json(res, 400, { error: 'Netinkamas bandomosios pamokos laikas' });
       }
+      const { start, end } = trialRange;
 
       const { data: conflicts } = await supabase
         .from('sessions')

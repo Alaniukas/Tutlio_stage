@@ -152,6 +152,34 @@ describe('CompanyStudents Pro Klasė list', () => {
     expect(screen.getByPlaceholderText('Parašykite komentarą apie šį mokinį...')).toBeTruthy();
   });
 
+  it('allows separate student and parent phone numbers for every company organization', () => {
+    render(
+      <MemoryRouter initialEntries={['/company/students']}>
+        <CompanyStudents />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+
+    expect(screen.getByText('Telefonas')).toBeTruthy();
+    expect(screen.getByText('Tėvų / globėjų kontaktai · Telefonas')).toBeTruthy();
+  });
+
+  it('offers managed parent and child accounts, including siblings on one parent email', () => {
+    render(
+      <MemoryRouter initialEntries={['/company/students']}>
+        <CompanyStudents />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+
+    expect(screen.getByRole('button', { name: /Sukurti paskyras iš karto/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
+    expect(screen.getByText('Vaikas Nr. 1')).toBeTruthy();
+    expect(screen.getByText('Vaikas Nr. 2')).toBeTruthy();
+  });
+
   it('does not mark a failed meeting-link write as saved and requests the persisted value', async () => {
     const updates = vi.fn();
     const selections = vi.fn();

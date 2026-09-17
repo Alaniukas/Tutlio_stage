@@ -28,19 +28,23 @@ export function fillDocxTemplateBuffer(params: {
 export async function renderDocxBufferToPdfBuffer(params: {
   docxBuffer: Buffer;
   payload: Record<string, string | number | boolean | null>;
+  timeoutMs?: number;
 }): Promise<Buffer> {
   return await convertDocxBufferToPdfWithFallbacks(
     fillDocxZip({ docxBuffer: params.docxBuffer, payload: params.payload }),
+    { timeoutMs: params.timeoutMs },
   );
 }
 
 export async function renderDocxTemplateBufferToPdfBuffer(params: {
   templateBytes: Buffer;
   payload: Record<string, string | number | boolean | null>;
+  timeoutMs?: number;
 }): Promise<Buffer> {
   return renderDocxBufferToPdfBuffer({
     docxBuffer: params.templateBytes,
     payload: params.payload,
+    timeoutMs: params.timeoutMs,
   });
 }
 
@@ -48,6 +52,7 @@ export async function renderDocxTemplateBufferToPdfBuffer(params: {
 export async function renderDocxTemplateUrlToPdfBuffer(params: {
   templateUrl: string;
   payload: Record<string, string | number | boolean | null>;
+  timeoutMs?: number;
 }): Promise<Buffer> {
   const response = await fetch(params.templateUrl);
   if (!response.ok) {
@@ -57,5 +62,6 @@ export async function renderDocxTemplateUrlToPdfBuffer(params: {
   return renderDocxBufferToPdfBuffer({
     docxBuffer: Buffer.from(source),
     payload: params.payload,
+    timeoutMs: params.timeoutMs,
   });
 }

@@ -33,15 +33,31 @@ function sofficeCandidates(): string[] {
   ];
 }
 
-const DOCX_CONVERTER_TIMEOUT_MS = Number(process.env.DOCX_CONVERTER_TIMEOUT_MS || 180000);
+const DEFAULT_DOCX_CONVERTER_TIMEOUT_MS = 90000;
+
+export type DocxConversionOptions = {
+  /** Total wall-clock budget, including busy retries. */
+  timeoutMs?: number;
+};
+
+function docxConverterTimeoutMs(override?: number): number {
+  const configured = override ?? Number(process.env.DOCX_CONVERTER_TIMEOUT_MS || DEFAULT_DOCX_CONVERTER_TIMEOUT_MS);
+  if (!Number.isFinite(configured) || configured <= 0) return DEFAULT_DOCX_CONVERTER_TIMEOUT_MS;
+  return Math.max(1000, Math.floor(configured));
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchDocxConverterOnce(base: string, key: string, docxBuffer: Buffer): Promise<Buffer> {
+async function fetchDocxConverterOnce(
+  base: string,
+  key: string,
+  docxBuffer: Buffer,
+  timeoutMs: number,
+): Promise<Buffer> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DOCX_CONVERTER_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${base}/convert-docx-to-pdf`, {
       method: 'POST',
@@ -71,7 +87,7 @@ async function fetchDocxConverterOnce(base: string, key: string, docxBuffer: Buf
     return pdf;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error(`Remote DOCX converter timed out after ${DOCX_CONVERTER_TIMEOUT_MS}ms`);
+      throw new Error(`Remote DOCX converter timed out after ${timeoutMs}ms`);
     }
     throw error;
   } finally {
@@ -87,22 +103,35 @@ function converterRetryDelayMs(error: unknown, attempt: number): number {
   return Math.min(5000 * 2 ** attempt, 20000);
 }
 
-export async function convertWithDocxConverterService(docxBuffer: Buffer): Promise<Buffer> {
+export async function convertWithDocxConverterService(
+  docxBuffer: Buffer,
+  options: DocxConversionOptions = {},
+): Promise<Buffer> {
   const base = normalizeDocxConverterBaseUrl(process.env.DOCX_CONVERTER_URL || '');
   const key = (process.env.DOCX_CONVERTER_API_KEY || '').trim();
   if (!base || !key) {
     throw new Error('DOCX_CONVERTER_URL and DOCX_CONVERTER_API_KEY are not both set');
   }
+  const timeoutMs = docxConverterTimeoutMs(options.timeoutMs);
+  const deadline = Date.now() + timeoutMs;
   const maxAttempts = 4;
   let lastError: unknown = null;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error(`Remote DOCX converter timed out after ${timeoutMs}ms`);
+    }
     try {
-      return await fetchDocxConverterOnce(base, key, docxBuffer);
+      return await fetchDocxConverterOnce(base, key, docxBuffer, remainingMs);
     } catch (error) {
       lastError = error;
       const retryable = Boolean((error as { retryable?: boolean })?.retryable);
       if (!retryable || attempt === maxAttempts - 1) break;
-      await sleep(converterRetryDelayMs(error, attempt));
+      const delayMs = converterRetryDelayMs(error, attempt);
+      if (delayMs >= deadline - Date.now()) {
+        throw new Error(`Remote DOCX converter timed out after ${timeoutMs}ms while waiting to retry`);
+      }
+      await sleep(delayMs);
     }
   }
   throw lastError instanceof Error ? lastError : new Error('Remote DOCX converter failed');
@@ -172,14 +201,17 @@ async function convertWithConvertApi(docxBuffer: Buffer, secret: string): Promis
  * Order: hosted DOCX service (e.g. Railway) → LibreOffice → ConvertAPI.
  * Matches /api/convert-docx-to-pdf behavior for school flows and serverless.
  */
-export async function convertDocxBufferToPdfWithFallbacks(docxBuffer: Buffer): Promise<Buffer> {
+export async function convertDocxBufferToPdfWithFallbacks(
+  docxBuffer: Buffer,
+  options: DocxConversionOptions = {},
+): Promise<Buffer> {
   const hasRemote = Boolean(
     (process.env.DOCX_CONVERTER_URL || '').trim() && (process.env.DOCX_CONVERTER_API_KEY || '').trim(),
   );
 
   if (hasRemote) {
     try {
-      return await convertWithDocxConverterService(docxBuffer);
+      return await convertWithDocxConverterService(docxBuffer, options);
     } catch (remoteError) {
       const remoteMessage = remoteError instanceof Error ? remoteError.message : 'Remote DOCX converter failed';
       if (process.env.CONVERTAPI_SECRET) {

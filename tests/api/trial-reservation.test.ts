@@ -3,6 +3,7 @@ import {
   isTrialReservationFlowEnabled,
   getTrialReservationDeadlineHours,
   trialReservationExpiryIso,
+  trialReservationRange,
   TRIAL_RESERVATION_DEFAULT_DEADLINE_HOURS,
   sendTrialReservationConfirmedNotifications,
   type ReservedTrialHold,
@@ -50,6 +51,19 @@ describe('trialReservationExpiryIso', () => {
     const now = new Date('2026-01-01T00:00:00.000Z');
     expect(trialReservationExpiryIso(24, now)).toBe('2026-01-02T00:00:00.000Z');
     expect(trialReservationExpiryIso(1.5, now)).toBe('2026-01-01T01:30:00.000Z');
+  });
+});
+
+describe('trialReservationRange', () => {
+  it('uses the configured trial duration instead of the regular picked-slot end', () => {
+    const range = trialReservationRange('2026-09-17T15:00:00.000Z', 45);
+    expect(range?.start.toISOString()).toBe('2026-09-17T15:00:00.000Z');
+    expect(range?.end.toISOString()).toBe('2026-09-17T15:45:00.000Z');
+  });
+
+  it('rejects invalid input', () => {
+    expect(trialReservationRange('bad-date', 45)).toBeNull();
+    expect(trialReservationRange('2026-09-17T15:00:00.000Z', 0)).toBeNull();
   });
 });
 

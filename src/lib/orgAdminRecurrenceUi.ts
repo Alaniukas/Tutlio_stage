@@ -17,10 +17,12 @@ export function orgAdminShowsConvertToRecurringFields(input: {
   organizationId: string | null | undefined;
   isClassGroupSession: boolean;
   alreadyRecurring: boolean;
+  isTrialSession?: boolean;
 }): boolean {
   return (
     isProKlaseOrg(input.organizationId) &&
     !input.isClassGroupSession &&
-    !input.alreadyRecurring
+    !input.alreadyRecurring &&
+    !input.isTrialSession
   );
 }

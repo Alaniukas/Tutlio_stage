@@ -6,9 +6,12 @@ const state = vi.hoisted(() => ({
   session: {
     id: 'sess-1',
     student_id: 'stu-1',
+    tutor_id: 'tutor-1',
+    subject_id: 'subject-1',
     start_time: '2026-09-07T13:00:00.000Z',
     end_time: '2026-09-07T13:45:00.000Z',
     class_group_id: 'grp-1',
+    subjects: { is_group: true },
   } as Record<string, unknown> | null,
   files: {
     'sess-1': [{ name: 'nd-ignas-test-homework.pdf', metadata: { size: 1000 } }],
@@ -29,6 +32,7 @@ vi.mock('../../api/_lib/extraLessonsContractShared', () => ({
       const api: any = {
         select: () => api,
         eq: (col: string, v: unknown) => { filters.push([col, v]); return api; },
+        is: (col: string, v: unknown) => { filters.push([col, v]); return api; },
         maybeSingle: async () => {
           if (table === 'sessions') {
             const id = filters.find(([c]) => c === 'id')?.[1];
@@ -49,6 +53,16 @@ vi.mock('../../api/_lib/extraLessonsContractShared', () => ({
           if (table === 'sessions') {
             const cg = filters.find(([c]) => c === 'class_group_id')?.[1];
             if (cg) {
+              return resolve({
+                data: [
+                  state.session,
+                  { ...state.session, id: 'sess-2', student_id: 'stu-2' },
+                ],
+                error: null,
+              });
+            }
+            const subjectId = filters.find(([c]) => c === 'subject_id')?.[1];
+            if (subjectId) {
               return resolve({
                 data: [
                   state.session,
@@ -85,6 +99,20 @@ vi.mock('../../api/_lib/extraLessonsContractShared', () => ({
 
 describe('student-session-files API', () => {
   beforeEach(() => {
+    state.session = {
+      id: 'sess-1',
+      student_id: 'stu-1',
+      tutor_id: 'tutor-1',
+      subject_id: 'subject-1',
+      start_time: '2026-09-07T13:00:00.000Z',
+      end_time: '2026-09-07T13:45:00.000Z',
+      class_group_id: 'grp-1',
+      subjects: { is_group: true },
+    };
+    state.files = {
+      'sess-1': [{ name: 'nd-ignas-test-homework.pdf', metadata: { size: 1000 } }],
+      'sess-2': [{ name: 'teacher-material.pdf', metadata: { size: 2000 } }],
+    };
     state.uploadPaths = [];
     state.removed = [];
   });
@@ -106,6 +134,35 @@ describe('student-session-files API', () => {
     const names = (res.body as { files: Array<{ name: string }> }).files.map((f) => f.name);
     expect(names).toContain('teacher-material.pdf');
     expect(names).toContain('nd-ignas-test-homework.pdf');
+  });
+
+  it('shares teacher materials between students in the same group-subject lesson', async () => {
+    state.session = { ...state.session!, class_group_id: null, subjects: { is_group: true } };
+    state.files['sess-2'] = [
+      { name: 'teacher-material.pdf', metadata: { size: 2000 } },
+      { name: 'nd-matas-test-homework.pdf', metadata: { size: 1500 } },
+    ];
+    const { default: handler } = await import('../../api/student-session-files');
+    const res = {
+      statusCode: 200,
+      body: null as unknown,
+      setHeader: vi.fn(),
+      status(code: number) { this.statusCode = code; return this; },
+      json(payload: unknown) { this.body = payload; return this; },
+    };
+
+    await handler(
+      { method: 'POST', body: { action: 'list', sessionId: 'sess-1' }, headers: {} } as any,
+      res as any,
+    );
+
+    expect(res.statusCode).toBe(200);
+    const files = (res.body as { files: Array<{ name: string; folderId: string }> }).files;
+    expect(files).toContainEqual(expect.objectContaining({
+      name: 'teacher-material.pdf',
+      folderId: 'sess-2',
+    }));
+    expect(files.map((file) => file.name)).not.toContain('nd-matas-test-homework.pdf');
   });
 
   it('returns signed upload url for homework', async () => {

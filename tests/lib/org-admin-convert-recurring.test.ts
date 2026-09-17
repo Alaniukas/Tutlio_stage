@@ -5,6 +5,7 @@ import {
   filterRowsAgainstBusyTutorSlots,
   insertSessionRowsInChunks,
   ORG_ADMIN_SESSION_INSERT_CHUNK,
+  resolveOrCreateTrialSubject,
   SessionRowsInsertError,
 } from '@/pages/company/orgAdminSessionCreate';
 import { PRO_KLASE_QA_ORG_ID } from '@/lib/marketMoney';
@@ -164,8 +165,91 @@ describe('insertSessionRowsInChunks', () => {
   });
 });
 
+describe('resolveOrCreateTrialSubject', () => {
+  it('uses the organization trial price and duration and refreshes an existing trial subject', async () => {
+    const subjectUpdates: Array<Record<string, unknown>> = [];
+    const from = vi.fn((table: string) => {
+      if (table === 'profiles') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: { organization_id: PRO_KLASE_QA_ORG_ID }, error: null })),
+            })),
+          })),
+        };
+      }
+      if (table === 'organizations') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({
+                data: {
+                  features: {
+                    trial_lesson_topic: 'Bandomoji pamoka',
+                    trial_lesson_duration_minutes: 45,
+                    trial_lesson_price_eur: 10,
+                  },
+                },
+                error: null,
+              })),
+            })),
+          })),
+        };
+      }
+      if (table === 'subjects') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({
+                  data: {
+                    id: 'trial-subject',
+                    name: 'Old trial',
+                    price: 25,
+                    duration_minutes: 60,
+                    is_group: false,
+                    max_students: null,
+                    is_trial: true,
+                  },
+                  error: null,
+                })),
+              })),
+            })),
+          })),
+          update: vi.fn((patch: Record<string, unknown>) => {
+            subjectUpdates.push(patch);
+            return { eq: vi.fn(async () => ({ error: null })) };
+          }),
+        };
+      }
+      throw new Error(`unexpected table ${table}`);
+    });
+
+    const result = await resolveOrCreateTrialSubject(
+      { from } as unknown as import('@supabase/supabase-js').SupabaseClient,
+      'tutor-1',
+      undefined,
+      { useOrgPriceOnly: true },
+    );
+
+    expect(result.price).toBe(10);
+    expect(result.durationMinutes).toBe(45);
+    expect(result.subject).toMatchObject({
+      id: 'trial-subject',
+      price: 10,
+      duration_minutes: 45,
+    });
+    expect(subjectUpdates).toEqual([{
+      name: 'Bandomoji pamoka',
+      duration_minutes: 45,
+      price: 10,
+    }]);
+  });
+});
+
 function mockSupabaseForConversionInsertFailure(
   busyRows: Array<{ id: string; start_time: string; end_time: string }> = [],
+  isTrial = false,
 ) {
   const deletedSessionIds: string[][] = [];
   const deletedTemplateIds: string[][] = [];
@@ -191,6 +275,7 @@ function mockSupabaseForConversionInsertFailure(
     show_comment_to_parent: false,
     recurring_session_id: null,
     created_by_role: 'org_admin',
+    subjects: { is_trial: isTrial },
   };
 
   const from = vi.fn((table: string) => {
@@ -318,6 +403,16 @@ describe('convertOrgAdminSessionToRecurring', () => {
         weekdays: [],
       }),
     ).rejects.toThrow(/savaitės dieną/);
+  });
+
+  it('rejects converting a trial lesson into a recurring series', async () => {
+    const mock = mockSupabaseForConversionInsertFailure([], true);
+    await expect(convertOrgAdminSessionToRecurring({
+      ...baseInput,
+      supabase: mock.supabase,
+    })).rejects.toThrow(/Bandomosios pamokos/);
+    expect(mock.anchorUpdates()).toBe(0);
+    expect(mock.deletedTemplateIds).toHaveLength(0);
   });
 
   it('removes partially inserted future rows without mutating the anchor when a later chunk fails', async () => {

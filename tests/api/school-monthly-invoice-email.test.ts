@@ -63,6 +63,26 @@ describe('buildSchoolMonthlyInvoiceEmailData', () => {
     const data = buildSchoolMonthlyInvoiceEmailData(invoice, { publicOrigin: 'https://tutlio.lt', student, org: noStripe, contract: {} });
     expect(data.payUrl).toBeUndefined();
   });
+
+  it('includes the original amount, discount and payable line snapshots', () => {
+    const data = buildSchoolMonthlyInvoiceEmailData({
+      ...invoice,
+      subtotal_eur: 48,
+      discount_amount_eur: 12,
+      total_eur: 36,
+    }, {
+      publicOrigin: 'https://tutlio.lt', student, org, contract: {},
+      lines: [{
+        description: 'Matematika 8 kl.', quantity: 8, unit_price_eur: 6,
+        original_amount_eur: 48, discount_type: 'percent', discount_value: 25,
+        discount_amount_eur: 12, amount_eur: 36,
+      }],
+    });
+    expect(data).toMatchObject({
+      subtotalAmount: '48.00', discountAmount: '12.00', totalAmount: '36.00',
+      lines: [{ originalAmount: '48.00', discountAmount: '12.00', amount: '36.00' }],
+    });
+  });
 });
 
 function fakeSupabase(state: { status: string }) {

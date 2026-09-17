@@ -14,6 +14,12 @@
         "api/platform-invoice-pdf.ts": {
             "includeFiles": "api/_lib/fonts/**"
         },
+        "api/school-monthly-invoice-admin.ts": {
+            "includeFiles": "{api/_lib/fonts/**,api/_lib/templates/laisvi-vaikai-invoice-logo.png}"
+        },
+        "api/school-discount-accept.ts": {
+            "includeFiles": "{api/_lib/fonts/**,api/_lib/templates/laisvi-vaikai-invoice-logo.png}"
+        },
         "api/admin-b2c-invoices.ts": {
             "includeFiles": "api/_lib/fonts/**"
         },
@@ -91,7 +97,8 @@
             "maxDuration": 60
         },
         "api/school-contract-complete.ts": {
-            "maxDuration": 120
+            "maxDuration": 120,
+            "includeFiles": "api/_lib/fonts/**"
         },
         "api/school-contract-render-docx-pdf.ts": {
             "maxDuration": 120
@@ -101,14 +108,17 @@
         },
         "api/extra-lessons-contract-offer.ts": {
             "maxDuration": 180,
-            "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
+            "includeFiles": "{api/_lib/fonts/**,api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
         },
         "api/extra-lessons-contract-accept.ts": {
             "maxDuration": 120,
-            "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
+            "includeFiles": "{api/_lib/fonts/**,api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
         },
         "api/extra-lessons-contract-withdraw.ts": {
-            "includeFiles": "src/lib/**"
+            "includeFiles": "{api/_lib/fonts/**,src/lib/**}"
+        },
+        "api/school-contract-file-url.ts": {
+            "includeFiles": "{api/_lib/fonts/**,api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
         },
         "api/bill-school-extra-lessons.ts": {
             "maxDuration": 300,

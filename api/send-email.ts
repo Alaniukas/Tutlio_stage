@@ -2445,6 +2445,36 @@ function schoolContractExtraAccepted(d: any, locale: Locale) {
   };
 }
 
+function schoolDiscountOffer(d: any, locale: Locale) {
+  const contact = schoolParentContactEmail(d);
+  const rows = [
+    td('Mokinys', esc(d.studentName || '—')),
+    td('Užsiėmimai', esc(d.activityLabel || '—')),
+    td('Nuolaida', esc(d.discountDescription || '—')),
+    td('Galioja', `${esc(d.validFrom || '—')} - ${esc(d.validUntil || '—')}`),
+    d.note ? td('Pastaba', esc(d.note)) : '',
+    td('Sutarties Nr.', esc(d.contractNumber || '—')),
+  ].join('');
+  return {
+    subject: `Jums suteikta nuolaida - ${d.studentName || 'mokinys'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Jums suteikta nuolaida</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
+      </div>
+      <div class="body" style="text-align:center;">
+        <p class="greeting" style="text-align:center;">Sveiki, ${esc(d.parentName || '')},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.65; text-align:center; margin:0 auto; max-width:500px;">
+          Mokiniui <strong>${esc(d.studentName || '')}</strong> suteikta nuolaida. Jums nieko papildomai daryti nereikia - tik peržiūrėkite informaciją ir paspauskite <strong>„Sutinku“</strong>. Patvirtinus automatiškai bus suformuotas priedas prie metinės sutarties.
+        </p>
+        <div class="info-card" style="text-align:left;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>
+        ${d.acceptUrl ? `<div style="text-align:center; margin:24px 0 10px;">${outlookEmailButton(String(d.acceptUrl), 'Sutinku', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 40px' })}</div>` : ''}
+        <p style="color:#6b7280; font-size:12px; line-height:1.5; text-align:center;">Nuorodoje dar kartą matysite visas sąlygas. Nuolaida įsigalios tik po patvirtinimo.</p>
+        ${contact ? `<p style="color:#6b7280; font-size:13px; text-align:center;">Jei turite klausimų, susisiekite su mokykla: ${esc(contact)}</p>` : ''}
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
 /**
  * Sent right after the click-wrap acceptance: the nearest lesson of that
  * contract with a tracked join link plus the homework page. School parents have
@@ -2507,17 +2537,33 @@ function schoolExtraFirstLessonInvite(d: any, locale: Locale) {
 function schoolMonthlyInvoice(d: any, locale: Locale) {
   const baseLessons = Number(d.baseLessons || 0);
   const extraLessons = Number(d.extraLessons || 0);
+  const detailedLines = Array.isArray(d.lines) ? d.lines : [];
+  const detailRows = detailedLines.map((line: any) => {
+    const qty = Number(line.quantity || 0);
+    const description = esc(String(line.description || 'Užsiėmimas'));
+    const original = emailMoney(line.originalAmount, locale);
+    const discount = Number(line.discountAmount || 0);
+    const value = discount > 0
+      ? `<span style="color:#6b7280;text-decoration:line-through;">${original}</span> <span style="color:#047857;">-${emailMoney(discount, locale)}</span> = <strong>${emailMoney(line.amount, locale)}</strong>`
+      : `<strong>${emailMoney(line.amount, locale)}</strong>`;
+    return td(`${description} (${qty} × ${emailMoney(line.unitPrice, locale)})`, value);
+  }).join('');
   const rows = [
-    td('Laikotarpis', String(d.periodLabel || `${d.periodStart} – ${d.periodEnd}`)),
-    baseLessons > 0
+    td('Laikotarpis', String(d.periodLabel || `${d.periodStart} - ${d.periodEnd}`)),
+    detailRows,
+    detailedLines.length === 0 && baseLessons > 0
       ? td(`Baziniai užsiėmimai (${baseLessons} × ${emailMoney(d.unitPrice, locale)})`, emailMoney(d.baseAmount, locale))
       : '',
-    extraLessons > 0
+    detailedLines.length === 0 && extraLessons > 0
       ? td(`Papildomi užsiėmimai (${extraLessons} × ${emailMoney(d.unitPrice, locale)})`, emailMoney(d.extraAmount, locale))
+      : '',
+    Number(d.discountAmount || 0) > 0
+      ? td('Pradinė suma', emailMoney(d.subtotalAmount, locale)) + td('Nuolaida', `<span style="color:#047857;">-${emailMoney(d.discountAmount, locale)}</span>`)
       : '',
     td('Mokėtina suma', `<strong>${emailMoney(d.totalAmount, locale)}</strong>`),
     td('Apmokėti iki', String(d.dueDate || '—'), false),
   ].join('');
+  const isDetailed = detailedLines.length > 0;
   const payBlock = d.payUrl
     ? `<div style="text-align:center; margin:24px 0 8px;">${outlookEmailButton(String(d.payUrl), `Apmokėti ${emailMoney(d.totalAmount, locale)}`, '#4f46e5', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>
        <p style="color:#6b7280; font-size:13px; line-height:1.6; text-align:center;">Mokėjimas kortele per saugų Stripe langą. Paskyros kurti ar prisijungti nereikia.</p>`
@@ -2526,15 +2572,16 @@ function schoolMonthlyInvoice(d: any, locale: Locale) {
     subject: `Sąskaita už ${d.periodLabel || 'mėnesį'} — ${d.studentName || 'Mokinys'}`,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#0f766e', '#115e59')}">
-        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Papildomų užsiėmimų sąskaita</h1>
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${isDetailed ? 'Mėnesio sąskaita' : 'Papildomų užsiėmimų sąskaita'}</h1>
         <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${d.schoolName || 'Mokykla'}</p>
       </div>
       <div class="body">
         <p class="greeting">Sveiki${d.parentName ? `, ${d.parentName}` : ''}!</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Pateikiame <strong>${d.studentName || 'mokinio'}</strong> papildomų užsiėmimų sąskaitą už ${d.periodLabel || 'praėjusį mėnesį'}${d.contractNumber ? ` (sutartis Nr. ${d.contractNumber})` : ''}.
+          Pateikiame <strong>${d.studentName || 'mokinio'}</strong> ${isDetailed ? 'užsiėmimų' : 'papildomų užsiėmimų'} sąskaitą už ${d.periodLabel || 'praėjusį mėnesį'}${d.invoiceNumber ? ` (${d.invoiceNumber})` : d.contractNumber ? ` (sutartis Nr. ${d.contractNumber})` : ''}.
         </p>
         <div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>
+        ${d.discountNote ? `<p style="color:#047857;font-size:13px;line-height:1.6;"><strong>Nuolaidos pastaba:</strong> ${esc(String(d.discountNote))}</p>` : ''}
         ${payBlock}
         ${d.contactEmail ? `<p style="color:#9ca3af; font-size:12px; margin-top:16px;">Klausimai dėl sąskaitos: <a href="mailto:${d.contactEmail}" style="color:#6366f1;">${d.contactEmail}</a></p>` : ''}
       </div>${footerFor(locale)}`, locale),
@@ -3624,6 +3671,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'school_contract': emailContent = schoolContract(data, locale); break;
       case 'school_contract_extra_offer': emailContent = schoolContractExtraOffer(data, locale); break;
       case 'school_contract_extra_accepted': emailContent = schoolContractExtraAccepted(data, locale); break;
+      case 'school_discount_offer': emailContent = schoolDiscountOffer(data, locale); break;
       case 'school_extra_first_lesson_invite': emailContent = schoolExtraFirstLessonInvite(data, locale); break;
       case 'school_monthly_invoice': emailContent = schoolMonthlyInvoice(data, locale); break;
       case 'school_contract_extra_withdrawn': emailContent = schoolContractExtraWithdrawn(data, locale); break;
@@ -3702,9 +3750,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         supabase: createClient(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, supabaseServiceRoleClientOptions()),
         invoiceId: rawData.invoiceId,
         organizationId: String(rawData.organizationId || ''),
-        payload: { from: emailPayload.from, to: Array.isArray(emailPayload.to) ? emailPayload.to : [emailPayload.to], subject: emailPayload.subject, html: emailContent.html },
+        payload: {
+          from: emailPayload.from,
+          to: Array.isArray(emailPayload.to) ? emailPayload.to : [emailPayload.to],
+          subject: emailPayload.subject,
+          html: emailContent.html,
+          attachments: Array.isArray(rawAttachments) ? rawAttachments : undefined,
+        },
         send: async (payload, idempotencyKey) => {
-          const response = await resend.emails.send(payload, { idempotencyKey });
+          const response = await resend.emails.send({
+            ...payload,
+            attachments: payload.attachments?.map((attachment) => ({
+              filename: attachment.filename,
+              content: Buffer.from(attachment.content, 'base64'),
+            })),
+          }, { idempotencyKey });
           return { id: response.data?.id, error: response.error?.message };
         },
       });

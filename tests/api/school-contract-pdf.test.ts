@@ -17,6 +17,7 @@ vi.mock('../../api/_lib/renderSchoolContractDocxToPdf', () => ({
 import { PDFDocument } from 'pdf-lib';
 import { createSimpleContractPdf, renderAndStoreSchoolContractPdf } from '../../api/_lib/schoolContractPdf';
 import { renderAndStoreExtraLessonsPdf, signSchoolContractPdf } from '../../api/_lib/extraLessonsPdf';
+import { EXTRA_LESSONS_DEFAULT_BODY } from '../../src/lib/extraLessonsContract';
 
 function makeSupabase(opts: { signError?: boolean } = {}) {
   const uploads: Array<{ path: string; data: Buffer }> = [];
@@ -136,6 +137,24 @@ describe('createSimpleContractPdf', () => {
     expect(doc.getPageCount()).toBeGreaterThan(1);
     expect(Buffer.from(bytes).subarray(0, 5).toString()).toBe('%PDF-');
   });
+
+  it('renders Lithuanian legal text with an embedded Unicode font', async () => {
+    const bytes = await createSimpleContractPdf({
+      contractNumber: 'PP-LT',
+      studentName: 'Ąžuolas Šimkus',
+      parentName: 'Živilė Šimkienė',
+      parentEmail: 'parent@example.com',
+      parentPhone: '+37060000000',
+      parentPersonalCode: '',
+      childBirthDate: '',
+      address: '',
+      annualFee: 48,
+      body: 'Nuotolinių užsiėmimų sutartis. Teisė atsisakyti per keturiolika dienų.',
+    });
+
+    expect(Buffer.from(bytes).subarray(0, 5).toString()).toBe('%PDF-');
+    expect(bytes.length).toBeGreaterThan(10_000);
+  });
 });
 
 describe('renderAndStoreExtraLessonsPdf', () => {
@@ -221,17 +240,38 @@ describe('renderAndStoreExtraLessonsPdf', () => {
     expect(result.uploadedPath).toBe(uploads[0].path);
   });
 
-  it('throws instead of creating a text-dump PDF when the Demo DOCX converter fails', async () => {
+  it('uses the complete legal-text PDF when the bundled DOCX converter fails', async () => {
+    const { supabase, uploads } = makeExtraSupabase();
+    mocks.renderDocxBuffer.mockRejectedValueOnce(new Error('converter unavailable'));
+
+    const result = await renderAndStoreExtraLessonsPdf(supabase as any, {
+      ...extraParams,
+      filledBody: EXTRA_LESSONS_DEFAULT_BODY.replace(/\{\{[^}]+\}\}/g, 'QA'),
+      contract: {
+        ...extraParams.contract,
+        organization_id: 'c3a00000-7e57-4000-8000-000000000001',
+      },
+    });
+
+    expect(result.renderMode).toBe('legal_text_fallback');
+    expect(uploads).toHaveLength(1);
+    const bytes = Buffer.from(uploads[0].data);
+    expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
+    expect((await PDFDocument.load(Uint8Array.from(bytes))).getPageCount()).toBeGreaterThan(1);
+  });
+
+  it('refuses a bundled fallback when the legal body is incomplete', async () => {
     const { supabase, uploads } = makeExtraSupabase();
     mocks.renderDocxBuffer.mockRejectedValueOnce(new Error('converter unavailable'));
 
     await expect(renderAndStoreExtraLessonsPdf(supabase as any, {
       ...extraParams,
+      filledBody: 'Short or partially rendered legal body',
       contract: {
         ...extraParams.contract,
         organization_id: 'c3a00000-7e57-4000-8000-000000000001',
       },
-    })).rejects.toThrow(/pagal DOCX šabloną/);
+    })).rejects.toThrow(/atsarginė kopija nepilna/);
     expect(uploads).toHaveLength(0);
   });
 });

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { MOKSLO_VAISIAI_ORG_ID } from '../../src/lib/marketMoney';
+import { MOKSLO_VAISIAI_ORG_ID, PRO_KLASE_ORG_ID } from '../../src/lib/marketMoney';
 
 const mocks = vi.hoisted(() => ({
   createUser: vi.fn(),
@@ -29,7 +29,7 @@ function awaitedMutation(result: { error: unknown }) {
   return query;
 }
 
-function database() {
+function database(organizationId = MOKSLO_VAISIAI_ORG_ID) {
   return {
     auth: { admin: {
       createUser: mocks.createUser,
@@ -45,7 +45,7 @@ function database() {
             full_name: 'Child',
             email: null,
             tutor_id: 'tutor-1',
-            organization_id: MOKSLO_VAISIAI_ORG_ID,
+            organization_id: organizationId,
             linked_user_id: null,
             parent_user_id: null,
             payer_name: 'Parent',
@@ -154,6 +154,24 @@ describe('Mokslo Vaisiai username provisioning', () => {
     expect(mocks.createUser).toHaveBeenCalledTimes(2);
     expect(mocks.createUser.mock.calls[0][0].email).toBe('mv-7k4m-p9qd@student-login.tutlio.invalid');
     expect(mocks.createUser.mock.calls[1][0].email).toBe('mv-abcd-jkmn@student-login.tutlio.invalid');
+  });
+
+  it('supports Pro Klasė and requests a Pro Klasė child username', async () => {
+    mocks.generateLoginName.mockReturnValue('pk-7k4m-p9qd');
+
+    const result = await provisionMvFamilyAccounts(database(PRO_KLASE_ORG_ID), {
+      studentId: 'student-1',
+      studentFullName: 'Child',
+      studentEmail: '',
+      parentEmail: 'parent@example.test',
+      scope: 'student',
+      appOrigin: 'https://tutlio.lt',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mocks.generateLoginName).toHaveBeenCalledWith('pk');
+    expect(mocks.createUser.mock.calls[0][0].email)
+      .toBe('pk-7k4m-p9qd@student-login.tutlio.invalid');
   });
 
   it('removes a newly created auth user when the profile cannot be saved', async () => {

@@ -4,6 +4,7 @@ import {
   isInAppSupportSendCommand,
   isInAppSupportDraftComplete,
   normalizeInAppSupportAgentReply,
+  nextInAppSupportQuestionField,
   prepareInAppSupportDraftForSubmission,
   parseInAppSupportAiConversation,
   parseInAppSupportAiIntake,
@@ -72,6 +73,30 @@ describe('in-app support conversational agent output', () => {
 
     expect(inAppSupportDraftMissingFields('feature', draft)).toEqual([]);
     expect(isInAppSupportDraftComplete('feature', draft)).toBe(true);
+  });
+
+  it('asks about the most useful missing bug fact instead of following form order', () => {
+    expect(nextInAppSupportQuestionField('bug', {
+      title: 'Save fails for recurring lessons',
+      context: 'An organization admin creates a recurring lesson in the calendar.',
+      steps: ['Open the calendar', 'Create a recurring lesson', 'Select Save'],
+      expectedOutcome: 'Every weekly lesson should be created.',
+      actualOutcome: '',
+      impact: null,
+      impactDetails: '',
+    })).toBe('actualOutcome');
+  });
+
+  it('does not ask a feature requester for bug reproduction steps', () => {
+    expect(nextInAppSupportQuestionField('feature', {
+      title: 'AI-generated tests',
+      context: 'Teachers create tests manually today.',
+      steps: [],
+      expectedOutcome: '',
+      actualOutcome: '',
+      impact: null,
+      impactDetails: '',
+    })).toBe('expectedOutcome');
   });
 });
 

@@ -38,6 +38,7 @@ it('applies the pending tutor-pay, permission, and consultation migrations', asy
       );
       CREATE TABLE public.subjects(id uuid PRIMARY KEY);
       CREATE TABLE public.sessions(id uuid PRIMARY KEY);
+      CREATE TABLE public.school_contracts(id uuid PRIMARY KEY);
       CREATE TABLE public.parent_profiles(id uuid PRIMARY KEY, user_id uuid);
       CREATE TABLE public.parent_students(parent_id uuid, student_id uuid);
       CREATE TABLE public.student_individual_pricing(id uuid PRIMARY KEY);
@@ -55,6 +56,8 @@ it('applies the pending tutor-pay, permission, and consultation migrations', asy
     await db.exec(migration('20260911120000_org_admin_individual_pricing_students_edit.sql'));
     await db.exec(migration('20260911120200_school_consultations.sql'));
     await db.exec(migration('20260911120300_tutor_invites_help_team_category.sql'));
+    await db.exec(migration('20260917120000_school_monthly_invoice_discounts.sql'));
+    await db.exec(migration('20260917160000_school_discount_agreements.sql'));
 
     const moneyColumns = (await db.query(`
       SELECT table_name, column_name, numeric_scale
@@ -86,12 +89,13 @@ it('applies the pending tutor-pay, permission, and consultation migrations', asy
       WHERE table_schema = 'public'
         AND table_name IN (
           'school_consultation_requests',
-          'school_consultations',
-          'student_lesson_discounts',
-          'school_monthly_invoice_lines'
+        'school_consultations',
+        'student_lesson_discounts',
+          'school_monthly_invoice_lines',
+          'school_discount_agreements'
         )
     `)).rows;
-    expect(consultationTables).toHaveLength(4);
+    expect(consultationTables).toHaveLength(5);
 
     const addedColumns = (await db.query(`
       SELECT table_name, column_name
@@ -114,6 +118,22 @@ it('applies the pending tutor-pay, permission, and consultation migrations', asy
         AND column_name = 'contract_id'
     `)).rows[0] as { is_nullable: string };
     expect(contractColumn.is_nullable).toBe('YES');
+
+    const discountColumns = (await db.query(`
+      SELECT table_name, column_name
+      FROM information_schema.columns
+      WHERE (table_name, column_name) IN (
+        ('student_lesson_discounts', 'discount_type'),
+        ('student_lesson_discounts', 'amount_eur'),
+        ('student_lesson_discounts', 'agreement_id'),
+        ('school_monthly_invoices', 'subtotal_eur'),
+        ('school_monthly_invoices', 'discount_amount_eur'),
+        ('school_monthly_invoice_lines', 'original_amount_eur'),
+        ('school_monthly_invoice_lines', 'discount_amount_eur'),
+        ('school_monthly_invoice_lines', 'session_ids')
+      )
+    `)).rows;
+    expect(discountColumns).toHaveLength(8);
   } finally {
     await db.close();
   }

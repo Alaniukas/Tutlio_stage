@@ -61,7 +61,7 @@ export interface InAppSupportAiConversation {
   impact: InAppSupportImpact | null;
   impactDetails: string;
   ready: boolean;
-  missingTopics: string[];
+  missingTopics: InAppSupportDraftField[];
 }
 
 export type InAppSupportDraftField =
@@ -180,7 +180,18 @@ export function parseInAppSupportAiConversation(value: unknown): InAppSupportAiC
   const impactDetails = text(raw.impactDetails, 2_000);
   const ready = raw.ready === true;
   const missingTopics = Array.isArray(raw.missingTopics)
-    ? raw.missingTopics.map((item) => text(item, 120)).filter(Boolean).slice(0, 3)
+    ? raw.missingTopics
+      .map((item) => text(item, 120))
+      .filter((item): item is InAppSupportDraftField => [
+        'title',
+        'context',
+        'steps',
+        'expectedOutcome',
+        'actualOutcome',
+        'impact',
+        'impactDetails',
+      ].includes(item))
+      .slice(0, 1)
     : [];
   if (reply.length < 3 || typeof raw.ready !== 'boolean') return null;
 
@@ -218,6 +229,24 @@ export function isInAppSupportDraftComplete(
   draft: InAppSupportDraftFields,
 ): boolean {
   return inAppSupportDraftMissingFields(category, draft).length === 0;
+}
+
+/**
+ * Picks the most useful deterministic fallback topic when the model marks a
+ * report ready before the required evidence exists. The model may still ask a
+ * different missing topic when the conversation makes it more natural, but a
+ * generated title is deliberately last so the user is not asked to do the
+ * agent's summarization work.
+ */
+export function nextInAppSupportQuestionField(
+  category: InAppSupportCategory,
+  draft: InAppSupportDraftFields,
+): InAppSupportDraftField | null {
+  const missing = new Set(inAppSupportDraftMissingFields(category, draft));
+  const priority: InAppSupportDraftField[] = category === 'bug'
+    ? ['actualOutcome', 'steps', 'expectedOutcome', 'context', 'impactDetails', 'impact', 'title']
+    : ['expectedOutcome', 'context', 'impactDetails', 'impact', 'title'];
+  return priority.find((field) => missing.has(field)) ?? null;
 }
 
 export function prepareInAppSupportDraftForSubmission(

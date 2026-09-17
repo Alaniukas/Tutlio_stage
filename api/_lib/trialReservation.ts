@@ -50,6 +50,24 @@ export function trialReservationExpiryIso(hours: number, now: Date = new Date())
   return new Date(now.getTime() + hours * 3_600_000).toISOString();
 }
 
+/**
+ * The organization trial duration is authoritative. A picked availability
+ * window may have been sized for the regular subject, so never persist its end
+ * time as the trial lesson end.
+ */
+export function trialReservationRange(
+  startIso: string,
+  durationMinutes: number,
+): { start: Date; end: Date } | null {
+  const start = new Date(startIso);
+  const duration = Number(durationMinutes);
+  if (Number.isNaN(start.getTime()) || !Number.isFinite(duration) || duration < 1) return null;
+  return {
+    start,
+    end: new Date(start.getTime() + Math.round(duration) * 60_000),
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Package reservation (pay-by-deadline) — Pro Klase intake funnel, Phase 2,
 // req 3 + req 5. Generalizes the trial hold so a package can pre-book lesson

@@ -45,9 +45,10 @@ export type TutorProfileGate = {
 };
 
 /**
- * A linked `students` row plus a bare `profiles` row (no org, no subscription) is a
- * student account — not a dual-role tutor. Ghost profiles often come from QA seeds
- * or auth metadata upserts during email confirmation.
+ * A linked student/parent identity plus a bare `profiles` row (no org, no
+ * subscription) is not a dual-role tutor. Ghost profiles often come from QA
+ * seeds, historical child accounts, or auth metadata upserts during email
+ * confirmation.
  */
 export function profileQualifiesAsTutor(
   profile: TutorProfileGate | null | undefined,
@@ -117,7 +118,7 @@ export async function resolveAccountPortals(
     }
   }
 
-  const tutor = profileQualifiesForTutorPortal(profileResult?.data, student, orgAdmin);
+  const tutor = profileQualifiesForTutorPortal(profileResult?.data, student || parent, orgAdmin);
   return { orgAdmin, parent, student, tutor };
 }
 

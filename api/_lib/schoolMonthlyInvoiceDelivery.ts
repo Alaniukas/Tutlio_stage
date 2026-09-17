@@ -2,7 +2,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { schoolContractBillingModel } from '../../src/lib/schoolCanonicalBilling.js';
 
 export const SCHOOL_INVOICE_RETRY_WINDOW_MS = 23 * 60 * 60 * 1000;
-export type SchoolInvoiceRenderedEmail = { from: string; to: string[]; subject: string; html: string };
+export type SchoolInvoiceRenderedEmail = {
+  from: string;
+  to: string[];
+  subject: string;
+  html: string;
+  attachments?: { filename: string; content: string }[];
+};
 export type SchoolInvoiceDeliveryResult = { sent: boolean; alreadySent?: boolean; id?: string; reason?: string };
 
 export function schoolMonthlyInvoiceIdempotencyKey(invoiceId: string): string {
@@ -26,9 +32,11 @@ export async function deliverSchoolMonthlyInvoiceOnce(params: {
   if (invoiceError || !invoice) return { sent: false, reason: invoiceError?.message || 'invoice not found in organization' };
   if (invoice.invoice_email_sent_at) return { sent: false, alreadySent: true };
   const frozenContract = Array.isArray(invoice.contract) ? invoice.contract[0] : invoice.contract;
-  const model = schoolContractBillingModel({ organization_id: organizationId, filled_body: frozenContract?.filled_body, order_snapshot: frozenContract?.order_snapshot });
-  if (model === 'review' || (model === 'actual' && invoice.billing_model !== 'actual')) {
-    return { sent: false, reason: 'invoice billing model requires review against frozen contract' };
+  if (frozenContract) {
+    const model = schoolContractBillingModel({ organization_id: organizationId, filled_body: frozenContract.filled_body, order_snapshot: frozenContract.order_snapshot });
+    if (model === 'review' || (model === 'actual' && invoice.billing_model !== 'actual')) {
+      return { sent: false, reason: 'invoice billing model requires review against frozen contract' };
+    }
   }
   if (invoice.payment_status !== 'pending') return { sent: false, reason: 'invoice is not pending' };
 

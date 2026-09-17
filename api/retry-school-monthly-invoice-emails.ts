@@ -14,7 +14,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const started = Date.now();
   const supabase = createClient(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
   const { data: rows, error } = await readAllSchoolBillingRows((after) => {
-    let query = supabase.from('school_monthly_invoices').select('*, student:students(full_name,email,payer_email,payer_name), org:organizations(id,name,email,features,stripe_account_id,stripe_onboarding_complete), contract:school_contracts(contract_number,filled_body,order_snapshot), delivery:school_monthly_invoice_deliveries(id,attempted_at,sent_at,payload)')
+    let query = supabase.from('school_monthly_invoices').select('*, student:students(full_name,email,payer_email,payer_name), org:organizations(id,name,email,features,stripe_account_id,stripe_onboarding_complete), contract:school_contracts(contract_number,filled_body,order_snapshot), lines:school_monthly_invoice_lines(description,unit_price_eur,quantity,original_amount_eur,discount_type,discount_value,discount_amount_eur,amount_eur), delivery:school_monthly_invoice_deliveries(id,attempted_at,sent_at,payload)')
       .eq('payment_status', 'pending').is('invoice_email_sent_at', null).order('id').limit(500);
     if (after) query = query.gt('id', after);
     return query;
@@ -23,8 +23,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let held = 0, failed = 0, emailed = 0, cursor = 0;
   const ready = rows.filter((row: any) => {
     const contract = Array.isArray(row.contract) ? row.contract[0] : row.contract;
-    const model = schoolContractBillingModel({ organization_id: row.organization_id, filled_body: contract?.filled_body, order_snapshot: contract?.order_snapshot });
-    if (model === 'review' || (model === 'actual' && row.billing_model !== 'actual')) { held++; return false; }
+    if (contract) {
+      const model = schoolContractBillingModel({ organization_id: row.organization_id, filled_body: contract.filled_body, order_snapshot: contract.order_snapshot });
+      if (model === 'review' || (model === 'actual' && row.billing_model !== 'actual')) { held++; return false; }
+    }
     const delivery = Array.isArray(row.delivery) ? row.delivery[0] : row.delivery;
     // Old uncertain sends must be reconciled, not replayed after provider dedup expires.
     if (delivery && !delivery.sent_at && (!delivery.payload || started - Date.parse(delivery.attempted_at) >= SCHOOL_INVOICE_RETRY_WINDOW_MS)) {

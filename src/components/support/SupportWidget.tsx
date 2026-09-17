@@ -22,6 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import { peekCachedAuthUser, rememberAuthUser } from '@/lib/authSession';
+import { useBodyScrollLock, useVisualViewport } from '@/hooks/useVisualViewport';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
 import type { SupportWidgetCopyKey } from '@/lib/i18n/supportCopyKeys';
@@ -176,11 +177,16 @@ export default function SupportWidget() {
   const [contactImage, setContactImage] = useState<File | null>(null);
   const [contactImagePreview, setContactImagePreview] = useState('');
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const contactImageInputRef = useRef<HTMLInputElement>(null);
   const contactRequestIdRef = useRef(messageId());
   const abortRef = useRef<AbortController | null>(null);
+  const visualViewport = useVisualViewport();
+  const isMobileViewport = visualViewport.width < 640;
+
+  useBodyScrollLock(open && isMobileViewport);
 
   const copy = (key: string) => {
     const translated = t(key);
@@ -279,14 +285,24 @@ export default function SupportWidget() {
 
   useEffect(() => {
     if (!open) return;
-    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' });
+    messagesRef.current?.scrollTo?.({ top: messagesRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, open, streaming]);
 
   useEffect(() => {
     if (!open || contactOpen) return;
+    if (!window.matchMedia?.('(min-width: 640px) and (pointer: fine)').matches) return;
     const timer = window.setTimeout(() => inputRef.current?.focus(), 160);
     return () => window.clearTimeout(timer);
   }, [open, contactOpen]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') requestClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
 
   useEffect(() => {
     if (!open || contactOpen || messages.length > 0) return;
@@ -607,10 +623,16 @@ export default function SupportWidget() {
     <>
       {open && (
         <section
+          role="dialog"
+          aria-modal="true"
           aria-label={copy('support.widget.title')}
-          className="fixed inset-x-3 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-[175] flex h-[min(680px,calc(100dvh-8.5rem))] flex-col overflow-hidden rounded-[28px] border border-indigo-100 bg-white shadow-[0_24px_80px_-18px_rgba(49,46,129,0.38)] sm:inset-auto sm:bottom-24 sm:right-6 sm:h-[min(680px,calc(100dvh-7.5rem))] sm:w-[400px]"
+          className="fixed inset-x-0 top-0 z-[175] flex h-dvh min-h-0 w-screen max-w-[100vw] flex-col overflow-hidden overscroll-contain bg-white sm:inset-auto sm:bottom-24 sm:right-6 sm:top-auto sm:h-[min(680px,calc(100dvh-7.5rem))] sm:w-[400px] sm:rounded-[28px] sm:border sm:border-indigo-100 sm:shadow-[0_24px_80px_-18px_rgba(49,46,129,0.38)]"
+          style={isMobileViewport ? {
+            top: visualViewport.offsetTop,
+            height: visualViewport.height,
+          } : undefined}
         >
-          <header className="relative overflow-hidden bg-gradient-to-br from-indigo-950 via-indigo-800 to-indigo-600 px-5 pb-4 pt-5 text-white">
+          <header className="relative shrink-0 overflow-hidden bg-gradient-to-br from-indigo-950 via-indigo-800 to-indigo-600 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white sm:px-5 sm:pb-4 sm:pt-5">
             <div className="pointer-events-none absolute -right-12 -top-14 h-40 w-40 rounded-full bg-cyan-300/20 blur-2xl" />
             <div className="pointer-events-none absolute -bottom-16 left-20 h-32 w-32 rounded-full bg-violet-300/20 blur-2xl" />
             <div className="relative flex items-center gap-3">
@@ -633,7 +655,7 @@ export default function SupportWidget() {
                 <button
                   type="button"
                   onClick={requestClose}
-                  className="grid h-9 w-9 place-items-center rounded-full text-indigo-100 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                  className="grid h-11 w-11 place-items-center rounded-full text-indigo-100 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:h-9 sm:w-9"
                   aria-label={copy('support.widget.close')}
                 >
                   <X className="h-5 w-5" />
@@ -642,7 +664,7 @@ export default function SupportWidget() {
             </div>
           </header>
 
-          <div ref={messagesRef} role="log" aria-live="polite" className="flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-indigo-50/70 via-white to-white px-4 py-5">
+          <div ref={messagesRef} role="log" aria-live="polite" className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain bg-gradient-to-b from-indigo-50/70 via-white to-white px-3 py-3 sm:px-4 sm:py-5">
             <div className="flex items-start gap-2.5">
               <div className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-indigo-600 shadow-sm">
                 <SupportRobotIcon className="h-7 w-7" />
@@ -735,13 +757,13 @@ export default function SupportWidget() {
             ))}
 
             {messages.length === 0 && introPhase === 'done' && (
-              <div className="flex flex-wrap gap-2 pl-10">
+              <div className="flex flex-col items-start gap-2 pl-10 sm:flex-row sm:flex-wrap">
                 {suggestions.map((suggestion) => (
                   <button
                     key={suggestion}
                     type="button"
                     onClick={() => void sendMessage(suggestion)}
-                    className="rounded-full border border-indigo-200 bg-white px-3 py-2 text-left text-xs font-medium text-indigo-700 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                    className="min-h-11 rounded-full border border-indigo-200 bg-white px-3 py-2 text-left text-xs font-medium text-indigo-700 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                   >
                     {suggestion}
                   </button>
@@ -750,8 +772,11 @@ export default function SupportWidget() {
             )}
           </div>
 
-          <div className="border-t border-slate-100 bg-white px-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] pt-3">
-            <div className="mb-2.5 grid min-h-[72px] grid-cols-2 overflow-hidden rounded-xl border border-indigo-100 bg-indigo-50/60">
+          <div className="shrink-0 border-t border-slate-100 bg-white px-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] pt-3">
+            <div className={cn(
+              'mb-2.5 grid min-h-[72px] grid-cols-2 overflow-hidden rounded-xl border border-indigo-100 bg-indigo-50/60',
+              composerFocused && 'hidden sm:grid',
+            )}>
               <button
                 type="button"
                 onClick={() => void openContact()}
@@ -792,6 +817,8 @@ export default function SupportWidget() {
                 value={input}
                 onChange={(event) => setInput(event.target.value.slice(0, 2_000))}
                 onKeyDown={handleKeyDown}
+                onFocus={() => setComposerFocused(true)}
+                onBlur={() => setComposerFocused(false)}
                 placeholder={copy('support.widget.placeholder')}
                 disabled={streaming}
                 className="max-h-24 min-h-10 flex-1 resize-none bg-transparent px-2 py-2.5 text-sm text-slate-800 outline-none placeholder:text-slate-400 disabled:opacity-60"
@@ -801,7 +828,7 @@ export default function SupportWidget() {
                 onClick={() => streaming ? abortRef.current?.abort() : void sendMessage()}
                 disabled={!streaming && !input.trim()}
                 aria-label={streaming ? copy('support.widget.stop') : copy('support.widget.send')}
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-indigo-600 text-white shadow-sm transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-indigo-600 text-white shadow-sm transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300 sm:h-10 sm:w-10"
               >
                 {streaming ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4" />}
               </button>
@@ -809,13 +836,13 @@ export default function SupportWidget() {
           </div>
 
           {contactOpen && (
-            <div className="absolute inset-0 z-20 flex flex-col bg-white">
-              <header className="border-b border-slate-100 bg-gradient-to-br from-indigo-950 to-indigo-700 px-4 pb-4 pt-5 text-white">
+            <div className="absolute inset-0 z-20 flex min-h-0 flex-col bg-white">
+              <header className="shrink-0 border-b border-slate-100 bg-gradient-to-br from-indigo-950 to-indigo-700 px-4 pb-4 pt-[max(0.75rem,env(safe-area-inset-top))] text-white sm:pt-5">
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={() => setContactOpen(false)}
-                    className="grid h-9 w-9 place-items-center rounded-full text-indigo-100 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                    className="grid h-11 w-11 place-items-center rounded-full text-indigo-100 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:h-9 sm:w-9"
                     aria-label={copy('support.contact.back')}
                   >
                     <ArrowLeft className="h-5 w-5" />
@@ -849,7 +876,7 @@ export default function SupportWidget() {
                   </button>
                 </div>
               ) : (
-                <form onSubmit={submitContact} className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+                <form onSubmit={submitContact} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 sm:px-5 sm:py-5">
                   <label className="block text-xs font-semibold text-slate-700">
                     {copy('support.contact.name')}
                     <input
@@ -1028,7 +1055,10 @@ export default function SupportWidget() {
         onClick={toggleWidget}
         aria-label={open ? copy('support.widget.close') : copy('support.widget.label')}
         aria-expanded={open}
-        className="group fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-3 z-[176] grid h-[76px] w-[76px] place-items-center bg-transparent text-indigo-700 transition duration-300 hover:-translate-y-1 hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 sm:bottom-4 sm:right-5"
+        className={cn(
+          'group fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-3 z-[176] grid h-[76px] w-[76px] place-items-center bg-transparent text-indigo-700 transition duration-300 hover:-translate-y-1 hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 sm:bottom-4 sm:right-5',
+          open && 'hidden sm:grid',
+        )}
       >
         {open ? <X className="relative h-7 w-7" /> : <SupportRobotIcon className="relative h-16 w-16 transition-transform duration-300 group-hover:scale-105" />}
         {!open && <span className="absolute -right-0.5 -top-0.5 h-4 w-4 rounded-full border-2 border-white bg-emerald-400" />}

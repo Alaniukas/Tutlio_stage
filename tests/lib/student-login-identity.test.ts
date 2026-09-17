@@ -22,6 +22,14 @@ describe('student usernames', () => {
       .toBe('mv-7k4m-p9qd');
   });
 
+  it('accepts Pro Klasė child usernames', () => {
+    expect(isStudentLoginName(' PK-7K4M-P9QD ')).toBe(true);
+    expect(loginIdentifierToEmail(' PK-7K4M-P9QD '))
+      .toBe('pk-7k4m-p9qd@student-login.tutlio.invalid');
+    expect(studentLoginNameFromEmail('pk-7k4m-p9qd@student-login.tutlio.invalid'))
+      .toBe('pk-7k4m-p9qd');
+  });
+
   it('does not convert arbitrary names or similar domains', () => {
     expect(isStudentLoginName('mv-child')).toBe(false);
     expect(isStudentLoginName('mv-i1o0-abcd')).toBe(false);

@@ -23,6 +23,10 @@ interface RecurrenceFieldsProps {
   showEstimate?: boolean;
   /** Tighter paddings for narrow dialogs. */
   compact?: boolean;
+  /** Keep recurrence enabled while still allowing the user to choose its frequency and weekdays. */
+  lockEnabled?: boolean;
+  /** Keep the policy-provided end date fixed. */
+  lockEndDate?: boolean;
 }
 
 /**
@@ -43,6 +47,8 @@ export default function RecurrenceFields({
   startTime,
   showEstimate,
   compact,
+  lockEnabled = false,
+  lockEndDate = false,
 }: RecurrenceFieldsProps) {
   const { t } = useTranslation();
 
@@ -61,7 +67,14 @@ export default function RecurrenceFields({
 
   return (
     <div className={cn('border border-gray-100 rounded-xl space-y-3 bg-gray-50', compact ? 'p-3' : 'p-3 sm:p-4')}>
-      <button type="button" onClick={handleToggle} className="flex items-center justify-between w-full">
+      <button
+        type="button"
+        onClick={handleToggle}
+        disabled={lockEnabled}
+        aria-disabled={lockEnabled}
+        aria-pressed={enabled}
+        className={cn('flex items-center justify-between w-full', lockEnabled && 'cursor-default')}
+      >
         <div className="text-left">
           <p className="text-sm font-medium text-gray-900">{t('cal.recurringLesson')}</p>
           <p className="text-xs text-gray-500">{t('cal.recurringDesc')}</p>
@@ -104,6 +117,7 @@ export default function RecurrenceFields({
                     <button
                       key={day}
                       type="button"
+                      aria-pressed={isSelected}
                       onClick={() => {
                         onWeekdaysChange(
                           isSelected ? weekdays.filter((d) => d !== day) : [...weekdays, day],
@@ -131,8 +145,9 @@ export default function RecurrenceFields({
             <DateInput
               value={endDate}
               onChange={(e) => onEndDateChange(e.target.value)}
+              disabled={lockEndDate}
               min={startTime ? format(addWeeks(new Date(startTime), 1), 'yyyy-MM-dd') : undefined}
-              className="rounded-xl text-sm"
+              className="rounded-xl text-sm disabled:cursor-default disabled:bg-gray-100"
             />
             {!endDate && (
               <p className="text-xs text-gray-500">{t('cal.recurringNoEndHint')}</p>

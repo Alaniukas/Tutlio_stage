@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { useBodyScrollLock, useVisualViewport } from '@/hooks/useVisualViewport';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import {
@@ -554,6 +555,7 @@ export function InAppSupportPageContent({
         headers,
         body: JSON.stringify({
           mode: 'conversation',
+          conversationId: requestId,
           submitRequested,
           category,
           latestMessage: value,
@@ -741,7 +743,7 @@ export function InAppSupportPageContent({
               </p>
             </div>
             {onClose && (
-              <button type="button" onClick={onClose} className="grid h-9 w-9 place-items-center rounded-full text-indigo-100 transition hover:bg-white/10 hover:text-white sm:h-10 sm:w-10" aria-label={copy.close}>
+              <button type="button" onClick={onClose} className="grid h-11 w-11 place-items-center rounded-full text-indigo-100 transition hover:bg-white/10 hover:text-white sm:h-10 sm:w-10" aria-label={copy.close}>
                 <X className="h-5 w-5" />
               </button>
             )}
@@ -875,7 +877,7 @@ export function InAppSupportPageContent({
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={draft.files.length >= IN_APP_SUPPORT_MAX_ATTACHMENTS || composerBusy}
-                      className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-indigo-600 disabled:opacity-40"
+                      className="relative grid h-11 w-11 shrink-0 place-items-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-indigo-600 disabled:opacity-40 sm:h-10 sm:w-10"
                       aria-label={copy.addImages}
                     >
                       <Paperclip className="h-4.5 w-4.5" />
@@ -905,7 +907,7 @@ export function InAppSupportPageContent({
                       type="button"
                       onClick={() => void sendChatMessage()}
                       disabled={composerBusy || !input.trim()}
-                      className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-indigo-600 text-white shadow-sm transition-all duration-200 hover:bg-indigo-700 active:scale-95 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+                      className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-indigo-600 text-white shadow-sm transition-all duration-200 hover:bg-indigo-700 active:scale-95 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none sm:h-10 sm:w-10"
                       aria-label={agentReady ? copy.send : copy.continue}
                     >
                       {submitting
@@ -983,13 +985,16 @@ export function InAppSupportPopover({
   onClose: () => void;
 }) {
   const width = 560;
-  const viewportWidth = typeof window === 'undefined' ? 1280 : window.innerWidth;
-  const viewportHeight = typeof window === 'undefined' ? 900 : window.innerHeight;
+  const visualViewport = useVisualViewport();
+  const viewportWidth = visualViewport.width;
+  const viewportHeight = visualViewport.height;
   const desktop = viewportWidth >= 1024;
   const left = desktop
     ? Math.max(16, Math.min((anchor?.right ?? 16) + 12, viewportWidth - width - 16))
     : 8;
   const bottom = desktop ? Math.max(16, viewportHeight - (anchor?.bottom ?? viewportHeight - 16)) : 8;
+
+  useBodyScrollLock(!desktop);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1007,9 +1012,11 @@ export function InAppSupportPopover({
           'absolute overflow-hidden bg-white',
           desktop
             ? 'h-[min(780px,calc(100dvh-2rem))] w-[560px] rounded-2xl shadow-[0_28px_90px_-24px_rgba(15,23,42,0.55)]'
-            : 'inset-0 h-[100dvh] w-screen rounded-none shadow-none',
+            : 'inset-x-0 top-0 h-dvh w-screen max-w-[100vw] rounded-none shadow-none',
         )}
-        style={desktop ? { left, bottom } : undefined}
+        style={desktop
+          ? { left, bottom }
+          : { top: visualViewport.offsetTop, height: visualViewport.height }}
       >
         <InAppSupportPageContent
           compact

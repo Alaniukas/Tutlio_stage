@@ -2047,7 +2047,6 @@ export default function CompanyContracts() {
                               .order('name');
                             setExtraIndividualSubjects(
                               (subjectsData || [])
-                                .filter((s) => !s.is_group)
                                 .map((s) => ({
                                   id: s.id,
                                   name: s.name,

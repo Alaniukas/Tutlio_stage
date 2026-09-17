@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { deliverSchoolMonthlyInvoiceOnce } from '../../api/_lib/schoolMonthlyInvoiceDelivery';
 
 const now = new Date('2026-09-01T08:00:00Z');
-const payload = { from: 'School <school@example.com>', to: ['parent@example.com'], subject: 'Invoice', html: '<p>80 EUR</p>' };
+const payload = {
+  from: 'School <school@example.com>', to: ['parent@example.com'], subject: 'Invoice', html: '<p>80 EUR</p>',
+  attachments: [{ filename: 'PAM-762.pdf', content: 'cGRm' }],
+};
 function db(initial: any = null, opts: { stampError?: boolean; missingSchema?: boolean } = {}) {
   const state = { invoice: { id: 'inv', organization_id: 'org', payment_status: 'pending', invoice_email_sent_at: null as string | null }, delivery: initial };
   return { state, client: { from(table: string) {

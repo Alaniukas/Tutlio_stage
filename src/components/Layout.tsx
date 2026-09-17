@@ -419,7 +419,7 @@ export default function Layout({ children }: LayoutProps) {
             'flex-1 min-h-0 min-w-0 overflow-x-hidden',
             isCalendarRoute
               ? 'overflow-y-auto px-2 sm:px-3 py-2 sm:py-3'
-              : 'overflow-y-auto px-4 xl:px-6 py-6',
+              : 'overflow-y-auto px-3 py-4 sm:px-4 sm:py-6 xl:px-6',
           )}
         >
           <div

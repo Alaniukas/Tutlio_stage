@@ -24,10 +24,18 @@ const SIGNED_URL_TTL_SECONDS = 60 * 60;
 type SessionRow = {
   id: string;
   student_id: string;
+  tutor_id: string;
+  subject_id: string | null;
   start_time: string;
   end_time: string | null;
   class_group_id: string | null;
+  subjects?: { is_group?: boolean | null } | { is_group?: boolean | null }[] | null;
 };
+
+function isGroupSubjectSession(session: SessionRow): boolean {
+  const relation = Array.isArray(session.subjects) ? session.subjects[0] : session.subjects;
+  return !session.class_group_id && relation?.is_group === true && Boolean(session.subject_id);
+}
 
 async function loadMemberGroupIds(supabase: SupabaseClient, studentId: string): Promise<Set<string>> {
   const { data } = await supabase
@@ -52,7 +60,7 @@ async function resolveSessionAccess(
 > {
   const { data: session } = await supabase
     .from('sessions')
-    .select('id, student_id, start_time, end_time, class_group_id')
+    .select('id, student_id, tutor_id, subject_id, start_time, end_time, class_group_id, subjects(is_group)')
     .eq('id', sessionId)
     .maybeSingle();
   if (!session) return { ok: false, status: 404, error: 'Pamoka nerasta' };
@@ -128,7 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'list') {
     const { data: session } = await supabase
       .from('sessions')
-      .select('id, student_id, start_time, end_time, class_group_id')
+      .select('id, student_id, tutor_id, subject_id, start_time, end_time, class_group_id, subjects(is_group)')
       .eq('id', sessionId)
       .maybeSingle();
     if (!session) return res.status(404).json({ error: 'Pamoka nerasta' });
@@ -138,17 +146,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (classGroupId) {
       const { data } = await supabase
         .from('sessions')
-        .select('id, student_id, start_time, end_time, class_group_id')
+        .select('id, student_id, tutor_id, subject_id, start_time, end_time, class_group_id')
         .eq('class_group_id', classGroupId)
         .eq('start_time', (session as SessionRow).start_time)
         .eq('end_time', (session as SessionRow).end_time);
       siblings = (data || []) as SessionRow[];
+    } else if (isGroupSubjectSession(session as SessionRow)) {
+      const row = session as SessionRow;
+      const { data } = await supabase
+        .from('sessions')
+        .select('id, student_id, tutor_id, subject_id, start_time, end_time, class_group_id')
+        .eq('tutor_id', row.tutor_id)
+        .eq('subject_id', row.subject_id)
+        .eq('start_time', row.start_time)
+        .eq('end_time', row.end_time)
+        .is('class_group_id', null);
+      siblings = (data || []) as SessionRow[];
     }
 
-    const folders = siblingFolders(
-      session as unknown as Parameters<typeof siblingFolders>[0],
-      siblings as unknown as Parameters<typeof siblingFolders>[1],
-    );
+    const folders = isGroupSubjectSession(session as SessionRow)
+      ? [...new Set([sessionId, ...siblings.map((row) => row.id)])]
+      : siblingFolders(
+          session as unknown as Parameters<typeof siblingFolders>[0],
+          siblings as unknown as Parameters<typeof siblingFolders>[1],
+        );
     const seen = new Set<string>();
     const merged: Array<{
       name: string;

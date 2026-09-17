@@ -24,6 +24,9 @@ import {
 } from '../../src/lib/extraLessonsContract.js';
 import { stripDocxBufferToAnnex } from './extraLessonsAnnexDocx.js';
 
+/** Leaves enough time for a complete legal-text fallback inside 120s functions. */
+export const EXTRA_LESSONS_DOCX_TIMEOUT_MS = 90000;
+
 export async function signSchoolContractPdf(
   supabase: SupabaseClient,
   pathOrUrl: string | null | undefined,
@@ -34,20 +37,6 @@ export async function signSchoolContractPdf(
   const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, expiresSec);
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
-}
-
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('timeout')), ms);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 export function extraLessonsBundledDocxCandidates(): string[] {
@@ -127,7 +116,7 @@ export async function freezeExtraLessonsPdfSource(
     parentName: String(params.student.payer_name || ''), parentEmail: String(params.student.payer_email || ''),
     parentPhone: String(params.student.payer_phone || ''), parentPersonalCode: '', childBirthDate: '', address: '',
     annualFee: params.indicativeMonthlyEur, body: params.filledBody,
-    title: 'Nuotoliniu papildomu pamoku paslaugu sutartis', feeLabel: 'Orientacine menesio kaina',
+    title: 'Nuotolinių papildomų užsiėmimų paslaugų sutartis', feeLabel: 'Orientacinė mėnesio kaina',
   });
   return { kind: 'pdf', base64: Buffer.from(pdf).toString('base64') };
 }
@@ -147,9 +136,14 @@ export async function renderAndStoreExtraLessonsPdf(
     indicativeMonthlyEur: number;
     extraLessonsPayload?: Record<string, string>;
   },
-): Promise<{ uploadedPath: string | null; pdfBase64?: string }> {
+): Promise<{
+  uploadedPath: string | null;
+  pdfBase64?: string;
+  renderMode: 'docx' | 'legal_text' | 'legal_text_fallback';
+}> {
   const st = params.student || {};
   let pdfBytes: Uint8Array | null = null;
+  let renderMode: 'docx' | 'legal_text' | 'legal_text_fallback' = 'legal_text';
   const payload = extraLessonsDocxPayload({
     student: st,
     indicativeMonthlyEur: params.indicativeMonthlyEur,
@@ -160,13 +154,35 @@ export async function renderAndStoreExtraLessonsPdf(
   if (usesBundledExtraLessonsDocx(params.contract.organization_id)) {
     try {
       const templateBytes = readFileSync(resolveExtraLessonsBundledDocxPath());
-      pdfBytes = new Uint8Array(await withTimeout(
-        renderDocxTemplateBufferToPdfBuffer({ templateBytes, payload }),
-        170000,
-      ));
+      pdfBytes = new Uint8Array(await renderDocxTemplateBufferToPdfBuffer({
+        templateBytes,
+        payload,
+        timeoutMs: EXTRA_LESSONS_DOCX_TIMEOUT_MS,
+      }));
+      renderMode = 'docx';
     } catch (e) {
       const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
-      throw new Error(`Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${detail}`, { cause: e });
+      const fallbackBody = String(params.filledBody || '');
+      const requiredSections = [
+        '1. SUTARTIES ŠALYS IR UŽSAKYMO DUOMENYS',
+        '6. TEISĖ PER 14 DIENŲ ATSISAKYTI NUOTOLINĖS SUTARTIES',
+        '11. BAIGIAMOSIOS NUOSTATOS',
+        '1 PRIEDAS',
+      ];
+      const completeLegalBody = requiredSections.every((section) => fallbackBody.includes(section))
+        && !/\{\{[^}]+\}\}/.test(fallbackBody);
+      if (!completeLegalBody) {
+        throw new Error(
+          `Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną, o teisinio teksto atsarginė kopija nepilna: ${detail}`,
+          { cause: e },
+        );
+      }
+      renderMode = 'legal_text_fallback';
+      console.warn('[extra-lessons] DOCX conversion failed; using complete legal-text PDF fallback', {
+        contractId: params.contract.id,
+        organizationId: params.contract.organization_id,
+        detail,
+      });
     }
   } else if (params.contract.template_id) {
     const { data: tpl, error: templateErr } = await supabase
@@ -186,10 +202,12 @@ export async function renderAndStoreExtraLessonsPdf(
         if (signErr || !signedData?.signedUrl) {
           throw new Error(`nepavyko pasiekti DOCX šablono${signErr?.message ? `: ${signErr.message}` : ''}`);
         }
-        pdfBytes = await withTimeout(
-          createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload }),
-          170000,
-        );
+        pdfBytes = await createDocxTemplatePdf({
+          fetchUrl: signedData.signedUrl,
+          payload,
+          timeoutMs: EXTRA_LESSONS_DOCX_TIMEOUT_MS,
+        });
+        renderMode = 'docx';
       } catch (e) {
         const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
         throw new Error(`Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${detail}`, { cause: e });
@@ -209,8 +227,8 @@ export async function renderAndStoreExtraLessonsPdf(
       address: '',
       annualFee: params.indicativeMonthlyEur,
       body: params.filledBody,
-      title: 'Nuotoliniu papildomu pamoku paslaugu sutartis',
-      feeLabel: 'Orientacine menesio kaina',
+      title: 'Nuotolinių papildomų užsiėmimų paslaugų sutartis',
+      feeLabel: 'Orientacinė mėnesio kaina',
     });
   }
 
@@ -227,7 +245,7 @@ export async function renderAndStoreExtraLessonsPdf(
   if (uploadErr) {
     throw new Error(`Nepavyko išsaugoti papildomų užsiėmimų sutarties PDF: ${uploadErr.message}`);
   }
-  return { uploadedPath: path, pdfBase64: Buffer.from(pdfBytes).toString('base64') };
+  return { uploadedPath: path, pdfBase64: Buffer.from(pdfBytes).toString('base64'), renderMode };
 }
 
 async function annexPdfFromFilledDocx(params: {
@@ -244,7 +262,9 @@ async function annexPdfFromFilledDocx(params: {
     submitNote: extraLessonsWithdrawalFormSubmitNote(schoolEmail),
   });
   if (annexDocx) {
-    return new Uint8Array(await withTimeout(convertDocxBufferToPdfWithFallbacks(annexDocx), 170000));
+    return new Uint8Array(await convertDocxBufferToPdfWithFallbacks(annexDocx, {
+      timeoutMs: EXTRA_LESSONS_DOCX_TIMEOUT_MS,
+    }));
   }
   return createSimpleContractPdf({
     contractNumber: '',

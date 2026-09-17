@@ -62,6 +62,10 @@ describe('profileQualifiesAsTutor', () => {
     expect(profileQualifiesAsTutor(ghostProfile, true)).toBe(false);
   });
 
+  it('applies the same ghost-profile guard to a linked parent identity', () => {
+    expect(profileQualifiesForTutorPortal(ghostProfile, true, false)).toBe(false);
+  });
+
   it('treats solo tutor signup profile as tutor when no student row', () => {
     expect(profileQualifiesAsTutor(ghostProfile, false)).toBe(true);
   });

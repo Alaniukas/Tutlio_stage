@@ -25,10 +25,11 @@ import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { authHeaders } from '@/lib/apiHelpers';
 import { parseOrgTrialPolicy, shouldAutoMarkNextLessonTrial, countTrialsFromHistory } from '@/lib/orgTrialPolicy';
-import { isMoksloVaisiaiOrg } from '@/lib/marketMoney';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
 import { ASSIGN_STUDENT_FREE_SLOT_DIALOG_CONTENT_CLASS } from '@/components/AssignStudentFreeSlotDialog';
 import RecurrenceFields, { type RecurrenceFrequency } from '@/components/RecurrenceFields';
 import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
+import { proKlaseAvailabilitySearchRecurrence } from '@/lib/proKlaseBooking';
 
 /** A free availability window picked from FindTutorModal, to be narrowed to a lesson slot. */
 export interface FindLessonBookPick {
@@ -95,6 +96,7 @@ export default function FindLessonBookDialog({
   const pkFeat = (flagId: string) =>
     proKlaseFeatureEnabled(organizationId, orgEntityType, hasFeature, flagId, orgFeaturesLoading);
   const isMvOrg = isMoksloVaisiaiOrg(organizationId);
+  const isProKlaseBooking = isProKlaseOrg(organizationId);
   const [subject, setSubject] = useState<SubjectRow | null>(null);
   const [overridePrice, setOverridePrice] = useState<number | null>(null);
   const [lessonStartIso, setLessonStartIso] = useState('');
@@ -173,10 +175,13 @@ export default function FindLessonBookDialog({
       setSuccessMessage('');
       setIsTrial(false);
       setFirstLessonIsTrial(false);
-      setIsRecurring(false);
+      const requiredRecurrence = isProKlaseBooking
+        ? proKlaseAvailabilitySearchRecurrence(pick.startIso)
+        : null;
+      setIsRecurring(Boolean(requiredRecurrence));
       setRecurringFrequency('weekly');
-      setRecurringWeekdays([]);
-      setRecurringEndDate('');
+      setRecurringWeekdays(requiredRecurrence?.weekdays ?? []);
+      setRecurringEndDate(requiredRecurrence?.endDate ?? '');
       const durationMin = Number((subj as SubjectRow | null)?.duration_minutes) || 60;
       if (!Number.isNaN(windowStart.getTime()) && !Number.isNaN(windowEnd.getTime())) {
         const range = defaultLessonRange(windowStart, windowEnd, durationMin);
@@ -187,7 +192,7 @@ export default function FindLessonBookDialog({
     return () => {
       cancelled = true;
     };
-  }, [pick, studentId]);
+  }, [pick, studentId, isProKlaseBooking]);
 
   // Org trial defaults (same source as the org calendar / create-trial-package).
   useEffect(() => {
@@ -237,13 +242,22 @@ export default function FindLessonBookDialog({
     });
     setAutoTrialOn(next);
     if (next) {
-      setIsTrial(true);
-      setIsRecurring(false);
-      setFirstLessonIsTrial(false);
-      setRecurringWeekdays([]);
-      setRecurringEndDate('');
+      if (isProKlaseBooking) {
+        const requiredRecurrence = proKlaseAvailabilitySearchRecurrence(pick.startIso);
+        setIsTrial(false);
+        setIsRecurring(true);
+        setFirstLessonIsTrial(true);
+        setRecurringWeekdays((current) => current.length > 0 ? current : (requiredRecurrence?.weekdays ?? []));
+        setRecurringEndDate((current) => current || requiredRecurrence?.endDate || '');
+      } else {
+        setIsTrial(true);
+        setIsRecurring(false);
+        setFirstLessonIsTrial(false);
+        setRecurringWeekdays([]);
+        setRecurringEndDate('');
+      }
     }
-  }, [orgFeaturesLoading, studentId, pick, historyCounts, trialPolicy, isMvOrg]);
+  }, [orgFeaturesLoading, studentId, pick, historyCounts, trialPolicy, isMvOrg, isProKlaseBooking]);
 
   const durationMin = isTrial ? trialDefaults.durationMinutes : (subject?.duration_minutes || 60);
 
@@ -501,6 +515,8 @@ export default function FindLessonBookDialog({
               <RecurrenceFields
                 compact
                 enabled={isRecurring}
+                lockEnabled={isProKlaseBooking}
+                lockEndDate={isProKlaseBooking}
                 onEnabledChange={(enabled) => {
                   setIsRecurring(enabled);
                   if (!enabled) setFirstLessonIsTrial(false);
