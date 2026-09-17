@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from './types.js';
 import { getPlatformAdminSecret } from './_lib/adminSecret.js';
+import { sendInAppSupportCompletionEmail } from './_lib/inAppSupportCompletionEmail.js';
 import { getSupportServiceClient, SUPPORT_ATTACHMENT_BUCKET } from './_lib/supportPersistence.js';
 import type { InAppSupportAttachment } from '../src/lib/inAppSupport.js';
 
@@ -41,6 +42,68 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ requests });
   }
 
+  if (req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body) || {};
+    } catch {
+      return res.status(400).json({ error: 'Invalid JSON' });
+    }
+    const id = String(body.id || '').trim();
+    if (!/^[a-f0-9-]{36}$/i.test(id) || body.action !== 'notify_completion') {
+      return res.status(400).json({ error: 'Invalid completion notification request' });
+    }
+
+    const { data: supportRequest, error: loadError } = await db
+      .from('in_app_support_requests')
+      .select('id, reporter_name, reporter_email, category, title, locale, status, completion_notified_at')
+      .eq('id', id)
+      .maybeSingle();
+    if (loadError) {
+      console.error('[admin-support-requests] Completion request load failed:', loadError);
+      return res.status(500).json({ error: 'Failed to load support request' });
+    }
+    if (!supportRequest) return res.status(404).json({ error: 'Support request not found' });
+    if (supportRequest.status !== 'resolved') {
+      return res.status(409).json({ error: 'Mark and save this request as resolved before notifying the user' });
+    }
+    if (supportRequest.completion_notified_at) {
+      return res.status(409).json({ error: 'The user has already been notified about this request' });
+    }
+
+    let emailId: string;
+    try {
+      emailId = await sendInAppSupportCompletionEmail({
+        id: supportRequest.id,
+        reference: `SUP-${supportRequest.id.replace(/-/g, '').slice(0, 8).toUpperCase()}`,
+        reporterName: supportRequest.reporter_name,
+        reporterEmail: supportRequest.reporter_email,
+        category: supportRequest.category,
+        title: supportRequest.title,
+        locale: supportRequest.locale,
+      });
+    } catch (emailError) {
+      console.error('[admin-support-requests] Completion email failed:', emailError);
+      return res.status(502).json({ error: 'Failed to send the completion email' });
+    }
+
+    const notifiedAt = new Date().toISOString();
+    const { data, error } = await db
+      .from('in_app_support_requests')
+      .update({
+        completion_notified_at: notifiedAt,
+        completion_notification_email_id: emailId.slice(0, 500),
+      })
+      .eq('id', id)
+      .select('*')
+      .single();
+    if (error || !data) {
+      console.error('[admin-support-requests] Completion notification update failed:', error);
+      return res.status(500).json({ error: 'Email sent, but the notification status could not be saved' });
+    }
+    return res.status(200).json({ request: data });
+  }
+
   if (req.method === 'PATCH') {
     let body: Record<string, unknown>;
     try {
@@ -70,6 +133,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ request: data });
   }
 
-  res.setHeader('Allow', 'GET, PATCH');
+  res.setHeader('Allow', 'GET, PATCH, POST');
   return res.status(405).json({ error: 'Method not allowed' });
 }

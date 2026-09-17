@@ -33,6 +33,8 @@ const request: SupportRequest = {
   transcript: [{ role: 'user', content: 'My draft disappears.' }],
   attachments: [],
   coding_agent_prompt: 'You are an AI coding agent. Resolve support report SUP-17EE7859.',
+  completion_notified_at: null,
+  completion_notification_email_id: null,
   status: 'new',
   priority: 'untriaged',
   internal_note: null,
@@ -50,5 +52,16 @@ describe('admin support requests', () => {
     fireEvent.click(screen.getByRole('button', { name: /Kopijuoti/ }));
     expect(mocks.copyTextToClipboard).toHaveBeenCalledWith(request.coding_agent_prompt);
     await waitFor(() => expect(screen.getByRole('button', { name: /Nukopijuota/ })).toBeTruthy());
+  });
+
+  it('sends a completion notice only after the request is resolved and confirms it in the panel', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<AdminSupportRequestsPanel adminSecret="demo" demoRequests={[{ ...request, status: 'resolved' }]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pranešti, kad klaida ištaisyta' }));
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('admin@example.com'));
+    await waitFor(() => expect(screen.getByText('Naudotojas informuotas')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Pranešti, kad klaida ištaisyta' })).toBeNull();
   });
 });

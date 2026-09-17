@@ -116,6 +116,9 @@ describe('in-app support send confirmation', () => {
     expect(inAppSupportSendGuidance('en')).toContain('send to the team');
     expect(inAppSupportSendGuidance('lt')).toContain('siųsti komandai');
     expect(inAppSupportSendGuidance('nl')).toContain('stuur naar het team');
+    expect(inAppSupportSendGuidance('en')).toContain('email when the bug is fixed');
+    expect(inAppSupportSendGuidance('lt')).toContain('gausite el. laišką');
+    expect(inAppSupportSendGuidance('nl')).toContain('Je ontvangt een e-mail');
   });
 
   it('does not treat vague confirmation as permission to submit', () => {

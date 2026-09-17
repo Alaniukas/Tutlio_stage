@@ -9,6 +9,7 @@ import {
   Image as ImageIcon,
   Lightbulb,
   Loader2,
+  MailCheck,
   MessageSquareText,
   RefreshCw,
   Save,
@@ -56,6 +57,8 @@ export type SupportRequest = {
   transcript: InAppSupportTranscriptMessage[];
   attachments: AdminAttachment[];
   coding_agent_prompt: string | null;
+  completion_notified_at: string | null;
+  completion_notification_email_id: string | null;
   status: InAppSupportStatus;
   priority: InAppSupportPriority;
   internal_note: string | null;
@@ -109,6 +112,7 @@ export default function AdminSupportRequestsPanel({
   const [selectedId, setSelectedId] = useState<string | null>(demoRequests?.[0]?.id || null);
   const [loading, setLoading] = useState(!demoRequests);
   const [saving, setSaving] = useState(false);
+  const [notifyingCompletion, setNotifyingCompletion] = useState(false);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | InAppSupportStatus>('all');
@@ -220,6 +224,44 @@ export default function AdminSupportRequestsPanel({
   const copyCodingAgentPrompt = async () => {
     if (!selected?.coding_agent_prompt) return;
     setPromptCopied(await copyTextToClipboard(selected.coding_agent_prompt));
+  };
+
+  const notifyCompletion = async () => {
+    if (!selected
+      || selected.status !== 'resolved'
+      || selected.completion_notified_at
+      || notifyingCompletion) return;
+    const action = selected.category === 'bug' ? 'klaida ištaisyta' : 'funkcija įdiegta';
+    if (!window.confirm(`Išsiųsti ${selected.reporter_email} laišką, kad ${action}?`)) return;
+
+    setNotifyingCompletion(true);
+    setError('');
+    try {
+      if (demoMode) {
+        const completionNotifiedAt = new Date().toISOString();
+        setRequests((current) => current.map((item) => item.id === selected.id ? {
+          ...item,
+          completion_notified_at: completionNotifiedAt,
+          completion_notification_email_id: 'demo-completion-email',
+          updated_at: completionNotifiedAt,
+        } : item));
+        return;
+      }
+      const response = await fetch('/api/admin-support-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
+        body: JSON.stringify({ id: selected.id, action: 'notify_completion' }),
+      });
+      const result = await response.json().catch(() => null) as { request?: SupportRequest; error?: string } | null;
+      if (!response.ok || !result?.request) throw new Error(result?.error || 'Nepavyko išsiųsti užbaigimo laiško');
+      setRequests((current) => current.map((item) => (
+        item.id === selected.id ? { ...item, ...result.request, attachments: item.attachments } : item
+      )));
+    } catch (notifyError) {
+      setError(notifyError instanceof Error ? notifyError.message : 'Nepavyko išsiųsti užbaigimo laiško');
+    } finally {
+      setNotifyingCompletion(false);
+    }
   };
 
   return (
@@ -416,6 +458,31 @@ export default function AdminSupportRequestsPanel({
                     <button type="button" onClick={() => void save()} disabled={saving} className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60">
                       {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Išsaugoti
                     </button>
+
+                    <div className="mt-4 border-t border-white/10 pt-4">
+                      <p className="text-xs font-bold text-slate-200">Užbaigimo laiškas</p>
+                      {selected.completion_notified_at ? (
+                        <div className="mt-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2.5 text-xs leading-5 text-emerald-200">
+                          <span className="flex items-center gap-1.5 font-bold"><MailCheck className="h-4 w-4" /> Naudotojas informuotas</span>
+                          <span className="mt-1 block text-emerald-300/70">{formatDate(selected.completion_notified_at)}</span>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="mt-1.5 text-[11px] leading-4 text-slate-500">
+                            Laišką galima siųsti tik išsaugojus būseną „Išspręsta“. Gavėjas bus {selected.reporter_email}.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => void notifyCompletion()}
+                            disabled={selected.status !== 'resolved' || notifyingCompletion}
+                            className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {notifyingCompletion ? <Loader2 className="h-4 w-4 animate-spin" /> : <MailCheck className="h-4 w-4" />}
+                            {selected.category === 'bug' ? 'Pranešti, kad klaida ištaisyta' : 'Pranešti, kad funkcija įdiegta'}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
 
                   <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-xs text-slate-400">

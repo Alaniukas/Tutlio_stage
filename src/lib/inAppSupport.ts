@@ -17,10 +17,10 @@ const SUPPORT_NAV_LABELS = {
 } as const;
 
 const SUPPORT_SEND_GUIDANCE = {
-  en: 'If you feel you have shared enough context, just say “send to the team”. The agent will send this conversation to the Tutlio team, and they will take care of it as soon as possible.',
-  lt: 'Jei manote, kad jau pateikėte pakankamai konteksto, tiesiog parašykite „siųsti komandai“. Agentas perduos šį pokalbį Tutlio komandai, o ji pasirūpins juo kaip įmanoma greičiau.',
-  nl: 'Als je vindt dat je genoeg context hebt gegeven, zeg dan gewoon ‘stuur naar het team’. De agent stuurt dit gesprek naar het Tutlio-team, dat er zo snel mogelijk mee aan de slag gaat.',
-  pl: 'Jeśli uważasz, że podano już wystarczający kontekst, napisz po prostu „wyślij do zespołu”. Agent przekaże tę rozmowę zespołowi Tutlio, który zajmie się nią tak szybko, jak to możliwe.',
+  en: 'If you feel you have shared enough context, just say “send to the team”. The agent will send this conversation to the Tutlio team, and they will act on it as soon as possible. You will receive an email when the bug is fixed or the feature is implemented.',
+  lt: 'Jei manote, kad jau pateikėte pakankamai konteksto, tiesiog parašykite „siųsti komandai“. Agentas perduos šį pokalbį Tutlio komandai, o ji imsis darbo kaip įmanoma greičiau. Kai klaida bus ištaisyta arba funkcija įdiegta, gausite el. laišką.',
+  nl: 'Als je vindt dat je genoeg context hebt gegeven, zeg dan gewoon ‘stuur naar het team’. De agent stuurt dit gesprek naar het Tutlio-team, dat er zo snel mogelijk mee aan de slag gaat. Je ontvangt een e-mail wanneer de bug is opgelost of de functie is geïmplementeerd.',
+  pl: 'Jeśli uważasz, że podano już wystarczający kontekst, napisz po prostu „wyślij do zespołu”. Agent przekaże tę rozmowę zespołowi Tutlio, który zajmie się nią tak szybko, jak to możliwe. Otrzymasz e-mail, gdy błąd zostanie naprawiony lub funkcja wdrożona.',
 } as const;
 
 export function inAppSupportLabel(locale: string): string {
