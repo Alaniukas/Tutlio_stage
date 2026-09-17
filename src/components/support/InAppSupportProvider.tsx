@@ -28,6 +28,7 @@ export function useInAppSupportAgent(): SupportAgentContextValue {
 export default function InAppSupportProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const [open, setOpen] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
   const [sourcePath, setSourcePath] = useState('');
   const [anchor, setAnchor] = useState<SupportPopoverAnchor | null>(null);
 
@@ -41,6 +42,7 @@ export default function InAppSupportProvider({ children }: { children: ReactNode
       bottom: rect.bottom,
     } : null);
     setSourcePath(`${location.pathname}${location.search}`);
+    setHasOpened(true);
     setOpen(true);
   }, [location.pathname, location.search]);
   const contextValue = useMemo(() => ({ openSupportAgent }), [openSupportAgent]);
@@ -48,9 +50,10 @@ export default function InAppSupportProvider({ children }: { children: ReactNode
   return (
     <SupportAgentContext.Provider value={contextValue}>
       {children}
-      {IN_APP_SUPPORT_ENABLED && open ? (
+      {IN_APP_SUPPORT_ENABLED && hasOpened ? (
         <Suspense fallback={null}>
           <InAppSupportPopover
+            open={open}
             anchor={anchor}
             sourcePath={sourcePath}
             onClose={() => setOpen(false)}

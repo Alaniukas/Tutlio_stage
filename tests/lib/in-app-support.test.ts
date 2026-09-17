@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   inAppSupportDraftMissingFields,
   isInAppSupportSendCommand,
+  inAppSupportSendGuidance,
   isInAppSupportDraftComplete,
   normalizeInAppSupportAgentReply,
   nextInAppSupportQuestionField,
@@ -108,6 +109,13 @@ describe('in-app support send confirmation', () => {
     expect(isInAppSupportSendCommand('Taip, siųskite komandai!')).toBe(true);
     expect(isInAppSupportSendCommand('siųsti, pridėk nuotraukas')).toBe(true);
     expect(isInAppSupportSendCommand('Wyślij to')).toBe(true);
+    expect(isInAppSupportSendCommand('Stuur naar het team')).toBe(true);
+  });
+
+  it('explains explicit team submission in English, Lithuanian, and Dutch', () => {
+    expect(inAppSupportSendGuidance('en')).toContain('send to the team');
+    expect(inAppSupportSendGuidance('lt')).toContain('siųsti komandai');
+    expect(inAppSupportSendGuidance('nl')).toContain('stuur naar het team');
   });
 
   it('does not treat vague confirmation as permission to submit', () => {

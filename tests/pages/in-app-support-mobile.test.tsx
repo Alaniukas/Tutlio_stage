@@ -35,7 +35,35 @@ describe('in-app support mobile shell', () => {
     expect(panel?.classList.contains('shadow-none')).toBe(true);
     expect(panel?.style.top).toBe('0px');
     expect(panel?.style.height).toBe('844px');
-    expect(screen.getByRole('button', { name: 'Close support agent' }).classList.contains('bg-transparent')).toBe(true);
+    expect(screen.getByTestId('support-agent-backdrop').classList.contains('bg-transparent')).toBe(true);
+  });
+
+  it('does not close on outside clicks and preserves the draft while hidden', () => {
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <MemoryRouter initialEntries={['/school']}>
+        <InAppSupportPopover open anchor={null} demoMode onClose={onClose} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Pasiūlyti funkciją/ }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Prašau išsaugoti šį nebaigtą aprašymą.' } });
+    fireEvent.click(screen.getByTestId('support-agent-backdrop'));
+    expect(onClose).not.toHaveBeenCalled();
+
+    rerender(
+      <MemoryRouter initialEntries={['/school']}>
+        <InAppSupportPopover open={false} anchor={null} demoMode onClose={onClose} />
+      </MemoryRouter>,
+    );
+    rerender(
+      <MemoryRouter initialEntries={['/school']}>
+        <InAppSupportPopover open anchor={null} demoMode onClose={onClose} />
+      </MemoryRouter>,
+    );
+
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value)
+      .toBe('Prašau išsaugoti šį nebaigtą aprašymą.');
   });
 
   it('uses one bottom chat composer and does not render form progress or helper copy', () => {

@@ -13,11 +13,24 @@ const SUPPORT_NAV_LABELS = {
   en: 'Support agent',
   lt: 'Pagalbos agentas',
   pl: 'Agent pomocy',
+  nl: 'Supportagent',
+} as const;
+
+const SUPPORT_SEND_GUIDANCE = {
+  en: 'If you feel you have shared enough context, just say “send to the team”. The agent will send this conversation to the Tutlio team, and they will take care of it as soon as possible.',
+  lt: 'Jei manote, kad jau pateikėte pakankamai konteksto, tiesiog parašykite „siųsti komandai“. Agentas perduos šį pokalbį Tutlio komandai, o ji pasirūpins juo kaip įmanoma greičiau.',
+  nl: 'Als je vindt dat je genoeg context hebt gegeven, zeg dan gewoon ‘stuur naar het team’. De agent stuurt dit gesprek naar het Tutlio-team, dat er zo snel mogelijk mee aan de slag gaat.',
+  pl: 'Jeśli uważasz, że podano już wystarczający kontekst, napisz po prostu „wyślij do zespołu”. Agent przekaże tę rozmowę zespołowi Tutlio, który zajmie się nią tak szybko, jak to możliwe.',
 } as const;
 
 export function inAppSupportLabel(locale: string): string {
-  const language = locale === 'lt' || locale === 'pl' ? locale : 'en';
+  const language = locale === 'lt' || locale === 'pl' || locale === 'nl' ? locale : 'en';
   return SUPPORT_NAV_LABELS[language];
+}
+
+export function inAppSupportSendGuidance(locale: string): string {
+  const language = locale === 'lt' || locale === 'pl' || locale === 'nl' ? locale : 'en';
+  return SUPPORT_SEND_GUIDANCE[language];
 }
 
 export interface InAppSupportAttachment {
@@ -335,6 +348,10 @@ const IN_APP_SUPPORT_SEND_COMMANDS = new Set([
   'wyslij zespolowi do sprawdzenia',
   'tak wyslij',
   'tak wyslij to',
+  'stuur naar het team',
+  'stuur dit naar het team',
+  'stuur naar team',
+  'verzend naar het team',
 ]);
 
 /** Requires an explicit localized send instruction; a vague "yes" never submits a report. */
@@ -349,6 +366,7 @@ export function isInAppSupportSendCommand(value: string): boolean {
   if (IN_APP_SUPPORT_SEND_COMMANDS.has(normalized)) return true;
   if (/^(prasau )?(siusk|siuskite|siusti)\b/.test(normalized)) return true;
   if (/^(prosze )?wyslij\b/.test(normalized)) return true;
+  if (/^(alsjeblieft )?(stuur|verzend)\b/.test(normalized)) return true;
   return /^(please )?(send|submit)( it| this| the report)?\b/.test(normalized);
 }
 

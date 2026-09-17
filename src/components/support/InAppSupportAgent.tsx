@@ -26,6 +26,7 @@ import {
   IN_APP_SUPPORT_ATTACHMENT_TYPES,
   IN_APP_SUPPORT_MAX_ATTACHMENTS,
   IN_APP_SUPPORT_MAX_ATTACHMENT_BYTES,
+  inAppSupportSendGuidance,
   isInAppSupportSendCommand,
   isInAppSupportDraftComplete,
   prepareInAppSupportDraftForSubmission,
@@ -767,7 +768,14 @@ export function InAppSupportPageContent({
                   <button type="button" onClick={reset} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                     <RotateCcw className="h-4 w-4" /> {copy.startOver}
                   </button>
-                  <button type="button" onClick={onDone || reset} className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      reset();
+                      onDone?.();
+                    }}
+                    className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-700"
+                  >
                     {copy.done}
                   </button>
                 </div>
@@ -915,6 +923,10 @@ export function InAppSupportPageContent({
                         : <Send className={cn('h-4 w-4', intakeLoading && 'opacity-50')} />}
                     </button>
                   </div>
+                  <p className="mt-2 flex items-start gap-2 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-[11px] leading-4 text-indigo-800">
+                    <Send className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span>{inAppSupportSendGuidance(locale)}</span>
+                  </p>
                   <div className="mt-1.5 flex items-center justify-between gap-3 px-1">
                     <button type="button" onClick={reset} disabled={composerBusy} className="inline-flex min-h-7 items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-slate-700 disabled:opacity-40">
                       <RotateCcw className="h-3.5 w-3.5" /> {copy.startOver}
@@ -974,11 +986,13 @@ export function InAppSupportPreview() {
 }
 
 export function InAppSupportPopover({
+  open = true,
   anchor,
   demoMode = false,
   sourcePath,
   onClose,
 }: {
+  open?: boolean;
   anchor: SupportPopoverAnchor | null;
   demoMode?: boolean;
   sourcePath?: string;
@@ -994,19 +1008,24 @@ export function InAppSupportPopover({
     : 8;
   const bottom = desktop ? Math.max(16, viewportHeight - (anchor?.bottom ?? viewportHeight - 16)) : 8;
 
-  useBodyScrollLock(!desktop);
+  useBodyScrollLock(open && !desktop);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (open && event.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, [onClose, open]);
 
   return (
-    <div className="fixed inset-0 z-[220]" role="dialog" aria-modal="true">
-      <button type="button" className="absolute inset-0 bg-transparent" onClick={onClose} aria-label="Close support agent" />
+    <div
+      className={cn('fixed inset-0 z-[220]', !open && 'hidden')}
+      role="dialog"
+      aria-modal="true"
+      aria-hidden={!open}
+    >
+      <div className="absolute inset-0 bg-transparent" data-testid="support-agent-backdrop" aria-hidden="true" />
       <div
         className={cn(
           'absolute overflow-hidden bg-white',
