@@ -109,7 +109,8 @@ describe('local support preview submission', () => {
     } as any, res as any);
 
     expect(result.statusCode).toBe(200);
-    expect(result.body).toMatchObject({ notificationSent: true, reference: 'SUP-17EE7859' });
+    expect(result.body).toMatchObject({ notificationSent: true });
+    expect((result.body as { reference: string }).reference).toMatch(/^SUP-[A-F0-9]{8}$/);
     expect(mocks.verifyRequestAuth).not.toHaveBeenCalled();
     expect(mocks.resolveReporter).not.toHaveBeenCalled();
     expect(mocks.insert).toHaveBeenCalledWith(expect.objectContaining({
@@ -118,10 +119,12 @@ describe('local support preview submission', () => {
       title: report.title,
       context: report.context,
       transcript: report.transcript,
+      coding_agent_prompt: expect.stringContaining('Structured submission type: Feature request'),
     }));
     expect(mocks.sendNotification).toHaveBeenCalledWith(expect.objectContaining({
       reporter: expect.objectContaining({ email: INTERNAL_NOTIFY_EMAILS[0] }),
       report: expect.objectContaining({ context: report.context, transcript: report.transcript }),
+      codingAgentPrompt: expect.stringContaining('Full support conversation'),
     }));
   });
 });

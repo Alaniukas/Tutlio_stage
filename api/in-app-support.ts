@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from './types.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { allowSupportRequest } from './_lib/supportRequest.js';
@@ -8,6 +9,7 @@ import {
   verifyInAppSupportAttachments,
 } from './_lib/inAppSupport.js';
 import { sendInAppSupportNotification } from './_lib/inAppSupportEmail.js';
+import { buildInAppSupportCodingAgentPrompt } from './_lib/inAppSupportCodingPrompt.js';
 import { INTERNAL_NOTIFY_EMAILS } from './_lib/resendConfig.js';
 import {
   isLocalInAppSupportPreview,
@@ -50,7 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ]);
     const db = getSupportServiceClient();
     const reporterUserId = localPreview ? null : auth.userId;
-    const row = {
+    const baseRow = {
         request_id: input.requestId,
         reporter_user_id: reporterUserId,
         reporter_name: reporter.name,
@@ -82,23 +84,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(409).json({ error: 'This support request reference is already in use.' });
     }
 
+    const requestRecordId = existing?.id ? String(existing.id) : randomUUID();
+    const reference = `SUP-${requestRecordId.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+    const submittedReport = { ...input, attachments };
+    const notificationReporter = { userId: auth.userId, ...reporter };
+    const codingAgentPrompt = buildInAppSupportCodingAgentPrompt({
+      reference,
+      reporter: notificationReporter,
+      report: submittedReport,
+    });
+    const row = { ...baseRow, coding_agent_prompt: codingAgentPrompt };
+
     const query = existing
       ? db.from('in_app_support_requests').update(row).eq('id', existing.id)
-      : db.from('in_app_support_requests').insert(row);
+      : db.from('in_app_support_requests').insert({ id: requestRecordId, ...row });
     const { data, error } = await query
       .select('id, status, created_at')
       .single();
     if (error || !data) throw error || new Error('Could not save support request.');
 
-    const reference = `SUP-${String(data.id).replace(/-/g, '').slice(0, 8).toUpperCase()}`;
     try {
       await sendInAppSupportNotification({
         db,
         id: String(data.id),
         reference,
         createdAt: String(data.created_at),
-        reporter: { userId: auth.userId, ...reporter },
-        report: { ...input, attachments },
+        reporter: notificationReporter,
+        report: submittedReport,
+        codingAgentPrompt,
       });
     } catch (notificationError) {
       console.error('[in-app-support] Team notification failed:', notificationError);

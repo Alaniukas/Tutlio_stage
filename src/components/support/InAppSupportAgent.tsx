@@ -9,9 +9,9 @@ import { useLocation } from 'react-router-dom';
 import {
   Bug,
   CheckCircle2,
+  Info,
   Lightbulb,
   Loader2,
-  LockKeyhole,
   Paperclip,
   RotateCcw,
   Send,
@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useBodyScrollLock, useVisualViewport } from '@/hooks/useVisualViewport';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
@@ -130,6 +131,8 @@ type Copy = {
   sendCommandHint: string;
   sendCommandError: string;
   emailNotice: string;
+  sendInfoLabel: string;
+  privacyInfoLabel: string;
   notificationError: string;
   clarificationPlaceholder: string;
   clarificationAction: string;
@@ -212,6 +215,8 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     sendCommandHint: 'A clear send command is required. “Yes” by itself will not submit the report.',
     sendCommandError: 'Please type “send it” or use the Send button when you want me to notify the team.',
     emailNotice: 'Sending saves the report in /admin and emails the same Tutlio team that receives demo and enterprise enquiries.',
+    sendInfoLabel: 'How sending works',
+    privacyInfoLabel: 'Privacy and automatic context',
     notificationError: 'Your report was saved, but I could not notify the team by email yet. Please send it again so I can retry the notification safely.',
     clarificationPlaceholder: 'Answer the missing detail here…',
     clarificationAction: 'Add detail and check again',
@@ -292,6 +297,8 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     sendCommandHint: 'Reikalinga aiški siuntimo komanda. Vien žodis „taip“ pranešimo neišsiųs.',
     sendCommandError: 'Kai norėsite informuoti komandą, parašykite „siųsti“ arba paspauskite siuntimo mygtuką.',
     emailNotice: 'Išsiuntus pranešimas bus išsaugotas /admin skydelyje, o el. laišką gaus ta pati Tutlio komanda, kuri gauna demo ir įmonių užklausas.',
+    sendInfoLabel: 'Kaip veikia siuntimas',
+    privacyInfoLabel: 'Privatumas ir automatinis kontekstas',
     notificationError: 'Pranešimas išsaugotas, bet komandos dar nepavyko informuoti el. paštu. Išsiųskite dar kartą, kad galėčiau saugiai pakartoti pranešimą.',
     clarificationPlaceholder: 'Čia atsakykite į trūkstamą klausimą…',
     clarificationAction: 'Pridėti informaciją ir tikrinti dar kartą',
@@ -372,6 +379,8 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     sendCommandHint: 'Wymagane jest jednoznaczne polecenie wysłania. Samo „tak” nie wyśle zgłoszenia.',
     sendCommandError: 'Gdy zechcesz powiadomić zespół, wpisz „wyślij” albo użyj przycisku wysyłania.',
     emailNotice: 'Wysłanie zapisze zgłoszenie w panelu /admin i powiadomi e-mailem ten sam zespół Tutlio, który otrzymuje zapytania o demo i ofertę dla firm.',
+    sendInfoLabel: 'Jak działa wysyłanie',
+    privacyInfoLabel: 'Prywatność i kontekst automatyczny',
     notificationError: 'Zgłoszenie zostało zapisane, ale nie udało się jeszcze powiadomić zespołu e-mailem. Wyślij je ponownie, abym mógł bezpiecznie ponowić powiadomienie.',
     clarificationPlaceholder: 'Odpowiedz tutaj na brakujące pytanie…',
     clarificationAction: 'Dodaj szczegół i sprawdź ponownie',
@@ -421,6 +430,39 @@ function AttachmentPreview({ file }: { file: File }) {
     return () => URL.revokeObjectURL(url);
   }, [file]);
   return src ? <img src={src} alt="" className="h-full w-full object-cover" /> : null;
+}
+
+function SupportInfoTooltip({
+  label,
+  content,
+  tone = 'indigo',
+}: {
+  label: string;
+  content: string;
+  tone?: 'indigo' | 'emerald';
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          title={content}
+          className={cn(
+            'grid h-7 w-7 place-items-center rounded-full border transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300',
+            tone === 'emerald'
+              ? 'border-emerald-200 text-emerald-600'
+              : 'border-indigo-200 text-indigo-600',
+          )}
+        >
+          <Info className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" align="end" className="z-[180] max-w-xs rounded-xl border-slate-200 bg-slate-950 px-3 py-2 text-xs leading-5 text-slate-100 shadow-xl">
+        {content}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 export function InAppSupportPageContent({
@@ -505,7 +547,6 @@ export function InAppSupportPageContent({
     setAgentReady(false);
     setMessages([
       { role: 'assistant', content: copy.welcome },
-      { role: 'user', content: nextCategory === 'bug' ? copy.bug : copy.feature },
       { role: 'assistant', content: nextCategory === 'bug' ? copy.contextPromptBug : copy.contextPromptFeature },
     ]);
     setInput('');
@@ -783,7 +824,7 @@ export function InAppSupportPageContent({
             ) : (
               <>
                 {messages.map((message, index) => (
-                  <div key={`${message.role}-${index}`} className={cn(
+                  <div key={`${message.role}-${index}`} data-support-role={message.role} className={cn(
                     'flex animate-in fade-in slide-in-from-bottom-1 duration-200',
                     message.role === 'user' ? 'justify-end' : 'items-start gap-2.5',
                   )}>
@@ -923,27 +964,26 @@ export function InAppSupportPageContent({
                         : <Send className={cn('h-4 w-4', intakeLoading && 'opacity-50')} />}
                     </button>
                   </div>
-                  <p className="mt-2 flex items-start gap-2 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-[11px] leading-4 text-indigo-800">
-                    <Send className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    <span>{inAppSupportSendGuidance(locale)}</span>
-                  </p>
-                  <div className="mt-1.5 flex items-center justify-between gap-3 px-1">
-                    <button type="button" onClick={reset} disabled={composerBusy} className="inline-flex min-h-7 items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-slate-700 disabled:opacity-40">
-                      <RotateCcw className="h-3.5 w-3.5" /> {copy.startOver}
-                    </button>
-                    <span className="text-right text-[10px] text-slate-400">
-                      {agentReady ? copy.sendCommandHint : 'Enter · Shift+Enter'}
-                    </span>
-                  </div>
-                  {agentReady && <p className="mt-1 px-1 text-[10px] leading-4 text-slate-400">{copy.emailNotice}</p>}
                 </>
               )}
 
-              <p className="mt-2 flex items-start gap-2 px-1 text-[10px] leading-4 text-slate-400">
-                <LockKeyhole className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                <span className="sm:hidden">{copy.privacyShort}</span>
-                <span className="hidden sm:inline">{copy.privacy}</span>
-              </p>
+              <div className="mt-2 flex min-h-7 items-center justify-between gap-3 px-1">
+                {showComposer ? (
+                  <button type="button" onClick={reset} disabled={composerBusy} className="inline-flex min-h-7 items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-slate-700 disabled:opacity-40">
+                    <RotateCcw className="h-3.5 w-3.5" /> {copy.startOver}
+                  </button>
+                ) : <span />}
+                <div className="flex items-center gap-1.5">
+                  {showComposer && !agentReady && <span className="mr-1 text-[10px] text-slate-400">Enter · Shift+Enter</span>}
+                  <TooltipProvider delayDuration={100}>
+                    <SupportInfoTooltip
+                      label={copy.sendInfoLabel}
+                      content={`${inAppSupportSendGuidance(locale)}${agentReady ? ` ${copy.sendCommandHint} ${copy.emailNotice}` : ''}`}
+                    />
+                    <SupportInfoTooltip label={copy.privacyInfoLabel} content={copy.privacy} tone="emerald" />
+                  </TooltipProvider>
+                </div>
+              </div>
             </div>
           </footer>
         )}

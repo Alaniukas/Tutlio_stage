@@ -29,6 +29,7 @@ export interface InAppSupportNotificationEmailInput {
   reporter: InAppSupportEmailReporter;
   report: InAppSupportSubmission;
   attachments: InAppSupportEmailAttachment[];
+  codingAgentPrompt: string;
   adminUrl: string;
 }
 
@@ -132,6 +133,7 @@ export function buildInAppSupportNotificationEmail(input: InAppSupportNotificati
       </div>
 
       ${section('Full support-agent conversation', transcript)}
+      ${section('AI coding-agent prompt', `<p style="margin:0 0 10px;color:#64748b;font-size:12px">Copy this complete prompt into the coding agent. It includes the structured selection, report details, technical context, and full conversation.</p><pre style="margin:0;max-height:640px;overflow:auto;white-space:pre-wrap;word-break:break-word;border-radius:10px;background:#0f172a;padding:14px;color:#e2e8f0;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace">${html(input.codingAgentPrompt)}</pre>`)}
 
       <div style="margin-top:24px;text-align:center">
         <a href="${html(input.adminUrl)}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#4f46e5;color:#fff;text-decoration:none;font-weight:800">Open Tutlio admin dashboard</a>
@@ -153,6 +155,7 @@ export async function sendInAppSupportNotification(input: {
   createdAt: string;
   reporter: InAppSupportEmailReporter;
   report: InAppSupportSubmission;
+  codingAgentPrompt: string;
 }): Promise<string | null> {
   const apiKey = getResendApiKey();
   if (!apiKey) throw new Error('Team notification email is not configured.');
@@ -171,6 +174,7 @@ export async function sendInAppSupportNotification(input: {
     reporter: input.reporter,
     report: input.report,
     attachments,
+    codingAgentPrompt: input.codingAgentPrompt,
     adminUrl: `${origin}/admin`,
   });
   const reportVersion = createHash('sha256').update(JSON.stringify({

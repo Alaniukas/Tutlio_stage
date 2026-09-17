@@ -4,6 +4,7 @@ import {
   Bug,
   CheckCircle2,
   Clock3,
+  Copy,
   ExternalLink,
   Image as ImageIcon,
   Lightbulb,
@@ -21,6 +22,7 @@ import type {
   InAppSupportStatus,
   InAppSupportTranscriptMessage,
 } from '@/lib/inAppSupport';
+import { copyTextToClipboard } from '@/lib/copyToClipboard';
 import { cn } from '@/lib/utils';
 
 type AdminAttachment = {
@@ -53,6 +55,7 @@ export type SupportRequest = {
   environment: Record<string, string>;
   transcript: InAppSupportTranscriptMessage[];
   attachments: AdminAttachment[];
+  coding_agent_prompt: string | null;
   status: InAppSupportStatus;
   priority: InAppSupportPriority;
   internal_note: string | null;
@@ -114,6 +117,7 @@ export default function AdminSupportRequestsPanel({
   const [editPriority, setEditPriority] = useState<InAppSupportPriority>('untriaged');
   const [internalNote, setInternalNote] = useState('');
   const [showTranscript, setShowTranscript] = useState(false);
+  const [promptCopied, setPromptCopied] = useState(false);
 
   const load = async () => {
     if (demoRequests) {
@@ -166,6 +170,7 @@ export default function AdminSupportRequestsPanel({
     setEditPriority(selected.priority);
     setInternalNote(selected.internal_note || '');
     setShowTranscript(false);
+    setPromptCopied(false);
   }, [selected?.id]);
 
   const counts = useMemo(() => ({
@@ -210,6 +215,11 @@ export default function AdminSupportRequestsPanel({
     } finally {
       setSaving(false);
     }
+  };
+
+  const copyCodingAgentPrompt = async () => {
+    if (!selected?.coding_agent_prompt) return;
+    setPromptCopied(await copyTextToClipboard(selected.coding_agent_prompt));
   };
 
   return (
@@ -333,6 +343,26 @@ export default function AdminSupportRequestsPanel({
                   <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
                     <DetailLabel>Poveikis: {selected.environment?.reportCompleteness === 'user_confirmed_incomplete' ? 'Nenurodytas, reikia įvertinti' : IMPACT[selected.impact]}</DetailLabel>
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{selected.impact_details}</p>
+                  </div>
+
+                  <div className="rounded-xl border border-indigo-400/20 bg-indigo-500/[0.06] p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <DetailLabel>DI programavimo agento promptas</DetailLabel>
+                      <button
+                        type="button"
+                        onClick={() => void copyCodingAgentPrompt()}
+                        disabled={!selected.coding_agent_prompt}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-indigo-400/20 bg-indigo-400/10 px-2.5 text-[11px] font-bold text-indigo-200 hover:bg-indigo-400/20 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {promptCopied ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                        {promptCopied ? 'Nukopijuota' : 'Kopijuoti'}
+                      </button>
+                    </div>
+                    {selected.coding_agent_prompt ? (
+                      <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950/70 p-3 text-xs leading-5 text-slate-300">{selected.coding_agent_prompt}</pre>
+                    ) : (
+                      <p className="mt-3 text-xs leading-5 text-slate-500">Ši užklausa sukurta prieš įdiegiant automatinius promptus.</p>
+                    )}
                   </div>
 
                   {selected.attachments?.length > 0 && (

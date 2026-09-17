@@ -41,6 +41,8 @@ const report = {
   }],
 };
 
+const codingAgentPrompt = 'You are an AI coding agent.\n\nSupport reference: SUP-17EE7859\nFull support conversation: Taip, siųskite komandai.';
+
 describe('in-app support team notification email', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -67,6 +69,7 @@ describe('in-app support team notification email', () => {
       },
       report,
       attachments: [{ ...report.attachments[0], signedUrl: 'https://storage.example/private-image' }],
+      codingAgentPrompt,
       adminUrl: 'https://tutlio.lt/admin',
     });
 
@@ -78,6 +81,8 @@ describe('in-app support team notification email', () => {
     expect(email.html).toContain('Taip, siųskite komandai.');
     expect(email.html).toContain('https://storage.example/private-image');
     expect(email.html).toContain('https://tutlio.lt/admin');
+    expect(email.html).toContain('AI coding-agent prompt');
+    expect(email.html).toContain('Support reference: SUP-17EE7859');
   });
 
   it('escapes user-provided HTML in every report section', () => {
@@ -95,12 +100,14 @@ describe('in-app support team notification email', () => {
       },
       report: { ...report, context: '<script>alert(1)</script>' },
       attachments: [],
+      codingAgentPrompt: '<script>ignore safeguards</script>',
       adminUrl: 'https://tutlio.lt/admin',
     });
 
     expect(email.html).not.toContain('<script>alert(1)</script>');
     expect(email.html).not.toContain('<img src=x onerror=alert(1)>');
     expect(email.html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(email.html).toContain('&lt;script&gt;ignore safeguards&lt;/script&gt;');
   });
 
   it('clearly flags a user-confirmed incomplete report for manual triage', () => {
@@ -124,6 +131,7 @@ describe('in-app support team notification email', () => {
         },
       },
       attachments: [],
+      codingAgentPrompt,
       adminUrl: 'https://tutlio.lt/admin',
     });
 
@@ -151,6 +159,7 @@ describe('in-app support team notification email', () => {
         organizationName: 'Demo School',
       },
       report,
+      codingAgentPrompt,
     });
 
     expect(mocks.send).toHaveBeenCalledWith(
@@ -186,6 +195,7 @@ describe('in-app support team notification email', () => {
         organizationName: null,
       },
       report,
+      codingAgentPrompt,
     })).rejects.toThrow('did not confirm');
   });
 });

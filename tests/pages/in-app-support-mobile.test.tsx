@@ -81,6 +81,23 @@ describe('in-app support mobile shell', () => {
     expect(screen.queryByText(/Pakanka vieno natūralaus aprašymo/)).toBeNull();
   });
 
+  it('keeps the selected category as structured context and moves explanatory copy into info tooltips', () => {
+    render(
+      <MemoryRouter initialEntries={['/school']}>
+        <InAppSupportPopover anchor={null} demoMode onClose={() => {}} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Pasiūlyti funkciją/ }));
+
+    expect(document.querySelectorAll('[data-support-role="user"]')).toHaveLength(0);
+    const sendInfo = screen.getByRole('button', { name: 'Kaip veikia siuntimas' });
+    const privacyInfo = screen.getByRole('button', { name: 'Privatumas ir automatinis kontekstas' });
+    expect(sendInfo.getAttribute('title')).toContain('siųsti komandai');
+    expect(privacyInfo.getAttribute('title')).toContain('Nerašykite slaptažodžių');
+    expect(screen.queryByText(/Agentas perduos šį pokalbį Tutlio komandai/)).toBeNull();
+  });
+
   it('grows the composer through four lines before enabling its own scrollbar', () => {
     render(
       <MemoryRouter initialEntries={['/school']}>
@@ -164,6 +181,8 @@ describe('in-app support mobile shell', () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/in-app-support-assist') {
         const body = JSON.parse(String(init?.body || '{}'));
+        expect(body.category).toBe('feature');
+        expect(body.conversation).not.toContainEqual({ role: 'user', content: 'Pasiūlyti funkciją' });
         return new Response(JSON.stringify({
           conversation: {
             reply: body.submitRequested
