@@ -43,21 +43,31 @@ export function sliceTimeRangeBySessions<T extends { start: Date; end: Date }>(
   sessions: SessionTimeSlice[],
 ): T[] {
   let freeBlocks: T[] = [block];
-  const overlapping = sessions.filter(
-    (s) => s.status !== 'cancelled' && s.start_time < block.end && s.end_time > block.start,
-  );
+  const overlapping = sessions.flatMap((session) => {
+    if (session.status === 'cancelled') return [];
+
+    const start = session.start_time instanceof Date
+      ? session.start_time
+      : new Date(session.start_time);
+    const end = session.end_time instanceof Date
+      ? session.end_time
+      : new Date(session.end_time);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return [];
+    if (start >= block.end || end <= block.start) return [];
+
+    return [{ start, end }];
+  });
 
   for (const session of overlapping) {
-    const sessionStart = session.start_time instanceof Date ? session.start_time : new Date(session.start_time);
-    const sessionEnd = session.end_time instanceof Date ? session.end_time : new Date(session.end_time);
     const next: T[] = [];
     for (const freeBlock of freeBlocks) {
-      if (sessionStart < freeBlock.end && sessionEnd > freeBlock.start) {
-        if (sessionStart > freeBlock.start) {
-          next.push({ ...freeBlock, end: sessionStart });
+      if (session.start < freeBlock.end && session.end > freeBlock.start) {
+        if (session.start > freeBlock.start) {
+          next.push({ ...freeBlock, end: session.start });
         }
-        if (sessionEnd < freeBlock.end) {
-          next.push({ ...freeBlock, start: sessionEnd });
+        if (session.end < freeBlock.end) {
+          next.push({ ...freeBlock, start: session.end });
         }
       } else {
         next.push(freeBlock);

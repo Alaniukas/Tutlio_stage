@@ -59,4 +59,44 @@ describe('availabilityCalendarBlocks', () => {
     expect(slices[1].start.getHours()).toBe(15);
     expect(slices[1].end.getHours()).toBe(16);
   });
+
+  it('removes a fully booked block when session timestamps come from the database as strings', () => {
+    const start = new Date('2026-05-21T14:00:00.000Z');
+    const end = new Date('2026-05-21T15:00:00.000Z');
+
+    const slices = sliceTimeRangeBySessions(
+      { start, end },
+      [{
+        start_time: '2026-05-21T14:00:00.000Z',
+        end_time: '2026-05-21T15:00:00.000Z',
+        status: 'active',
+      }],
+    );
+
+    expect(slices).toEqual([]);
+  });
+
+  it('ignores invalid and cancelled session timestamps', () => {
+    const start = new Date('2026-05-21T14:00:00.000Z');
+    const end = new Date('2026-05-21T15:00:00.000Z');
+
+    const slices = sliceTimeRangeBySessions(
+      { start, end },
+      [
+        { start_time: 'invalid', end_time: 'invalid', status: 'active' },
+        {
+          start_time: '2026-05-21T14:30:00.000Z',
+          end_time: '2026-05-21T14:00:00.000Z',
+          status: 'active',
+        },
+        {
+          start_time: '2026-05-21T14:00:00.000Z',
+          end_time: '2026-05-21T15:00:00.000Z',
+          status: 'cancelled',
+        },
+      ],
+    );
+
+    expect(slices).toEqual([{ start, end }]);
+  });
 });
