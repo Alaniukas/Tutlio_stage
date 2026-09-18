@@ -161,6 +161,26 @@ describe('schoolContractFilters', () => {
     expect(counts.sent).toBe(1);
     expect(counts.draft).toBe(0);
     expect(counts.incomplete_data).toBe(1);
+    expect(counts.suspended).toBe(0);
+    expect(counts.terminated).toBe(0);
+  });
+
+  it('filters suspended and terminated contracts independently', () => {
+    const suspended = {
+      ...baseContract,
+      signing_status: 'signed' as const,
+      suspension_started_at: '2026-09-01T08:00:00.000Z',
+      suspension_until: '2099-09-30',
+    };
+    const terminated = {
+      ...baseContract,
+      signing_status: 'signed' as const,
+      terminated_at: '2026-09-10T08:00:00.000Z',
+    };
+    expect(matchesContractFilter('suspended', suspended, true)).toBe(true);
+    expect(matchesContractFilter('terminated', suspended, true)).toBe(false);
+    expect(matchesContractFilter('terminated', terminated, true)).toBe(true);
+    expect(matchesContractFilter('suspended', terminated, true)).toBe(false);
   });
 
   it('complete draft/sent appear only under their status filters (not incomplete)', () => {

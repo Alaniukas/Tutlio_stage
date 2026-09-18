@@ -34,16 +34,25 @@ function buildRecurringSlots(count: number) {
 }
 
 function mockAvailabilitySupabase(sessionCount: number) {
-  const metrics = { selectCalls: 0, writes: 0 };
+  const metrics = { selectCalls: 0, writes: 0, activeWrites: 0, maxConcurrentWrites: 0 };
   const rows = [{
     id: 'a1',
     tutor_id: 't1',
-    is_recurring: false,
-    specific_date: '2026-09-15',
+    is_recurring: true,
+    specific_date: null,
+    day_of_week: 2,
     start_time: '08:00',
     end_time: '20:00',
     subject_ids: [],
   }];
+
+  const writeWithLatency = async () => {
+    metrics.writes += 1;
+    metrics.activeWrites += 1;
+    metrics.maxConcurrentWrites = Math.max(metrics.maxConcurrentWrites, metrics.activeWrites);
+    await sleep(LATENCY_MS);
+    metrics.activeWrites -= 1;
+  };
 
   const from = vi.fn((table: string) => {
     if (table !== 'availability') throw new Error(`unexpected table ${table}`);
@@ -71,24 +80,21 @@ function mockAvailabilitySupabase(sessionCount: number) {
       select: vi.fn(() => selectApi),
       update: vi.fn(() => ({
         eq: vi.fn(async () => {
-          metrics.writes += 1;
-          await sleep(LATENCY_MS);
+          await writeWithLatency();
           return { error: null };
         }),
       })),
       insert: vi.fn(() => ({
         select: vi.fn(() => ({
           single: vi.fn(async () => {
-            metrics.writes += 1;
-            await sleep(LATENCY_MS);
+            await writeWithLatency();
             return { data: { id: `new-${metrics.writes}` }, error: null };
           }),
         })),
       })),
       delete: vi.fn(() => ({
         eq: vi.fn(async () => {
-          metrics.writes += 1;
-          await sleep(LATENCY_MS);
+          await writeWithLatency();
           return { error: null };
         }),
       })),
@@ -218,7 +224,10 @@ describe('session create performance (mocked network latency)', () => {
     await consumeAvailabilityForCreatedSessions(supabase as never, 't1', sessions);
 
     expect(metrics.selectCalls).toBe(1);
-    // Writes still happen per session, but we avoid 29 redundant availability SELECTs.
+    // Different dates are independent, so their remainder writes do not wait
+    // for every previous week in a school-year series.
+    expect(metrics.maxConcurrentWrites).toBeGreaterThan(1);
+    expect(metrics.maxConcurrentWrites).toBeLessThanOrEqual(6);
     expect(metrics.selectCalls).toBeLessThan(sessionCount);
   });
 

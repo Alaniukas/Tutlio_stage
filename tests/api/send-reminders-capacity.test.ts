@@ -177,6 +177,36 @@ describe('session reminder capacity behavior', () => {
     expect(mocks.updateCalls).toContainEqual({ reminder_tutor_sent: true });
   });
 
+  it('adds the school homework and recordings links to the student reminder', async () => {
+    const session = futureSession();
+    session.student.organization_id = 'school-1';
+    session.tutor.organization_id = 'school-1';
+    session.reminder_tutor_sent = true;
+    mocks.organization = {
+      entity_type: 'school',
+      features: { school_lesson_recordings: true },
+    };
+    mocks.sessions.push(session);
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = mockRes();
+    await handler(mockReq(), response);
+
+    const studentReminder = fetchMock.mock.calls
+      .map(([, init]) => JSON.parse(String(init?.body || '{}')))
+      .find((body) => body.type === 'session_reminder' && body.data?.isTutor === false);
+    expect(studentReminder?.data).toMatchObject({
+      organizationId: 'school-1',
+      schoolFlow: true,
+    });
+    expect(studentReminder?.data?.homeworkUrl).toMatch(
+      /^https:\/\/tutlio\.lt\/school-homework\?student=student-1&t=[a-f0-9]{40}$/,
+    );
+    expect(studentReminder?.data?.recordingsUrl).toBe(`${studentReminder.data.homeworkUrl}#recordings`);
+    expect(response.getResult()).toMatchObject({ statusCode: 200, body: { sent: 1 } });
+  });
+
   it('keeps a school parent reminder pending when contract access skips the email', async () => {
     const session = futureSession();
     Object.assign(session.student as any, {

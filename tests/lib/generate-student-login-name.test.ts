@@ -17,4 +17,10 @@ describe('generateStudentLoginName', () => {
     expect(loginName).toMatch(/^pk-[a-hj-km-np-z2-9]{4}-[a-hj-km-np-z2-9]{4}$/);
     expect(isStudentLoginName(loginName)).toBe(true);
   });
+
+  it('uses a neutral prefix for portable organization features', () => {
+    const loginName = generateStudentLoginName('st');
+    expect(loginName).toMatch(/^st-[a-hj-km-np-z2-9]{4}-[a-hj-km-np-z2-9]{4}$/);
+    expect(isStudentLoginName(loginName)).toBe(true);
+  });
 });

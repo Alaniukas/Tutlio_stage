@@ -19,6 +19,7 @@ import { snapshotFromRow } from './_lib/extraLessonsContractShared.js';
 import { sendSchoolMonthlyInvoiceEmail, type SchoolMonthlyInvoiceRow } from './_lib/schoolMonthlyInvoiceEmail.js';
 import { publicAppOrigin } from './_lib/publicLinkToken.js';
 import { computeCanonicalSchoolMonthlyBill, groupOccurrenceKey, hasSchoolOccurrenceEvidence, schoolContractBillingModel, schoolInvoiceDueDate } from '../src/lib/schoolCanonicalBilling.js';
+import { schoolContractSuspensionOverlapsPeriod } from '../src/lib/schoolContractLifecycle.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const runStartedAt = Date.now();
@@ -55,7 +56,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: contracts, error } = await readAllSchoolBillingRows((afterId) => {
     let query = supabase
     .from('school_contracts')
-    .select('id, organization_id, student_id, class_group_id, contract_number, filled_body, unit_price_eur, base_lessons_per_month, accepted_at, withdrawal_requested_at, kind, start_within_14_status, start_within_14_days, order_snapshot, student:students(full_name, email, payer_email, payer_name), org:organizations(id, name, email, features, stripe_account_id, stripe_onboarding_complete)')
+    .select('id, organization_id, student_id, class_group_id, contract_number, filled_body, unit_price_eur, base_lessons_per_month, accepted_at, withdrawal_requested_at, suspension_started_at, suspension_until, suspension_resumed_at, kind, start_within_14_status, start_within_14_days, order_snapshot, student:students(full_name, email, payer_email, payer_name), org:organizations(id, name, email, features, stripe_account_id, stripe_onboarding_complete)')
     .eq('kind', EXTRA_LESSONS_CONTRACT_KIND)
     .eq('signing_status', 'signed')
     .not('accepted_at', 'is', null)
@@ -100,6 +101,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(503).json({ success: false, error: 'billing_run_deadline', created, emailed, skipped, held, failed, review, continuation_required: true, period: { start, end } });
     }
     const model = schoolContractBillingModel(contract);
+    if (schoolContractSuspensionOverlapsPeriod(contract, start, end)) {
+      held++;
+      review.push({ contract_id: contract.id, reason: 'contract_suspended_during_billing_period' });
+      continue;
+    }
     if (model === 'review') {
       held++; review.push({ contract_id: contract.id, reason: 'unknown_frozen_contract_billing_terms' }); continue;
     }

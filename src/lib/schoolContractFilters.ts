@@ -1,3 +1,5 @@
+import { isSchoolContractSuspended, isSchoolContractTerminated } from './schoolContractLifecycle.js';
+
 export type SchoolContractSigningStatus =
   | 'draft'
   | 'sent'
@@ -12,7 +14,9 @@ export type SchoolContractFilter =
   | 'signed'
   | 'awaiting_school'
   | 'awaiting_parents'
-  | 'incomplete_data';
+  | 'incomplete_data'
+  | 'suspended'
+  | 'terminated';
 
 export type SchoolContractStudentFields = {
   full_name?: string | null;
@@ -40,6 +44,11 @@ export type SchoolContractFilterInput = {
   signatures?: SchoolContractSignatureFields[] | null;
   pdf_url?: string | null;
   signed_contract_url?: string | null;
+  terminated_at?: string | null;
+  withdrawal_requested_at?: string | null;
+  suspension_started_at?: string | null;
+  suspension_until?: string | null;
+  suspension_resumed_at?: string | null;
 };
 
 export type SchoolContractFilterOptions = {
@@ -150,6 +159,8 @@ export function matchesContractFilter(
   if (filter === 'draft') return contract.signing_status === 'draft';
   if (filter === 'sent') return contract.signing_status === 'sent';
   if (filter === 'signed') return contract.signing_status === 'signed';
+  if (filter === 'suspended') return isSchoolContractSuspended(contract);
+  if (filter === 'terminated') return isSchoolContractTerminated(contract);
   if (filter === 'awaiting_school') {
     if (contract.signing_status === 'awaiting_school_signature') return true;
     // Parent-signed copy (or a bad status jump) must not sit in "signed by school"
@@ -184,6 +195,8 @@ export function countContractsByFilter(
     'awaiting_school',
     'awaiting_parents',
     'incomplete_data',
+    'suspended',
+    'terminated',
   ];
   const counts = {} as Record<SchoolContractFilter, number>;
   for (const filter of filters) {

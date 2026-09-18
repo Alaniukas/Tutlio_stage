@@ -2,7 +2,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { findAuthUserByEmail, isAuthEmailAlreadyRegistered } from './findAuthUserByEmail.js';
 import { generateTempPassword } from './generateTempPassword.js';
 import { generateStudentLoginName } from './generateStudentLoginName.js';
-import { isMoksloVaisiaiOrg, isProKlaseOrg } from './marketMoney.js';
 import { sendMvAccountActivationEmail } from './sendMvFamilyAccountsEmail.js';
 import { inviteEmailLocale, orgAwareOrigin } from './public-origin.js';
 import {
@@ -12,6 +11,11 @@ import {
 } from './mvAccountActivationToken.js';
 import { resolveMvNotifyTargets, type MvEmailDelivery } from '../../src/lib/mvProvisionOptions.js';
 import { loginIdentifierToEmail } from '../../src/lib/studentLoginIdentity.js';
+import {
+  managedFamilyAccountsEnabled,
+  managedStudentLoginPrefix,
+} from '../../src/lib/managedFamilyAccounts.js';
+import type { OrgRowForEmailBranding } from './emailOrgBranding.js';
 
 export type MvProvisionScope = 'auto' | 'both' | 'parent' | 'student';
 
@@ -22,6 +26,8 @@ export type MvProvisionInput = {
   parentEmail?: string;
   studentFullName?: string;
   studentEmail?: string;
+  /** Ignore the contact email stored on the student row and generate a login handle. */
+  forceStudentUsername?: boolean;
   locale?: string;
   appOrigin: string;
   scope?: MvProvisionScope;
@@ -29,6 +35,10 @@ export type MvProvisionInput = {
   parentNotifyEmail?: string;
   studentNotifyEmail?: string;
   bothNotifyEmail?: string;
+  /** Self-registration can keep the password the parent has just chosen. */
+  parentPassword?: string;
+  /** The current registration page is already the activation step. */
+  suppressParentActivationEmail?: boolean;
 };
 
 export type MvProvisionAccountResult = {
@@ -308,6 +318,7 @@ async function sendActivationEmail(opts: {
   appOrigin: string;
   orgName: string | null;
   organizationId: string | null;
+  org: OrgRowForEmailBranding | null;
   locale: string;
 }): Promise<{ emailSent: boolean; emailError?: string; activationUrl: string }> {
   const token = buildMvAccountActivationToken({
@@ -326,6 +337,7 @@ async function sendActivationEmail(opts: {
     activationUrl,
     orgName: opts.orgName,
     organizationId: opts.organizationId,
+    org: opts.org,
     locale: opts.locale,
   });
   if (emailResult.ok === false) {
@@ -357,10 +369,23 @@ export async function provisionMvFamilyAccounts(
   }
 
   const organizationId = selectedStudent.organization_id;
-  if (!isMoksloVaisiaiOrg(organizationId) && !isProKlaseOrg(organizationId)) {
+  let orgLocale: string | null = null;
+  let orgName: string | null = null;
+  let org: OrgRowForEmailBranding | null = null;
+  if (organizationId) {
+    const { data: orgRow } = await supabase
+      .from('organizations')
+      .select('name, preferred_locale, logo_url, brand_color, brand_color_secondary, features')
+      .eq('id', organizationId)
+      .maybeSingle();
+    org = (orgRow as OrgRowForEmailBranding | null) ?? null;
+    orgName = (orgRow?.name as string | null) ?? null;
+    orgLocale = (orgRow?.preferred_locale as string | null) ?? null;
+  }
+  if (!managedFamilyAccountsEnabled(organizationId, org?.features as Record<string, unknown> | undefined)) {
     return { ok: false, status: 403, error: 'This organization does not support managed family accounts', code: 'org_not_supported' };
   }
-  const studentLoginPrefix = isProKlaseOrg(organizationId) ? 'pk' : 'mv';
+  const studentLoginPrefix = managedStudentLoginPrefix(organizationId);
 
   const loadedStudents = await loadProvisionStudents(supabase, selectedStudent, input.studentIds);
   if ('error' in loadedStudents) {
@@ -386,7 +411,9 @@ export async function provisionMvFamilyAccounts(
   const parentName = (input.parentName || firstValue('payer_name')).trim();
   const parentEmail = (input.parentEmail || firstValue('payer_email')).trim().toLowerCase();
   const studentFullName = (input.studentFullName || firstValue('full_name')).trim();
-  const studentEmail = (input.studentEmail || firstValue('email')).trim().toLowerCase();
+  const studentEmail = (
+    input.forceStudentUsername ? '' : (input.studentEmail || firstValue('email'))
+  ).trim().toLowerCase();
 
   const needsParent = linkedParentIds.length === 0;
   const needsStudent = linkedStudentIds.length === 0;
@@ -417,18 +444,6 @@ export async function provisionMvFamilyAccounts(
 
   const tutorIds = new Set(studentRows.map((row) => row.tutor_id).filter(Boolean));
 
-  let orgLocale: string | null = null;
-  let orgName: string | null = null;
-  if (organizationId) {
-    const { data: orgRow } = await supabase
-      .from('organizations')
-      .select('name, preferred_locale, logo_url, brand_color, brand_color_secondary, features')
-      .eq('id', organizationId)
-      .maybeSingle();
-    orgName = (orgRow?.name as string | null) ?? null;
-    orgLocale = (orgRow?.preferred_locale as string | null) ?? null;
-  }
-
   const appOrigin = orgAwareOrigin(orgLocale, input.appOrigin);
   const emailLocale = inviteEmailLocale(input.locale || orgLocale || undefined, appOrigin);
 
@@ -454,7 +469,7 @@ export async function provisionMvFamilyAccounts(
   let parentUserId = linkedParentIds[0] || null;
 
   if (doParent) {
-    const parentPassword = generateTempPassword();
+    const parentPassword = input.parentPassword || generateTempPassword();
     let parentAuth: { userId: string; created: boolean; reused?: boolean } | { error: string; code?: string } = await ensureMvAuthUser(supabase, {
       email: parentEmail,
       password: parentPassword,
@@ -488,7 +503,7 @@ export async function provisionMvFamilyAccounts(
       const message = e instanceof Error ? e.message : String(e);
       return { ok: false, status: 500, error: message, code: 'link_parent_failed' };
     }
-    if (parentAuth.created) {
+    if (parentAuth.created && !input.suppressParentActivationEmail) {
       const parentNotifyTo = notifyTargets.parentTo;
       const mail = await sendActivationEmail({
         role: 'parent',
@@ -501,6 +516,7 @@ export async function provisionMvFamilyAccounts(
         appOrigin,
         orgName,
         organizationId,
+        org,
         locale: emailLocale,
       });
       result.parent = {
@@ -516,9 +532,10 @@ export async function provisionMvFamilyAccounts(
     } else {
       result.parent = {
         email: parentEmail,
+        ...(parentAuth.created ? { password: parentPassword } : {}),
         userId: parentAuth.userId,
-        created: false,
-        reused: true,
+        created: parentAuth.created,
+        ...(parentAuth.created ? {} : { reused: true }),
         emailSent: false,
         activationUrl: '',
         notifyEmail: notifyTargets.parentTo,
@@ -637,6 +654,7 @@ export async function provisionMvFamilyAccounts(
         appOrigin,
         orgName,
         organizationId,
+        org,
         locale: emailLocale,
       });
       result.student = {

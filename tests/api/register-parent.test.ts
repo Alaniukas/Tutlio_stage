@@ -10,12 +10,14 @@ const mocks = vi.hoisted(() => {
   const updateUserById = vi.fn();
   const from = vi.fn();
   const rpc = vi.fn();
+  const sendWelcome = vi.fn();
   return {
     createUser,
     listUsers,
     updateUserById,
     from,
     rpc,
+    sendWelcome,
     createClient: vi.fn(() => ({
       from,
       rpc,
@@ -25,6 +27,9 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.createClient }));
+vi.mock('../../api/_lib/sendProKlaseRegistrationWelcomeEmail.js', () => ({
+  sendProKlaseRegistrationWelcomeEmail: mocks.sendWelcome,
+}));
 
 import handler from '../../api/register-parent';
 
@@ -91,6 +96,7 @@ describe('POST /api/register-parent', () => {
     mocks.createUser.mockResolvedValue({ data: { user: { id: 'new-user' } }, error: null });
     mocks.updateUserById.mockResolvedValue({ data: {}, error: null });
     mocks.rpc.mockResolvedValue({ data: null, error: { code: 'PGRST202' } });
+    mocks.sendWelcome.mockResolvedValue({ ok: true });
   });
 
   afterEach(() => {
@@ -170,6 +176,11 @@ describe('POST /api/register-parent', () => {
       email_confirm: true,
       user_metadata: { role: 'parent', full_name: 'Agne Rubeziene' },
     }));
+    expect(mocks.sendWelcome).toHaveBeenCalledWith({
+      organizationId: PRO_KLASE_ORG,
+      to: 'alaniukasa@gmail.com',
+      parentName: 'Agne Rubeziene',
+    });
   });
 
   it('does not reset or link an existing Auth user', async () => {

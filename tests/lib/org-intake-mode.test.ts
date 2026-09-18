@@ -45,6 +45,12 @@ describe('orgIntakeMode Pro Klasė gating', () => {
   it('does not expand pre-activation scheduling to schools, generic orgs, or loading state', () => {
     expect(canScheduleStudentBeforeActivation(MOKSLO_VAISIAI_ORG_ID, 'school')).toBe(false);
     expect(canScheduleStudentBeforeActivation(otherOrgId, 'company')).toBe(false);
+    expect(canScheduleStudentBeforeActivation(
+      otherOrgId,
+      'company',
+      false,
+      (id) => id === 'managed_family_accounts',
+    )).toBe(true);
     expect(canScheduleStudentBeforeActivation(MOKSLO_VAISIAI_ORG_ID, 'company', true)).toBe(false);
   });
 

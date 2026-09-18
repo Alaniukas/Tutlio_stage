@@ -17,6 +17,9 @@ export type SchoolClassGroupDraft = {
   platform?: string;
   duration_minutes?: number;
   meeting_link?: string | null;
+  /** Teacher-requested review; an administrator clears it by saving the group. */
+  admin_action_required?: boolean;
+  admin_action_note?: string | null;
   slots: SchoolClassGroupSlot[];
 };
 
@@ -219,6 +222,10 @@ export function parseClassGroupWriteBody(
     meeting_link: body.meeting_link == null || String(body.meeting_link).trim() === ''
       ? null
       : String(body.meeting_link).trim(),
+    admin_action_required: body.admin_action_required === true,
+    admin_action_note: body.admin_action_note == null || String(body.admin_action_note).trim() === ''
+      ? null
+      : String(body.admin_action_note).trim().slice(0, 1000),
     slots: normalizeGroupSlots(rawSlots, duration),
     student_ids: Array.isArray(body.student_ids) ? [...new Set(body.student_ids.map(String))] : null,
   };
@@ -235,6 +242,8 @@ export function classGroupRowFields(draft: SchoolClassGroupDraft): Record<string
     platform: draft.platform || 'Google Meet',
     duration_minutes: draft.duration_minutes || 45,
     meeting_link: draft.meeting_link ?? null,
+    admin_action_required: draft.admin_action_required === true,
+    admin_action_note: draft.admin_action_note ?? null,
   };
 }
 
@@ -250,6 +259,8 @@ export function groupToWriteDraft(group: SchoolClassGroupRecord): SchoolClassGro
     platform: group.platform || 'Google Meet',
     duration_minutes: duration,
     meeting_link: group.meeting_link ?? null,
+    admin_action_required: group.admin_action_required === true,
+    admin_action_note: group.admin_action_note ?? null,
     slots: normalizeGroupSlots(group.slots || [], duration),
     student_ids: (group.members || []).map((member) => member.student_id),
   };

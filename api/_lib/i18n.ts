@@ -61,6 +61,13 @@ const EMAIL_SERVER_FALLBACKS: Partial<Record<Locale, Record<string, string>>> = 
       'Įsigydami pamokų paketą, apmokėsite visas einamajam mėnesiui suplanuotas pamokas. Jeigu negalėsite dalyvauti kurioje nors apmokėtoje pamokoje, ją visuomet galėsite perkelti į kitą laiką, iš anksto suderinę su korepetitoriumi.<br/><br/>Jeigu mėnesio eigoje norėsite papildomų pamokų, už jas galėsite atsiskaityti atskirai.',
     'em.packageProKlaseEmailLabel': 'El. paštas:',
     'em.packageProKlasePhoneLabel': 'Tel. nr.:',
+    'em.packageScheduleAccountHint':
+      'Visą suplanuotų pamokų tvarkaraštį galėsite peržiūrėti savo paskyroje, kai užbaigsite registraciją.',
+    'em.trialPaymentSub': 'Bandomosios pamokos apmokėjimas',
+    'em.trialPaymentHeader': 'Apmokėkite bandomąją pamoką',
+    'em.trialPaymentHeaderSub': 'Mokėjimo informacija ir saugi apmokėjimo nuoroda',
+    'em.trialPaymentBody': 'Žemiau pateikta suplanuotos bandomosios pamokos apmokėjimo informacija.',
+    'em.trialPaymentHow': 'Apmokėjus bandomoji pamoka bus pažymėta kaip apmokėta jūsų paskyroje.',
   },
   en: {
     'em.mvPayerPaymentInfoTitle': 'Payments and documents in one place',
@@ -85,6 +92,13 @@ const EMAIL_SERVER_FALLBACKS: Partial<Record<Locale, Record<string, string>>> = 
       'By purchasing a lesson package, you pay for all lessons scheduled for the current month. If you cannot attend a paid lesson, you can always reschedule it by arranging a new time with the tutor in advance.<br/><br/>If you want additional lessons during the month, you can pay for them separately.',
     'em.packageProKlaseEmailLabel': 'Email:',
     'em.packageProKlasePhoneLabel': 'Phone:',
+    'em.packageScheduleAccountHint':
+      'After completing registration, you can review the full lesson schedule in your account.',
+    'em.trialPaymentSub': 'Trial lesson payment',
+    'em.trialPaymentHeader': 'Pay for the trial lesson',
+    'em.trialPaymentHeaderSub': 'Payment details and a secure payment link',
+    'em.trialPaymentBody': 'Below are the payment details for the scheduled trial lesson.',
+    'em.trialPaymentHow': 'After payment, the trial lesson will be marked as paid in your account.',
   },
 };
 

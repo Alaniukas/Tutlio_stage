@@ -136,6 +136,7 @@ export default function StudentOnboarding() {
 
     /** Non-school: whether to create payer as parent + send parent portal invite */
     const [wantsParentAccount, setWantsParentAccount] = useState(false);
+    const [createStudentUsernameAccount, setCreateStudentUsernameAccount] = useState(false);
     /** After registration: parent invite email outcome */
     const [parentInviteOutcome, setParentInviteOutcome] = useState<'idle' | 'sending' | 'sent' | 'failed' | 'skipped'>('idle');
     const [parentInviteCode, setParentInviteCode] = useState<string | null>(null);
@@ -163,6 +164,11 @@ export default function StudentOnboarding() {
             ),
         [isSchoolInvite, payerName, payerEmail, payerPhone, locale],
     );
+    const sameEmailParentMode = useMemo(() => {
+        if (isSchoolInvite || !wantsParentAccount || !usesProKlaseLegalDocs(legalOrgId)) return false;
+        const studentEmail = (studentData?.email || email).trim().toLowerCase();
+        return Boolean(studentEmail && payerEmail.trim().toLowerCase() === studentEmail);
+    }, [email, isSchoolInvite, legalOrgId, payerEmail, studentData?.email, wantsParentAccount]);
 
     const calculateAgeFromDate = (dateValue?: string | null): string => {
         if (!dateValue) return '';
@@ -333,6 +339,8 @@ export default function StudentOnboarding() {
                     payerPhone: effectivePayerType === 'parent' ? payerPhone.trim() : null,
                     acceptedAt,
                     suppressParentInvite: isSchoolInvite,
+                    sameEmailParentMode,
+                    createStudentUsernameAccount: sameEmailParentMode && createStudentUsernameAccount,
                     locale,
                 }),
             });
@@ -342,6 +350,7 @@ export default function StudentOnboarding() {
                 code?: string;
                 parentInviteSent?: boolean;
                 parentInviteCode?: string | null;
+                accountPortal?: 'student' | 'parent';
             };
 
             if (!apiRes.ok) {
@@ -354,7 +363,7 @@ export default function StudentOnboarding() {
                 password,
             });
             if (!signInError) {
-                navigate('/student');
+                navigate(body.accountPortal === 'parent' ? '/parent' : '/student');
                 return;
             }
             console.warn('[StudentOnboarding] auto sign-in after register failed:', signInError);
@@ -564,6 +573,7 @@ export default function StudentOnboarding() {
                                                     setPayerName('');
                                                     setPayerEmail('');
                                                     setPayerPhone('');
+                                                    setCreateStudentUsernameAccount(false);
                                                     setError(null);
                                                 }}
                                                 className={cn(
@@ -614,6 +624,29 @@ export default function StudentOnboarding() {
                                                 placeholder={locale === 'es' ? 'padre@ejemplo.es' : 'parent@example.com'}
                                                 className="w-full px-4 py-3 rounded-2xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-gray-50"
                                             />
+                                            {sameEmailParentMode && (
+                                                <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
+                                                    <p className="text-xs leading-relaxed text-violet-900">
+                                                        {t('onboard.sameEmailParentPrimary')}
+                                                    </p>
+                                                    <label className="mt-3 flex cursor-pointer items-start gap-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={createStudentUsernameAccount}
+                                                            onChange={(event) => setCreateStudentUsernameAccount(event.target.checked)}
+                                                            className="mt-0.5 h-4 w-4 rounded border-violet-300 text-violet-600 focus:ring-violet-500"
+                                                        />
+                                                        <span>
+                                                            <span className="block text-xs font-semibold text-gray-900">
+                                                                {t('onboard.createChildUsername')}
+                                                            </span>
+                                                            <span className="mt-0.5 block text-xs leading-relaxed text-gray-600">
+                                                                {t('onboard.createChildUsernameDesc')}
+                                                            </span>
+                                                        </span>
+                                                    </label>
+                                                </div>
+                                            )}
                                         </div>
                                         <div>
                                             <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">

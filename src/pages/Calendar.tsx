@@ -163,10 +163,11 @@ import {
 } from '@/lib/schoolClassGroupSessions';
 import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
 import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
-import type { SchoolClassGroupRecord } from '@/lib/schoolClassGroups';
+import { groupToWriteDraft, type SchoolClassGroupRecord } from '@/lib/schoolClassGroups';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
 import { sessionCommentDeliveryNeeded, sessionCommentDeliveryRecipients } from '@/lib/sessionCommentDelivery';
+import { findTutorBreakConflicts, tutorBreakOverrideMessage } from '@/lib/sessionBreakConflict';
 import Toast from '@/components/Toast';
 import { dedupeAsync } from '@/lib/dataCache';
 import {
@@ -248,6 +249,9 @@ interface Session {
   _classGroupName?: string;
   _classGroupSessions?: Session[];
   _classGroupMembers?: Array<{ student_id: string; full_name: string; grade?: string | null }>;
+  _groupSessions?: Session[];
+  _isGroup?: boolean;
+  _isSharedIndividual?: boolean;
   student?: {
     full_name: string;
     email?: string;
@@ -365,6 +369,7 @@ export default function CalendarPage() {
     [sessions],
   );
   const [students, setStudents] = useState<Student[]>([]);
+  const [schoolStudentOptions, setSchoolStudentOptions] = useState<Student[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [individualPricing, setIndividualPricing] = useState<any[]>([]);
   const [tutorSubjectPrices, setTutorSubjectPrices] = useState<any[]>([]);
@@ -588,17 +593,31 @@ export default function CalendarPage() {
         const data = await res.json().catch(() => ({}));
         if (!cancelled && res.ok) {
           setClassGroups((data.groups || []) as SchoolClassGroupRecord[]);
+          setSchoolStudentOptions(Array.isArray(data.students) ? data.students as Student[] : []);
         } else if (!cancelled) {
           setClassGroups([]);
+          setSchoolStudentOptions([]);
         }
       } catch {
-        if (!cancelled) setClassGroups([]);
+        if (!cancelled) {
+          setClassGroups([]);
+          setSchoolStudentOptions([]);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [showClassGroups]);
+
+  const schoolLessonStudents = useMemo(() => {
+    if (!isSchoolTutor || schoolStudentOptions.length === 0) return students;
+    const byId = new Map<string, Student>();
+    for (const student of schoolStudentOptions) byId.set(student.id, student);
+    // Keep the richer tutor-visible record (emails/payment model) when present.
+    for (const student of students) byId.set(student.id, { ...byId.get(student.id), ...student });
+    return [...byId.values()];
+  }, [isSchoolTutor, schoolStudentOptions, students]);
 
   // Set default dates when mass cancel modal opens
   useEffect(() => {
@@ -865,7 +884,7 @@ export default function CalendarPage() {
       return catalog;
     }
 
-    const selectedStudent = students.find(s => s.id === selectedStudentId);
+      const selectedStudent = schoolLessonStudents.find(s => s.id === selectedStudentId);
     if (!selectedStudent || !selectedStudent.grade) {
       return catalog;
     }
@@ -878,7 +897,7 @@ export default function CalendarPage() {
     });
 
     return filtered;
-  }, [selectedStudentId, students, subjects, showTutorTrialToggle]);
+  }, [selectedStudentId, schoolLessonStudents, subjects, showTutorTrialToggle]);
 
   // Subjects available in "assign student to slot" flow
   const assignFilteredSubjects = useMemo(() => {
@@ -1008,8 +1027,8 @@ export default function CalendarPage() {
       const startMs = new Date(session.start_time).getTime();
       const endMs = new Date(session.end_time).getTime();
       const subject = subjects.find(s => s.id === session.subject_id);
-      if (subject?.is_group && Number.isFinite(startMs) && Number.isFinite(endMs)) {
-        const key = `${startMs}_${endMs}_${session.subject_id}`;
+      if ((subject?.is_group || isLaisviVaikai) && Number.isFinite(startMs) && Number.isFinite(endMs)) {
+        const key = `${subject?.is_group ? 'group' : 'shared-individual'}_${startMs}_${endMs}_${session.subject_id}`;
         if (!grouped.has(key)) {
           grouped.set(key, []);
         }
@@ -1030,17 +1049,24 @@ export default function CalendarPage() {
         const somePaid = groupSessions.some(s => s.paid);
         const paidCount = groupSessions.filter(s => s.paid).length;
 
-        // For single-student group lessons, show with clear indication it's a group lesson
-        const displayTopic = groupSessions.length === 1
-          ? `${first.topic || t('cal.groupLesson')} (1/${subject?.max_students || 1} ${t('cal.seatsMany')})`
-          : `${first.topic || t('cal.groupLesson')}: ${studentNames}`;
+        const sharedIndividual = !subject?.is_group;
+        if (sharedIndividual && groupSessions.length === 1) {
+          individual.push(first);
+          return;
+        }
+        // For single-student group lessons, show with clear indication it's a group lesson.
+        const displayTopic = sharedIndividual
+          ? `${first.topic || 'Individualus užsiėmimas'}: ${studentNames}`
+          : groupSessions.length === 1
+            ? `${first.topic || t('cal.groupLesson')} (1/${subject?.max_students || 1} ${t('cal.seatsMany')})`
+            : `${first.topic || t('cal.groupLesson')}: ${studentNames}`;
 
         mergedGroups.push({
           ...first,
           id: `group_${key}`, // Unique ID for the group
           topic: displayTopic,
           student: {
-            full_name: `${groupSessions.length}/${subject?.max_students || groupSessions.length} ${t('cal.seatsMany')}${
+            full_name: `${groupSessions.length}/${sharedIndividual ? 2 : (subject?.max_students || groupSessions.length)} ${t('cal.seatsMany')}${
               !orgPolicy.isOrgTutor && somePaid
                 ? ` (${t('cal.paidCount', { count: String(paidCount) })})`
                 : ''
@@ -1049,12 +1075,13 @@ export default function CalendarPage() {
           // Store original sessions for modal access
           _groupSessions: groupSessions,
           _isGroup: true,
+          _isSharedIndividual: sharedIndividual,
         } as any);
       }
     });
 
     return [...individual, ...mergedGroups];
-  }, [subjects, orgPolicy.isOrgTutor]);
+  }, [subjects, orgPolicy.isOrgTutor, isLaisviVaikai, t]);
 
   const mergedSessions = useMemo(
     () => mergeGroupSessions(sessionsAfterClassGroups),
@@ -1554,7 +1581,10 @@ export default function CalendarPage() {
       setIsClassGroupSession(false);
       setClassGroupParticipants([]);
       setSelectedGroupSessions(event._groupSessions);
-      setSelectedEvent(event._groupSessions[0]); // Use first session as base
+      setSelectedEvent({
+        ...event._groupSessions[0],
+        _isSharedIndividual: event._isSharedIndividual === true,
+      }); // Use first session as base
     } else {
       setIsGroupSession(false);
       setIsClassGroupSession(false);
@@ -1583,13 +1613,13 @@ export default function CalendarPage() {
       (p) => p.student_id === studentId && p.subject_id === selectedSubjectId,
     );
     const tsp = getTutorSubjectPrice(subj.name);
-    const effectivePrice = pricing?.price ?? tsp?.price ?? subj.price;
+    const effectivePrice = pricing?.price ?? (isLaisviVaikai ? 20 : (tsp?.price ?? subj.price));
 
     setTopic(subj.name || '');
     if (typeof effectivePrice === 'number') {
       setPrice(effectivePrice);
     }
-    setMeetingLink(resolveMeetingLink(subj.meeting_link, selectedStudentId));
+    setMeetingLink(resolveMeetingLink(subj.meeting_link, studentId));
 
     // Auto-adjust end time based on individual duration (if available) or subject duration
     if (!createDurationTouched) {
@@ -1641,7 +1671,7 @@ export default function CalendarPage() {
       } else {
         const tsp = getTutorSubjectPrice(subj.name);
         setTopic(subj.name);
-        setPrice(tsp?.price ?? subj.price);
+        setPrice(isLaisviVaikai ? (subj.is_group ? 6 : 20) : (tsp?.price ?? subj.price));
         setMeetingLink(resolveMeetingLink(subj.meeting_link, selectedStudentId));
         const dur = tsp?.duration_minutes ?? subj.duration_minutes ?? 60;
         if (!createDurationTouched && startTime) {
@@ -1780,10 +1810,16 @@ export default function CalendarPage() {
     // Check if we have students selected (either individual or group)
     const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
     const isGroupLesson = selectedSubject?.is_group;
-    const hasStudents = isGroupLesson ? selectedStudentIds.length > 0 : !!selectedStudentId;
+    const isSharedIndividual = isLaisviVaikai && !isGroupLesson;
+    const hasStudents = isGroupLesson || isSharedIndividual ? selectedStudentIds.length > 0 : !!selectedStudentId;
 
     if (!hasStudents || !startTime || !endTime) {
       alert(t('cal.selectStudentAndTime'));
+      return;
+    }
+
+    if (isLaisviVaikai && isGroupLesson && selectedStudentIds.length < 3) {
+      alert('Grupiniam užsiėmimui pasirinkite bent 3 mokinius. Kai mokinių yra 1-2, kurkite individualų užsiėmimą.');
       return;
     }
 
@@ -1828,7 +1864,7 @@ export default function CalendarPage() {
     if (isRecurring) {
       // Get subject data for group lesson logic
       const subject = subjects.find((s) => s.id === selectedSubjectId);
-      const studentIdsToCreate = isGroupLesson ? selectedStudentIds : [selectedStudentId];
+      const studentIdsToCreate = isGroupLesson || isSharedIndividual ? selectedStudentIds : [selectedStudentId];
 
       // Determine which days to create templates for
       const daysToCreate = (recurringFrequency !== 'monthly' && selectedWeekdays.length > 0)
@@ -1918,7 +1954,7 @@ export default function CalendarPage() {
         while (!isBefore(endLimit, current)) {
           const sessionEnd = new Date(current.getTime() + durationMs);
 
-          const recurStudent = students.find((s) => s.id === template.student_id);
+          const recurStudent = schoolLessonStudents.find((s) => s.id === template.student_id);
           let sessionPaid = isPaid;
           let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(recurStudent?.payment_model, {
             paid: isPaid,
@@ -1990,13 +2026,15 @@ export default function CalendarPage() {
         const slotList = [...uniqueSlots.values()];
         const earliest = new Date(Math.min(...slotList.map((s) => s.start.getTime())));
         const latest = new Date(Math.max(...slotList.map((s) => s.end.getTime())));
+        const breakMinutes = Math.max(0, Number(ctxProfile?.break_between_lessons) || 0);
+        const breakMs = breakMinutes * 60_000;
         const { data: existingBusy } = await supabase
           .from('sessions')
           .select('id, start_time, end_time')
           .eq('tutor_id', user.id)
           .neq('status', 'cancelled')
-          .lt('start_time', latest.toISOString())
-          .gt('end_time', earliest.toISOString());
+          .lt('start_time', new Date(latest.getTime() + breakMs).toISOString())
+          .gt('end_time', new Date(earliest.getTime() - breakMs).toISOString());
         const conflictSlots = slotList.filter((slot) =>
           hasOverlapWithExclusions(slot.start, slot.end, existingBusy ?? [], new Set()),
         );
@@ -2011,6 +2049,18 @@ export default function CalendarPage() {
               .map((slot) => format(slot.start, 'MM-dd HH:mm'))
               .join(', '),
           }));
+          setSaving(false);
+          return;
+        }
+        const breakConflicts = findTutorBreakConflicts(slotList, existingBusy ?? [], breakMinutes);
+        if (
+          breakConflicts.length > 0
+          && !window.confirm(tutorBreakOverrideMessage(breakMinutes, breakConflicts.length, locale))
+        ) {
+          const tplIds = recurringTemplates.map((tpl: any) => tpl.id).filter(Boolean);
+          if (tplIds.length > 0) {
+            await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
+          }
           setSaving(false);
           return;
         }
@@ -2290,7 +2340,8 @@ export default function CalendarPage() {
       const isGroupLesson = subject?.is_group;
 
       // Determine which students to create sessions for
-      const studentIdsToCreate = isGroupLesson ? selectedStudentIds : [selectedStudentId];
+      const isSharedIndividual = isLaisviVaikai && !isGroupLesson;
+      const studentIdsToCreate = isGroupLesson || isSharedIndividual ? selectedStudentIds : [selectedStudentId];
 
       // Check for lesson packages for each student and prepare sessions
       const sessionsToInsert = [];
@@ -2307,7 +2358,7 @@ export default function CalendarPage() {
         studentId: string;
       }> = [];
       for (const studentId of studentIdsToCreate) {
-        const studentRow = students.find((s) => s.id === studentId);
+        const studentRow = schoolLessonStudents.find((s) => s.id === studentId);
         // Check if student has available lesson package item for this subject
         let sessionPaid = isPaid;
         let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentRow?.payment_model, {
@@ -2371,15 +2422,29 @@ export default function CalendarPage() {
 
       // Conflict check before inserting: warn instead of silently double-booking.
       {
+        const breakMinutes = Math.max(0, Number(ctxProfile?.break_between_lessons) || 0);
+        const breakMs = breakMinutes * 60_000;
         const { data: existingBusy } = await supabase
           .from('sessions')
           .select('id, start_time, end_time')
           .eq('tutor_id', user.id)
           .neq('status', 'cancelled')
-          .lt('start_time', endDate.toISOString())
-          .gt('end_time', startDate.toISOString());
+          .lt('start_time', new Date(endDate.getTime() + breakMs).toISOString())
+          .gt('end_time', new Date(startDate.getTime() - breakMs).toISOString());
         if (hasOverlapWithExclusions(startDate, endDate, existingBusy ?? [], new Set())) {
           alert(t('cal.duplicateTime'));
+          setSaving(false);
+          return;
+        }
+        const breakConflicts = findTutorBreakConflicts(
+          [{ start: startDate, end: endDate }],
+          existingBusy ?? [],
+          breakMinutes,
+        );
+        if (
+          breakConflicts.length > 0
+          && !window.confirm(tutorBreakOverrideMessage(breakMinutes, breakConflicts.length, locale))
+        ) {
           setSaving(false);
           return;
         }
@@ -3151,7 +3216,12 @@ export default function CalendarPage() {
           .gte('start_time', selectedEvent.start_time.toISOString())
           .eq('status', 'active');
 
-        if (selectedEvent.recurring_session_id) {
+        const recurringIds = isGroupSession
+          ? [...new Set(selectedGroupSessions.map((row) => row.recurring_session_id).filter(Boolean) as string[])]
+          : [];
+        if (recurringIds.length > 1) {
+          futureQuery = futureQuery.in('recurring_session_id', recurringIds);
+        } else if (selectedEvent.recurring_session_id) {
           futureQuery = futureQuery.eq('recurring_session_id', selectedEvent.recurring_session_id);
         } else {
           futureQuery = futureQuery.eq('subject_id', selectedEvent.subject_id);
@@ -3504,7 +3574,14 @@ export default function CalendarPage() {
           .gte('start_time', selectedEvent.start_time.toISOString())
           .eq('status', 'active');
 
-        if (selectedEvent.recurring_session_id) {
+        const recurringIds = isGroupSession
+          ? [...new Set(selectedGroupSessions
+              .map((row) => row.recurring_session_id)
+              .filter(Boolean) as string[])]
+          : [];
+        if (recurringIds.length > 1) {
+          futureQuery = futureQuery.in('recurring_session_id', recurringIds);
+        } else if (selectedEvent.recurring_session_id) {
           futureQuery = futureQuery.eq('recurring_session_id', selectedEvent.recurring_session_id);
         } else {
           futureQuery = futureQuery.eq('subject_id', selectedEvent.subject_id);
@@ -3584,8 +3661,10 @@ export default function CalendarPage() {
             }
           }
         }
-      } else if (isClassGroupSession) {
-        const ids = classGroupOccurrenceSessionIds(selectedGroupSessions);
+      } else if (isGroupSession) {
+        const ids = isClassGroupSession
+          ? classGroupOccurrenceSessionIds(selectedGroupSessions)
+          : selectedGroupSessions.map((session) => session.id);
         if (!ids.length) {
           error = new Error(t('cal.errorGeneric'));
         } else {
@@ -3595,6 +3674,17 @@ export default function CalendarPage() {
             ...editSessionPayload,
           }).in('id', ids);
           error = groupError;
+          if (!groupError && timeChanged) {
+            await supabase.from('sessions').update({
+              original_start_time: (selectedEvent as any).original_start_time ?? oldStart.toISOString(),
+              rescheduled_at: new Date().toISOString(),
+              reschedule_reason: rescheduleReason.trim(),
+              reschedule_requested_by: effectiveRescheduleRequestedBy,
+            }).in('id', ids)
+              .then(({ error: reschedErr }) => {
+                if (reschedErr) console.warn('[Calendar] reschedule tracking columns not available:', reschedErr.message);
+              });
+          }
         }
       } else {
         const { error: singleError } = await supabase.from('sessions').update({
@@ -3699,7 +3789,7 @@ export default function CalendarPage() {
             }).catch((err) => console.error('[Calendar] reschedule mail', err));
           };
 
-          if (isClassGroupSession) {
+          if (isClassGroupSession || isGroupSession) {
             const studentIds = [...new Set(
               selectedGroupSessions.map((session) => session.student_id).filter(Boolean),
             )];
@@ -4140,6 +4230,37 @@ export default function CalendarPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setSaving(false); return; }
 
+      if (isClassGroupSession && addToGroupChoice === 'all_future' && selectedEvent.class_group_id) {
+        const group = classGroups.find((row) => row.id === selectedEvent.class_group_id);
+        if (!group) throw new Error('Grupė nerasta. Atnaujinkite kalendorių ir bandykite dar kartą.');
+        const draft = groupToWriteDraft(group);
+        const memberIds = [...new Set([
+          ...(draft.student_ids || []),
+          ...addToGroupStudentIds,
+        ])];
+        const response = await fetch('/api/school-class-groups', {
+          method: 'PATCH',
+          headers: await authHeaders(),
+          body: JSON.stringify({ ...draft, id: group.id, student_ids: memberIds }),
+        });
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(json.error || 'Nepavyko atnaujinti grupės narių.');
+
+        const refreshed = await fetch('/api/school-class-groups', { headers: await authHeaders() });
+        const refreshedJson = await refreshed.json().catch(() => ({}));
+        if (refreshed.ok) {
+          setClassGroups((refreshedJson.groups || []) as SchoolClassGroupRecord[]);
+          setSchoolStudentOptions(Array.isArray(refreshedJson.students) ? refreshedJson.students as Student[] : []);
+        }
+        alert(t('cal.addStudentsSuccess', { count: String(addToGroupStudentIds.length) }));
+        setIsAddToGroupOpen(false);
+        setAddToGroupStudentIds([]);
+        setAddToGroupChoice('single');
+        fetchData();
+        setSaving(false);
+        return;
+      }
+
       const { data: tutorProfile } = await supabase
         .from('profiles')
         .select('full_name, email, organization_id')
@@ -4154,22 +4275,33 @@ export default function CalendarPage() {
 
       // Loop through each selected student
       for (const studentId of addToGroupStudentIds) {
-        const { data: studentData } = await supabase
+        const { data: loadedStudent } = await supabase
           .from('students')
           .select('full_name, email, linked_user_id')
           .eq('id', studentId)
-          .single();
+          .maybeSingle();
+        const listedStudent = schoolLessonStudents.find((row) => row.id === studentId);
+        const studentData = loadedStudent || (listedStudent ? {
+          full_name: listedStudent.full_name,
+          email: listedStudent.email,
+          linked_user_id: listedStudent.linked_user_id,
+        } : null);
 
         if (addToGroupChoice === 'all_future') {
           // Add student to all future sessions in recurring group
           // Find all future sessions with same subject, tutor, and time slot
-          const { data: futureSessions } = await supabase
+          let futureQuery = supabase
             .from('sessions')
             .select('*')
             .eq('tutor_id', user.id)
             .eq('subject_id', selectedEvent.subject_id)
             .gte('start_time', selectedEvent.start_time)
             .eq('status', 'active');
+          const recurringIds = [...new Set(selectedGroupSessions
+            .map((row) => row.recurring_session_id)
+            .filter(Boolean) as string[])];
+          if (recurringIds.length) futureQuery = futureQuery.in('recurring_session_id', recurringIds);
+          const { data: futureSessions } = await futureQuery;
 
           if (futureSessions && futureSessions.length > 0) {
             // Group sessions by start_time to find unique occurrences
@@ -5011,17 +5143,18 @@ export default function CalendarPage() {
             {(() => {
               const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
               const isGroupLesson = selectedSubject?.is_group;
-              const maxStudents = selectedSubject?.max_students || 1;
+              const isSharedIndividual = isLaisviVaikai && !isGroupLesson;
+              const maxStudents = isSharedIndividual ? 2 : (selectedSubject?.max_students || 1);
 
-              if (isGroupLesson) {
+              if (isGroupLesson || isSharedIndividual) {
                 return (
                   <div className="space-y-2">
-                    <Label>{t('cal.studentsRequired', { max: String(maxStudents) })}</Label>
+                    <Label>{isSharedIndividual ? 'Mokiniai (1-2)' : t('cal.studentsRequired', { max: String(maxStudents) })}</Label>
                     <div className="border border-gray-200 rounded-xl p-3 space-y-2 max-h-60 overflow-y-auto">
-                      {students.length === 0 ? (
+                      {schoolLessonStudents.length === 0 ? (
                         <p className="text-sm text-gray-400 text-center py-2">{t('cal.noStudents')}</p>
                       ) : (
-                        sortStudentsByFullName(students).map((student) => (
+                        sortStudentsByFullName(schoolLessonStudents).map((student) => (
                           <label key={student.id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded-lg cursor-pointer">
                             <input
                               type="checkbox"
@@ -5030,9 +5163,14 @@ export default function CalendarPage() {
                                 if (e.target.checked) {
                                   if (selectedStudentIds.length < maxStudents) {
                                     setSelectedStudentIds([...selectedStudentIds, student.id]);
+                                    if (!selectedStudentId) handleStudentChange(student.id);
                                   }
                                 } else {
                                   setSelectedStudentIds(selectedStudentIds.filter(id => id !== student.id));
+                                  if (selectedStudentId === student.id) {
+                                    const nextPrimary = selectedStudentIds.find((id) => id !== student.id) || '';
+                                    setSelectedStudentId(nextPrimary);
+                                  }
                                 }
                               }}
                               disabled={!selectedStudentIds.includes(student.id) && selectedStudentIds.length >= maxStudents}
@@ -5057,7 +5195,7 @@ export default function CalendarPage() {
                         <SelectValue placeholder={t('cal.selectStudentPlaceholder')} />
                       </SelectTrigger>
                       <SelectContent>
-                        {sortStudentsByFullName(students).map((student) => (
+                        {sortStudentsByFullName(schoolLessonStudents).map((student) => (
                           <SelectItem key={student.id} value={student.id}>
                             {student.full_name}
                           </SelectItem>
@@ -5284,7 +5422,9 @@ export default function CalendarPage() {
                 disabled={(() => {
                   const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
                   const isGroupLesson = selectedSubject?.is_group;
-                  const hasStudents = isGroupLesson ? selectedStudentIds.length > 0 : !!selectedStudentId;
+                  const hasStudents = isGroupLesson || (isLaisviVaikai && !isGroupLesson)
+                    ? selectedStudentIds.length > 0
+                    : !!selectedStudentId;
                   const weekdayMissing = isRecurring && recurringFrequency !== 'monthly' && selectedWeekdays.length === 0;
                   return licenseFrozen || saving || !hasStudents || !startTime || !endTime || weekdayMissing;
                 })()}
@@ -5474,7 +5614,9 @@ export default function CalendarPage() {
                         <p className="font-bold text-gray-900">
                           {isClassGroupSession
                             ? (selectedEvent?.topic || t('school.groups.title'))
-                            : t('cal.groupLessonTitle')}
+                            : selectedEvent?._isSharedIndividual
+                              ? 'Individualus užsiėmimas'
+                              : t('cal.groupLessonTitle')}
                         </p>
                         <p className="text-xs text-violet-600">
                           {isClassGroupSession
@@ -6274,7 +6416,7 @@ export default function CalendarPage() {
                     const subject = subjects.find(s => s.id === selectedEvent?.subject_id);
                     // Count current students in this group
                     const currentStudentCount = selectedGroupSessions.length;
-                    const maxStudents = subject?.max_students || 5;
+                    const maxStudents = selectedEvent?._isSharedIndividual ? 2 : (subject?.max_students || 5);
 
                     if (currentStudentCount >= maxStudents) {
                       alert(t('cal.groupFull', { max: String(maxStudents) }));
@@ -6362,7 +6504,7 @@ export default function CalendarPage() {
               <Label>{t('cal.studentsLabel')}</Label>
               <div className="max-h-48 overflow-y-auto border rounded-lg p-2 space-y-1">
                 {sortStudentsByFullName(
-                  students.filter(student => !selectedGroupSessions.some(s => s.student_id === student.id)),
+                  schoolLessonStudents.filter(student => !selectedGroupSessions.some(s => s.student_id === student.id)),
                 ).map(student => (
                     <label key={student.id} className="flex items-center gap-2 cursor-pointer p-2 hover:bg-gray-50 rounded">
                       <input

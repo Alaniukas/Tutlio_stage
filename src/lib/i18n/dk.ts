@@ -271,7 +271,7 @@ export const dk: Record<string, string> = {
   'compStu.provisionEmailSent': 'Loginoplysninger blev også sendt til forælderen via e-mail.',
   'compStu.provisionCopyAll': 'Kopiér alt',
   'compStu.provisionCopied': 'Kopieret',
-  'compStu.provisionDialogTitle': 'Opret MV-konti',
+  'compStu.provisionDialogTitle': 'Opret konti',
   'compStu.provisionDialogDesc': 'Du kan ændre login-e-mails og vælge, hvor aktiveringsmails sendes hen.',
   'compStu.provisionCreateWhich': 'Hvilke konti skal oprettes',
   'compStu.provisionParentLoginEmail': 'Forælders login-e-mail',

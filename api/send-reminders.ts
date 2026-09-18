@@ -174,6 +174,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const orgId = (tutor as any)?.organization_id || null;
         const studentOrgId = ((student as any)?.organization_id as string | null) ?? orgId;
         const schoolFlowForSession = await isSchoolOrg(studentOrgId);
+        const orgFeatures = await getOrgFeatures(orgId);
+        const studentOrgFeatures = studentOrgId && studentOrgId !== orgId
+          ? await getOrgFeatures(studentOrgId)
+          : orgFeatures;
+        const homeworkUrl = schoolFlowForSession && student?.id
+          ? buildSchoolHomeworkUrl(publicAppOrigin(), String(student.id))
+          : undefined;
+        const recordingsUrl = homeworkUrl && studentOrgFeatures?.school_lesson_recordings === true
+          ? `${homeworkUrl}#recordings`
+          : undefined;
         // sessionId lets /api/send-email swap the link for a tracked /api/join-session URL (attendance).
         // Whiteboard link intentionally omitted: it pointed at the deployment domain and
         // recipients (parents/students) often lack board access — it lives in-app only.
@@ -210,6 +220,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 data: {
                   ...baseData,
                   reminderDeliveryScope,
+                  ...(schoolFlowForSession && studentOrgId
+                    ? {
+                      organizationId: studentOrgId,
+                      schoolFlow: true,
+                      homeworkUrl,
+                      recordingsUrl,
+                    }
+                    : {}),
                   recipientName: student.full_name,
                   otherName: tutor?.full_name,
                   isTutor: false,
@@ -244,21 +262,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             studentEmail: student?.email,
             linkedUserId: (student as any)?.linked_user_id,
           });
-          const orgFeatures = await getOrgFeatures(orgId);
-          const studentOrgFeatures = studentOrgId && studentOrgId !== orgId
-            ? await getOrgFeatures(studentOrgId)
-            : orgFeatures;
           const flexibleInvites = orgFeatures?.flexible_invitations === true;
           // School org: the payer email on the student row is the parent contact,
           // whether or not that parent ever registered (schools run on emails only).
           const schoolFlow = schoolFlowForSession;
-          const homeworkUrl = schoolFlow && student?.id
-            ? buildSchoolHomeworkUrl(publicAppOrigin(), String(student.id))
-            : undefined;
-          const recordingsUrl = homeworkUrl && studentOrgFeatures?.school_lesson_recordings === true
-            ? `${homeworkUrl}#recordings`
-            : undefined;
-
           const candidates: ReminderRecipient[] = [];
 
           if (schoolFlow && !flexibleInvites) {

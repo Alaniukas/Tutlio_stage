@@ -219,7 +219,7 @@ export const de: Record<string, string> = {
   'compStu.provisionEmailSent': 'Anmeldedaten wurden auch per E-Mail an die Eltern gesendet.',
   'compStu.provisionCopyAll': 'Alles kopieren',
   'compStu.provisionCopied': 'Kopiert',
-  'compStu.provisionDialogTitle': 'MV-Konten erstellen',
+  'compStu.provisionDialogTitle': 'Konten erstellen',
   'compStu.provisionDialogDesc': 'Anmelde-E-Mails können geändert und das Ziel der Aktivierungs-E-Mails gewählt werden.',
   'compStu.provisionCreateWhich': 'Welche Konten erstellen',
   'compStu.provisionParentLoginEmail': 'Anmelde-E-Mail des Elternteils',

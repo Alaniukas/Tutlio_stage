@@ -419,6 +419,9 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/:locale/book/:inviteCode" element={<StudentOnboarding />} />
         <Route path="/parent-register" element={<ParentRegister />} />
         <Route path="/:locale/parent-register" element={<ParentRegister />} />
+        <Route path="/account-activate" element={<MvAccountActivate />} />
+        <Route path="/:locale/account-activate" element={<MvAccountActivate />} />
+        {/* Legacy links issued before the portable managed-family-accounts flag. */}
         <Route path="/mv-account-activate" element={<MvAccountActivate />} />
         <Route path="/:locale/mv-account-activate" element={<MvAccountActivate />} />
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />

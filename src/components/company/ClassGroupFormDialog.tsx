@@ -64,6 +64,8 @@ function emptyDraft(tutorId: string) {
     platform: 'Google Meet',
     duration_minutes: duration,
     meeting_link: '',
+    admin_action_required: false,
+    admin_action_note: '',
     slots: [{ weekday: 1, start_time: start, end_time: addMinutesToTime(start, duration) }] as SchoolClassGroupSlot[],
     student_ids: [] as string[],
   };
@@ -115,6 +117,8 @@ export default function ClassGroupFormDialog(props: {
   const [platform, setPlatform] = useState('Google Meet');
   const [duration, setDuration] = useState(45);
   const [meetingLink, setMeetingLink] = useState('');
+  const [adminActionRequired, setAdminActionRequired] = useState(false);
+  const [adminActionNote, setAdminActionNote] = useState('');
   const [slots, setSlots] = useState<SchoolClassGroupSlot[]>(
     emptyDraft('').slots,
   );
@@ -137,6 +141,8 @@ export default function ClassGroupFormDialog(props: {
       setPlatform(draft.platform || 'Google Meet');
       setDuration(draft.duration_minutes || 45);
       setMeetingLink(draft.meeting_link || '');
+      setAdminActionRequired(draft.admin_action_required === true);
+      setAdminActionNote(draft.admin_action_note || '');
       setSlots(draft.slots.length ? draft.slots : emptyDraft(draft.tutor_id).slots);
       setStudentIds(draft.student_ids || []);
       return;
@@ -150,6 +156,8 @@ export default function ClassGroupFormDialog(props: {
     setPlatform(blank.platform);
     setDuration(blank.duration_minutes);
     setMeetingLink(blank.meeting_link);
+    setAdminActionRequired(false);
+    setAdminActionNote('');
     setSlots(blank.slots);
     setStudentIds([]);
   }, [props.open, props.mode, props.group, props.defaultTutorId]);
@@ -210,6 +218,8 @@ export default function ClassGroupFormDialog(props: {
       platform,
       duration_minutes: duration,
       meeting_link: meetingLink,
+      admin_action_required: adminActionRequired,
+      admin_action_note: adminActionRequired ? adminActionNote.trim() : null,
       slots: normalizedSlots,
     };
     const fields = validateSchoolClassGroup(draft);
@@ -276,6 +286,36 @@ export default function ClassGroupFormDialog(props: {
               />
               <p className="text-xs text-muted-foreground mt-1">{t('school.groups.calendarNameHint')}</p>
             </div>
+            {!props.canDelete && (
+              <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                <label className="flex cursor-pointer items-start gap-2 text-sm font-medium text-amber-950">
+                  <input
+                    type="checkbox"
+                    checked={adminActionRequired}
+                    onChange={(event) => setAdminActionRequired(event.target.checked)}
+                    className="mt-0.5 rounded border-amber-300"
+                  />
+                  Reikalingas administracijos sprendimas
+                </label>
+                {adminActionRequired && (
+                  <textarea
+                    value={adminActionNote}
+                    onChange={(event) => setAdminActionNote(event.target.value)}
+                    maxLength={1000}
+                    rows={3}
+                    className="mt-2 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm"
+                    placeholder="Trumpai aprašykite, ką administracija turi patikrinti ar nuspręsti."
+                  />
+                )}
+              </div>
+            )}
+            {props.canDelete && props.group?.admin_action_required && (
+              <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                <p className="font-semibold">Mokytojas pažymėjo, kad reikalingas administracijos sprendimas.</p>
+                {props.group.admin_action_note ? <p className="mt-1">{props.group.admin_action_note}</p> : null}
+                <p className="mt-1 text-xs text-amber-800">Išsaugojus grupę žyma bus laikoma sutvarkyta.</p>
+              </div>
+            )}
             <div>
               <Label>{staff}</Label>
               <select

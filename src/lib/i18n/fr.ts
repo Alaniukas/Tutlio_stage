@@ -204,7 +204,7 @@ export const fr: Record<string, string> = {
   'compStu.provisionEmailSent': 'Les identifiants ont aussi été envoyés au parent par e-mail.',
   'compStu.provisionCopyAll': 'Tout copier',
   'compStu.provisionCopied': 'Copié',
-  'compStu.provisionDialogTitle': 'Créer des comptes MV',
+  'compStu.provisionDialogTitle': 'Créer des comptes',
   'compStu.provisionDialogDesc': 'Vous pouvez modifier les e-mails de connexion et choisir où envoyer les e-mails d’activation.',
   'compStu.provisionCreateWhich': 'Quels comptes créer',
   'compStu.provisionParentLoginEmail': 'E-mail de connexion du parent',

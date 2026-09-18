@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   EXTRA_LESSONS_DEFAULT_BODY,
   EXTRA_LESSONS_DOCX_PLACEHOLDERS,
+  INDIVIDUAL_EXTRA_LESSONS_SCHEDULE_LABEL,
   START_WITHIN_14_CHECKBOX_TEXT,
   buildExtraLessonsOrderSnapshot,
   canonicalExtraLessonsPayload,
@@ -44,6 +45,23 @@ describe('extraLessonsContract', () => {
     expect(indicativeMonthlyPrice(8, 12)).toBe(96);
     expect(validateExtraLessonsOrder(order)).toEqual([]);
     expect(order.individual_cancel_terms).toBe('netaikoma');
+  });
+
+  it('uses the flexible agreed schedule wording for individual contracts', () => {
+    const order = buildExtraLessonsOrderSnapshot({
+      service_name: 'Individuali matematika',
+      service_type: 'individual',
+      duration_minutes: 45,
+      start_date: '2026-09-20',
+      end_date: '2027-06-15',
+      unit_price_eur: 20,
+      base_lessons_per_month: 4,
+      schedule_slots: [{ weekday: 2, start_time: '16:00', end_time: '16:45' }],
+      schedule_label: 'antradienis 16:00–16:45',
+    });
+
+    expect(order.schedule_label).toBe(INDIVIDUAL_EXTRA_LESSONS_SCHEDULE_LABEL);
+    expect(validateExtraLessonsOrder(order)).toEqual([]);
   });
 
   it('requires terms checkbox for click-wrap', () => {

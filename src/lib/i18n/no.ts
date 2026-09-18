@@ -101,7 +101,7 @@ export const no: Record<string, string> = {
   'compStu.provisionEmailSent': 'Innloggingsdetaljer ble også sendt til forelderen på e-post.',
   'compStu.provisionCopyAll': 'Kopier alt',
   'compStu.provisionCopied': 'Kopiert',
-  'compStu.provisionDialogTitle': 'Opprett MV-kontoer',
+  'compStu.provisionDialogTitle': 'Opprett kontoer',
   'compStu.provisionDialogDesc': 'Du kan endre innloggings-e-poster og velge hvor aktiverings-e-poster sendes.',
   'compStu.provisionCreateWhich': 'Hvilke kontoer opprettes',
   'compStu.provisionParentLoginEmail': 'Forelders innloggings-e-post',

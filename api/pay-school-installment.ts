@@ -24,6 +24,7 @@ import {
     expireConnectCheckoutSession,
     retrieveConnectCheckoutSessionWithScope,
 } from './_lib/stripeDirectCharge.js';
+import { isSchoolContractSuspended } from '../src/lib/schoolContractLifecycle.js';
 
 /** Connect accounts need this API version (matches api/stripe-connect.ts) — mixed versions caused opaque failures. */
 const STRIPE_API_VERSION = '2026-02-25.clover' as any;
@@ -82,6 +83,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         if (contract.terminated_at) {
             return res.status(400).send(errorPage('Sutartis nutraukta', 'Naujų įmokų pagal šią sutartį priimti negalima. Kreipkitės į mokyklą.'));
+        }
+        if (isSchoolContractSuspended(contract)) {
+            return res.status(400).send(errorPage('Sutartis sustabdyta', 'Sutarties sustabdymo laikotarpiu naujų įmokų priimti negalima. Kreipkitės į mokyklą.'));
         }
         if (!schoolContractAllowsInstallmentPayment(contract.signing_status)) {
             return res.status(403).send(errorPage('Mokėjimas dar negalimas', SCHOOL_INSTALLMENT_PAYMENT_BLOCKED_LT));

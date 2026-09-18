@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine, Settings, Save, Search, Download, MoreVertical, AlertTriangle, Ban } from 'lucide-react';
+import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine, Settings, Save, Search, Download, MoreVertical, AlertTriangle, Ban, BadgePercent, PauseCircle, PlayCircle } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { sendEmail } from '@/lib/email';
 import { useTranslation } from '@/lib/i18n';
@@ -58,6 +58,9 @@ import ExtraLessonsOfferDialog, { type ExtraLessonsTaughtSubject } from '@/compo
 import CompanyStaffContracts from '@/pages/company/CompanyStaffContracts';
 import { isExtraLessonsContractKind } from '@/lib/extraLessonsContract';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import SchoolDiscountOfferDialog from '@/components/school/SchoolDiscountOfferDialog';
+import { schoolConsultationsEnabled } from '@/lib/schoolConsultationsOrg';
+import { isSchoolContractSuspended } from '@/lib/schoolContractLifecycle';
 
 interface Student {
   id: string;
@@ -114,6 +117,10 @@ interface Contract {
   accepted_at?: string | null;
   terminated_at?: string | null;
   termination_reason?: string | null;
+  suspension_started_at?: string | null;
+  suspension_until?: string | null;
+  suspension_reason?: string | null;
+  suspension_resumed_at?: string | null;
   withdrawal_requested_at?: string | null;
   extra_end_kind?: 'withdrawal' | 'termination' | null;
   unit_price_eur?: number | null;
@@ -303,6 +310,11 @@ export default function CompanyContracts() {
   const [terminationContract, setTerminationContract] = useState<Contract | null>(null);
   const [terminationReason, setTerminationReason] = useState('');
   const [terminationBusy, setTerminationBusy] = useState(false);
+  const [suspensionContract, setSuspensionContract] = useState<Contract | null>(null);
+  const [suspensionReason, setSuspensionReason] = useState('');
+  const [suspensionUntil, setSuspensionUntil] = useState('');
+  const [suspensionBusy, setSuspensionBusy] = useState(false);
+  const [discountContract, setDiscountContract] = useState<Contract | null>(null);
 
   useEffect(() => { if (!getCached(CONTRACTS_CACHE_KEY)) load(); }, []);
   useEffect(() => {
@@ -1735,6 +1747,40 @@ export default function CompanyContracts() {
     }
   };
 
+  const changeContractSuspension = async (action: 'suspend' | 'resume') => {
+    if (!suspensionContract) return;
+    if (action === 'suspend' && suspensionReason.trim().length < 3) return;
+    setSuspensionBusy(true);
+    try {
+      const response = await fetch('/api/school-contract-suspend', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          contractId: suspensionContract.id,
+          action,
+          reason: suspensionReason.trim(),
+          until: suspensionUntil || null,
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body?.success !== true) throw new Error(body?.error || `HTTP ${response.status}`);
+      setSuspensionContract(null);
+      setSuspensionReason('');
+      setSuspensionUntil('');
+      setToast({
+        message: action === 'suspend'
+          ? 'Sutartis sustabdyta. Prieiga, priminimai ir naujas skaičiavimas pristabdyti.'
+          : 'Sutarties vykdymas atnaujintas.',
+        type: 'success',
+      });
+      reload();
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : tr('common.error'), type: 'error' });
+    } finally {
+      setSuspensionBusy(false);
+    }
+  };
+
   const openContractFile = async (urlOrPath?: string | null, contractId?: string | null) => {
     if (!urlOrPath?.trim() && !contractId?.trim()) {
       setToast({ message: tr('school.toastFileOpenFail'), type: 'error' });
@@ -1983,6 +2029,8 @@ export default function CompanyContracts() {
       awaiting_parents: tr('school.filterAwaitingParents'),
       incomplete_data: tr('school.filterIncompleteData'),
       signed: tr('school.filterSigned'),
+      suspended: 'Sustabdytos',
+      terminated: 'Nutrauktos',
     } as const)[key]} (${count})`;
 
   return (
@@ -2201,6 +2249,8 @@ export default function CompanyContracts() {
                         'awaiting_parents',
                         'incomplete_data',
                         'signed',
+                        'suspended',
+                        'terminated',
                       ] as const).map((key) => (
                         <SelectItem key={key} value={key}>
                           {schoolContractFilterLabel(key, contractFilterCounts[key])}
@@ -2282,6 +2332,11 @@ export default function CompanyContracts() {
                               : 'Nutraukta'}
                           </span>
                         )}
+                        {isSchoolContractSuspended(c) && (
+                          <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+                            Sustabdyta
+                          </span>
+                        )}
                       </div>
                       {isExtraLessonsContractKind(c.kind) && !c.pdf_url && (
                         <div role="alert" className="mt-2 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
@@ -2304,6 +2359,11 @@ export default function CompanyContracts() {
                         {(c.terminated_at || c.withdrawal_requested_at) && (
                           <span className="ml-3 text-rose-700">
                             Baigta {new Date(c.terminated_at || c.withdrawal_requested_at || '').toLocaleDateString('lt-LT')}
+                          </span>
+                        )}
+                        {isSchoolContractSuspended(c) && (
+                          <span className="ml-3 text-amber-700">
+                            Sustabdyta{c.suspension_until ? ` iki ${new Date(`${c.suspension_until}T12:00:00`).toLocaleDateString('lt-LT')}` : ''}
                           </span>
                         )}
                       </p>
@@ -2405,6 +2465,8 @@ export default function CompanyContracts() {
                           c.signing_status !== 'draft' && (extra || !eSignEnabled || c.signing_status === 'sent'),
                           !extra && c.signing_status !== 'draft',
                           isSchoolView && !c.terminated_at && !c.withdrawal_requested_at,
+                          isSchoolView && !extra && c.signing_status === 'signed'
+                            && schoolConsultationsEnabled(orgId, orgFeatures),
                         ].some(Boolean);
                         if (!menuActions) return null;
                         return (
@@ -2458,6 +2520,36 @@ export default function CompanyContracts() {
                               >
                                 <FileText className="w-4 h-4 shrink-0" />
                                 {tr('school.uploadSignedCopy')}
+                              </button>
+                            )}
+                            {isSchoolView
+                              && !extra
+                              && c.signing_status === 'signed'
+                              && schoolConsultationsEnabled(orgId, orgFeatures)
+                              && c.student_id && (
+                              <button
+                                type="button"
+                                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left text-emerald-700 hover:bg-emerald-50"
+                                onClick={() => setDiscountContract(c)}
+                              >
+                                <BadgePercent className="w-4 h-4 shrink-0" />
+                                Sukurti nuolaidos priedą
+                              </button>
+                            )}
+                            {isSchoolView && !c.terminated_at && !c.withdrawal_requested_at && (
+                              <button
+                                type="button"
+                                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left text-amber-700 hover:bg-amber-50"
+                                onClick={() => {
+                                  setSuspensionContract(c);
+                                  setSuspensionReason(c.suspension_reason || '');
+                                  setSuspensionUntil(c.suspension_until || '');
+                                }}
+                              >
+                                {isSchoolContractSuspended(c)
+                                  ? <PlayCircle className="w-4 h-4 shrink-0" />
+                                  : <PauseCircle className="w-4 h-4 shrink-0" />}
+                                {isSchoolContractSuspended(c) ? 'Atnaujinti sutartį' : 'Sustabdyti sutartį'}
                               </button>
                             )}
                             {isSchoolView && !c.terminated_at && !c.withdrawal_requested_at && (
@@ -2610,6 +2702,102 @@ export default function CompanyContracts() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={Boolean(suspensionContract)}
+        onOpenChange={(open) => {
+          if (!open && !suspensionBusy) {
+            setSuspensionContract(null);
+            setSuspensionReason('');
+            setSuspensionUntil('');
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {suspensionContract && isSchoolContractSuspended(suspensionContract)
+                ? 'Atnaujinti sutartį'
+                : 'Sustabdyti sutartį'}
+            </DialogTitle>
+          </DialogHeader>
+          {suspensionContract && isSchoolContractSuspended(suspensionContract) ? (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Atnaujinti sutarties vykdymą mokiniui {suspensionContract.student?.full_name || '–'}.
+              </p>
+              {suspensionContract.suspension_reason ? (
+                <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                  Sustabdymo priežastis: {suspensionContract.suspension_reason}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Pasirašyta sutartis ir istorija išliks. Sustabdymo laikotarpiu neveiks mokinio prisijungimo nuorodos, nebus siunčiami priminimai ir kuriamas naujas skaičiavimas.
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="school-contract-suspension-until">Sustabdyta iki (nebūtina)</Label>
+                <DateInput
+                  id="school-contract-suspension-until"
+                  value={suspensionUntil}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={(event) => setSuspensionUntil(event.target.value)}
+                />
+                <p className="text-xs text-gray-500">Nenurodžius datos sutartis liks sustabdyta, kol administratorius ją atnaujins.</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="school-contract-suspension-reason">Sustabdymo priežastis</Label>
+                <Textarea
+                  id="school-contract-suspension-reason"
+                  value={suspensionReason}
+                  onChange={(event) => setSuspensionReason(event.target.value)}
+                  maxLength={1000}
+                  className="min-h-24"
+                  placeholder="Pvz., grupė laikinai iširo, laukiama naujų mokinių."
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={suspensionBusy} onClick={() => setSuspensionContract(null)}>
+              {tr('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              disabled={suspensionBusy || (!isSchoolContractSuspended(suspensionContract || {}) && suspensionReason.trim().length < 3)}
+              onClick={() => void changeContractSuspension(
+                suspensionContract && isSchoolContractSuspended(suspensionContract) ? 'resume' : 'suspend',
+              )}
+              className="bg-amber-600 text-white hover:bg-amber-700"
+            >
+              {suspensionBusy
+                ? 'Saugoma…'
+                : suspensionContract && isSchoolContractSuspended(suspensionContract)
+                  ? 'Atnaujinti sutartį'
+                  : 'Sustabdyti sutartį'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {orgId && discountContract?.student_id && (
+        <SchoolDiscountOfferDialog
+          open={Boolean(discountContract)}
+          onOpenChange={(open) => { if (!open) setDiscountContract(null); }}
+          organizationId={orgId}
+          students={students.map((student) => ({
+            id: student.id,
+            fullName: student.full_name,
+            payerEmail: student.payer_email,
+          }))}
+          initialStudentId={discountContract.student_id}
+          contractId={discountContract.id}
+          lockStudent
+          onSaved={(message, type) => setToast({ message, type })}
+        />
+      )}
 
       <Dialog
         open={Boolean(pendingScanUpload)}

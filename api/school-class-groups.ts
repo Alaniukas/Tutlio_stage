@@ -106,18 +106,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!orgId) return res.status(403).json({ error: 'No organization' });
 
   if (req.method === 'GET') {
-    const { data, error } = await supabase
-      .from('school_class_groups')
-      .select(GROUP_SELECT)
-      .eq('organization_id', orgId)
-      .order('name');
+    const canManageGroups = admin.ok || profile?.organization_id === orgId;
+    const [groupsResult, studentsResult] = await Promise.all([
+      supabase
+        .from('school_class_groups')
+        .select(GROUP_SELECT)
+        .eq('organization_id', orgId)
+        .order('name'),
+      canManageGroups
+        ? supabase
+            .from('students')
+            .select('id, full_name, grade, enrollment_status')
+            .eq('organization_id', orgId)
+            .is('detached_at', null)
+            .order('full_name')
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    const { data, error } = groupsResult;
     if (error) return res.status(500).json({ error: error.message });
+    if (studentsResult.error) return res.status(500).json({ error: studentsResult.error.message });
+    const students = studentsResult.data || [];
     if (admin.ok) {
-      return res.status(200).json({ groups: data || [] });
+      return res.status(200).json({ groups: data || [], students });
     }
     if (profile?.organization_id === orgId) {
       const tutorGroups = (data || []).filter((g) => g.tutor_id === auth.userId);
-      return res.status(200).json({ groups: tutorGroups });
+      return res.status(200).json({ groups: tutorGroups, students });
     }
     if (portalStudentIds.length) {
       const { data: memberships } = await supabase
@@ -155,6 +169,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         organization_id: orgId,
         ...classGroupRowFields(draft),
         created_by: auth.userId,
+        ...(draft.admin_action_required && !admin.ok ? {
+          admin_action_requested_at: new Date().toISOString(),
+          admin_action_requested_by: auth.userId,
+        } : {}),
       })
       .select('*')
       .single();
@@ -170,7 +188,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })),
       );
     }
-    if (draft.student_ids?.length && admin.ok) {
+    if (draft.student_ids?.length) {
       const { data: owned } = await supabase
         .from('students')
         .select('id')
@@ -244,7 +262,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    if (editAdmin.ok && draft.student_ids !== null) {
+    if (draft.student_ids !== null) {
       const uniqueIds = draft.student_ids;
       let allowed = uniqueIds;
       if (uniqueIds.length) {
@@ -263,6 +281,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
       }
     }
+
+    // A teacher raises the flag. An administrator resolves it by reviewing and
+    // saving the group, so the dashboard task disappears from live state.
+    const attentionPatch = editAdmin.ok
+      ? {
+          admin_action_required: false,
+          admin_action_note: null,
+          admin_action_resolved_at: new Date().toISOString(),
+          admin_action_resolved_by: auth.userId,
+        }
+      : draft.admin_action_required
+        ? {
+            admin_action_required: true,
+            admin_action_note: draft.admin_action_note,
+            admin_action_requested_at: new Date().toISOString(),
+            admin_action_requested_by: auth.userId,
+            admin_action_resolved_at: null,
+            admin_action_resolved_by: null,
+          }
+        : {
+            admin_action_required: false,
+            admin_action_note: null,
+          };
+    const { error: attentionError } = await supabase
+      .from('school_class_groups')
+      .update(attentionPatch)
+      .eq('id', groupId)
+      .eq('organization_id', orgId);
+    if (attentionError) return res.status(500).json({ error: attentionError.message });
 
     const sync = await syncGroupSessions(supabase, groupId, orgId);
     return res.status(200).json({ ok: true, ...sync });

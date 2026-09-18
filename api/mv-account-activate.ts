@@ -5,9 +5,10 @@ import {
   verifyMvAccountActivationToken,
 } from './_lib/mvAccountActivationToken.js';
 import { findAuthUserByEmail } from './_lib/findAuthUserByEmail.js';
-import { isMoksloVaisiaiOrg, isProKlaseOrg } from './_lib/marketMoney.js';
 import { orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
 import { loginIdentifierToEmail } from '../src/lib/studentLoginIdentity.js';
+import { managedFamilyAccountsEnabled } from '../src/lib/managedFamilyAccounts.js';
+import { resolveEmailOrgBranding } from './_lib/emailOrgBranding.js';
 
 function parseJsonBody(req: VercelRequest): Record<string, unknown> {
   const raw = req.body;
@@ -60,20 +61,41 @@ async function loadPreview(
   }
 
   const organizationId = student.organization_id ?? null;
-  if (!isMoksloVaisiaiOrg(organizationId) && !isProKlaseOrg(organizationId)) {
-    return { status: 403 as const, body: { error: 'Invalid organization', code: 'org_not_supported' } };
-  }
-
   let orgName: string | null = null;
   let orgLocale: string | null = null;
+  let orgSlug: string | null = null;
+  let branding: {
+    name: string;
+    logoUrl: string | null;
+    brandColor: string;
+    brandColorSecondary: string;
+  } | null = null;
+  let orgFeatures: Record<string, unknown> | null = null;
   if (organizationId) {
     const { data: orgRow } = await supabase
       .from('organizations')
-      .select('name, preferred_locale')
+      .select('name, slug, preferred_locale, logo_url, brand_color, brand_color_secondary, features')
       .eq('id', organizationId)
       .maybeSingle();
-    orgName = typeof orgRow?.name === 'string' ? orgRow.name : null;
+    orgFeatures = orgRow?.features && typeof orgRow.features === 'object'
+      ? orgRow.features as Record<string, unknown>
+      : null;
+    const resolved = resolveEmailOrgBranding(organizationId, orgRow);
+    orgName = resolved.publicName || resolved.branding?.name
+      || (typeof orgRow?.name === 'string' ? orgRow.name : null);
     orgLocale = typeof orgRow?.preferred_locale === 'string' ? orgRow.preferred_locale : null;
+    orgSlug = typeof orgRow?.slug === 'string' ? orgRow.slug : null;
+    if (resolved.branding) {
+      branding = {
+        name: resolved.branding.name,
+        logoUrl: resolved.branding.logo_url,
+        brandColor: resolved.branding.brand_color,
+        brandColorSecondary: resolved.branding.brand_color_secondary || resolved.branding.brand_color,
+      };
+    }
+  }
+  if (!managedFamilyAccountsEnabled(organizationId, orgFeatures)) {
+    return { status: 403 as const, body: { error: 'Invalid organization', code: 'org_not_supported' } };
   }
 
   const authUser = await findAuthUserByEmail(supabase, loginIdentifierToEmail(loginIdentifier));
@@ -97,8 +119,9 @@ async function loadPreview(
       email: loginIdentifier,
       studentName: student.full_name || '',
       orgName,
+      branding,
       alreadyActivated,
-      loginUrl: buildMvLoginUrl(origin, loginIdentifier, role),
+      loginUrl: buildMvLoginUrl(origin, loginIdentifier, role, orgSlug),
     },
     authUserId: authUser.id,
   };

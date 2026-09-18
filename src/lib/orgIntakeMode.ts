@@ -1,6 +1,7 @@
 import type { OrgEntityType } from '@/contexts/OrgEntityContext';
 import { FEATURE_REGISTRY, type FeatureDefinition } from './featureRegistry.js';
 import { isMoksloVaisiaiOrg, isProKlaseOrg } from './marketMoney.js';
+import { managedFamilyAccountsEnabled } from './managedFamilyAccounts.js';
 
 /** Traditional school org (contracts, installments, school parent flows). Not Pro Klasė. */
 export function isSchoolOrg(entityType: OrgEntityType | string | null | undefined): boolean {
@@ -74,9 +75,12 @@ export function canScheduleStudentBeforeActivation(
   orgId: string | null | undefined,
   entityType: OrgEntityType | string | null | undefined,
   featuresLoading = false,
+  hasFeature?: (id: string) => boolean,
 ): boolean {
   if (isSchoolOrg(entityType) || featuresLoading) return false;
-  return isProKlaseOrg(orgId) || isMoksloVaisiaiOrg(orgId);
+  return managedFamilyAccountsEnabled(orgId, {
+    managed_family_accounts: hasFeature?.('managed_family_accounts') === true,
+  });
 }
 
 /** Pro Klasė-only flag: Pro Klasė org + flag on. */

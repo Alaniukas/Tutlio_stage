@@ -21,6 +21,7 @@ import {
   type StartWithin14Status,
 } from '../../src/lib/extraLessonsContract.js';
 import { snapshotFromRow } from './extraLessonsContractShared.js';
+import { isSchoolContractSuspended } from '../../src/lib/schoolContractLifecycle.js';
 
 export const CLASS_GROUP_HORIZON_DAYS = 60;
 const INSERT_CHUNK = 400;
@@ -164,7 +165,7 @@ export async function loadExtraLessonsStartGates(
   const gates: ExtraStartGateMap = new Map();
   let query = supabase
     .from('school_contracts')
-    .select('student_id, class_group_id, accepted_at, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at')
+    .select('student_id, class_group_id, accepted_at, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at, suspension_started_at, suspension_until, suspension_resumed_at')
     .eq('kind', EXTRA_LESSONS_CONTRACT_KIND)
     .eq('signing_status', 'signed')
     .not('accepted_at', 'is', null);
@@ -174,6 +175,10 @@ export async function loadExtraLessonsStartGates(
     if (row.withdrawal_requested_at) continue;
     const order = snapshotFromRow(row) as ExtraLessonsOrderSnapshot | null;
     if (!order || !row.accepted_at || !row.student_id) continue;
+    if (isSchoolContractSuspended(row)) {
+      gates.set(`${row.student_id}:${row.class_group_id || order.group_id || ''}`, '9999-12-31');
+      continue;
+    }
     const ymd = extraLessonsServiceStartYmd({
       status: (row.start_within_14_status || (row.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status,
       acceptedAtIso: row.accepted_at,

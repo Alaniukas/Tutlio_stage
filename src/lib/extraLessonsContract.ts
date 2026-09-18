@@ -108,6 +108,8 @@ export type ExtraLessonsOrderSnapshot = {
   subject_name?: string | null;
 };
 
+export const INDIVIDUAL_EXTRA_LESSONS_SCHEDULE_LABEL = 'Pagal su mokykla suderintą grafiką';
+
 export const START_WITHIN_14_CHECKBOX_TEXT =
   'Prašau pradėti teikti paslaugas nepasibaigus 14 dienų sutarties atsisakymo terminui. Suprantu, kad atsisakęs Sutarties turėsiu sumokėti už iki atsisakymo suteiktas paslaugas.';
 
@@ -189,7 +191,9 @@ export function buildExtraLessonsOrderSnapshot(input: {
       : String(input.platform).trim(),
     duration_minutes: durationRaw > 0 ? Math.round(durationRaw) : 0,
     schedule_slots: slots,
-    schedule_label: String(input.schedule_label || formatScheduleLabel(slots)).trim(),
+    schedule_label: type === 'individual'
+      ? INDIVIDUAL_EXTRA_LESSONS_SCHEDULE_LABEL
+      : String(input.schedule_label || formatScheduleLabel(slots)).trim(),
     start_date: String(input.start_date || '').trim(),
     end_date: String(input.end_date || '').trim(),
     unit_price_eur: unit,

@@ -33,6 +33,15 @@ const baseStyles = `
   </style>
 `;
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function wrap(content: string, locale: Locale): string {
   return `<!DOCTYPE html>
 <html lang="${locale}">
@@ -90,6 +99,11 @@ export async function sendMvAccountActivationEmail(
   const orgLabel = resolved.publicName || data.orgName || resolved.branding?.name || '';
   const headerColor = resolved.branding?.brand_color || MOKSLO_VAISIAI_BRAND_COLOR;
   const headerSecondary = resolved.branding?.brand_color_secondary || MOKSLO_VAISIAI_BRAND_COLOR_SECONDARY;
+  const headerBrand = resolved.branding?.logo_url
+    ? `<img src="${escapeHtml(resolved.branding.logo_url)}" alt="${escapeHtml(orgLabel)}" style="display:block;max-height:56px;max-width:200px;margin:0 auto 14px;" />`
+    : orgLabel
+      ? `<p style="color:#ffffff;font-size:17px;margin:0 0 10px;font-weight:700;">${escapeHtml(orgLabel)}</p>`
+      : '';
 
   const subject = isParent
     ? t(locale, 'em.mvActivationParentSub', { student: studentName })
@@ -106,7 +120,8 @@ export async function sendMvAccountActivationEmail(
   let html = wrap(
     `
       <div class="header" style="${headerInlineStyle(headerColor, headerSecondary)}">
-        <h1 style="color:#ffffff;font-size:22px;margin:0;font-weight:700;">${t(locale, 'em.mvActivationHeader')}</h1>
+        ${headerBrand}
+        <h1 style="color:#ffffff;font-size:22px;margin:0;font-weight:700;">${t(locale, 'mvActivate.title')}</h1>
       </div>
       <div class="body">
         <p style="color:#4b5563;font-size:15px;line-height:1.6;margin:0 0 16px;">

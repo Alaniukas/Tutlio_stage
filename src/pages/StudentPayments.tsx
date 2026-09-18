@@ -9,6 +9,7 @@ import { CreditCard, FileText, Loader2, Package, CheckCircle, Landmark, Calendar
 import { format } from 'date-fns';
 import { Link } from 'react-router-dom';
 import { viewerCanPayLessons } from '@/lib/lessonPayerView';
+import { orderStudentPaymentLessons } from '@/lib/studentPaymentLessonOrder';
 
 type PackageRow = {
   id: string;
@@ -41,7 +42,7 @@ type LessonPaymentRow = {
   price: number | null;
   paid: boolean;
   topic: string | null;
-  subject?: { name?: string | null } | null;
+  subject?: { name?: string | null; is_trial?: boolean | null } | null;
 };
 
 function packageLabel(pkg: PackageRow, fallback: string): string {
@@ -101,7 +102,12 @@ export default function StudentPayments() {
           ),
         );
 
-        const [{ data: pkgRows }, { data: invoiceRows }, { data: sessionRows }] = await Promise.all([
+        const [
+          { data: pkgRows },
+          { data: invoiceRows },
+          { data: pendingSessionRows },
+          { data: paidSessionRows },
+        ] = await Promise.all([
           supabase
             .from('lesson_packages')
             .select('id, total_lessons, available_lessons, total_price, paid, paid_at, created_at, payment_status, payment_method, extras_period_start, billing_period_start, billing_period_end, subject:subjects(name), lesson_package_items(subjects(name))')
@@ -115,13 +121,24 @@ export default function StudentPayments() {
             .limit(50),
           supabase
             .from('sessions')
-            .select('id, start_time, price, paid, topic, subject:subjects(name)')
+            .select('id, start_time, price, paid, topic, subject:subjects(name, is_trial)')
             .in('student_id', studentIds)
             .eq('status', 'active')
             .not('price', 'is', null)
             .gt('price', 0)
-            .order('start_time', { ascending: false })
+            .eq('paid', false)
+            .order('start_time', { ascending: true })
             .limit(50),
+          supabase
+            .from('sessions')
+            .select('id, start_time, price, paid, topic, subject:subjects(name, is_trial)')
+            .in('student_id', studentIds)
+            .eq('status', 'active')
+            .not('price', 'is', null)
+            .gt('price', 0)
+            .eq('paid', true)
+            .order('start_time', { ascending: false })
+            .limit(10),
         ]);
         if (cancelled) return;
 
@@ -133,12 +150,16 @@ export default function StudentPayments() {
         setHistory(packages.filter((pkg) => pkg.paid));
         setInvoices((invoiceRows || []) as InvoiceRow[]);
 
-        const lessons = ((sessionRows || []) as any[]).map((row) => ({
+        const pendingLessonRows = ((pendingSessionRows || []) as any[]).map((row) => ({
           ...row,
           subject: Array.isArray(row.subject) ? row.subject[0] ?? null : row.subject ?? null,
         })) as LessonPaymentRow[];
-        setPendingLessons(lessons.filter((s) => !s.paid));
-        setPaidLessons(lessons.filter((s) => s.paid).slice(0, 10));
+        const paidLessonRows = ((paidSessionRows || []) as any[]).map((row) => ({
+          ...row,
+          subject: Array.isArray(row.subject) ? row.subject[0] ?? null : row.subject ?? null,
+        })) as LessonPaymentRow[];
+        setPendingLessons(orderStudentPaymentLessons(pendingLessonRows));
+        setPaidLessons(paidLessonRows);
       } catch (err) {
         console.error('[StudentPayments] load failed:', err);
       } finally {

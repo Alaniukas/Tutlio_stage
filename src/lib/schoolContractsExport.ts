@@ -62,6 +62,8 @@ const CONTRACT_FILTER_FILENAME_SLUGS: Record<SchoolContractFilter | 'unsigned', 
   awaiting_parents: 'nepasirasyta-tevu',
   incomplete_data: 'truksta-duomenu',
   signed: 'pasirasytos',
+  suspended: 'sustabdytos',
+  terminated: 'nutrauktos',
   unsigned: 'nepasirasytos',
 };
 

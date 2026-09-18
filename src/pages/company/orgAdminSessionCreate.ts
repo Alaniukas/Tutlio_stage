@@ -23,6 +23,11 @@ import {
   resolveOrganizationLessonPrice,
   type OrganizationDynamicPricingRule,
 } from '@/lib/organizationDynamicPricing';
+import {
+  findTutorBreakConflicts,
+  tutorBreakOverrideMessage,
+  type SessionTimeSlot,
+} from '@/lib/sessionBreakConflict';
 
 type SubjectLite = {
   id: string;
@@ -229,6 +234,7 @@ export async function loadTutorBusyRowsInRange(
   supabase: SupabaseClient,
   tutorId: string,
   slots: Array<{ start: Date; end: Date }>,
+  paddingMinutes = 0,
 ): Promise<TutorBusyRow[]> {
   const uniqueSlots = new Map<string, { start: Date; end: Date }>();
   for (const slot of slots) {
@@ -240,13 +246,14 @@ export async function loadTutorBusyRowsInRange(
 
   const earliest = new Date(Math.min(...slotList.map((s) => s.start.getTime())));
   const latest = new Date(Math.max(...slotList.map((s) => s.end.getTime())));
+  const paddingMs = Math.max(0, Number(paddingMinutes) || 0) * 60_000;
   const { data: existingBusy, error } = await supabase
     .from('sessions')
     .select('id, start_time, end_time')
     .eq('tutor_id', tutorId)
     .eq('status', 'active')
-    .lt('start_time', latest.toISOString())
-    .gt('end_time', earliest.toISOString());
+    .lt('start_time', new Date(latest.getTime() + paddingMs).toISOString())
+    .gt('end_time', new Date(earliest.getTime() - paddingMs).toISOString());
   if (error) throw new Error(error.message);
   return (existingBusy || []) as TutorBusyRow[];
 }
@@ -305,6 +312,35 @@ export async function assertTutorSlotsFree(
   }
 }
 
+async function confirmTutorBreakConflictOverride(
+  supabase: SupabaseClient,
+  tutorId: string,
+  slots: SessionTimeSlot[],
+  allowBreakConflict: boolean,
+): Promise<void> {
+  if (allowBreakConflict || slots.length === 0) return;
+  const { data: tutor } = await supabase
+    .from('profiles')
+    .select('break_between_lessons')
+    .eq('id', tutorId)
+    .maybeSingle();
+  const breakMinutes = Math.max(
+    0,
+    Number((tutor as { break_between_lessons?: number | null } | null)?.break_between_lessons) || 0,
+  );
+  if (breakMinutes === 0) return;
+  const breakBusy = await loadTutorBusyRowsInRange(supabase, tutorId, slots, breakMinutes);
+  const conflicts = findTutorBreakConflicts(slots, breakBusy, breakMinutes);
+  if (conflicts.length === 0) return;
+
+  const locale = typeof document !== 'undefined' ? document.documentElement.lang || 'lt' : 'lt';
+  const confirmed = typeof window !== 'undefined'
+    && window.confirm(tutorBreakOverrideMessage(breakMinutes, conflicts.length, locale));
+  if (!confirmed) {
+    throw new Error('Pamokų kūrimas atšauktas, nes nepaliekama korepetitoriaus nustatyta pertrauka.');
+  }
+}
+
 /** Emails to tutor + student + payer (if parent) for created sessions. */
 async function notifyAfterOrgAdminSessionsCreated(
   supabase: SupabaseClient,
@@ -313,6 +349,7 @@ async function notifyAfterOrgAdminSessionsCreated(
   subjectLabel: string,
   isRecurring = false,
   isOpenEnded = false,
+  suppressClientBookingEmails = false,
 ) {
   if (sessionsForNotify.length === 0) return;
 
@@ -392,6 +429,8 @@ async function notifyAfterOrgAdminSessionsCreated(
       }).catch(err => console.error('[OrgSchedule] tutor notify', err));
     }
   }
+
+  if (suppressClientBookingEmails) return;
 
   if (isRecurring) {
     // Recurring: send one consolidated email per student with all lesson dates
@@ -595,6 +634,10 @@ export interface OrgAdminCreateSessionInput {
   orgSubjectTemplateId?: string;
   /** Reusable multi-create dialogs render their own inline success state. */
   suppressSuccessAlert?: boolean;
+  /** Keep the tutor notification, but do not email the client about the generated schedule. */
+  suppressClientBookingEmails?: boolean;
+  /** Bypass only after the user explicitly accepted the tutor-break warning. */
+  allowBreakConflict?: boolean;
   dynamicPricingRules?: OrganizationDynamicPricingRule[];
   /** School class group: tag sessions and book every selected member even if the subject is individual. */
   classGroupId?: string | null;
@@ -633,6 +676,8 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     individualPricing,
     dynamicPricingRules = [],
     classGroupId = null,
+    suppressClientBookingEmails = false,
+    allowBreakConflict = false,
   } = p;
   const schoolClassGroupId = classGroupId ? String(classGroupId).trim() : '';
   let { createSubjectId, createPrice } = p;
@@ -767,12 +812,22 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     }),
   );
 
-  const syncGoogle = (sessionId: string) => {
+  const syncGoogle = (sessionIds: string[]) => {
+    const uniqueSessionIds = [...new Set(sessionIds.filter(Boolean))];
+    if (uniqueSessionIds.length === 0) return;
     void (async () => {
       await fetch('/api/google-calendar-sync', {
         method: 'POST',
         headers: await authHeaders(),
-        body: JSON.stringify({ userId: createTutorId, sessionId }),
+        // A recurring series can contain dozens of lessons. Sending one request
+        // per row saturates the browser connection pool and delays the rest of
+        // the student-create flow. The existing full-sync path loads the tutor
+        // once and reconciles every new row in one background request.
+        body: JSON.stringify(
+          uniqueSessionIds.length === 1
+            ? { userId: createTutorId, sessionId: uniqueSessionIds[0] }
+            : { userId: createTutorId },
+        ),
       });
     })().catch(() => {});
   };
@@ -971,6 +1026,20 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       await cleanupRecurringTemplates();
       throw tutorSlotOverlapError(candidateSlots[0]);
     }
+    try {
+      await confirmTutorBreakConflictOverride(
+        supabase,
+        createTutorId,
+        freeRows.map((row) => ({
+          start: new Date(row.start_time as string),
+          end: new Date(row.end_time as string),
+        })),
+        allowBreakConflict,
+      );
+    } catch (error) {
+      await cleanupRecurringTemplates();
+      throw error;
+    }
     let inserted: CreatedSessionRow[] = [];
     try {
       inserted = await insertSessionRowsInChunks(supabase, freeRows);
@@ -1029,11 +1098,10 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       createTopic || subj.name || 'Pamoka',
       true,
       !(createRecurringEndDate || '').trim(),
+      suppressClientBookingEmails,
     );
 
-    for (const row of inserted || []) {
-      syncGoogle((row as { id: string }).id);
-    }
+    syncGoogle((inserted || []).map((row) => (row as { id: string }).id));
 
     await persistRecurringPlanFrequency(supabase, [...new Set(recurringTemplates.map((t) => t.student_id))], planFrequency);
 
@@ -1124,7 +1192,17 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     });
   }
 
-  await assertTutorSlotsFree(supabase, createTutorId, [{ start: startDate, end: endDate }]);
+  const oneOffSlots = [{ start: startDate, end: endDate }];
+  const oneOffBusy = await loadTutorBusyRowsInRange(supabase, createTutorId, oneOffSlots);
+  if (slotConflictsWithBusyRows(oneOffSlots[0], oneOffBusy, new Set())) {
+    throw tutorSlotOverlapError(oneOffSlots[0]);
+  }
+  await confirmTutorBreakConflictOverride(
+    supabase,
+    createTutorId,
+    oneOffSlots,
+    allowBreakConflict,
+  );
 
   const { data: created, error } = await supabase.from('sessions').insert(sessionsToInsert).select();
   if (error) throw new Error(error.message);
@@ -1157,6 +1235,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     createTutorId,
     (created || []) as CreatedSessionRow[],
     createTopic || subj.name || 'Pamoka',
+    false,
+    false,
+    suppressClientBookingEmails,
   );
 
   const { data: tutorProfile } = await supabase
@@ -1232,7 +1313,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       }
     }
 
-    syncGoogle(sess.id);
+    syncGoogle([sess.id]);
   }
 
   if (!p.suppressSuccessAlert) {

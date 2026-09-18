@@ -60,6 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 class_group_id,
                 school_billing_kind,
                 payment_after_lesson_reminder_sent,
+                subject:subjects(is_trial),
                 student:students!inner(
                     full_name,
                     email,

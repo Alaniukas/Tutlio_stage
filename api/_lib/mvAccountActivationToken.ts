@@ -87,15 +87,21 @@ export function verifyMvAccountActivationToken(
 export function buildMvAccountActivationUrl(origin: string, token: string): string {
   const base = String(origin || '').replace(/\/$/, '');
   const params = new URLSearchParams({ t: token });
-  return `${base}/mv-account-activate?${params.toString()}`;
+  return `${base}/account-activate?${params.toString()}`;
 }
 
-export function buildMvLoginUrl(origin: string, email: string, role: MvActivationRole): string {
+export function buildMvLoginUrl(
+  origin: string,
+  email: string,
+  role: MvActivationRole,
+  orgSlug?: string | null,
+): string {
   const base = String(origin || '').replace(/\/$/, '');
   const params = new URLSearchParams({
     email: email.trim().toLowerCase(),
     portal: role === 'parent' ? 'parent' : 'student',
     mvActivated: '1',
   });
+  if (orgSlug?.trim()) params.set('org', orgSlug.trim());
   return `${base}/login?${params.toString()}`;
 }

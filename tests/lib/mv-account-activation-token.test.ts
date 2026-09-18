@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildMvAccountActivationUrl,
   buildMvAccountActivationToken,
   buildMvLoginUrl,
   verifyMvAccountActivationToken,
@@ -7,6 +8,11 @@ import {
 
 describe('mvAccountActivationToken', () => {
   const secret = 'test-secret-for-mv-activation';
+
+  it('uses a brand-neutral public activation route', () => {
+    expect(buildMvAccountActivationUrl('https://tutlio.lt', 'token'))
+      .toBe('https://tutlio.lt/account-activate?t=token');
+  });
 
   it('builds and verifies parent activation token', () => {
     const token = buildMvAccountActivationToken(

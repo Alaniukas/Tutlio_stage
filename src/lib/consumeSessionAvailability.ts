@@ -233,16 +233,43 @@ export async function consumeAvailabilityForCreatedSessions(
     .eq('tutor_id', tutorId);
   if (error) throw error;
 
-  const state = [...((rows || []) as AvailabilityRow[])];
+  const loadedRows = [...((rows || []) as AvailabilityRow[])];
+  const sessionsByDate = new Map<string, Array<{ start_time: string; end_time: string }>>();
   for (const session of sessions) {
-    try {
-      await consumeSessionSlotAvailabilityOnRows(supabase, {
-        tutorId,
-        startTime: session.start_time,
-        endTime: session.end_time,
-      }, state);
-    } catch (err) {
-      console.error('[consumeAvailabilityForCreatedSessions]', err);
-    }
+    const { specificDate } = sessionInstantToAvailabilityFields(session.start_time, session.end_time);
+    const sameDate = sessionsByDate.get(specificDate) || [];
+    sameDate.push(session);
+    sessionsByDate.set(specificDate, sameDate);
   }
+
+  // Different dates never mutate the same one-time availability row. Process a
+  // few dates concurrently so a school-year series does not wait on 30-40
+  // sequential database round trips. Sessions on the same date remain ordered
+  // and share state, preserving the slot-splitting behaviour.
+  const dateGroups = [...sessionsByDate.entries()];
+  const workerCount = Math.min(6, dateGroups.length);
+  let nextGroupIndex = 0;
+  const worker = async () => {
+    while (nextGroupIndex < dateGroups.length) {
+      const groupIndex = nextGroupIndex;
+      nextGroupIndex += 1;
+      const [specificDate, sameDateSessions] = dateGroups[groupIndex];
+      const state = loadedRows.filter(
+        (row) => row.is_recurring || row.specific_date === specificDate,
+      );
+      for (const session of sameDateSessions) {
+        try {
+          await consumeSessionSlotAvailabilityOnRows(supabase, {
+            tutorId,
+            startTime: session.start_time,
+            endTime: session.end_time,
+          }, state);
+        } catch (err) {
+          console.error('[consumeAvailabilityForCreatedSessions]', err);
+        }
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
 }

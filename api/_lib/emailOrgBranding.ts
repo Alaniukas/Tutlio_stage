@@ -101,8 +101,9 @@ const HEADER_PAIRS: [string, string][] = [
 
 /**
  * Resolve email branding for any recipient (student / parent / tutor / admin).
- * Pro Klasė always gets full white-label (logo + from + signature), even if
- * `custom_branding` were toggled off — product requirement for all user roles.
+ * Feature origin never affects identity: when a feature is reused by another
+ * organization, sender, signature, logo and colors come from that target org.
+ * Pro Klasė and Mokslo vaisiai keep their legacy always-on white-label behavior.
  */
 export function resolveEmailOrgBranding(
   orgId: string | null | undefined,
@@ -157,8 +158,13 @@ export function resolveEmailOrgBranding(
     out.emailTeamSignature = customTeamSignature || 'Mokslo vaisių komanda';
     out.emailSenderName = customSenderName || 'Mokslo vaisiai sistema';
   } else {
-    if (customTeamSignature) out.emailTeamSignature = customTeamSignature;
-    if (customSenderName) out.emailSenderName = customSenderName;
+    const targetBrandName = out.branding?.name;
+    if (customTeamSignature || targetBrandName) {
+      out.emailTeamSignature = customTeamSignature || targetBrandName;
+    }
+    if (customSenderName || targetBrandName) {
+      out.emailSenderName = customSenderName || targetBrandName;
+    }
   }
 
   return out;

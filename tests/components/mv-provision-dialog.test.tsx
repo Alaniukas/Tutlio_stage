@@ -32,6 +32,8 @@ describe('MvProvisionDialog', () => {
       parent_user_id: 'parent-user-1',
     });
 
+    expect(screen.getByRole('heading', { name: 'Sukurti paskyras' })).toBeTruthy();
+    expect(screen.queryByText('Sukurti MV paskyras')).toBeNull();
     expect(screen.queryByRole('checkbox', { name: 'Tėvų paskyra' })).toBeNull();
     expect((screen.getByRole('checkbox', { name: 'Mokinio paskyra' }) as HTMLInputElement).checked).toBe(true);
     expect(screen.getByText(/Bus sugeneruotas mokinio prisijungimo vardas/).textContent).toContain(

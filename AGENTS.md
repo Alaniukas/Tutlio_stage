@@ -310,6 +310,12 @@ Kiekvienas `api/foo-bar.ts` → endpoint `/api/foo-bar`.
 **Hook:** `src/hooks/useOrgFeatures.ts` — `hasFeature('feature_id')`  
 **Admin UI:** `/admin` — toggle per organizaciją (`organizations.features` JSON)
 
+**Universali white-label taisyklė:** feature flag'as įjungia tik funkcionalumą. Jei feature'as,
+sukurtas vienai organizacijai, įjungiamas kitai, visi vartotojui matomi pavadinimai, logotipai,
+spalvos, el. laiškų siuntėjo vardai, parašai ir nuorodos privalo būti imami iš organizacijos,
+kuriai flag'as įjungtas, o ne iš organizacijos, kuriai feature'as buvo sukurtas pirmiausia.
+Vidiniai legacy failų / API pavadinimai gali likti, tačiau jie negali patekti į UI ar laiškus.
+
 ### School-related feature'ai
 
 | ID | Paskirtis |
@@ -324,6 +330,7 @@ Kiekvienas `api/foo-bar.ts` → endpoint `/api/foo-bar`.
 | `extra_lessons_billing` | Mėnesio pabaigos papildomų pamokų sąskaitos (company/Pro Klasė srautas, ne school click-wrap) |
 | `pvm_education_invoice` | PVM S.F. layout, atominė serijos numeracija, išorinių numerių rezervacija |
 | `student_card_booking` | Org admin rezervuoja pamoką iš mokinio kortelės (`FindTutorModal` + `FindLessonBookDialog`) |
+| `managed_family_accounts` | Administracija iš karto sukuria mokinio / tėvų paskyras ir pasirenka aktyvavimo laiškų gavėjus. Legacy MV / Pro Klasė įjungta pagal org ID; kitoms org — per flag'ą. Prisijungimo vardas kitoms org neutralus `st-*`, o UI / laiškai / aktyvavimo puslapis naudoja tik tikslinės org white-label. |
 
 Naudojimas:
 ```typescript

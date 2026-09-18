@@ -132,6 +132,7 @@ import {
   proKlaseFeatureEnabled,
 } from '@/lib/orgIntakeMode';
 import { isProKlaseOrg, isMoksloVaisiaiOrg } from '@/lib/marketMoney';
+import { managedFamilyAccountsEnabled } from '@/lib/managedFamilyAccounts';
 import {
   credentialsFromProvisionResponse,
   postMvProvisionFamilyAccounts,
@@ -436,11 +437,14 @@ export default function CompanyStudents() {
     proKlaseFeatureEnabled(orgId, orgEntityType, hasFeature, flagId, orgFeaturesLoading);
   const orgUsesManualPackages = !orgFeaturesLoading && hasFeature('manual_payments');
   const isMvOrg = isMoksloVaisiaiOrg(orgId);
-  const supportsManagedFamilyAccounts = isMvOrg || isProKlaseOrg(orgId);
+  const supportsManagedFamilyAccounts = managedFamilyAccountsEnabled(orgId, {
+    managed_family_accounts: !orgFeaturesLoading && hasFeature('managed_family_accounts'),
+  });
   const preActivationSchedulingUi = canScheduleStudentBeforeActivation(
     orgId,
     orgEntityType,
     orgFeaturesLoading,
+    hasFeature,
   );
   const proKlaseAvailabilitySearchUi = proKlaseAdminUi && preActivationSchedulingUi;
   const studentCardBookingEnabled = pkFeat('student_card_booking');
@@ -2281,6 +2285,7 @@ export default function CompanyStudents() {
             ],
             individualPricing: [],
             suppressSuccessAlert: true,
+            suppressClientBookingEmails: proKlaseAdminUi,
           });
           if (
             item.isTrial &&
@@ -2298,6 +2303,7 @@ export default function CompanyStudents() {
                 topic: trialTopic || undefined,
                 durationMinutes: trialDuration,
                 priceEur: trialCharge,
+                suppressRegistrationInvite: true,
               }),
             });
             if (!resp.ok) {
@@ -2341,7 +2347,10 @@ export default function CompanyStudents() {
       !isSchoolView && shouldSendStudentInviteEmail(newStudent.invite_target);
     if (shouldSendInviteOnCreate && newStudent.email?.trim()) {
       const inviteBaseUrl = orgCanonicalOrigin(orgPreferredLocale) ?? baseUrl;
-      for (const row of inserted) {
+      // One child can have several tutor-paired student rows. Registration is
+      // still one account flow, so never send one invite per tutor.
+      const row = inserted[0];
+      if (row) {
         const tutor = tutors.find((t) => t.id === row.tutor_id);
         const bookingUrl = `${inviteBaseUrl}/book/${row.invite_code}`;
         const inviteResult = await sendEmailDetailed({

@@ -13,6 +13,7 @@ describe('schoolSessionBilling', () => {
   it('skips per-lesson reminders for school org and class groups', () => {
     expect(shouldSkipPerLessonPaymentReminders({ class_group_id: 'g1' }, 'company')).toBe(true);
     expect(shouldSkipPerLessonPaymentReminders({ price: 20 }, 'school')).toBe(true);
+    expect(shouldSkipPerLessonPaymentReminders({ subject: { is_trial: true } }, 'company')).toBe(true);
     expect(shouldSkipPerLessonPaymentReminders({ price: 20 }, 'company')).toBe(false);
   });
 

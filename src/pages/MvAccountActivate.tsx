@@ -10,6 +10,12 @@ type Preview = {
   email: string;
   studentName: string;
   orgName: string | null;
+  branding: {
+    name: string;
+    logoUrl: string | null;
+    brandColor: string;
+    brandColorSecondary: string;
+  } | null;
   alreadyActivated: boolean;
   loginUrl: string;
 };
@@ -90,6 +96,13 @@ export default function MvAccountActivate() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-10">
       <div className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-8 shadow-sm space-y-5">
         <div className="text-center space-y-2">
+          {preview?.branding?.logoUrl && (
+            <img
+              src={preview.branding.logoUrl}
+              alt={preview.branding.name}
+              className="mx-auto max-h-16 max-w-[220px] object-contain"
+            />
+          )}
           <h1 className="text-2xl font-bold text-gray-900">{t('mvActivate.title')}</h1>
           {preview?.orgName && (
             <p className="text-sm text-gray-500">{preview.orgName}</p>
@@ -106,8 +119,8 @@ export default function MvAccountActivate() {
           <>
             <p className="text-sm text-gray-600 leading-relaxed">
               {preview.role === 'parent'
-                ? t('mvActivate.parentDesc', { student: preview.studentName })
-                : t('mvActivate.studentDesc', { student: preview.studentName })}
+                ? t('mvActivate.parentDesc', { org: preview.orgName || '', student: preview.studentName })
+                : t('mvActivate.studentDesc', { org: preview.orgName || '', student: preview.studentName })}
             </p>
             <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-700">
               <span className="text-gray-500">
@@ -122,6 +135,7 @@ export default function MvAccountActivate() {
                 <Button
                   type="button"
                   className="rounded-xl w-full"
+                  style={preview.branding ? { backgroundColor: preview.branding.brandColor } : undefined}
                   onClick={() => navigate(preview.loginUrl.replace(/^https?:\/\/[^/]+/, ''))}
                 >
                   {t('mvActivate.goLogin')}
@@ -131,6 +145,7 @@ export default function MvAccountActivate() {
               <Button
                 type="button"
                 className="rounded-xl w-full bg-emerald-700 hover:bg-emerald-800"
+                style={preview.branding ? { backgroundColor: preview.branding.brandColor } : undefined}
                 disabled={activating}
                 onClick={() => void handleActivate()}
               >

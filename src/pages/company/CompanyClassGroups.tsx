@@ -111,7 +111,10 @@ export default function CompanyClassGroups() {
     const headers = await authHeaders();
     const res = await fetch('/api/school-class-groups', { headers });
     const data = await res.json().catch(() => ({}));
-    if (res.ok) setGroups(data.groups || []);
+    if (res.ok) {
+      setGroups(data.groups || []);
+      if (Array.isArray(data.students)) setStudents(data.students as ClassGroupStudentOption[]);
+    }
     setLoaded(true);
   };
 
@@ -138,13 +141,18 @@ export default function CompanyClassGroups() {
       setIsOrgAdmin(admin);
       if (!orgIdResolved) return;
 
-      const { data: studentRows } = await supabase
-        .from('students')
-        .select('id, full_name, grade, enrollment_status')
-        .eq('organization_id', orgIdResolved)
-        .is('detached_at', null)
-        .order('full_name');
-      setStudents((studentRows || []) as ClassGroupStudentOption[]);
+      // Admins already have direct RLS access. Keep this fallback for rolling
+      // deployments where the API response predates the scoped `students` list;
+      // tutors rely on the server-provided minimal list instead.
+      if (admin) {
+        const { data: studentRows } = await supabase
+          .from('students')
+          .select('id, full_name, grade, enrollment_status')
+          .eq('organization_id', orgIdResolved)
+          .is('detached_at', null)
+          .order('full_name');
+        setStudents((studentRows || []) as ClassGroupStudentOption[]);
+      }
 
       let visibleTutors: ClassGroupTutorOption[] = [];
       if (admin) {
@@ -406,7 +414,7 @@ export default function CompanyClassGroups() {
         group={editing}
         students={students}
         tutors={tutors}
-        canEditMembers={isOrgAdmin}
+        canEditMembers
         canDelete={isOrgAdmin}
         defaultTutorId={isOrgAdmin ? (tutors.length === 1 ? tutors[0].id : '') : userId}
         organizationId={orgId}

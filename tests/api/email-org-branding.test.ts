@@ -71,6 +71,8 @@ describe('resolveEmailOrgBranding', () => {
     });
     expect(withFlag.branding?.name).toBe('Other Org');
     expect(withFlag.branding?.hidePoweredBy).toBe(false);
+    expect(withFlag.emailSenderName).toBe('Other Org');
+    expect(withFlag.emailTeamSignature).toBe('Other Org');
   });
 
   it('keeps Tutlio in the email footer when email_footer_powered_by is on', () => {

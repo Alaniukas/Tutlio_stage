@@ -29,7 +29,20 @@ function awaitedMutation(result: { error: unknown }) {
   return query;
 }
 
-function database(organizationId = MOKSLO_VAISIAI_ORG_ID) {
+function database(
+  organizationId = MOKSLO_VAISIAI_ORG_ID,
+  organization?: Record<string, unknown>,
+) {
+  const organizationRow = organization ?? (organizationId === PRO_KLASE_ORG_ID
+    ? {
+        name: 'Pro Klasė',
+        preferred_locale: 'lt',
+        logo_url: 'https://cdn.example/proklase.png',
+        brand_color: '#004ec2',
+        brand_color_secondary: '#0066ff',
+        features: { public_name: 'Pro Klasė' },
+      }
+    : { name: 'Mokslo vaisiai', preferred_locale: 'lt' });
   return {
     auth: { admin: {
       createUser: mocks.createUser,
@@ -63,7 +76,7 @@ function database(organizationId = MOKSLO_VAISIAI_ORG_ID) {
           select: vi.fn(() => query),
           eq: vi.fn(() => query),
           maybeSingle: vi.fn(async () => ({
-            data: { name: 'Mokslo vaisiai', preferred_locale: 'lt' },
+            data: organizationRow,
             error: null,
           })),
         };
@@ -172,6 +185,70 @@ describe('Mokslo Vaisiai username provisioning', () => {
     expect(mocks.generateLoginName).toHaveBeenCalledWith('pk');
     expect(mocks.createUser.mock.calls[0][0].email)
       .toBe('pk-7k4m-p9qd@student-login.tutlio.invalid');
+    expect(mocks.send.mock.calls[0][1]).toMatchObject({
+      organizationId: PRO_KLASE_ORG_ID,
+      orgName: 'Pro Klasė',
+      org: {
+        name: 'Pro Klasė',
+        logo_url: 'https://cdn.example/proklase.png',
+        brand_color: '#004ec2',
+        brand_color_secondary: '#0066ff',
+      },
+    });
+  });
+
+  it('ports the feature to another white-label without leaking an MV or Pro Klasė identity', async () => {
+    const organizationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    mocks.generateLoginName.mockReturnValue('st-7k4m-p9qd');
+
+    const result = await provisionMvFamilyAccounts(database(organizationId, {
+      name: 'Kita Akademija',
+      preferred_locale: 'lt',
+      logo_url: 'https://cdn.example/kita-akademija.png',
+      brand_color: '#123456',
+      brand_color_secondary: '#abcdef',
+      features: {
+        managed_family_accounts: true,
+        custom_branding: true,
+        public_name: 'Kita Akademija',
+      },
+    }), {
+      studentId: 'student-1',
+      studentFullName: 'Child',
+      studentEmail: '',
+      parentEmail: 'parent@example.test',
+      scope: 'student',
+      appOrigin: 'https://tutlio.lt',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mocks.generateLoginName).toHaveBeenCalledWith('st');
+    expect(result.ok && result.student?.email).toBe('st-7k4m-p9qd');
+    expect(mocks.send.mock.calls[0][1]).toMatchObject({
+      organizationId,
+      orgName: 'Kita Akademija',
+      org: {
+        name: 'Kita Akademija',
+        logo_url: 'https://cdn.example/kita-akademija.png',
+        brand_color: '#123456',
+        brand_color_secondary: '#abcdef',
+      },
+    });
+  });
+
+  it('rejects another organization when the portable flag is off', async () => {
+    const result = await provisionMvFamilyAccounts(database(
+      'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      { name: 'Kita Akademija', preferred_locale: 'lt', features: {} },
+    ), {
+      studentId: 'student-1',
+      scope: 'student',
+      appOrigin: 'https://tutlio.lt',
+    });
+
+    expect(result).toMatchObject({ ok: false, status: 403, code: 'org_not_supported' });
+    expect(mocks.createUser).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
   });
 
   it('removes a newly created auth user when the profile cannot be saved', async () => {

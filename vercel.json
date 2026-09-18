@@ -26,6 +26,12 @@
         "api/admin-b2b-invoices.ts": {
             "includeFiles": "api/_lib/fonts/**"
         },
+        "api/register-parent.ts": {
+            "includeFiles": "api/_lib/assets/proklase/**"
+        },
+        "api/register-student.ts": {
+            "includeFiles": "api/_lib/assets/proklase/**"
+        },
         "api/page-render.ts": {
             "maxDuration": 30
         },

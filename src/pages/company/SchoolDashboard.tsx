@@ -9,6 +9,8 @@ import {
   ClipboardCheck,
   CreditCard,
   FileClock,
+  ListTodo,
+  Activity,
   UserCheck,
   UserX,
 } from 'lucide-react';
@@ -25,6 +27,8 @@ import { useTranslation } from '@/lib/i18n';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import {
   isSchoolParentConfirmationPending,
+  buildSchoolAdminActionQueue,
+  buildSchoolActivityFeed,
   schoolParentConfirmationLabel,
   sumPendingSchoolInvoices,
 } from '@/lib/schoolDashboard';
@@ -50,6 +54,14 @@ type SchoolDashboardSession = SchoolMeetingRow & {
   tutor_joined_at?: string | null;
   student_joined_at?: string | null;
   tutor_comment?: string | null;
+  class_group_id?: string | null;
+  status_confirmed_at?: string | null;
+  cancelled_at?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+  cancellation_reason?: string | null;
+  paid?: boolean | null;
+  price?: number | string | null;
 };
 
 type PendingContract = {
@@ -61,6 +73,9 @@ type PendingContract = {
   signatures?: Array<{ role?: string | null; status?: string | null }> | null;
   sent_at?: string | null;
   created_at?: string | null;
+  signed_at?: string | null;
+  pdf_url?: string | null;
+  signed_contract_url?: string | null;
   student_name: string;
 };
 
@@ -79,9 +94,18 @@ type DashboardData = {
   sessions: SchoolDashboardSession[];
   contracts: PendingContract[];
   invoices: PendingInvoice[];
+  groups: Array<{
+    id: string;
+    name: string;
+    admin_action_required?: boolean | null;
+    admin_action_note?: string | null;
+    admin_action_requested_at?: string | null;
+    updated_at?: string | null;
+    tutor_name?: string | null;
+  }>;
 };
 
-const EMPTY_DATA: DashboardData = { sessions: [], contracts: [], invoices: [] };
+const EMPTY_DATA: DashboardData = { sessions: [], contracts: [], invoices: [], groups: [] };
 
 function relatedOne<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
@@ -169,10 +193,9 @@ export default function SchoolDashboard() {
       const contractsPromise = can('contracts.view')
         ? fetchAllRows<any>((from, to) => supabase
             .from('school_contracts')
-            .select('id, kind, signing_status, completion_submitted_at, accepted_at, sent_at, created_at, student:students(full_name), signatures:school_contract_signatures(role, status)')
+            .select('id, kind, signing_status, completion_submitted_at, accepted_at, sent_at, signed_at, created_at, pdf_url, signed_contract_url, student:students(full_name), signatures:school_contract_signatures(role, status)')
             .eq('organization_id', organizationId)
             .is('archived_at', null)
-            .in('signing_status', ['sent', 'signed_by_school'])
             .order('created_at', { ascending: false })
             .range(from, to))
         : Promise.resolve([]);
@@ -186,18 +209,27 @@ export default function SchoolDashboard() {
             .order('id')
             .range(from, to))
         : Promise.resolve([]);
+      const groupsPromise = can('sessions.view')
+        ? fetchAllRows<any>((from, to) => supabase
+            .from('school_class_groups')
+            .select('id, name, tutor_id, admin_action_required, admin_action_note, admin_action_requested_at, updated_at')
+            .eq('organization_id', organizationId)
+            .order('updated_at', { ascending: false })
+            .range(from, to))
+        : Promise.resolve([]);
 
-      const [tutors, contractRows, invoiceRows] = await Promise.all([
+      const [tutors, contractRows, invoiceRows, groupRows] = await Promise.all([
         tutorsPromise,
         contractsPromise,
         invoicesPromise,
+        groupsPromise,
       ]);
       const tutorIds = tutors.map(tutor => tutor.id);
       const tutorNames = new Map(tutors.map(tutor => [tutor.id, tutor.full_name || t('role.staffSchool')]));
       const sessionRows = can('sessions.view') && tutorIds.length > 0
         ? await fetchAllRows<any>((from, to) => supabase
             .from('sessions')
-            .select('id, class_group_id, tutor_id, student_id, subject_id, start_time, end_time, status, topic, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, cancellation_reason, no_show_reason, cancelled_by, tutor_comment, student:students(full_name), subjects(is_group)')
+            .select('id, class_group_id, tutor_id, student_id, subject_id, start_time, end_time, status, topic, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, cancellation_reason, no_show_reason, cancelled_by, cancelled_at, paid, price, created_at, updated_at, tutor_comment, student:students(full_name), subjects(is_group)')
             .in('tutor_id', tutorIds)
             .gte('start_time', queryStart.toISOString())
             .lte('start_time', queryEnd.toISOString())
@@ -218,15 +250,17 @@ export default function SchoolDashboard() {
             tutor_name: tutorNames.get(row.tutor_id) || t('role.staffSchool'),
           } as SchoolDashboardSession;
         }),
-        contracts: contractRows
-          .filter(isSchoolParentConfirmationPending)
-          .map((row: any) => ({
+        contracts: contractRows.map((row: any) => ({
             ...row,
             student_name: relatedOne<{ full_name?: string | null }>(row.student)?.full_name || t('common.student'),
           })),
         invoices: invoiceRows.map((row: any) => ({
           ...row,
           student_name: relatedOne<{ full_name?: string | null }>(row.student)?.full_name || t('common.student'),
+        })),
+        groups: groupRows.map((row: any) => ({
+          ...row,
+          tutor_name: tutorNames.get(row.tutor_id) || t('role.staffSchool'),
         })),
       });
     } catch (error) {
@@ -285,6 +319,12 @@ export default function SchoolDashboard() {
     };
   }, [data.sessions]);
 
+  const pendingContracts = useMemo(
+    () => data.contracts.filter(isSchoolParentConfirmationPending),
+    [data.contracts],
+  );
+  const adminActions = useMemo(() => buildSchoolAdminActionQueue(data), [data]);
+  const activityFeed = useMemo(() => buildSchoolActivityFeed(data), [data]);
   const visibleAttention = derived.attention.filter(row => !dismissedIds.has(row.id)).slice(0, 8);
   const pendingInvoiceTotal = sumPendingSchoolInvoices(data.invoices);
 
@@ -367,7 +407,7 @@ export default function SchoolDashboard() {
     },
     ...(can('contracts.view') ? [{
       label: t('schoolDash.parentConfirmations'),
-      value: data.contracts.length,
+      value: pendingContracts.length,
       sub: t('schoolDash.contractsWaiting'),
       icon: FileClock,
       tone: 'bg-amber-100 text-amber-700',
@@ -391,6 +431,40 @@ export default function SchoolDashboard() {
           </p>
         </header>
 
+        <section className="overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-sm" aria-labelledby="school-admin-work-title">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-100 bg-amber-50/70 px-4 py-3 sm:px-5">
+            <div className="flex items-center gap-2">
+              <ListTodo className="h-5 w-5 text-amber-700" />
+              <div>
+                <h2 id="school-admin-work-title" className="font-semibold text-gray-950">Reikia administracijos veiksmo</h2>
+                <p className="text-xs text-amber-800">Sąrašas susidaro automatiškai ir dingsta sutvarkius priežastį.</p>
+              </div>
+            </div>
+            <span className="rounded-full bg-white px-2.5 py-1 text-sm font-bold text-amber-800 shadow-sm">{adminActions.length}</span>
+          </div>
+          {adminActions.length === 0 ? (
+            <div className="flex items-center gap-2 px-4 py-5 text-sm text-emerald-700 sm:px-5">
+              <CheckCircle2 className="h-4 w-4" /> Šiuo metu nebaigtų administracijos darbų nėra.
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {adminActions.slice(0, 12).map((item) => (
+                <Link key={item.id} to={item.href} className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-amber-50/40 sm:px-5">
+                  <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${item.priority === 3 ? 'bg-rose-500' : item.priority === 2 ? 'bg-amber-500' : 'bg-blue-500'}`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-gray-950">{item.title}</span>
+                    <span className="mt-0.5 block text-xs leading-5 text-gray-500">{item.detail}</span>
+                  </span>
+                  <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-gray-400" />
+                </Link>
+              ))}
+              {adminActions.length > 12 ? (
+                <p className="px-5 py-3 text-xs text-gray-500">Rodoma 12 iš {adminActions.length}. Likę darbai matomi atitinkamuose sistemos languose.</p>
+              ) : null}
+            </div>
+          )}
+        </section>
+
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
           {summaryCards.map(({ label, value, sub, icon: Icon, tone }) => (
             <div key={label} className="min-w-0 rounded-2xl border border-gray-100 bg-white p-3.5 shadow-sm sm:p-4">
@@ -403,6 +477,26 @@ export default function SchoolDashboard() {
             </div>
           ))}
         </div>
+
+        <DashboardSection title="Kas vyksta sistemoje" icon={Activity} iconClassName="text-indigo-600">
+          {activityFeed.length === 0 ? (
+            <EmptyState text="Naujausių pakeitimų dar nėra." />
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {activityFeed.slice(0, 12).map((item) => (
+                <Link key={item.id} to={item.href} className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0 hover:text-indigo-700">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-gray-900">{item.title}</span>
+                    <span className="mt-0.5 block text-xs text-gray-500">{item.actor} · {item.detail}</span>
+                  </span>
+                  <time className="shrink-0 text-xs text-gray-400" dateTime={item.occurredAt}>
+                    {format(schoolDate(item.occurredAt), 'd MMM, HH:mm', { locale: dateFnsLocale })}
+                  </time>
+                </Link>
+              ))}
+            </div>
+          )}
+        </DashboardSection>
 
         {can('sessions.view') ? (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -569,11 +663,11 @@ export default function SchoolDashboard() {
                 link="/school/contracts"
                 linkLabel={t('schoolDash.openContracts')}
               >
-                {data.contracts.length === 0 ? (
+                {pendingContracts.length === 0 ? (
                   <EmptyState text={t('schoolDash.noParentConfirmations')} />
                 ) : (
                   <div className="space-y-2">
-                    {data.contracts.slice(0, 8).map(contract => {
+                    {pendingContracts.slice(0, 8).map(contract => {
                       const pendingKind = schoolParentConfirmationLabel(contract);
                       return (
                         <Link

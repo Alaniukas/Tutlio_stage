@@ -51,6 +51,26 @@ describe('tutor notification coverage and safe rendering', () => {
     }
   });
 
+  it('labels a trial charge as a payment and points the client to their account schedule', async () => {
+    const { subject, html } = await preview('lt', 'prepaid_package_request', {
+      recipientName: 'Parent',
+      studentName: 'Child',
+      tutorName: 'Pro Klasė',
+      subjectName: 'Bandomoji pamoka',
+      totalLessons: 1,
+      pricePerLesson: 10,
+      totalPrice: 10,
+      paymentLink: 'https://example.test/pay',
+      trialPayment: true,
+      scheduleAvailableInAccount: true,
+    });
+
+    expect(subject).toBe(t('lt', 'em.trialPaymentSub'));
+    expect(html).toContain(t('lt', 'em.trialPaymentHeader'));
+    expect(html).toContain(t('lt', 'em.packageScheduleAccountHint'));
+    expect(html).not.toContain(t('lt', 'em.packageReqHeader'));
+  });
+
   describe.each(SUPPORTED_LOCALES)('%s', (locale) => {
     const money = (amount: number) => new Intl.NumberFormat(LOCALE_FORMAT_TAGS[locale], {
       style: 'currency', currency: locale === 'pl' ? 'PLN' : 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2,

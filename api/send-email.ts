@@ -599,9 +599,24 @@ function sessionStudentNoShowPayer(d: any, locale: Locale) {
 function sessionReminder(d: any, locale: Locale) {
   const sessionId = d.sessionId ? encodeURIComponent(String(d.sessionId)) : '';
   const dateParam = d.date ? encodeURIComponent(String(d.date)) : '';
+  const schoolFlow = d.schoolFlow === true && !d.isTutor;
   const calendarUrl = d.isTutor
     ? `${getAppUrl()}/calendar?${dateParam ? `date=${dateParam}&` : ''}sessionId=${sessionId}`
     : `${getAppUrl()}/student/sessions?sessionId=${sessionId}`;
+  const schoolJoinButton = schoolFlow && d.meetingLink
+    ? `<div style="text-align:center; margin-top:20px;">${outlookEmailButton(String(d.meetingLink), t(locale, 'em.btnJoinNow'), '#4f46e5', { fontWeight: '600', fontSize: '15px', padding: '14px 32px' })}</div>`
+    : '';
+  const homeworkButton = schoolFlow && d.homeworkUrl
+    ? `<div style="text-align:center; margin-top:10px;">${outlookEmailButton(String(d.homeworkUrl), 'Namų darbai ir užsiėmimo medžiaga', '#059669', { fontWeight: '600', fontSize: '13px', padding: '11px 24px' })}</div>`
+    : '';
+  const recordingsButton = schoolFlow && d.recordingsUrl
+    ? `<div style="text-align:center; margin-top:8px;">${outlookEmailButton(String(d.recordingsUrl), 'Grupės įrašai', '#0f766e', { fontWeight: '600', fontSize: '13px', padding: '11px 24px' })}</div>`
+    : '';
+  const cta = schoolFlow
+    ? schoolJoinButton + homeworkButton + recordingsButton
+    : `<div style="text-align:center; margin-top:20px;">
+          ${outlookEmailButton(sessionId ? calendarUrl : (d.isTutor ? `${getAppUrl()}/dashboard` : `${getAppUrl()}/student/sessions`), t(locale, 'em.btnOpenLesson'), '#ea580c', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+        </div>`;
   return {
     subject: t(locale, 'em.reminderSub', { date: d.date, time: d.time }),
     html: wrap(`
@@ -618,9 +633,7 @@ function sessionReminder(d: any, locale: Locale) {
         ${d.meetingLink ? `<tr><td style="padding:10px 0;${!d.tutorComment ? ' border-bottom:1px solid #f0eeff;' : ''} color:#6b7280; font-size:14px;">${t(locale, 'em.labelLink')}</td><td style="padding:10px 0;${!d.tutorComment ? ' border-bottom:1px solid #f0eeff;' : ''} text-align:right;"><a href="${d.meetingLink}" style="color:#6366f1; font-weight:600; font-size:14px; text-decoration:none;">${t(locale, 'em.btnJoinNow')}</a></td></tr>` : ''}
         ${d.tutorComment ? `<tr><td colspan="2" style="padding:16px 0 0 0;"><div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:16px;"><p style="color:#1e3a8a; font-size:13px; font-weight:700; margin:0 0 6px 0;">${t(locale, 'em.tutorComment')}</p><div style="color:#1e40af; font-size:14px; line-height:1.5; white-space:pre-wrap;">${d.tutorComment}</div></div></td></tr>` : ''}
         </table></div>
-        <div style="text-align:center; margin-top:20px;">
-          ${outlookEmailButton(sessionId ? calendarUrl : (d.isTutor ? `${getAppUrl()}/dashboard` : `${getAppUrl()}/student/sessions`), t(locale, 'em.btnOpenLesson'), '#ea580c', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
-        </div>
+        ${cta}
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -1795,16 +1808,23 @@ function prepaidPackageRequest(d: any, locale: Locale) {
   const isMulti = items.length > 1;
   const itemsBreakdown = packageItemsBreakdownRows(items, locale);
   const proKlase = d.isProKlase === true || isProKlaseOrg(d.organizationId);
-  const headerSub = proKlase
+  const trialPayment = d.trialPayment === true;
+  const headerSub = trialPayment
+    ? t(locale, 'em.trialPaymentHeaderSub')
+    : proKlase
     ? t(locale, 'em.packageReqHeaderSubProKlase')
     : t(locale, 'em.packageReqHeaderSub');
-  const bodyText = proKlase
+  const bodyText = trialPayment
+    ? t(locale, 'em.trialPaymentBody')
+    : proKlase
     ? t(locale, 'em.packageReqBodyProKlase')
     : t(locale, 'em.packageReqBody', {
         tutor: d.tutorName,
         studentPart: d.studentName !== d.recipientName ? t(locale, 'em.packageReqStudentPart', { student: d.studentName }) : '',
       });
-  const howBody = proKlase
+  const howBody = trialPayment
+    ? t(locale, 'em.trialPaymentHow')
+    : proKlase
     ? t(locale, 'em.packageHowBodyProKlase')
     : t(locale, 'em.packageHowBody', {
         count: String(d.totalLessons),
@@ -1820,10 +1840,12 @@ function prepaidPackageRequest(d: any, locale: Locale) {
           ${t(locale, 'em.stripeRedirect')}
         </p>`;
   return {
-    subject: t(locale, 'em.packageReqSub', { count: String(d.totalLessons), label: totalLessonsLabel }),
+    subject: trialPayment
+      ? t(locale, 'em.trialPaymentSub')
+      : t(locale, 'em.packageReqSub', { count: String(d.totalLessons), label: totalLessonsLabel }),
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#8b5cf6', '#6366f1')}">
-        <h1>${t(locale, 'em.packageReqHeader')}</h1>
+        <h1>${trialPayment ? t(locale, 'em.trialPaymentHeader') : t(locale, 'em.packageReqHeader')}</h1>
         <p>${headerSub}</p>
         ${proKlase
           ? `<p style="color:rgba(255,255,255,0.92); font-size:13px; line-height:1.6; margin:12px 0 0;">
@@ -1857,6 +1879,13 @@ function prepaidPackageRequest(d: any, locale: Locale) {
             ${howBody}
           </p>
         </div>
+        ${d.scheduleAvailableInAccount
+          ? `<div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; padding:14px 16px; margin:16px 0;">
+              <p style="color:#1e40af; font-size:14px; margin:0; line-height:1.6;">
+                ${t(locale, 'em.packageScheduleAccountHint')}
+              </p>
+            </div>`
+          : ''}
         ${payBlock}
       </div>
       ${footerFor(locale, null, d.emailTeamSignature)}

@@ -44,7 +44,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 401, { error: 'Unauthorized' });
   }
 
-  const { studentId, tutorId, topic, durationMinutes, priceEur, startIso, endIso, sessionId } = req.body as {
+  const {
+    studentId,
+    tutorId,
+    topic,
+    durationMinutes,
+    priceEur,
+    startIso,
+    endIso,
+    sessionId,
+    suppressRegistrationInvite,
+  } = req.body as {
     studentId?: string;
     tutorId?: string;
     topic?: string;
@@ -55,6 +65,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     endIso?: string;
     /** Already-created trial lesson to attach the payment package to (creation-time payment email flow). */
     sessionId?: string;
+    /** New-client flow already sends its own registration email after scheduling. */
+    suppressRegistrationInvite?: boolean;
   };
   if (!studentId || !tutorId) {
     return json(res, 400, { error: 'Missing studentId or tutorId' });
@@ -452,6 +464,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .update({ stripe_checkout_session_id: checkoutSession.id, total_price: basePriceEur })
       .eq('id', lessonPackage.id);
 
+    const trialOrgId = (tutor as { organization_id?: string | null }).organization_id || adminRow.organizationId;
+
     // Send email to payer with trial payment link.
     // Use stable /api/pay-package redirect so the link never expires.
     const stableTrialPaymentLink = `${appOrigin}/api/pay-package?package=${lessonPackage.id}`;
@@ -474,6 +488,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             pricePerLesson: trialPriceEur.toFixed(2),
             totalPrice: payerChargedTotalEur.toFixed(2),
             paymentLink: stableTrialPaymentLink,
+            trialPayment: true,
+            scheduleAvailableInAccount: isProKlaseOrg(trialOrgId),
             ...((tutor as any).organization_id ? { organizationId: (tutor as any).organization_id } : {}),
           },
         }),
@@ -487,8 +503,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .catch((e) => console.error('[create-trial-package] Error calling /api/send-email (stripe):', e));
     }
 
-    const trialOrgId = (tutor as { organization_id?: string | null }).organization_id || adminRow.organizationId;
-    if (isProKlaseOrg(trialOrgId)) {
+    if (isProKlaseOrg(trialOrgId) && !suppressRegistrationInvite) {
       await sendTrialRegistrationInvites(supabase, {
         appUrl: appOrigin,
         studentId,

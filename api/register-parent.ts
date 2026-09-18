@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { isAuthEmailAlreadyRegistered } from './_lib/findAuthUserByEmail.js';
 import { isAcceptedFlag, parentLegalAcceptanceMissing, usesProKlaseLegalDocs } from './_lib/proKlaseLegal.js';
+import { sendProKlaseRegistrationWelcomeEmail } from './_lib/sendProKlaseRegistrationWelcomeEmail.js';
 import { normalizeStudentGrade1to12 } from './_lib/studentGrade.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -154,6 +155,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await linkParent(supabase, authData.user.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail, childInfo, {
       acceptedAt: usesProKlaseLegalDocs(orgId) ? acceptedAt : null,
     });
+
+    const welcome = await sendProKlaseRegistrationWelcomeEmail({
+      organizationId: orgId,
+      to: normalizedEmail,
+      parentName: fullName.trim(),
+    });
+    if (welcome.ok === false) {
+      console.warn('[register-parent] Pro Klasė welcome email:', welcome.error);
+    }
 
     return res.status(200).json({ success: true });
   } catch (err: any) {

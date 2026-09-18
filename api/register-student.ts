@@ -8,6 +8,9 @@ import { createClient } from '@supabase/supabase-js';
 import { insertParentInviteAndSendEmail } from './_lib/parentInvite.js';
 import { inviteEmailLocale, orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
 import { studentRegistrationDetails } from './_lib/studentRegistrationDetails.js';
+import { provisionMvFamilyAccounts } from './_lib/mvProvisionFamilyAccounts.js';
+import { sendProKlaseRegistrationWelcomeEmail } from './_lib/sendProKlaseRegistrationWelcomeEmail.js';
+import { sameOrgStudentIdentity, type OrgStudentIdentityRow } from '../src/lib/orgStudentIdentity.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -39,6 +42,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       acceptedAt,
       /** When true (e.g. school org), skip parent invite email — admin may send separately; student can resend from portal. */
       suppressParentInvite,
+      /** Same address is the parent's login; the child has no email login by default. */
+      sameEmailParentMode,
+      /** Optional MV-style generated username for the child. */
+      createStudentUsernameAccount,
       locale,
     } = req.body || {};
 
@@ -60,23 +67,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'Student record not found' });
     }
 
+    let relatedStudentIds = [String(student.id)];
+    if (student.organization_id) {
+      const { data: organizationStudentRows } = await supabase
+        .from('students')
+        .select('id, tutor_id, linked_user_id, email, organization_id, full_name, grade, payer_email, detached_at')
+        .eq('organization_id', student.organization_id)
+        .is('detached_at', null);
+      const selectedIdentity = student as OrgStudentIdentityRow;
+      const matchingIds = (organizationStudentRows || [])
+        .filter((row) => sameOrgStudentIdentity(selectedIdentity, row as OrgStudentIdentityRow))
+        .map((row) => String(row.id));
+      if (matchingIds.length > 0) relatedStudentIds = [...new Set(matchingIds)];
+    }
+
     // Parent-invite links should use the org's canonical market domain.
     let orgLocale: string | null = null;
+    let registrationOrgId: string | null = (student as { organization_id?: string | null }).organization_id ?? null;
     try {
-      let orgIdForLocale: string | null = (student as { organization_id?: string | null }).organization_id ?? null;
-      if (!orgIdForLocale && student.tutor_id) {
+      if (!registrationOrgId && student.tutor_id) {
         const { data: tutorRow } = await supabase
           .from('profiles')
           .select('organization_id')
           .eq('id', student.tutor_id)
           .maybeSingle();
-        orgIdForLocale = (tutorRow as { organization_id?: string | null } | null)?.organization_id ?? null;
+        registrationOrgId = (tutorRow as { organization_id?: string | null } | null)?.organization_id ?? null;
       }
-      if (orgIdForLocale) {
+      if (registrationOrgId) {
         const { data: orgRow } = await supabase
           .from('organizations')
           .select('preferred_locale')
-          .eq('id', orgIdForLocale)
+          .eq('id', registrationOrgId)
           .maybeSingle();
         orgLocale = (orgRow as { preferred_locale?: string | null } | null)?.preferred_locale ?? null;
       }
@@ -122,6 +143,93 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ...preservedDetails,
     };
 
+    const normalizedPayerEmail = String(payerEmail || '').trim().toLowerCase();
+    if (sameEmailParentMode === true) {
+      if (payerType !== 'parent' || !normalizedPayerEmail || normalizedPayerEmail !== submittedEmail) {
+        return res.status(400).json({
+          error: 'Parent mode requires the same valid parent and registration email',
+          code: 'same_email_parent_invalid',
+        });
+      }
+      if (!String(payerName || '').trim()) {
+        return res.status(400).json({ error: 'Parent name is required', code: 'parent_name_required' });
+      }
+
+      const provision = await provisionMvFamilyAccounts(supabase, {
+        studentId,
+        studentIds: relatedStudentIds,
+        parentName: String(payerName).trim(),
+        parentEmail: submittedEmail,
+        studentFullName: String(fullName || student.full_name || '').trim(),
+        // Blank email intentionally requests the managed generated username.
+        studentEmail: createStudentUsernameAccount === true ? '' : submittedEmail,
+        forceStudentUsername: createStudentUsernameAccount === true,
+        scope: createStudentUsernameAccount === true ? 'both' : 'parent',
+        emailDelivery: 'parent_both',
+        bothNotifyEmail: submittedEmail,
+        parentPassword: password,
+        suppressParentActivationEmail: true,
+        locale: typeof locale === 'string' ? locale : orgLocale || undefined,
+        appOrigin: inviteOrigin,
+      });
+      if (provision.ok === false) {
+        return res.status(provision.status).json({ error: provision.error, code: provision.code });
+      }
+      if (!provision.parent || provision.parent.reused) {
+        return res.status(400).json({
+          error: 'This email is already registered. Sign in or use password reset.',
+          code: 'email_already_registered',
+        });
+      }
+
+      const detailsUpdate = supabase.from('students').update({
+        ...preservedDetails,
+        email: createStudentUsernameAccount === true ? null : submittedEmail,
+        phone: phone || null,
+        age: (() => {
+          const n = Number(age);
+          return Number.isFinite(n) ? n : null;
+        })(),
+        grade: grade || null,
+        subject_id: subjectId || null,
+        payment_payer: 'parent',
+        payer_name: String(payerName).trim(),
+        payer_email: submittedEmail,
+        payer_phone: payerPhone || null,
+        accepted_privacy_policy_at: acceptedAt || null,
+        accepted_terms_at: acceptedAt || null,
+      });
+      const { error: detailsErr } = relatedStudentIds.length === 1
+        ? await detailsUpdate.eq('id', studentId).is('detached_at', null)
+        : await detailsUpdate.in('id', relatedStudentIds).is('detached_at', null);
+      if (detailsErr) {
+        console.error('[register-student] same-email details update failed:', detailsErr);
+        return res.status(500).json({ error: 'Failed to update student details', code: 'update_student_failed' });
+      }
+
+      const welcome = await sendProKlaseRegistrationWelcomeEmail({
+        organizationId: registrationOrgId,
+        to: submittedEmail,
+        parentName: String(payerName).trim(),
+      });
+      if (welcome.ok === false) {
+        console.warn('[register-student] Pro Klasė welcome email:', welcome.error);
+      }
+
+      return res.status(200).json({
+        success: true,
+        userId: provision.parent.userId,
+        accountPortal: 'parent',
+        parentInviteSent: false,
+        parentInviteSkipped: true,
+        ...(provision.student ? {
+          studentUsernameCreated: true,
+          studentUsername: provision.student.email,
+          studentActivationEmailSent: provision.student.emailSent,
+        } : {}),
+      });
+    }
+
     let authUserId: string | null = null;
 
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
@@ -154,7 +262,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const { error: linkErr } = await supabase.from('students').update({
+    const linkUpdate = supabase.from('students').update({
       email: submittedEmail,
       linked_user_id: authUserId,
       phone: phone || null,
@@ -171,7 +279,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       accepted_privacy_policy_at: acceptedAt || null,
       accepted_terms_at: acceptedAt || null,
       ...preservedDetails,
-    }).eq('id', studentId)
+    });
+    const linkScoped = relatedStudentIds.length === 1
+      ? linkUpdate.eq('id', studentId)
+      : linkUpdate.in('id', relatedStudentIds);
+    const { error: linkErr } = await linkScoped
       .is('detached_at', null)
       .or(`linked_user_id.is.null,linked_user_id.eq.${authUserId}`);
 

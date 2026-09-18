@@ -5,6 +5,7 @@ import {
   type StartWithin14Status,
 } from '../../src/lib/extraLessonsContract.js';
 import { sessionYmdVilnius } from '../../src/lib/schoolExtraLessonsBilling.js';
+import { schoolContractBlocksService } from '../../src/lib/schoolContractLifecycle.js';
 
 export type SchoolAccessContract = {
   kind?: string | null;
@@ -12,6 +13,9 @@ export type SchoolAccessContract = {
   archived_at?: string | null;
   terminated_at?: string | null;
   withdrawal_requested_at?: string | null;
+  suspension_started_at?: string | null;
+  suspension_until?: string | null;
+  suspension_resumed_at?: string | null;
   accepted_at?: string | null;
   start_within_14_status?: string | null;
   start_within_14_days?: boolean | null;
@@ -57,7 +61,8 @@ function contractActiveForSession(
 ): boolean {
   if (contract.signing_status !== 'signed' || contract.archived_at) return false;
   const nowMs = now.getTime();
-  if (happenedBy(contract.terminated_at, nowMs) || happenedBy(contract.withdrawal_requested_at, nowMs)) {
+  if (happenedBy(contract.terminated_at, nowMs) || happenedBy(contract.withdrawal_requested_at, nowMs)
+    || schoolContractBlocksService(contract, now)) {
     return false;
   }
   if (contract.kind !== 'extra_lessons') return true;

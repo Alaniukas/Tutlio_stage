@@ -131,6 +131,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (gate.ok === false) return res.status(gate.status).json({ error: gate.error });
 
   const studentId = String(body.studentId || '').trim();
+  const requestedContractId = String(body.contractId || '').trim();
   if (!studentId) return res.status(400).json({ error: 'Pasirinkite mokinį.' });
   const [{ data: student }, { data: org }] = await Promise.all([
     supabase.from('students')
@@ -167,16 +168,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const recipientEmail = String(student.payer_email || student.email || '').trim();
     if (!recipientEmail) throw new Error('Mokiniui nėra nurodytas mokėtojo el. paštas.');
 
-    const { data: contract } = await supabase.from('school_contracts')
+    let contractQuery = supabase.from('school_contracts')
       .select('id, contract_number')
       .eq('organization_id', organizationId)
       .eq('student_id', studentId)
       .eq('kind', 'annual')
       .eq('signing_status', 'signed')
-      .is('archived_at', null)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .is('archived_at', null);
+    contractQuery = requestedContractId
+      ? contractQuery.eq('id', requestedContractId)
+      : contractQuery.order('created_at', { ascending: false }).limit(1);
+    const { data: contract } = await contractQuery.maybeSingle();
     if (!contract) throw new Error('Mokinys neturi pasirašytos metinės sutarties.');
 
     let pending = supabase.from('school_discount_agreements')

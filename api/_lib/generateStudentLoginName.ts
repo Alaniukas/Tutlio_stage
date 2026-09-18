@@ -3,7 +3,7 @@ import { randomInt } from 'node:crypto';
 // Lowercase, URL-safe and without i/l/o/0/1 so a child can copy it reliably.
 const STUDENT_LOGIN_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
 
-export type StudentLoginPrefix = 'mv' | 'pk';
+export type StudentLoginPrefix = 'mv' | 'pk' | 'st';
 
 export function generateStudentLoginName(prefix: StudentLoginPrefix = 'mv'): string {
   let value = '';

@@ -267,7 +267,7 @@ export const fi: Record<string, string> = {
   'compStu.provisionEmailSent': 'Kirjautumistiedot lähetettiin myös vanhemmalle sähköpostitse.',
   'compStu.provisionCopyAll': 'Kopioi kaikki',
   'compStu.provisionCopied': 'Kopioitu',
-  'compStu.provisionDialogTitle': 'Luo MV-tilit',
+  'compStu.provisionDialogTitle': 'Luo tilit',
   'compStu.provisionDialogDesc': 'Voit muuttaa kirjautumissähköposteja ja valita, minne aktivointiviestit lähetetään.',
   'compStu.provisionCreateWhich': 'Mitkä tilit luodaan',
   'compStu.provisionParentLoginEmail': 'Vanhemman kirjautumissähköposti',

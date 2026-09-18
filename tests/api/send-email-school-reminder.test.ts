@@ -52,10 +52,10 @@ function mockReq(body: unknown) {
   };
 }
 
-async function sendEmail(data: Record<string, unknown>) {
+async function sendEmail(data: Record<string, unknown>, type = 'session_reminder_payer') {
   const { default: handler } = await import('../../api/send-email');
   const res = mockRes();
-  await handler(mockReq({ type: 'session_reminder_payer', to: 'parent@example.com', data, locale: 'lt' }) as any, res as any);
+  await handler(mockReq({ type, to: 'parent@example.com', data, locale: 'lt' }) as any, res as any);
   expect(res.getResult().statusCode).toBe(200);
   expect(sendMock).toHaveBeenCalledTimes(1);
   return sendMock.mock.calls[0][0] as { subject: string; html: string };
@@ -155,5 +155,26 @@ describe('session_reminder_payer for school parents', () => {
       statusCode: 503,
       body: { error: 'Reminder delivery was not confirmed' },
     });
+  });
+});
+
+describe('session_reminder for school students', () => {
+  it('gives the student the same join, homework and recordings actions as the parent', async () => {
+    const { html } = await sendEmail({
+      ...base,
+      schoolFlow: true,
+      isTutor: false,
+      recipientName: 'Austėja Mockutė',
+      otherName: 'Demo Mokytoja Ana',
+      homeworkUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc',
+      recordingsUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc#recordings',
+    }, 'session_reminder');
+
+    expect(html).toContain('Prisijungti dabar');
+    expect(html).toContain('/api/join-session?');
+    expect(html).toContain('Namų darbai ir užsiėmimo medžiaga');
+    expect(html).toContain('Grupės įrašai');
+    expect(html).toContain('#recordings');
+    expect(html).not.toContain('/student/sessions');
   });
 });

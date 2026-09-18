@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   generate: vi.fn(),
   send: vi.fn(),
+  org: vi.fn(),
 }));
 
 vi.mock('../../api/_lib/findAuthUserByEmail.js', () => ({ findAuthUserByEmail: mocks.find }));
@@ -20,6 +21,14 @@ import { sendStudentUsernameRecovery } from '../../api/_lib/studentUsernameRecov
 const authEmail = 'mv-0123456789abcdef@student-login.tutlio.invalid';
 const redirect = 'https://tutlio.lt/auth/callback?next=/reset-password';
 const db = {
+  from: vi.fn(() => {
+    const query: any = {
+      select: vi.fn(() => query),
+      eq: vi.fn(() => query),
+      maybeSingle: mocks.org,
+    };
+    return query;
+  }),
   auth: { admin: {
     getUserById: mocks.get,
     updateUserById: mocks.update,
@@ -47,6 +56,16 @@ beforeEach(() => {
     data: { properties: { action_link: 'https://auth.example.test/recovery' } },
   });
   mocks.send.mockResolvedValue({ error: null });
+  mocks.org.mockResolvedValue({
+    data: {
+      name: 'Mokslo vaisiai',
+      logo_url: 'https://cdn.example/mv.png',
+      brand_color: '#124410',
+      brand_color_secondary: '#3a761f',
+      features: {},
+    },
+    error: null,
+  });
 });
 
 describe('student username password recovery', () => {
@@ -61,6 +80,73 @@ describe('student username password recovery', () => {
     expect(mocks.send.mock.calls[0][0].html).not.toContain('student-login.tutlio.invalid');
     expect(mocks.update.mock.calls[0][0]).toBe('child');
     expect(mocks.update.mock.calls[0][1]).not.toHaveProperty('password');
+  });
+
+  it('uses Pro Klasė white-label instead of the original MV recovery identity', async () => {
+    const proAuthEmail = 'pk-abcd-2345@student-login.tutlio.invalid';
+    mocks.get.mockResolvedValue({ data: { user: {
+      ...user,
+      email: proAuthEmail,
+      app_metadata: {
+        ...user.app_metadata,
+        provisioned_by_organization: '3422031d-6e21-424d-980b-35a9c6d7b8f1',
+        student_login_name: 'pk-abcd-2345',
+      },
+    } } });
+    mocks.org.mockResolvedValue({
+      data: {
+        name: 'Pro Klasė',
+        logo_url: 'https://cdn.example/proklase.png',
+        brand_color: '#004ec2',
+        brand_color_secondary: '#0066ff',
+        features: { public_name: 'Pro Klasė' },
+      },
+      error: null,
+    });
+
+    await sendStudentUsernameRecovery(db, proAuthEmail, redirect);
+
+    const payload = mocks.send.mock.calls[0][0];
+    expect(payload.from).toMatch(/^ProKlasė Sistema </);
+    expect(payload.subject).toContain('Pro Klasė');
+    expect(payload.html).toContain('https://cdn.example/proklase.png');
+    expect(payload.html).not.toContain('Mokslo vais');
+  });
+
+  it('uses the target white-label for another organization with the portable flag', async () => {
+    const portableAuthEmail = 'st-abcd-2345@student-login.tutlio.invalid';
+    mocks.get.mockResolvedValue({ data: { user: {
+      ...user,
+      email: portableAuthEmail,
+      app_metadata: {
+        ...user.app_metadata,
+        provisioned_by_organization: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        student_login_name: 'st-abcd-2345',
+      },
+    } } });
+    mocks.org.mockResolvedValue({
+      data: {
+        name: 'Kita Akademija',
+        logo_url: 'https://cdn.example/kita-akademija.png',
+        brand_color: '#123456',
+        brand_color_secondary: '#abcdef',
+        features: {
+          managed_family_accounts: true,
+          custom_branding: true,
+          public_name: 'Kita Akademija',
+        },
+      },
+      error: null,
+    });
+
+    await sendStudentUsernameRecovery(db, portableAuthEmail, redirect);
+
+    const payload = mocks.send.mock.calls[0][0];
+    expect(payload.from).toMatch(/^Kita Akademija </);
+    expect(payload.subject).toContain('Kita Akademija');
+    expect(payload.html).toContain('https://cdn.example/kita-akademija.png');
+    expect(payload.html).not.toContain('Mokslo vais');
+    expect(payload.html).not.toContain('Pro Klas');
   });
 
   it.each(['missing', 'inactive', 'foreign', 'throttled', 'mismatched'])('does not send recovery for %s accounts', async (state) => {

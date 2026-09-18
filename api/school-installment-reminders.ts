@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { schoolContractAllowsInstallmentPayment } from './_lib/schoolContractPaymentGate.js';
 import { loadReminderOptOuts, normalizeReminderEmail } from './_lib/reminderOptOut.js';
+import { isSchoolContractSuspended } from '../src/lib/schoolContractLifecycle.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 export const SCHOOL_REMINDER_BATCH_SIZE = 25;
@@ -46,7 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const dueIn1 = ymdInVilnius(plusDays(today, 1));
 
   const installmentSelect =
-    'id, contract_id, installment_number, amount, due_date, payment_status, reminder_3d_sent_at, reminder_1d_sent_at, contract:school_contracts(id, student_id, organization_id, signing_status, archived_at, terminated_at, annual_fee, additional_fee_amount, additional_fee_purpose, student:students(full_name, email, payer_email, payer_name), org:organizations(name, email, features, stripe_account_id, stripe_onboarding_complete))';
+    'id, contract_id, installment_number, amount, due_date, payment_status, reminder_3d_sent_at, reminder_1d_sent_at, contract:school_contracts(id, student_id, organization_id, signing_status, archived_at, terminated_at, suspension_started_at, suspension_until, suspension_resumed_at, annual_fee, additional_fee_amount, additional_fee_purpose, student:students(full_name, email, payer_email, payer_name), org:organizations(name, email, features, stripe_account_id, stripe_onboarding_complete))';
 
   const [due3IdsRes, due1IdsRes, overdueIdsRes] = await Promise.all([
     supabase.rpc('get_due_school_installment_reminder_ids', {
@@ -120,7 +121,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : is3d
         ? !!inst.reminder_3d_sent_at
         : !!inst.reminder_1d_sent_at;
-    if (alreadySent || inst.payment_status !== 'pending' || inst.contract?.archived_at || inst.contract?.terminated_at) continue;
+    if (alreadySent || inst.payment_status !== 'pending' || inst.contract?.archived_at
+      || inst.contract?.terminated_at || isSchoolContractSuspended(inst.contract || {})) continue;
     if (!schoolContractAllowsInstallmentPayment(inst.contract?.signing_status)) {
       console.warn('[school-installment-reminders] skip: contract not fully signed', inst.contract?.id, inst.id, inst.contract?.signing_status);
       continue;

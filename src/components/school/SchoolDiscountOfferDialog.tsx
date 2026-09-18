@@ -28,6 +28,9 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   organizationId: string;
   students: SchoolMonthlyInvoiceStudentOption[];
+  initialStudentId?: string;
+  contractId?: string;
+  lockStudent?: boolean;
   onSaved: (message: string, type: 'success' | 'error') => void;
 };
 
@@ -52,9 +55,12 @@ export default function SchoolDiscountOfferDialog({
   onOpenChange,
   organizationId,
   students,
+  initialStudentId,
+  contractId,
+  lockStudent = false,
   onSaved,
 }: Props) {
-  const [studentId, setStudentId] = useState(students[0]?.id || '');
+  const [studentId, setStudentId] = useState(initialStudentId || students[0]?.id || '');
   const [activities, setActivities] = useState<ActivityOption[]>([]);
   const [agreements, setAgreements] = useState<AgreementHistory[]>([]);
   const [activityKey, setActivityKey] = useState('');
@@ -80,7 +86,7 @@ export default function SchoolDiscountOfferDialog({
         const response = await fetch('/api/school-discount-offer', {
           method: 'POST',
           headers: await authHeaders(),
-          body: JSON.stringify({ action: 'options', organizationId, studentId }),
+          body: JSON.stringify({ action: 'options', organizationId, studentId, contractId }),
         });
         const json = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(json.error || 'Nepavyko gauti mokinio užsiėmimų.');
@@ -96,11 +102,11 @@ export default function SchoolDiscountOfferDialog({
       }
     })();
     return () => { cancelled = true; };
-  }, [open, organizationId, studentId]);
+  }, [open, organizationId, studentId, contractId]);
 
   useEffect(() => {
-    if (open) setStudentId((current) => current || students[0]?.id || '');
-  }, [open, students]);
+    if (open) setStudentId(initialStudentId || students[0]?.id || '');
+  }, [open, students, initialStudentId]);
 
   const submit = async () => {
     if (!selectedActivity || !discountValue) return;
@@ -114,6 +120,7 @@ export default function SchoolDiscountOfferDialog({
           action: 'create',
           organizationId,
           studentId,
+          contractId,
           subjectId: selectedActivity.subjectId,
           tutorId: selectedActivity.tutorId,
           discountType,
@@ -146,7 +153,7 @@ export default function SchoolDiscountOfferDialog({
       <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto rounded-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-xl">
-            <BadgePercent className="h-5 w-5 text-emerald-700" /> Taikyti nuolaidą
+            <BadgePercent className="h-5 w-5 text-emerald-700" /> Sukurti nuolaidos priedą
           </DialogTitle>
           <p className="text-sm text-slate-500">Tėvams bus išsiųstas patvirtinimo laiškas. Nuolaida sąskaitoms bus taikoma tik paspaudus „Sutinku“.</p>
         </DialogHeader>
@@ -154,7 +161,7 @@ export default function SchoolDiscountOfferDialog({
         <div className="grid gap-4 py-3 sm:grid-cols-2">
           <div className="space-y-2 sm:col-span-2">
             <Label>Mokinys</Label>
-            <Select value={studentId} onValueChange={setStudentId}>
+            <Select value={studentId} onValueChange={setStudentId} disabled={lockStudent}>
               <SelectTrigger><SelectValue placeholder="Pasirinkite mokinį" /></SelectTrigger>
               <SelectContent>{students.map((student) => <SelectItem key={student.id} value={student.id}>{student.fullName}</SelectItem>)}</SelectContent>
             </Select>

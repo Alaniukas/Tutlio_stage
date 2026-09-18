@@ -56,6 +56,11 @@ export const FEATURE_CATEGORIES = {
  *
  * IMPORTANT: Only add features that are FULLY IMPLEMENTED
  * Each feature here should have corresponding UI/logic in the app
+ *
+ * UNIVERSAL FLAG RULE:
+ * Feature flags enable behavior only. User-visible names, logos, colors,
+ * sender names, signatures and links must always resolve from the organization
+ * where the flag is enabled, never from the organization where it originated.
  */
 export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
   // ─────────────────────────────────────────────────────────────────────
@@ -137,6 +142,19 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     category: 'appearance',
     defaultValue: false,
     requiresSetup: true,
+    pricingTier: 'enterprise',
+  },
+
+  managed_family_accounts: {
+    id: 'managed_family_accounts',
+    name: 'Administracijos kuriamos šeimos paskyros',
+    nameEn: 'Admin-provisioned family accounts',
+    description:
+      'Administracija iš karto sukuria mokinio ir (arba) tėvų paskyras, pasirenka aktyvavimo laiškų gavėjus ir naudoja šios organizacijos white-label brandingą.',
+    descriptionEn:
+      'Admins create student and/or parent accounts immediately, choose activation-email recipients, and use the active organization\'s white-label branding.',
+    category: 'advanced',
+    defaultValue: false,
     pricingTier: 'enterprise',
   },
 
