@@ -6,6 +6,7 @@ import {
 } from '../../src/lib/extraLessonsContract.js';
 import { sessionYmdVilnius } from '../../src/lib/schoolExtraLessonsBilling.js';
 import { schoolContractBlocksService } from '../../src/lib/schoolContractLifecycle.js';
+import { isSchoolClassGroupSuspended } from '../../src/lib/schoolGroupMinimumPolicy.js';
 
 export type SchoolAccessContract = {
   kind?: string | null;
@@ -42,6 +43,14 @@ function happenedBy(value: string | null | undefined, atMs: number): boolean {
   if (!value) return false;
   const instant = Date.parse(value);
   return Number.isFinite(instant) && instant <= atMs;
+}
+
+function isMissingGroupSuspensionColumn(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  const message = String(error.message || '').toLowerCase();
+  return error.code === '42703'
+    || error.code === 'PGRST204'
+    || (message.includes('suspension_') && (message.includes('does not exist') || message.includes('could not find')));
 }
 
 function matchingExtraContract(contract: SchoolAccessContract, session: SchoolAccessSession): boolean {
@@ -141,6 +150,22 @@ export async function checkSchoolSessionStudentAccess(
     .maybeSingle();
   if (organizationError) throw new Error(organizationError.message);
   if (organization?.entity_type !== 'school') return { isSchool: false, allowed: true };
+
+  if (session.class_group_id) {
+    const { data: group, error: groupError } = await supabase
+      .from('school_class_groups')
+      .select('suspension_started_at, suspension_until, suspension_resumed_at')
+      .eq('id', session.class_group_id)
+      .eq('organization_id', organizationId)
+      .maybeSingle();
+    // During a rolling deploy, the API can briefly run before the additive
+    // group-suspension migration reaches the database. Keep the existing
+    // contract checks available during that narrow overlap.
+    if (groupError && !isMissingGroupSuspensionColumn(groupError)) throw new Error(groupError.message);
+    if (group && isSchoolClassGroupSuspended(group, now)) {
+      return { isSchool: true, allowed: false, reason: 'contract_not_active' };
+    }
+  }
 
   // `*` intentionally tolerates a rolling deploy before the termination columns
   // are present; unsigned-contract access is still enforced during that overlap.

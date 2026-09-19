@@ -31,6 +31,10 @@ export type SchoolClassGroupMember = {
 export type SchoolClassGroupRecord = SchoolClassGroupDraft & {
   id: string;
   members?: SchoolClassGroupMember[];
+  suspension_started_at?: string | null;
+  suspension_until?: string | null;
+  suspension_reason?: string | null;
+  suspension_resumed_at?: string | null;
   /** Embedded by /api/school-class-groups so the list can show the teacher without a second lookup. */
   tutor?: { full_name?: string | null } | null;
 };

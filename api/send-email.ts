@@ -2665,6 +2665,39 @@ function schoolContractExtraTerminated(d: any, locale: Locale) {
   };
 }
 
+function schoolGroupSuspended(d: any, locale: Locale) {
+  const contact = schoolParentContactEmail(d);
+  return {
+    subject: `Grupės užsiėmimai laikinai sustabdyti - ${d.groupName || 'grupė'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#d97706', '#b45309')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Grupės užsiėmimai laikinai sustabdyti</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.65;">
+          Informuojame, kad mokinio <strong>${esc(d.studentName || '')}</strong> grupės
+          <strong>${esc(d.groupName || '')}</strong> užsiėmimai laikinai sustabdyti.
+          Aktyvių mokinių skaičius grupėje sumažėjo iki ${esc(d.activeStudentCount ?? '2')}, todėl ji šiuo metu nebeatitinka grupinio užsiėmimo sąlygos.
+        </p>
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${td('Grupė', esc(d.groupName || '—'))}
+            ${td('Aktyvūs mokiniai', esc(d.activeStudentCount ?? '—'))}
+            ${td('Minimalus skaičius', esc(d.minimumStudentCount ?? 3))}
+          </table>
+        </div>
+        <p style="color:#4b5563; font-size:14px; line-height:1.65;">
+          Kol grupė sustabdyta, nauji užsiėmimai ir mokėjimai už juos nebus skaičiuojami. Mokykla informuos, kai grupę bus galima atnaujinti.
+        </p>
+        <p style="color:#6b7280; font-size:13px; line-height:1.6;">
+          Dėl tolesnio grafiko susisiekite su mokykla${contact ? `: <a href="mailto:${esc(contact)}" style="color:#4f46e5;">${esc(contact)}</a>` : ' įprastais mokyklos kontaktais'}.
+        </p>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
 function schoolContractFeeDue(d: any, locale: Locale) {
   const appUrl = getAppUrl();
   const amountEur = Number(d.amount || 50);
@@ -3705,6 +3738,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'school_monthly_invoice': emailContent = schoolMonthlyInvoice(data, locale); break;
       case 'school_contract_extra_withdrawn': emailContent = schoolContractExtraWithdrawn(data, locale); break;
       case 'school_contract_extra_terminated': emailContent = schoolContractExtraTerminated(data, locale); break;
+      case 'school_group_suspended': emailContent = schoolGroupSuspended(data, locale); break;
       case 'school_contract_fee_due': emailContent = schoolContractFeeDue(data, locale); break;
       case 'school_installment_request': emailContent = schoolInstallmentRequest(data, locale); break;
       case 'tutor_student_assigned': emailContent = tutorStudentAssigned(data, locale); break;

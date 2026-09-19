@@ -1,3 +1,5 @@
+import { isSchoolClassGroupSuspended } from './schoolGroupMinimumPolicy.js';
+
 export type SchoolDashboardContract = {
   kind?: string | null;
   signing_status?: string | null;
@@ -103,6 +105,10 @@ type ActionGroup = {
   admin_action_requested_at?: string | null;
   tutor_name?: string | null;
   updated_at?: string | null;
+  suspension_started_at?: string | null;
+  suspension_until?: string | null;
+  suspension_resumed_at?: string | null;
+  suspension_reason?: string | null;
 };
 
 const instant = (value?: string | null) => {
@@ -239,6 +245,17 @@ export function buildSchoolAdminActionQueue(input: {
   }
 
   for (const group of input.groups || []) {
+    if (isSchoolClassGroupSuspended(group)) {
+      items.push({
+        id: `group-minimum:${group.id}`,
+        category: 'groups',
+        title: `Sustabdyta grupė: ${group.name}`,
+        detail: group.suspension_reason || 'Grupėje liko mažiau nei 3 aktyvūs mokiniai.',
+        href: '/school/contracts',
+        occurredAt: group.suspension_started_at || group.updated_at || now.toISOString(),
+        priority: 3,
+      });
+    }
     if (!group.admin_action_required) continue;
     items.push({
       id: `group:${group.id}`,
@@ -289,7 +306,17 @@ export function buildSchoolActivityFeed(input: {
   }
   for (const group of input.groups || []) {
     if (!group.updated_at) continue;
-    items.push({ id: `group:${group.id}`, title: `Atnaujinta grupė: ${group.name}`, detail: group.admin_action_note || 'Tvarkaraštis arba grupės sudėtis', actor: group.tutor_name || 'Administracija', occurredAt: group.updated_at, href: '/school/groups' });
+    const suspended = isSchoolClassGroupSuspended(group);
+    items.push({
+      id: `group:${group.id}`,
+      title: suspended ? `Sustabdyta grupė: ${group.name}` : `Atnaujinta grupė: ${group.name}`,
+      detail: suspended
+        ? group.suspension_reason || 'Grupėje liko mažiau nei 3 aktyvūs mokiniai.'
+        : group.admin_action_note || 'Tvarkaraštis arba grupės sudėtis',
+      actor: group.tutor_name || 'Administracija',
+      occurredAt: group.updated_at,
+      href: '/school/groups',
+    });
   }
   return items.sort((a, b) => instant(b.occurredAt) - instant(a.occurredAt)).slice(0, 30);
 }

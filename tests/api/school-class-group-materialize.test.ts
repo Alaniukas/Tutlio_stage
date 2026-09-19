@@ -190,6 +190,29 @@ describe('reconcileClassGroupSessions', () => {
     expect(result.created).toBe(2); // s1 from 2026-09-11 on, s2 archived
     expect(db.inserted.map((r) => r.start_time)).toEqual(['2026-09-11T16:00:00.000Z', '2026-09-18T16:00:00.000Z']);
   });
+
+  it('removes generated future lessons while the whole group is suspended and restores them after resume', async () => {
+    const db = fakeSupabase([]);
+    const window = materializationWindow(NOW, 14);
+    await reconcileClassGroupSessions(db.client, group(), { window });
+    expect(db.tables.sessions).toHaveLength(6);
+
+    const suspended = await reconcileClassGroupSessions(db.client, group({
+      suspension_started_at: '2026-09-04T12:30:00.000Z',
+      suspension_until: null,
+      suspension_resumed_at: null,
+    }), { window });
+    expect(suspended).toMatchObject({ created: 0, deleted: 6 });
+    expect(db.tables.sessions).toHaveLength(0);
+
+    const resumed = await reconcileClassGroupSessions(db.client, group({
+      suspension_started_at: '2026-09-04T12:30:00.000Z',
+      suspension_until: null,
+      suspension_resumed_at: '2026-09-04T13:00:00.000Z',
+    }), { window });
+    expect(resumed).toMatchObject({ created: 6, deleted: 0 });
+    expect(db.tables.sessions).toHaveLength(6);
+  });
 });
 
 describe('removeFutureClassGroupSessions', () => {

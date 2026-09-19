@@ -102,6 +102,10 @@ type DashboardData = {
     admin_action_requested_at?: string | null;
     updated_at?: string | null;
     tutor_name?: string | null;
+    suspension_started_at?: string | null;
+    suspension_until?: string | null;
+    suspension_resumed_at?: string | null;
+    suspension_reason?: string | null;
   }>;
 };
 
@@ -212,7 +216,7 @@ export default function SchoolDashboard() {
       const groupsPromise = can('sessions.view')
         ? fetchAllRows<any>((from, to) => supabase
             .from('school_class_groups')
-            .select('id, name, tutor_id, admin_action_required, admin_action_note, admin_action_requested_at, updated_at')
+            .select('id, name, tutor_id, admin_action_required, admin_action_note, admin_action_requested_at, updated_at, suspension_started_at, suspension_until, suspension_resumed_at, suspension_reason')
             .eq('organization_id', organizationId)
             .order('updated_at', { ascending: false })
             .range(from, to))

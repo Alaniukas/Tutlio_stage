@@ -81,6 +81,22 @@ describe('school dashboard action queues', () => {
     ]));
   });
 
+  it('keeps a group below the three-student minimum in the admin queue', () => {
+    const actions = buildSchoolAdminActionQueue({
+      contracts: [],
+      invoices: [],
+      sessions: [],
+      groups: [{
+        id: 'group-low',
+        name: 'Lietuvių 8 klasė',
+        suspension_started_at: '2026-09-18T08:00:00.000Z',
+        suspension_reason: 'Grupėje liko 2 aktyvūs mokiniai.',
+      }],
+      now: new Date('2026-09-19T10:00:00.000Z'),
+    });
+    expect(actions[0]).toMatchObject({ id: 'group-minimum:group-low', priority: 3 });
+  });
+
   it('keeps an uploaded but unfinished contract copy in the document review queue', () => {
     const actions = buildSchoolAdminActionQueue({
       now: new Date('2026-09-18T12:00:00.000Z'),

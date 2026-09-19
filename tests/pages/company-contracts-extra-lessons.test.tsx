@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrgEntityProvider } from '@/contexts/OrgEntityContext';
 import CompanyContracts from '@/pages/company/CompanyContracts';
 
@@ -35,6 +35,7 @@ const extraContractsFixture = () => [
     contract_number: 'PP-100',
     annual_fee: 24,
     unit_price_eur: 6,
+    class_group_id: 'group-1',
     sent_at: '2026-09-01T10:00:00.000Z',
     order_snapshot: {
       service_name: 'lietuvių kalba',
@@ -111,6 +112,10 @@ describe('CompanyContracts extra-lessons list', () => {
     testState.cache.contracts = extraContractsFixture();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('renders extra-lessons titles, monthly fee and search without crashing', async () => {
     render(
       <OrgEntityProvider value="school">
@@ -135,5 +140,45 @@ describe('CompanyContracts extra-lessons list', () => {
       screen.getByText('PDF neparuoštas, todėl tėvai šios sutarties negavo. Sukurkite naują papildomų užsiėmimų pasiūlymą.'),
     ).toBeTruthy();
     expect(screen.getAllByText(/PDF neparuoštas/).length).toBe(1);
+  });
+
+  it('requires acknowledgement when terminating a contract would leave only two group students', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        willSuspendGroup: true,
+        groupImpact: {
+          groupId: 'group-1',
+          groupName: 'LT 5 kl.',
+          currentActiveStudentCount: 3,
+          remainingActiveStudentCount: 2,
+          minimumStudentCount: 3,
+          willSuspendGroup: true,
+        },
+      }),
+    })));
+
+    render(
+      <OrgEntityProvider value="school">
+        <MemoryRouter initialEntries={['/school/contracts']}>
+          <CompanyContracts />
+        </MemoryRouter>
+      </OrgEntityProvider>,
+    );
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Daugiau veiksmų' }).length).toBe(2));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Daugiau veiksmų' })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Nutraukti sutartį' }));
+
+    expect(await screen.findByText('Nutraukus sutartį iširs grupė „LT 5 kl.“.')).toBeTruthy();
+    const destructive = screen.getByRole('button', { name: 'Nutraukti ir sustabdyti grupę' }) as HTMLButtonElement;
+    expect(destructive.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.change(screen.getByPlaceholderText('Trumpai nurodykite, kodėl ir kieno prašymu sutartis nutraukiama.'), {
+      target: { value: 'Tėvų prašymu' },
+    });
+    expect(destructive.disabled).toBe(false);
   });
 });

@@ -15,6 +15,7 @@ import ClassGroupFormDialog, {
   type ClassGroupTutorOption,
 } from '@/components/company/ClassGroupFormDialog';
 import { usesLaisviStyleExtraLessonsPrefill } from '@/lib/laisviVaikaiExtraLessonsDefaults';
+import { isSchoolClassGroupSuspended } from '@/lib/schoolGroupMinimumPolicy';
 import {
   classGroupCalendarLabel,
   classGroupMatchesQuery,
@@ -275,7 +276,14 @@ export default function CompanyClassGroups() {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="font-semibold text-gray-900">{g.name}</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="font-semibold text-gray-900">{g.name}</div>
+            {isSchoolClassGroupSuspended(g) ? (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                Sustabdyta, grupėje mažiau nei 3 aktyvūs mokiniai
+              </span>
+            ) : null}
+          </div>
           {g.calendar_name && classGroupCalendarLabel(g) !== g.name && (
             <div className="text-sm text-gray-500">{t('school.groups.calendarName')}: {classGroupCalendarLabel(g)}</div>
           )}
@@ -293,6 +301,9 @@ export default function CompanyClassGroups() {
           <div className="text-sm text-gray-500 mt-1">
             {t('school.groups.members')}: {(g.members || []).map((m) => m.student?.full_name).filter(Boolean).join(', ') || '—'}
           </div>
+          {isSchoolClassGroupSuspended(g) && g.suspension_reason ? (
+            <div className="mt-1 text-sm text-amber-700">{g.suspension_reason}</div>
+          ) : null}
         </div>
         <span className="inline-flex items-center gap-1 shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
           <Pencil className="w-3.5 h-3.5" />

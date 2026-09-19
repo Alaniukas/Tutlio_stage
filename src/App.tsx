@@ -108,6 +108,9 @@ const PreviewSchoolMonthlyInvoice = import.meta.env.DEV
 const PreviewSchoolDiscountAccept = import.meta.env.DEV
   ? lazy(() => import('@/pages/dev/PreviewSchoolDiscountAccept'))
   : null;
+const PreviewSchoolGroupSuspension = import.meta.env.DEV
+  ? lazy(() => import('@/pages/dev/PreviewSchoolGroupSuspension'))
+  : null;
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
 const ParentInvoices = lazy(() => import('@/pages/ParentInvoices'));
@@ -347,6 +350,16 @@ export default function App({ basename }: { basename: string }) {
             element={
               <StaticLocaleProvider locale="lt">
                 <PreviewSchoolDiscountAccept />
+              </StaticLocaleProvider>
+            }
+          />
+        )}
+        {import.meta.env.DEV && PreviewSchoolGroupSuspension && (
+          <Route
+            path="/preview/school-group-suspension"
+            element={
+              <StaticLocaleProvider locale="lt">
+                <PreviewSchoolGroupSuspension />
               </StaticLocaleProvider>
             }
           />

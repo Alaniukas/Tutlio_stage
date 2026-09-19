@@ -22,12 +22,13 @@ import {
 } from '../../src/lib/extraLessonsContract.js';
 import { snapshotFromRow } from './extraLessonsContractShared.js';
 import { isSchoolContractSuspended } from '../../src/lib/schoolContractLifecycle.js';
+import { isSchoolClassGroupSuspended } from '../../src/lib/schoolGroupMinimumPolicy.js';
 
 export const CLASS_GROUP_HORIZON_DAYS = 60;
 const INSERT_CHUNK = 400;
 
 export const CLASS_GROUP_MATERIALIZE_SELECT =
-  'id, organization_id, tutor_id, subject_id, meeting_link, duration_minutes, school_year_start, school_year_end, '
+  'id, organization_id, tutor_id, subject_id, meeting_link, duration_minutes, school_year_start, school_year_end, suspension_started_at, suspension_until, suspension_resumed_at, '
   + 'slots:school_class_group_slots(weekday, start_time, end_time), members:school_class_group_members(student_id)';
 
 export type MaterializeGroupSlot = { weekday: number | string; start_time: string; end_time: string };
@@ -41,6 +42,9 @@ export type MaterializeGroupRow = {
   duration_minutes?: number | null;
   school_year_start: string;
   school_year_end: string;
+  suspension_started_at?: string | null;
+  suspension_until?: string | null;
+  suspension_resumed_at?: string | null;
   slots?: MaterializeGroupSlot[] | null;
   members?: Array<{ student_id: string }> | null;
 };
@@ -250,7 +254,9 @@ export async function reconcileClassGroupSessions(
         .map((s) => s.id),
     );
   }
-  const activeMembers = memberIds.filter((id) => !detached?.has(id));
+  const activeMembers = isSchoolClassGroupSuspended(group, window.now)
+    ? []
+    : memberIds.filter((id) => !detached?.has(id));
 
   const occurrences = expectedClassGroupOccurrences(group, window);
   const expected = new Map<string, { student_id: string; startIso: string; endIso: string }>();

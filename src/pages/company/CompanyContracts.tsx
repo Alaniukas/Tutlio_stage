@@ -61,6 +61,9 @@ import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import SchoolDiscountOfferDialog from '@/components/school/SchoolDiscountOfferDialog';
 import { schoolConsultationsEnabled } from '@/lib/schoolConsultationsOrg';
 import { isSchoolContractSuspended } from '@/lib/schoolContractLifecycle';
+import SchoolContractTerminationDialog, {
+  type SchoolContractTerminationImpact,
+} from '@/components/company/SchoolContractTerminationDialog';
 
 interface Student {
   id: string;
@@ -131,6 +134,8 @@ interface Contract {
     group_name?: string | null;
     tutor_name?: string | null;
   } | null;
+  class_group_id?: string | null;
+  suspension_scope?: 'individual' | 'group_under_minimum' | null;
   class_group?: { name?: string | null; tutor?: { full_name?: string | null } | null } | null;
   signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null; manually_marked_at?: string | null; signed_pdf_path?: string | null }[];
   installments?: { installment_number: number; amount: number; due_date: string | null; payment_status: string | null }[];
@@ -310,6 +315,10 @@ export default function CompanyContracts() {
   const [terminationContract, setTerminationContract] = useState<Contract | null>(null);
   const [terminationReason, setTerminationReason] = useState('');
   const [terminationBusy, setTerminationBusy] = useState(false);
+  const [terminationImpact, setTerminationImpact] = useState<SchoolContractTerminationImpact | null>(null);
+  const [terminationImpactLoading, setTerminationImpactLoading] = useState(false);
+  const [terminationGroupConfirmed, setTerminationGroupConfirmed] = useState(false);
+  const terminationPreviewRequestRef = useRef(0);
   const [suspensionContract, setSuspensionContract] = useState<Contract | null>(null);
   const [suspensionReason, setSuspensionReason] = useState('');
   const [suspensionUntil, setSuspensionUntil] = useState('');
@@ -1717,6 +1726,41 @@ export default function CompanyContracts() {
     reload();
   };
 
+  const openTerminationDialog = (contract: Contract) => {
+    const requestId = ++terminationPreviewRequestRef.current;
+    setTerminationContract(contract);
+    setTerminationReason('');
+    setTerminationImpact(null);
+    setTerminationGroupConfirmed(false);
+    if (!contract.class_group_id) {
+      setTerminationImpactLoading(false);
+      return;
+    }
+    setTerminationImpactLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch('/api/school-contract-terminate', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({ contractId: contract.id, preview: true }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || body?.success !== true) throw new Error(body?.error || `HTTP ${response.status}`);
+        if (requestId === terminationPreviewRequestRef.current && body.groupImpact) {
+          setTerminationImpact(body.groupImpact as SchoolContractTerminationImpact);
+        }
+      } catch (error) {
+        if (requestId !== terminationPreviewRequestRef.current) return;
+        setToast({
+          message: error instanceof Error ? error.message : 'Nepavyko patikrinti grupės būsenos.',
+          type: 'warning',
+        });
+      } finally {
+        if (requestId === terminationPreviewRequestRef.current) setTerminationImpactLoading(false);
+      }
+    })();
+  };
+
   const terminateContract = async () => {
     if (!terminationContract || terminationReason.trim().length < 3) return;
     setTerminationBusy(true);
@@ -1727,15 +1771,34 @@ export default function CompanyContracts() {
         body: JSON.stringify({
           contractId: terminationContract.id,
           reason: terminationReason.trim(),
+          confirmGroupSuspension: terminationImpact?.willSuspendGroup === true && terminationGroupConfirmed,
         }),
       });
       const body = await response.json().catch(() => ({}));
+      if (response.status === 409 && body?.code === 'GROUP_WILL_SUSPEND') {
+        if (body.groupImpact) setTerminationImpact(body.groupImpact as SchoolContractTerminationImpact);
+        setTerminationGroupConfirmed(false);
+        setToast({ message: body.error, type: 'warning' });
+        return;
+      }
       if (!response.ok || body?.success !== true) {
         throw new Error(body?.error || `HTTP ${response.status}`);
       }
       setTerminationContract(null);
       setTerminationReason('');
-      setToast({ message: 'Sutartis nutraukta. Mokinio prieiga prie užsiėmimų ir būsimas skaičiavimas sustabdyti.', type: 'success' });
+      setTerminationImpact(null);
+      setTerminationGroupConfirmed(false);
+      const groupWasNewlySuspended = body.groupJustSuspended === true;
+      const notificationsIncomplete = groupWasNewlySuspended
+        && Number(body.notificationsSent || 0) < Number(body.notificationsAttempted || 0);
+      setToast({
+        message: groupWasNewlySuspended
+          ? notificationsIncomplete || Number(body.notificationsAttempted || 0) === 0
+            ? `Sutartis nutraukta ir grupė „${body.groupName || terminationImpact?.groupName || ''}“ sustabdyta. Ne visoms šeimoms pavyko išsiųsti pranešimą, todėl jas reikia informuoti rankiniu būdu.`
+            : `Sutartis nutraukta. Grupė „${body.groupName || terminationImpact?.groupName || ''}“ automatiškai sustabdyta, šeimos informuotos.`
+          : 'Sutartis nutraukta. Mokinio prieiga prie užsiėmimų ir būsimas skaičiavimas sustabdyti.',
+        type: notificationsIncomplete || (groupWasNewlySuspended && Number(body.notificationsAttempted || 0) === 0) ? 'warning' : 'success',
+      });
       reload();
     } catch (error) {
       setToast({
@@ -1767,11 +1830,20 @@ export default function CompanyContracts() {
       setSuspensionContract(null);
       setSuspensionReason('');
       setSuspensionUntil('');
+      const groupWasNewlySuspended = body.groupJustSuspended === true;
+      const notificationsIncomplete = groupWasNewlySuspended
+        && Number(body.notificationsSent || 0) < Number(body.notificationsAttempted || 0);
       setToast({
         message: action === 'suspend'
-          ? 'Sutartis sustabdyta. Prieiga, priminimai ir naujas skaičiavimas pristabdyti.'
-          : 'Sutarties vykdymas atnaujintas.',
-        type: 'success',
+          ? groupWasNewlySuspended
+            ? notificationsIncomplete || Number(body.notificationsAttempted || 0) === 0
+              ? `Sutartis ir grupė „${body.groupName || ''}“ sustabdyta, nes liko mažiau nei 3 aktyvūs mokiniai. Ne visas šeimas pavyko informuoti el. paštu.`
+              : `Sutartis ir grupė „${body.groupName || ''}“ sustabdyta, nes liko mažiau nei 3 aktyvūs mokiniai. Šeimos informuotos.`
+            : 'Sutartis sustabdyta. Prieiga, priminimai ir naujas skaičiavimas pristabdyti.'
+          : body.groupResumed
+            ? `Grupė „${body.groupName || ''}“ ir jos sutartys atnaujintos.`
+            : 'Sutarties vykdymas atnaujintas.',
+        type: notificationsIncomplete || (groupWasNewlySuspended && Number(body.notificationsAttempted || 0) === 0) ? 'warning' : 'success',
       });
       reload();
     } catch (error) {
@@ -2334,7 +2406,9 @@ export default function CompanyContracts() {
                         )}
                         {isSchoolContractSuspended(c) && (
                           <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
-                            Sustabdyta
+                            {c.suspension_scope === 'group_under_minimum'
+                              ? 'Sustabdyta kartu su grupe'
+                              : 'Sustabdyta'}
                           </span>
                         )}
                       </div>
@@ -2556,10 +2630,7 @@ export default function CompanyContracts() {
                               <button
                                 type="button"
                                 className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left text-rose-700 hover:bg-rose-50"
-                                onClick={() => {
-                                  setTerminationContract(c);
-                                  setTerminationReason('');
-                                }}
+                                onClick={() => openTerminationDialog(c)}
                               >
                                 <Ban className="w-4 h-4 shrink-0" />
                                 Nutraukti sutartį
@@ -2645,63 +2716,28 @@ export default function CompanyContracts() {
         )}
       </div>
 
-      <Dialog
+      <SchoolContractTerminationDialog
         open={Boolean(terminationContract)}
-        onOpenChange={(open) => {
-          if (!open && !terminationBusy) {
-            setTerminationContract(null);
-            setTerminationReason('');
-          }
+        studentName={terminationContract?.student?.full_name}
+        impact={terminationImpact}
+        impactLoading={terminationImpactLoading}
+        groupConfirmed={terminationGroupConfirmed}
+        reason={terminationReason}
+        busy={terminationBusy}
+        cancelLabel={tr('common.cancel')}
+        onGroupConfirmedChange={setTerminationGroupConfirmed}
+        onReasonChange={setTerminationReason}
+        onClose={() => {
+          if (terminationBusy) return;
+          terminationPreviewRequestRef.current += 1;
+          setTerminationContract(null);
+          setTerminationReason('');
+          setTerminationImpact(null);
+          setTerminationImpactLoading(false);
+          setTerminationGroupConfirmed(false);
         }}
-      >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Nutraukti sutartį</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-gray-600">
-              Nutraukti sutartį mokiniui {terminationContract?.student?.full_name || '–'}.
-              Pasirašytas dokumentas ir mokėjimų istorija išliks.
-            </p>
-            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
-              Mokinio prisijungimo nuorodos nustos veikti iš karto. Pagal šią sutartį nebebus siunčiami nauji užsiėmimų priminimai ir nebus skaičiuojami būsimi užsiėmimų mokesčiai.
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="school-contract-termination-reason">Nutraukimo priežastis</Label>
-              <Textarea
-                id="school-contract-termination-reason"
-                value={terminationReason}
-                onChange={(event) => setTerminationReason(event.target.value)}
-                placeholder="Trumpai nurodykite, kodėl ir kieno prašymu sutartis nutraukiama."
-                maxLength={1000}
-                className="min-h-24"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={terminationBusy}
-              onClick={() => {
-                setTerminationContract(null);
-                setTerminationReason('');
-              }}
-            >
-              {tr('common.cancel')}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={terminationBusy || terminationReason.trim().length < 3}
-              onClick={() => void terminateContract()}
-            >
-              <Ban className="mr-1.5 h-4 w-4" />
-              {terminationBusy ? 'Nutraukiama…' : 'Nutraukti sutartį'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        onSubmit={() => void terminateContract()}
+      />
 
       <Dialog
         open={Boolean(suspensionContract)}

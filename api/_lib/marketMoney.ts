@@ -246,8 +246,19 @@ export function directChargeApplicationFeeCents(
 ): number {
   if (isProKlaseFeeProfile(feeProfile)) {
     if (baseAmount < PRO_KLASE_HIGH_TIER_MIN_BASE) return 0;
-    // From €30 the full custom 2% + €0.10 commission is paid by the client.
-    return lessonCheckoutBreakdownCents(baseAmount, market, feeProfile, feeSplit).feesCents;
+    // Pro Klasė's 2% + €0.10 is the total payer surcharge and already includes
+    // Stripe processing. Direct charges debit that processing fee from the connected
+    // account, so Tutlio may collect only the remainder as its application fee.
+    const { feesCents, totalCents } = lessonCheckoutBreakdownCents(
+      baseAmount,
+      market,
+      feeProfile,
+      feeSplit,
+    );
+    const estimatedStripeFeeCents = Math.round(
+      totalCents * MARKET_FEES.stripePercent + stripeFixedFee(market) * 100,
+    );
+    return Math.max(0, feesCents - estimatedStripeFeeCents);
   }
   return Math.max(0, Math.round(baseAmount * MARKET_FEES.platformPercent * 100));
 }

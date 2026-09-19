@@ -6,6 +6,11 @@ const state = vi.hoisted(() => ({
   patch: null as Record<string, unknown> | null,
 }));
 
+const groupPolicy = vi.hoisted(() => ({
+  preview: vi.fn(),
+  suspend: vi.fn(),
+}));
+
 vi.mock('../../api/_lib/orgAdminAccess.js', () => ({
   requireOrgAdminAccess: async () => state.adminOk
     ? { ok: true, access: { organizationId: 'school', userId: 'admin' } }
@@ -34,6 +39,11 @@ vi.mock('../../api/_lib/extraLessonsContractShared.js', () => ({
   }),
 }));
 
+vi.mock('../../api/_lib/schoolGroupMinimumPolicy.js', () => ({
+  previewSchoolGroupContractExit: groupPolicy.preview,
+  suspendSchoolGroupIfBelowMinimum: groupPolicy.suspend,
+}));
+
 import handler from '../../api/school-contract-terminate';
 
 function response() {
@@ -45,8 +55,10 @@ beforeEach(() => {
   state.patch = null;
   state.contract = {
     id: 'contract', organization_id: 'school', kind: 'annual',
-    terminated_at: null, withdrawal_requested_at: null,
+    class_group_id: null, terminated_at: null, withdrawal_requested_at: null,
   };
+  groupPolicy.preview.mockReset().mockResolvedValue(null);
+  groupPolicy.suspend.mockReset().mockResolvedValue({ groupSuspended: false });
 });
 
 describe('school contract termination', () => {
@@ -83,5 +95,53 @@ describe('school contract termination', () => {
     const invalid = response();
     await handler({ method: 'POST', body: { contractId: 'contract', reason: '' } } as any, invalid);
     expect(invalid.status).toHaveBeenCalledWith(400);
+  });
+
+  it('previews a group-breaking termination without changing the contract', async () => {
+    state.contract.class_group_id = 'group-1';
+    groupPolicy.preview.mockResolvedValue({
+      groupId: 'group-1',
+      groupName: '7 klasė',
+      currentActiveStudentCount: 3,
+      remainingActiveStudentCount: 2,
+      minimumStudentCount: 3,
+      willSuspendGroup: true,
+    });
+    const res = response();
+    await handler({ method: 'POST', body: { contractId: 'contract', preview: true } } as any, res);
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      willSuspendGroup: true,
+    }));
+    expect(state.patch).toBeNull();
+  });
+
+  it('requires explicit confirmation before a termination that suspends the group', async () => {
+    state.contract.class_group_id = 'group-1';
+    const impact = {
+      groupId: 'group-1',
+      groupName: '7 klasė',
+      currentActiveStudentCount: 3,
+      remainingActiveStudentCount: 2,
+      minimumStudentCount: 3,
+      willSuspendGroup: true,
+    };
+    groupPolicy.preview.mockResolvedValue(impact);
+
+    const warning = response();
+    await handler({ method: 'POST', body: { contractId: 'contract', reason: 'Parent request' } } as any, warning);
+    expect(warning.status).toHaveBeenCalledWith(409);
+    expect(warning.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'GROUP_WILL_SUSPEND' }));
+    expect(state.patch).toBeNull();
+
+    const confirmed = response();
+    await handler({
+      method: 'POST',
+      body: { contractId: 'contract', reason: 'Parent request', confirmGroupSuspension: true },
+    } as any, confirmed);
+    expect(confirmed.status).toHaveBeenCalledWith(200);
+    expect(state.patch).toMatchObject({ termination_reason: 'Parent request' });
+    expect(groupPolicy.suspend).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,6 +1,10 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { requireOrgAdminAccess } from './_lib/orgAdminAccess.js';
 import { serviceSupabase } from './_lib/extraLessonsContractShared.js';
+import {
+  resumeSchoolGroupIfMinimumMet,
+  suspendSchoolGroupIfBelowMinimum,
+} from './_lib/schoolGroupMinimumPolicy.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -16,7 +20,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: contract, error: loadError } = await supabase
     .from('school_contracts')
-    .select('id, terminated_at, withdrawal_requested_at, suspension_started_at, suspension_resumed_at')
+    .select('id, organization_id, class_group_id, terminated_at, withdrawal_requested_at, suspension_started_at, suspension_resumed_at, suspension_scope')
     .eq('id', contractId)
     .eq('organization_id', admin.access.organizationId)
     .maybeSingle();
@@ -30,6 +34,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'resume') {
     if (!contract.suspension_started_at || contract.suspension_resumed_at) {
       return res.status(200).json({ success: true, alreadyResumed: true });
+    }
+    if (contract.class_group_id) {
+      const groupResume = await resumeSchoolGroupIfMinimumMet(supabase, {
+        organizationId: admin.access.organizationId,
+        groupId: contract.class_group_id,
+        resumeContractId: contract.id,
+        adminUserId: admin.access.userId,
+      });
+      if (groupResume.groupWasSuspended) {
+        if (!groupResume.resumed) {
+          return res.status(409).json({
+            error: `Grupės atnaujinti negalima: aktyvių mokinių būtų ${groupResume.resumableStudentCount}, o reikia bent 3.`,
+            code: 'GROUP_MINIMUM_NOT_MET',
+            groupName: groupResume.groupName,
+            activeStudentCount: groupResume.resumableStudentCount,
+            minimumStudentCount: 3,
+          });
+        }
+        return res.status(200).json({ success: true, resumedAt: nowIso, groupResumed: true, groupName: groupResume.groupName });
+      }
     }
     const { error } = await supabase.from('school_contracts').update({
       suspension_resumed_at: nowIso,
@@ -52,7 +76,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     suspension_started_by: admin.access.userId,
     suspension_resumed_at: null,
     suspension_resumed_by: null,
+    suspension_scope: 'individual',
+    suspension_group_id: contract.class_group_id || null,
   }).eq('id', contract.id);
   if (error) return res.status(500).json({ error: error.message });
-  return res.status(200).json({ success: true, suspendedAt: nowIso, until: until || null });
+  const groupResult = contract.class_group_id
+    ? await suspendSchoolGroupIfBelowMinimum(req, supabase, {
+        organizationId: admin.access.organizationId,
+        groupId: contract.class_group_id,
+        triggerContractId: contract.id,
+        adminUserId: admin.access.userId,
+      })
+    : null;
+  return res.status(200).json({
+    success: true,
+    suspendedAt: nowIso,
+    until: until || null,
+    ...(groupResult || {}),
+  });
 }

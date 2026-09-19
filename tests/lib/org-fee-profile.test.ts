@@ -86,11 +86,26 @@ describe('Proklasė payer fee — checkout breakdown (cents)', () => {
     expect(serverBreakdown(50, 'default', sp)).toEqual(lessonCheckoutBreakdownCents(50, 'default', p));
   });
 
-  it('collects no Tutlio fee below €30 and the full custom commission from €30', () => {
+  it('keeps Stripe processing inside the Pro Klasė surcharge', () => {
     expect(directChargeApplicationFeeCents(20, 'default', serverOrgFeeProfile('proklase'))).toBe(0);
-    expect(directChargeApplicationFeeCents(30, 'default', serverOrgFeeProfile('proklase'))).toBe(70);
-    expect(directChargeApplicationFeeCents(50, 'default', serverOrgFeeProfile('proklase'))).toBe(110);
-    expect(directChargeApplicationFeeCents(100, 'default', serverOrgFeeProfile('proklase'))).toBe(210);
+    expect(directChargeApplicationFeeCents(24, 'default', serverOrgFeeProfile('proklase'))).toBe(0);
+    expect(directChargeApplicationFeeCents(30, 'default', serverOrgFeeProfile('proklase'))).toBe(0);
+    expect(directChargeApplicationFeeCents(33, 'default', serverOrgFeeProfile('proklase'))).toBe(0);
+    expect(directChargeApplicationFeeCents(50, 'default', serverOrgFeeProfile('proklase'))).toBe(8);
+    expect(directChargeApplicationFeeCents(100, 'default', serverOrgFeeProfile('proklase'))).toBe(32);
+    expect(directChargeApplicationFeeCents(216, 'default', serverOrgFeeProfile('proklase'))).toBe(86);
+  });
+
+  it('leaves the full €216 package base with Pro Klasė', () => {
+    const profile = serverOrgFeeProfile('proklase');
+    const breakdown = serverBreakdown(216, 'default', profile);
+    const stripeFeeCents = Math.round(breakdown.totalCents * 0.015 + 25);
+    const tutlioFeeCents = directChargeApplicationFeeCents(216, 'default', profile);
+
+    expect(breakdown.totalCents).toBe(22_042);
+    expect(stripeFeeCents).toBe(356);
+    expect(tutlioFeeCents).toBe(86);
+    expect(breakdown.totalCents - stripeFeeCents - tutlioFeeCents).toBe(breakdown.baseCents);
   });
 
   it('keeps the Stripe surcharge out of Tutlio\'s standard application fee', () => {
