@@ -341,7 +341,6 @@ export default function CalendarPage() {
     !orgPolicy.loading &&
     (!orgPolicy.isOrgTutor || orgPolicy.canCreateSessions);
   const { contactVisibility, hasFeature: hasOrgFeature, entityType: orgEntityType, organizationId, loading: orgFeaturesLoading } = useOrgFeatures();
-  const adminOnlyReschedule = orgPolicy.isOrgTutor && hasOrgFeature('org_admin_only_reschedule');
   const { user: ctxUser, profile: ctxProfile } = useUser();
   const isSchoolTutor = orgEntityType === 'school';
   const showClassGroups = !!organizationId && !orgFeaturesLoading && hasOrgFeature('school_class_groups');
@@ -3499,12 +3498,6 @@ export default function CalendarPage() {
       const durationChanged =
         Math.round((oldEnd.getTime() - oldStart.getTime()) / 60000) !== Math.round(editDurationMinutes);
 
-      if (adminOnlyReschedule && (timeChanged || durationChanged)) {
-        alert(t('cal.rescheduleAdminOnly'));
-        setSaving(false);
-        return;
-      }
-
       if (timeChanged && rescheduleReason.trim().length < 5) {
         alert(t('cal.rescheduleReasonRequired'));
         setSaving(false);
@@ -3676,7 +3669,8 @@ export default function CalendarPage() {
           error = new Error(t('cal.errorGeneric'));
         } else {
           const { error: groupError } = await supabase.from('sessions').update({
-            ...(!adminOnlyReschedule ? { start_time: newStart.toISOString(), end_time: newEnd.toISOString() } : {}),
+            start_time: newStart.toISOString(),
+            end_time: newEnd.toISOString(),
             ...editSessionPayload,
           }).in('id', ids);
           error = groupError;
@@ -3694,7 +3688,8 @@ export default function CalendarPage() {
         }
       } else {
         const { error: singleError } = await supabase.from('sessions').update({
-          ...(!adminOnlyReschedule ? { start_time: newStart.toISOString(), end_time: newEnd.toISOString() } : {}),
+          start_time: newStart.toISOString(),
+          end_time: newEnd.toISOString(),
           ...editSessionPayload,
         }).eq('id', selectedEvent.id);
         error = singleError;
@@ -5505,16 +5500,10 @@ export default function CalendarPage() {
                 <Label>{t('compSch.topicSubject')}</Label>
                 <Input value={editTopic} onChange={(e) => setEditTopic(e.target.value)} placeholder={t('cal.topicPlaceholder')} className="rounded-xl" />
               </div>
-              {adminOnlyReschedule ? (
-                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
-                  {t('cal.rescheduleAdminOnly')}
-                </p>
-              ) : (
               <div className="space-y-2">
                 <Label>{t('cal.timeLabel')}</Label>
                 <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
               </div>
-              )}
               {editNewStartTime && selectedEvent &&
                 Math.floor(new Date(editNewStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) && (
                 <div className="space-y-2">
@@ -5551,7 +5540,7 @@ export default function CalendarPage() {
                   </div>
                 </div>
               )}
-              {!adminOnlyReschedule && !hideProKlaseOrgTutorFreeTime && !isClassGroupSession && (
+              {!hideProKlaseOrgTutorFreeTime && !isClassGroupSession && (
               <label className="flex items-start gap-2 cursor-pointer">
                 <Checkbox
                   checked={leaveFreeTimeOnReschedule}
@@ -5560,7 +5549,6 @@ export default function CalendarPage() {
                 <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
               </label>
               )}
-              {!adminOnlyReschedule && (
               <div className="space-y-2">
                 <Label>{t('cal.durationLabel')}</Label>
                 <Input
@@ -5576,7 +5564,6 @@ export default function CalendarPage() {
                   {t('cal.durationHint')}
                 </p>
               </div>
-              )}
               <div className="space-y-2">
                 <Label>{t('cal.meetingLinkLabel')}</Label>
                 <Input value={editMeetingLink} onChange={(e) => setEditMeetingLink(e.target.value)} placeholder="https://meet.google.com/..." className="rounded-xl" />
@@ -6288,7 +6275,7 @@ export default function CalendarPage() {
                   </div>
                 </div>
               )}
-            {selectedEvent?.status === 'active' && !adminOnlyReschedule && (
+            {selectedEvent?.status === 'active' && (
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="outline"

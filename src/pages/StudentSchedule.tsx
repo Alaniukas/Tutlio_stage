@@ -745,7 +745,7 @@ export default function StudentSchedule() {
                 const orgFeatures = (oe as { features?: Record<string, unknown> | null } | null)?.features;
                 setSchoolClassGroupsEnabled(orgFeatures?.school_class_groups === true);
                 setStudentActionsDisabled(orgFeatures?.disable_student_reschedule_cancel === true);
-                setOrgRescheduleDisabled(orgFeatures?.org_admin_only_reschedule === true);
+                setOrgRescheduleDisabled(orgFeatures?.disable_student_reschedule === true);
                 setStudentBookingDisabled(orgFeatures?.disable_student_booking === true);
             }
             setTutorOrgIsSchool(orgIsSchool);
@@ -888,7 +888,7 @@ export default function StudentSchedule() {
                 setTutorOrgFeeSplit(resolveOrgPayerFeeSplit(orgFeatures));
                 setSchoolClassGroupsEnabled(orgFeatures?.school_class_groups === true);
                 actionsDisabledResolved = orgFeatures?.disable_student_reschedule_cancel === true;
-                rescheduleDisabledResolved = orgFeatures?.org_admin_only_reschedule === true;
+                rescheduleDisabledResolved = orgFeatures?.disable_student_reschedule === true;
                 bookingDisabledResolved = orgFeatures?.disable_student_booking === true;
                 if (oe) {
                     enablePerLessonResolved = (oe as { enable_per_lesson?: boolean | null }).enable_per_lesson ?? enablePerLessonResolved;

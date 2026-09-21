@@ -13,7 +13,6 @@ export const thOverrides: Record<string, string> = {
   'common.reloadPageWarning': "การโหลดหน้าใหม่จะทำให้การเปลี่ยนแปลงที่ยังไม่ได้บันทึกสูญหาย ต้องการดำเนินการต่อหรือไม่?",
   "landing.blogPost1Date": "2025",
   "cal.rescheduleSameMonthOnly": "เลื่อนคาบเรียนได้ภายในเดือนปฏิทินเดียวกันเท่านั้น",
-  "cal.rescheduleAdminOnly": "ฝ่ายดูแลเท่านั้นที่สามารถเปลี่ยนเวลาเรียนได้",
   "cal.rescheduleReasonLabel": "📝 เหตุผลที่เลื่อนคาบเรียน *",
   "cal.rescheduleReasonHelper": "นักเรียนและฝ่ายดูแลจะเห็นข้อความนี้",
   "cal.rescheduleReasonHelperSolo": "นักเรียนจะเห็นข้อความนี้",

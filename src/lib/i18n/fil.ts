@@ -12,7 +12,6 @@ export const filOverrides: Record<string, string> = {
   'common.reloadPage': "I-reload ang pahina",
   'common.reloadPageWarning': "Mawawala ang mga pagbabagong hindi pa nai-save kapag nag-reload. Magpatuloy?",
   "cal.rescheduleSameMonthOnly": "Maaari lamang ilipat ang mga sesyon sa loob ng parehong buwan sa kalendaryo.",
-  "cal.rescheduleAdminOnly": "Administrasyon lamang ang maaaring magbago ng oras ng sesyon.",
   "cal.rescheduleReasonLabel": "📝 Dahilan ng paglipat ng iskedyul *",
   "cal.rescheduleReasonHelper": "Makikita ng estudyante at administrasyon ang mensaheng ito",
   "cal.rescheduleReasonHelperSolo": "Makikita ng estudyante ang mensaheng ito",

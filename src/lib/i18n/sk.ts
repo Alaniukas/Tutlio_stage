@@ -11,7 +11,6 @@ export const skOverrides: Record<string, string> = {
   'common.reloadPage': "Znova načítať stránku",
   'common.reloadPageWarning': "Opätovným načítaním stránky stratíte neuložené zmeny. Pokračovať?",
   "cal.rescheduleSameMonthOnly": "Hodiny možno presúvať iba v rámci toho istého kalendárneho mesiaca.",
-  "cal.rescheduleAdminOnly": "Čas hodiny môže zmeniť iba administratíva.",
   "cal.rescheduleReasonLabel": "📝 Dôvod presunutia *",
   "cal.rescheduleReasonHelper": "Túto správu uvidí študent aj administratíva",
   "cal.rescheduleReasonHelperSolo": "Túto správu uvidí študent",

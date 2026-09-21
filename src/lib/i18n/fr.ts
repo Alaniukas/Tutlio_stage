@@ -169,7 +169,6 @@ export const fr: Record<string, string> = {
   'dash.confirmStatusError': 'Échec de l’enregistrement du statut : {msg}',
   'status.needsStatusConfirmation': 'Statut requis',
   'cal.rescheduleSameMonthOnly': 'Les cours ne peuvent être déplacés que dans le même mois civil.',
-  "cal.rescheduleAdminOnly": "Seule l’administration peut modifier l’heure d’un cours.",
   'cal.rescheduleReasonLabel': '📝 Motif du report *',
   'cal.rescheduleReasonHelper': 'L\'élève et l\'administration verront ce message',
   'cal.rescheduleReasonHelperSolo': 'L\'élève verra ce message',

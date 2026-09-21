@@ -261,7 +261,6 @@ export const nl: Record<string, string> = {
   'companyNav.sectionManage': 'Beheer',
   'companyNav.sectionHelp': 'Hulp',
   "cal.rescheduleSameMonthOnly": "Lessen kunnen alleen binnen dezelfde kalendermaand worden verplaatst.",
-  "cal.rescheduleAdminOnly": "Alleen de administratie kan de tijd van een les wijzigen.",
   "cal.rescheduleReasonLabel": "📝 Reden voor verplaatsing *",
   "cal.rescheduleReasonHelper": "De leerling en de administratie krijgen dit bericht te zien",
   "cal.rescheduleReasonHelperSolo": "De leerling krijgt dit bericht te zien",

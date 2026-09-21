@@ -12,7 +12,6 @@ export const itOverrides: Record<string, string> = {
   'common.reloadPage': "Ricarica la pagina",
   'common.reloadPageWarning': "Ricaricando la pagina perderai le modifiche non salvate. Continuare?",
   "cal.rescheduleSameMonthOnly": "Le lezioni possono essere spostate solo all'interno dello stesso mese.",
-  "cal.rescheduleAdminOnly": "Solo l'amministrazione può cambiare l'orario di una lezione.",
   "cal.rescheduleReasonLabel": "📝 Motivo dello spostamento *",
   "cal.rescheduleReasonHelper": "Lo studente e l'amministrazione vedranno questo messaggio",
   "cal.rescheduleReasonHelperSolo": "Lo studente vedrà questo messaggio",

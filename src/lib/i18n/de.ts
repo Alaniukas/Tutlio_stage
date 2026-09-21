@@ -184,7 +184,6 @@ export const de: Record<string, string> = {
   'dash.confirmStatusError': 'Status konnte nicht gespeichert werden: {msg}',
   'status.needsStatusConfirmation': 'Status erforderlich',
   'cal.rescheduleSameMonthOnly': 'Unterrichtsstunden können nur innerhalb desselben Kalendermonats verschoben werden.',
-  "cal.rescheduleAdminOnly": "Nur die Verwaltung kann den Termin einer Unterrichtsstunde ändern.",
   'cal.rescheduleReasonLabel': '📝 Grund für die Verschiebung *',
   'cal.rescheduleReasonHelper': 'Diese Nachricht sehen der Schüler und die Verwaltung',
   'cal.rescheduleReasonHelperSolo': 'Diese Nachricht sieht der Schüler',

@@ -8,7 +8,6 @@ export const ptBrOverrides: Record<string, string> = {
   'common.reloadPage': "Recarregar a página",
   'common.reloadPageWarning': "Ao recarregar a página, você perderá as alterações não salvas. Continuar?",
   "cal.rescheduleSameMonthOnly": "As aulas só podem ser remarcadas dentro do mesmo mês.",
-  "cal.rescheduleAdminOnly": "Somente a administração pode alterar o horário de uma aula.",
   "cal.rescheduleReasonLabel": "📝 Motivo do remarcação *",
   "cal.rescheduleReasonHelper": "O aluno e a administração verão esta mensagem",
   "cal.rescheduleReasonHelperSolo": "O aluno verá esta mensagem",

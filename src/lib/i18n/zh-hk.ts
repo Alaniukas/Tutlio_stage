@@ -9,7 +9,6 @@ export const zhHkOverrides: Record<string, string> = {
   'common.reloadPage': "重新載入頁面",
   'common.reloadPageWarning': "重新載入會遺失尚未儲存的變更。是否繼續？",
   "cal.rescheduleSameMonthOnly": "課堂只可改期至同一個曆月內。",
-  "cal.rescheduleAdminOnly": "只有管理員可以更改課堂時間。",
   "cal.rescheduleReasonLabel": "📝 改期原因 *",
   "cal.rescheduleReasonHelper": "學生和管理員將會看到此訊息",
   "cal.rescheduleReasonHelperSolo": "學生將會看到此訊息",

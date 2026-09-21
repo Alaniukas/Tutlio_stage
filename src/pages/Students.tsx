@@ -140,7 +140,6 @@ export default function StudentsPage() {
   const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(profile?.organization_id);
   const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
   const { hasFeature, loading: orgFeaturesLoading, contactVisibility, entityType, organizationId } = useOrgFeatures();
-  const adminOnlyReschedule = orgPolicy.isOrgTutor && hasFeature('org_admin_only_reschedule');
   const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, entityType, hasFeature, 'monthly_packages', orgFeaturesLoading);
   const canChooseParentComment = canChooseParentLessonComment(
     organizationId || profile?.organization_id,
@@ -1117,13 +1116,6 @@ export default function StudentsPage() {
     const oldEnd = new Date(selectedSessionForModal.end_time);
     const truncMin = (d: Date) => Math.floor(d.getTime() / 60000);
     const timeChanged = truncMin(oldStart) !== truncMin(newStart);
-    const durationChanged = Math.round((oldEnd.getTime() - oldStart.getTime()) / 60000) !== editDurationMinutes;
-
-    if (adminOnlyReschedule && (timeChanged || durationChanged)) {
-      setToastMessage({ message: t('cal.rescheduleAdminOnly'), type: 'error' });
-      return;
-    }
-
     // Monthly packages (req 6): a package lesson can only be moved within the
     // same calendar month (anchored on its original start). One-off / trial
     // lessons (no package) are unconstrained.
@@ -1137,7 +1129,8 @@ export default function StudentsPage() {
 
     setSavingSession(true);
     const payload: Record<string, any> = {
-      ...(!adminOnlyReschedule ? { start_time: newStart.toISOString(), end_time: newEnd.toISOString() } : {}),
+      start_time: newStart.toISOString(),
+      end_time: newEnd.toISOString(),
       topic: editTopic || null,
       meeting_link: editMeetingLink || null,
       tutor_comment: editTutorComment.trim() || null,
@@ -2895,17 +2888,11 @@ export default function StudentsPage() {
                 <Label>{t('compSch.topicSubject')}</Label>
                 <Input value={editTopic} onChange={(e) => setEditTopic(e.target.value)} className="rounded-xl" />
               </div>
-              {adminOnlyReschedule ? (
-                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
-                  {t('cal.rescheduleAdminOnly')}
-                </p>
-              ) : (
               <div className="space-y-2">
                 <Label>{t('cal.timeLabel')}</Label>
                 <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
               </div>
-              )}
-              {!adminOnlyReschedule && !hideProKlaseOrgTutorFreeTime && (
+              {!hideProKlaseOrgTutorFreeTime && (
               <label className="flex items-start gap-2 cursor-pointer">
                 <Checkbox
                   checked={leaveFreeTimeOnReschedule}
@@ -2914,7 +2901,6 @@ export default function StudentsPage() {
                 <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
               </label>
               )}
-              {!adminOnlyReschedule && (
               <div className="space-y-2">
                 <Label>{t('cal.durationLabel')}</Label>
                 <Input
@@ -2927,7 +2913,6 @@ export default function StudentsPage() {
                   step={5}
                 />
               </div>
-              )}
               <div className="space-y-2">
                 <Label>{t('cal.meetingLinkLabel')}</Label>
                 <Input value={editMeetingLink} onChange={(e) => setEditMeetingLink(e.target.value)} className="rounded-xl" placeholder="https://..." />

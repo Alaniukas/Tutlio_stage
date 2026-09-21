@@ -232,7 +232,6 @@ export const fi: Record<string, string> = {
   'dash.confirmStatusError': 'Tilan tallennus epäonnistui: {msg}',
   'status.needsStatusConfirmation': 'Tila puuttuu',
   'cal.rescheduleSameMonthOnly': 'Oppitunteja voi siirtää vain saman kalenterikuukauden sisällä.',
-  "cal.rescheduleAdminOnly": "Vain hallinto voi muuttaa oppitunnin ajankohtaa.",
   'cal.rescheduleReasonLabel': '📝 Siirron syy *',
   'cal.rescheduleReasonHelper': 'Oppilas ja hallinto näkevät tämän viestin',
   'cal.rescheduleReasonHelperSolo': 'Oppilas näkee tämän viestin',

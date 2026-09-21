@@ -17,7 +17,7 @@ export interface StudentPortalPolicy {
   bookingDisabled: boolean;
   /** Org feature disable_student_reschedule_cancel. */
   actionsDisabled: boolean;
-  /** Org feature org_admin_only_reschedule (or the combined student-action flag). */
+  /** Org feature disable_student_reschedule (or the combined student-action flag). */
   rescheduleDisabled: boolean;
   /** Org feature student_payments_page ("Mokėjimai" portal section). */
   paymentsPageEnabled: boolean;

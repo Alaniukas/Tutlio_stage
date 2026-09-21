@@ -13,7 +13,6 @@ export const huOverrides: Record<string, string> = {
   'common.reloadPage': "Oldal újratöltése",
   'common.reloadPageWarning': "Az újratöltéskor a nem mentett módosítások elvesznek. Folytatja?",
   "cal.rescheduleSameMonthOnly": "Az órák csak ugyanazon naptári hónapon belül helyezhetők át.",
-  "cal.rescheduleAdminOnly": "Csak az adminisztráció módosíthatja az óra időpontját.",
   "cal.rescheduleReasonLabel": "📝 Az időpont-módosítás indoka *",
   "cal.rescheduleReasonHelper": "Ezt az üzenetet a diák és az adminisztráció is látni fogja",
   "cal.rescheduleReasonHelperSolo": "Ezt az üzenetet a diák látni fogja",

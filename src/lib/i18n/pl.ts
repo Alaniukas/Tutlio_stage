@@ -171,7 +171,6 @@ export const pl: Record<string, string> = {
   'dash.confirmStatusError': 'Nie udało się zapisać statusu: {msg}',
   'status.needsStatusConfirmation': 'Oznacz status',
   'cal.rescheduleSameMonthOnly': 'Lekcje można przenosić tylko w obrębie tego samego miesiąca kalendarzowego.',
-  "cal.rescheduleAdminOnly": "Tylko administracja może zmienić termin lekcji.",
   'cal.rescheduleReasonLabel': '📝 Powód przełożenia *',
   'cal.rescheduleReasonHelper': 'Tę wiadomość zobaczy uczeń i administracja',
   'cal.rescheduleReasonHelperSolo': 'Tę wiadomość zobaczy uczeń',

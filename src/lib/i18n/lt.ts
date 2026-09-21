@@ -17,7 +17,6 @@ export const lt: Record<string, string> = {
   'common.reloadPage': "Įkelti puslapį iš naujo",
   'common.reloadPageWarning': "Įkėlus puslapį iš naujo, neišsaugoti pakeitimai bus prarasti. Tęsti?",
   'cal.rescheduleSameMonthOnly': 'Pamokas galima perkelti tik tą patį kalendorinį mėnesį.',
-  'cal.rescheduleAdminOnly': 'Pamokos laiką gali pakeisti tik administracija.',
   'cal.rescheduleReasonLabel': '📝 Perkėlimo priežastis *',
   'cal.rescheduleReasonHelper': 'Šią žinutę matys mokinys ir administracija',
   'cal.rescheduleReasonHelperSolo': 'Šią žinutę matys mokinys',

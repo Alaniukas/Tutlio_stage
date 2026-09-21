@@ -21,7 +21,7 @@ describe('student lesson action policy', () => {
   beforeEach(() => { mocks.features = {}; });
 
   it('restricts rescheduling without also restricting cancellation', async () => {
-    mocks.features = { org_admin_only_reschedule: true };
+    mocks.features = { disable_student_reschedule: true };
     const policy = (await fetchStudentPortalPolicyMap(['student-1']))['student-1'];
     expect(policy.rescheduleDisabled).toBe(true);
     expect(policy.actionsDisabled).toBe(false);

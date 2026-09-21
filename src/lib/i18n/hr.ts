@@ -12,7 +12,6 @@ export const hrOverrides: Record<string, string> = {
   'common.reloadPage': "Ponovno učitaj stranicu",
   'common.reloadPageWarning': "Ponovnim učitavanjem izgubit ćete nespremljene promjene. Nastaviti?",
   "cal.rescheduleSameMonthOnly": "Satovi se mogu premještati samo unutar istog kalendarskog mjeseca.",
-  "cal.rescheduleAdminOnly": "Samo administracija može promijeniti termin sata.",
   "cal.rescheduleReasonLabel": "📝 Razlog promjene termina *",
   "cal.rescheduleReasonHelper": "Učenik i administracija vidjet će ovu poruku",
   "cal.rescheduleReasonHelperSolo": "Učenik će vidjeti ovu poruku",

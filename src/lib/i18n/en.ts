@@ -17,7 +17,6 @@ export const en: Record<string, string> = {
   'common.reloadPage': "Reload page",
   'common.reloadPageWarning': "Reloading will discard unsaved changes. Continue?",
   'cal.rescheduleSameMonthOnly': 'Lessons can only be moved within the same calendar month.',
-  'cal.rescheduleAdminOnly': 'Only the administration can change a lesson time.',
   'cal.rescheduleReasonLabel': '📝 Reschedule reason *',
   'cal.rescheduleReasonHelper': 'The student and the administration will see this message',
   'cal.rescheduleReasonHelperSolo': 'The student will see this message',

@@ -11,7 +11,6 @@ export const bgOverrides: Record<string, string> = {
   'common.reloadPage': "Презареди страницата",
   'common.reloadPageWarning': "При презареждане незапазените промени ще бъдат загубени. Продължавате ли?",
   "cal.rescheduleSameMonthOnly": "Уроците могат да се преместват само в рамките на същия календарен месец.",
-  "cal.rescheduleAdminOnly": "Само администрацията може да промени часа на урока.",
   "cal.rescheduleReasonLabel": "📝 Причина за преместване *",
   "cal.rescheduleReasonHelper": "Ученикът и администрацията ще виждат това съобщение",
   "cal.rescheduleReasonHelperSolo": "Ученикът ще вижда това съобщение",

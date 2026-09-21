@@ -10,7 +10,6 @@ export const csOverrides: Record<string, string> = {
   'common.reloadPage': "Znovu načíst stránku",
   'common.reloadPageWarning': "Opětovným načtením stránky ztratíte neuložené změny. Pokračovat?",
   "cal.rescheduleSameMonthOnly": "Lekce lze přesouvat pouze v rámci stejného kalendářního měsíce.",
-  "cal.rescheduleAdminOnly": "Čas lekce může změnit pouze administrátor.",
   "cal.rescheduleReasonLabel": "📝 Důvod přesunutí *",
   "cal.rescheduleReasonHelper": "Tuto zprávu uvidí student i administrátor",
   "cal.rescheduleReasonHelperSolo": "Tuto zprávu uvidí student",

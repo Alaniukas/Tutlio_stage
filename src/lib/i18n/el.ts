@@ -11,7 +11,6 @@ export const elOverrides: Record<string, string> = {
   'common.reloadPage': "Επαναφόρτωση σελίδας",
   'common.reloadPageWarning': "Η επαναφόρτωση θα διαγράψει τις μη αποθηκευμένες αλλαγές. Συνέχεια;",
   "cal.rescheduleSameMonthOnly": "Τα μαθήματα μπορούν να μεταφερθούν μόνο μέσα στον ίδιο ημερολογιακό μήνα.",
-  "cal.rescheduleAdminOnly": "Μόνο η διοίκηση μπορεί να αλλάξει την ώρα ενός μαθήματος.",
   "cal.rescheduleReasonLabel": "📝 Αιτία αλλαγής ώρας *",
   "cal.rescheduleReasonHelper": "Ο μαθητής και η διοίκηση θα δουν αυτό το μήνυμα",
   "cal.rescheduleReasonHelperSolo": "Ο μαθητής θα δει αυτό το μήνυμα",

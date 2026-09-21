@@ -51,7 +51,7 @@ export type ParentTutorContactPolicy = {
   providerName?: string | null;
   /** Org feature disable_student_reschedule_cancel — self-service moves/cancels go through administration. */
   studentActionsDisabled?: boolean;
-  /** Org feature org_admin_only_reschedule (or the combined student-action flag). */
+  /** Org feature disable_student_reschedule (or the combined student-action flag). */
   rescheduleDisabled?: boolean;
 };
 

@@ -13,7 +13,6 @@ export const roOverrides: Record<string, string> = {
 
   // cal
   "cal.rescheduleSameMonthOnly": "Lecțiile pot fi reprogramate doar în aceeași lună calendaristică.",
-  "cal.rescheduleAdminOnly": "Doar administrația poate schimba ora unei lecții.",
   "cal.rescheduleReasonLabel": "📝 Motivul reprogramării *",
   "cal.rescheduleReasonHelper": "Elevul și administrația vor vedea acest mesaj",
   "cal.rescheduleReasonHelperSolo": "Elevul va vedea acest mesaj",

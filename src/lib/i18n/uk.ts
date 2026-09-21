@@ -8,7 +8,6 @@ export const ukOverrides: Record<string, string> = {
   'common.reloadPage': "Перезавантажити сторінку",
   'common.reloadPageWarning': "Перезавантаження призведе до втрати незбережених змін. Продовжити?",
   "cal.rescheduleSameMonthOnly": "Заняття можна переносити лише в межах одного календарного місяця.",
-  "cal.rescheduleAdminOnly": "Лише адміністрація може змінити час заняття.",
   "cal.rescheduleReasonLabel": "📝 Причина перенесення *",
   "cal.rescheduleReasonHelper": "Це повідомлення побачать учень і адміністрація",
   "cal.rescheduleReasonHelperSolo": "Це повідомлення побачить учень",

@@ -11,7 +11,6 @@ export const jaOverrides: Record<string, string> = {
   'common.reloadPage': "ページを再読み込み",
   'common.reloadPageWarning': "再読み込みすると、保存していない変更は失われます。続行しますか？",
   "cal.rescheduleSameMonthOnly": "レッスンの日程変更は、同じ月内に限ります。",
-  "cal.rescheduleAdminOnly": "レッスンの時間を変更できるのは運営担当者のみです。",
   "cal.rescheduleReasonLabel": "📝 日程変更の理由 *",
   "cal.rescheduleReasonHelper": "このメッセージは受講者と運営担当者に表示されます",
   "cal.rescheduleReasonHelperSolo": "このメッセージは受講者に表示されます",

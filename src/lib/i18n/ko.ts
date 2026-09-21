@@ -12,7 +12,6 @@ export const koOverrides: Record<string, string> = {
   'common.reloadPage': "페이지 새로고침",
   'common.reloadPageWarning': "새로고침하면 저장하지 않은 변경 사항이 사라집니다. 계속하시겠습니까?",
   "cal.rescheduleSameMonthOnly": "수업 일정은 같은 달 안에서만 변경할 수 있습니다.",
-  "cal.rescheduleAdminOnly": "수업 시간은 관리자만 변경할 수 있습니다.",
   "cal.rescheduleReasonLabel": "📝 일정 변경 사유 *",
   "cal.rescheduleReasonHelper": "이 메시지는 학생과 관리자에게 표시됩니다",
   "cal.rescheduleReasonHelperSolo": "이 메시지는 학생에게 표시됩니다",

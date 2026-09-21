@@ -12,7 +12,6 @@ export const idOverrides: Record<string, string> = {
   'common.reloadPage': "Muat ulang halaman",
   'common.reloadPageWarning': "Memuat ulang akan menghapus perubahan yang belum disimpan. Lanjutkan?",
   "cal.rescheduleSameMonthOnly": "Sesi les hanya dapat dijadwalkan ulang dalam bulan kalender yang sama.",
-  "cal.rescheduleAdminOnly": "Hanya administrator yang dapat mengubah waktu sesi les.",
   "cal.rescheduleReasonLabel": "📝 Alasan penjadwalan ulang *",
   "cal.rescheduleReasonHelper": "Siswa dan administrator akan melihat pesan ini",
   "cal.rescheduleReasonHelperSolo": "Siswa akan melihat pesan ini",

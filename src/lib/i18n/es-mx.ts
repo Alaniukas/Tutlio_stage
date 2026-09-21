@@ -12,7 +12,6 @@ export const esMxOverrides: Record<string, string> = {
   'common.reloadPage': "Recargar la página",
   'common.reloadPageWarning': "Al recargar se perderán los cambios sin guardar. ¿Continuar?",
   "cal.rescheduleSameMonthOnly": "Las clases solo se pueden mover dentro del mismo mes natural.",
-  "cal.rescheduleAdminOnly": "Solo la administración puede cambiar el horario de una clase.",
   "cal.rescheduleReasonLabel": "📝 Motivo de la reprogramación *",
   "cal.rescheduleReasonHelper": "El alumno y la administración verán este mensaje",
   "cal.rescheduleReasonHelperSolo": "El alumno verá este mensaje",

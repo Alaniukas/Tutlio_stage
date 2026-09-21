@@ -8,7 +8,6 @@ export const arOverrides: Record<string, string> = {
   'common.reloadPage': "إعادة تحميل الصفحة",
   'common.reloadPageWarning': "ستؤدي إعادة التحميل إلى فقدان التغييرات غير المحفوظة. هل تريد المتابعة؟",
   "cal.rescheduleSameMonthOnly": "لا يمكن نقل الدروس إلا ضمن الشهر الميلادي نفسه.",
-  "cal.rescheduleAdminOnly": "يمكن للإدارة فقط تغيير موعد الدرس.",
   "cal.rescheduleReasonLabel": "📝 سبب إعادة الجدولة *",
   "cal.rescheduleReasonHelper": "سيطّلع الطالب والإدارة على هذه الرسالة",
   "cal.rescheduleReasonHelperSolo": "سيطّلع الطالب على هذه الرسالة",

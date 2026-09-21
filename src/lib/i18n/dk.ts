@@ -236,7 +236,6 @@ export const dk: Record<string, string> = {
   'dash.confirmStatusError': 'Kunne ikke gemme status: {msg}',
   'status.needsStatusConfirmation': 'Status mangler',
   'cal.rescheduleSameMonthOnly': 'Lektioner kan kun flyttes inden for samme kalendermåned.',
-  "cal.rescheduleAdminOnly": "Kun administrationen kan ændre tidspunktet for en lektion.",
   'cal.rescheduleReasonLabel': '📝 Årsag til omlægning *',
   'cal.rescheduleReasonHelper': 'Eleven og administrationen ser denne besked',
   'cal.rescheduleReasonHelperSolo': 'Eleven ser denne besked',

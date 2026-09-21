@@ -12,7 +12,6 @@ export const trOverrides: Record<string, string> = {
   'common.reloadPage': "Sayfayı yeniden yükle",
   'common.reloadPageWarning': "Yeniden yükleme, kaydedilmemiş değişiklikleri silecektir. Devam edilsin mi?",
   "cal.rescheduleSameMonthOnly": "Dersler yalnızca aynı takvim ayı içinde başka bir zamana taşınabilir.",
-  "cal.rescheduleAdminOnly": "Ders saatini yalnızca yönetim değiştirebilir.",
   "cal.rescheduleReasonLabel": "📝 Ders saati değişikliği nedeni *",
   "cal.rescheduleReasonHelper": "Öğrenci ve yönetim bu mesajı görecek",
   "cal.rescheduleReasonHelperSolo": "Öğrenci bu mesajı görecek",

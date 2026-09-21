@@ -282,7 +282,6 @@ export const ee: Record<string, string> = {
   'dash.confirmStatusError': 'Staatuse salvestamine ebaõnnestus: {msg}',
   'status.needsStatusConfirmation': 'Märkige staatus',
   'cal.rescheduleSameMonthOnly': 'Tunde saab ümber tõsta ainult sama kalendrikuu piires.',
-  "cal.rescheduleAdminOnly": "Tunni aega saab muuta ainult administratsioon.",
   'cal.rescheduleReasonLabel': '📝 Ümberajastamise põhjus *',
   'cal.rescheduleReasonHelper': 'Seda sõnumit näevad õpilane ja administratsioon',
   'cal.rescheduleReasonHelperSolo': 'Seda sõnumit näeb õpilane',

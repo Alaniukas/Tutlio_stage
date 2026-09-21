@@ -812,7 +812,7 @@ export default function StudentSessions() {
                 enableMonthlyBilling = !!(orgPay as { enable_monthly_billing?: boolean }).enable_monthly_billing;
                 const orgFeatures = (orgPay as { features?: Record<string, unknown> | null }).features;
                 setStudentActionsDisabled(orgFeatures?.disable_student_reschedule_cancel === true);
-                setOrgRescheduleDisabled(orgFeatures?.org_admin_only_reschedule === true);
+                setOrgRescheduleDisabled(orgFeatures?.disable_student_reschedule === true);
             } else {
                 setOrgRescheduleDisabled(false);
             }
@@ -1249,7 +1249,7 @@ export default function StudentSessions() {
                 ? t('cal.rescheduleSameMonthOnly')
                 : rawErr === 'student_actions_disabled'
                     ? t('stuSess.actionsDisabledByOrg')
-                    : rawErr.includes('org_admin_only_reschedule')
+                    : rawErr.includes('disable_student_reschedule')
                         ? t('stuSess.rescheduleDisabledByOrg')
                     : rawErr;
             alert('Nepavyko perkelti: ' + errorMsg);

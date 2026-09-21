@@ -322,7 +322,7 @@ export default function StudentDashboard() {
                         enableMonthlyBilling = !!(orgPay as { enable_monthly_billing?: boolean }).enable_monthly_billing;
                         const orgFeatures = (orgPay as { features?: Record<string, unknown> | null }).features;
                         setStudentActionsDisabled(orgFeatures?.disable_student_reschedule_cancel === true);
-                        setOrgRescheduleDisabled(orgFeatures?.org_admin_only_reschedule === true);
+                        setOrgRescheduleDisabled(orgFeatures?.disable_student_reschedule === true);
                         setStudentBookingDisabled(orgFeatures?.disable_student_booking === true);
                     } else {
                         setOrgRescheduleDisabled(false);

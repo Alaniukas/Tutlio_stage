@@ -814,7 +814,6 @@ export const heOverrides: Record<string, string> = {
   "lessonSet.savedMsg": "ההגדרות נשמרו!",
   "studentSettings.subtitle": "ההגדרות האישיות שלך",
   "cal.rescheduleSameMonthOnly": "אפשר להעביר שיעורים רק בתוך אותו חודש קלנדרי.",
-  "cal.rescheduleAdminOnly": "רק ההנהלה יכולה לשנות את מועד השיעור.",
   "cal.rescheduleReasonLabel": "📝 סיבת שינוי המועד *",
   "cal.rescheduleReasonHelper": "התלמיד וההנהלה יראו את ההודעה הזו",
   "cal.rescheduleReasonHelperSolo": "התלמיד יראה את ההודעה הזו",

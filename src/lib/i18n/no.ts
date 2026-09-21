@@ -66,7 +66,6 @@ export const no: Record<string, string> = {
   'dash.confirmStatusError': 'Kunne ikke lagre status: {msg}',
   'status.needsStatusConfirmation': 'Status mangler',
   'cal.rescheduleSameMonthOnly': 'Timer kan bare flyttes innenfor samme kalendermåned.',
-  "cal.rescheduleAdminOnly": "Bare administrasjonen kan endre tidspunktet for en time.",
   'cal.rescheduleReasonLabel': '📝 Årsak til flytting *',
   'cal.rescheduleReasonHelper': 'Eleven og administrasjonen ser denne meldingen',
   'cal.rescheduleReasonHelperSolo': 'Eleven ser denne meldingen',

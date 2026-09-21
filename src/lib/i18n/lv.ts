@@ -268,7 +268,6 @@ export const lv: Record<string, string> = {
   'dash.confirmStatusError': 'Neizdevās saglabāt statusu: {msg}',
   'status.needsStatusConfirmation': 'Atzīmējiet statusu',
   'cal.rescheduleSameMonthOnly': 'Nodarbības var pārcelt tikai tā paša kalendārā mēneša ietvaros.',
-  "cal.rescheduleAdminOnly": "Tikai administrācija var mainīt nodarbības laiku.",
   'cal.rescheduleReasonLabel': '📝 Pārcelšanas iemesls *',
   'cal.rescheduleReasonHelper': 'Šo ziņu redzēs skolēns un administrācija',
   'cal.rescheduleReasonHelperSolo': 'Šo ziņu redzēs skolēns',

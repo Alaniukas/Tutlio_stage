@@ -17,7 +17,7 @@ export interface StudentPortalPolicyEntry {
   bookingDisabled: boolean;
   /** Org feature disable_student_reschedule_cancel. */
   actionsDisabled: boolean;
-  /** Org feature org_admin_only_reschedule (or the combined student-action flag). */
+  /** Org feature disable_student_reschedule (or the combined student-action flag). */
   rescheduleDisabled: boolean;
   /** Org feature student_payments_page ("Mokėjimai" portal section). */
   paymentsPageEnabled: boolean;
@@ -99,7 +99,7 @@ export async function fetchStudentPortalPolicyMap(
         policyByOrg[o.id] = {
           bookingDisabled,
           actionsDisabled: o.features?.disable_student_reschedule_cancel === true,
-          rescheduleDisabled: o.features?.disable_student_reschedule_cancel === true || o.features?.org_admin_only_reschedule === true,
+          rescheduleDisabled: o.features?.disable_student_reschedule_cancel === true || o.features?.disable_student_reschedule === true,
           paymentsPageEnabled: proKlaseFeatureEnabledForOrgRecord(
             o.id,
             o.entity_type,

@@ -8,7 +8,6 @@ export const hiOverrides: Record<string, string> = {
   'common.reloadPage': "पेज फिर से लोड करें",
   'common.reloadPageWarning': "पेज फिर से लोड करने पर बिना सहेजे बदलाव मिट जाएँगे। जारी रखें?",
   "cal.rescheduleSameMonthOnly": "क्लास का समय केवल उसी कैलेंडर महीने के भीतर बदला जा सकता है।",
-  "cal.rescheduleAdminOnly": "केवल प्रशासन ही क्लास का समय बदल सकता है।",
   "cal.rescheduleReasonLabel": "📝 समय बदलने का कारण *",
   "cal.rescheduleReasonHelper": "विद्यार्थी और प्रशासन को यह संदेश दिखाई देगा",
   "cal.rescheduleReasonHelperSolo": "विद्यार्थी को यह संदेश दिखाई देगा",

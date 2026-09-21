@@ -10,7 +10,6 @@ export const slOverrides: Record<string, string> = {
   'common.reloadPage': "Znova naloži stran",
   'common.reloadPageWarning': "S ponovnim nalaganjem boste izgubili neshranjene spremembe. Želite nadaljevati?",
   "cal.rescheduleSameMonthOnly": "Ure je mogoče prestaviti le znotraj istega koledarskega meseca.",
-  "cal.rescheduleAdminOnly": "Čas ure lahko spremeni samo administracija.",
   "cal.rescheduleReasonLabel": "📝 Razlog za prestavitev *",
   "cal.rescheduleReasonHelper": "Učenec in administracija bosta videla to sporočilo",
   "cal.rescheduleReasonHelperSolo": "Učenec bo videl to sporočilo",

@@ -236,7 +236,6 @@ export const es: Record<string, string> = {
   'dash.confirmStatusError': 'No se pudo guardar el estado: {msg}',
   'status.needsStatusConfirmation': 'Falta el estado',
   'cal.rescheduleSameMonthOnly': 'Las clases solo se pueden mover dentro del mismo mes natural.',
-  "cal.rescheduleAdminOnly": "Solo la administración puede cambiar la hora de una clase.",
   'cal.rescheduleReasonLabel': '📝 Motivo de la reprogramación *',
   'cal.rescheduleReasonHelper': 'El alumno y la administración verán este mensaje',
   'cal.rescheduleReasonHelperSolo': 'El alumno verá este mensaje',

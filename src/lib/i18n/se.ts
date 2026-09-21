@@ -382,7 +382,6 @@ export const se: Record<string, string> = {
   'dash.confirmStatusError': 'Det gick inte att spara statusen: {msg}',
   'status.needsStatusConfirmation': 'Status krävs',
   'cal.rescheduleSameMonthOnly': 'Lektioner kan endast flyttas inom samma kalendermånad.',
-  "cal.rescheduleAdminOnly": "Endast administrationen kan ändra tiden för en lektion.",
   'cal.rescheduleReasonLabel': '📝 Anledning till ombokning *',
   'cal.rescheduleReasonHelper': 'Eleven och administrationen ser detta meddelande',
   'cal.rescheduleReasonHelperSolo': 'Eleven ser detta meddelande',
