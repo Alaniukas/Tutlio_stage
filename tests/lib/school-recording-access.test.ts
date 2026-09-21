@@ -122,6 +122,16 @@ const groups = [
 describe('school recording relationship authorization', () => {
   beforeEach(() => { state.admin = null; });
 
+  it('does not let a sessions-only admin view recordings', async () => {
+    state.admin = { organizationId: 'org-1', role: 'custom', permissions: { 'sessions.view': true } };
+    const denied = await resolveRecordingViewerAccess(supabaseFixture({ groups, organizations: [org()] }), 'qa-admin');
+    expect(denied.groups).toEqual([]);
+
+    state.admin = { organizationId: 'org-1', role: 'admin', permissions: {} };
+    const allowed = await resolveRecordingViewerAccess(supabaseFixture({ groups, organizations: [org()] }), 'school-admin');
+    expect(allowed.groups.map((group) => group.id)).toEqual(['group-a', 'group-b']);
+  });
+
   it('gives a student only the group where that student is a member', async () => {
     const access = await resolveRecordingViewerAccess(supabaseFixture({
       directStudents: [{ id: 'student-a', organization_id: 'org-1' }],

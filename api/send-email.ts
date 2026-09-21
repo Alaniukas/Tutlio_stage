@@ -42,7 +42,7 @@ import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { sanitizeStudentNameForEmail } from './_lib/pendingChildName.js';
 import { hasOrgAdminPermission, type OrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { deliverAcceptanceOnce, validAcceptanceDeliveryKey } from './_lib/schoolAcceptanceDelivery.js';
-import { validSessionReminderDeliveryKey } from './_lib/sessionReminderDelivery.js';
+import { reminderWasAlreadySent, validSessionReminderDeliveryKey } from './_lib/sessionReminderDelivery.js';
 import { deliverSchoolMonthlyInvoiceOnce, schoolMonthlyInvoiceIdempotencyKey } from './_lib/schoolMonthlyInvoiceDelivery.js';
 import { pooledPackageEmailIdempotencyKey } from './_lib/sendPendingPackageEmail.js';
 import {
@@ -3861,6 +3861,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : await resend.emails.send(emailPayload);
 
     if (error) {
+      if (sessionReminderDelivery && reminderWasAlreadySent(error)) {
+        // Resend accepted this logical reminder earlier. Its rendered body can
+        // change on retry (for example after a lesson edit or deployment), but
+        // retrying with a new key would deliver a duplicate email.
+        console.warn('[send-email] Reminder was already sent with this idempotency key');
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason: 'already_sent_with_modified_payload',
+        });
+      }
       console.error('[send-email] Resend error:', error);
       const msg = error && typeof error === 'object' && 'message' in error ? String((error as any).message) : 'Failed to send email';
       return res.status(500).json({ error: msg });

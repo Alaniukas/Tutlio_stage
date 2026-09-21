@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { authHeaders } from '@/lib/apiHelpers';
 import { invalidateCache } from '@/lib/dataCache';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { useOptionalOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { useStaffLabels } from '@/hooks/useStaffLabels';
 import { useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
@@ -92,7 +93,9 @@ function dropCalendarCaches() {
 
 export default function CompanyClassGroups() {
   const { t, locale } = useTranslation();
-  const { hasFeature } = useOrgFeatures();
+  const { hasFeature, loading: featuresLoading, error: featuresError } = useOrgFeatures();
+  const orgAdminAccess = useOptionalOrgAdminAccess();
+  const canEditGroups = orgAdminAccess ? orgAdminAccess.can('sessions.edit') : true;
   const { staff } = useStaffLabels();
   const [groups, setGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [individualSessions, setIndividualSessions] = useState<IndividualSessionRecord[]>([]);
@@ -240,6 +243,19 @@ export default function CompanyClassGroups() {
   const showTutorTools = isOrgAdmin && tutorFilterOptions.length > 1;
   const showSearch = groups.length + individualSessions.length > 3 || query.length > 0;
 
+  if (featuresLoading) {
+    return <p className="text-sm text-gray-500">{t('common.loading')}</p>;
+  }
+
+  if (featuresError) {
+    return (
+      <div className="space-y-3 text-sm text-gray-500">
+        <p>{t('common.error')}</p>
+        <Button variant="outline" onClick={() => window.location.reload()}>{t('common.reloadPage')}</Button>
+      </div>
+    );
+  }
+
   if (!hasFeature('school_class_groups')) {
     return <p className="text-sm text-gray-500">{t('school.groups.disabled')}</p>;
   }
@@ -267,13 +283,8 @@ export default function CompanyClassGroups() {
     return true;
   };
 
-  const renderCard = (g: SchoolClassGroupRecord) => (
-    <button
-      key={g.id}
-      type="button"
-      className="w-full text-left rounded-xl border bg-white p-4 hover:border-emerald-300 hover:shadow-sm transition-colors"
-      onClick={() => openEdit(g)}
-    >
+  const renderCard = (g: SchoolClassGroupRecord) => {
+    const content = (
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -305,13 +316,29 @@ export default function CompanyClassGroups() {
             <div className="mt-1 text-sm text-amber-700">{g.suspension_reason}</div>
           ) : null}
         </div>
-        <span className="inline-flex items-center gap-1 shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
-          <Pencil className="w-3.5 h-3.5" />
-          {t('school.groups.edit')}
-        </span>
+        {canEditGroups && (
+          <span className="inline-flex items-center gap-1 shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
+            <Pencil className="w-3.5 h-3.5" />
+            {t('school.groups.edit')}
+          </span>
+        )}
       </div>
-    </button>
-  );
+    );
+    return canEditGroups ? (
+      <button
+        key={g.id}
+        type="button"
+        className="w-full text-left rounded-xl border bg-white p-4 hover:border-emerald-300 hover:shadow-sm transition-colors"
+        onClick={() => openEdit(g)}
+      >
+        {content}
+      </button>
+    ) : (
+      <div key={g.id} className="w-full rounded-xl border bg-white p-4">
+        {content}
+      </div>
+    );
+  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -320,10 +347,12 @@ export default function CompanyClassGroups() {
           <h1 className="text-2xl font-bold text-gray-900">{t('school.groups.title')}</h1>
           <p className="text-sm text-gray-600 mt-1">{t('school.groups.lead')}</p>
         </div>
-        <Button className="bg-emerald-600 hover:bg-emerald-700 rounded-xl" onClick={openCreate}>
-          <Plus className="w-4 h-4 mr-1" />
-          {t('school.groups.new')}
-        </Button>
+        {canEditGroups && (
+          <Button className="bg-emerald-600 hover:bg-emerald-700 rounded-xl" onClick={openCreate}>
+            <Plus className="w-4 h-4 mr-1" />
+            {t('school.groups.new')}
+          </Button>
+        )}
       </div>
 
       {materializeWarning && (
@@ -418,7 +447,7 @@ export default function CompanyClassGroups() {
         </section>
       )}
 
-      <ClassGroupFormDialog
+      {canEditGroups && <ClassGroupFormDialog
         open={modalOpen}
         onOpenChange={setModalOpen}
         mode={editing ? 'edit' : 'create'}
@@ -435,7 +464,7 @@ export default function CompanyClassGroups() {
           void loadGroups();
         }}
         onDelete={deleteGroup}
-      />
+      />}
     </div>
   );
 }

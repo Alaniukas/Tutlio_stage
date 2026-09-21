@@ -90,7 +90,7 @@ export function buildCompanyNavItems(
     base.push({ href: `${orgBasePath}/groups`, label: t('companyNav.groups'), icon: UsersRound, permission: 'sessions.view', section: 'work' });
   }
   if (isSchool && showRecordings) {
-    base.push({ href: `${orgBasePath}/recordings`, label: t('companyNav.recordings'), icon: Video, permission: 'sessions.view', section: 'work' });
+    base.push({ href: `${orgBasePath}/recordings`, label: t('companyNav.recordings'), icon: Video, permission: 'recordings.view', section: 'work' });
   }
   if (showPublicPage) {
     base.push({ href: `${orgBasePath}/public-page`, label: t('companyNav.publicPage'), icon: Globe, permission: 'settings.view', section: 'manage' });

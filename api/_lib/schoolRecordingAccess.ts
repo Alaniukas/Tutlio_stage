@@ -269,7 +269,7 @@ export async function resolveRecordingViewerAccess(
   if (profile.error) throw profile.error;
 
   const adminCanView = Boolean(
-    admin && hasOrgAdminPermission(admin.role, admin.permissions, 'sessions.view'),
+    admin && hasOrgAdminPermission(admin.role, admin.permissions, 'recordings.view'),
   );
   const accessParams = {
     adminOrgId: adminCanView ? admin?.organizationId : null,
@@ -340,7 +340,8 @@ export async function resolveRecordingViewerAccess(
   groups
     .sort((a, b) => a.name.localeCompare(b.name, 'lt'));
   const canManage = Boolean(
-    admin
+    adminCanView
+    && admin
     && enabledOrgIds.has(admin.organizationId)
     && hasOrgAdminPermission(admin.role, admin.permissions, 'sessions.edit'),
   );

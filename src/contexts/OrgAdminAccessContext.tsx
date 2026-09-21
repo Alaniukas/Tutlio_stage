@@ -200,3 +200,7 @@ export function useOrgAdminAccess(): OrgAdminAccessContextValue {
   if (!context) throw new Error('useOrgAdminAccess must be used within OrgAdminAccessProvider');
   return context;
 }
+
+export function useOptionalOrgAdminAccess(): OrgAdminAccessContextValue | null {
+  return useContext(OrgAdminAccessContext);
+}

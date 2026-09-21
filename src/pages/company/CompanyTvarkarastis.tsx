@@ -424,11 +424,11 @@ export default function CompanyTvarkarastis() {
   // Feature flags
   // Super-admins (owners) always have the calendar. Other seats still need the org flags.
   const canView = isOwner || hasFeature('org_admin_calendar_view') || hasFeature('org_admin_calendar_full_control');
-  const canFullControl = isOwner || hasFeature('org_admin_calendar_full_control');
   const canEditSessions = canOrgAdmin('sessions.edit');
+  const canFullControl = canEditSessions && (isOwner || hasFeature('org_admin_calendar_full_control'));
   const canManageAvailability = canFullControl;
   /** Pamokų paieška — visoms įmonėms su kalendoriaus prieiga; Pro Klasė frequency tik su flag'u. */
-  const showFindLesson = canView;
+  const showFindLesson = canView && canEditSessions;
   const showTrialToggleInCreate =
     !isSchoolOrgView &&
     !featuresLoading &&
@@ -1811,7 +1811,7 @@ export default function CompanyTvarkarastis() {
   }, []);
 
   const handleSelectSlot = (slotInfo: { start: Date; end: Date }) => {
-    if (!canView) return;
+    if (!canView || !canEditSessions) return;
 
     if (canManageAvailability && !showOnlySessions) {
       const match = availabilityBlocks.find((b: any) => (
@@ -1923,6 +1923,7 @@ export default function CompanyTvarkarastis() {
   };
 
   const beginSessionEdit = (session: Session) => {
+    if (!canEditSessions) return;
     const start = session.start_time instanceof Date ? session.start_time : new Date(session.start_time);
     const end = session.end_time instanceof Date ? session.end_time : new Date(session.end_time);
     const durMs = Number.isFinite(end.getTime()) && Number.isFinite(start.getTime())
@@ -1967,7 +1968,7 @@ export default function CompanyTvarkarastis() {
   };
 
   const handleSaveSession = async () => {
-    if (!selectedEvent) return;
+    if (!selectedEvent || !canEditSessions) return;
     setSaving(true);
     try {
       const newStart = new Date(editStartTime);
@@ -3181,6 +3182,7 @@ export default function CompanyTvarkarastis() {
   const schoolLessonCanCancel = Boolean(
     selectedEvent &&
       canView &&
+      canEditSessions &&
       isSchoolOrgView &&
       (isLaisviVaikai
         ? (isClassGroupSession
@@ -3256,7 +3258,7 @@ export default function CompanyTvarkarastis() {
                 <span className="truncate text-xs sm:text-sm">{t('compSch.freeTime')}</span>
               </Button>
             )}
-            {canView && (
+            {canView && canEditSessions && (
               <Button onClick={() => { resetCreateForm(); setIsCreateSessionOpen(true); }} className="flex-1 min-w-[min(100%,10rem)] sm:flex-initial touch-manipulation gap-2">
                 <Plus className="w-4 h-4 shrink-0" />
                 <span className="truncate text-xs sm:text-sm">{t('compSch.newLesson')}</span>
@@ -3465,7 +3467,7 @@ export default function CompanyTvarkarastis() {
                   onNavigate={setCurrentDate}
                   onSelectSlot={handleSelectSlot}
                   onSelectEvent={handleSelectEvent}
-                  selectable={canView}
+                  selectable={canView && canEditSessions}
                   toolbar={false}
                   eventPropGetter={eventStyleGetter}
                   culture={locale}
@@ -4214,7 +4216,7 @@ export default function CompanyTvarkarastis() {
                   </>
                 )}
               </DialogTitle>
-              {canView && isSchoolOrgView && isClassGroupSession && !isEditingSession
+              {canEditSessions && canView && isSchoolOrgView && isClassGroupSession && !isEditingSession
                 && !cancelConfirmOpen && selectedEvent?.status !== 'cancelled' && (
                 <Button
                   type="button"
@@ -4629,7 +4631,7 @@ export default function CompanyTvarkarastis() {
                 </Button>
               )}
 
-              {canView && isSchoolOrgView && isClassGroupSession && !cancelConfirmOpen
+              {canEditSessions && canView && isSchoolOrgView && isClassGroupSession && !cancelConfirmOpen
                 && selectedEvent.status !== 'cancelled' && (
                 <Button
                   variant="outline"
@@ -4641,7 +4643,7 @@ export default function CompanyTvarkarastis() {
                 </Button>
               )}
 
-              {canView && selectedEvent.status !== 'cancelled' && !cancelConfirmOpen && !isSchoolOrgView && !isSchoolBilledSession(selectedEvent) && (
+              {canEditSessions && canView && selectedEvent.status !== 'cancelled' && !cancelConfirmOpen && !isSchoolOrgView && !isSchoolBilledSession(selectedEvent) && (
                 <div className="space-y-2 pt-1">
                   <Button
                     variant="outline"

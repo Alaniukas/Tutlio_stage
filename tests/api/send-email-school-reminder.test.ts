@@ -156,6 +156,30 @@ describe('session_reminder_payer for school parents', () => {
       body: { error: 'Reminder delivery was not confirmed' },
     });
   });
+
+  it('treats Resend payload drift as an already delivered reminder without sending push', async () => {
+    sendMock.mockResolvedValue({
+      data: null,
+      error: { statusCode: 409, name: 'invalid_idempotent_request', message: 'Payload changed' },
+    });
+    const scope = `payer:${base.sessionId}`;
+    const { default: handler } = await import('../../api/send-email');
+    const res = mockRes();
+    await handler(mockReq({
+      type: 'session_reminder_payer',
+      to: 'parent@example.com',
+      idempotencyKey: sessionReminderDeliveryKey('session_reminder_payer', 'parent@example.com', scope),
+      data: { ...base, reminderDeliveryScope: scope },
+      locale: 'lt',
+    }) as any, res as any);
+
+    expect(res.getResult()).toMatchObject({
+      statusCode: 200,
+      body: { success: true, skipped: true, reason: 'already_sent_with_modified_payload' },
+    });
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(pushMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('session_reminder for school students', () => {

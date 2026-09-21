@@ -2126,8 +2126,8 @@ export default function CompanyContracts() {
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h1 className="text-2xl font-bold text-gray-900">{tr('school.contractsTitle')}</h1>
-          <div className="flex items-center gap-2">
-            <div className="bg-gray-100 rounded-lg p-1 flex gap-1">
+          <div className="flex w-full min-w-0 flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+            <div className="bg-gray-100 rounded-lg p-1 flex w-fit max-w-full gap-1">
               <button onClick={() => setTab('contracts')} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'contracts' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
                 {tr('school.tabContracts')}
               </button>
@@ -2141,10 +2141,11 @@ export default function CompanyContracts() {
               </button>
             </div>
             {tab === 'contracts' ? (
-              <div className="flex gap-2">
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
                 {Boolean(orgFeatures.school_extra_lessons_contract) && (
                   <Button
                     variant="outline"
+                    className="h-auto min-h-9 w-full whitespace-normal text-left sm:w-auto"
                     onClick={async () => {
                       try {
                         const headers = await authHeaders();
@@ -2202,7 +2203,7 @@ export default function CompanyContracts() {
                     <Plus className="w-4 h-4 mr-2" /> {tr('school.extra.newOffer')}
                   </Button>
                 )}
-                <Button onClick={openCreateContract} className="bg-emerald-600 hover:bg-emerald-700">
+                <Button onClick={openCreateContract} className="h-auto min-h-9 w-full whitespace-normal bg-emerald-600 hover:bg-emerald-700 sm:w-auto">
                   <Plus className="w-4 h-4 mr-2" /> {tr('school.newContract')}
                 </Button>
               </div>

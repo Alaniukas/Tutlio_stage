@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   sessionReminderDeliveryKey,
   sessionReminderDeliveryOutcome,
+  reminderWasAlreadySent,
   validSessionReminderDeliveryKey,
 } from '../../api/_lib/sessionReminderDelivery';
 
@@ -62,5 +63,16 @@ describe('session reminder delivery keys', () => {
       skipped: true,
       reason: 'tutor_notification_preference',
     })).toBe('permanent_skip');
+    expect(sessionReminderDeliveryOutcome(true, {
+      success: true,
+      skipped: true,
+      reason: 'already_sent_with_modified_payload',
+    })).toBe('permanent_skip');
+  });
+
+  it('recognizes only the provider response for a previously sent modified reminder', () => {
+    expect(reminderWasAlreadySent({ statusCode: 409, name: 'invalid_idempotent_request' })).toBe(true);
+    expect(reminderWasAlreadySent({ statusCode: 409, name: 'concurrent_idempotent_requests' })).toBe(false);
+    expect(reminderWasAlreadySent({ statusCode: 500, name: 'invalid_idempotent_request' })).toBe(false);
   });
 });

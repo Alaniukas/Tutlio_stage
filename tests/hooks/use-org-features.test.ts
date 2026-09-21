@@ -44,4 +44,15 @@ describe('useOrgFeatures', () => {
     expect(result.current.organizationId).toBe('org-from-admin');
     expect(orgAdminRowByUserDeduped).toHaveBeenCalledWith('user-1');
   });
+
+  it('reports a failed organization lookup separately from a disabled feature', async () => {
+    tutorSidebarProfileDeduped.mockResolvedValue({ data: { organization_id: 'org-1' } });
+    orgSuspensionRowDeduped.mockResolvedValue({ data: null, error: { message: 'Network error' } });
+
+    const { result } = renderHook(() => useOrgFeatures());
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error).toBe(true);
+    expect(result.current.hasFeature('school_class_groups')).toBe(false);
+  });
 });

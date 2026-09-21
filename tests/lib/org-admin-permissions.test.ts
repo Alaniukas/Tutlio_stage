@@ -45,6 +45,8 @@ describe('organization admin permissions', () => {
     expect(hasOrgAdminPermission('custom', { 'students.view': true }, 'students.view')).toBe(true);
     expect(hasOrgAdminPermission('custom', { 'students.view': true }, 'students.edit')).toBe(false);
     expect(hasOrgAdminPermission('custom', { 'finance.view': true }, 'finance.totals')).toBe(false);
+    expect(hasOrgAdminPermission('custom', { 'sessions.view': true }, 'recordings.view')).toBe(false);
+    expect(hasOrgAdminPermission('admin', {}, 'recordings.view')).toBe(true);
   });
 
   it('applies the administrator preset when the stored permissions JSON is empty', () => {

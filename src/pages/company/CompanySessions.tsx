@@ -1206,7 +1206,7 @@ export default function CompanySessions() {
                 : ''}
             </p>
           </div>
-          {!hideWaitlist && (
+          {!hideWaitlist && canOrgAdmin('students.view') && (
           <Button variant="outline" className="gap-2 rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0" asChild>
             <Link to={`${orgBasePath}/waitlist`}>
               <ListOrdered className="w-4 h-4" />
@@ -1543,7 +1543,7 @@ export default function CompanySessions() {
               </div>
               <SessionCreatedByBadge createdByRole={selectedSession.created_by_role} />
 
-              {editMode ? (
+              {editMode && canEditSessions ? (
                 <div className="space-y-4">
                   {selectedSession.recurring_session_id && !selectedSession.class_group_id && (
                     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
@@ -1879,7 +1879,7 @@ export default function CompanySessions() {
                     </div>
                   )}
 
-                  {!cancelMode && (
+                  {canEditSessions && !cancelMode && (
                     selectedSession.status === 'active'
                     || selectedSession.status === 'completed'
                     || (supportsManualAttendance && selectedSession.status === 'no_show')

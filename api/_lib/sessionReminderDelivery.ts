@@ -4,6 +4,13 @@ const SESSION_REMINDER_TYPES = new Set(['session_reminder', 'session_reminder_pa
 
 export type SessionReminderDeliveryOutcome = 'sent' | 'permanent_skip' | 'retry';
 
+/** Resend reserves an idempotency key only after the original email was sent. */
+export function reminderWasAlreadySent(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const providerError = error as { statusCode?: unknown; name?: unknown };
+  return providerError.statusCode === 409 && providerError.name === 'invalid_idempotent_request';
+}
+
 function normalizedRecipient(to: unknown): string | null {
   const value = Array.isArray(to) ? to[0] : to;
   if (typeof value !== 'string') return null;
@@ -68,7 +75,8 @@ export function sessionReminderDeliveryOutcome(
     && payload?.success === true
     && payload.skipped === true
     && (payload.reason === 'parent_notification_preference'
-      || payload.reason === 'tutor_notification_preference')
+      || payload.reason === 'tutor_notification_preference'
+      || payload.reason === 'already_sent_with_modified_payload')
   ) {
     return 'permanent_skip';
   }

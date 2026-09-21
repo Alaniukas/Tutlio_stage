@@ -564,7 +564,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/sessions" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanySessions /></OrgPermissionRoute>} />
             <Route path="/school/schedule" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyTvarkarastis /></OrgPermissionRoute>} />
             <Route path="/school/groups" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyClassGroups /></OrgPermissionRoute>} />
-            <Route path="/school/recordings" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyLessonRecordings /></OrgPermissionRoute>} />
+            <Route path="/school/recordings" element={<OrgPermissionRoute permission="recordings.view" editPermission="sessions.edit"><CompanyLessonRecordings /></OrgPermissionRoute>} />
             <Route path="/school/messages" element={<OrgPermissionRoute permission="messages.view" editPermission="messages.edit"><CompanyMessages /></OrgPermissionRoute>} />
             <Route path="/school/stats" element={<OrgPermissionRoute permission="stats.view"><CompanyStats /></OrgPermissionRoute>} />
             <Route path="/school/instructions" element={<CompanyInstructions />} />

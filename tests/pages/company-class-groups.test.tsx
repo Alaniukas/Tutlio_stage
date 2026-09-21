@@ -8,11 +8,17 @@ const fetchMock = vi.fn();
 
 const testState = vi.hoisted(() => ({
   from: vi.fn(),
+  featuresLoading: false,
+  canEditGroups: true,
+}));
+
+vi.mock('@/contexts/OrgAdminAccessContext', () => ({
+  useOptionalOrgAdminAccess: () => ({ can: () => testState.canEditGroups }),
 }));
 
 vi.mock('@/hooks/useOrgFeatures', () => ({
   useOrgFeatures: () => ({
-    loading: false,
+    loading: testState.featuresLoading,
     hasFeature: (id: string) => id === 'school_class_groups',
   }),
 }));
@@ -47,6 +53,8 @@ const group = {
 describe('CompanyClassGroups edit modal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    testState.featuresLoading = false;
+    testState.canEditGroups = true;
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     fetchMock.mockResolvedValue({
       ok: true,
@@ -89,6 +97,20 @@ describe('CompanyClassGroups edit modal', () => {
     });
   });
 
+  it('does not report groups as disabled while features are loading', () => {
+    testState.featuresLoading = true;
+    render(
+      <OrgEntityProvider value="school">
+        <MemoryRouter initialEntries={['/school/groups']}>
+          <CompanyClassGroups />
+        </MemoryRouter>
+      </OrgEntityProvider>,
+    );
+
+    expect(screen.getByText('Kraunama...')).toBeTruthy();
+    expect(screen.queryByText('Grupių funkcija neįjungta šiai organizacijai.')).toBeNull();
+  });
+
   it('renders the groups page without raw i18n keys', async () => {
     render(
       <OrgEntityProvider value="school">
@@ -104,6 +126,22 @@ describe('CompanyClassGroups edit modal', () => {
     expect(screen.getByText('Redaguoti')).toBeTruthy();
     expect(screen.queryByText('common.edit')).toBeNull();
     expect(screen.queryByText('school.groups.edit')).toBeNull();
+  });
+
+  it('shows groups without edit controls for a view-only admin', async () => {
+    testState.canEditGroups = false;
+    render(
+      <OrgEntityProvider value="school">
+        <MemoryRouter initialEntries={['/school/groups']}>
+          <CompanyClassGroups />
+        </MemoryRouter>
+      </OrgEntityProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('QA Legal Matematika')).toBeTruthy());
+    expect(screen.queryByText('Redaguoti')).toBeNull();
+    expect(screen.queryByText('Nauja grupė')).toBeNull();
+    expect(screen.getByText('QA Legal Matematika').closest('button')).toBeNull();
   });
 
   it('shows an upcoming teacher-created individual lesson separately from class groups', async () => {

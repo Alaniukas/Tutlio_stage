@@ -12,6 +12,7 @@ import { parseOrgContactVisibility, type OrgContactVisibility } from '@/lib/orgC
 
 interface OrgFeaturesState {
   loading: boolean;
+  error: boolean;
   organizationId: string | null;
   entityType: 'company' | 'school' | null;
   features: Record<string, boolean>;
@@ -30,6 +31,7 @@ interface OrgFeaturesState {
 export function useOrgFeatures(): OrgFeaturesState {
   const { user: contextUser } = useUser();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [entityType, setEntityType] = useState<'company' | 'school' | null>(null);
   const [rawFeatures, setRawFeatures] = useState<Record<string, unknown> | null>(null);
@@ -38,35 +40,43 @@ export function useOrgFeatures(): OrgFeaturesState {
   useEffect(() => {
     let cancelled = false;
     async function loadFeatures() {
+      setLoading(true);
+      setError(false);
       try {
         const user = contextUser ?? await dedupeAuthGetUser();
         if (cancelled) return;
         if (!user) {
           setRawFeatures(null);
+          setError(true);
           return;
         }
 
         const { data: prof } = await tutorSidebarProfileDeduped(user.id);
+        if (cancelled) return;
         let orgId = prof?.organization_id ?? null;
         // Org admins often have no organization_id on profiles — resolve via organization_admins
         // (same source as CompanyFinance / CompanyContracts).
         if (!orgId) {
           const adminRow = await orgAdminRowByUserDeduped(user.id);
+          if (cancelled) return;
           orgId = adminRow?.organization_id ?? null;
         }
         if (!orgId) {
           setRawFeatures(null);
           setEntityType(null);
+          setError(true);
           return;
         }
 
         setOrganizationId(orgId);
 
-        const { data: org } = await orgSuspensionRowDeduped(orgId);
+        const { data: org, error: orgError } = await orgSuspensionRowDeduped(orgId);
+        if (cancelled) return;
 
-        if (!org) {
+        if (orgError || !org) {
           setRawFeatures(null);
           setEntityType(null);
+          setError(true);
           return;
         }
 
@@ -90,6 +100,7 @@ export function useOrgFeatures(): OrgFeaturesState {
 
         setFeatures(mergedFeatures);
       } catch (error) {
+        if (!cancelled) setError(true);
         if (!isAuthLockAbort(error)) {
           console.error('Error loading org features:', error);
         }
@@ -115,6 +126,7 @@ export function useOrgFeatures(): OrgFeaturesState {
 
   return {
     loading,
+    error,
     organizationId,
     entityType,
     features,

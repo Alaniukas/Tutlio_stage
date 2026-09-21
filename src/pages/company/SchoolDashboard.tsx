@@ -333,7 +333,7 @@ export default function SchoolDashboard() {
   const pendingInvoiceTotal = sumPendingSchoolInvoices(data.invoices);
 
   const handleConfirmNoShow = async () => {
-    if (!noShowTarget) return;
+    if (!noShowTarget || !can('sessions.edit')) return;
     const sessionId = noShowTarget.id;
     setMarkingNoShow(true);
     try {
@@ -635,7 +635,7 @@ export default function SchoolDashboard() {
                           ×
                         </button>
                       </div>
-                      {row.status !== 'no_show' ? (
+                      {can('sessions.edit') && row.status !== 'no_show' ? (
                         <button
                           type="button"
                           onClick={() => setNoShowTarget(row)}
