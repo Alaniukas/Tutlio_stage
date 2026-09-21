@@ -8,6 +8,8 @@ import {
   recordingRetentionDays,
 } from './_lib/googleDriveRecordings.js';
 import { resolveRecordingViewerAccess } from './_lib/schoolRecordingAccess.js';
+import { recordingSlotScope, recordingSlotTags, recordingVisibleToScope } from './_lib/schoolRecordingSlotAccess.js';
+import { schoolMemberSlotKey } from '../src/lib/schoolClassGroups.js';
 import {
   createSchoolRecordingTicket,
   createSchoolRecordingViewerSession,
@@ -97,8 +99,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const groups = await Promise.all(access.groups.map(async (group) => {
       const mapping = mappingByGroup.get(group.id);
-      const base = publicGroup(group, mapping);
-      const manageFields = access.canManage ? {
+      const canManageGroup = access.canManage && access.adminOrganizationId === group.organizationId;
+      const base = { ...publicGroup(group, mapping), canManage: canManageGroup };
+      const manageFields = canManageGroup ? {
         driveFolderId: mapping?.drive_folder_id || '',
         driveFolderName: mapping?.drive_folder_name || null,
       } : {};
@@ -113,7 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!requestedGroupId || group.id !== requestedGroupId) {
         return {
           ...base,
-          ...(access.canManage ? {
+          ...(canManageGroup ? {
             driveFolderId: mapping.drive_folder_id,
             driveFolderName: mapping.drive_folder_name,
           } : {}),
@@ -123,13 +126,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       try {
         const recordings = await listDriveRecordings(mapping.drive_folder_id);
+        const classGroup = group.kind === 'class_group';
+        const [scope, tags, groupSlots] = classGroup
+          ? await Promise.all([
+              recordingSlotScope(
+                supabase,
+                group.sourceId,
+                access.studentIds || [],
+                access.adminOrganizationId === group.organizationId || group.tutorId === auth.userId,
+              ),
+              recordingSlotTags(supabase, group.sourceId),
+              canManageGroup
+                ? supabase.from('school_class_group_slots').select('weekday, start_time').eq('group_id', group.sourceId)
+                : Promise.resolve({ data: [], error: null }),
+            ])
+          : [{ unrestricted: true, schedules: [] }, new Map(), { data: [], error: null }] as const;
+        if (groupSlots.error) throw groupSlots.error;
+        const visible = classGroup
+          ? recordings.filter((file) => recordingVisibleToScope(scope, tags.get(file.id) || null))
+          : recordings;
         return {
           ...base,
-          ...(access.canManage ? {
+          ...(canManageGroup ? {
             driveFolderId: mapping.drive_folder_id,
             driveFolderName: mapping.drive_folder_name,
           } : {}),
-          recordings: recordings.map((file) => {
+          ...(canManageGroup && classGroup ? {
+            slots: (groupSlots.data || []).map((slot) => ({ weekday: Number(slot.weekday), start_time: String(slot.start_time).slice(0, 5) })),
+          } : {}),
+          recordings: visible.map((file) => {
             const ticket = createSchoolRecordingTicket({
               userId: auth.userId!,
               groupId: group.id,
@@ -141,6 +166,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               recordedAt: file.createdTime,
               durationMillis: file.durationMillis,
               size: file.size,
+              ...(canManageGroup && classGroup ? { slot: tags.get(file.id) || null } : {}),
               streamUrl: `/api/school-lesson-recording-stream?t=${encodeURIComponent(ticket)}`,
             };
           }),
@@ -151,12 +177,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.error('[school-recordings] Drive list failed', group.id, (error as Error)?.message);
         return {
           ...base,
-          ...(access.canManage ? {
+          ...(canManageGroup ? {
             driveFolderId: mapping.drive_folder_id,
             driveFolderName: mapping.drive_folder_name,
           } : {}),
           recordings: [],
-          loadError: access.canManage
+          loadError: canManageGroup
             ? 'Nepavyko perskaityti šio Drive aplanko. Patikrinkite, ar jis bendrinamas su tarnybine paskyra.'
             : 'Įrašai laikinai nepasiekiami.',
           recordingsPending: false,
@@ -179,6 +205,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const groupId = String(body.groupId || '').trim();
     const group = access.groups.find((candidate) => candidate.id === groupId);
     if (!group) return res.status(404).json({ error: 'Grupė arba individuali pamoka nerasta.' });
+    if (access.adminOrganizationId !== group.organizationId) {
+      return res.status(403).json({ error: 'Insufficient organization permission' });
+    }
+
+    if (body.action === 'assign_slot') {
+      if (group.kind !== 'class_group') return res.status(400).json({ error: 'Laiką galima priskirti tik grupės įrašui.' });
+      const fileId = String(body.fileId || '').trim();
+      if (!fileId) return res.status(400).json({ error: 'Trūksta įrašo ID.' });
+      const { data: mapping, error: mappingError } = await supabase.from('school_recording_drive_folders')
+        .select('drive_folder_id').eq('group_id', group.sourceId).eq('organization_id', group.organizationId).maybeSingle();
+      if (mappingError || !mapping?.drive_folder_id) return res.status(404).json({ error: 'Grupės įrašų aplankas nerastas.' });
+      const file = await getDriveFileMetadata(fileId).catch(() => null);
+      if (!file || !file.mimeType.startsWith('video/') || !file.parents.includes(mapping.drive_folder_id)) {
+        return res.status(400).json({ error: 'Įrašas nepriklauso šios grupės aplankui.' });
+      }
+      if (body.slot == null) {
+        const { error } = await supabase.from('school_recording_file_slots').delete()
+          .eq('group_id', group.sourceId).eq('drive_file_id', fileId);
+        if (error) return res.status(500).json({ error: 'Nepavyko pašalinti įrašo laiko.' });
+        return res.status(200).json({ ok: true });
+      }
+      const rawSlot = body.slot as { weekday?: unknown; start_time?: unknown };
+      const slot = { weekday: Number(rawSlot.weekday), start_time: String(rawSlot.start_time || '').slice(0, 5) };
+      if (!Number.isInteger(slot.weekday) || slot.weekday < 0 || slot.weekday > 6 || !/^\d{2}:\d{2}$/.test(slot.start_time)) {
+        return res.status(400).json({ error: 'Neteisingas grupės laikas.' });
+      }
+      const { data: slots, error: slotsError } = await supabase.from('school_class_group_slots')
+        .select('weekday, start_time').eq('group_id', group.sourceId);
+      if (slotsError) return res.status(500).json({ error: 'Nepavyko patikrinti grupės laikų.' });
+      if (!(slots || []).some((candidate) => schoolMemberSlotKey(candidate) === schoolMemberSlotKey(slot))) {
+        return res.status(400).json({ error: 'Šis laikas nebėra grupės tvarkaraštyje.' });
+      }
+      const { error } = await supabase.from('school_recording_file_slots').upsert({
+        group_id: group.sourceId,
+        drive_file_id: fileId,
+        weekday: slot.weekday,
+        start_time: slot.start_time,
+        assigned_by: auth.userId,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'group_id,drive_file_id' });
+      if (error) return res.status(500).json({ error: 'Nepavyko priskirti įrašo laikui.' });
+      return res.status(200).json({ ok: true });
+    }
 
     const rawFolder = String(body.driveFolderId || '').trim();
     if (!rawFolder) {

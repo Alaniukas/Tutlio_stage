@@ -138,12 +138,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (existingContractId) {
     const { data: contract } = await supabase
       .from('school_contracts')
-      .select('id, organization_id, student_id, contract_number, kind, pdf_url, filled_body, template_id, order_snapshot, unit_price_eur, annual_fee')
+      .select('id, organization_id, student_id, contract_number, kind, signing_status, accepted_at, pdf_url, filled_body, template_id, order_snapshot, unit_price_eur, annual_fee')
       .eq('id', existingContractId)
       .eq('organization_id', access.access.organizationId)
       .maybeSingle();
     if (!contract || contract.kind !== EXTRA_LESSONS_CONTRACT_KIND) {
       return res.status(404).json({ error: 'Extra-lessons contract not found' });
+    }
+    const regenerate = body.regenerate_pdf === true;
+    if (regenerate && (contract.signing_status !== 'sent' || contract.accepted_at)) {
+      return res.status(409).json({ error: 'Patvirtintos sutarties PDF keisti negalima.' });
     }
     const { data: student } = await supabase
       .from('students')
@@ -168,7 +172,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = await ensureExtraLessonsCompletionToken(supabase, contract.id);
     const origin = appOrigin(req);
     const acceptUrl = extraLessonsAcceptUrl(origin, token);
-    if (!contract.pdf_url) {
+    const shouldRender = !contract.pdf_url || regenerate || (
+      usesBundledExtraLessonsDocx(access.access.organizationId)
+      && contract.signing_status === 'sent'
+      && !contract.accepted_at
+      && body.send !== false
+    );
+    if (shouldRender) {
       try {
         const rendered = await renderAndStoreExtraLessonsPdf(supabase, {
           contract: {
@@ -202,6 +212,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       } catch (e) {
         console.error('[extra-lessons-contract-offer] resend pdf', (e as Error).message);
+        return res.status(503).json({
+          error: EXTRA_LESSONS_PDF_FAILED_ERROR,
+          code: EXTRA_LESSONS_PDF_FAILED_CODE,
+          contractId: contract.id,
+          emailSent: false,
+        });
       }
     }
     if (!contract.pdf_url) {
@@ -211,6 +227,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         contractId: contract.id,
         emailSent: false,
       });
+    }
+    if (body.send === false) {
+      return res.status(200).json({ ok: true, contractId: contract.id, regenerated: shouldRender });
     }
     const mail = await sendExtraLessonsOfferEmail(req, {
       to: payerEmail,

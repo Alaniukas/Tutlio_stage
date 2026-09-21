@@ -6,6 +6,42 @@ export type SchoolClassGroupSlot = {
   end_time: string;
 };
 
+export type SchoolMemberSlot = Pick<SchoolClassGroupSlot, 'weekday' | 'start_time'>;
+export type SchoolClassGroupMemberWrite = {
+  student_id: string;
+  /** Null means every weekly time; a nonempty subset limits this student. */
+  schedule_slots: SchoolMemberSlot[] | null;
+};
+
+export function schoolMemberSlotKey(slot: SchoolMemberSlot): string {
+  return `${Number(slot.weekday)}:${String(slot.start_time || '').slice(0, 5)}`;
+}
+
+export function memberFollowsGroupSlot(
+  scheduleSlots: SchoolMemberSlot[] | null | undefined,
+  slot: SchoolMemberSlot,
+): boolean {
+  return scheduleSlots == null || scheduleSlots.some((choice) => schoolMemberSlotKey(choice) === schoolMemberSlotKey(slot));
+}
+
+export function validateSchoolMemberSchedules(
+  slots: SchoolClassGroupSlot[],
+  members: SchoolClassGroupMemberWrite[] | null,
+): boolean {
+  if (members === null) return true;
+  const available = new Set(slots.map(schoolMemberSlotKey));
+  const students = new Set<string>();
+  for (const member of members) {
+    if (!member.student_id || students.has(member.student_id)) return false;
+    students.add(member.student_id);
+    if (member.schedule_slots === null) continue;
+    if (!member.schedule_slots.length) return false;
+    const selected = new Set(member.schedule_slots.map(schoolMemberSlotKey));
+    if (selected.size !== member.schedule_slots.length || [...selected].some((key) => !available.has(key))) return false;
+  }
+  return true;
+}
+
 export type SchoolClassGroupDraft = {
   name: string;
   /** Short label for calendars; contracts use `name`. */
@@ -25,6 +61,7 @@ export type SchoolClassGroupDraft = {
 
 export type SchoolClassGroupMember = {
   student_id: string;
+  schedule_slots?: SchoolMemberSlot[] | null;
   student?: { full_name: string; grade?: string | null; email?: string | null } | null;
 };
 
@@ -104,6 +141,7 @@ export function groupClassGroupsByTutor(
 
 export type SchoolClassGroupWrite = SchoolClassGroupDraft & {
   student_ids: string[] | null;
+  members: SchoolClassGroupMemberWrite[] | null;
 };
 
 export type ScheduleSlotInput = {
@@ -232,6 +270,20 @@ export function parseClassGroupWriteBody(
       : String(body.admin_action_note).trim().slice(0, 1000),
     slots: normalizeGroupSlots(rawSlots, duration),
     student_ids: Array.isArray(body.student_ids) ? [...new Set(body.student_ids.map(String))] : null,
+    members: Array.isArray(body.members)
+      ? body.members.map((raw) => {
+          const member = raw as Record<string, unknown>;
+          return {
+            student_id: String(member.student_id || '').trim(),
+            schedule_slots: member.schedule_slots == null ? null : Array.isArray(member.schedule_slots)
+              ? member.schedule_slots.map((choice) => ({
+                  weekday: Number((choice as SchoolMemberSlot).weekday),
+                  start_time: String((choice as SchoolMemberSlot).start_time || '').slice(0, 5),
+                }))
+              : [],
+          };
+        })
+      : null,
   };
 }
 
@@ -267,6 +319,10 @@ export function groupToWriteDraft(group: SchoolClassGroupRecord): SchoolClassGro
     admin_action_note: group.admin_action_note ?? null,
     slots: normalizeGroupSlots(group.slots || [], duration),
     student_ids: (group.members || []).map((member) => member.student_id),
+    members: (group.members || []).map((member) => ({
+      student_id: member.student_id,
+      schedule_slots: member.schedule_slots ?? null,
+    })),
   };
 }
 

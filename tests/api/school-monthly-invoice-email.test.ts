@@ -83,6 +83,14 @@ describe('buildSchoolMonthlyInvoiceEmailData', () => {
       lines: [{ originalAmount: '48.00', discountAmount: '12.00', amount: '36.00' }],
     });
   });
+
+  it('omits the payment link when the accepted addendum covers the whole amount', () => {
+    const data = buildSchoolMonthlyInvoiceEmailData({ ...invoice, subtotal_eur: 162,
+      discount_amount_eur: 162, total_eur: 0, payment_status: 'paid' },
+    { publicOrigin: 'https://tutlio.lt', student, org, contract: {} });
+    expect(data).toMatchObject({ subtotalAmount: '162.00', discountAmount: '162.00', totalAmount: '0.00' });
+    expect(data.payUrl).toBeUndefined();
+  });
 });
 
 function fakeSupabase(state: { status: string }) {

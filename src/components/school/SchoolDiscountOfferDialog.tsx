@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import type { SchoolMonthlyInvoiceStudentOption } from './SchoolMonthlyInvoiceDialog';
 
-type ActivityOption = { subjectId: string; tutorId: string | null; label: string };
+type ActivityOption = { subjectId: string | null; tutorId: string | null; label: string };
 type AgreementHistory = {
   id: string;
   agreementNumber: string;
@@ -35,19 +35,20 @@ type Props = {
 };
 
 function ymd(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Vilnius', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(date);
 }
 
-function academicYearEnd(date = new Date()): string {
-  const endYear = date.getMonth() + 1 >= 7 ? date.getFullYear() + 1 : date.getFullYear();
+function academicYearEnd(fromYmd = ymd(new Date())): string {
+  const year = Number(fromYmd.slice(0, 4));
+  const month = Number(fromYmd.slice(5, 7));
+  const endYear = month >= 7 ? year + 1 : year;
   return `${endYear}-06-30`;
 }
 
 function optionKey(option: ActivityOption): string {
-  return `${option.subjectId}:${option.tutorId || ''}`;
+  return `${option.subjectId || ''}:${option.tutorId || ''}`;
 }
 
 export default function SchoolDiscountOfferDialog({
@@ -198,7 +199,7 @@ export default function SchoolDiscountOfferDialog({
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <Label>Galioja iki</Label>
-              <button type="button" className="text-xs font-semibold text-emerald-700 hover:underline" onClick={() => setValidUntil(academicYearEnd(new Date(`${validFrom}T12:00:00`)))}>Iki mokslo metų pabaigos</button>
+              <button type="button" className="text-xs font-semibold text-emerald-700 hover:underline" onClick={() => setValidUntil(academicYearEnd(validFrom))}>Iki mokslo metų pabaigos</button>
             </div>
             <DateInput value={validUntil} min={validFrom} onChange={(event) => setValidUntil(event.target.value)} />
           </div>
@@ -211,12 +212,12 @@ export default function SchoolDiscountOfferDialog({
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
           <div className="flex items-start gap-2">
             <MailCheck className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>Paspaudus „Išsaugoti ir siųsti“ nuolaida dar nebus aktyvi. Tėvams patvirtinus, sistema automatiškai sukurs priedą prie pasirašytos metinės sutarties.</p>
+            <p>Paspaudus „Išsaugoti ir siųsti“ nuolaida dar nebus aktyvi. Tėvams patvirtinus, sistema automatiškai sukurs priedą prie pasirašytos užsiėmimų sutarties.</p>
           </div>
         </div>
         {!!agreements.length && (
           <section className="space-y-2 rounded-xl border border-slate-200 p-4">
-            <h3 className="text-sm font-semibold text-slate-900">Mokinio nuolaidų priedai</h3>
+            <h3 className="text-sm font-semibold text-slate-900">Sutarties nuolaidų priedai</h3>
             <div className="divide-y divide-slate-100">
               {agreements.map((agreement) => {
                 const status = agreement.status === 'accepted'

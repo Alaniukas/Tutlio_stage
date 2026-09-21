@@ -1,7 +1,7 @@
 export type SchoolDiscountType = 'percent' | 'amount';
 
 export type SchoolDiscountAgreementInput = {
-  subjectId: string;
+  subjectId: string | null;
   tutorId?: string | null;
   discountType: SchoolDiscountType;
   discountValue: number;
@@ -14,8 +14,9 @@ const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
 export function normalizeSchoolDiscountAgreementInput(
   input: Partial<SchoolDiscountAgreementInput>,
+  options: { allowMissingSubject?: boolean } = {},
 ): SchoolDiscountAgreementInput {
-  const subjectId = String(input.subjectId || '').trim();
+  const subjectId = String(input.subjectId || '').trim() || null;
   const tutorId = String(input.tutorId || '').trim() || null;
   const discountType: SchoolDiscountType = input.discountType === 'amount' ? 'amount' : 'percent';
   const discountValue = Math.round(Math.max(0, Number(input.discountValue) || 0) * 100) / 100;
@@ -23,7 +24,7 @@ export function normalizeSchoolDiscountAgreementInput(
   const validUntil = String(input.validUntil || '').slice(0, 10);
   const note = String(input.note || '').trim().slice(0, 500) || null;
 
-  if (!subjectId) throw new Error('Pasirinkite užsiėmimą.');
+  if (!subjectId && !options.allowMissingSubject) throw new Error('Pasirinkite užsiėmimą.');
   if (discountValue <= 0) throw new Error('Įveskite nuolaidos dydį.');
   if (discountType === 'percent' && discountValue > 100) {
     throw new Error('Procentinė nuolaida negali viršyti 100 %.');

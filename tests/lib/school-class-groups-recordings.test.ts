@@ -15,6 +15,7 @@ import {
   toggleMemberIds,
   updateGroupScheduleSlot,
   validateSchoolClassGroup,
+  validateSchoolMemberSchedules,
 } from '../../src/lib/schoolClassGroups';
 
 describe('schoolLessonRecordings + class groups', () => {
@@ -113,6 +114,22 @@ describe('schoolLessonRecordings + class groups', () => {
       { weekday: 1, start_time: '15:00', end_time: '16:00' },
       { weekday: 3, start_time: '15:00', end_time: '16:00' },
     ]);
+  });
+
+  it('accepts a nonempty member time subset and rejects a time outside the group', () => {
+    const slots = [
+      { weekday: 2, start_time: '11:00', end_time: '11:45' },
+      { weekday: 4, start_time: '11:00', end_time: '11:45' },
+    ];
+    expect(validateSchoolMemberSchedules(slots, [
+      { student_id: 's1', schedule_slots: [{ weekday: 4, start_time: '11:00' }] },
+    ])).toBe(true);
+    expect(validateSchoolMemberSchedules(slots, [
+      { student_id: 's1', schedule_slots: [{ weekday: 5, start_time: '11:00' }] },
+    ])).toBe(false);
+    expect(validateSchoolMemberSchedules(slots, [
+      { student_id: 's1', schedule_slots: [] },
+    ])).toBe(false);
   });
 
   it('keeps an independent start time on each weekday', () => {

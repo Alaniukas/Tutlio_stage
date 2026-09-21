@@ -20,6 +20,8 @@ import { sendSchoolMonthlyInvoiceEmail, type SchoolMonthlyInvoiceRow } from './_
 import { publicAppOrigin } from './_lib/publicLinkToken.js';
 import { computeCanonicalSchoolMonthlyBill, groupOccurrenceKey, hasSchoolOccurrenceEvidence, schoolContractBillingModel, schoolInvoiceDueDate } from '../src/lib/schoolCanonicalBilling.js';
 import { schoolContractSuspensionOverlapsPeriod } from '../src/lib/schoolContractLifecycle.js';
+import { isSchoolConsultationsOrg } from '../src/lib/schoolConsultationsOrg.js';
+import { discountExtraLessonsBill, type ExtraLessonsDiscountAgreement } from '../src/lib/schoolExtraLessonsDiscount.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const runStartedAt = Date.now();
@@ -69,6 +71,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (error) return res.status(500).json({ error: error.message });
   const rows = contracts || [];
+  const discountByContract = new Map<string, ExtraLessonsDiscountAgreement[]>();
+  // Existing parent-approved terms remain payable even if the UI feature is later disabled.
+  const discountContractIds = rows
+    .filter((contract) => isSchoolConsultationsOrg(contract.organization_id))
+    .map((contract) => contract.id);
+  for (let offset = 0; offset < discountContractIds.length; offset += 100) {
+    const ids = discountContractIds.slice(offset, offset + 100);
+    const { data: agreements, error: discountError } = await readAllSchoolBillingRows((afterId) => {
+      let query = supabase.from('school_discount_agreements')
+        .select('id, contract_id, agreement_number, subject_id, tutor_id, discount_type, discount_value, valid_from, valid_until, accepted_at, note')
+        .in('contract_id', ids)
+        .eq('status', 'accepted')
+        .lte('valid_from', end)
+        .gte('valid_until', start)
+        .order('id', { ascending: true })
+        .limit(500);
+      if (afterId) query = query.gt('id', afterId);
+      return query;
+    });
+    if (discountError) return res.status(500).json({ error: discountError.message });
+    for (const agreement of agreements || []) {
+      const list = discountByContract.get(agreement.contract_id) || [];
+      list.push(agreement as ExtraLessonsDiscountAgreement);
+      discountByContract.set(agreement.contract_id, list);
+    }
+  }
   let created = 0;
   let skipped = 0;
   let emailed = 0;
@@ -83,7 +111,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     : (process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt');
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
   const emailInvoice = async (invoice: SchoolMonthlyInvoiceRow, contract: any) => {
-    if (invoice.invoice_email_sent_at || invoice.payment_status !== 'pending') return;
+    if (invoice.invoice_email_sent_at || (invoice.payment_status !== 'pending'
+      && !(invoice.payment_status === 'paid' && Number(invoice.total_eur) === 0))) return;
     if (!contract.student || !contract.org) { failed++; return; }
     const outcome = await sendSchoolMonthlyInvoiceEmail(supabase, invoice, {
       apiOrigin, publicOrigin: publicAppOrigin(), serviceRoleKey,
@@ -186,7 +215,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       loadedSessions = await readAllSchoolBillingRows((afterId) => {
       let query = supabase
       .from('sessions')
-      .select('id, student_id, start_time, end_time, status, student_joined_at, tutor_joined_at, status_confirmed_at, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, school_billing_kind, class_group_id, subject_id, tutor:profiles!sessions_tutor_id_fkey!inner(organization_id)')
+      .select('id, student_id, tutor_id, start_time, end_time, status, student_joined_at, tutor_joined_at, status_confirmed_at, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, school_billing_kind, class_group_id, subject_id, tutor:profiles!sessions_tutor_id_fkey!inner(organization_id)')
       .eq('tutor.organization_id', contract.organization_id)
       .gte('start_time', wallClockToUtc(start, '00:00:00').toISOString())
       .lte('start_time', new Date(wallClockToUtc(end, '23:59:59').getTime() + 999).toISOString())
@@ -239,13 +268,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (actualBill?.review_session_ids.length) {
       held++; review.push({ contract_id: contract.id, reason: 'unconfirmed_session_outcomes', session_ids: actualBill.review_session_ids }); continue;
     }
+    const agreements = discountByContract.get(contract.id) || [];
+    if (agreements.length && model !== 'actual') {
+      held++; review.push({ contract_id: contract.id, reason: 'discount_requires_actual_session_billing' }); continue;
+    }
     if (!(bill.total_eur > 0)) {
       skipped += 1;
       continue;
     }
+    const discounted = discountExtraLessonsBill(
+      bill.total_eur, bill.unit_price_eur, actualBill?.billed_session_ids || [], matchingSessions,
+      agreements,
+    );
 
     if (dryRun) {
-      planned.push({ contract_id: contract.id, existing: false, billing_model: model, total_eur: bill.total_eur,
+      planned.push({ contract_id: contract.id, existing: false, billing_model: model, total_eur: discounted.totalEur,
+        subtotal_eur: discounted.subtotalEur, discount_amount_eur: discounted.discountAmountEur,
         base_lessons: bill.base_lessons, extra_lessons: bill.extra_lessons,
         billed_session_ids: actualBill?.billed_session_ids || bill.extra_session_ids });
       continue;
@@ -265,11 +303,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       base_amount_eur: bill.base_amount_eur,
       extra_lessons: bill.extra_lessons,
       extra_amount_eur: bill.extra_amount_eur,
-      total_eur: bill.total_eur,
+      subtotal_eur: discounted.subtotalEur,
+      discount_amount_eur: discounted.discountAmountEur,
+      discount_note: discounted.discountNote,
+      total_eur: discounted.totalEur,
       extra_session_ids: bill.extra_session_ids,
       billing_model: model,
       billed_session_ids: actualBill?.billed_session_ids || [],
-      payment_status: 'pending',
+      payment_status: discounted.totalEur === 0 ? 'paid' : 'pending',
+      paid_at: discounted.totalEur === 0 ? new Date().toISOString() : null,
       due_date: model === 'actual' ? schoolInvoiceDueDate(new Date()) : due.toISOString().slice(0, 10),
     }).select('*').single();
     if (insErr || !inserted) {

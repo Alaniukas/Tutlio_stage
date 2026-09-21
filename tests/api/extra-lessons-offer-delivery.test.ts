@@ -97,6 +97,26 @@ it('does not send a resend email until a contract PDF exists', async () => {
   expect(fetch).not.toHaveBeenCalled();
 });
 
+it('never resends an old text PDF when DOCX regeneration fails', async () => {
+  const originalFrom = state.db.from;
+  state.db.from = vi.fn((table: string) => table === 'school_contracts'
+    ? query({
+        id: 'contract-1', organization_id: 'school-1', student_id: 'student-1',
+        contract_number: 'PP-1', kind: 'extra_lessons', signing_status: 'sent',
+        accepted_at: null, pdf_url: 'old-text.pdf', filled_body: 'Contract body',
+        template_id: null, order_snapshot: { service_type: 'group', service_name: 'Math',
+          duration_minutes: 45, unit_price_eur: 20, base_lessons_per_month: 4,
+          indicative_monthly_eur: 80, schedule_label: 'Thursday 11:00' },
+      })
+    : originalFrom(table));
+  const send = vi.spyOn(globalThis, 'fetch');
+  const response: any = { status: vi.fn().mockReturnThis(), json: vi.fn().mockImplementation((value) => value) };
+  const result = await handler({ method: 'POST', body: { contract_id: 'contract-1', regenerate_pdf: true, send: true }, headers: {} } as any, response);
+  expect(response.status).toHaveBeenCalledWith(503);
+  expect(result).toMatchObject({ code: 'contract_pdf_generation_failed', emailSent: false });
+  expect(send).not.toHaveBeenCalled();
+});
+
 it('discards a new offer instead of saving a sent contract without PDF', async () => {
   const deleted: Array<{ table: string; id?: string; contractId?: string }> = [];
   const fetch = vi.spyOn(globalThis, 'fetch');

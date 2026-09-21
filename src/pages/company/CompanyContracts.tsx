@@ -59,7 +59,7 @@ import CompanyStaffContracts from '@/pages/company/CompanyStaffContracts';
 import { isExtraLessonsContractKind } from '@/lib/extraLessonsContract';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import SchoolDiscountOfferDialog from '@/components/school/SchoolDiscountOfferDialog';
-import { schoolConsultationsEnabled } from '@/lib/schoolConsultationsOrg';
+import { schoolExtraLessonsDiscountEnabled } from '@/lib/schoolConsultationsOrg';
 import { isSchoolContractSuspended } from '@/lib/schoolContractLifecycle';
 import SchoolContractTerminationDialog, {
   type SchoolContractTerminationImpact,
@@ -1761,6 +1761,22 @@ export default function CompanyContracts() {
     })();
   };
 
+  const regenerateExtraContractPdf = async (contract: Contract) => {
+    try {
+      const res = await fetch('/api/extra-lessons-contract-offer', {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contract_id: contract.id, regenerate_pdf: true, send: false }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Nepavyko atnaujinti sutarties PDF.');
+      setToast({ message: 'Sutarties PDF atnaujintas pagal DOCX šabloną.', type: 'success' });
+      reload();
+    } catch (error) {
+      setToast({ message: (error as Error).message, type: 'error' });
+    }
+  };
+
   const terminateContract = async () => {
     if (!terminationContract || terminationReason.trim().length < 3) return;
     setTerminationBusy(true);
@@ -2537,10 +2553,12 @@ export default function CompanyContracts() {
                             || c.signing_status === 'awaiting_school_signature'
                             || c.signing_status === 'signed_by_school'),
                           c.signing_status !== 'draft' && (extra || !eSignEnabled || c.signing_status === 'sent'),
+                          extra && c.signing_status === 'sent' && !c.accepted_at,
                           !extra && c.signing_status !== 'draft',
                           isSchoolView && !c.terminated_at && !c.withdrawal_requested_at,
-                          isSchoolView && !extra && c.signing_status === 'signed'
-                            && schoolConsultationsEnabled(orgId, orgFeatures),
+                          isSchoolView && extra && c.signing_status === 'signed' && Boolean(c.accepted_at)
+                            && !c.terminated_at && !c.withdrawal_requested_at
+                            && schoolExtraLessonsDiscountEnabled(orgId, orgFeatures),
                         ].some(Boolean);
                         if (!menuActions) return null;
                         return (
@@ -2596,10 +2614,22 @@ export default function CompanyContracts() {
                                 {tr('school.uploadSignedCopy')}
                               </button>
                             )}
+                            {extra && c.signing_status === 'sent' && !c.accepted_at && (
+                              <button
+                                type="button"
+                                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left hover:bg-gray-50"
+                                onClick={() => void regenerateExtraContractPdf(c)}
+                              >
+                                <FileText className="w-4 h-4 shrink-0" />
+                                Atnaujinti PDF pagal DOCX
+                              </button>
+                            )}
                             {isSchoolView
-                              && !extra
+                              && extra
                               && c.signing_status === 'signed'
-                              && schoolConsultationsEnabled(orgId, orgFeatures)
+                              && c.accepted_at
+                              && !c.terminated_at && !c.withdrawal_requested_at
+                              && schoolExtraLessonsDiscountEnabled(orgId, orgFeatures)
                               && c.student_id && (
                               <button
                                 type="button"

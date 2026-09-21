@@ -6,12 +6,19 @@ const mocks = vi.hoisted(() => ({
   listRecordings: vi.fn(),
   createTicket: vi.fn(),
   createViewerSession: vi.fn(),
+  slotScope: vi.fn(),
+  slotTags: vi.fn(),
   mappings: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('../../api/_lib/auth.js', () => ({ verifyRequestAuth: mocks.verifyAuth }));
 vi.mock('../../api/_lib/schoolRecordingAccess.js', () => ({
   resolveRecordingViewerAccess: mocks.resolveAccess,
+}));
+vi.mock('../../api/_lib/schoolRecordingSlotAccess.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../api/_lib/schoolRecordingSlotAccess')>(),
+  recordingSlotScope: mocks.slotScope,
+  recordingSlotTags: mocks.slotTags,
 }));
 vi.mock('../../api/_lib/googleDriveRecordings.js', () => ({
   extractGoogleDriveId: vi.fn(),
@@ -85,6 +92,8 @@ describe('GET /api/school-lesson-recordings', () => {
     }]);
     mocks.createTicket.mockReset().mockReturnValue('signed-playback-ticket');
     mocks.createViewerSession.mockReset().mockReturnValue('signed-viewer-session');
+    mocks.slotScope.mockReset().mockResolvedValue({ unrestricted: true, schedules: [] });
+    mocks.slotTags.mockReset().mockResolvedValue(new Map());
   });
 
   it('returns only the resolved group names without listing Drive until a group is requested', async () => {
@@ -136,6 +145,8 @@ describe('GET /api/school-lesson-recordings', () => {
       isAdmin: false,
       isTutor: false,
       isStudentOrParent: true,
+      studentIds: ['student-row'],
+      adminOrganizationId: null,
     });
     mocks.mappings = [{
       group_id: null,
@@ -164,6 +175,15 @@ describe('GET /api/school-lesson-recordings', () => {
       groupId: 'subject:subject-allowed',
       fileId: 'drive-file-id',
     });
+  });
+
+  it('does not issue a playback ticket for another group day', async () => {
+    mocks.slotScope.mockResolvedValue({ unrestricted: false, schedules: [[{ weekday: 4, start_time: '11:00' }]] });
+    mocks.slotTags.mockResolvedValue(new Map([['drive-file-id', { weekday: 2, start_time: '11:00' }]]));
+    const res = mockRes();
+    await handler({ method: 'GET', query: { groupId: 'group-allowed' }, headers: {} } as any, res as any);
+    expect(res.getResult().body.groups[0].recordings).toEqual([]);
+    expect(mocks.createTicket).not.toHaveBeenCalled();
   });
 
   it('does not touch Drive when the viewer has no authorized groups', async () => {

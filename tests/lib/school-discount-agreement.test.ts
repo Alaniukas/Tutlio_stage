@@ -32,6 +32,13 @@ describe('school discount agreement', () => {
     expect(schoolDiscountTermsLabel('amount', 12.5)).toContain('mėnesio sumos kiekvienoje sąskaitoje');
   });
 
+  it('allows a group contract without a subject while keeping individual subjects required', () => {
+    const input = { subjectId: null, tutorId: 'teacher', discountType: 'percent' as const,
+      discountValue: 20, validFrom: '2026-09-01', validUntil: '2027-06-30' };
+    expect(() => normalizeSchoolDiscountAgreementInput(input)).toThrow('Pasirinkite užsiėmimą');
+    expect(normalizeSchoolDiscountAgreementInput(input, { allowMissingSubject: true }).subjectId).toBeNull();
+  });
+
   it('rejects invalid percentages and date ranges', () => {
     expect(() => normalizeSchoolDiscountAgreementInput({
       subjectId: 'subject-1', discountType: 'percent', discountValue: 101,

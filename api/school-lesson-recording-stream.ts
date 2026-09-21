@@ -11,6 +11,7 @@ import {
   resolveHomeworkRecordingGroup,
   resolveRecordingViewerAccess,
 } from './_lib/schoolRecordingAccess.js';
+import { recordingSlotScope, recordingSlotTag, recordingVisibleToScope } from './_lib/schoolRecordingSlotAccess.js';
 import {
   verifySchoolHomeworkRecordingTicket,
   verifySchoolRecordingTicket,
@@ -62,10 +63,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Re-check current relationships on every media request. Removing a
     // member, teacher, folder mapping, or feature flag revokes the next range.
+    const access = loginTicket
+      ? await resolveRecordingViewerAccess(supabase, loginTicket.userId)
+      : null;
     const group = homeworkTicket
       ? await resolveHomeworkRecordingGroup(supabase, homeworkTicket.studentId, homeworkTicket.groupId)
-      : (await resolveRecordingViewerAccess(supabase, loginTicket!.userId))
-        .groups.find((candidate) => candidate.id === loginTicket!.groupId) || null;
+      : access?.groups.find((candidate) => candidate.id === loginTicket!.groupId) || null;
     if (!group) return res.status(403).json({ error: 'Prieiga prie šio įrašo neleidžiama.' });
     const fileId = (homeworkTicket || loginTicket)!.fileId;
 
@@ -87,6 +90,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       || !isRecordingWithinRetention(file.createdTime)
     ) {
       return res.status(404).json({ error: 'Įrašas nerastas arba jo saugojimo terminas pasibaigė.' });
+    }
+    if (group.kind === 'class_group') {
+      const [scope, tag] = await Promise.all([
+        recordingSlotScope(
+          supabase,
+          group.sourceId,
+          homeworkTicket ? [homeworkTicket.studentId] : access?.studentIds || [],
+          !homeworkTicket && (access?.adminOrganizationId === group.organizationId || group.tutorId === loginTicket?.userId),
+        ),
+        recordingSlotTag(supabase, group.sourceId, fileId),
+      ]);
+      if (!recordingVisibleToScope(scope, tag)) {
+        return res.status(403).json({ error: 'Šis įrašas nėra skirtas vaiko lankomam grupės laikui.' });
+      }
     }
     if (!file.size) return res.status(422).json({ error: 'Google Drive nepateikė įrašo dydžio.' });
 

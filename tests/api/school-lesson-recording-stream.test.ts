@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   getMetadata: vi.fn(),
   fetchRange: vi.fn(),
   mapping: { drive_folder_id: 'folder-allowed' } as Record<string, unknown> | null,
+  slotScope: vi.fn(),
+  slotTag: vi.fn(),
 }));
 
 vi.mock('../../api/_lib/schoolRecordingTicket.js', () => ({
@@ -19,6 +21,11 @@ vi.mock('../../api/_lib/schoolRecordingTicket.js', () => ({
 vi.mock('../../api/_lib/schoolRecordingAccess.js', () => ({
   resolveRecordingViewerAccess: mocks.resolveAccess,
   resolveHomeworkRecordingGroup: mocks.resolveHomeworkGroup,
+}));
+vi.mock('../../api/_lib/schoolRecordingSlotAccess.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../api/_lib/schoolRecordingSlotAccess')>(),
+  recordingSlotScope: mocks.slotScope,
+  recordingSlotTag: mocks.slotTag,
 }));
 vi.mock('../../api/_lib/googleDriveRecordings.js', () => ({
   getDriveFileMetadata: mocks.getMetadata,
@@ -89,6 +96,8 @@ describe('GET /api/school-lesson-recording-stream', () => {
       isAdmin: false,
       isTutor: false,
       isStudentOrParent: true,
+      studentIds: ['student-row'],
+      adminOrganizationId: null,
     });
     mocks.mapping = { drive_folder_id: 'folder-allowed' };
     mocks.getMetadata.mockReset().mockResolvedValue({
@@ -101,6 +110,8 @@ describe('GET /api/school-lesson-recording-stream', () => {
       canDownload: true,
     });
     mocks.fetchRange.mockReset();
+    mocks.slotScope.mockReset().mockResolvedValue({ unrestricted: true, schedules: [] });
+    mocks.slotTag.mockReset().mockResolvedValue(null);
   });
 
   it('rejects a copied playback URL when the browser has no matching viewer session', async () => {
@@ -152,6 +163,15 @@ describe('GET /api/school-lesson-recording-stream', () => {
         'Cache-Control': 'private, no-store, max-age=0',
       },
     });
+    expect(mocks.fetchRange).not.toHaveBeenCalled();
+  });
+
+  it('rejects an old playback ticket after a child is restricted to another day', async () => {
+    mocks.slotScope.mockResolvedValue({ unrestricted: false, schedules: [[{ weekday: 4, start_time: '11:00' }]] });
+    mocks.slotTag.mockResolvedValue({ weekday: 2, start_time: '11:00' });
+    const res = mockRes();
+    await handler({ method: 'HEAD', query: { t: 'signed' }, headers: {} } as any, res);
+    expect(res.getResult().statusCode).toBe(403);
     expect(mocks.fetchRange).not.toHaveBeenCalled();
   });
 

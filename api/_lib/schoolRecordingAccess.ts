@@ -14,6 +14,8 @@ export interface RecordingViewerGroup {
 export interface RecordingViewerAccess {
   groups: RecordingViewerGroup[];
   organizationIds: string[];
+  studentIds: string[];
+  adminOrganizationId: string | null;
   canManage: boolean;
   isAdmin: boolean;
   isTutor: boolean;
@@ -346,6 +348,8 @@ export async function resolveRecordingViewerAccess(
   return {
     groups,
     organizationIds: [...enabledOrgIds],
+    studentIds,
+    adminOrganizationId: adminCanView ? admin?.organizationId || null : null,
     canManage,
     isAdmin: adminCanView,
     isTutor: groups.some((group) => group.tutorId === userId),

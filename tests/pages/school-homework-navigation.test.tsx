@@ -84,6 +84,45 @@ describe('school homework lesson navigation', () => {
     expect(screen.queryByText('Praeities grupė')).toBeNull();
   });
 
+  it('does not tell parents to wait for the clock when the join link is unavailable', async () => {
+    const now = Date.now();
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        now: new Date(now).toISOString(),
+        school: { name: 'Demo Mokykla' },
+        student: { id: 'student', name: 'Mokinys' },
+        terminology: { staff: true, activity: false },
+        limits: { maxBytes: 10_000_000, allowedExt: ['.pdf'] },
+        sessions: [{
+          id: 'lesson',
+          start: new Date(now + 10 * 60_000).toISOString(),
+          end: new Date(now + 55 * 60_000).toISOString(),
+          status: 'active',
+          teacher: 'Mokytoja',
+          group: 'Matematika',
+          subject: '',
+          topic: '',
+          joinUrl: null,
+          hasMeetingLink: true,
+          joinBlockedByContract: true,
+          files: [],
+        }],
+      }),
+    })));
+
+    render(
+      <MemoryRouter initialEntries={['/school-homework?student=student&t=token']}>
+        <SchoolHomework />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/šiai pamokai nėra galiojančios sutarties/)).toBeTruthy();
+    expect(screen.queryByText(/Prisijungti bus galima nuo/)).toBeNull();
+  });
+
   it('shows group recordings from the homework payload without a Tutlio login', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,

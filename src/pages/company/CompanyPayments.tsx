@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, CreditCard, Send, CheckCircle, Clock, AlertCircle, Trash2, Loader2, ChevronDown, ChevronUp, ReceiptText, BadgePercent } from 'lucide-react';
+import { Plus, CreditCard, Send, CheckCircle, Clock, AlertCircle, Trash2, Loader2, ChevronDown, ChevronUp, ReceiptText } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { supabase } from '@/lib/supabase';
 import { sendEmail } from '@/lib/email';
@@ -28,7 +28,6 @@ import { useTranslation } from '@/lib/i18n';
 import { useSchoolPaymentsData, type SchoolPaymentInstallment } from '@/hooks/useSchoolPaymentsData';
 import { format } from 'date-fns';
 import SchoolMonthlyInvoiceDialog from '@/components/school/SchoolMonthlyInvoiceDialog';
-import SchoolDiscountOfferDialog from '@/components/school/SchoolDiscountOfferDialog';
 import { schoolConsultationsEnabled } from '@/lib/schoolConsultationsOrg';
 
 interface NewInstallmentRow {
@@ -62,7 +61,6 @@ export default function CompanyPayments() {
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [collapsedContracts, setCollapsedContracts] = useState<Record<string, boolean>>({});
   const [monthlyInvoiceOpen, setMonthlyInvoiceOpen] = useState(false);
-  const [discountOfferOpen, setDiscountOfferOpen] = useState(false);
 
   const monthlyInvoicesEnabled = schoolConsultationsEnabled(orgId, orgFeatures);
   const monthlyInvoiceStudents = useMemo(() => {
@@ -260,19 +258,10 @@ export default function CompanyPayments() {
               <span className="rounded-xl bg-emerald-700 p-2.5 text-white shadow-sm"><ReceiptText className="h-5 w-5" /></span>
               <div>
                 <p className="font-semibold text-gray-900">Mėnesinės užsiėmimų sąskaitos</p>
-                <p className="mt-1 max-w-2xl text-sm text-gray-600">Suteikite nuolaidą patvirtinimui arba formuokite sąskaitą su jau patvirtintomis nuolaidomis.</p>
+                <p className="mt-1 max-w-2xl text-sm text-gray-600">Formuokite mėnesinę sąskaitą. Nuolaidų priedai kuriami prie užsiėmimų sutarčių.</p>
               </div>
             </div>
             <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-              <Button
-                type="button"
-                variant="outline"
-                className="gap-2 border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-50"
-                disabled={monthlyInvoiceStudents.length === 0}
-                onClick={() => setDiscountOfferOpen(true)}
-              >
-                <BadgePercent className="h-4 w-4" /> Taikyti nuolaidą
-              </Button>
               <Button
                 type="button"
                 className="gap-2 bg-emerald-700 hover:bg-emerald-800"
@@ -459,13 +448,6 @@ export default function CompanyPayments() {
 
       {monthlyInvoicesEnabled && orgId && (
         <>
-          <SchoolDiscountOfferDialog
-            open={discountOfferOpen}
-            onOpenChange={setDiscountOfferOpen}
-            organizationId={orgId}
-            students={monthlyInvoiceStudents}
-            onSaved={(message, type) => setToast({ message, type })}
-          />
           <SchoolMonthlyInvoiceDialog
             open={monthlyInvoiceOpen}
             onOpenChange={setMonthlyInvoiceOpen}

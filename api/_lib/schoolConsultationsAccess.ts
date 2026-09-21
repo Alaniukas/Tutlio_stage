@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest } from '../types.js';
 import { verifyRequestAuth } from './auth.js';
 import { getOrgAdminAccessByUserId } from './orgAdminAccess.js';
-import { schoolConsultationsEnabled } from '../../src/lib/schoolConsultationsOrg.js';
+import { schoolConsultationsEnabled, schoolExtraLessonsDiscountEnabled } from '../../src/lib/schoolConsultationsOrg.js';
 
 export function serviceSupabase(): SupabaseClient {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -29,6 +29,22 @@ export async function assertOrgConsultationsEnabled(
   if (!org) return { ok: false, status: 404, error: 'Organizacija nerasta.' };
   const features = (org.features || {}) as Record<string, unknown>;
   if (!schoolConsultationsEnabled(org.id, features) && !schoolConsultationsEnabled(org.slug, features)) {
+    return { ok: false, status: 404, error: 'Funkcija nepasiekiama.' };
+  }
+  return { ok: true };
+}
+
+export async function assertOrgExtraLessonsDiscountEnabled(
+  supabase: SupabaseClient,
+  organizationId: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const { data: org } = await supabase.from('organizations')
+    .select('id, slug, features, entity_type').eq('id', organizationId).maybeSingle();
+  if (!org) return { ok: false, status: 404, error: 'Organizacija nerasta.' };
+  const features = (org.features || {}) as Record<string, unknown>;
+  if (org.entity_type !== 'school'
+    || (!schoolExtraLessonsDiscountEnabled(org.id, features)
+      && !schoolExtraLessonsDiscountEnabled(org.slug, features))) {
     return { ok: false, status: 404, error: 'Funkcija nepasiekiama.' };
   }
   return { ok: true };

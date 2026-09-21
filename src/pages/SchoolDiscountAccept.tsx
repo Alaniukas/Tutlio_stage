@@ -127,7 +127,7 @@ export default function SchoolDiscountAccept({ previewFixture }: Props = {}) {
               ['Užsiėmimai', preview.activityLabel],
               ['Nuolaida', discountDescription],
               ['Galiojimas', `${preview.validFrom} - ${preview.validUntil}`],
-              ['Metinė sutartis', `Nr. ${preview.contractNumber}`],
+              ['Užsiėmimų sutartis', `Nr. ${preview.contractNumber}`],
               ['Priedas', preview.agreementNumber],
             ].map(([label, value]) => (
               <div key={label} className="grid gap-1 px-4 py-3 sm:grid-cols-[150px_1fr]">
@@ -151,7 +151,7 @@ export default function SchoolDiscountAccept({ previewFixture }: Props = {}) {
                   <a href={preview.pdfUrl} target="_blank" rel="noreferrer"><Download className="h-4 w-4" /> Atsisiųsti sutarties priedą</a>
                 </Button>
               )}
-              <p className="text-xs text-slate-500">Patvirtintas priedas išsaugotas prie mokinio metinės sutarties.</p>
+              <p className="text-xs text-slate-500">Patvirtintas priedas išsaugotas prie mokinio užsiėmimų sutarties.</p>
             </div>
           ) : (
             <div className="space-y-3 pt-2 text-center">
@@ -160,7 +160,7 @@ export default function SchoolDiscountAccept({ previewFixture }: Props = {}) {
                 Sutinku
               </Button>
               <p className="text-xs leading-relaxed text-slate-500">
-                Paspausdami „Sutinku“ patvirtinate aukščiau nurodytas nuolaidos sąlygas ir sutinkate, kad būtų suformuotas priedas prie metinės sutarties.
+                Paspausdami „Sutinku“ patvirtinate aukščiau nurodytas nuolaidos sąlygas ir sutinkate, kad būtų suformuotas priedas prie užsiėmimų sutarties.
               </p>
             </div>
           )}

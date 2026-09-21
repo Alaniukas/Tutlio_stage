@@ -4,6 +4,7 @@ import {
   recordingRetentionDays,
 } from './googleDriveRecordings.js';
 import { createSchoolHomeworkRecordingTicket } from './schoolRecordingTicket.js';
+import { recordingSlotScope, recordingSlotTags, recordingVisibleToScope } from './schoolRecordingSlotAccess.js';
 
 export type HomeworkRecordingFile = {
   id: string;
@@ -170,10 +171,19 @@ export async function listHomeworkGroupRecordings(
         HOMEWORK_DRIVE_LIST_TIMEOUT_MS,
         'Drive list timed out',
       );
+      const visible = group.id.startsWith('subject:')
+        ? recordings
+        : await (async () => {
+            const [scope, tags] = await Promise.all([
+              recordingSlotScope(supabase, group.id, [params.studentId]),
+              recordingSlotTags(supabase, group.id),
+            ]);
+            return recordings.filter((file) => recordingVisibleToScope(scope, tags.get(file.id) || null));
+          })();
       return {
         id: group.id,
         name: group.name,
-        recordings: mapRecordingFiles(params.studentId, group.id, recordings),
+        recordings: mapRecordingFiles(params.studentId, group.id, visible),
         loadError: null,
         pending: false,
       } satisfies HomeworkRecordingGroup;

@@ -32,3 +32,11 @@ export function schoolConsultationsEnabled(
 ): boolean {
   return isSchoolConsultationsOrg(orgIdOrSlug) && hasSchoolConsultationsFeature(features, orgIdOrSlug);
 }
+
+/** Discount addenda belong to signed extra-lessons contracts, independently of consultations. */
+export function schoolExtraLessonsDiscountEnabled(
+  orgIdOrSlug: string | null | undefined,
+  features: Record<string, unknown> | null | undefined,
+): boolean {
+  return isSchoolConsultationsOrg(orgIdOrSlug) && features?.school_extra_lessons_contract === true;
+}

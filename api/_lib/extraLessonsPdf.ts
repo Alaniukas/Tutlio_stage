@@ -24,7 +24,7 @@ import {
 } from '../../src/lib/extraLessonsContract.js';
 import { stripDocxBufferToAnnex } from './extraLessonsAnnexDocx.js';
 
-/** Leaves enough time for a complete legal-text fallback inside 120s functions. */
+/** Leaves time for the caller to report a converter failure inside 120s functions. */
 export const EXTRA_LESSONS_DOCX_TIMEOUT_MS = 90000;
 
 export async function signSchoolContractPdf(
@@ -139,11 +139,11 @@ export async function renderAndStoreExtraLessonsPdf(
 ): Promise<{
   uploadedPath: string | null;
   pdfBase64?: string;
-  renderMode: 'docx' | 'legal_text' | 'legal_text_fallback';
+  renderMode: 'docx' | 'legal_text';
 }> {
   const st = params.student || {};
   let pdfBytes: Uint8Array | null = null;
-  let renderMode: 'docx' | 'legal_text' | 'legal_text_fallback' = 'legal_text';
+  let renderMode: 'docx' | 'legal_text' = 'legal_text';
   const payload = extraLessonsDocxPayload({
     student: st,
     indicativeMonthlyEur: params.indicativeMonthlyEur,
@@ -162,27 +162,7 @@ export async function renderAndStoreExtraLessonsPdf(
       renderMode = 'docx';
     } catch (e) {
       const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
-      const fallbackBody = String(params.filledBody || '');
-      const requiredSections = [
-        '1. SUTARTIES ŠALYS IR UŽSAKYMO DUOMENYS',
-        '6. TEISĖ PER 14 DIENŲ ATSISAKYTI NUOTOLINĖS SUTARTIES',
-        '11. BAIGIAMOSIOS NUOSTATOS',
-        '1 PRIEDAS',
-      ];
-      const completeLegalBody = requiredSections.every((section) => fallbackBody.includes(section))
-        && !/\{\{[^}]+\}\}/.test(fallbackBody);
-      if (!completeLegalBody) {
-        throw new Error(
-          `Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną, o teisinio teksto atsarginė kopija nepilna: ${detail}`,
-          { cause: e },
-        );
-      }
-      renderMode = 'legal_text_fallback';
-      console.warn('[extra-lessons] DOCX conversion failed; using complete legal-text PDF fallback', {
-        contractId: params.contract.id,
-        organizationId: params.contract.organization_id,
-        detail,
-      });
+      throw new Error(`Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${detail}`, { cause: e });
     }
   } else if (params.contract.template_id) {
     const { data: tpl, error: templateErr } = await supabase

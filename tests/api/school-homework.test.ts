@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   uploadPaths: [] as string[],
   removed: [] as string[][],
   recordingGroups: [] as Array<Record<string, unknown>>,
+  profiles: [] as Array<Record<string, unknown>>,
+  subjects: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('../../api/_lib/schoolHomeworkRecordings.js', () => ({
@@ -40,7 +42,8 @@ vi.mock('@supabase/supabase-js', () => {
           const sid = filters.find(([c]) => c === 'student_id')?.[1];
           return resolve({ data: sid ? state.sessions.filter((s) => s.student_id === sid) : state.sessions, error: null });
         }
-        if (table === 'profiles') return resolve({ data: [{ id: 't1', full_name: 'Demo Mokytoja Ana' }], error: null });
+        if (table === 'profiles') return resolve({ data: state.profiles, error: null });
+        if (table === 'subjects') return resolve({ data: state.subjects, error: null });
         if (table === 'school_class_groups') return resolve({ data: [{ id: 'g1', name: 'QA Legal Matematika' }], error: null });
         if (table === 'school_class_group_members') {
           const sid = filters.find(([c]) => c === 'student_id')?.[1];
@@ -83,7 +86,9 @@ beforeEach(() => {
   process.env.SUPABASE_URL = 'https://example.supabase.co';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-key-test';
   process.env.APP_URL = 'https://tutlio.lt';
-  state.student = { id: STUDENT, full_name: 'Austėja Mockutė', organization_id: 'org1', detached_at: null };
+  state.student = { id: STUDENT, full_name: 'Austėja Mockutė', organization_id: 'org1', detached_at: null, personal_meeting_link: null };
+  state.profiles = [{ id: 't1', full_name: 'Demo Mokytoja Ana', personal_meeting_link: null }];
+  state.subjects = [];
   state.org = { id: 'org1', name: 'Demo Mokykla', entity_type: 'school', features: {} };
   const inFuture = new Date(Date.now() + 3 * 86_400_000).toISOString();
   state.sessions = [
@@ -162,6 +167,25 @@ describe('GET /api/school-homework', () => {
     expect(out.body.recordingGroups).toEqual([]);
   });
 
+  it('offers separate tracked links for overlapping lessons and resolves a teacher meeting link', async () => {
+    const start = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    state.profiles[0].personal_meeting_link = 'https://meet.google.com/teacher-room';
+    state.sessions = [
+      { id: 'lesson-a', student_id: STUDENT, start_time: start, end_time: start, status: 'active', meeting_link: null, tutor_id: 't1', class_group_id: 'g1', subject_id: null, topic: null },
+      { id: 'lesson-b', student_id: STUDENT, start_time: start, end_time: start, status: 'active', meeting_link: 'https://meet.google.com/second-room', tutor_id: 't1', class_group_id: 'g1', subject_id: null, topic: null },
+    ];
+    state.files = {};
+    const res = mockRes();
+    await handler({ method: 'GET', query: { student: STUDENT, t: token() }, headers: { host: 'tutlio.lt' } } as any, res as any);
+    const rows = res.getResult().body.sessions;
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row: any) => row.joinUrl)).toEqual([
+      expect.stringContaining('sid=lesson-a&role=student'),
+      expect.stringContaining('sid=lesson-b&role=student'),
+    ]);
+    expect(rows.map((row: any) => row.hasMeetingLink)).toEqual([true, true]);
+  });
+
   it('returns group Drive recordings on the public homework page', async () => {
     state.recordingGroups = [{
       id: 'g1',
@@ -200,6 +224,7 @@ describe('GET /api/school-homework', () => {
     await handler({ method: 'GET', query: { student: STUDENT, t: token() }, headers: { host: 'tutlio.lt' } } as any, res as any);
     expect(res.getResult().body.sessions[0].joinUrl).toBeNull();
     expect(res.getResult().body.sessions[0].hasMeetingLink).toBe(true);
+    expect(res.getResult().body.sessions[0].joinBlockedByContract).toBe(true);
   });
 });
 

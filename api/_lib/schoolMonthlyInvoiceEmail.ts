@@ -148,7 +148,10 @@ export async function sendSchoolMonthlyInvoiceEmail(
   ctx: SchoolMonthlyInvoiceEmailContext,
 ): Promise<{ sent: boolean; alreadySent?: boolean; reason?: string }> {
   if (invoice.invoice_email_sent_at) return { sent: false, alreadySent: true };
-  if (invoice.payment_status !== 'pending') return { sent: false, alreadySent: true };
+  if (invoice.payment_status !== 'pending'
+    && !(invoice.payment_status === 'paid' && Number(invoice.total_eur) === 0)) {
+    return { sent: false, alreadySent: true };
+  }
   const to = String(ctx.student.payer_email || ctx.student.email || '').trim();
   if (!to) return { sent: false, reason: 'no payer email' };
   const data = buildSchoolMonthlyInvoiceEmailData(invoice, ctx);

@@ -58,6 +58,13 @@ it('applies the pending tutor-pay, permission, and consultation migrations', asy
     await db.exec(migration('20260911120300_tutor_invites_help_team_category.sql'));
     await db.exec(migration('20260917120000_school_monthly_invoice_discounts.sql'));
     await db.exec(migration('20260917160000_school_discount_agreements.sql'));
+    await db.exec(migration('20260921150000_extra_lessons_discounts_without_subject.sql'));
+
+    const subjectColumn = (await db.query(`
+      SELECT is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'school_discount_agreements' AND column_name = 'subject_id'
+    `)).rows[0] as { is_nullable: string };
+    expect(subjectColumn.is_nullable).toBe('YES');
 
     const moneyColumns = (await db.query(`
       SELECT table_name, column_name, numeric_scale

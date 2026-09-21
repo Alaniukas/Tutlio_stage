@@ -20,13 +20,17 @@ import {
   addMinutesToTime,
   defaultSchoolYearRange,
   groupToWriteDraft,
+  memberFollowsGroupSlot,
   normalizeGroupSlots,
+  schoolMemberSlotKey,
   studentsForGroupPicker,
   toggleMemberIds,
   validateSchoolClassGroup,
+  validateSchoolMemberSchedules,
   withSlotEnds,
   type SchoolClassGroupRecord,
   type SchoolClassGroupSlot,
+  type SchoolMemberSlot,
 } from '@/lib/schoolClassGroups';
 
 export type ClassGroupStudentOption = {
@@ -123,6 +127,7 @@ export default function ClassGroupFormDialog(props: {
     emptyDraft('').slots,
   );
   const [studentIds, setStudentIds] = useState<string[]>([]);
+  const [memberSlots, setMemberSlots] = useState<Record<string, SchoolMemberSlot[] | null>>({});
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -145,6 +150,7 @@ export default function ClassGroupFormDialog(props: {
       setAdminActionNote(draft.admin_action_note || '');
       setSlots(draft.slots.length ? draft.slots : emptyDraft(draft.tutor_id).slots);
       setStudentIds(draft.student_ids || []);
+      setMemberSlots(Object.fromEntries((draft.members || []).map((member) => [member.student_id, member.schedule_slots])));
       return;
     }
     const blank = emptyDraft(props.defaultTutorId);
@@ -160,6 +166,7 @@ export default function ClassGroupFormDialog(props: {
     setAdminActionNote('');
     setSlots(blank.slots);
     setStudentIds([]);
+    setMemberSlots({});
   }, [props.open, props.mode, props.group, props.defaultTutorId]);
 
   const normalizedSlots = useMemo(
@@ -209,6 +216,10 @@ export default function ClassGroupFormDialog(props: {
   }, [props.tutors, tutorId, staff]);
 
   const save = async () => {
+    const members = studentIds.map((student_id) => ({
+      student_id,
+      schedule_slots: normalizedSlots.length === 1 ? null : memberSlots[student_id] ?? null,
+    }));
     const draft = {
       name,
       calendar_name: calendarName.trim() || null,
@@ -227,6 +238,10 @@ export default function ClassGroupFormDialog(props: {
       setError(t('school.groups.invalid'));
       return;
     }
+    if (props.canEditMembers && !validateSchoolMemberSchedules(normalizedSlots, members)) {
+      setError('Kiekvienam mokiniui pasirinkite bent vieną galiojantį grupės laiką.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -235,6 +250,7 @@ export default function ClassGroupFormDialog(props: {
         ...draft,
         slots: normalizedSlots,
         student_ids: props.canEditMembers ? studentIds : undefined,
+        members: props.canEditMembers ? members : undefined,
       };
       if (props.mode === 'edit' && props.group) payload.id = props.group.id;
       const res = await fetch('/api/school-class-groups', {
@@ -404,6 +420,40 @@ export default function ClassGroupFormDialog(props: {
                 </span>
               ))}
             </div>
+            {props.canEditMembers && normalizedSlots.length > 1 && selectedStudents.length > 0 && (
+              <div className="rounded-lg border bg-white p-2.5 space-y-2">
+                <p className="text-xs font-medium text-gray-700">Kuriuos grupės laikus lanko kiekvienas vaikas?</p>
+                {selectedStudents.map((student) => (
+                  <div key={student.id} className="border-t pt-2 first:border-t-0 first:pt-0">
+                    <p className="text-xs font-medium text-gray-800">{student.full_name}</p>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                      {normalizedSlots.map((slot) => {
+                        const key = schoolMemberSlotKey(slot);
+                        const selected = memberFollowsGroupSlot(memberSlots[student.id], slot);
+                        return (
+                          <label key={key} className="inline-flex items-center gap-1 text-xs text-gray-700">
+                            <input type="checkbox" checked={selected} onChange={() => {
+                              const valid = new Set(normalizedSlots.map(schoolMemberSlotKey));
+                              const current = (memberSlots[student.id] ?? normalizedSlots)
+                                .filter((choice) => valid.has(schoolMemberSlotKey(choice)));
+                              const next = selected
+                                ? current.filter((choice) => schoolMemberSlotKey(choice) !== key)
+                                : [...current, { weekday: slot.weekday, start_time: slot.start_time }];
+                              if (!next.length) return;
+                              setMemberSlots((previous) => ({
+                                ...previous,
+                                [student.id]: next.length === normalizedSlots.length ? null : next,
+                              }));
+                            }} />
+                            {weekdayOptions.find((day) => day.v === slot.weekday)?.label} {slot.start_time.slice(0, 5)}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             {props.canEditMembers && (
               <>
                 <Input

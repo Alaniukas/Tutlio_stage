@@ -6,6 +6,8 @@ import {
   classGroupRowFields,
   parseClassGroupWriteBody,
   validateSchoolClassGroup,
+  validateSchoolMemberSchedules,
+  type SchoolClassGroupMemberWrite,
 } from '../src/lib/schoolClassGroups.js';
 import {
   materializeClassGroupNow,
@@ -13,7 +15,55 @@ import {
   type ReconcileResult,
 } from './_lib/schoolClassGroupMaterialize.js';
 
-const GROUP_SELECT = '*, tutor:profiles!school_class_groups_tutor_id_fkey(full_name), slots:school_class_group_slots(*), members:school_class_group_members(student_id, enrolled_at, student:students(full_name, email, grade))';
+const GROUP_SELECT = '*, tutor:profiles!school_class_groups_tutor_id_fkey(full_name), slots:school_class_group_slots(*), members:school_class_group_members(student_id, enrolled_at, schedule_slots, student:students(full_name, email, grade))';
+
+async function ownedMembers(
+  supabase: ReturnType<typeof serviceSupabase>,
+  orgId: string,
+  members: SchoolClassGroupMemberWrite[] | null,
+): Promise<SchoolClassGroupMemberWrite[] | null> {
+  if (members === null || members.length === 0) return members;
+  const { data, error } = await supabase.from('students').select('id')
+    .eq('organization_id', orgId).in('id', members.map((member) => member.student_id));
+  if (error) throw error;
+  const allowed = new Set((data || []).map((row) => row.id));
+  if (members.some((member) => !allowed.has(member.student_id))) {
+    throw new Error('Student is not in this organization');
+  }
+  return members;
+}
+
+async function saveGroupMembers(
+  supabase: ReturnType<typeof serviceSupabase>,
+  groupId: string,
+  members: SchoolClassGroupMemberWrite[] | null,
+): Promise<void> {
+  if (members === null) return;
+  const { data: existing, error: loadError } = await supabase.from('school_class_group_members')
+    .select('student_id, enrolled_at').eq('group_id', groupId);
+  if (loadError) throw loadError;
+  const enrolledAtByStudent = new Map((existing || []).map((row) => [row.student_id, row.enrolled_at]));
+  const wanted = new Set(members.map((member) => member.student_id));
+  const removed = (existing || []).map((row) => row.student_id).filter((id) => !wanted.has(id));
+  if (removed.length) {
+    const { error } = await supabase.from('school_class_group_members').delete()
+      .eq('group_id', groupId).in('student_id', removed);
+    if (error) throw error;
+  }
+  if (members.length) {
+    const { error } = await supabase.from('school_class_group_members').upsert(
+      members.map((member) => ({
+        group_id: groupId,
+        ...member,
+        ...(enrolledAtByStudent.has(member.student_id)
+          ? { enrolled_at: enrolledAtByStudent.get(member.student_id) }
+          : {}),
+      })),
+      { onConflict: 'group_id,student_id' },
+    );
+    if (error) throw error;
+  }
+}
 
 /**
  * Lessons show up in every calendar right after save (the hourly cron used to
@@ -139,21 +189,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select('group_id')
         .in('student_id', portalStudentIds);
       const groupIds = new Set((memberships || []).map((row: { group_id: string }) => row.group_id));
-      const studentGroups = (data || []).filter((g) => groupIds.has(g.id));
+      const visibleStudents = new Set(portalStudentIds);
+      const studentGroups = (data || []).filter((g) => groupIds.has(g.id)).map((g) => ({
+        ...g,
+        members: (g.members || []).filter((member: { student_id: string }) => visibleStudents.has(member.student_id)),
+      }));
       return res.status(200).json({ groups: studentGroups });
     }
     return res.status(200).json({ groups: [] });
   }
 
   if (req.method === 'POST') {
+    const createAdmin = await requireOrgAdminAccess(req, supabase, 'sessions.edit');
     const body = (req.body || {}) as Record<string, unknown>;
-    const draft = parseClassGroupWriteBody(body, admin.ok ? '' : auth.userId);
+    const draft = parseClassGroupWriteBody(body, createAdmin.ok ? '' : auth.userId);
     const errors = validateSchoolClassGroup(draft);
     if (errors.length) return res.status(400).json({ error: 'Invalid group', fields: errors });
-    if (!admin.ok && draft.tutor_id !== auth.userId) {
+    const requestedMembers = draft.members ?? draft.student_ids?.map((student_id) => ({ student_id, schedule_slots: null })) ?? null;
+    if (!validateSchoolMemberSchedules(draft.slots, requestedMembers)) {
+      return res.status(400).json({ error: 'Pasirinkite bent vieną galiojantį laiką kiekvienam grupės mokiniui.' });
+    }
+    if (!createAdmin.ok && draft.tutor_id !== auth.userId) {
       return res.status(403).json({ error: 'Teachers can only create their own groups' });
     }
-    if (admin.ok) {
+    if (createAdmin.ok) {
       const { data: tutor } = await supabase
         .from('profiles')
         .select('id')
@@ -163,13 +222,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!tutor) return res.status(400).json({ error: 'Teacher is not in this organization' });
     }
 
+    let members: SchoolClassGroupMemberWrite[] | null;
+    try {
+      members = await ownedMembers(supabase, orgId, requestedMembers);
+    } catch (memberError) {
+      return res.status(400).json({ error: (memberError as Error).message });
+    }
+
     const { data: group, error } = await supabase
       .from('school_class_groups')
       .insert({
         organization_id: orgId,
         ...classGroupRowFields(draft),
         created_by: auth.userId,
-        ...(draft.admin_action_required && !admin.ok ? {
+        ...(draft.admin_action_required && !createAdmin.ok ? {
           admin_action_requested_at: new Date().toISOString(),
           admin_action_requested_by: auth.userId,
         } : {}),
@@ -179,7 +245,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error || !group) return res.status(500).json({ error: error?.message || 'Insert failed' });
 
     if (draft.slots.length) {
-      await supabase.from('school_class_group_slots').insert(
+      const { error: slotError } = await supabase.from('school_class_group_slots').insert(
         draft.slots.map((s) => ({
           group_id: group.id,
           weekday: s.weekday,
@@ -187,20 +253,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           end_time: s.end_time,
         })),
       );
-    }
-    if (draft.student_ids?.length) {
-      const { data: owned } = await supabase
-        .from('students')
-        .select('id')
-        .eq('organization_id', orgId)
-        .in('id', draft.student_ids);
-      const allowed = new Set((owned || []).map((row: { id: string }) => row.id));
-      const memberIds = draft.student_ids.filter((id) => allowed.has(id));
-      if (memberIds.length) {
-        await supabase.from('school_class_group_members').insert(
-          memberIds.map((student_id) => ({ group_id: group.id, student_id })),
-        );
+      if (slotError) {
+        await supabase.from('school_class_groups').delete().eq('id', group.id);
+        return res.status(500).json({ error: slotError.message });
       }
+    }
+    try {
+      await saveGroupMembers(supabase, group.id, members);
+    } catch (memberError) {
+      await supabase.from('school_class_groups').delete().eq('id', group.id);
+      return res.status(500).json({ error: (memberError as Error).message });
     }
     const sync = await syncGroupSessions(supabase, group.id, orgId);
     return res.status(200).json({ ok: true, group, ...sync });
@@ -230,6 +292,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!editAdmin.ok) draft.tutor_id = existing.tutor_id;
     const errors = validateSchoolClassGroup(draft);
     if (errors.length) return res.status(400).json({ error: 'Invalid group', fields: errors });
+    const requestedMembers = editAdmin.ok
+      ? (draft.members ?? draft.student_ids?.map((student_id) => ({ student_id, schedule_slots: null })) ?? null)
+      : null;
+    if (!validateSchoolMemberSchedules(draft.slots, requestedMembers)) {
+      return res.status(400).json({ error: 'Pasirinkite bent vieną galiojantį laiką kiekvienam grupės mokiniui.' });
+    }
+    if (!editAdmin.ok && Array.isArray(body.slots)) {
+      const { data: currentMembers, error: scheduleError } = await supabase
+        .from('school_class_group_members').select('student_id, schedule_slots').eq('group_id', groupId);
+      if (scheduleError) return res.status(500).json({ error: scheduleError.message });
+      if (!validateSchoolMemberSchedules(draft.slots, (currentMembers || []) as SchoolClassGroupMemberWrite[])) {
+        return res.status(400).json({ error: 'Pakeitus grupės laiką, administracija turi atnaujinti vaikų pasirinktus laikus.' });
+      }
+    }
+    let members: SchoolClassGroupMemberWrite[] | null;
+    try {
+      members = await ownedMembers(supabase, orgId, requestedMembers);
+    } catch (memberError) {
+      return res.status(400).json({ error: (memberError as Error).message });
+    }
 
     if (editAdmin.ok && draft.tutor_id !== existing.tutor_id) {
       const { data: tutor } = await supabase
@@ -249,9 +331,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (updErr) return res.status(500).json({ error: updErr.message });
 
     if (Array.isArray(body.slots)) {
-      await supabase.from('school_class_group_slots').delete().eq('group_id', groupId);
+      const { error: deleteError } = await supabase.from('school_class_group_slots').delete().eq('group_id', groupId);
+      if (deleteError) return res.status(500).json({ error: deleteError.message });
       if (draft.slots.length) {
-        await supabase.from('school_class_group_slots').insert(
+        const { error: slotError } = await supabase.from('school_class_group_slots').insert(
           draft.slots.map((s) => ({
             group_id: groupId,
             weekday: s.weekday,
@@ -259,27 +342,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             end_time: s.end_time,
           })),
         );
+        if (slotError) return res.status(500).json({ error: slotError.message });
       }
     }
-
-    if (draft.student_ids !== null) {
-      const uniqueIds = draft.student_ids;
-      let allowed = uniqueIds;
-      if (uniqueIds.length) {
-        const { data: owned } = await supabase
-          .from('students')
-          .select('id')
-          .eq('organization_id', orgId)
-          .in('id', uniqueIds);
-        const ok = new Set((owned || []).map((row: { id: string }) => row.id));
-        allowed = uniqueIds.filter((id) => ok.has(id));
-      }
-      await supabase.from('school_class_group_members').delete().eq('group_id', groupId);
-      if (allowed.length) {
-        await supabase.from('school_class_group_members').insert(
-          allowed.map((student_id) => ({ group_id: groupId, student_id })),
-        );
-      }
+    try {
+      await saveGroupMembers(supabase, groupId, members);
+    } catch (memberError) {
+      return res.status(500).json({ error: (memberError as Error).message });
     }
 
     // A teacher raises the flag. An administrator resolves it by reviewing and

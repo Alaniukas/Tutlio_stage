@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ contracts: [] as any[], sessions: [] as any[], inserts: [] as any[], filters: [] as any[], sessionError: null as any, emails: 0 }));
+const state = vi.hoisted(() => ({ contracts: [] as any[], sessions: [] as any[], discounts: [] as any[], inserts: [] as any[], filters: [] as any[], sessionError: null as any, emails: 0 }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
   from(table: string) {
     let insert: any;
     let afterId: string | null = null;
     const query: any = {
       select: () => query, not: () => query, is: () => query,
-      order: () => query, limit: () => query,
+      order: () => query, limit: () => query, in: () => query,
       gt: (_key: string, value: string) => { afterId = value; return query; },
       eq: (key: string, value: any) => { state.filters.push([table, key, value]); return query; },
       gte: (key: string, value: any) => { state.filters.push([table, key, value]); return query; },
@@ -15,7 +15,7 @@ vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
       insert: (row: any) => { insert = row; state.inserts.push(row); return query; },
       maybeSingle: async () => ({ data: null, error: null }),
       single: async () => ({ data: { id: 'invoice', ...insert }, error: null }),
-      then: (resolve: any) => resolve({ data: afterId ? [] : table === 'school_contracts' ? state.contracts : state.sessions, error: table === 'sessions' ? state.sessionError : null }),
+      then: (resolve: any) => resolve({ data: afterId ? [] : table === 'school_contracts' ? state.contracts : table === 'school_discount_agreements' ? state.discounts : state.sessions, error: table === 'sessions' ? state.sessionError : null }),
     };
     return query;
   },
@@ -39,7 +39,7 @@ async function run(query: Record<string, string> = {}) {
 
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-01T04:00:00Z'));
-  state.contracts = []; state.sessions = []; state.inserts = []; state.filters = []; state.sessionError = null; state.emails = 0;
+  state.contracts = []; state.sessions = []; state.discounts = []; state.inserts = []; state.filters = []; state.sessionError = null; state.emails = 0;
 });
 afterEach(() => vi.useRealTimers());
 
@@ -73,6 +73,36 @@ describe('monthly school billing allocation', () => {
       ['first', 10, 'actual', ['a'], '2026-09-08'], ['second', 10, 'actual', ['b'], '2026-09-08'],
     ]);
     expect(state.filters.filter(([table, key]) => table === 'sessions' && key === 'class_group_id')).toHaveLength(2); // data page + empty page, once for both children.
+  });
+
+  it('freezes a parent-approved contract discount even if its UI feature was later disabled', async () => {
+    const organizationId = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
+    state.contracts = [{ ...contract('first', 'individual', null, 'math'), organization_id: organizationId,
+      org: { id: organizationId, features: { school_extra_lessons_contract: false } }, filled_body: EXTRA_LESSONS_LEGAL_BODY }];
+    state.sessions = [
+      { id: 'before', student_id: 'student', subject_id: 'math', tutor_id: 'teacher', start_time: '2026-08-10T10:00:00Z', status: 'completed', tutor_joined_at: '2026-08-10T10:00:00Z', school_billing_kind: 'base' },
+      { id: 'after', student_id: 'student', subject_id: 'math', tutor_id: 'teacher', start_time: '2026-08-20T10:00:00Z', status: 'completed', tutor_joined_at: '2026-08-20T10:00:00Z', school_billing_kind: 'base' },
+    ];
+    state.discounts = [{ id: 'discount', contract_id: 'first', agreement_number: 'NPR-1', subject_id: 'math', tutor_id: 'teacher',
+      discount_type: 'percent', discount_value: 25, valid_from: '2026-08-01', valid_until: '2026-08-31', accepted_at: '2026-08-15T10:00:00Z', note: null }];
+    const response = await run();
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(state.inserts[0]).toMatchObject({ contract_id: 'first', subtotal_eur: 20, discount_amount_eur: 2.5,
+      total_eur: 17.5, discount_note: 'NPR-1', payment_status: 'pending' });
+    expect(state.emails).toBe(1);
+  });
+
+  it('records a fully discounted month as paid and still emails the zero amount', async () => {
+    const organizationId = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
+    state.contracts = [{ ...contract('first', 'individual', null, 'math'), organization_id: organizationId,
+      org: { id: organizationId, features: { school_extra_lessons_contract: true } }, filled_body: EXTRA_LESSONS_LEGAL_BODY }];
+    state.sessions = [{ id: 'lesson', student_id: 'student', subject_id: 'math', tutor_id: 'teacher',
+      start_time: '2026-08-20T10:00:00Z', status: 'completed', tutor_joined_at: '2026-08-20T10:00:00Z', school_billing_kind: 'base' }];
+    state.discounts = [{ id: 'discount', contract_id: 'first', agreement_number: 'NPR-1', subject_id: 'math', tutor_id: 'teacher',
+      discount_type: 'percent', discount_value: 100, valid_from: '2026-08-01', valid_until: '2026-08-31', accepted_at: '2026-08-15T10:00:00Z', note: null }];
+    expect((await run()).status).toHaveBeenCalledWith(200);
+    expect(state.inserts[0]).toMatchObject({ subtotal_eur: 10, discount_amount_eur: 10, total_eur: 0, payment_status: 'paid' });
+    expect(state.emails).toBe(1);
   });
 
   it('holds an entire canonical invoice with unconfirmed outcomes', async () => {

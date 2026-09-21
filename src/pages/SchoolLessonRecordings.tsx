@@ -25,6 +25,7 @@ type Recording = {
   durationMillis: number | null;
   size: number | null;
   streamUrl: string;
+  slot?: { weekday: number; start_time: string } | null;
 };
 
 type RecordingGroup = {
@@ -32,11 +33,13 @@ type RecordingGroup = {
   kind: 'class_group' | 'individual';
   name: string;
   configured: boolean;
+  canManage?: boolean;
   driveFolderId?: string;
   driveFolderName?: string | null;
   loadError?: string | null;
   recordingsPending?: boolean;
   recordings: Recording[];
+  slots?: Array<{ weekday: number; start_time: string }>;
 };
 
 type RecordingsResponse = {
@@ -189,6 +192,7 @@ export default function SchoolLessonRecordings() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingGroupId, setSavingGroupId] = useState<string | null>(null);
+  const [savingSlotId, setSavingSlotId] = useState<string | null>(null);
   const [playbackGroupId, setPlaybackGroupId] = useState('');
   const [folderInputs, setFolderInputs] = useState<Record<string, string>>({});
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
@@ -311,6 +315,29 @@ export default function SchoolLessonRecordings() {
     }
   };
 
+  const saveRecordingSlot = async (
+    groupId: string,
+    fileId: string,
+    slot: { weekday: number; start_time: string } | null,
+  ) => {
+    setSavingSlotId(fileId);
+    setError('');
+    try {
+      const response = await fetch('/api/school-lesson-recordings', {
+        method: 'PUT',
+        headers: await authHeaders(),
+        body: JSON.stringify({ action: 'assign_slot', groupId, fileId, slot }),
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || t('school.recordings.error'));
+      await loadGroupVideos(groupId);
+    } catch (saveError) {
+      setError((saveError as Error)?.message || t('school.recordings.error'));
+    } finally {
+      setSavingSlotId(null);
+    }
+  };
+
   const withPortalLayout = (content: React.ReactNode) => {
     if (location.pathname.startsWith('/student/')) return <StudentLayout>{content}</StudentLayout>;
     if (location.pathname.startsWith('/parent/')) return <ParentLayout>{content}</ParentLayout>;
@@ -396,7 +423,7 @@ export default function SchoolLessonRecordings() {
                     : t('companyNav.groups')}
                 </p>
                 <h2 className="text-lg font-semibold text-gray-900">{group.name}</h2>
-                {data?.canManage && (
+                {group.canManage && (
                   <div className="mt-4 max-w-3xl">
                     <Label htmlFor={`drive-folder-${group.id}`}>{t('school.recordings.folder')}</Label>
                     <div className="mt-1.5 flex flex-col sm:flex-row gap-2">
@@ -447,7 +474,7 @@ export default function SchoolLessonRecordings() {
                     )}
                   </div>
                 )}
-                {!data?.canManage && !group.configured && (
+                {!group.canManage && !group.configured && (
                   <p className="mt-2 text-sm text-gray-500">{t('school.recordings.notConfigured')}</p>
                 )}
                 {group.id === playbackGroupId && group.loadError && (
@@ -460,13 +487,43 @@ export default function SchoolLessonRecordings() {
                   <Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}
                 </p>
               ) : group.recordings.length > 0 ? (
-                <GroupRecordingsList
-                  recordings={group.recordings}
-                  locale={locale}
-                  countLabel={t('school.recordings.count', { count: String(group.recordings.length) })}
-                  pickLabel={t('school.recordings.pickRecording')}
-                  unsupportedLabel={t('school.recordings.videoUnsupported')}
-                />
+                <>
+                  <GroupRecordingsList
+                    recordings={group.recordings}
+                    locale={locale}
+                    countLabel={t('school.recordings.count', { count: String(group.recordings.length) })}
+                    pickLabel={t('school.recordings.pickRecording')}
+                    unsupportedLabel={t('school.recordings.videoUnsupported')}
+                  />
+                  {group.canManage && group.kind === 'class_group' && (group.slots || []).length > 1 && (
+                    <div className="border-t p-4 sm:p-5 space-y-3">
+                      <p className="text-sm font-medium text-gray-900">Priskirkite įrašus grupės laikams</p>
+                      <p className="text-xs text-gray-600">Tik konkrečius laikus lankantys vaikai matys įrašą, kai jam priskirtas jų lankomas laikas. Nepriskirti įrašai jiems nerodomi.</p>
+                      {group.recordings.map((recording) => (
+                        <label key={recording.id} className="flex flex-col gap-1.5 text-xs sm:flex-row sm:items-center sm:justify-between">
+                          <span className="min-w-0 break-words text-gray-700">{recording.name}</span>
+                          <select
+                            className="h-9 rounded-lg border bg-white px-2 text-sm sm:w-64"
+                            aria-label={`Grupės laikas: ${recording.name}`}
+                            value={recording.slot ? `${recording.slot.weekday}:${recording.slot.start_time}` : ''}
+                            disabled={savingSlotId === recording.id}
+                            onChange={(event) => {
+                              const slot = group.slots?.find((choice) => `${choice.weekday}:${choice.start_time}` === event.target.value) || null;
+                              void saveRecordingSlot(group.id, recording.id, slot);
+                            }}
+                          >
+                            <option value="">Nepriskirta</option>
+                            {(group.slots || []).map((slot) => (
+                              <option key={`${slot.weekday}:${slot.start_time}`} value={`${slot.weekday}:${slot.start_time}`}>
+                                {new Intl.DateTimeFormat(locale, { weekday: 'long', timeZone: 'UTC' }).format(new Date(Date.UTC(2026, 0, 4 + slot.weekday)))} {slot.start_time}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </>
               ) : group.configured && !group.loadError ? (
                 <p className="p-5 text-sm text-gray-500">
                   {t('school.recordings.empty', { days: data?.retentionDays || 30 })}

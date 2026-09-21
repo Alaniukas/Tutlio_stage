@@ -29,6 +29,13 @@ describe('isWithinJoinClickWindow', () => {
   it('rejects invalid start times', () => {
     expect(isWithinJoinClickWindow(at(0), 'not-a-date', END)).toBe(false);
   });
+
+  it('uses the same instant for a student abroad and a lesson scheduled in Lithuania', () => {
+    const start = '2026-09-10T16:00:00Z'; // 19:00 in Vilnius
+    const end = '2026-09-10T16:45:00Z';
+    expect(isWithinJoinClickWindow(new Date('2026-09-10T11:45:00-04:00'), start, end)).toBe(true);
+    expect(isWithinJoinClickWindow(new Date('2026-09-10T10:00:00-04:00'), start, end)).toBe(false);
+  });
 });
 
 describe('deriveAttendance', () => {

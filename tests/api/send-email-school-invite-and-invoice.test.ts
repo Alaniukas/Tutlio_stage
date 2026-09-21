@@ -183,4 +183,16 @@ describe('school_monthly_invoice', () => {
     expect(html).toContain('Apmokėjimo būdą nurodys mokykla');
     expect(html).toContain('info@demo.lt');
   });
+
+  it('explains that a fully discounted invoice requires no payment', async () => {
+    const { html } = await sendEmail('school_monthly_invoice', {
+      schoolName: 'Demo Mokykla', studentName: 'A', periodLabel: '2026 m. rugsėjis',
+      unitPrice: '18.00', baseLessons: 1, baseAmount: '18.00', extraLessons: 0,
+      extraAmount: '0.00', subtotalAmount: '18.00', discountAmount: '18.00',
+      totalAmount: '0.00', dueDate: '2026-10-07',
+    });
+    expect(html).toContain('Visa suma padengta nuolaida. Apmokėti nereikia.');
+    expect(html).not.toContain('Apmokėjimo būdą nurodys mokykla');
+    expect(html).not.toContain('Apmokėti iki');
+  });
 });

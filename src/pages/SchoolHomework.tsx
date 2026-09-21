@@ -4,8 +4,10 @@ import { Download, Loader2, Paperclip, Play, Trash2, Upload, Video } from 'lucid
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { isWithinJoinClickWindow } from '@/lib/attendance';
-import { joinOpensAtLabel, useJoinClock } from '@/components/JoinLessonButton';
+import { useJoinClock } from '@/components/JoinLessonButton';
 import { applySchoolTerminology, type SchoolTerminology } from '@/lib/i18n/schoolTerminology';
+import { schoolJoinOpensAtLabel, schoolLessonDayLabel, schoolLessonTimeLabel } from '@/lib/schoolHomeworkTime';
+import { SCHOOL_TIME_ZONE } from '@/lib/schoolTime';
 
 /**
  * Public homework page for school parents without a Tutlio account. Reached
@@ -36,6 +38,7 @@ type HomeworkSession = {
   topic: string;
   joinUrl: string | null;
   hasMeetingLink: boolean;
+  joinBlockedByContract?: boolean;
   files: HomeworkFile[];
 };
 
@@ -83,7 +86,11 @@ const COPY = {
   submit: 'Pateikti namų darbą',
   uploading: 'Įkeliama…',
   join: 'Prisijungti prie pamokos',
-  joinAt: 'Prisijungti bus galima nuo {time}',
+  joinAt: 'Prisijungti bus galima nuo {time} Lietuvos laiku',
+  joinUnavailable: 'Prisijungimo nuoroda šiuo metu neprieinama. Kreipkitės į mokyklą.',
+  joinContractBlocked: 'Prisijungimas sustabdytas: šiai pamokai nėra galiojančios sutarties. Kreipkitės į mokyklą.',
+  schoolTime: 'Pamokų laikas nurodytas Lietuvos laiku.',
+  localTime: 'Jūsų laiku: {time}',
   noLink: 'Prisijungimo nuorodą atsiųsime priminimu prieš pamoką.',
   invalid: 'Nuoroda negalioja arba pasibaigė. Naujausią nuorodą rasite paskutiniame mokyklos laiške.',
   loading: 'Kraunama…',
@@ -113,15 +120,9 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function dayLabel(iso: string): string {
-  const d = new Date(iso);
-  const label = d.toLocaleDateString('lt-LT', { weekday: 'long', month: 'long', day: 'numeric' });
-  return label.charAt(0).toUpperCase() + label.slice(1);
-}
-
-function timeLabel(iso: string | null): string {
+function localDateTimeLabel(iso: string | null): string {
   if (!iso) return '';
-  return new Date(iso).toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleString('lt-LT', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function durationLabel(durationMillis: number | null): string | null {
@@ -307,6 +308,7 @@ export default function SchoolHomework() {
   const recordingsRef = useRef<HTMLElement | null>(null);
   const [recordingById, setRecordingById] = useState<Record<string, HomeworkRecordingGroup>>({});
   const now = useJoinClock();
+  const showLocalTime = Intl.DateTimeFormat().resolvedOptions().timeZone !== SCHOOL_TIME_ZONE;
 
   const terminology = payload?.terminology ?? { staff: true, activity: true };
   const tx = useCallback(
@@ -475,12 +477,17 @@ export default function SchoolHomework() {
       <article key={s.id} className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5 shadow-sm space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wider text-violet-600">{dayLabel(s.start)}</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-violet-600">{schoolLessonDayLabel(s.start)}</p>
             <h3 className="text-lg font-bold text-gray-900 leading-tight">{title}</h3>
             <p className="text-sm text-gray-600 mt-0.5">
-              {timeLabel(s.start)}{s.end ? ` – ${timeLabel(s.end)}` : ''}
+              {schoolLessonTimeLabel(s.start)}{s.end ? ` – ${schoolLessonTimeLabel(s.end)}` : ''}
               {s.teacher ? ` · ${tx('teacher')}: ${s.teacher}` : ''}
             </p>
+            {showLocalTime && (
+              <p className="text-xs text-gray-500 mt-0.5">
+                {tx('localTime', { time: `${localDateTimeLabel(s.start)}${s.end ? ` – ${localDateTimeLabel(s.end)}` : ''}` })}
+              </p>
+            )}
             {s.topic && s.topic !== title && <p className="text-sm text-gray-500 mt-0.5">{s.topic}</p>}
           </div>
           {isUpcoming && s.hasMeetingLink && (
@@ -501,7 +508,11 @@ export default function SchoolHomework() {
                 >
                   <Play className="w-4 h-4" /> {tx('join')}
                 </span>
-                <span className="text-[11px] text-gray-500">{tx('joinAt', { time: joinOpensAtLabel(s.start, now) })}</span>
+                <span className="text-[11px] text-gray-500">
+                  {s.joinUrl
+                    ? tx('joinAt', { time: schoolJoinOpensAtLabel(s.start) })
+                    : s.joinBlockedByContract ? tx('joinContractBlocked') : tx('joinUnavailable')}
+                </span>
               </span>
             )
           )}
@@ -602,6 +613,7 @@ export default function SchoolHomework() {
           <h1 className="text-2xl sm:text-3xl font-black text-gray-900">{tx('title')}</h1>
           {payload && <p className="text-sm text-gray-600">{tx('child')}: <strong>{payload.student.name}</strong></p>}
           <p className="text-xs text-gray-500">{tx('hint')}</p>
+          <p className="text-xs text-gray-500">{tx('schoolTime')}</p>
           {payload && payload.sessions.length > 0 && (
             <p className="text-sm text-gray-700">{tx('sectionsIntro')}</p>
           )}

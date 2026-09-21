@@ -9,6 +9,7 @@ import {
   signSchoolDiscountPdf,
 } from './_lib/schoolDiscountAgreementShared.js';
 import { SCHOOL_CONTRACTS_BUCKET } from './_lib/schoolContractPdfPath.js';
+import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
 import { schoolDiscountAcceptanceStatement } from '../src/lib/schoolDiscountAgreement.js';
 
 function vilniusDateTime(value: Date | string): string {
@@ -26,10 +27,13 @@ async function loadAgreementContext(token: string) {
   const [{ data: student }, { data: contract }, { data: org }, { data: profile }] = await Promise.all([
     supabase.from('students')
       .select('id, full_name, payer_name, payer_email, email')
-      .eq('id', agreement.student_id).maybeSingle(),
+      .eq('id', agreement.student_id)
+      .eq('organization_id', agreement.organization_id).maybeSingle(),
     supabase.from('school_contracts')
-      .select('id, contract_number, signing_status, kind')
-      .eq('id', agreement.contract_id).maybeSingle(),
+      .select('id, contract_number, signing_status, kind, accepted_at, archived_at, terminated_at, withdrawal_requested_at')
+      .eq('id', agreement.contract_id)
+      .eq('organization_id', agreement.organization_id)
+      .eq('student_id', agreement.student_id).maybeSingle(),
     supabase.from('organizations')
       .select('id, name, email')
       .eq('id', agreement.organization_id).maybeSingle(),
@@ -85,8 +89,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }).eq('id', agreement.id).eq('status', 'pending');
     return res.status(410).json({ error: 'Nuolaidos patvirtinimo nuoroda nebegalioja.' });
   }
-  if (contract.kind !== 'annual' || contract.signing_status !== 'signed') {
-    return res.status(409).json({ error: 'Metinė sutartis nebėra aktyvi.' });
+  if (contract.kind !== 'extra_lessons' || contract.signing_status !== 'signed' || !contract.accepted_at
+    || contract.archived_at || contract.terminated_at || contract.withdrawal_requested_at) {
+    return res.status(409).json({ error: 'Užsiėmimų sutartis nebėra aktyvi.' });
   }
   if (req.method === 'GET') return res.status(200).json(publicPayload(context));
 
@@ -104,6 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
 
   try {
+    const branding = await resolveInvoiceBranding(supabase, agreement.organization_id);
     const pdf = await generateSchoolDiscountAgreementPdf({
       agreementNumber: agreement.agreement_number,
       contractNumber: contract.contract_number || contract.id,
@@ -123,6 +129,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       validUntil: agreement.valid_until,
       note: agreement.note,
       acceptanceStatement,
+      branding,
     });
     const pdfPath = schoolDiscountPdfPath({
       organizationId: agreement.organization_id,
@@ -133,22 +140,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { error: uploadError } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET)
       .upload(pdfPath, pdf, { contentType: 'application/pdf', upsert: true });
     if (uploadError) throw uploadError;
-
-    const { error: discountError } = await supabase.from('student_lesson_discounts').upsert({
-      organization_id: agreement.organization_id,
-      student_id: agreement.student_id,
-      subject_id: agreement.subject_id,
-      tutor_id: agreement.tutor_id,
-      discount_type: agreement.discount_type,
-      percent: agreement.discount_type === 'percent' ? Number(agreement.discount_value) : null,
-      amount_eur: agreement.discount_type === 'amount' ? Number(agreement.discount_value) : null,
-      valid_from: agreement.valid_from,
-      valid_until: agreement.valid_until,
-      note: agreement.note,
-      agreement_id: agreement.id,
-      created_by: agreement.created_by,
-    }, { onConflict: 'agreement_id' });
-    if (discountError) throw discountError;
 
     const evidence = {
       version: SCHOOL_DISCOUNT_ACCEPTANCE_VERSION,

@@ -191,6 +191,27 @@ describe('reconcileClassGroupSessions', () => {
     expect(db.inserted.map((r) => r.start_time)).toEqual(['2026-09-11T16:00:00.000Z', '2026-09-18T16:00:00.000Z']);
   });
 
+  it('creates only the selected weekday for a child attending part of a group', async () => {
+    const db = fakeSupabase([]);
+    const window = materializationWindow(NOW, 14);
+    const twoDays = group({
+      slots: [
+        { weekday: 2, start_time: '19:00', end_time: '19:45' },
+        { weekday: 5, start_time: '19:00', end_time: '19:45' },
+      ],
+      members: [
+        { student_id: 's1', schedule_slots: [{ weekday: 5, start_time: '19:00' }] },
+        { student_id: 's2', schedule_slots: null },
+      ],
+    });
+    await reconcileClassGroupSessions(db.client, twoDays, { window });
+    const restricted = db.tables.sessions.filter((row) => row.student_id === 's1');
+    const full = db.tables.sessions.filter((row) => row.student_id === 's2');
+    expect(restricted).toHaveLength(3);
+    expect(full).toHaveLength(5);
+    expect(restricted.every((row) => new Date(row.start_time).getUTCDay() === 5)).toBe(true);
+  });
+
   it('removes generated future lessons while the whole group is suspended and restores them after resume', async () => {
     const db = fakeSupabase([]);
     const window = materializationWindow(NOW, 14);

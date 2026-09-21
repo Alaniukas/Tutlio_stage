@@ -233,7 +233,7 @@ export default function SchoolDashboard() {
       const sessionRows = can('sessions.view') && tutorIds.length > 0
         ? await fetchAllRows<any>((from, to) => supabase
             .from('sessions')
-            .select('id, class_group_id, tutor_id, student_id, subject_id, start_time, end_time, status, topic, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, cancellation_reason, no_show_reason, cancelled_by, cancelled_at, paid, price, created_at, updated_at, tutor_comment, student:students(full_name), subjects(is_group)')
+            .select('id, class_group_id, tutor_id, student_id, subject_id, start_time, end_time, status, topic, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, cancellation_reason, no_show_reason, cancelled_by, cancelled_at, paid, price, created_at, tutor_comment, student:students(full_name), subjects(is_group)')
             .in('tutor_id', tutorIds)
             .gte('start_time', queryStart.toISOString())
             .lte('start_time', queryEnd.toISOString())

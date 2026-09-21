@@ -18,6 +18,7 @@ import { buildTrackedJoinUrl } from './_lib/joinLink.js';
 import { schoolSessionContractAllowsAccess, type SchoolAccessContract } from './_lib/schoolContractAccess.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { schoolTerminologyForOrg } from '../src/lib/i18n/schoolTerminology.js';
+import { resolveSessionMeetingLink } from '../src/lib/meetingLink.js';
 import {
   HOMEWORK_FILE_PREFIX,
   isHomeworkSubmissionFile,
@@ -109,7 +110,7 @@ async function authorize(
   studentId: string,
   token: string,
 ): Promise<
-  | { ok: true; student: { id: string; full_name: string; organization_id: string | null }; org: { id: string; name: string | null; entity_type: string | null; features: Record<string, unknown> | null } }
+  | { ok: true; student: { id: string; full_name: string; organization_id: string | null; personal_meeting_link: string | null }; org: { id: string; name: string | null; entity_type: string | null; features: Record<string, unknown> | null } }
   | { ok: false; status: number; error: string }
 > {
   if (!studentId || !verifyPublicLinkToken('homework', studentId, token)) {
@@ -117,7 +118,7 @@ async function authorize(
   }
   const { data: student } = await supabase
     .from('students')
-    .select('id, full_name, organization_id, detached_at')
+    .select('id, full_name, organization_id, detached_at, personal_meeting_link')
     .eq('id', studentId)
     .maybeSingle();
   if (!student || (student as { detached_at?: string | null }).detached_at) {
@@ -135,7 +136,12 @@ async function authorize(
   }
   return {
     ok: true,
-    student: { id: student.id, full_name: String(student.full_name || ''), organization_id: orgId },
+    student: {
+      id: student.id,
+      full_name: String(student.full_name || ''),
+      organization_id: orgId,
+      personal_meeting_link: String(student.personal_meeting_link || '').trim() || null,
+    },
     org: org as { id: string; name: string | null; entity_type: string | null; features: Record<string, unknown> | null },
   };
 }
@@ -243,13 +249,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const tutorIds = [...new Set(sessions.map((s) => s.tutor_id).filter(Boolean))] as string[];
     const subjectIds = [...new Set(sessions.map((s) => s.subject_id).filter(Boolean))] as string[];
     const [tutorsRes, groupsRes, subjectsRes] = await Promise.all([
-      tutorIds.length ? supabase.from('profiles').select('id, full_name').in('id', tutorIds) : Promise.resolve({ data: [] }),
+      tutorIds.length ? supabase.from('profiles').select('id, full_name, personal_meeting_link').in('id', tutorIds) : Promise.resolve({ data: [] }),
       groupIds.length ? supabase.from('school_class_groups').select('id, name').in('id', groupIds) : Promise.resolve({ data: [] }),
-      subjectIds.length ? supabase.from('subjects').select('id, name').in('id', subjectIds) : Promise.resolve({ data: [] }),
+      subjectIds.length ? supabase.from('subjects').select('id, name, meeting_link').in('id', subjectIds) : Promise.resolve({ data: [] }),
     ]);
     const tutorName = new Map(((tutorsRes.data || []) as Array<{ id: string; full_name: string | null }>).map((t) => [t.id, t.full_name || '']));
+    const tutorLink = new Map(((tutorsRes.data || []) as Array<{ id: string; personal_meeting_link: string | null }>).map((t) => [t.id, t.personal_meeting_link]));
     const groupName = new Map(((groupsRes.data || []) as Array<{ id: string; name: string | null }>).map((g) => [g.id, g.name || '']));
     const subjectName = new Map(((subjectsRes.data || []) as Array<{ id: string; name: string | null }>).map((s) => [s.id, s.name || '']));
+    const subjectLink = new Map(((subjectsRes.data || []) as Array<{ id: string; meeting_link: string | null }>).map((s) => [s.id, s.meeting_link]));
 
     // Files: only lessons close enough to matter (recent past + upcoming), capped.
     const fileScanFrom = now.getTime() - FILE_SCAN_PAST_DAYS * 86_400_000;
@@ -320,7 +328,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       let joinUrl: string | null = null;
       const contractAllowsJoin = !contractError && schoolSessionContractAllowsAccess(accessContracts, s, now);
-      if (contractAllowsJoin && s.meeting_link && s.status === 'active') {
+      const meetingLink = resolveSessionMeetingLink({
+        sessionLink: s.meeting_link,
+        studentPersonalLink: auth.student.personal_meeting_link,
+        tutorPersonalLink: s.tutor_id ? tutorLink.get(s.tutor_id) : null,
+        subjectLink: s.subject_id ? subjectLink.get(s.subject_id) : null,
+      });
+      if (contractAllowsJoin && meetingLink && s.status === 'active') {
         try { joinUrl = buildTrackedJoinUrl(origin, s.id, 'student'); } catch { joinUrl = null; }
       }
       return {
@@ -333,7 +347,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         subject: s.subject_id ? subjectName.get(s.subject_id) || '' : '',
         topic: s.topic || '',
         joinUrl,
-        hasMeetingLink: Boolean(s.meeting_link),
+        hasMeetingLink: Boolean(meetingLink),
+        joinBlockedByContract: Boolean(meetingLink) && !contractAllowsJoin,
         files,
       };
     });

@@ -27,7 +27,7 @@ export async function deliverSchoolMonthlyInvoiceOnce(params: {
   const { supabase, invoiceId, organizationId } = params;
   const now = params.now || new Date();
   const { data: invoice, error: invoiceError } = await supabase.from('school_monthly_invoices')
-    .select('id, organization_id, payment_status, invoice_email_sent_at, billing_model, contract:school_contracts(filled_body,order_snapshot)')
+    .select('id, organization_id, payment_status, total_eur, invoice_email_sent_at, billing_model, contract:school_contracts(filled_body,order_snapshot)')
     .eq('id', invoiceId).eq('organization_id', organizationId).maybeSingle();
   if (invoiceError || !invoice) return { sent: false, reason: invoiceError?.message || 'invoice not found in organization' };
   if (invoice.invoice_email_sent_at) return { sent: false, alreadySent: true };
@@ -38,7 +38,10 @@ export async function deliverSchoolMonthlyInvoiceOnce(params: {
       return { sent: false, reason: 'invoice billing model requires review against frozen contract' };
     }
   }
-  if (invoice.payment_status !== 'pending') return { sent: false, reason: 'invoice is not pending' };
+  if (invoice.payment_status !== 'pending'
+    && !(invoice.payment_status === 'paid' && Number(invoice.total_eur) === 0)) {
+    return { sent: false, reason: 'invoice is not pending' };
+  }
 
   const load = () => supabase.from('school_monthly_invoice_deliveries').select('*')
     .eq('id', invoiceId).eq('organization_id', organizationId).maybeSingle();

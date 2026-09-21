@@ -23,13 +23,14 @@ import {
 import { snapshotFromRow } from './extraLessonsContractShared.js';
 import { isSchoolContractSuspended } from '../../src/lib/schoolContractLifecycle.js';
 import { isSchoolClassGroupSuspended } from '../../src/lib/schoolGroupMinimumPolicy.js';
+import { memberFollowsGroupSlot, type SchoolMemberSlot } from '../../src/lib/schoolClassGroups.js';
 
 export const CLASS_GROUP_HORIZON_DAYS = 60;
 const INSERT_CHUNK = 400;
 
 export const CLASS_GROUP_MATERIALIZE_SELECT =
   'id, organization_id, tutor_id, subject_id, meeting_link, duration_minutes, school_year_start, school_year_end, suspension_started_at, suspension_until, suspension_resumed_at, '
-  + 'slots:school_class_group_slots(weekday, start_time, end_time), members:school_class_group_members(student_id)';
+  + 'slots:school_class_group_slots(weekday, start_time, end_time), members:school_class_group_members(student_id, schedule_slots)';
 
 export type MaterializeGroupSlot = { weekday: number | string; start_time: string; end_time: string };
 
@@ -46,13 +47,14 @@ export type MaterializeGroupRow = {
   suspension_until?: string | null;
   suspension_resumed_at?: string | null;
   slots?: MaterializeGroupSlot[] | null;
-  members?: Array<{ student_id: string }> | null;
+  members?: Array<{ student_id: string; schedule_slots?: SchoolMemberSlot[] | null }> | null;
 };
 
 export type ClassGroupOccurrence = {
   ymd: string;
   startIso: string;
   endIso: string;
+  slot: SchoolMemberSlot;
 };
 
 export type MaterializeWindow = {
@@ -156,7 +158,7 @@ export function expectedClassGroupOccurrences(
       const startIso = startUtc.toISOString();
       if (seen.has(startIso)) continue; // two slots on the same weekday/time
       seen.add(startIso);
-      out.push({ ymd, startIso, endIso: endUtc.toISOString() });
+      out.push({ ymd, startIso, endIso: endUtc.toISOString(), slot: { weekday, start_time: startTime } });
     }
   }
   return out.sort((a, b) => a.startIso.localeCompare(b.startIso));
@@ -256,12 +258,14 @@ export async function reconcileClassGroupSessions(
   }
   const activeMembers = isSchoolClassGroupSuspended(group, window.now)
     ? []
-    : memberIds.filter((id) => !detached?.has(id));
+    : (group.members || []).filter((member) => member.student_id && !detached?.has(member.student_id));
 
   const occurrences = expectedClassGroupOccurrences(group, window);
   const expected = new Map<string, { student_id: string; startIso: string; endIso: string }>();
   for (const occ of occurrences) {
-    for (const studentId of activeMembers) {
+    for (const member of activeMembers) {
+      if (!memberFollowsGroupSlot(member.schedule_slots, occ.slot)) continue;
+      const studentId = member.student_id;
       const gate = options.extraGates?.get(`${studentId}:${group.id}`);
       if (gate && occ.ymd < gate) {
         result.skipped += 1;
@@ -313,7 +317,7 @@ export async function reconcileClassGroupSessions(
       .from('sessions')
       .select('id, student_id, tutor_id, subject_id, meeting_link, start_time, end_time, status, class_group_id, student_joined_at, tutor_joined_at')
       .eq('tutor_id', group.tutor_id)
-      .in('student_id', activeMembers.length ? activeMembers : ['00000000-0000-0000-0000-000000000000'])
+      .in('student_id', activeMembers.length ? activeMembers.map((member) => member.student_id) : ['00000000-0000-0000-0000-000000000000'])
       .in('start_time', startIsos)
       .neq('status', 'cancelled');
     const foreign = new Map<string, ExistingRow>();

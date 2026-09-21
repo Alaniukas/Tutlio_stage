@@ -36,6 +36,13 @@ describe('durable invoice delivery', () => {
     expect(await run(database.client, send)).toMatchObject({ alreadySent: true });
     expect(send).toHaveBeenCalledTimes(1);
   });
+  it('delivers a zero-euro invoice that was settled by a full contract discount', async () => {
+    const database = db();
+    Object.assign(database.state.invoice, { total_eur: 0, payment_status: 'paid' });
+    const send = vi.fn().mockResolvedValue({ id: 'free-email' });
+    expect(await run(database.client, send)).toEqual({ sent: true, id: 'free-email' });
+    expect(send).toHaveBeenCalledOnce();
+  });
   it('retries an uncertain request with exactly the first rendered payload and same key', async () => {
     const database = db(); const send = vi.fn().mockRejectedValueOnce(new Error('timeout')).mockResolvedValueOnce({ id: 'email' });
     expect(await run(database.client, send)).toMatchObject({ sent: false, reason: 'timeout' });

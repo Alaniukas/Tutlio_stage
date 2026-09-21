@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs';
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
-import { resolveInvoiceFontPath } from './invoicePdf.js';
-import { resolveLaisviVaikaiInvoiceLogoPath } from './schoolMonthlyInvoicePdf.js';
+import { resolveInvoiceFontPath, type InvoicePdfBranding } from './invoicePdf.js';
 import {
   schoolDiscountTermsLabel,
   schoolDiscountValueLabel,
@@ -28,6 +27,7 @@ export type SchoolDiscountAgreementPdfData = {
   validUntil: string;
   note?: string | null;
   acceptanceStatement: string;
+  branding?: InvoicePdfBranding | null;
 };
 
 const PAGE_W = 595.28;
@@ -103,7 +103,7 @@ function drawDetailRow(
   return y - height;
 }
 
-/** One-page click-wrap addendum attached to an accepted annual school contract. */
+/** One-page click-wrap addendum attached to an accepted lessons contract. */
 export async function generateSchoolDiscountAgreementPdf(
   data: SchoolDiscountAgreementPdfData,
 ): Promise<Uint8Array> {
@@ -111,16 +111,23 @@ export async function generateSchoolDiscountAgreementPdf(
   doc.registerFontkit(fontkit);
   const font = await doc.embedFont(new Uint8Array(readFileSync(resolveInvoiceFontPath('regular'))), { subset: true });
   const bold = await doc.embedFont(new Uint8Array(readFileSync(resolveInvoiceFontPath('bold'))), { subset: true });
-  const logo = await doc.embedPng(new Uint8Array(readFileSync(resolveLaisviVaikaiInvoiceLogoPath())));
+  let logo = null;
+  if (data.branding?.logo) {
+    try {
+      logo = data.branding.logo.mime === 'jpeg'
+        ? await doc.embedJpg(data.branding.logo.bytes)
+        : await doc.embedPng(data.branding.logo.bytes);
+    } catch { /* A broken organization logo must not block the signed addendum. */ }
+  }
   const page = doc.addPage([PAGE_W, PAGE_H]);
 
-  const logoScale = Math.min(150 / logo.width, 105 / logo.height);
-  page.drawImage(logo, {
-    x: MARGIN,
-    y: PAGE_H - 145,
-    width: logo.width * logoScale,
-    height: logo.height * logoScale,
-  });
+  if (logo) {
+    const logoScale = Math.min(150 / logo.width, 105 / logo.height);
+    page.drawImage(logo, {
+      x: MARGIN, y: PAGE_H - 145,
+      width: logo.width * logoScale, height: logo.height * logoScale,
+    });
+  }
 
   page.drawText(data.schoolName, { x: 330, y: PAGE_H - 66, size: 10, font: bold, color: BLACK });
   let schoolY = PAGE_H - 82;

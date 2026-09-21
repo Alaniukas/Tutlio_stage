@@ -17,6 +17,8 @@ function supabaseFixture(opts: {
     subject: { id: string; name: string };
     tutor: { organization_id: string };
   }>;
+  members?: Array<{ schedule_slots: Array<{ weekday: number; start_time: string }> | null }>;
+  tags?: Array<{ drive_file_id: string; weekday: number; start_time: string }>;
 }) {
   return {
     from(table: string) {
@@ -28,6 +30,8 @@ function supabaseFixture(opts: {
           if (table === 'school_class_groups') return resolve({ data: opts.groups, error: null });
           if (table === 'recurring_individual_sessions') return resolve({ data: opts.recurring || [], error: null });
           if (table === 'school_recording_drive_folders') return resolve({ data: opts.mappings, error: null });
+          if (table === 'school_class_group_members') return resolve({ data: opts.members || [{ schedule_slots: null }], error: null });
+          if (table === 'school_recording_file_slots') return resolve({ data: opts.tags || [], error: null });
           return resolve({ data: [], error: null });
         },
       };
@@ -124,6 +128,27 @@ describe('listHomeworkGroupRecordings', () => {
     expect(result.groups.map((group) => group.id)).toEqual(['subject:subject-1']);
     expect(result.groups[0].name).toBe('Solo muzika');
     expect(listDrive).toHaveBeenCalledWith('folder-individual');
+  });
+
+  it('hides untagged and other-day group videos from a part-time child', async () => {
+    listDrive.mockResolvedValue([
+      { id: 'tuesday', name: 'Tuesday.mp4', createdTime: '2026-09-10T10:00:00Z' },
+      { id: 'thursday', name: 'Thursday.mp4', createdTime: '2026-09-11T10:00:00Z' },
+      { id: 'untagged', name: 'Unknown.mp4', createdTime: '2026-09-12T10:00:00Z' },
+    ]);
+    const result = await listHomeworkGroupRecordings(supabaseFixture({
+      groups: [{ id: 'g1', name: 'Two days', organization_id: 'org-1' }],
+      mappings: [{ group_id: 'g1', organization_id: 'org-1', drive_folder_id: 'folder-1' }],
+      members: [{ schedule_slots: [{ weekday: 4, start_time: '11:00' }] }],
+      tags: [
+        { drive_file_id: 'tuesday', weekday: 2, start_time: '11:00' },
+        { drive_file_id: 'thursday', weekday: 4, start_time: '11:00' },
+      ],
+    }), {
+      studentId: 'student-1', organizationId: 'org-1', memberGroupIds: ['g1'],
+      recordingsEnabled: true, listFiles: true,
+    });
+    expect(result.groups[0].recordings.map((row) => row.id)).toEqual(['thursday']);
   });
 
   it('omits mapped groups that have no videos so the homework page stays quiet', async () => {
