@@ -185,9 +185,12 @@ export default function StudentSessions() {
      * Seeded from the pre-mount StudentPolicyProvider (no flash); fetch reconciles. */
     const portalPolicy = useStudentPolicy();
     const [studentActionsDisabled, setStudentActionsDisabled] = useState(portalPolicy.actionsDisabled);
+    const [orgRescheduleDisabled, setOrgRescheduleDisabled] = useState(portalPolicy.rescheduleDisabled);
+    const rescheduleDisabled = studentActionsDisabled || orgRescheduleDisabled;
     useEffect(() => {
         if (portalPolicy.resolved && portalPolicy.actionsDisabled) setStudentActionsDisabled(true);
-    }, [portalPolicy.resolved, portalPolicy.actionsDisabled]);
+        if (portalPolicy.resolved && portalPolicy.rescheduleDisabled) setOrgRescheduleDisabled(true);
+    }, [portalPolicy.resolved, portalPolicy.actionsDisabled, portalPolicy.rescheduleDisabled]);
     // Whether the org reschedule/cancel policy has been resolved for the current fetch.
     // Guards the nav-state flow so a warm session cache can't open the reschedule
     // picker before we know the org forbids it (the RPC would reject it anyway).
@@ -539,7 +542,7 @@ export default function StudentSessions() {
             returnToRef.current = state.returnTo;
         }
         setSelectedSession(session);
-        if (studentActionsDisabled && (state.flow === 'reschedule' || state.flow === 'cancel' || state.flow === 'cancel_after_payment')) {
+        if ((state.flow === 'reschedule' && rescheduleDisabled) || (studentActionsDisabled && (state.flow === 'cancel' || state.flow === 'cancel_after_payment'))) {
             // Org blocks student reschedule/cancel: show plain lesson details instead.
             setIsModalOpen(true);
             navigate(location.pathname, { replace: true, state: null });
@@ -568,7 +571,7 @@ export default function StudentSessions() {
             setIsCancelModalOpen(true);
             navigate(location.pathname, { replace: true, state: null });
         }
-    }, [sessions, studentActionsDisabled, studentActionsResolved]);
+    }, [sessions, studentActionsDisabled, rescheduleDisabled, studentActionsResolved]);
 
     // Open lesson modal from email CTA (?sessionId=)
     const sessionIdFromUrlHandledRef = useRef(false);
@@ -809,7 +812,12 @@ export default function StudentSessions() {
                 enableMonthlyBilling = !!(orgPay as { enable_monthly_billing?: boolean }).enable_monthly_billing;
                 const orgFeatures = (orgPay as { features?: Record<string, unknown> | null }).features;
                 setStudentActionsDisabled(orgFeatures?.disable_student_reschedule_cancel === true);
+                setOrgRescheduleDisabled(orgFeatures?.org_admin_only_reschedule === true);
+            } else {
+                setOrgRescheduleDisabled(false);
             }
+        } else {
+            setOrgRescheduleDisabled(false);
         }
         setStudentActionsResolved(true);
         setTutorPaymentFlags({
@@ -1021,7 +1029,7 @@ export default function StudentSessions() {
 
     // ── Open reschedule flow ──────────────────────────────────────────────────
     const openRescheduleFlow = () => {
-        if (studentActionsDisabled) return;
+        if (rescheduleDisabled) return;
         setIsModalOpen(false);
         setSelectedNewSlot(null);
         setRescheduleLoading(true);
@@ -1171,7 +1179,7 @@ export default function StudentSessions() {
     };
 
     const handleConfirmReschedule = async () => {
-        if (!selectedSession || !selectedNewSlot) return;
+        if (!selectedSession || !selectedNewSlot || rescheduleDisabled) return;
         setSaving(true);
 
         // Use RPC function to bypass RLS (students can't directly update sessions)
@@ -1241,6 +1249,8 @@ export default function StudentSessions() {
                 ? t('cal.rescheduleSameMonthOnly')
                 : rawErr === 'student_actions_disabled'
                     ? t('stuSess.actionsDisabledByOrg')
+                    : rawErr.includes('org_admin_only_reschedule')
+                        ? t('stuSess.rescheduleDisabledByOrg')
                     : rawErr;
             alert('Nepavyko perkelti: ' + errorMsg);
         }
@@ -1964,7 +1974,7 @@ export default function StudentSessions() {
                         )}
                     </div>
 
-                    {/* Two-button footer: Reschedule + Cancel (hidden when the org disables student self-service) */}
+                    {/* Keep cancellation available when only rescheduling is restricted. */}
                     {selectedSession?.status === 'active' && isAfter(new Date(selectedSession.end_time), new Date()) && (
                         studentActionsDisabled ? (
                             <p className="mt-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
@@ -1972,6 +1982,11 @@ export default function StudentSessions() {
                             </p>
                         ) : (
                         <DialogFooter className="mt-2 flex gap-2 sm:flex-row">
+                            {rescheduleDisabled ? (
+                                <p className="flex-1 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                                    {t('stuSess.rescheduleDisabledByOrg')}
+                                </p>
+                            ) : (
                             <Button
                                 variant="outline"
                                 onClick={openRescheduleFlow}
@@ -1981,6 +1996,7 @@ export default function StudentSessions() {
                                 <RefreshCw className={cn("w-4 h-4 mr-2", rescheduleLoading && "animate-spin")} />
                                 {t('studentDash.reschedule')}
                             </Button>
+                            )}
                             <Button
                                 variant="destructive"
                                 onClick={openCancelFlow}
@@ -2082,7 +2098,7 @@ export default function StudentSessions() {
                                 )}
 
                                 <div className="flex gap-3">
-                                    {!studentActionsDisabled && (
+                                    {!rescheduleDisabled && (
                                     <Button
                                         variant="outline"
                                         onClick={openRescheduleFlow}

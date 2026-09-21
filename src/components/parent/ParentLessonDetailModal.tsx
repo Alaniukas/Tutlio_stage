@@ -51,6 +51,8 @@ export type ParentTutorContactPolicy = {
   providerName?: string | null;
   /** Org feature disable_student_reschedule_cancel — self-service moves/cancels go through administration. */
   studentActionsDisabled?: boolean;
+  /** Org feature org_admin_only_reschedule (or the combined student-action flag). */
+  rescheduleDisabled?: boolean;
 };
 
 /** Session row shape for the shared parent lesson modal. */
@@ -446,6 +448,11 @@ export function ParentLessonDetailModal({
                 </p>
               ) : (
               <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                {tutorPolicy?.rescheduleDisabled ? (
+                  <p className="flex-1 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                    {t('stuSess.rescheduleDisabledByOrg')}
+                  </p>
+                ) : (
                 <Button
                   variant="outline"
                   onClick={reschedule}
@@ -453,6 +460,7 @@ export function ParentLessonDetailModal({
                 >
                   {t('studentDash.reschedule')}
                 </Button>
+                )}
                 <Button
                   variant="outline"
                   onClick={cancel}

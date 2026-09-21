@@ -138,6 +138,7 @@ import { isLaisviVaikaiOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/mark
 import { canChooseParentLessonComment } from '@/lib/parentLessonComment';
 import { resolveOrCreateTrialSubject } from '@/pages/company/orgAdminSessionCreate';
 import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
+import { fetchStudentTrialHistory } from '@/lib/studentTrialHistory';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import {
   buildRecurringSessionCounts,
@@ -340,6 +341,7 @@ export default function CalendarPage() {
     !orgPolicy.loading &&
     (!orgPolicy.isOrgTutor || orgPolicy.canCreateSessions);
   const { contactVisibility, hasFeature: hasOrgFeature, entityType: orgEntityType, organizationId, loading: orgFeaturesLoading } = useOrgFeatures();
+  const adminOnlyReschedule = orgPolicy.isOrgTutor && hasOrgFeature('org_admin_only_reschedule');
   const { user: ctxUser, profile: ctxProfile } = useUser();
   const isSchoolTutor = orgEntityType === 'school';
   const showClassGroups = !!organizationId && !orgFeaturesLoading && hasOrgFeature('school_class_groups');
@@ -685,19 +687,18 @@ export default function CalendarPage() {
       if (!cancelled && isTrial) {
         const policy = parseOrgTrialPolicy(featObj);
         if (policy.commentRequired) {
-          const { data: trialHistory } = selectedEvent.student_id
-            ? await supabase
-                .from('sessions')
-                .select('id, start_time, status, subjects!inner(is_trial)')
-                .eq('student_id', selectedEvent.student_id)
-                .eq('subjects.is_trial', true)
-                .order('start_time', { ascending: true })
-            : { data: [] };
+          const trialHistory = selectedEvent.student_id
+            ? await fetchStudentTrialHistory([selectedEvent.student_id], user.id, orgId)
+                .catch((error) => {
+                  console.error('[Calendar] trial history load failed', error);
+                  return [];
+                })
+            : [];
           const required = sessionNeedsOrgTrialComment({
             policy,
             isTrial: true,
             sessionId: selectedEvent.id,
-            studentTrials: (trialHistory || []) as Array<{ id: string; start_time?: string | null; status?: string | null }>,
+            studentTrials: trialHistory,
           });
           if (!cancelled) setTrialCommentHint(required ? 'required' : 'optional');
         }
@@ -3498,6 +3499,12 @@ export default function CalendarPage() {
       const durationChanged =
         Math.round((oldEnd.getTime() - oldStart.getTime()) / 60000) !== Math.round(editDurationMinutes);
 
+      if (adminOnlyReschedule && (timeChanged || durationChanged)) {
+        alert(t('cal.rescheduleAdminOnly'));
+        setSaving(false);
+        return;
+      }
+
       if (timeChanged && rescheduleReason.trim().length < 5) {
         alert(t('cal.rescheduleReasonRequired'));
         setSaving(false);
@@ -3669,8 +3676,7 @@ export default function CalendarPage() {
           error = new Error(t('cal.errorGeneric'));
         } else {
           const { error: groupError } = await supabase.from('sessions').update({
-            start_time: newStart.toISOString(),
-            end_time: newEnd.toISOString(),
+            ...(!adminOnlyReschedule ? { start_time: newStart.toISOString(), end_time: newEnd.toISOString() } : {}),
             ...editSessionPayload,
           }).in('id', ids);
           error = groupError;
@@ -3688,8 +3694,7 @@ export default function CalendarPage() {
         }
       } else {
         const { error: singleError } = await supabase.from('sessions').update({
-          start_time: newStart.toISOString(),
-          end_time: newEnd.toISOString(),
+          ...(!adminOnlyReschedule ? { start_time: newStart.toISOString(), end_time: newEnd.toISOString() } : {}),
           ...editSessionPayload,
         }).eq('id', selectedEvent.id);
         error = singleError;
@@ -4049,19 +4054,18 @@ export default function CalendarPage() {
           const feat = (orgRow as any)?.features;
           const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
           const trialPolicy = parseOrgTrialPolicy(featObj);
-          const { data: trialHistory } = selectedEvent.student_id
-            ? await supabase
-                .from('sessions')
-                .select('id, start_time, status, subjects!inner(is_trial)')
-                .eq('student_id', selectedEvent.student_id)
-                .eq('subjects.is_trial', true)
-                .order('start_time', { ascending: true })
-            : { data: [] as Array<{ id: string; start_time?: string | null; status?: string | null }> };
+          const trialHistory = selectedEvent.student_id
+            ? await fetchStudentTrialHistory([selectedEvent.student_id], user.id, orgId)
+                .catch((error) => {
+                  console.error('[Calendar] trial history load failed', error);
+                  return [];
+                })
+            : [];
           const needsTrialComment = sessionNeedsOrgTrialComment({
             policy: trialPolicy,
             isTrial: true,
             sessionId: selectedEvent.id,
-            studentTrials: (trialHistory || []) as Array<{ id: string; start_time?: string | null; status?: string | null }>,
+            studentTrials: trialHistory,
           });
           if (needsTrialComment && !viewCommentText.trim()) {
             setToastMessage({ message: t('cal.trialCommentReminder'), type: 'warning' });
@@ -4194,14 +4198,41 @@ export default function CalendarPage() {
       setSessions((prev) => prev.map(updateOutcome));
       setSelectedGroupSessions((prev) => prev.map(updateOutcome));
       setSelectedEvent((prev) => prev ? updateOutcome(prev) : prev);
-      const needsProKlaseComment =
-        hideProKlaseOrgTutorCancel && (status === 'completed' || status === 'no_show');
       const hasComment = Boolean(
         viewCommentText.trim() || session.tutor_comment?.trim(),
       );
-      if (needsProKlaseComment && !hasComment) {
+      let needsTrialComment = false;
+      if (hideProKlaseOrgTutorCancel
+        && (status === 'completed' || status === 'no_show')
+        && session.subjects?.is_trial === true
+        && !hasComment) {
+        const orgId = organizationId || ctxProfile?.organization_id;
+        if (orgId) {
+          const [{ data: orgRow }, trialHistory] = await Promise.all([
+            supabase.from('organizations').select('features').eq('id', orgId).maybeSingle(),
+            fetchStudentTrialHistory([session.student_id], currentUserId, orgId)
+              .catch((error) => {
+                console.error('[Calendar] trial history load failed', error);
+                return [];
+              }),
+          ]);
+          const features = orgRow?.features;
+          const policy = parseOrgTrialPolicy(
+            features && typeof features === 'object' && !Array.isArray(features)
+              ? features as Record<string, unknown>
+              : {},
+          );
+          needsTrialComment = sessionNeedsOrgTrialComment({
+            policy,
+            isTrial: true,
+            sessionId: session.id,
+            studentTrials: trialHistory,
+          });
+        }
+      }
+      if (needsTrialComment) {
         setToastMessage({
-          message: t('dash.lessonCommentMissing'),
+          message: t('cal.trialCommentReminder'),
           type: 'warning',
         });
       } else if (!options?.keepModalOpen) {
@@ -5474,10 +5505,16 @@ export default function CalendarPage() {
                 <Label>{t('compSch.topicSubject')}</Label>
                 <Input value={editTopic} onChange={(e) => setEditTopic(e.target.value)} placeholder={t('cal.topicPlaceholder')} className="rounded-xl" />
               </div>
+              {adminOnlyReschedule ? (
+                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                  {t('cal.rescheduleAdminOnly')}
+                </p>
+              ) : (
               <div className="space-y-2">
                 <Label>{t('cal.timeLabel')}</Label>
                 <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
               </div>
+              )}
               {editNewStartTime && selectedEvent &&
                 Math.floor(new Date(editNewStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) && (
                 <div className="space-y-2">
@@ -5514,7 +5551,7 @@ export default function CalendarPage() {
                   </div>
                 </div>
               )}
-              {!hideProKlaseOrgTutorFreeTime && !isClassGroupSession && (
+              {!adminOnlyReschedule && !hideProKlaseOrgTutorFreeTime && !isClassGroupSession && (
               <label className="flex items-start gap-2 cursor-pointer">
                 <Checkbox
                   checked={leaveFreeTimeOnReschedule}
@@ -5523,6 +5560,7 @@ export default function CalendarPage() {
                 <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
               </label>
               )}
+              {!adminOnlyReschedule && (
               <div className="space-y-2">
                 <Label>{t('cal.durationLabel')}</Label>
                 <Input
@@ -5538,6 +5576,7 @@ export default function CalendarPage() {
                   {t('cal.durationHint')}
                 </p>
               </div>
+              )}
               <div className="space-y-2">
                 <Label>{t('cal.meetingLinkLabel')}</Label>
                 <Input value={editMeetingLink} onChange={(e) => setEditMeetingLink(e.target.value)} placeholder="https://meet.google.com/..." className="rounded-xl" />
@@ -6249,7 +6288,7 @@ export default function CalendarPage() {
                   </div>
                 </div>
               )}
-            {selectedEvent?.status === 'active' && (
+            {selectedEvent?.status === 'active' && !adminOnlyReschedule && (
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="outline"

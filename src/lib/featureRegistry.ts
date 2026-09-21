@@ -301,6 +301,17 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'premium',
   },
 
+  org_admin_only_reschedule: {
+    id: 'org_admin_only_reschedule',
+    name: 'Pamokas perkelia tik administracija',
+    nameEn: 'Only administrators can reschedule lessons',
+    description: 'Mokiniai, tėvai ir korepetitoriai negali keisti pamokų laiko. Atšaukimo teisės nesikeičia.',
+    descriptionEn: 'Students, parents, and tutors cannot change lesson times. Cancellation permissions are unchanged.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
   tutor_lesson_status_confirmation: {
     id: 'tutor_lesson_status_confirmation',
     name: 'Korepetitorius privalo pažymėti pamokos statusą',

@@ -113,13 +113,16 @@ export default function StudentDashboard() {
     // the data fetch below still reconciles as a backstop.
     const portalPolicy = useStudentPolicy();
     const [studentActionsDisabled, setStudentActionsDisabled] = useState(portalPolicy.actionsDisabled);
+    const [orgRescheduleDisabled, setOrgRescheduleDisabled] = useState(portalPolicy.rescheduleDisabled);
+    const rescheduleDisabled = studentActionsDisabled || orgRescheduleDisabled;
     // Org feature disable_student_booking — hide self-service booking entry points.
     const [studentBookingDisabled, setStudentBookingDisabled] = useState(portalPolicy.bookingDisabled);
     useEffect(() => {
         if (!portalPolicy.resolved) return;
         if (portalPolicy.actionsDisabled) setStudentActionsDisabled(true);
+        if (portalPolicy.rescheduleDisabled) setOrgRescheduleDisabled(true);
         if (portalPolicy.bookingDisabled) setStudentBookingDisabled(true);
-    }, [portalPolicy.resolved, portalPolicy.actionsDisabled, portalPolicy.bookingDisabled]);
+    }, [portalPolicy.resolved, portalPolicy.actionsDisabled, portalPolicy.rescheduleDisabled, portalPolicy.bookingDisabled]);
     const { blocked: paymentBookingBlocked, loading: paymentBlockLoading } = useStudentPaymentBlock(activeStudentId);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const now = new Date();
@@ -319,10 +322,14 @@ export default function StudentDashboard() {
                         enableMonthlyBilling = !!(orgPay as { enable_monthly_billing?: boolean }).enable_monthly_billing;
                         const orgFeatures = (orgPay as { features?: Record<string, unknown> | null }).features;
                         setStudentActionsDisabled(orgFeatures?.disable_student_reschedule_cancel === true);
+                        setOrgRescheduleDisabled(orgFeatures?.org_admin_only_reschedule === true);
                         setStudentBookingDisabled(orgFeatures?.disable_student_booking === true);
+                    } else {
+                        setOrgRescheduleDisabled(false);
                     }
                 } else {
                     setStudentActionsDisabled(false);
+                    setOrgRescheduleDisabled(false);
                     setStudentBookingDisabled(false);
                 }
                 setTutorPaymentFlags({
@@ -918,6 +925,11 @@ export default function StudentDashboard() {
                             </p>
                         ) : (
                         <DialogFooter className="mt-2 flex gap-2 sm:flex-row">
+                            {rescheduleDisabled ? (
+                                <p className="flex-1 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                                    {t('stuSess.rescheduleDisabledByOrg')}
+                                </p>
+                            ) : (
                             <Button
                                 variant="outline"
                                 onClick={() => { setIsModalOpen(false); navigate('/student/sessions', { state: { sessionId: selectedSession.id, flow: 'reschedule' } }); }}
@@ -926,6 +938,7 @@ export default function StudentDashboard() {
                                 <RefreshCw className="w-4 h-4 mr-2" />
                                 {t('studentDash.reschedule')}
                             </Button>
+                            )}
                             <Button
                                 variant="destructive"
                                 onClick={() => { setIsModalOpen(false); navigate('/student/sessions', { state: { sessionId: selectedSession.id, flow: 'cancel' } }); }}

@@ -62,6 +62,7 @@ import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 import { isProKlaseAwaitingOutcomeConfirmation } from '@/lib/proKlaseTutorPay';
 import { canChooseParentLessonComment } from '@/lib/parentLessonComment';
 import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
+import { fetchStudentTrialHistory } from '@/lib/studentTrialHistory';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
@@ -402,24 +403,23 @@ export default function DashboardPage() {
             const orgFeat = orgFeatRes.data?.features;
             const orgFeatObj = orgFeat && typeof orgFeat === 'object' && !Array.isArray(orgFeat) ? (orgFeat as Record<string, unknown>) : {};
             const trialPolicy = parseOrgTrialPolicy(orgFeatObj);
-            const proKlaseCommentRequired = isProKlaseOrg(organizationId);
+            const isProKlase = isProKlaseOrg(organizationId);
 
             const trialsByStudent = new Map<string, Array<{ id: string; start_time?: string | null; status?: string | null }>>();
             if (trialPolicy.commentRequired) {
-                const trialStudentIds = [...new Set(
+                const trialStudentIds = [...new Set<string>(
                     (sessionsData || [])
                         .filter((s: any) => s.subjects?.is_trial === true && s.student_id)
                         .map((s: any) => s.student_id as string),
                 )];
                 if (trialStudentIds.length > 0) {
-                    const { data: trialHistory } = await supabase
-                        .from('sessions')
-                        .select('id, student_id, start_time, status, subjects!inner(is_trial)')
-                        .eq('tutor_id', user.id)
-                        .in('student_id', trialStudentIds)
-                        .eq('subjects.is_trial', true)
-                        .order('start_time', { ascending: true });
-                    for (const row of trialHistory || []) {
+                    let trialHistory = [] as Awaited<ReturnType<typeof fetchStudentTrialHistory>>;
+                    try {
+                        trialHistory = await fetchStudentTrialHistory(trialStudentIds, user.id, organizationId);
+                    } catch (error) {
+                        console.error('[Dashboard] trial history load failed', error);
+                    }
+                    for (const row of trialHistory) {
                         const sid = (row as { student_id: string }).student_id;
                         const list = trialsByStudent.get(sid) ?? [];
                         list.push(row as { id: string; start_time?: string | null; status?: string | null });
@@ -432,10 +432,7 @@ export default function DashboardPage() {
                 .filter((s: any) => {
                     const needsComment = ['completed', 'no_show'].includes(String(s.status));
                     if (!needsComment || String(s.tutor_comment || '').trim()) return false;
-                    if (proKlaseCommentRequired) {
-                        return Boolean(s.status_confirmed_at)
-                            && Date.parse(String(s.end_time || '')) <= Date.now();
-                    }
+                    if (isProKlase && !s.status_confirmed_at) return false;
                     return sessionNeedsOrgTrialComment({
                         policy: trialPolicy,
                         isTrial: s.subjects?.is_trial === true,
@@ -449,9 +446,7 @@ export default function DashboardPage() {
                 ...missingComments.map((s: any) => ({
                     id: `missing_comment_${s.id}`,
                     tone: 'warning' as const,
-                    message: proKlaseCommentRequired
-                        ? t('dash.lessonCommentMissing')
-                        : t('dash.trialCommentMissing', { count: 1 }),
+                    message: t('dash.trialCommentMissing', { count: 1 }),
                     when: s.start_time,
                     sessionId: s.id,
                 })),
