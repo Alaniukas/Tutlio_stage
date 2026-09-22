@@ -18,6 +18,7 @@ import {
 } from './_lib/soloManualStudentPayments.js';
 import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 import { proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
@@ -540,8 +541,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             .map(s => {
                                 const subjectName = (s.subjects as any)?.name || 'Pamoka';
                                 const dt = new Date(s.start_time);
-                                const datePart = dt.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' });
-                                const timePart = dt.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
+                                const { date: datePart, time: timePart } = lessonEmailDateTime(dt);
                                 const studentFullName = (s.students as any)?.full_name || '';
                                 const desc = studentFullName
                                     ? `${subjectName} — ${studentFullName} (${datePart} ${timePart})`
@@ -574,9 +574,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 .map(s => {
                     const sessionDate = new Date(s.start_time);
                     const subject = s.subjects as any;
+                    const when = lessonEmailDateTime(sessionDate);
                     return {
-                        date: sessionDate.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' }),
-                        time: sessionDate.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' }),
+                        date: when.date,
+                        time: when.time,
                         subject: subject?.name || '–',
                         price: (s.price || 0).toFixed(2),
                     };

@@ -22,6 +22,7 @@ import {
   type MatchSubject,
 } from '@/lib/tutorMatching';
 import { availabilitySlotKey } from '@/lib/pickedAvailabilityTime';
+import { expandBusyByBreak } from '@/lib/sessionBreakConflict';
 import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 
@@ -79,6 +80,7 @@ type SubjectCriterion = {
 type TutorOption = {
   name: string;
   teachingNotes?: string | null;
+  breakMinutes: number;
 };
 
 const SEARCH_HORIZON_DAYS = 27;
@@ -132,8 +134,14 @@ export default function FindTutorModal({
 
   useEffect(() => {
     if (busyIntervals.length === 0) return;
-    setResults((current) => subtractBusyFromMatchSlots(current, busyIntervals));
-  }, [busyIntervals]);
+    const breakMinutesByTutor = Object.fromEntries(
+      Object.entries(tutors).map(([id, tutor]) => [id, tutor.breakMinutes]),
+    );
+    setResults((current) => subtractBusyFromMatchSlots(
+      current,
+      expandBusyByBreak(busyIntervals, breakMinutesByTutor),
+    ));
+  }, [busyIntervals, tutors]);
 
   useEffect(() => {
     if (isOpen) return;
@@ -193,7 +201,7 @@ export default function FindTutorModal({
         getOrgVisibleTutors(
           supabase,
           orgId,
-          'id, full_name, email, teaching_notes, has_active_license',
+          'id, full_name, email, teaching_notes, has_active_license, break_between_lessons',
         ),
       ]);
       if (cancelled) return;
@@ -203,7 +211,11 @@ export default function FindTutorModal({
       );
       const map: Record<string, TutorOption> = {};
       tutorList.forEach((t: any) => {
-        map[t.id] = { name: t.full_name, teachingNotes: t.teaching_notes };
+        map[t.id] = {
+          name: t.full_name,
+          teachingNotes: t.teaching_notes,
+          breakMinutes: Math.max(0, Number(t.break_between_lessons) || 0),
+        };
       });
       setTutors(map);
 
@@ -296,11 +308,17 @@ export default function FindTutorModal({
       .gt('end_time', from.toISOString())
       .neq('status', 'cancelled');
 
-    const busy: BusyInterval[] = (sessions || []).map((s: any) => ({
-      tutor_id: s.tutor_id,
-      start: new Date(s.start_time),
-      end: new Date(s.end_time),
-    })).concat(busyIntervals);
+    const breakMinutesByTutor = Object.fromEntries(
+      Object.entries(tutors).map(([id, tutor]) => [id, tutor.breakMinutes]),
+    );
+    const busy: BusyInterval[] = expandBusyByBreak(
+      (sessions || []).map((s: any) => ({
+        tutor_id: s.tutor_id,
+        start: new Date(s.start_time),
+        end: new Date(s.end_time),
+      })).concat(busyIntervals),
+      breakMinutesByTutor,
+    );
 
     const windowsForSearch = preferredWindows.length > 0
       ? preferredWindows.map((w) => ({ dayOfWeek: w.dayOfWeek, startTime: w.startTime, endTime: w.endTime }))

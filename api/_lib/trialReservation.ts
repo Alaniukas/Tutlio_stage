@@ -6,6 +6,7 @@ import { insertParentInviteAndSendEmail } from './parentInvite.js';
 import { isOrgTutor } from './isOrgTutor.js';
 import { studentRegistrationAlreadyActive } from './registrationInviteGate.js';
 import { isProKlaseOrg } from './marketMoney.js';
+import { lessonEmailDateTime } from './lessonLocalTime.js';
 
 export const TRIAL_RESERVATION_DEFAULT_DEADLINE_HOURS = 24;
 const MAX_DEADLINE_HOURS = 24 * 30; // 30 days
@@ -121,10 +122,10 @@ export interface ReservedTrialHold {
 }
 
 function ltDate(d: Date): string {
-  return d.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return lessonEmailDateTime(d).date;
 }
 function ltTime(d: Date): string {
-  return d.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
+  return lessonEmailDateTime(d).time;
 }
 
 async function postInternalEmail(appUrl: string, payload: unknown): Promise<void> {

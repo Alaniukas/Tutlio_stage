@@ -6,6 +6,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { verifyPerlasToken } from './_lib/perlasFinance.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
+import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://www.tutlio.lt';
 
@@ -141,8 +142,7 @@ async function handlePaymentCallback(decoded: Record<string, unknown>, supabase:
   const sessionStart = new Date(session.start_time);
   const durationMs = new Date(session.end_time).getTime() - sessionStart.getTime();
   const durationMinutes = Math.round(durationMs / 60000);
-  const dateStr = sessionStart.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' });
-  const timeStr = sessionStart.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
+  const { date: dateStr, time: timeStr } = lessonEmailDateTime(sessionStart);
   const sendEmailUrl = `${APP_URL}/api/send-email`;
 
   let orgName: string | null = null;

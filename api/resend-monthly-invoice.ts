@@ -13,6 +13,7 @@ import {
 } from './_lib/soloManualStudentPayments.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -94,10 +95,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .filter(Boolean)
       .sort((a: any, b: any) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
       .map((s: any) => {
-        const sessionDate = new Date(s.start_time);
+        const when = lessonEmailDateTime(new Date(s.start_time));
         return {
-          date: sessionDate.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' }),
-          time: sessionDate.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' }),
+          date: when.date,
+          time: when.time,
           subject: s.subjects?.name || '–',
           price: Number(s.price || 0).toFixed(2),
         };

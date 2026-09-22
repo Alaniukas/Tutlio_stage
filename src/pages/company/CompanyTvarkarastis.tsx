@@ -44,6 +44,7 @@ import {
 import { sessionCommentVisibilityLabelKey } from '@/lib/parentLessonComment';
 import {
   assertTutorSlotsFree,
+  confirmTutorBreakConflictOverride,
   convertOrgAdminSessionToRecurring,
   runOrgAdminCreateSession,
   type OrgAdminCreateSessionInput,
@@ -2104,6 +2105,17 @@ export default function CompanyTvarkarastis() {
         await assertTutorLicensed(newTutorId);
       }
 
+      const movedTutorId = newTutorId || selectedEvent.tutor_id;
+      if (timeChangedForMove && !(groupEditChoice === 'all_future' && selectedEvent.recurring_session_id && !isClassGroupSession)) {
+        await confirmTutorBreakConflictOverride(
+          supabase,
+          movedTutorId,
+          [{ start: newStart, end: newEnd }],
+          false,
+          isClassGroupSession ? classGroupIds : [selectedEvent.id],
+        );
+      }
+
       if (isClassGroupSession) {
         if (!classGroupIds.length) {
           throw new Error(t('compSch.saveFailedPermissionsOrRecords'));
@@ -2137,6 +2149,26 @@ export default function CompanyTvarkarastis() {
           ),
           rows,
         );
+        if (timeChangedForMove) {
+          const movedSlots = patches.flatMap(({ patch }) => {
+            const startRaw = patch.start_time;
+            const endRaw = patch.end_time;
+            if (typeof startRaw !== 'string' || typeof endRaw !== 'string') return [];
+            const start = new Date(startRaw);
+            const end = new Date(endRaw);
+            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+            return [{ start, end }];
+          });
+          if (movedSlots.length > 0) {
+            await confirmTutorBreakConflictOverride(
+              supabase,
+              movedTutorId,
+              movedSlots,
+              false,
+              patches.map((item) => item.id),
+            );
+          }
+        }
         const updatedIds: string[] = [];
         for (const { id, patch } of patches) {
           const { data, error } = await supabase.from('sessions').update(patch).eq('id', id).select('id');

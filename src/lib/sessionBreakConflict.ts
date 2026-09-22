@@ -6,7 +6,30 @@ export type SessionTimeSlot = {
 export type BusySessionTime = {
   start_time: unknown;
   end_time: unknown;
+  id?: string;
 };
+
+export type BreakPaddedInterval = {
+  tutor_id: string;
+  start: Date;
+  end: Date;
+};
+
+/** Grow each booked lesson by the tutor's break on both sides so that gap is not offered as free time. */
+export function expandBusyByBreak<T extends BreakPaddedInterval>(
+  intervals: T[],
+  breakMinutesByTutor: Record<string, number>,
+): T[] {
+  return intervals.map((interval) => {
+    const padMs = Math.max(0, Number(breakMinutesByTutor[interval.tutor_id]) || 0) * 60_000;
+    if (padMs === 0) return interval;
+    return {
+      ...interval,
+      start: new Date(interval.start.getTime() - padMs),
+      end: new Date(interval.end.getTime() + padMs),
+    };
+  });
+}
 
 function validDate(value: unknown): Date | null {
   const date = value instanceof Date ? value : new Date(String(value || ''));
@@ -47,10 +70,10 @@ export function tutorBreakOverrideMessage(breakMinutes: number, conflictCount: n
   const minutes = Math.max(0, Math.round(Number(breakMinutes) || 0));
   if (locale.toLowerCase().startsWith('lt')) {
     return conflictCount > 1
-      ? `${conflictCount} kuriamos pamokos nepalieka korepetitoriaus nustatytos ${minutes} min. pertraukos. Ar vis tiek sukurti?`
-      : `Ši pamoka nepalieka korepetitoriaus nustatytos ${minutes} min. pertraukos. Ar vis tiek sukurti?`;
+      ? `${conflictCount} laikai nepalieka nustatytos ${minutes} min. pertraukos. Ar vis tiek tęsti?`
+      : `Šis laikas nepalieka nustatytos ${minutes} min. pertraukos. Ar vis tiek tęsti?`;
   }
   return conflictCount > 1
-    ? `${conflictCount} lessons do not leave the tutor's configured ${minutes}-minute break. Create them anyway?`
-    : `This lesson does not leave the tutor's configured ${minutes}-minute break. Create it anyway?`;
+    ? `${conflictCount} times do not leave the configured ${minutes}-minute break. Continue anyway?`
+    : `This time does not leave the configured ${minutes}-minute break. Continue anyway?`;
 }

@@ -312,11 +312,12 @@ export async function assertTutorSlotsFree(
   }
 }
 
-async function confirmTutorBreakConflictOverride(
+export async function confirmTutorBreakConflictOverride(
   supabase: SupabaseClient,
   tutorId: string,
   slots: SessionTimeSlot[],
   allowBreakConflict: boolean,
+  excludeSessionIds: string[] = [],
 ): Promise<void> {
   if (allowBreakConflict || slots.length === 0) return;
   const { data: tutor } = await supabase
@@ -330,7 +331,12 @@ async function confirmTutorBreakConflictOverride(
   );
   if (breakMinutes === 0) return;
   const breakBusy = await loadTutorBusyRowsInRange(supabase, tutorId, slots, breakMinutes);
-  const conflicts = findTutorBreakConflicts(slots, breakBusy, breakMinutes);
+  const excluded = new Set(excludeSessionIds.filter(Boolean));
+  const conflicts = findTutorBreakConflicts(
+    slots,
+    breakBusy.filter((row) => !excluded.has(String(row.id))),
+    breakMinutes,
+  );
   if (conflicts.length === 0) return;
 
   const locale = typeof document !== 'undefined' ? document.documentElement.lang || 'lt' : 'lt';
@@ -1750,6 +1756,24 @@ export async function convertOrgAdminSessionToRecurring(
     .map((row) => row.start_time);
   if (sessionsRows.length > 0 && freeRows.length === 0) {
     await failAfterRollback(tutorSlotOverlapError(futureSlots[0]), []);
+  }
+
+  try {
+    await confirmTutorBreakConflictOverride(
+      supabase,
+      tutorId,
+      [
+        anchorSlot,
+        ...freeRows.map((row) => ({
+          start: new Date(String(row.start_time)),
+          end: new Date(String(row.end_time)),
+        })),
+      ],
+      false,
+      [sessionId],
+    );
+  } catch (error) {
+    await failAfterRollback(error, []);
   }
 
   let inserted: CreatedSessionRow[] = [];

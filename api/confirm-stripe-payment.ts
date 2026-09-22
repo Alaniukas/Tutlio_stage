@@ -5,6 +5,7 @@ import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
 import { retrieveConnectCheckoutSession } from './_lib/stripeDirectCharge.js';
+import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -107,8 +108,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const durationMs = new Date(sessionData.end_time).getTime() - new Date(sessionData.start_time).getTime();
             const durationMinutes = Math.round(durationMs / 60000);
             const sessionStart = new Date(sessionData.start_time);
-            const dateStr = sessionStart.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' });
-            const timeStr = sessionStart.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
+            const { date: dateStr, time: timeStr } = lessonEmailDateTime(sessionStart);
             const totalChargedEur =
                 checkoutSession?.amount_total != null ? checkoutSession.amount_total / 100 : undefined;
             const providerName = orgName || tutor.full_name || 'Korepetitorius';

@@ -17,6 +17,7 @@ import { summarizeStripeOnboarding } from './_lib/stripeAccountOnboarding.js';
 import { sendTrialReservationConfirmedNotifications } from './_lib/trialReservation.js';
 import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
 import { markSchoolMonthlyInvoicePaid } from './_lib/schoolMonthlyInvoiceEmail.js';
+import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -794,8 +795,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         const student = (dbSession as any).students;
                         const tutor = (dbSession as any).profiles;
                         const sessionStart = new Date((dbSession as any).start_time);
-                        const dateStr = sessionStart.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' });
-                        const timeStr = sessionStart.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
+                        const { date: dateStr, time: timeStr } = lessonEmailDateTime(sessionStart);
                         const durationMinutes = Math.round(
                             (new Date((dbSession as any).end_time).getTime() - sessionStart.getTime()) / 60000
                         );
@@ -977,8 +977,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     const tutor = dbSession.profiles as any;
 
                     const sessionStart = new Date(dbSession.start_time);
-                    const dateStr = sessionStart.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' });
-                    const timeStr = sessionStart.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
+                    const { date: dateStr, time: timeStr } = lessonEmailDateTime(sessionStart);
 
                     const recipients = new Set<string>();
                     if (student.email) recipients.add(student.email);
