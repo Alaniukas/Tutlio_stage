@@ -92,6 +92,7 @@ export function useSchoolPaymentsData() {
       .from('school_contracts')
       .select('id, student_id, contract_number, annual_fee, signing_status, archived_at, student:students(full_name, email, payer_email, payer_name)')
       .eq('organization_id', admin.organization_id)
+      .is('staff_document_type', null)
       .is('archived_at', null)
       .eq('signing_status', 'signed')
       .order('created_at', { ascending: false });

@@ -90,6 +90,17 @@
         "api/school-contract-sign-reconcile.ts": {
             "maxDuration": 60
         },
+        "api/school-staff-documents.ts": {
+            "maxDuration": 180,
+            "includeFiles": "api/_lib/templates/staff/**"
+        },
+        "api/school-staff-consent.ts": {
+            "maxDuration": 120,
+            "includeFiles": "api/_lib/templates/staff/**"
+        },
+        "api/school-staff-document-retention.ts": {
+            "maxDuration": 300
+        },
         "api/school-contract-sign-init.ts": {
             "maxDuration": 90
         },
@@ -260,6 +271,10 @@
         {
             "path": "/api/school-contract-sign-reconcile",
             "schedule": "* * * * *"
+        },
+        {
+            "path": "/api/school-staff-document-retention",
+            "schedule": "15 * * * *"
         },
         {
             "path": "/api/materialize-recurring-sessions",

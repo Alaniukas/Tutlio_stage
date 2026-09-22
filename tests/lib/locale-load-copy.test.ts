@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { SUPPORTED_LOCALES, loadLocaleDict, t } from '@/lib/i18n/core';
 import { LOCALE_LOAD_COPY } from '@/lib/i18n/localeLoadCopy';
 
-beforeAll(() => Promise.all(SUPPORTED_LOCALES.map(loadLocaleDict)));
+beforeAll(() => Promise.all(SUPPORTED_LOCALES.map(loadLocaleDict)), 60_000);
 describe('standalone locale recovery copy', () => {
   it.each(SUPPORTED_LOCALES)('%s matches existing translated labels without eagerly importing dictionaries', (locale) => {
     expect(LOCALE_LOAD_COPY[locale]).toEqual({

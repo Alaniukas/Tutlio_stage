@@ -57,6 +57,36 @@ function rel(file: string): string {
   return path.relative(ROOT, file).split(path.sep).join('/');
 }
 
+type RuntimeImport = { specifier: string; resolved: string | null };
+const runtimeImportsByFile = new Map<string, RuntimeImport[]>();
+
+function runtimeImports(file: string): RuntimeImport[] {
+  const cached = runtimeImportsByFile.get(file);
+  if (cached) return cached;
+
+  let source: string;
+  try {
+    source = stripComments(readFileSync(file, 'utf8'));
+  } catch {
+    runtimeImportsByFile.set(file, []);
+    return [];
+  }
+
+  const imports: RuntimeImport[] = [];
+  IMPORT_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = IMPORT_RE.exec(source))) {
+    if (/^\s*type\s/.test(match[2] || '')) continue;
+    const specifier = match[3] || match[4];
+    imports.push({
+      specifier,
+      resolved: specifier.startsWith('.') ? resolveRelative(file, specifier) : null,
+    });
+  }
+  runtimeImportsByFile.set(file, imports);
+  return imports;
+}
+
 /** Runtime import graph of one API entry, collecting unresolvable specifiers. */
 function auditEntry(entry: string): Offence[] {
   const offences: Offence[] = [];
@@ -68,21 +98,7 @@ function auditEntry(entry: string): Offence[] {
     if (seen.has(file)) continue;
     seen.add(file);
 
-    let source: string;
-    try {
-      source = stripComments(readFileSync(file, 'utf8'));
-    } catch {
-      continue;
-    }
-
-    let match: RegExpExecArray | null;
-    IMPORT_RE.lastIndex = 0;
-    while ((match = IMPORT_RE.exec(source))) {
-      const specifier = match[3] || match[4];
-      const clause = match[2] || '';
-      const typeOnly = /^\s*type\s/.test(clause);
-      if (typeOnly) continue;
-
+    for (const { specifier, resolved } of runtimeImports(file)) {
       if (specifier.startsWith('@/')) {
         offences.push({ entry, file: rel(file), specifier, reason: 'Vite alias is not resolvable by Node' });
         continue;
@@ -92,7 +108,6 @@ function auditEntry(entry: string): Offence[] {
       if (!RESOLVABLE_EXTENSIONS.test(specifier)) {
         offences.push({ entry, file: rel(file), specifier, reason: 'relative import needs an explicit .js extension' });
       }
-      const resolved = resolveRelative(file, specifier);
       if (resolved && !resolved.includes('node_modules')) stack.push(resolved);
     }
   }

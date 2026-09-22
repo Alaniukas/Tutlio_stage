@@ -96,6 +96,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!(contract as any).organizations?.features?.school_contract_esign) {
     return json(res, 403, { error: 'E-signing is not enabled for this organization' });
   }
+  if ((contract as any).staff_revoked_at) {
+    return json(res, 410, { error: 'Šis darbuotojo dokumentas atšauktas.' });
+  }
 
   const ready = String((contract as any).signing_status) === 'signed_by_school';
   let row = rowRaw;

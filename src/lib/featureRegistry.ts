@@ -145,6 +145,18 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'enterprise',
   },
 
+  school_staff_documents: {
+    id: 'school_staff_documents',
+    name: 'Darbuotojų dokumentai',
+    nameEn: 'Staff documents',
+    description: 'VšĮ „Laisvi vaikai“ darbuotojų konfidencialumo ir asmens duomenų sutikimo dokumentų pasirašymas pagal jų pateiktus šablonus. Reikia school_contract_esign.',
+    descriptionEn: 'VšĮ Laisvi vaikai staff confidentiality and data consent signing using its supplied templates. Requires school_contract_esign.',
+    category: 'integrations',
+    defaultValue: false,
+    requiresSetup: true,
+    pricingTier: 'enterprise',
+  },
+
   managed_family_accounts: {
     id: 'managed_family_accounts',
     name: 'Administracijos kuriamos šeimos paskyros',

@@ -45,7 +45,9 @@ class FakeQuery {
   }
   eq(col: string, val: any): this { this.filters.push((r) => r[col] === val); return this; }
   neq(col: string, val: any): this { this.filters.push((r) => r[col] !== val); return this; }
+  is(col: string, val: null): this { this.filters.push((r) => r[col] === val || r[col] === undefined); return this; }
   lt(col: string, val: any): this { this.filters.push((r) => r[col] != null && r[col] < val); return this; }
+  lte(col: string, val: any): this { this.filters.push((r) => r[col] != null && r[col] <= val); return this; }
   gt(col: string, val: any): this { this.filters.push((r) => r[col] != null && r[col] > val); return this; }
   in(col: string, vals: any[]): this { const s = new Set(vals); this.filters.push((r) => s.has(r[col])); return this; }
   not(col: string, _op: string, _val: any): this {

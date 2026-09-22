@@ -85,7 +85,7 @@ export async function resetDeadGoSignSignature(
 }
 
 export const CONTRACT_SIGN_SELECT =
-  'id, organization_id, student_id, party_kind, counterparty_name, counterparty_email, signing_status, pdf_url, signed_contract_url, contract_number, require_second_parent, annual_fee, additional_fee_amount, additional_fee_purpose, ' +
+  'id, organization_id, student_id, party_kind, counterparty_name, counterparty_email, signing_status, pdf_url, signed_contract_url, contract_number, require_second_parent, annual_fee, additional_fee_amount, additional_fee_purpose, staff_document_type, staff_consent_answers, staff_viewed_at, staff_revoked_at, ' +
   'organizations(name, email, features), ' +
   'student:students(id, full_name, payer_name, payer_email, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_personal_code)';
 
@@ -136,7 +136,12 @@ export function contractSigningSettings(contract: any): ContractSigningSettings 
 
 export function contractPdfFileName(contract: any): string {
   const slug = sanitizeContractNumberForFilename(contract?.contract_number || '');
-  return `${slug ? `Sutartis-${slug}` : 'Sutartis'}.pdf`;
+  const prefix = contract?.staff_document_type === 'consent'
+    ? 'Darbuotojo-sutikimas'
+    : contract?.staff_document_type === 'confidentiality'
+      ? 'Konfidencialumo-susitarimas'
+      : 'Sutartis';
+  return `${slug ? `${prefix}-${slug}` : prefix}.pdf`;
 }
 
 /** Download a stored (private-bucket) PDF to a Buffer. */
@@ -295,6 +300,7 @@ export async function beginGoSignForRow(
   row: any,
   appOrigin: string,
 ): Promise<string> {
+  if (contract.staff_revoked_at) throw new Error('Šis darbuotojo dokumentas atšauktas.');
   const rows = await fetchSignatureRows(supabase, contract.id);
   const inputPath = inputPdfPathForRole(contract, rows, row.role);
   if (!inputPath) throw new Error(`No input PDF available for role ${row.role}`);
@@ -309,17 +315,28 @@ export async function beginGoSignForRow(
   // per signer. The org-level location/contact describe the SCHOOL — parents
   // sign from wherever they are and must show their own contact, not info@.
   const isSchoolSigner = row.role === 'school';
+  const staffPosition = contract.staff_document_type
+    ? isSchoolSigner
+      ? process.env.GOSIGN_POS_STAFF_SCHOOL || 'relative, -1, 0.28, 0.82, 6cm, 2.4cm'
+      : process.env.GOSIGN_POS_STAFF_EMPLOYEE || 'relative, -1, 0.72, 0.82, 6cm, 2.4cm'
+    : null;
   const result = await initOneSign({
     responseUrl,
     signingType: 'Signature',
     locale: 'lt',
-    position: signaturePositionForRole(row.role as SignerRole),
+    position: staffPosition || signaturePositionForRole(row.role as SignerRole),
     signerPersonalCode: row.signer_personal_code || undefined,
-    reason: settings.reason || undefined,
+    reason: contract.staff_document_type === 'consent'
+      ? 'Darbuotojo asmens duomenų tvarkymo sutikimas'
+      : contract.staff_document_type === 'confidentiality'
+        ? 'Konfidencialumo susitarimas ir priedas'
+        : settings.reason || undefined,
     location: isSchoolSigner ? (settings.location || undefined) : undefined,
     contact: isSchoolSigner ? (settings.contact || undefined) : (stringSetting(row.signer_email) || undefined),
     displayValidity: true,
-    mobileSigningText: 'Tutlio: ugdymo sutarties pasirašymas',
+    mobileSigningText: contract.staff_document_type
+      ? 'Tutlio: darbuotojo dokumento pasirašymas'
+      : 'Tutlio: ugdymo sutarties pasirašymas',
     file: {
       fileId: `${contract.id}:${row.role}`.slice(0, 128),
       fileDigest,
@@ -380,7 +397,7 @@ export async function ensureSignatureRow(
 }
 
 /** Best-effort internal email via /api/send-email. */
-async function sendInternalEmail(
+export async function sendInternalEmail(
   appOrigin: string,
   type: string,
   to: string | string[],
@@ -418,6 +435,10 @@ export async function inviteTeacherToSign(
   signer: { name: string; email: string },
 ): Promise<{ emailed: boolean }> {
   if (!isTeacherContract(contract)) throw new Error('Contract is not a teacher contract');
+  if (contract.staff_revoked_at) throw new Error('Šis darbuotojo dokumentas atšauktas.');
+  if (contract.staff_document_type === 'consent' && !contract.staff_consent_answers) {
+    throw new Error('Darbuotojas dar nepažymėjo visų sutikimo punktų.');
+  }
   const contractId = String(contract.id || '');
   if (!contractId || !schoolSignedPath) throw new Error('School-signed contract PDF is missing');
 
@@ -453,8 +474,9 @@ export async function inviteTeacherToSign(
   const emailed = await sendInternalEmail(appOrigin, 'school_teacher_contract_sign_request', signer.email, {
     teacherName: signer.name,
     schoolName: contract.organizations?.name || '',
+    staffDocumentType: contract.staff_document_type || null,
     signUrl: parentSignUrl(appOrigin, row.token),
-    pdfUrl: pdfUrl || undefined,
+    pdfUrl: contract.staff_document_type ? undefined : pdfUrl || undefined,
     organizationId: contract.organization_id,
   });
   return { emailed };
@@ -530,6 +552,9 @@ export async function pollAndAdvance(
     .maybeSingle();
   if (!contract) return { status: 'not_found' };
   const contractId = String((contract as any).id);
+  if ((contract as any).staff_revoked_at) {
+    return { status: 'canceled', role: row.role, contractId };
+  }
 
   if (row.status === 'signed') {
     const contractStatus = String((contract as any).signing_status || '');
@@ -671,6 +696,16 @@ export async function advanceAfterRoleSigned(
       .update({ signing_status: 'signed_by_school' })
       .eq('id', contractId);
     if (isTeacherContract(contract)) {
+      if ((contract as any).staff_document_type && !(contract as any).staff_revoked_at) {
+        try {
+          await inviteTeacherToSign(supabase, contract, signedPath, appOrigin, {
+            name: String((contract as any).counterparty_name || ''),
+            email: String((contract as any).counterparty_email || ''),
+          });
+        } catch (error) {
+          console.error('[schoolContractSigning] staff invite failed:', error);
+        }
+      }
       return { contractStatus: 'signed_by_school', done: false };
     }
     // Invite the primary parent to sign the school-signed PDF.
@@ -763,6 +798,7 @@ async function finalizeTeacherContract(
   await sendInternalEmail(appOrigin, 'school_teacher_contract_fully_signed', recipient, {
     teacherName: contract.counterparty_name || '',
     schoolName: contract.organizations?.name || '',
+    staffDocumentType: contract.staff_document_type || null,
     pdfUrl: pdfUrl || undefined,
     organizationId: contract.organization_id,
   });

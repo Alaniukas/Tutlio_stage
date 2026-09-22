@@ -342,6 +342,15 @@ function mockSupabaseForConversionInsertFailure(
         })),
       };
     }
+    if (table === 'profiles') {
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle: vi.fn(async () => ({ data: { break_between_lessons: 0 }, error: null })),
+          })),
+        })),
+      };
+    }
     if (table === 'students') {
       return {
         select: vi.fn(() => ({

@@ -100,6 +100,7 @@ interface Contract {
   contract_number?: string | null;
   student_id: string | null;
   party_kind?: 'student' | 'teacher' | null;
+  staff_document_type?: 'confidentiality' | 'consent' | null;
   counterparty_name?: string | null;
   counterparty_email?: string | null;
   filled_body: string;
@@ -371,7 +372,7 @@ export default function CompanyContracts() {
 
     const [tRes, cRes, sRes] = await Promise.all([
       supabase.from('school_contract_templates').select('*').eq('organization_id', admin.organization_id).order('created_at', { ascending: false }),
-      supabase.from('school_contracts').select(CONTRACTS_SELECT).eq('organization_id', admin.organization_id).is('archived_at', null).order('created_at', { ascending: false }).limit(2000),
+      supabase.from('school_contracts').select(CONTRACTS_SELECT).eq('organization_id', admin.organization_id).is('staff_document_type', null).is('archived_at', null).order('created_at', { ascending: false }).limit(2000),
       supabase.from('students').select('id, full_name, email, phone, grade, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent').eq('organization_id', admin.organization_id).order('full_name'),
     ]);
 
@@ -412,6 +413,7 @@ export default function CompanyContracts() {
       .from('school_contracts')
       .select(CONTRACTS_SELECT)
       .eq('organization_id', orgId)
+      .is('staff_document_type', null)
       .is('archived_at', null)
       .order('created_at', { ascending: false });
     if (error) {
@@ -2060,7 +2062,7 @@ export default function CompanyContracts() {
   // Keep them out of the student/parent list so they cannot be mistaken for
   // an education contract or enter the school finance workflow.
   const studentContracts = contracts.filter((contract) => contract.party_kind !== 'teacher');
-  const teacherContracts = contracts.filter((contract) => contract.party_kind === 'teacher');
+  const teacherContracts = contracts.filter((contract) => contract.party_kind === 'teacher' && !contract.staff_document_type);
   const contractFilterCounts = countContractsByFilter(studentContracts, isSchoolView, { eSignEnabled });
   const visibleContracts = studentContracts.filter((c) => {
     if (isSchoolView) {

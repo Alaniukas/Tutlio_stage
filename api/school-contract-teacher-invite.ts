@@ -59,6 +59,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.edit')
   ) return json(res, 403, { error: 'Forbidden' });
 
+  if ((contract as any).staff_document_type) {
+    return json(res, 409, { error: 'Darbuotojo dokumento priminimą siųskite per darbuotojų dokumentų puslapį.' });
+  }
+
   if (String((contract as any).signing_status) === 'signed') {
     return json(res, 409, { error: 'Sutartis jau pasirašyta abiejų šalių.' });
   }

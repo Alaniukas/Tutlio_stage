@@ -199,6 +199,7 @@ export default function SchoolDashboard() {
             .from('school_contracts')
             .select('id, kind, signing_status, completion_submitted_at, accepted_at, sent_at, signed_at, created_at, pdf_url, signed_contract_url, student:students(full_name), signatures:school_contract_signatures(role, status)')
             .eq('organization_id', organizationId)
+            .is('staff_document_type', null)
             .is('archived_at', null)
             .order('created_at', { ascending: false })
             .range(from, to))

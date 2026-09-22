@@ -159,7 +159,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: signed, error: signErr } = await supabase.storage
     .from(SCHOOL_CONTRACTS_BUCKET)
-    .createSignedUrl(path, 60 * 15);
+    .createSignedUrl(path, 60 * 15, req.body?.download === true ? { download: fileName } : undefined);
   if (signErr || !signed?.signedUrl) {
     return json(res, 500, { error: signErr?.message || 'Nepavyko sugeneruoti nuorodos.' });
   }

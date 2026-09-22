@@ -118,6 +118,7 @@ export async function fetchContractSummaries(
     .from('school_contracts')
     .select(CONTRACTS_SUMMARY_SELECT)
     .eq('organization_id', organizationId)
+    .is('staff_document_type', null)
     .is('archived_at', null)
     .order('created_at', { ascending: false }));
   if (error) {
@@ -125,6 +126,7 @@ export async function fetchContractSummaries(
       .from('school_contracts')
       .select(CONTRACTS_SUMMARY_SELECT_FALLBACK)
       .eq('organization_id', organizationId)
+      .is('staff_document_type', null)
       .is('archived_at', null)
       .order('created_at', { ascending: false }));
   }
@@ -141,6 +143,7 @@ export async function fetchContractsByIds<T>(
     .from('school_contracts')
     .select(CONTRACTS_FULL_SELECT)
     .eq('organization_id', organizationId)
+    .is('staff_document_type', null)
     .is('archived_at', null)
     .in('id', ids);
   if (error) {
@@ -148,6 +151,7 @@ export async function fetchContractsByIds<T>(
       .from('school_contracts')
       .select(CONTRACTS_FULL_SELECT_FALLBACK)
       .eq('organization_id', organizationId)
+      .is('staff_document_type', null)
       .is('archived_at', null)
       .in('id', ids));
   }

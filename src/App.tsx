@@ -44,6 +44,7 @@ const AuthCallback = lazy(() => import('@/pages/AuthCallback'));
 const Register = lazy(() => import('@/pages/Register'));
 const ResetPassword = lazy(() => import('@/pages/ResetPassword'));
 const SchoolSign = lazy(() => import('@/pages/SchoolSign'));
+const SchoolStaffConsent = lazy(() => import('@/pages/SchoolStaffConsent'));
 const SchoolSignReturn = lazy(() => import('@/pages/SchoolSignReturn'));
 const UnsubscribeReminders = lazy(() => import('@/pages/UnsubscribeReminders'));
 const DashboardPage = lazy(() => import('@/pages/Dashboard'));
@@ -79,6 +80,7 @@ const CompanyTvarkarastis = lazy(() => import('@/pages/company/CompanyTvarkarast
 const CompanyStats = lazy(() => import('@/pages/company/CompanyStats'));
 const CompanySettings = lazy(() => import('@/pages/company/CompanySettings'));
 const CompanyContracts = lazy(() => import('@/pages/company/CompanyContracts'));
+const CompanyStaffDocuments = lazy(() => import('@/pages/company/CompanyStaffDocuments'));
 const CompanyFinanceHub = lazy(() => import('@/pages/company/CompanyFinanceHub'));
 const CompanyInstructions = lazy(() => import('@/pages/company/CompanyInstructions'));
 const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicPricing'));
@@ -95,6 +97,9 @@ const PreviewComplimentaryLesson = import.meta.env.DEV
   : null;
 const PreviewStaffContracts = import.meta.env.DEV
   ? lazy(() => import('@/pages/dev/PreviewStaffContracts'))
+  : null;
+const PreviewStaffDocuments = import.meta.env.DEV
+  ? lazy(() => import('@/pages/dev/PreviewStaffDocuments'))
   : null;
 const PreviewInAppSupport = import.meta.env.DEV
   ? lazy(() => import('@/pages/dev/PreviewInAppSupport'))
@@ -314,6 +319,16 @@ export default function App({ basename }: { basename: string }) {
             }
           />
         )}
+        {import.meta.env.DEV && PreviewStaffDocuments && (
+          <Route
+            path="/preview/staff-documents"
+            element={
+              <StaticLocaleProvider locale="lt">
+                <PreviewStaffDocuments />
+              </StaticLocaleProvider>
+            }
+          />
+        )}
         {import.meta.env.DEV && PreviewInAppSupport && (
           <Route
             path="/preview/support-agent"
@@ -442,6 +457,7 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/school-discount-accept" element={<SchoolDiscountAccept />} />
         <Route path="/school-homework" element={<SchoolHomework />} />
         <Route path="/school-sign" element={<SchoolSign />} />
+        <Route path="/school-staff-consent" element={<SchoolStaffConsent />} />
         <Route path="/school-sign/return" element={<SchoolSignReturn />} />
         <Route path="/unsubscribe" element={<UnsubscribeReminders />} />
         <Route path="/pasirasymas/sutarties/per/go-sign/:token" element={<SchoolSign />} />
@@ -572,6 +588,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/settings" element={<OrgPermissionRoute permission="settings.view" editPermission="settings.edit"><CompanySettings /></OrgPermissionRoute>} />
             <Route path="/school/finance" element={<OrgPermissionRoute permission="finance.view" editPermission="finance.edit"><CompanyFinanceHub /></OrgPermissionRoute>} />
             <Route path="/school/contracts" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyContracts /></OrgPermissionRoute>} />
+            <Route path="/school/staff-documents" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyStaffDocuments /></OrgPermissionRoute>} />
             <Route path="/school/team" element={<OrgPermissionRoute permission="team.view" editPermission="team.edit"><CompanyTeam /></OrgPermissionRoute>} />
             <Route path="/school/support" element={<InAppSupportRoute fallbackPath="/school" />} />
           </Route>

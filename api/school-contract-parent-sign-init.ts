@@ -65,6 +65,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!(contract as any).organizations?.features?.school_contract_esign) {
     return json(res, 403, { error: 'E-signing is not enabled for this organization' });
   }
+  if ((contract as any).staff_revoked_at) {
+    return json(res, 410, { error: 'Šis darbuotojo dokumentas atšauktas.' });
+  }
 
   const ready = String((contract as any).signing_status) === 'signed_by_school';
   let row = rowRaw;
@@ -77,6 +80,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const expired = isSignatureTokenExpired(row);
 
   if (req.method === 'GET') {
+    if ((contract as any).staff_document_type && !(contract as any).staff_viewed_at) {
+      await supabase.from('school_contracts')
+        .update({ staff_viewed_at: new Date().toISOString() })
+        .eq('id', (contract as any).id)
+        .is('staff_viewed_at', null);
+    }
     // Download link for the Smart-ID (Dokobit) path: the exact PDF this signer
     // must sign (the previous signer's output).
     let pdfUrl: string | undefined;
@@ -100,6 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       schoolName: (contract as any).organizations?.name || '',
       signerName: row.signer_name || '',
       partyKind: isTeacherContract(contract) ? 'teacher' : 'student',
+      staffDocumentType: (contract as any).staff_document_type || null,
       status: row.status,
       alreadySigned: row.status === 'signed',
       expired: Boolean(expired),

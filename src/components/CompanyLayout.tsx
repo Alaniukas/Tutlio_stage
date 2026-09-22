@@ -39,7 +39,7 @@ import { useUser } from '@/contexts/UserContext';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { useSchoolTerminology } from '@/hooks/useSchoolTerminology';
 import { showDynamicPricingNav } from '@/lib/orgIntakeMode';
-import { isInstructionsHiddenForOrg } from '@/lib/marketMoney';
+import { isInstructionsHiddenForOrg, LAISVI_VAIKIAI_ORG_ID } from '@/lib/marketMoney';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import type { OrgAdminPermission } from '@/lib/orgAdminPermissions';
 import SupportRobotIcon from '@/components/support/SupportRobotIcon';
@@ -75,6 +75,7 @@ export function buildCompanyNavItems(
   showInstructions = true,
   showGroups = false,
   showRecordings = false,
+  showStaffDocuments = false,
 ): CompanyNavItem[] {
   const base: CompanyNavItem[] = [
     { href: `${orgBasePath}`, label: t('companyNav.overview'), icon: LayoutDashboard, exact: true, permission: 'dashboard.view', section: 'work' },
@@ -97,6 +98,9 @@ export function buildCompanyNavItems(
   }
   if (isSchool) {
     base.push({ href: `${orgBasePath}/contracts`, label: t('companyNav.contracts'), icon: FileText, permission: 'contracts.view', section: 'manage' });
+    if (showStaffDocuments) {
+      base.push({ href: `${orgBasePath}/staff-documents`, label: 'Darbuotojų dokumentai', icon: FileText, permission: 'contracts.view', section: 'manage' });
+    }
   }
   base.push({ href: `${orgBasePath}/finance`, label: t('companyNav.finance'), icon: CreditCard, permission: 'finance.view', section: 'manage' });
   if (showDynamicPricing) {
@@ -183,9 +187,10 @@ export default function CompanyLayout() {
         showInstructions,
         hasFeature('school_class_groups'),
         SCHOOL_LESSON_RECORDINGS_NAV_READY && isSchool && hasFeature('school_lesson_recordings'),
+        isSchool && organizationId === LAISVI_VAIKIAI_ORG_ID && hasFeature('school_staff_documents'),
       )
       .filter((item) => item.permission === null || can(item.permission)),
-    [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage, showInstructions, can, hasFeature],
+    [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage, showInstructions, can, hasFeature, organizationId],
   );
 
   useEffect(() => {

@@ -46,6 +46,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!(contract as any).organizations?.features?.school_contract_esign) {
     return json(res, 403, { error: 'E-signing is not enabled for this organization' });
   }
+  if ((contract as any).staff_revoked_at) {
+    return json(res, 410, { error: 'Šis darbuotojo dokumentas atšauktas.' });
+  }
 
   const orgId = String((contract as any).organization_id || '');
   const adminAccess = await getOrgAdminAccessByUserId(supabase, auth.userId);

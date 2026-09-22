@@ -85,6 +85,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.edit')
   ) return json(res, 403, { error: 'Forbidden' });
 
+  if ((contract as any).staff_document_type) {
+    return json(res, 409, { error: 'Darbuotojo dokumentui būtini abiejų šalių elektroniniai parašai.' });
+  }
+
   if ((contract as any).organizations?.features?.school_contract_esign !== true) {
     return json(res, 409, { error: 'Šiai organizacijai e-pasirašymas neįjungtas — naudokite įprastą žymėjimą.' });
   }

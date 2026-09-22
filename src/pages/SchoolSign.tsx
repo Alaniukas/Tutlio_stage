@@ -15,6 +15,7 @@ type Info = {
   ready?: boolean;
   pdfUrl?: string;
   partyKind?: 'student' | 'teacher';
+  staffDocumentType?: 'confidentiality' | 'consent' | null;
 };
 
 export default function SchoolSign() {
@@ -31,6 +32,11 @@ export default function SchoolSign() {
   const [uploadedDone, setUploadedDone] = useState(false);
   const [uploadedWarning, setUploadedWarning] = useState(false);
   const isTeacherContract = info.partyKind === 'teacher';
+  const staffDocumentName = info.staffDocumentType === 'consent'
+    ? 'sutikimą dėl asmens duomenų tvarkymo'
+    : info.staffDocumentType === 'confidentiality'
+      ? 'konfidencialumo susitarimą su priedu'
+      : null;
 
   useEffect(() => {
     if (!token) {
@@ -161,16 +167,16 @@ export default function SchoolSign() {
 
       {state === 'signed' && (
         <>
-          <h1 className="text-xl font-bold text-emerald-700 mb-2">Sutartis jau pasirašyta</h1>
+          <h1 className="text-xl font-bold text-emerald-700 mb-2">Dokumentas jau pasirašytas</h1>
           <p className="text-gray-600">Ačiū! Jūsų parašas jau gautas. Šios nuorodos nebereikia.</p>
         </>
       )}
 
       {state === 'notready' && (
         <>
-          <h1 className="text-xl font-bold text-gray-900 mb-2">Sutartis dar neparuošta pasirašyti</h1>
+          <h1 className="text-xl font-bold text-gray-900 mb-2">{staffDocumentName ? 'Dokumentas dar neparuoštas pasirašyti' : 'Sutartis dar neparuošta pasirašyti'}</h1>
           <p className="text-gray-600">
-            Sutartį pirmiausia turi pasirašyti mokykla. Kai tik ji bus paruošta, gausite el. laišką su nuoroda.
+            {staffDocumentName ? 'Dokumentą' : 'Sutartį'} pirmiausia turi pasirašyti mokykla. Kai tik {staffDocumentName ? 'jis bus paruoštas' : 'ji bus paruošta'}, gausite el. laišką su nuoroda.
           </p>
         </>
       )}
@@ -178,12 +184,19 @@ export default function SchoolSign() {
       {state === 'ready' && (
         <>
           <h1 className="text-xl font-bold text-gray-900 mb-1">
-            {isTeacherContract ? 'Mokytojo sutarties pasirašymas' : 'Ugdymo sutarties pasirašymas'}
+            {staffDocumentName ? 'Darbuotojo dokumento pasirašymas' : isTeacherContract ? 'Mokytojo sutarties pasirašymas' : 'Ugdymo sutarties pasirašymas'}
           </h1>
           <p className="text-gray-600 mb-4">
-            {info.schoolName || 'Mokykla'} pasirašė {isTeacherContract ? 'sutartį su jumis' : 'ugdymo sutartį'}
+            {info.schoolName || 'Mokykla'} pasirašė {staffDocumentName || (isTeacherContract ? 'sutartį su jumis' : 'ugdymo sutartį')}
             {!isTeacherContract && info.studentName ? ` dėl ${info.studentName}` : ''}. Pasirinkite pasirašymo būdą.
           </p>
+          {staffDocumentName && info.pdfUrl && (
+            <p className="mb-4 text-sm">
+              <a href={info.pdfUrl} target="_blank" rel="noreferrer" className="font-medium text-indigo-700 underline">
+                Peržiūrėti visą pasirašomą PDF
+              </a>
+            </p>
+          )}
 
           <div className="border border-gray-200 rounded-xl p-4 mb-3">
             <p className="font-semibold text-gray-900 mb-1">1. Mobiliuoju parašu, LT ID arba kortele</p>
@@ -206,13 +219,13 @@ export default function SchoolSign() {
           <div className="border border-gray-200 rounded-xl p-4">
             <p className="font-semibold text-gray-900 mb-1">2. Per Dokobit (Smart-ID ar mobilusis parašas)</p>
             <p className="text-sm text-gray-500 mb-3">
-              Atsisiųskite sutartį čia, pasirašykite Dokobit, tada grįžkite ir įkelkite pasirašytą failą.
+              Atsisiųskite {staffDocumentName ? 'dokumentą' : 'sutartį'} čia, pasirašykite Dokobit, tada grįžkite ir įkelkite pasirašytą failą.
             </p>
             <ol className="text-sm text-gray-600 mb-3 list-decimal pl-5 space-y-1">
               <li>
                 {info.pdfUrl ? (
                   <a className="text-indigo-600 font-medium underline" href={info.pdfUrl} target="_blank" rel="noreferrer">
-                    Atsisiųskite sutartį
+                    Atsisiųskite {staffDocumentName ? 'dokumentą' : 'sutartį'}
                   </a>
                 ) : (
                   <button
@@ -220,7 +233,7 @@ export default function SchoolSign() {
                     className="text-indigo-600 font-medium underline"
                     onClick={() => window.location.reload()}
                   >
-                    Atsisiųskite sutartį — perkrauti nuorodą
+                    Atsisiųskite {staffDocumentName ? 'dokumentą' : 'sutartį'} — perkrauti nuorodą
                   </button>
                 )}
                 {' '}(naudokite tik šį failą).

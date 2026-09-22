@@ -1480,20 +1480,25 @@ function schoolContractFullySigned(d: any, _locale: Locale) {
 }
 
 function schoolTeacherContractSignRequest(d: any, _locale: Locale) {
+  const documentName = d.staffDocumentType === 'consent'
+    ? 'sutikimą dėl asmens duomenų tvarkymo'
+    : d.staffDocumentType === 'confidentiality'
+      ? 'konfidencialumo susitarimą su priedu'
+      : 'sutartį';
   return {
-    subject: `Pasirašykite sutartį su ${String(d.schoolName || 'mokykla')}`,
+    subject: `Pasirašykite ${documentName} su ${String(d.schoolName || 'mokykla')}`,
     html: wrap(
       `
       <div class="header" style="${headerInlineStyle('#6366f1', '#4f46e5')}">
-        <h2 style="color:#ffffff; font-size:24px; margin:0; font-weight:700;">Sutartis paruošta pasirašyti</h2>
+        <h2 style="color:#ffffff; font-size:24px; margin:0; font-weight:700;">${d.staffDocumentType ? 'Dokumentas paruoštas' : 'Sutartis paruošta'} pasirašyti</h2>
       </div>
       <div class="body">
         <p class="greeting">Sveiki${d.teacherName ? `, ${esc(d.teacherName)}` : ''},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          ${esc(d.schoolName || 'Mokykla')} pasirašė sutartį ir kviečia jus ją pasirašyti elektroniniu parašu.
+          ${esc(d.schoolName || 'Mokykla')} pasirašė ${documentName} ir kviečia jus ${d.staffDocumentType ? 'jį' : 'ją'} pasirašyti elektroniniu parašu.
         </p>
         <div style="text-align:center; margin-top:24px;">
-          ${outlookEmailButton(d.signUrl, 'Pasirašyti sutartį', '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+          ${outlookEmailButton(d.signUrl, 'Pasirašyti elektroniniu parašu', '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
         </div>
         ${d.pdfUrl ? `<div style="text-align:center; margin-top:12px;">${outlookEmailButton(d.pdfUrl, 'Peržiūrėti mokyklos pasirašytą PDF', '#64748b', { fontWeight: '600', fontSize: '13px', padding: '10px 22px' })}</div>` : ''}
         <p style="color:#9ca3af; font-size:12px; margin-top:16px;">Ši nuoroda asmeninė – neperduokite jos kitiems. Nuoroda galioja 14 dienų.</p>
@@ -1504,17 +1509,23 @@ function schoolTeacherContractSignRequest(d: any, _locale: Locale) {
 }
 
 function schoolTeacherContractFullySigned(d: any, _locale: Locale) {
+  const documentName = d.staffDocumentType === 'consent'
+    ? 'Sutikimas dėl asmens duomenų tvarkymo'
+    : d.staffDocumentType === 'confidentiality'
+      ? 'Konfidencialumo susitarimas su priedu'
+      : 'Sutartis';
+  const signedWord = d.staffDocumentType ? 'pasirašytas' : 'pasirašyta';
   return {
-    subject: `Sutartis su ${String(d.schoolName || 'mokykla')} pasirašyta`,
+    subject: `${documentName} su ${String(d.schoolName || 'mokykla')} ${signedWord}`,
     html: wrap(
       `
       <div class="header" style="${headerInlineStyle('#10b981', '#059669')}">
-        <h2 style="color:#ffffff; font-size:24px; margin:0; font-weight:700;">Sutartis pasirašyta</h2>
+        <h2 style="color:#ffffff; font-size:24px; margin:0; font-weight:700;">${d.staffDocumentType ? 'Dokumentas pasirašytas' : 'Sutartis pasirašyta'}</h2>
       </div>
       <div class="body">
         <p class="greeting">Sveiki${d.teacherName ? `, ${esc(d.teacherName)}` : ''},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Sutartis su ${esc(d.schoolName || 'mokykla')} pasirašyta abiejų šalių.
+          ${documentName} su ${esc(d.schoolName || 'mokykla')} ${signedWord} abiejų šalių.
         </p>
         ${d.pdfUrl ? `<div style="text-align:center; margin-top:20px;">${outlookEmailButton(d.pdfUrl, 'Atsisiųsti pasirašytą sutartį', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}</div>` : ''}
       </div>${footerFor('lt')}`,
@@ -2471,6 +2482,28 @@ function schoolContractExtraAccepted(d: any, locale: Locale) {
           </table>
         </div>
       </div>${footerFor(locale)}`, locale),
+  };
+}
+
+function schoolStaffConsentChoicesRequest(d: any, _locale: Locale) {
+  return {
+    subject: `${String(d.schoolName || 'Mokykla')}: pažymėkite asmens duomenų sutikimo punktus`,
+    html: wrap(
+      `<div class="header" style="${headerInlineStyle('#6366f1', '#4f46e5')}">
+        <h2 style="color:#ffffff; font-size:24px; margin:0; font-weight:700;">Darbuotojo sutikimo forma</h2>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki${d.employeeName ? `, ${esc(d.employeeName)}` : ''},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          ${esc(d.schoolName || 'Mokykla')} prašo peržiūrėti asmens duomenų tvarkymo sutikimą ir atskirai pažymėti kiekvieną iš 10 punktų. Po to dokumentą pasirašys mokykla, o jūs gausite atskirą nuorodą pasirašyti elektroniniu parašu.
+        </p>
+        <div style="text-align:center; margin-top:24px;">
+          ${outlookEmailButton(d.choicesUrl, 'Peržiūrėti ir pažymėti punktus', '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+        </div>
+        <p style="color:#9ca3af; font-size:12px; margin-top:16px;">Ši nuoroda asmeninė – neperduokite jos kitiems.</p>
+      </div>${footerFor('lt')}`,
+      'lt',
+    ),
   };
 }
 
@@ -3711,6 +3744,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'school_contract_fully_signed': emailContent = schoolContractFullySigned(data, locale); break;
       case 'school_teacher_contract_sign_request': emailContent = schoolTeacherContractSignRequest(data, locale); break;
       case 'school_teacher_contract_fully_signed': emailContent = schoolTeacherContractFullySigned(data, locale); break;
+      case 'school_staff_consent_choices_request': emailContent = schoolStaffConsentChoicesRequest(data, locale); break;
       case 'school_contract_completion_admin': emailContent = schoolContractCompletionAdmin(data, locale); break;
       case 'school_contract_parent_signed_admin': emailContent = schoolContractParentSignedAdmin(data, locale); break;
       case 'payment_received_tutor': emailContent = paymentReceivedTutor(data, locale); break;

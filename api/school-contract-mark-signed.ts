@@ -35,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: contract, error: contractErr } = await supabase
     .from('school_contracts')
     .select(
-      'id, organization_id, student_id, signing_status, signed_at, signed_contract_url, org:organizations(name, features), student:students(id, full_name, email, invite_code, payer_email, payer_name, parent_secondary_email, parent_secondary_name)',
+      'id, organization_id, student_id, signing_status, signed_at, signed_contract_url, staff_document_type, org:organizations(name, features), student:students(id, full_name, email, invite_code, payer_email, payer_name, parent_secondary_email, parent_secondary_name)',
     )
     .eq('id', contractId)
     .maybeSingle();
@@ -50,6 +50,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     adminAccess?.organizationId !== orgId
     || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.edit')
   ) return json(res, 403, { error: 'Forbidden' });
+
+  if ((contract as any).staff_document_type) {
+    return json(res, 409, { error: 'Darbuotojo dokumentui būtini abiejų šalių elektroniniai parašai.' });
+  }
 
   const manualUpload = req.body?.manualUpload === true;
   if ((contract as any).org?.features?.school_contract_esign === true && !manualUpload) {

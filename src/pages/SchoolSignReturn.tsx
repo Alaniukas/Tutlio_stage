@@ -87,7 +87,7 @@ export default function SchoolSignReturn() {
             <p className="text-gray-600">
               {allSigned
                 ? signerRole === 'teacher'
-                  ? 'Sutartis pasirašyta abiejų šalių. Pasirašytą kopiją gausite el. paštu.'
+                  ? 'Dokumentas pasirašytas abiejų šalių. Pasirašytą kopiją gausite el. paštu.'
                   : 'Sutartis pasirašyta abiejų šalių. Netrukus gausite el. laišką dėl apmokėjimo.'
                 : 'Jūsų parašas gautas. Kitos šalies pasirašymo kvietimas išsiųstas el. paštu.'}
             </p>
