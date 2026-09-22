@@ -50,6 +50,11 @@ function csvCell(value: unknown): string {
   return `"${String(value ?? '').replace(/"/g, '""')}"`;
 }
 
+function countLabel(count: number, singular: string, plural: string, genitive: string): string {
+  const form = new Intl.PluralRules('lt').select(count);
+  return `${count} ${form === 'one' ? singular : form === 'few' ? plural : genitive}`;
+}
+
 type PreviewData = { documents: StaffDocument[]; organizationId: string };
 
 export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit: boolean; previewData?: PreviewData }) {
@@ -200,6 +205,11 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
   };
 
   const action = async (name: 'remind' | 'revoke' | 'remind-unsigned', id?: string) => {
+    if (name === 'revoke') {
+      const target = documents.find((item) => item.id === id);
+      if (!target || !window.confirm(`Atšaukti dokumentą „${TYPE_LABEL[target.staff_document_type]}“ darbuotojui ${target.counterparty_name}? Pasirašymo nuoroda nebeveiks. Kito dokumento būsena nesikeis.`)) return;
+    }
+    if (name === 'remind-unsigned' && !window.confirm('Išsiųsti priminimus visiems nepasirašiusiems darbuotojams? Paieška ir filtras šio veiksmo neriboja.')) return;
     if (previewData) {
       if (name === 'revoke') setDocuments((current) => current.map((item) => item.id === id ? { ...item, status: 'revoked', staff_revoked_at: new Date().toISOString() } : item));
       setMessage(name === 'revoke' ? 'Dokumentas atšauktas.' : 'Peržiūros režimu priminimas būtų išsiųstas el. paštu.');
@@ -323,9 +333,9 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
           <input className="min-w-[220px] flex-1 rounded-md border p-2 text-sm" placeholder="Ieškoti darbuotojo" value={search} onChange={(event) => setSearch(event.target.value)} />
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={unsignedOnly} onChange={(event) => setUnsignedOnly(event.target.checked)} /> Nepasirašyti</label>
           <button onClick={exportSummary} disabled={!visible.length} className="rounded-md border px-3 py-2 text-sm disabled:opacity-50">Atsisiųsti suvestinę CSV</button>
-          {canEdit && <button onClick={() => void action('remind-unsigned')} disabled={busy} className="rounded-md border px-3 py-2 text-sm disabled:opacity-50">Priminti nepasirašiusiems</button>}
+          {canEdit && <button onClick={() => void action('remind-unsigned')} disabled={busy} className="rounded-md border px-3 py-2 text-sm disabled:opacity-50">Priminti visiems nepasirašiusiems</button>}
         </div>
-        <p className="mt-3 text-xs text-slate-500">{grouped.length} darbuotojų · {visible.length} dokumentų. Masiniai priminimai tam pačiam dokumentui siunčiami ne dažniau kaip kartą per 24 val.</p>
+        <p className="mt-3 text-xs text-slate-500">{countLabel(grouped.length, 'darbuotojas', 'darbuotojai', 'darbuotojų')} · {countLabel(visible.length, 'dokumentas', 'dokumentai', 'dokumentų')}. Masinis priminimas siunčiamas visiems nepasirašiusiems, nepriklausomai nuo paieškos ar filtro, tam pačiam dokumentui ne dažniau kaip kartą per 24 val.</p>
         {loading ? <p className="mt-6 text-sm">Kraunama…</p> : visible.length === 0 ? <p className="mt-6 text-sm text-slate-500">Dokumentų nerasta.</p> : (
           <div className="mt-4 space-y-3">
             {grouped.map((group) => (

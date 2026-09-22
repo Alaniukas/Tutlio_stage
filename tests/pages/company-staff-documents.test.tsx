@@ -9,7 +9,7 @@ vi.mock('@/contexts/OrgAdminAccessContext', () => ({
   useOrgAdminAccess: () => ({ can: () => true }),
 }));
 
-import CompanyStaffDocuments from '../../src/pages/company/CompanyStaffDocuments';
+import CompanyStaffDocuments, { CompanyStaffDocumentsContent, type StaffDocument } from '../../src/pages/company/CompanyStaffDocuments';
 
 const ORG_ID = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
 
@@ -38,6 +38,8 @@ describe('school staff document upload form', () => {
     fireEvent.change(screen.getByLabelText(/Paruoštas konfidencialumo susitarimas su priedu viename PDF/), {
       target: { files: [file] },
     });
+    expect(screen.getByLabelText('Darbo sutarties Nr. (nebūtina)')).toBeTruthy();
+    expect(screen.getByLabelText('Darbo sutarties data (nebūtina)')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('PDF yra ir susitarimas, ir konfidencialios informacijos sąrašo priedas'));
     fireEvent.click(screen.getByRole('button', { name: 'Sukurti du dokumentus' }));
 
@@ -46,6 +48,48 @@ describe('school staff document upload form', () => {
     expect(posts[0].action).toBe('create-bundle');
     expect(posts[0].preparedPdfPath).toContain(`${ORG_ID}/contracts/`);
     expect(posts[0].confidentialityId).not.toBe(posts[0].consentId);
+  });
+
+  it('explains that bulk reminders include hidden records and uses correct count labels', () => {
+    const base = {
+      organization_id: ORG_ID,
+      counterparty_name: 'Bandomasis Darbuotojas',
+      counterparty_email: 'employee@example.com',
+      staff_document_group_id: 'group-1',
+      staff_employment_contract_number: null,
+      staff_employment_contract_date: null,
+      staff_consent_answers: null,
+      staff_revoked_at: null,
+      signing_status: 'draft',
+      status: 'draft' as const,
+      sent_at: null,
+      signed_at: null,
+      pdf_url: null,
+      signed_contract_url: null,
+      staff_files_deleted_at: null,
+    };
+    const documents: StaffDocument[] = [
+      { ...base, id: 'one', staff_document_type: 'confidentiality' },
+      { ...base, id: 'two', staff_document_type: 'consent' },
+    ];
+    render(<CompanyStaffDocumentsContent canEdit previewData={{ organizationId: ORG_ID, documents }} />);
+    expect(screen.getByText(/1 darbuotojas · 2 dokumentai\./)).toBeTruthy();
+    expect(screen.getByText(/nepriklausomai nuo paieškos ar filtro/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Priminti visiems nepasirašiusiems' })).toBeTruthy();
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    fireEvent.click(screen.getByRole('button', { name: 'Priminti visiems nepasirašiusiems' }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Paieška ir filtras šio veiksmo neriboja'));
+    expect(screen.queryByRole('status')).toBeNull();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Atšaukti' })[0]);
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('Kito dokumento būsena nesikeis'));
+    expect(screen.queryByText('Atšaukta')).toBeNull();
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Atšaukti' })[0]);
+    expect(screen.getByText('Atšaukta')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Atšaukti' })).toHaveLength(1);
   });
 
   it('retries the same pair without uploading the PDF a second time after a server error', async () => {
