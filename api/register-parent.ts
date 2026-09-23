@@ -102,15 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!studentRow || studentRow.detached_at) {
       return res.status(404).json({ error: 'Student record not found', code: 'invite_not_found' });
     }
-    let orgId: string | null = studentRow?.organization_id || null;
-    if (!orgId && studentRow?.tutor_id) {
-      const { data: tutorRow } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', studentRow.tutor_id)
-        .maybeSingle();
-      orgId = tutorRow?.organization_id || null;
-    }
+    const orgId = await studentOrganizationId(supabase, studentRow);
     if (parentLegalAcceptanceMissing({
       orgIdOrSlug: orgId,
       acceptedPrivacy: isAcceptedFlag(body.acceptedPrivacy),
@@ -123,6 +115,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : new Date().toISOString();
 
     const normalizedEmail = invite.parent_email.trim().toLowerCase();
+    const autoLinkSiblings = usesProKlaseLegalDocs(orgId);
+
+    // Read sibling invitations before creating the Auth user so a failed
+    // lookup can be retried without leaving a partially registered account.
+    let pendingInvites: Array<{ id: string; student_id: string; parent_email: string }> = [];
+    if (autoLinkSiblings) {
+      const { data, error } = await supabase
+        .from('parent_invites')
+        .select('id, student_id, parent_email')
+        .ilike('parent_email', normalizedEmail)
+        .eq('used', false);
+      if (error) return res.status(500).json({ error: error.message });
+      pendingInvites = data ?? [];
+    }
 
     const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
       email: normalizedEmail,
@@ -152,17 +158,67 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!authData.user) return res.status(500).json({ error: 'User creation failed' });
 
-    await linkParent(supabase, authData.user.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail, childInfo, {
-      acceptedAt: usesProKlaseLegalDocs(orgId) ? acceptedAt : null,
-    });
+    try {
+      const parentProfileId = await linkParent(supabase, authData.user.id, fullName.trim(), invite.student_id, normalizedEmail, childInfo, {
+        acceptedAt: usesProKlaseLegalDocs(orgId) ? acceptedAt : null,
+      });
+      const linkedInviteIds = [invite.id];
 
-    const welcome = await sendProKlaseRegistrationWelcomeEmail({
-      organizationId: orgId,
-      to: normalizedEmail,
-      parentName: fullName.trim(),
-    });
-    if (welcome.ok === false) {
-      console.warn('[register-parent] Pro Klasė welcome email:', welcome.error);
+      // A family can receive one invite for each child. Registering from the first
+      // invite must attach the remaining children without applying this child's
+      // grade or birth date to their records.
+      if (autoLinkSiblings) {
+        for (const pending of pendingInvites) {
+          if (pending.id === invite.id) continue;
+          // ILIKE treats '_' and '%' as wildcards; require an exact email match.
+          if (pending.parent_email.trim().toLowerCase() !== normalizedEmail) continue;
+          const { data: sibling, error: siblingErr } = await supabase
+            .from('students')
+            .select('organization_id, tutor_id, detached_at, parent_user_id')
+            .eq('id', pending.student_id)
+            .maybeSingle();
+          if (siblingErr) throw siblingErr;
+          if (!sibling || sibling.detached_at) continue;
+          if (await studentOrganizationId(supabase, sibling) !== orgId) continue;
+
+          await linkParentStudent(supabase, parentProfileId, authData.user.id, pending.student_id, {
+            // Keep an existing legacy parent_user_id when a second parent joins.
+            setParentUserId: !sibling.parent_user_id || sibling.parent_user_id === authData.user.id,
+          });
+          linkedInviteIds.push(pending.id);
+        }
+      }
+
+      // Mark invitations used only after every child was linked. This is one DB
+      // statement, so a failed sibling link cannot consume the first invitation.
+      const { error: inviteErr } = await supabase
+        .from('parent_invites')
+        .update({ used: true })
+        .in('id', linkedInviteIds);
+      if (inviteErr) throw inviteErr;
+    } catch (linkErr) {
+      // These FKs cascade the new profile/links and null out parent_user_id.
+      // Removing only the user created above lets this invitation be retried.
+      try {
+        const { error: rollbackErr } = await supabase.auth.admin.deleteUser(authData.user.id);
+        if (rollbackErr) console.error('[register-parent] Auth rollback failed:', rollbackErr);
+      } catch (rollbackErr) {
+        console.error('[register-parent] Auth rollback failed:', rollbackErr);
+      }
+      throw linkErr;
+    }
+
+    try {
+      const welcome = await sendProKlaseRegistrationWelcomeEmail({
+        organizationId: orgId,
+        to: normalizedEmail,
+        parentName: fullName.trim(),
+      });
+      if (welcome.ok === false) {
+        console.warn('[register-parent] Pro Klasė welcome email:', welcome.error);
+      }
+    } catch (welcomeErr) {
+      console.warn('[register-parent] Pro Klasė welcome email:', welcomeErr);
     }
 
     return res.status(200).json({ success: true });
@@ -172,16 +228,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+async function studentOrganizationId(
+  supabase: any,
+  student: { organization_id?: string | null; tutor_id?: string | null },
+): Promise<string | null> {
+  if (student.organization_id) return student.organization_id;
+  if (!student.tutor_id) return null;
+  const { data: tutorRow, error } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', student.tutor_id)
+    .maybeSingle();
+  if (error) throw error;
+  return tutorRow?.organization_id || null;
+}
+
 async function linkParent(
   supabase: any,
   userId: string,
   fullName: string,
   studentId: string,
-  inviteId: string,
   parentEmail: string,
   childInfo?: { child_birth_date?: string; grade?: string },
   legal?: { acceptedAt?: string | null },
-) {
+): Promise<string> {
   const { data: profileRow, error: profErr } = await supabase
     .from('parent_profiles')
     .upsert(
@@ -208,18 +278,34 @@ async function linkParent(
 
   const parentProfileId = profileRow.id as string;
 
+  await linkParentStudent(supabase, parentProfileId, userId, studentId, { childInfo });
+  return parentProfileId;
+}
+
+async function linkParentStudent(
+  supabase: any,
+  parentProfileId: string,
+  userId: string,
+  studentId: string,
+  options: {
+    childInfo?: { child_birth_date?: string; grade?: string };
+    setParentUserId?: boolean;
+  } = {},
+) {
   const { error: psErr } = await supabase.from('parent_students').upsert(
     { parent_id: parentProfileId, student_id: studentId },
     { onConflict: 'parent_id,student_id' }
   );
-  if (psErr) console.error('[register-parent] parent_students upsert', psErr);
+  if (psErr) throw psErr;
 
-  const studentUpdate: Record<string, unknown> = { parent_user_id: userId };
-  if (childInfo?.child_birth_date) studentUpdate.child_birth_date = childInfo.child_birth_date;
-  if (childInfo?.grade) studentUpdate.grade = childInfo.grade;
-  await supabase.from('students').update(studentUpdate).eq('id', studentId);
-
-  await supabase.from('parent_invites').update({ used: true }).eq('id', inviteId);
+  const studentUpdate: Record<string, unknown> = {};
+  if (options.setParentUserId !== false) studentUpdate.parent_user_id = userId;
+  if (options.childInfo?.child_birth_date) studentUpdate.child_birth_date = options.childInfo.child_birth_date;
+  if (options.childInfo?.grade) studentUpdate.grade = options.childInfo.grade;
+  if (Object.keys(studentUpdate).length > 0) {
+    const { error: studentErr } = await supabase.from('students').update(studentUpdate).eq('id', studentId);
+    if (studentErr) throw studentErr;
+  }
 
   const { data: st } = await supabase
     .from('students')

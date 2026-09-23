@@ -6,6 +6,7 @@ const PRO_KLASE_ORG = '3422031d-6e21-424d-980b-35a9c6d7b8f1';
 
 const mocks = vi.hoisted(() => {
   const createUser = vi.fn();
+  const deleteUser = vi.fn();
   const listUsers = vi.fn();
   const updateUserById = vi.fn();
   const from = vi.fn();
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => {
   const sendWelcome = vi.fn();
   return {
     createUser,
+    deleteUser,
     listUsers,
     updateUserById,
     from,
@@ -21,7 +23,7 @@ const mocks = vi.hoisted(() => {
     createClient: vi.fn(() => ({
       from,
       rpc,
-      auth: { admin: { createUser, listUsers, updateUserById } },
+      auth: { admin: { createUser, deleteUser, listUsers, updateUserById } },
     })),
   };
 });
@@ -58,6 +60,7 @@ function chain(result: { data: any; error: any }) {
   const self = () => q;
   q.select = self;
   q.eq = self;
+  q.in = self;
   q.ilike = self;
   q.order = self;
   q.limit = self;
@@ -82,8 +85,12 @@ describe('POST /api/register-parent', () => {
     vi.clearAllMocks();
     vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
     vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'service-role-test');
+    let parentInviteQueries = 0;
     mocks.from.mockImplementation((table: string) => {
-      if (table === 'parent_invites') return chain({ data: invite, error: null });
+      if (table === 'parent_invites') {
+        parentInviteQueries += 1;
+        return chain({ data: parentInviteQueries >= 2 ? [] : invite, error: null });
+      }
       if (table === 'students') {
         return chain({
           data: { organization_id: PRO_KLASE_ORG, tutor_id: 'tutor-1', linked_user_id: null },
@@ -94,6 +101,7 @@ describe('POST /api/register-parent', () => {
       return chain({ data: null, error: null });
     });
     mocks.createUser.mockResolvedValue({ data: { user: { id: 'new-user' } }, error: null });
+    mocks.deleteUser.mockResolvedValue({ data: {}, error: null });
     mocks.updateUserById.mockResolvedValue({ data: {}, error: null });
     mocks.rpc.mockResolvedValue({ data: null, error: { code: 'PGRST202' } });
     mocks.sendWelcome.mockResolvedValue({ ok: true });
@@ -181,6 +189,211 @@ describe('POST /api/register-parent', () => {
       to: 'alaniukasa@gmail.com',
       parentName: 'Agne Rubeziene',
     });
+  });
+
+  it('links pending sibling invites in the same organization without changing sibling details', async () => {
+    const otherOrg = 'other-organization';
+    const invites: Array<{
+      id: string;
+      student_id: string;
+      parent_email: string;
+      used: boolean;
+      token?: string;
+    }> = [
+      { ...invite, parent_email: 'Parent@Example.com', token: 'first-token' },
+      { id: 'invite-2', student_id: 'student-2', parent_email: 'parent@example.com', used: false },
+      { id: 'invite-other-org', student_id: 'student-3', parent_email: 'parent@example.com', used: false },
+      { id: 'invite-archived', student_id: 'student-4', parent_email: 'parent@example.com', used: false },
+      { id: 'invite-other-email', student_id: 'student-5', parent_email: 'someone@example.com', used: false },
+    ];
+    const students = new Map<string, Record<string, unknown>>([
+      ['student-1', { organization_id: PRO_KLASE_ORG, tutor_id: null, detached_at: null, linked_user_id: null }],
+      ['student-2', { organization_id: null, tutor_id: 'tutor-2', detached_at: null, linked_user_id: null, grade: '6', child_birth_date: '2014-04-06' }],
+      ['student-3', { organization_id: otherOrg, tutor_id: null, detached_at: null }],
+      ['student-4', { organization_id: PRO_KLASE_ORG, tutor_id: null, detached_at: '2026-09-01' }],
+      ['student-5', { organization_id: PRO_KLASE_ORG, tutor_id: null, detached_at: null }],
+    ]);
+    const studentUpdates: Array<{ id: string; values: Record<string, unknown> }> = [];
+    const linkedStudentIds: string[] = [];
+
+    mocks.from.mockImplementation((table: string) => {
+      const filters: Record<string, unknown> = {};
+      let action: 'select' | 'update' | 'upsert' = 'select';
+      let values: Record<string, unknown> = {};
+      const query: any = {
+        select: () => query,
+        eq: (column: string, value: unknown) => { filters[column] = value; return query; },
+        in: (column: string, values: unknown[]) => { filters[column] = values; return query; },
+        ilike: (column: string, value: unknown) => { filters[column] = value; return query; },
+        order: () => query,
+        limit: () => query,
+        update: (value: Record<string, unknown>) => { action = 'update'; values = value; return query; },
+        upsert: (value: Record<string, unknown>) => { action = 'upsert'; values = value; return query; },
+        maybeSingle: async () => result(),
+        single: async () => result(),
+        then: (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) =>
+          Promise.resolve(result()).then(resolve, reject),
+      };
+      const result = () => {
+        if (table === 'parent_invites') {
+          if (action === 'update') {
+            const ids = Array.isArray(filters.id) ? filters.id : [filters.id];
+            for (const target of invites.filter((item) => ids.includes(item.id))) {
+              target.used = Boolean(values.used);
+            }
+            return { data: null, error: null };
+          }
+          if (filters.token) return { data: invites.find((item) => item.token === filters.token) ?? null, error: null };
+          return {
+            // Include a different email to verify the handler rechecks equality;
+            // ILIKE can match more than requested when the email has wildcards.
+            data: invites.filter((item) => item.used === filters.used),
+            error: null,
+          };
+        }
+        if (table === 'students') {
+          const id = String(filters.id);
+          if (action === 'update') {
+            studentUpdates.push({ id, values });
+            Object.assign(students.get(id) ?? {}, values);
+            return { data: null, error: null };
+          }
+          return { data: students.get(id) ?? null, error: null };
+        }
+        if (table === 'parent_profiles') return { data: { id: 'pp-1' }, error: null };
+        if (table === 'profiles') return { data: { organization_id: PRO_KLASE_ORG }, error: null };
+        if (table === 'parent_students' && action === 'upsert') {
+          linkedStudentIds.push(String(values.student_id));
+        }
+        return { data: null, error: null };
+      };
+      return query;
+    });
+
+    const response = mockRes();
+    await handler(mockReq({
+      token: 'first-token',
+      fullName: 'Parent',
+      password: 'ExamplePassword123!',
+      childGrade: '10',
+      childBirthDate: '2012-02-04',
+      acceptedPrivacy: true,
+      acceptedTerms: true,
+    }), response);
+
+    expect(response.getResult()).toEqual({ statusCode: 200, body: { success: true } });
+    expect(mocks.createUser).toHaveBeenCalledWith(expect.objectContaining({ email: 'parent@example.com' }));
+    expect(linkedStudentIds).toEqual(['student-1', 'student-2']);
+    expect(studentUpdates).toContainEqual({
+      id: 'student-1',
+      values: { parent_user_id: 'new-user', grade: '10 klasė', child_birth_date: '2012-02-04' },
+    });
+    expect(studentUpdates).toContainEqual({ id: 'student-2', values: { parent_user_id: 'new-user' } });
+    expect(students.get('student-2')).toMatchObject({ grade: '6', child_birth_date: '2014-04-06' });
+    expect(invites.map((item) => [item.id, item.used])).toEqual([
+      ['invite-1', true],
+      ['invite-2', true],
+      ['invite-other-org', false],
+      ['invite-archived', false],
+      ['invite-other-email', false],
+    ]);
+  });
+
+  it.each([
+    ['sibling parent link', 'parent_students'],
+    ['sibling student update', 'students'],
+    ['invitation update', 'parent_invites'],
+  ] as const)('rolls back the new account when the %s fails', async (_label, failingTable) => {
+    const invites = [
+      { id: 'invite-1', student_id: 'student-1', parent_email: 'parent@example.com', token: 'first-token', used: false },
+      { id: 'invite-2', student_id: 'student-2', parent_email: 'parent@example.com', token: 'second-token', used: false },
+    ];
+    const inviteUpdates: string[][] = [];
+
+    mocks.from.mockImplementation((table: string) => {
+      const filters: Record<string, unknown> = {};
+      let action: 'select' | 'update' | 'upsert' = 'select';
+      let values: Record<string, unknown> = {};
+      const query: any = {
+        select: () => query,
+        eq: (column: string, value: unknown) => { filters[column] = value; return query; },
+        ilike: () => query,
+        in: (column: string, ids: string[]) => { filters[column] = ids; return query; },
+        update: (value: Record<string, unknown>) => { action = 'update'; values = value; return query; },
+        upsert: (value: Record<string, unknown>) => { action = 'upsert'; values = value; return query; },
+        maybeSingle: async () => result(),
+        single: async () => result(),
+        then: (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) =>
+          Promise.resolve(result()).then(resolve, reject),
+      };
+      const failure = { message: `${failingTable} write failed` };
+      const result = () => {
+        if (table === 'parent_invites') {
+          if (action === 'update') {
+            const ids = filters.id as string[];
+            inviteUpdates.push(ids);
+            if (failingTable === table) return { data: null, error: failure };
+            for (const item of invites.filter((candidate) => ids.includes(candidate.id))) item.used = Boolean(values.used);
+            return { data: null, error: null };
+          }
+          return {
+            data: filters.token
+              ? invites.find((item) => item.token === filters.token) ?? null
+              : invites.filter((item) => item.used === filters.used),
+            error: null,
+          };
+        }
+        if (table === 'students') {
+          if (action === 'update' && failingTable === table && filters.id === 'student-2') {
+            return { data: null, error: failure };
+          }
+          return { data: { organization_id: PRO_KLASE_ORG, tutor_id: null, detached_at: null, linked_user_id: null }, error: null };
+        }
+        if (table === 'parent_profiles') return { data: { id: 'pp-1' }, error: null };
+        if (table === 'parent_students' && action === 'upsert' && failingTable === table && values.student_id === 'student-2') {
+          return { data: null, error: failure };
+        }
+        return { data: null, error: null };
+      };
+      return query;
+    });
+
+    const response = mockRes();
+    await handler(mockReq({
+      token: 'first-token',
+      fullName: 'Parent',
+      password: 'ExamplePassword123!',
+      childGrade: '10',
+      acceptedPrivacy: true,
+      acceptedTerms: true,
+    }), response);
+
+    expect(response.getResult()).toMatchObject({ statusCode: 500, body: { code: 'internal_error' } });
+    expect(mocks.deleteUser).toHaveBeenCalledWith('new-user');
+    expect(inviteUpdates).toEqual(failingTable === 'parent_invites' ? [['invite-1', 'invite-2']] : []);
+    expect(invites.every((item) => !item.used)).toBe(true);
+    expect(mocks.sendWelcome).not.toHaveBeenCalled();
+  });
+
+  it('keeps separate parent invitations unchanged for other organizations', async () => {
+    const originalFrom = mocks.from.getMockImplementation()!;
+    mocks.from.mockImplementation((table: string) => table === 'students'
+      ? chain({ data: { organization_id: 'other-organization', tutor_id: null, detached_at: null }, error: null })
+      : originalFrom(table));
+
+    const response = mockRes();
+    await handler(mockReq({
+      token: 'tok',
+      fullName: 'Parent',
+      password: 'ExamplePassword123!',
+      childGrade: '7',
+      acceptedPrivacy: true,
+      acceptedTerms: true,
+    }), response);
+
+    expect(response.getResult()).toEqual({ statusCode: 200, body: { success: true } });
+    expect(mocks.from.mock.calls.filter(([table]) => table === 'parent_invites')).toHaveLength(2);
+    expect(mocks.deleteUser).not.toHaveBeenCalled();
   });
 
   it('does not reset or link an existing Auth user', async () => {

@@ -1,11 +1,14 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CompanyStudents from '@/pages/company/CompanyStudents';
 import { PRO_KLASE_ORG_ID } from '@/lib/marketMoney';
 
 const testState = vi.hoisted(() => ({
   from: vi.fn(),
+  studentInserts: [] as Array<Record<string, unknown>>,
+  sendEmailDetailed: vi.fn(),
+  createSession: vi.fn(),
   cache: {
     students: [
       {
@@ -88,9 +91,118 @@ vi.mock('@/hooks/useMarketMoney', () => ({
   useMarketMoney: () => ({ fmt: (n: unknown) => `€${n}` }),
 }));
 
+vi.mock('@/lib/email', () => ({
+  sendEmail: vi.fn(async () => true),
+  sendEmailDetailed: testState.sendEmailDetailed,
+}));
+
+vi.mock('@/lib/orgVisibleTutors', () => ({
+  getOrgVisibleTutors: vi.fn(async () => []),
+}));
+
+vi.mock('@/pages/company/orgAdminSessionCreate', () => ({
+  runOrgAdminCreateSession: testState.createSession,
+}));
+
+vi.mock('@/components/FindTutorModal', () => ({
+  default: ({ isOpen, frequencyEnabled, confirmSelection, onConfirmSlots }: {
+    isOpen: boolean;
+    frequencyEnabled?: boolean;
+    confirmSelection?: boolean;
+    onConfirmSlots?: (slots: Array<{
+      tutorId: string;
+      tutorName: string;
+      subjectId: string;
+      subjectName: string;
+      start: Date;
+      end: Date;
+      durationMinutes: number;
+    }>) => void;
+  }) => isOpen ? (
+    <div
+      data-testid="proklase-availability-search"
+      data-frequency={String(Boolean(frequencyEnabled))}
+      data-confirm-selection={String(Boolean(confirmSelection))}
+    >
+      <button type="button" onClick={() => onConfirmSlots?.([{
+        tutorId: 'tutor-second-child',
+        tutorName: 'Antras Mokytojas',
+        subjectId: 'math-second-child',
+        subjectName: 'Matematika',
+        start: new Date('2026-10-01T15:00:00.000Z'),
+        end: new Date('2026-10-01T16:00:00.000Z'),
+        durationMinutes: 60,
+      }])}>
+        Pasirinkti laisvą laiką
+      </button>
+    </div>
+  ) : null,
+}));
+
+vi.mock('@/components/company/PickedAvailabilityTimeEditor', () => ({
+  default: ({ tutorName, subjectName }: { tutorName: string; subjectName: string }) => (
+    <div data-testid="picked-availability-lesson">{tutorName} · {subjectName}</div>
+  ),
+}));
+
+function mockStudentSaveQueries() {
+  testState.from.mockImplementation((table: string) => {
+    let insertedStudent: Record<string, unknown> | null = null;
+    const query: any = new Proxy({}, {
+      get: (_target, prop) => {
+        if (prop === 'then') {
+          return (resolve: (value: unknown) => void) => resolve({ data: [], error: null, count: 0 });
+        }
+        if (prop === 'insert') {
+          return (payload: Record<string, unknown>) => {
+            if (table === 'students') {
+              insertedStudent = payload;
+              testState.studentInserts.push(payload);
+            }
+            return query;
+          };
+        }
+        if (prop === 'single') {
+          return async () => ({
+            data: insertedStudent
+              ? {
+                  id: `created-child-${testState.studentInserts.length}`,
+                  tutor_id: insertedStudent.tutor_id ?? null,
+                  invite_code: insertedStudent.invite_code,
+                }
+              : null,
+            error: null,
+          });
+        }
+        if (prop === 'maybeSingle') {
+          return async () => ({
+            data: table === 'subjects'
+              ? {
+                  id: 'math-second-child',
+                  name: 'Matematika',
+                  price: 25,
+                  duration_minutes: 60,
+                  is_group: false,
+                  max_students: 1,
+                  meeting_link: null,
+                }
+              : table === 'organizations' ? { features: {} } : null,
+            error: null,
+          });
+        }
+        return () => query;
+      },
+    });
+    return query;
+  });
+}
+
 describe('CompanyStudents Pro Klasė list', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    testState.studentInserts.length = 0;
+    testState.sendEmailDetailed.mockResolvedValue({ ok: true, skipped: false });
+    testState.createSession.mockResolvedValue({ createdSessionIds: ['created-lesson'] });
     testState.from.mockImplementation(() => {
       const query: any = new Proxy(
         {},
@@ -152,6 +264,10 @@ describe('CompanyStudents Pro Klasė list', () => {
     expect(screen.getByPlaceholderText('Parašykite komentarą apie šį mokinį...')).toBeTruthy();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('allows separate student and parent phone numbers for every company organization', () => {
     render(
       <MemoryRouter initialEntries={['/company/students']}>
@@ -178,6 +294,135 @@ describe('CompanyStudents Pro Klasė list', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
     expect(screen.getByText('Vaikas Nr. 1')).toBeTruthy();
     expect(screen.getByText('Vaikas Nr. 2')).toBeTruthy();
+  });
+
+  it('keeps a second child and their details when switching who receives invitations', () => {
+    render(
+      <MemoryRouter initialEntries={['/company/students']}>
+        <CompanyStudents />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
+    const secondChildName = screen.getAllByPlaceholderText('Jonas Jonaitis')[1] as HTMLInputElement;
+    fireEvent.change(secondChildName, { target: { value: 'Antras Vaikas' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tik mokinį' }));
+    expect(screen.getByText('Vaikas Nr. 2')).toBeTruthy();
+    expect((screen.getAllByPlaceholderText('Jonas Jonaitis')[1] as HTMLInputElement).value).toBe('Antras Vaikas');
+    expect(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mokinį ir tėvą' }));
+    expect(screen.getByText('Vaikas Nr. 2')).toBeTruthy();
+    expect((screen.getAllByPlaceholderText('Jonas Jonaitis')[1] as HTMLInputElement).value).toBe('Antras Vaikas');
+  });
+
+  it('keeps Pro Klasė availability search accessible for a family with multiple children', () => {
+    render(
+      <MemoryRouter initialEntries={['/company/students']}>
+        <CompanyStudents />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tik mokinį' }));
+
+    const secondChild = screen.getByTestId('additional-child-2');
+    expect(within(secondChild).getByText('Vaikas Nr. 2')).toBeTruthy();
+    fireEvent.click(within(secondChild).getByRole('button', { name: 'Ieškoti pagal laisvą laiką' }));
+    const search = screen.getByTestId('proklase-availability-search');
+    expect(search.getAttribute('data-frequency')).toBe('true');
+    expect(search.getAttribute('data-confirm-selection')).toBe('true');
+    fireEvent.click(within(search).getByText('Pasirinkti laisvą laiką'));
+
+    expect(screen.getByText('Vaikas Nr. 1')).toBeTruthy();
+    expect(within(secondChild).getByTestId('picked-availability-lesson').textContent)
+      .toBe('Antras Mokytojas · Matematika');
+    expect(screen.getAllByTestId('picked-availability-lesson')).toHaveLength(1);
+  });
+
+  it('saves two children, sends one student invite to each, and books the second child\'s picked lesson', async () => {
+    mockStudentSaveQueries();
+
+    render(<MemoryRouter initialEntries={['/company/students']}><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
+    const names = screen.getAllByPlaceholderText('Jonas Jonaitis');
+    fireEvent.change(names[0], { target: { value: 'Pirmas Vaikas' } });
+    fireEvent.change(names[1], { target: { value: 'Antras Vaikas' } });
+    const emails = screen.getAllByPlaceholderText('jonas@example.com');
+    fireEvent.change(emails[0], { target: { value: 'pirmas@example.test' } });
+    fireEvent.change(emails[1], { target: { value: 'antras@example.test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Tik mokinį' }));
+
+    const secondChild = screen.getByTestId('additional-child-2');
+    fireEvent.click(within(secondChild).getByRole('button', { name: 'Ieškoti pagal laisvą laiką' }));
+    fireEvent.click(within(screen.getByTestId('proklase-availability-search')).getByText('Pasirinkti laisvą laiką'));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti', exact: true }));
+
+    await waitFor(() => expect(testState.sendEmailDetailed).toHaveBeenCalledTimes(2));
+    expect(testState.studentInserts).toHaveLength(2);
+    expect(testState.studentInserts.map((row) => row.full_name)).toEqual(['Pirmas Vaikas', 'Antras Vaikas']);
+    expect(testState.studentInserts.map((row) => row.email)).toEqual(['pirmas@example.test', 'antras@example.test']);
+    expect(testState.sendEmailDetailed.mock.calls.map(([payload]) => payload)).toEqual([
+      expect.objectContaining({
+        type: 'invite_email',
+        to: 'pirmas@example.test',
+        data: expect.objectContaining({ studentName: 'Pirmas Vaikas' }),
+      }),
+      expect.objectContaining({
+        type: 'invite_email',
+        to: 'antras@example.test',
+        data: expect.objectContaining({ studentName: 'Antras Vaikas' }),
+      }),
+    ]);
+    expect(testState.createSession).toHaveBeenCalledOnce();
+    expect(testState.createSession).toHaveBeenCalledWith(expect.objectContaining({
+      createStudentId: 'created-child-2',
+      createTutorId: 'tutor-second-child',
+      createSubjectId: 'math-second-child',
+    }));
+  });
+
+  it('invites both students and creates a parent invite for each child', async () => {
+    mockStudentSaveQueries();
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
+      ok: true,
+      json: async () => ({ sent: 1 }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<MemoryRouter initialEntries={['/company/students']}><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
+    const names = screen.getAllByPlaceholderText('Jonas Jonaitis');
+    fireEvent.change(names[0], { target: { value: 'Pirmas Vaikas' } });
+    fireEvent.change(names[1], { target: { value: 'Antras Vaikas' } });
+    const emails = screen.getAllByPlaceholderText('jonas@example.com');
+    fireEvent.change(emails[0], { target: { value: 'pirmas@example.test' } });
+    fireEvent.change(emails[1], { target: { value: 'antras@example.test' } });
+    fireEvent.change(screen.getByPlaceholderText('Vardenis Pavardenis'), {
+      target: { value: 'Vaikų Tėvas' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('tevas@example.com'), {
+      target: { value: 'tevas@example.test' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Mokinį ir tėvą' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti', exact: true }));
+
+    const parentCalls = () => fetchMock.mock.calls.filter(([url]) =>
+      url === '/api/parent-create-invites-for-student');
+    await waitFor(() => expect(parentCalls()).toHaveLength(2));
+    expect(testState.studentInserts).toHaveLength(2);
+    expect(parentCalls().map(([, init]) => JSON.parse(String(init?.body)).studentId))
+      .toEqual(['created-child-1', 'created-child-2']);
+    expect(testState.sendEmailDetailed).toHaveBeenCalledTimes(2);
+    expect(testState.sendEmailDetailed.mock.calls.map(([payload]) => payload.to))
+      .toEqual(['pirmas@example.test', 'antras@example.test']);
+    expect(testState.sendEmailDetailed.mock.calls.every(([payload]) => payload.type === 'invite_email'))
+      .toBe(true);
   });
 
   it('does not mark a failed meeting-link write as saved and requests the persisted value', async () => {

@@ -246,6 +246,10 @@ type MvAdditionalChildDraft = {
   phone: string;
   grade: string;
   tutor_ids: string[];
+  admin_comment: string;
+  admin_comment_visible_to_tutor: boolean;
+  pickedLessons: AddStudentLessonPick[];
+  firstLessonIsTrial: boolean;
 };
 
 type InsertedStudentRow = {
@@ -265,6 +269,10 @@ function createMvAdditionalChildDraft(tutorIds: string[] = []): MvAdditionalChil
     phone: '',
     grade: '',
     tutor_ids: [...tutorIds],
+    admin_comment: '',
+    admin_comment_visible_to_tutor: false,
+    pickedLessons: [],
+    firstLessonIsTrial: false,
   };
 }
 
@@ -461,6 +469,7 @@ export default function CompanyStudents() {
   const [loading, setLoading] = useState(!stc);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [addStudentFindTutorOpen, setAddStudentFindTutorOpen] = useState(false);
+  const [addStudentFindTutorChildId, setAddStudentFindTutorChildId] = useState<string | null>(null);
   const [addStudentPickedLessons, setAddStudentPickedLessons] = useState<AddStudentLessonPick[]>([]);
   const [addStudentFirstLessonIsTrial, setAddStudentFirstLessonIsTrial] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -507,6 +516,14 @@ export default function CompanyStudents() {
   const [mvAdditionalChildren, setMvAdditionalChildren] = useState<MvAdditionalChildDraft[]>([]);
   const parentFirstInvite = isMvOrg && !isSchoolView && newStudent.invite_target === 'parent';
   const provisionAccounts = supportsManagedFamilyAccounts && !isSchoolView && newStudent.invite_target === 'provision';
+  const canAddAdditionalChildren = provisionAccounts || (proKlaseAdminUi && !parentFirstInvite);
+  const searchChildIndex = mvAdditionalChildren.findIndex((child) => child.id === addStudentFindTutorChildId);
+  const searchContextLabel = addStudentFindTutorChildId
+    ? mvAdditionalChildren[searchChildIndex]?.full_name.trim()
+      || t('compStu.childNumber', { number: String(searchChildIndex + 2) })
+    : mvAdditionalChildren.length > 0
+      ? newStudent.full_name.trim() || t('compStu.childNumber', { number: '1' })
+      : undefined;
   const [provisionCredentialsOpen, setProvisionCredentialsOpen] = useState(false);
   const [provisionCredentials, setProvisionCredentials] = useState<MvProvisionCredentialsView | null>(null);
   const [mvProvisionDialogOpen, setMvProvisionDialogOpen] = useState(false);
@@ -1950,6 +1967,29 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.phoneFormat'), type: 'error' });
       return;
     }
+    if (proKlaseAdminUi && shouldSendStudentInviteEmail(newStudent.invite_target)) {
+      const children = [newStudent, ...mvAdditionalChildren];
+      for (const [index, child] of children.entries()) {
+        if (!child.email.trim()) {
+          setToastMessage({
+            message: `${t('compStu.childNumber', { number: String(index + 1) })}: ${t('compStu.provisionStudentEmailRequired')}`,
+            type: 'error',
+          });
+          return;
+        }
+        if (
+          newStudent.invite_target === 'both'
+          && newStudent.payer_email.trim().toLowerCase() === child.email.trim().toLowerCase()
+        ) {
+          setToastMessage({ message: t('compStu.provisionEmailsMustDiffer'), type: 'error' });
+          return;
+        }
+      }
+      if (newStudent.invite_target === 'both' && !newStudent.payer_email.trim()) {
+        setToastMessage({ message: t('compStu.parentInviteEmailRequired'), type: 'error' });
+        return;
+      }
+    }
     if (
       !isSchoolView &&
       isMvOrg &&
@@ -2005,7 +2045,7 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.provisionEmailsMustDiffer'), type: 'error' });
       return;
     }
-    if (provisionAccounts) {
+    if (canAddAdditionalChildren) {
       const childEmails = [newStudent.email, ...mvAdditionalChildren.map((child) => child.email)]
         .map((email) => email.trim().toLowerCase())
         .filter(Boolean);
@@ -2036,7 +2076,10 @@ export default function CompanyStudents() {
       }
     }
 
-    for (const item of addStudentPickedLessons) {
+    for (const item of [
+      ...addStudentPickedLessons,
+      ...mvAdditionalChildren.flatMap((child) => child.pickedLessons),
+    ]) {
       const windowStart = new Date(item.pick.startIso);
       const windowEnd = new Date(item.pick.endIso);
       const lessonStart = new Date(item.lessonStartIso);
@@ -2072,7 +2115,7 @@ export default function CompanyStudents() {
 
     if (effectiveOrgId) {
       const orgTutors = await getOrgVisibleTutors(supabase, effectiveOrgId, 'id, email, full_name');
-      const studentEmails = provisionAccounts
+      const studentEmails = canAddAdditionalChildren
         ? [newStudent.email, ...mvAdditionalChildren.map((child) => child.email)]
         : [newStudent.email];
       for (const email of studentEmails) {
@@ -2174,7 +2217,7 @@ export default function CompanyStudents() {
       inserted.push(row as any);
     }
 
-    if (provisionAccounts) {
+    if (canAddAdditionalChildren) {
       for (const child of mvAdditionalChildren) {
         const rows: InsertedStudentRow[] = [];
         const childTutorIds = child.tutor_ids.length > 0 ? child.tutor_ids : [null];
@@ -2196,7 +2239,25 @@ export default function CompanyStudents() {
               payer_phone: primaryParent.phone || null,
               contact_parent: 'primary',
               invite_code: inviteCode,
-              payment_payer: 'parent',
+              payment_payer: newStudent.payment_payer,
+              ...(proKlaseAdminUi
+                ? {
+                    admin_comment: child.admin_comment.trim() || null,
+                    admin_comment_visible_to_tutor: child.admin_comment_visible_to_tutor,
+                  }
+                : {}),
+              ...(() => {
+                const matchWindows = child.pickedLessons.filter((item) => item.pick.tutorId === tutorId);
+                if (matchWindows.length === 0) return {};
+                return {
+                  preferred_availability: matchWindows.map((item) =>
+                    preferredWindowFromDateRange(
+                      new Date(item.lessonStartIso || item.pick.startIso),
+                      new Date(item.lessonEndIso || item.pick.endIso),
+                    ),
+                  ),
+                };
+              })(),
               ...(effectiveOrgId ? { organization_id: effectiveOrgId } : {}),
             })
             .select('id, tutor_id, invite_code')
@@ -2213,8 +2274,21 @@ export default function CompanyStudents() {
       }
     }
 
+    const plannedLessonGroups = [
+      {
+        rows: inserted,
+        lessons: markFirstChronologicalLessonAsTrial(addStudentPickedLessons, addStudentFirstLessonIsTrial),
+      },
+      ...additionalInsertedChildren.map(({ child, rows }) => ({
+        rows,
+        lessons: markFirstChronologicalLessonAsTrial(child.pickedLessons, child.firstLessonIsTrial),
+      })),
+    ];
+    const plannedStudentLessons = plannedLessonGroups.flatMap(({ rows, lessons }) =>
+      lessons.map((item) => ({ item, rows })),
+    );
     let lessonCreateFailed = false;
-    if (addStudentPickedLessons.length > 0 && inserted.length > 0) {
+    if (plannedStudentLessons.length > 0) {
       const { data: orgRow } = effectiveOrgId
         ? await supabase.from('organizations').select('features').eq('id', effectiveOrgId).maybeSingle()
         : { data: null };
@@ -2232,19 +2306,15 @@ export default function CompanyStudents() {
         typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
           ? featObj.trial_lesson_topic.trim()
           : '';
-      const plannedLessons = markFirstChronologicalLessonAsTrial(
-        addStudentPickedLessons,
-        addStudentFirstLessonIsTrial,
-      );
-      for (const item of plannedLessons) {
-        const lessonRow = inserted.find((row) => row.tutor_id === item.pick.tutorId) || inserted[0];
+      for (const { item, rows } of plannedStudentLessons) {
+        const lessonRow = rows.find((row) => row.tutor_id === item.pick.tutorId) || rows[0];
         try {
           const { data: subj } = await supabase
             .from('subjects')
             .select('id, name, price, duration_minutes, is_group, max_students, meeting_link')
             .eq('id', item.pick.subjectId)
             .maybeSingle();
-          if (!subj || !lessonRow.id) continue;
+          if (!subj || !lessonRow?.id) continue;
           const regularPrice = Number((subj as { price?: number | null }).price ?? 0);
           const trialCharge = item.isTrial ? trialPrice : regularPrice;
           const recurringEndDate = proKlaseAdminUi
@@ -2342,23 +2412,27 @@ export default function CompanyStudents() {
     let emailOk = true;
     let inviteSkippedExisting = false;
     const parentInviteProblems: string[] = [];
+    const createdChildren = [
+      { child: newStudent, rows: inserted },
+      ...additionalInsertedChildren,
+    ];
 
     const shouldSendInviteOnCreate =
       !isSchoolView && shouldSendStudentInviteEmail(newStudent.invite_target);
-    if (shouldSendInviteOnCreate && newStudent.email?.trim()) {
+    if (shouldSendInviteOnCreate) {
       const inviteBaseUrl = orgCanonicalOrigin(orgPreferredLocale) ?? baseUrl;
-      // One child can have several tutor-paired student rows. Registration is
-      // still one account flow, so never send one invite per tutor.
-      const row = inserted[0];
-      if (row) {
+      // Each child gets one invitation even when paired with several tutors.
+      for (const { child, rows } of createdChildren) {
+        const row = rows[0];
+        if (!row || !child.email?.trim()) continue;
         const tutor = tutors.find((t) => t.id === row.tutor_id);
         const bookingUrl = `${inviteBaseUrl}/book/${row.invite_code}`;
         const inviteResult = await sendEmailDetailed({
           type: 'invite_email',
-          to: newStudent.email.trim(),
+          to: child.email.trim(),
           locale: orgPreferredLocale || locale,
           data: {
-            studentName: newStudent.full_name,
+            studentName: child.full_name,
             tutorName: tutor?.full_name || t('compStu.tutorFallback'),
             inviteCode: row.invite_code,
             bookingUrl,
@@ -2373,9 +2447,11 @@ export default function CompanyStudents() {
     // When admin chose "student + parent", send parent portal invites.
     // Plain company: always; school: only with flexible_invitations (Pro Klasė-style).
     if (shouldSendParentInviteOnCreate(newStudent.invite_target) && (!isSchoolView || hasFeature('flexible_invitations'))) {
-      for (const row of inserted) {
-        const problem = await sendParentPortalInvites(row.id, false);
-        if (problem) parentInviteProblems.push(problem);
+      for (const { rows } of createdChildren) {
+        for (const row of rows) {
+          const problem = await sendParentPortalInvites(row.id, false);
+          if (problem) parentInviteProblems.push(problem);
+        }
       }
     }
 
@@ -2456,10 +2532,6 @@ export default function CompanyStudents() {
       const { data: orgRow } = await supabase.from('organizations').select('features').eq('id', orgId).single();
       const feat = orgRow?.features as Record<string, unknown> | null;
       if (feat?.notify_tutors_on_student_assign) {
-        const createdChildren = [
-          { child: newStudent, rows: inserted },
-          ...additionalInsertedChildren,
-        ];
         for (const { child, rows } of createdChildren) {
           const contactPayload = pickStudentContactsForTutorEmail(
             {
@@ -2486,16 +2558,13 @@ export default function CompanyStudents() {
       }
     }
 
-    const plannedSummary =
-      addStudentPickedLessons.length > 0
-        ? summarizePlannedStudentLessons(
-            markFirstChronologicalLessonAsTrial(addStudentPickedLessons, addStudentFirstLessonIsTrial),
-          )
-        : null;
+    const plannedSummary = plannedStudentLessons.length > 0
+      ? summarizePlannedStudentLessons(plannedStudentLessons.map(({ item }) => item))
+      : null;
 
     const provisionFlow = shouldProvisionAccountsOnCreate(newStudent.invite_target) && !isSchoolView;
     const toastType: 'success' | 'error' =
-      (shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk) ||
+      (shouldSendInviteOnCreate && !emailOk) ||
       parentInviteProblems.length > 0 ||
       lessonCreateFailed ||
       (provisionFlow && !provisionOk)
@@ -2504,7 +2573,7 @@ export default function CompanyStudents() {
     const toastMessage =
       provisionFlow && !provisionOk
         ? t('compStu.provisionFailed')
-        : shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
+        : shouldSendInviteOnCreate && !emailOk
           ? t('compStu.emailSendFailed')
           : lessonCreateFailed
             ? t('compStu.studentAddedLessonFailed')
@@ -2514,6 +2583,8 @@ export default function CompanyStudents() {
               ? t(mvAdditionalChildren.length > 0 ? 'compStu.provisionFamilySuccess' : 'compStu.provisionSuccess')
               : newStudent.invite_target === 'parent'
                 ? t('compStu.parentInvitedFirst')
+                : mvAdditionalChildren.length > 0
+                  ? t('common.saved')
                 : plannedSummary && plannedSummary.totalLessons > 0
                   ? plannedSummary.trialLessons > 0
                     ? t('compStu.studentAddedWithLessonsTrial', {
@@ -3162,6 +3233,7 @@ export default function CompanyStudents() {
                   if (!open) {
                     setAddStudentPickedLessons([]);
                     setMvAdditionalChildren([]);
+                    setAddStudentFindTutorChildId(null);
                   }
                 }}
               >
@@ -3191,6 +3263,7 @@ export default function CompanyStudents() {
                         className="h-8 rounded-lg border-indigo-200 text-xs text-indigo-700 hover:bg-indigo-50"
                         onClick={() => {
                           setMultiTutorPickerOpen(false);
+                          setAddStudentFindTutorChildId(null);
                           setAddStudentFindTutorOpen(true);
                         }}
                       >
@@ -3382,7 +3455,7 @@ export default function CompanyStudents() {
 
                   {!parentFirstInvite && (
                   <>
-                  {provisionAccounts && mvAdditionalChildren.length > 0 && (
+                  {canAddAdditionalChildren && mvAdditionalChildren.length > 0 && (
                     <p className="text-sm font-semibold text-gray-800">
                       {t('compStu.childNumber', { number: '1' })}
                     </p>
@@ -3546,18 +3619,20 @@ export default function CompanyStudents() {
                   )}
                   </div>
 
-                  {provisionAccounts && (
+                  {canAddAdditionalChildren && (
                     <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
                       <div>
                         <p className="text-sm font-semibold text-gray-900">
                           {t('compStu.additionalChildrenTitle')}
                         </p>
-                        <p className="mt-0.5 text-xs text-gray-500">
-                          {t('compStu.additionalChildrenHint')}
-                        </p>
+                        {provisionAccounts && (
+                          <p className="mt-0.5 text-xs text-gray-500">
+                            {t('compStu.additionalChildrenHint')}
+                          </p>
+                        )}
                       </div>
                       {mvAdditionalChildren.map((child, index) => (
-                        <div key={child.id} className="space-y-3 rounded-xl border border-gray-200 bg-white p-3">
+                        <div key={child.id} data-testid={`additional-child-${index + 2}`} className="space-y-3 rounded-xl border border-gray-200 bg-white p-3">
                           <div className="flex items-center justify-between gap-3">
                             <p className="text-sm font-semibold text-gray-800">
                               {t('compStu.childNumber', { number: String(index + 2) })}
@@ -3571,6 +3646,10 @@ export default function CompanyStudents() {
                                 setMvAdditionalChildren((current) =>
                                   current.filter((item) => item.id !== child.id),
                                 );
+                                if (addStudentFindTutorChildId === child.id) {
+                                  setAddStudentFindTutorOpen(false);
+                                  setAddStudentFindTutorChildId(null);
+                                }
                               }}
                             >
                               <Trash2 className="mr-1 h-3.5 w-3.5" />
@@ -3674,6 +3753,9 @@ export default function CompanyStudents() {
                                                 tutor_ids: isChecked
                                                   ? [...item.tutor_ids, tutor.id]
                                                   : item.tutor_ids.filter((id) => id !== tutor.id),
+                                                pickedLessons: isChecked
+                                                  ? item.pickedLessons
+                                                  : item.pickedLessons.filter((lesson) => lesson.pick.tutorId !== tutor.id),
                                               };
                                             }),
                                           );
@@ -3689,6 +3771,143 @@ export default function CompanyStudents() {
                               </div>
                             </div>
                           </div>
+                          {proKlaseAdminUi && (
+                            <div className="space-y-2">
+                              <Label>{t('compStu.adminComment')}</Label>
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+                                <textarea
+                                  value={child.admin_comment}
+                                  onChange={(e) => setMvAdditionalChildren((current) =>
+                                    current.map((item) => item.id === child.id ? { ...item, admin_comment: e.target.value } : item),
+                                  )}
+                                  rows={2}
+                                  className="min-h-[2.75rem] flex-1 rounded-xl border border-gray-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 resize-y"
+                                  placeholder={t('compStu.commentPlaceholder')}
+                                />
+                                <label className="flex shrink-0 items-center gap-2 text-xs text-gray-600 cursor-pointer sm:pt-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={child.admin_comment_visible_to_tutor}
+                                    onChange={(e) => setMvAdditionalChildren((current) =>
+                                      current.map((item) => item.id === child.id
+                                        ? { ...item, admin_comment_visible_to_tutor: e.target.checked }
+                                        : item),
+                                    )}
+                                    className="rounded border-gray-300"
+                                  />
+                                  {t('compStu.commentVisibleToTutor')}
+                                </label>
+                              </div>
+                            </div>
+                          )}
+                          {proKlaseAvailabilitySearchUi && (
+                            <div className="space-y-3 border-t border-gray-100 pt-3">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="rounded-lg border-indigo-200 text-xs text-indigo-700 hover:bg-indigo-50"
+                                onClick={() => {
+                                  setMultiTutorPickerOpen(false);
+                                  setAddStudentFindTutorChildId(child.id);
+                                  setAddStudentFindTutorOpen(true);
+                                }}
+                              >
+                                <Search className="mr-1.5 h-3.5 w-3.5" />
+                                {t('compStu.findTutorByAvailability')}
+                              </Button>
+                              {child.pickedLessons.map((item) => (
+                                <div key={lessonPickKey(item)} className="space-y-2">
+                                  <PickedAvailabilityTimeEditor
+                                    tutorId={item.pick.tutorId}
+                                    tutorName={item.pick.tutorName}
+                                    subjectId={item.pick.subjectId}
+                                    subjectName={item.pick.subjectName}
+                                    windowStartIso={item.pick.startIso}
+                                    windowEndIso={item.pick.endIso}
+                                    startIso={item.lessonStartIso || item.pick.startIso}
+                                    endIso={item.lessonEndIso || item.pick.endIso}
+                                    onChange={({ startIso, endIso }) => setMvAdditionalChildren((current) =>
+                                      current.map((draft) => draft.id === child.id
+                                        ? {
+                                            ...draft,
+                                            pickedLessons: draft.pickedLessons.map((lesson) => lessonPickKey(lesson) === lessonPickKey(item)
+                                              ? { ...lesson, lessonStartIso: startIso, lessonEndIso: endIso }
+                                              : lesson),
+                                          }
+                                        : draft),
+                                    )}
+                                    onSubjectChange={({ subjectId, subjectName }) => setMvAdditionalChildren((current) =>
+                                      current.map((draft) => draft.id === child.id
+                                        ? {
+                                            ...draft,
+                                            pickedLessons: draft.pickedLessons.map((lesson) => lessonPickKey(lesson) === lessonPickKey(item)
+                                              ? { ...lesson, pick: { ...lesson.pick, subjectId, subjectName } }
+                                              : lesson),
+                                          }
+                                        : draft),
+                                    )}
+                                    onClear={() => setMvAdditionalChildren((current) =>
+                                      current.map((draft) => draft.id === child.id
+                                        ? { ...draft, pickedLessons: draft.pickedLessons.filter((lesson) => lessonPickKey(lesson) !== lessonPickKey(item)) }
+                                        : draft),
+                                    )}
+                                  />
+                                  <div className="grid gap-2 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 sm:grid-cols-2 sm:items-end">
+                                    <div className="space-y-1.5">
+                                      <Label className="text-xs">{t('cal.recurringFrequencyLabel')}</Label>
+                                      <Select
+                                        value={item.recurringFrequency}
+                                        onValueChange={(value: 'weekly' | 'biweekly') => setMvAdditionalChildren((current) =>
+                                          current.map((draft) => draft.id === child.id
+                                            ? {
+                                                ...draft,
+                                                pickedLessons: draft.pickedLessons.map((lesson) => lessonPickKey(lesson) === lessonPickKey(item)
+                                                  ? { ...lesson, recurringFrequency: value }
+                                                  : lesson),
+                                              }
+                                            : draft),
+                                        )}
+                                      >
+                                        <SelectTrigger className="rounded-xl bg-white"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="weekly">{t('cal.freqWeekly')}</SelectItem>
+                                          <SelectItem value="biweekly">{t('cal.freqBiweekly')}</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <p className="text-xs text-indigo-800">
+                                      {t('compSch.repeatsUntil')}: {proKlaseSchoolYearEndDate(new Date(item.lessonStartIso))}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                              {child.pickedLessons.length > 0 && (
+                                <>
+                                  <div className="border border-amber-100 rounded-xl p-3 bg-amber-50/50">
+                                    <button
+                                      type="button"
+                                      onClick={() => setMvAdditionalChildren((current) =>
+                                        current.map((draft) => draft.id === child.id
+                                          ? { ...draft, firstLessonIsTrial: !draft.firstLessonIsTrial }
+                                          : draft),
+                                      )}
+                                      className="flex items-center justify-between gap-3 w-full text-left"
+                                    >
+                                      <div>
+                                        <p className="text-sm font-medium text-amber-900">{t('compSch.firstLessonTrial')}</p>
+                                        <p className="text-xs text-amber-800/80">{t('compSch.firstLessonTrialDesc')}</p>
+                                      </div>
+                                      <div className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${child.firstLessonIsTrial ? 'bg-amber-500' : 'bg-gray-300'}`}>
+                                        <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${child.firstLessonIsTrial ? 'translate-x-6' : 'translate-x-1'}`} />
+                                      </div>
+                                    </button>
+                                  </div>
+                                  <p className="text-[11px] text-gray-500">{t('findLesson.willCreateOnSave')}</p>
+                                </>
+                              )}
+                            </div>
+                          )}
                         </div>
                       ))}
                       <Button
@@ -3756,7 +3975,7 @@ export default function CompanyStudents() {
                             variant={newStudent.invite_target === 'student' ? 'default' : 'outline'}
                             className="rounded-xl text-xs"
                             onClick={() => {
-                              setMvAdditionalChildren([]);
+                              if (!proKlaseAdminUi) setMvAdditionalChildren([]);
                               setNewStudent({ ...newStudent, invite_target: 'student' });
                             }}
                           >
@@ -3768,7 +3987,7 @@ export default function CompanyStudents() {
                             variant={newStudent.invite_target === 'both' ? 'default' : 'outline'}
                             className="rounded-xl text-xs"
                             onClick={() => {
-                              setMvAdditionalChildren([]);
+                              if (!proKlaseAdminUi) setMvAdditionalChildren([]);
                               setNewStudent({ ...newStudent, invite_target: 'both' });
                             }}
                           >
@@ -6459,16 +6678,16 @@ export default function CompanyStudents() {
         {proKlaseAvailabilitySearchUi && (
         <FindTutorModal
           isOpen={addStudentFindTutorOpen}
-          onClose={() => setAddStudentFindTutorOpen(false)}
+          onClose={() => {
+            setAddStudentFindTutorOpen(false);
+            setAddStudentFindTutorChildId(null);
+          }}
           orgId={orgId}
           frequencyEnabled
           confirmSelection
+          contextLabel={searchContextLabel}
           onConfirmSlots={(slots) => {
             const tutorIds = [...new Set(slots.map((slot) => slot.tutorId))];
-            setNewStudent((current) => ({
-              ...current,
-              tutor_ids: [...new Set([...current.tutor_ids, ...tutorIds])],
-            }));
             const nextItems: AddStudentLessonPick[] = slots.map((slot) => {
               const range = defaultLessonRange(slot.start, slot.end, slot.durationMinutes || 60);
               return {
@@ -6485,10 +6704,28 @@ export default function CompanyStudents() {
                 recurringFrequency: 'weekly',
               };
             });
-            setAddStudentPickedLessons((current) => appendStudentLessonPicks(current, nextItems));
+            if (addStudentFindTutorChildId) {
+              setMvAdditionalChildren((current) => current.map((child) => child.id === addStudentFindTutorChildId
+                ? {
+                    ...child,
+                    tutor_ids: [...new Set([...child.tutor_ids, ...tutorIds])],
+                    pickedLessons: appendStudentLessonPicks(child.pickedLessons, nextItems),
+                  }
+                : child));
+            } else {
+              setNewStudent((current) => ({
+                ...current,
+                tutor_ids: [...new Set([...current.tutor_ids, ...tutorIds])],
+              }));
+              setAddStudentPickedLessons((current) => appendStudentLessonPicks(current, nextItems));
+            }
             setAddStudentFindTutorOpen(false);
+            setAddStudentFindTutorChildId(null);
           }}
-          busyIntervals={addStudentPickedLessons.map((item) => ({
+          busyIntervals={[
+            ...addStudentPickedLessons,
+            ...mvAdditionalChildren.flatMap((child) => child.pickedLessons),
+          ].map((item) => ({
             tutor_id: item.pick.tutorId,
             start: new Date(item.lessonStartIso),
             end: new Date(item.lessonEndIso),

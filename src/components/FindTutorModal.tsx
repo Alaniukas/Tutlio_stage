@@ -50,6 +50,8 @@ interface FindTutorModalProps {
   hidePrices?: boolean;
   /** Student's saved availability — seeds the preferred day/time windows on open. */
   initialPreferredWindows?: Array<{ dayOfWeek: number; startTime: string; endTime: string }>;
+  /** Identifies the child whose lesson times are being selected. */
+  contextLabel?: string;
   /**
    * Checkbox multi-select: picking does not book immediately. Confirm with Save
    * so several slots (including the same tutor) can be chosen together.
@@ -108,6 +110,7 @@ export default function FindTutorModal({
   busyIntervals = [],
   hidePrices,
   initialPreferredWindows,
+  contextLabel,
   confirmSelection = false,
   onConfirmSlots,
   orgAdminMode = false,
@@ -446,6 +449,7 @@ export default function FindTutorModal({
           <DialogTitle className="flex items-center gap-2">
             <Search className="w-5 h-5 text-indigo-600" />
             {orgAdminMode ? t('compSch.findLesson') : t('findLesson.title')}
+            {contextLabel && <span className="text-sm font-normal text-gray-500">· {contextLabel}</span>}
           </DialogTitle>
         </DialogHeader>
 
