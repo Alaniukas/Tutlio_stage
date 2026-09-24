@@ -268,7 +268,9 @@ describe('session reminder capacity behavior', () => {
   });
 
   it('never exceeds the outbound email attempt limit in one invocation', async () => {
-    for (let index = 1; index <= 101; index += 1) mocks.sessions.push(futureSession(index));
+    for (let index = 1; index <= SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT + 1; index += 1) {
+      mocks.sessions.push(futureSession(index));
+    }
     vi.stubGlobal('fetch', vi.fn(async () => emailResponse(true)));
 
     const response = mockRes();
@@ -301,6 +303,43 @@ describe('session reminder capacity behavior', () => {
       statusCode: 200,
       body: { sent: 2, emailAttempts: 2 },
     });
+  });
+
+  it('marks every school parent reminder in the same class-group slot', async () => {
+    const start = futureSession(1).start_time;
+    const end = futureSession(1).end_time;
+    const tutor = futureSession(1).tutor;
+    for (let index = 1; index <= 4; index += 1) {
+      mocks.sessions.push({
+        ...futureSession(index),
+        start_time: start,
+        end_time: end,
+        tutor,
+        tutor_id: tutor.id,
+        class_group_id: 'group-math',
+        class_group: { name: 'Matematika 7 klasė' },
+        reminder_tutor_sent: true,
+        student: {
+          id: `student-${index}`,
+          full_name: `Student ${index}`,
+          email: '',
+          payment_payer: 'self',
+          payer_email: `parent-${index}@example.test`,
+          payer_name: `Parent ${index}`,
+          parent_secondary_email: null,
+          parent_secondary_name: null,
+          organization_id: 'school-1',
+        },
+      });
+    }
+    mocks.organization = { entity_type: 'school', features: {} };
+    vi.stubGlobal('fetch', vi.fn(async () => emailResponse(true)));
+
+    const response = mockRes();
+    await handler(mockReq(), response);
+
+    expect(mocks.updateCalls.filter((call) => call.reminder_payer_sent === true)).toHaveLength(4);
+    expect(response.getResult()).toMatchObject({ statusCode: 200, body: { sent: 4, emailAttempts: 4 } });
   });
 
   it('sends one tutor reminder for all student rows in the same tutor time slot', async () => {

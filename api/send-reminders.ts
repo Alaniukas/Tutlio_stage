@@ -20,6 +20,11 @@ import {
   sessionReminderDeliveryOutcome,
   type SessionReminderDeliveryOutcome,
 } from './_lib/sessionReminderDelivery.js';
+import {
+  canSendAnotherReminderEmail,
+  payerGroupOccurrenceKey,
+  sortSessionsForReminderDelivery,
+} from './_lib/sessionReminderQueue.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -30,8 +35,11 @@ const API_URL = process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
   : (process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt');
 
-export const SESSION_REMINDER_BATCH_SIZE = 250;
-export const SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT = 100;
+export const SESSION_REMINDER_BATCH_SIZE = 500;
+/** Soft cap per cron run; burst allowance can finish one school group slot past this. */
+export const SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT = 1000;
+/** Extra payer emails allowed to finish one school group slot after the soft cap. */
+export const SESSION_REMINDER_GROUP_BURST_ALLOWANCE = 120;
 
 async function confirmedReminderOutcome(
   response: Response,
@@ -145,10 +153,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error) {
       console.error('[send-reminders] Session query error:', error);
     } else if (sessions?.length) {
+      const orderedSessions = sortSessionsForReminderDelivery(sessions);
+      let activeSchoolPayerOccurrence: string | null = null;
       // A school group occurrence has one session row per student. Choose one
       // deterministic row per tutor/time slot so the teacher gets one reminder.
       const tutorReminderLeaderByOccurrence = new Map<string, string>();
-      for (const session of sessions) {
+      for (const session of orderedSessions) {
         if (session.reminder_tutor_sent) continue;
         const scope = tutorReminderOccurrenceScope(session as any);
         if (!tutorReminderLeaderByOccurrence.has(scope)) {
@@ -156,8 +166,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      for (const session of sessions) {
-        if (emailAttempts >= SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) break;
+      for (const session of orderedSessions) {
+        const payerOccurrenceKey = payerGroupOccurrenceKey(session as any);
+        if (!canSendAnotherReminderEmail(
+          emailAttempts,
+          SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT,
+          SESSION_REMINDER_GROUP_BURST_ALLOWANCE,
+          activeSchoolPayerOccurrence,
+          payerOccurrenceKey,
+        )) {
+          break;
+        }
         const startTime = new Date(session.start_time);
         if (startTime <= now) continue; // Only future sessions – never remind for past
         const diffHours = (startTime.getTime() - now.getTime()) / (1000 * 60 * 60);
@@ -252,6 +271,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // With flexible_invitations on: remind ALL parent contacts (payer +
         // secondary + registered parents), decoupled from who pays.
         if (reminderStudentHours > 0 && !session.reminder_payer_sent && diffHours <= reminderStudentHours && diffHours >= 0) {
+          if (schoolFlowForSession && payerOccurrenceKey) {
+            activeSchoolPayerOccurrence = payerOccurrenceKey;
+          }
           const studentEmailNorm = (student?.email || '').trim().toLowerCase();
           const payerEmail = (student as any)?.payer_email?.trim() || '';
           const payerName = (student as any)?.payer_name || null;
@@ -326,7 +348,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           let allParentHandled = candidates.length > 0 && recipients.length === 0;
           if (recipients.length > 0) allParentHandled = true;
           for (const r of recipients) {
-            if (emailAttempts >= SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) {
+            if (!canSendAnotherReminderEmail(
+              emailAttempts,
+              SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT,
+              SESSION_REMINDER_GROUP_BURST_ALLOWANCE,
+              activeSchoolPayerOccurrence,
+              payerOccurrenceKey,
+            )) {
               allParentHandled = false;
               break;
             }
@@ -378,7 +406,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const tutorReminderScope = tutorReminderOccurrenceScope(session as any);
         const isTutorReminderLeader = tutorReminderLeaderByOccurrence.get(tutorReminderScope) === String(session.id);
-        if (isTutorReminderLeader && reminderTutorHours > 0 && !session.reminder_tutor_sent && diffHours <= reminderTutorHours && diffHours >= 0 && tutor?.email && emailAttempts < SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) {
+        if (isTutorReminderLeader && reminderTutorHours > 0 && !session.reminder_tutor_sent && diffHours <= reminderTutorHours && diffHours >= 0 && tutor?.email && canSendAnotherReminderEmail(
+          emailAttempts,
+          SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT,
+          SESSION_REMINDER_GROUP_BURST_ALLOWANCE,
+          activeSchoolPayerOccurrence,
+          payerOccurrenceKey,
+        )) {
           const markTutorOccurrenceSent = async () => {
             const tutorId = String(session.tutor_id || tutor?.id || '').trim();
             const update = supabase.from('sessions').update({ reminder_tutor_sent: true });

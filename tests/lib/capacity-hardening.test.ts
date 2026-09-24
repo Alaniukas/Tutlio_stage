@@ -57,8 +57,8 @@ describe('capacity hardening invariants', () => {
   });
 
   it('keeps cron work bounded and runs the fair materializer hourly', () => {
-    expect(reminders).toContain('SESSION_REMINDER_BATCH_SIZE = 250');
-    expect(reminders).toContain('SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT = 100');
+    expect(reminders).toContain('SESSION_REMINDER_BATCH_SIZE = 500');
+    expect(reminders).toContain('SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT = 1000');
     expect(schoolReminders).toContain('SCHOOL_REMINDER_BATCH_SIZE = 25');
     expect(materializer).toContain('MATERIALIZER_BATCH_SIZE = 100');
     expect(
