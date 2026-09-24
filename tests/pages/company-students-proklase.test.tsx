@@ -462,4 +462,47 @@ describe('CompanyStudents Pro Klasė list', () => {
     fireEvent.blur(input);
     await waitFor(() => expect(updates).toHaveBeenCalledOnce());
   });
+
+  it('adds a second child from an existing card and creates an account for the same parent', async () => {
+    const existing = testState.cache.students[0] as Record<string, unknown>;
+    existing.payer_name = 'Renata';
+    existing.payer_email = 'renata@example.test';
+    existing.payer_phone = '+37060000000';
+    mockStudentSaveQueries();
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        success: true,
+        parent: { email: 'renata@example.test', userId: 'parent-1', created: false, reused: true, emailSent: false },
+        student: { email: 'toma@example.test', userId: 'student-toma', created: true, emailSent: true, password: 'temp' },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
+    fireEvent.change(screen.getByPlaceholderText('Jonas Jonaitis'), { target: { value: 'Toma' } });
+    fireEvent.change(screen.getByPlaceholderText('jonas@example.com'), { target: { value: 'toma@example.test' } });
+    fireEvent.click(screen.getByTestId('save-existing-sibling'));
+
+    await waitFor(() => expect(testState.studentInserts).toHaveLength(1));
+    expect(testState.studentInserts[0]).toMatchObject({
+      full_name: 'Toma',
+      email: 'toma@example.test',
+      payer_name: 'Renata',
+      payer_email: 'renata@example.test',
+      payment_payer: 'parent',
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const provisionCall = fetchMock.mock.calls.find(([url]) => url === '/api/mv-provision-family-accounts');
+    expect(provisionCall).toBeTruthy();
+    expect(JSON.parse(String(provisionCall?.[1]?.body))).toMatchObject({
+      parentName: 'Renata',
+      parentEmail: 'renata@example.test',
+      studentFullName: 'Toma',
+      studentEmail: 'toma@example.test',
+      scope: 'both',
+    });
+  });
 });

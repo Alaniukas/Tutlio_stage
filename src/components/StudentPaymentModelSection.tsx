@@ -176,13 +176,13 @@ export default function StudentPaymentModelSection({
       />
       <div className="space-y-2">
         <Label className="text-xs text-gray-600">{t('studentPaymentSection.modelsLabel')}</Label>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           <button
             type="button"
             disabled={disabled || saving}
             onClick={() => void resetToDefault()}
             className={cn(
-              'rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
+              'w-full rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
               selectedModels.size === 0
                 ? 'border-violet-500 bg-violet-50 text-violet-900'
                 : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',
@@ -196,7 +196,7 @@ export default function StudentPaymentModelSection({
               disabled={disabled || saving}
               onClick={() => void toggleModel('per_lesson')}
               className={cn(
-                'rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
+                'w-full rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
                 selectedModels.has('per_lesson')
                   ? 'border-violet-500 bg-violet-50 text-violet-900'
                   : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',
@@ -210,7 +210,7 @@ export default function StudentPaymentModelSection({
             disabled={disabled || saving}
             onClick={() => void toggleModel('monthly_billing')}
             className={cn(
-              'rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
+              'w-full rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
               selectedModels.has('monthly_billing')
                 ? 'border-violet-500 bg-violet-50 text-violet-900'
                 : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',
@@ -223,7 +223,7 @@ export default function StudentPaymentModelSection({
             disabled={disabled || saving}
             onClick={() => void toggleModel('prepaid_packages')}
             className={cn(
-              'rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
+              'w-full rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
               selectedModels.has('prepaid_packages')
                 ? 'border-violet-500 bg-violet-50 text-violet-900'
                 : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',

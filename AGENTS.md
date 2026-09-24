@@ -330,7 +330,7 @@ Vidiniai legacy failų / API pavadinimai gali likti, tačiau jie negali patekti 
 | `extra_lessons_billing` | Mėnesio pabaigos papildomų pamokų sąskaitos (company/Pro Klasė srautas, ne school click-wrap) |
 | `pvm_education_invoice` | PVM S.F. layout, atominė serijos numeracija, išorinių numerių rezervacija |
 | `student_card_booking` | Org admin rezervuoja pamoką iš mokinio kortelės (`FindTutorModal` + `FindLessonBookDialog`) |
-| `managed_family_accounts` | Administracija iš karto sukuria mokinio / tėvų paskyras ir pasirenka aktyvavimo laiškų gavėjus. Legacy MV / Pro Klasė įjungta pagal org ID; kitoms org — per flag'ą. Prisijungimo vardas kitoms org neutralus `st-*`, o UI / laiškai / aktyvavimo puslapis naudoja tik tikslinės org white-label. |
+| `managed_family_accounts` | Administracija iš karto sukuria mokinio / tėvų paskyras ir pasirenka aktyvavimo laiškų gavėjus. Legacy MV / Pro Klasė įjungta pagal org ID; kitoms org — per flag'ą. Prisijungimo vardas kitoms org neutralus `st-*`, o UI / laiškai / aktyvavimo puslapis naudoja tik tikslinės org white-label. Kai vienas vaikas jau yra, esamo vaiko kortelėje „Pridėti dar vieną vaiką“ sukuria naują vaiko paskyrą su tais pačiais tėvais (Pro Klasė ir kitos managed-family org). Prisijungimo duomenys parodomi iš karto, o mokslo metų pamokų serija įrašoma toliau, kad mygtukas „Saugoma“ nelauktų visų eilučių. Pamoką adminas pasirenka pats pagal laisvą laiką: kas savaitę arba kas dvi, pirmoji gali būti bandomoji. Esamo mokinio kortelėje laisvo laiko paieška yra viršuje, o mokėjimo būdas eina per visą plotį. |
 
 Naudojimas:
 ```typescript

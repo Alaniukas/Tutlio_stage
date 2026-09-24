@@ -517,8 +517,13 @@ export default function CompanyStudents() {
   const parentFirstInvite = isMvOrg && !isSchoolView && newStudent.invite_target === 'parent';
   const provisionAccounts = supportsManagedFamilyAccounts && !isSchoolView && newStudent.invite_target === 'provision';
   const canAddAdditionalChildren = provisionAccounts || (proKlaseAdminUi && !parentFirstInvite);
+  const canAddSiblingToExisting = !isSchoolView && (proKlaseAdminUi || supportsManagedFamilyAccounts);
+  const [siblingDraft, setSiblingDraft] = useState<MvAdditionalChildDraft | null>(null);
+  const [savingSibling, setSavingSibling] = useState(false);
   const searchChildIndex = mvAdditionalChildren.findIndex((child) => child.id === addStudentFindTutorChildId);
-  const searchContextLabel = addStudentFindTutorChildId
+  const searchContextLabel = siblingDraft && addStudentFindTutorChildId === siblingDraft.id
+    ? siblingDraft.full_name.trim() || t('compStu.addAnotherChild')
+    : addStudentFindTutorChildId
     ? mvAdditionalChildren[searchChildIndex]?.full_name.trim()
       || t('compStu.childNumber', { number: String(searchChildIndex + 2) })
     : mvAdditionalChildren.length > 0
@@ -2653,6 +2658,248 @@ export default function CompanyStudents() {
     invalidateCache('company_contracts');
     fetchData();
     setSaving(false);
+  };
+
+  const handleAddSiblingToFamily = async () => {
+    if (!selectedStudent || !siblingDraft || savingSibling) return;
+    const fullName = siblingDraft.full_name.trim();
+    const parentName = (selectedStudent.payer_name || '').trim();
+    const parentEmail = (selectedStudent.payer_email || '').trim();
+    if (!fullName) {
+      setToastMessage({ message: t('compStu.fullNameRequired'), type: 'error' });
+      return;
+    }
+    if (!parentName || !parentEmail.includes('@')) {
+      setToastMessage({ message: t('compStu.parentInviteEmailRequired'), type: 'error' });
+      return;
+    }
+    if (
+      siblingDraft.email.trim()
+      && siblingDraft.email.trim().toLowerCase() === parentEmail.toLowerCase()
+    ) {
+      setToastMessage({ message: t('compStu.provisionEmailsMustDiffer'), type: 'error' });
+      return;
+    }
+    if (siblingDraft.phone.trim() && !validateLocalizedPhone(siblingDraft.phone, locale)) {
+      setToastMessage({ message: t('compStu.phoneFormat'), type: 'error' });
+      return;
+    }
+    for (const item of siblingDraft.pickedLessons) {
+      const windowStart = new Date(item.pick.startIso);
+      const windowEnd = new Date(item.pick.endIso);
+      const lessonStart = new Date(item.lessonStartIso);
+      const lessonEnd = new Date(item.lessonEndIso);
+      if (!lessonFitsAvailabilityWindow(windowStart, windowEnd, lessonStart, lessonEnd)) {
+        setToastMessage({ message: t('findLesson.outsideWindow'), type: 'error' });
+        return;
+      }
+    }
+    if (orgId && siblingDraft.email.trim()) {
+      const orgTutors = await getOrgVisibleTutors(supabase, orgId, 'id, email, full_name');
+      const conflict = findOrgTutorEmailConflict(siblingDraft.email, orgTutors);
+      if (conflict) {
+        setToastMessage({
+          message: t('compStu.emailMatchesOrgTutor', { name: conflict.tutorName }),
+          type: 'error',
+        });
+        return;
+      }
+    }
+
+    setSavingSibling(true);
+    const tutorIdsToInsert = siblingDraft.tutor_ids.length > 0 ? siblingDraft.tutor_ids : [null];
+    const rows: InsertedStudentRow[] = [];
+    for (const tutorId of tutorIdsToInsert) {
+      const inviteCode = generateInviteCode();
+      const matchWindows = siblingDraft.pickedLessons.filter((item) => item.pick.tutorId === tutorId);
+      const { data: row, error } = await supabase
+        .from('students')
+        .insert({
+          ...(tutorId ? { tutor_id: tutorId } : {}),
+          full_name: fullName,
+          email: siblingDraft.email.trim() || null,
+          phone: siblingDraft.phone.trim() || null,
+          grade: (normalizeStudentGrade1to12(siblingDraft.grade) ?? siblingDraft.grade) || null,
+          enrollment_status: 'active',
+          payer_name: parentName,
+          payer_email: parentEmail,
+          payer_phone: (selectedStudent.payer_phone || '').trim() || null,
+          contact_parent: 'primary',
+          invite_code: inviteCode,
+          payment_payer: 'parent',
+          ...(proKlaseAdminUi
+            ? {
+                admin_comment: siblingDraft.admin_comment.trim() || null,
+                admin_comment_visible_to_tutor: siblingDraft.admin_comment_visible_to_tutor,
+              }
+            : {}),
+          ...(matchWindows.length > 0
+            ? {
+                preferred_availability: matchWindows.map((item) =>
+                  preferredWindowFromDateRange(
+                    new Date(item.lessonStartIso || item.pick.startIso),
+                    new Date(item.lessonEndIso || item.pick.endIso),
+                  ),
+                ),
+              }
+            : {}),
+          ...(orgId ? { organization_id: orgId } : {}),
+        })
+        .select('id, tutor_id, invite_code')
+        .single();
+      if (error || !row) {
+        console.error('Error adding sibling:', error);
+        setToastMessage({ message: t('common.error'), type: 'error' });
+        setSavingSibling(false);
+        return;
+      }
+      rows.push(row as InsertedStudentRow);
+    }
+
+    const lessons = markFirstChronologicalLessonAsTrial(
+      siblingDraft.pickedLessons,
+      siblingDraft.firstLessonIsTrial,
+    );
+    // A school-year series is dozens of rows. Create the account first so
+    // "Saugoma" is not stuck until every lesson and availability slot is written.
+    const lessonWork = (async () => {
+      let lessonCreateFailed = false;
+      if (lessons.length === 0) return false;
+      const { data: orgRow } = orgId
+        ? await supabase.from('organizations').select('features').eq('id', orgId).maybeSingle()
+        : { data: null };
+      const featObj =
+        orgRow?.features && typeof orgRow.features === 'object' && !Array.isArray(orgRow.features)
+          ? (orgRow.features as Record<string, unknown>)
+          : {};
+      const trialPrice =
+        typeof featObj.trial_lesson_price_eur === 'number' ? Math.max(0, featObj.trial_lesson_price_eur) : 0;
+      const trialTopic =
+        typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
+          ? featObj.trial_lesson_topic.trim()
+          : '';
+      const trialDuration =
+        typeof featObj.trial_lesson_duration_minutes === 'number'
+          ? Math.max(15, Math.round(featObj.trial_lesson_duration_minutes))
+          : 60;
+      for (const item of lessons) {
+        const lessonRow = rows.find((row) => row.tutor_id === item.pick.tutorId) || rows[0];
+        try {
+          const { data: subj } = await supabase
+            .from('subjects')
+            .select('id, name, price, duration_minutes, is_group, max_students, meeting_link')
+            .eq('id', item.pick.subjectId)
+            .maybeSingle();
+          if (!subj || !lessonRow?.id) continue;
+          const regularPrice = Number((subj as { price?: number | null }).price ?? 0);
+          const recurringEndDate = proKlaseAdminUi
+            ? proKlaseSchoolYearEndDate(new Date(item.lessonStartIso))
+            : '';
+          const createRecurring = Boolean(recurringEndDate);
+          const result = await runOrgAdminCreateSession({
+            supabase,
+            createTutorId: item.pick.tutorId,
+            createSubjectId: item.pick.subjectId,
+            createStudentId: lessonRow.id,
+            createStudentIds: [lessonRow.id],
+            createStartTime: item.lessonStartIso,
+            createEndTime: item.lessonEndIso,
+            createTopic: item.isTrial && !createRecurring
+              ? trialTopic || item.pick.subjectName || (subj as { name?: string | null }).name || ''
+              : item.pick.subjectName || (subj as { name?: string | null }).name || '',
+            createMeetingLink: String((subj as { meeting_link?: string | null }).meeting_link || ''),
+            createIsRecurring: createRecurring,
+            createRecurringEndDate: recurringEndDate,
+            createRecurringFrequency: item.recurringFrequency,
+            createRecurringWeekdays: [new Date(item.lessonStartIso).getDay()],
+            createIsPaid: false,
+            createPrice: createRecurring ? regularPrice : (item.isTrial ? trialPrice : regularPrice),
+            createIsTrial: item.isTrial && !createRecurring,
+            createFirstLessonIsTrial: item.isTrial && createRecurring,
+            createTutorComment: '',
+            createShowCommentToStudent: false,
+            subjects: [{
+              id: (subj as { id: string }).id,
+              name: (subj as { name?: string | null }).name,
+              price: (subj as { price?: number | null }).price ?? null,
+              duration_minutes: (subj as { duration_minutes?: number | null }).duration_minutes ?? null,
+              is_group: (subj as { is_group?: boolean | null }).is_group ?? null,
+              max_students: (subj as { max_students?: number | null }).max_students ?? null,
+            }],
+            individualPricing: [],
+            suppressSuccessAlert: true,
+            suppressClientBookingEmails: proKlaseAdminUi,
+          });
+          if (
+            item.isTrial &&
+            trialPrice > 0 &&
+            pkFeat('trial_creation_payment_email') &&
+            result.createdSessionIds.length > 0
+          ) {
+            await fetch('/api/create-trial-package', {
+              method: 'POST',
+              headers: await authHeaders(),
+              body: JSON.stringify({
+                studentId: lessonRow.id,
+                tutorId: item.pick.tutorId,
+                sessionId: result.createdSessionIds[0],
+                topic: trialTopic || undefined,
+                durationMinutes: trialDuration,
+                priceEur: trialPrice,
+                suppressRegistrationInvite: true,
+              }),
+            });
+          }
+        } catch (lessonErr) {
+          console.error('Error creating lesson for sibling:', lessonErr);
+          lessonCreateFailed = true;
+        }
+      }
+      return lessonCreateFailed;
+    })();
+
+    const provisionResult = await postMvProvisionFamilyAccounts(
+      {
+        studentId: rows[0]!.id,
+        studentIds: rows.map((row) => row.id),
+        parentName,
+        parentEmail,
+        studentFullName: fullName,
+        studentEmail: siblingDraft.email.trim(),
+        locale: orgPreferredLocale || locale,
+        scope: 'both',
+        emailDelivery: 'separate',
+        studentNotifyEmail: siblingDraft.email.trim() || parentEmail,
+        parentNotifyEmail: parentEmail,
+      },
+      authHeaders,
+    );
+    if (!provisionResult.ok) {
+      setToastMessage({
+        message: provisionResult.json.error || t('compStu.provisionFailed'),
+        type: 'error',
+      });
+      setSavingSibling(false);
+      fetchData();
+      void lessonWork;
+      return;
+    }
+    const credentials = credentialsFromProvisionResponse(provisionResult.json);
+    if (credentials) {
+      setProvisionCredentials(credentials);
+      setProvisionCredentialsOpen(true);
+    }
+    setSiblingDraft(null);
+    invalidateCache('company_contracts');
+    fetchData();
+    setSavingSibling(false);
+    void lessonWork.then((lessonCreateFailed) => {
+      setToastMessage({
+        message: lessonCreateFailed ? t('compStu.studentAddedLessonFailed') : t('compStu.provisionFamilySuccess'),
+        type: lessonCreateFailed ? 'error' : 'success',
+      });
+      if (!lessonCreateFailed) fetchData();
+    });
   };
 
   const handleSaveComment = async () => {
@@ -5009,7 +5256,7 @@ export default function CompanyStudents() {
         )}
 
         {/* Student Detail Modal */}
-        <Dialog open={isStudentModalOpen} onOpenChange={(open) => { setIsStudentModalOpen(open); if (!open) { setSendPackageOpen(false); setFindLessonPicks([]); } }}>
+        <Dialog open={isStudentModalOpen} onOpenChange={(open) => { setIsStudentModalOpen(open); if (!open) { setSendPackageOpen(false); setFindLessonPicks([]); setSiblingDraft(null); } }}>
           <DialogContent
             className={cn(
               'w-[calc(100%-1.5rem)] max-h-[90vh] overflow-y-auto p-5 sm:p-6',
@@ -5021,6 +5268,63 @@ export default function CompanyStudents() {
             </DialogHeader>
             {selectedStudent && (
               <div className="w-full min-w-0 space-y-5">
+                {studentCardBookingEnabled && (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/50 px-4 py-3">
+                      <p className="text-sm font-semibold text-gray-900">{t('compStu.bookLessonTitle')}</p>
+                      <Button
+                        variant="outline"
+                        className="rounded-xl border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"
+                        onClick={() => {
+                          setFindLessonBookedIntervals([]);
+                          setFindLessonOpen(true);
+                        }}
+                      >
+                        <Search className="w-4 h-4 mr-2" />
+                        {t('compStu.bookLessonFindTutor')}
+                      </Button>
+                    </div>
+                    {findLessonPicks.map((pick) => (
+                      <FindLessonBookDialog
+                        key={availabilitySlotKey(pick)}
+                        variant="inline"
+                        pick={pick}
+                        studentId={selectedStudent?.id ?? ''}
+                        onClose={() =>
+                          setFindLessonPicks((current) =>
+                            current.filter((row) => availabilitySlotKey(row) !== availabilitySlotKey(pick)),
+                          )
+                        }
+                        onBooked={(booking) => {
+                          setFindLessonBookedIntervals((current) => [
+                            ...current,
+                            {
+                              tutor_id: booking.tutorId,
+                              start: new Date(booking.startIso),
+                              end: new Date(booking.endIso),
+                            },
+                          ]);
+                          setFindLessonPicks((current) =>
+                            current.filter((row) => availabilitySlotKey(row) !== availabilitySlotKey(pick)),
+                          );
+                          setModalSessionsRefreshKey((k) => k + 1);
+                          setPackagesRefreshKey((k) => k + 1);
+                          if (booking.trialPaymentSent) {
+                            setToastMessage({ message: t('compStu.trialSent'), type: 'success' });
+                          } else if (booking.recurringCreated) {
+                            setToastMessage({
+                              message: booking.recurringFirstLessonTrial
+                                ? t('findLesson.recurringCreatedWithTrial')
+                                : t('findLesson.recurringCreatedFullPrice'),
+                              type: 'success',
+                            });
+                          }
+                          fetchData();
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
                 {selectedStudentGroup.length > 1 && (
                   <div className="p-3 rounded-xl border border-gray-100 bg-gray-50">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{t('compStu.thTutor')}</p>
@@ -5604,6 +5908,17 @@ export default function CompanyStudents() {
                         </span>
                       )}
                     </div>
+                    {canAddSiblingToExisting && !siblingDraft && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="mt-3 w-full rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                        onClick={() => setSiblingDraft(createMvAdditionalChildDraft())}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        {t('compStu.addAnotherChild')}
+                      </Button>
+                    )}
                   </div>
 
                   {showStudentSchedulePane ? (
@@ -5623,8 +5938,209 @@ export default function CompanyStudents() {
                       )}
                     </div>
                   ) : null}
+
+                    {canAddSiblingToExisting && siblingDraft && (
+                    <div data-testid="existing-family-sibling" className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 lg:col-span-2">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">{t('compStu.addAnotherChild')}</p>
+                          <p className="mt-0.5 text-xs text-gray-500">{t('compStu.additionalChildrenHint')}</p>
+                          <p className="mt-1 text-xs text-gray-700">
+                            {t('compStu.parentNameLabel')}: {(selectedStudent.payer_name || '').trim() || '—'}
+                            {' · '}
+                            {(selectedStudent.payer_email || '').trim() || '—'}
+                          </p>
+                        </div>
+                        <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-3">
+                        <div className="space-y-2">
+                          <Label>{t('compStu.fullNameRequired')}</Label>
+                          <Input
+                            value={siblingDraft.full_name}
+                            onChange={(e) => setSiblingDraft((current) => current ? { ...current, full_name: e.target.value } : current)}
+                            placeholder={t('compStu.namePlaceholder')}
+                            className="rounded-xl bg-white"
+                          />
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label>{t('compStu.emailLabel')}</Label>
+                            <Input
+                              type="email"
+                              value={siblingDraft.email}
+                              onChange={(e) => setSiblingDraft((current) => current ? { ...current, email: e.target.value } : current)}
+                              placeholder="jonas@example.com"
+                              className="rounded-xl bg-white"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>{t('compStu.phoneLabel')}</Label>
+                            <Input
+                              value={siblingDraft.phone}
+                              onChange={(e) => setSiblingDraft((current) => current ? { ...current, phone: formatLocalizedPhone(e.target.value, locale) } : current)}
+                              placeholder={getLocalizedPhonePlaceholder(locale)}
+                              className="rounded-xl bg-white"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>{t('studentSettings.grade')}</Label>
+                            <Select
+                              value={proKlaseGradeSelectValue(siblingDraft.grade)}
+                              onValueChange={(value) => setSiblingDraft((current) => current ? { ...current, grade: value === 'unset' ? '' : value } : current)}
+                            >
+                              <SelectTrigger className="rounded-xl bg-white"><SelectValue placeholder={t('dynamicPricing.gradeUnset')} /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="unset">{t('dynamicPricing.gradeUnset')}</SelectItem>
+                                {Array.from({ length: 12 }, (_, gradeIndex) => `${gradeIndex + 1} klasė`).map((grade) => (
+                                  <SelectItem key={grade} value={grade}>{grade}</SelectItem>
+                                ))}
+                                <SelectItem value="Studentas">{t('lessonSet.gradeUniversity')}</SelectItem>
+                                <SelectItem value="Kita">{t('onboard.gradeOther')}</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>{t('compStu.additionalChildTutors')}</Label>
+                            <div className={cn('rounded-xl border border-gray-200 bg-white p-2 space-y-1', ORG_TUTOR_FILTER_SCROLL_CLASS)}>
+                              {tutors.map((tutor) => {
+                                const checked = siblingDraft.tutor_ids.includes(tutor.id);
+                                return (
+                                  <label key={tutor.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-xs hover:bg-gray-50">
+                                    <Checkbox
+                                      checked={checked}
+                                      onChange={(e) => {
+                                        const isChecked = e.target.checked;
+                                        setSiblingDraft((current) => {
+                                          if (!current) return current;
+                                          return {
+                                            ...current,
+                                            tutor_ids: isChecked
+                                              ? [...current.tutor_ids, tutor.id]
+                                              : current.tutor_ids.filter((id) => id !== tutor.id),
+                                            pickedLessons: isChecked
+                                              ? current.pickedLessons
+                                              : current.pickedLessons.filter((lesson) => lesson.pick.tutorId !== tutor.id),
+                                          };
+                                        });
+                                      }}
+                                    />
+                                    <span className="truncate">{tutor.full_name}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                        {proKlaseAvailabilitySearchUi && (
+                          <div className="space-y-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="rounded-lg border-indigo-200 text-xs text-indigo-700 hover:bg-indigo-50"
+                              onClick={() => {
+                                setAddStudentFindTutorChildId(siblingDraft.id);
+                                setAddStudentFindTutorOpen(true);
+                              }}
+                            >
+                              <Search className="mr-1.5 h-3.5 w-3.5" />
+                              {t('compStu.findTutorByAvailability')}
+                            </Button>
+                            {siblingDraft.pickedLessons.map((item) => (
+                              <div key={lessonPickKey(item)} className="space-y-2">
+                                <PickedAvailabilityTimeEditor
+                                  tutorId={item.pick.tutorId}
+                                  tutorName={item.pick.tutorName}
+                                  subjectId={item.pick.subjectId}
+                                  subjectName={item.pick.subjectName}
+                                  windowStartIso={item.pick.startIso}
+                                  windowEndIso={item.pick.endIso}
+                                  startIso={item.lessonStartIso || item.pick.startIso}
+                                  endIso={item.lessonEndIso || item.pick.endIso}
+                                  onChange={({ startIso, endIso }) => setSiblingDraft((current) => current ? {
+                                    ...current,
+                                    pickedLessons: current.pickedLessons.map((lesson) => lessonPickKey(lesson) === lessonPickKey(item)
+                                      ? { ...lesson, lessonStartIso: startIso, lessonEndIso: endIso }
+                                      : lesson),
+                                  } : current)}
+                                  onSubjectChange={({ subjectId, subjectName }) => setSiblingDraft((current) => current ? {
+                                    ...current,
+                                    pickedLessons: current.pickedLessons.map((lesson) => lessonPickKey(lesson) === lessonPickKey(item)
+                                      ? { ...lesson, pick: { ...lesson.pick, subjectId, subjectName } }
+                                      : lesson),
+                                  } : current)}
+                                  onClear={() => setSiblingDraft((current) => current ? {
+                                    ...current,
+                                    pickedLessons: current.pickedLessons.filter((lesson) => lessonPickKey(lesson) !== lessonPickKey(item)),
+                                  } : current)}
+                                />
+                                <div className="grid gap-2 rounded-xl border border-indigo-100 bg-white p-3 sm:grid-cols-2 sm:items-end">
+                                  <div className="space-y-1.5">
+                                    <Label className="text-xs">{t('cal.recurringFrequencyLabel')}</Label>
+                                    <Select
+                                      value={item.recurringFrequency}
+                                      onValueChange={(value: 'weekly' | 'biweekly') => setSiblingDraft((current) => current ? {
+                                        ...current,
+                                        pickedLessons: current.pickedLessons.map((lesson) => lessonPickKey(lesson) === lessonPickKey(item)
+                                          ? { ...lesson, recurringFrequency: value }
+                                          : lesson),
+                                      } : current)}
+                                    >
+                                      <SelectTrigger className="rounded-xl bg-white"><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="weekly">{t('cal.freqWeekly')}</SelectItem>
+                                        <SelectItem value="biweekly">{t('cal.freqBiweekly')}</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <p className="text-xs text-indigo-800">
+                                    {t('compSch.repeatsUntil')}: {proKlaseSchoolYearEndDate(new Date(item.lessonStartIso))}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                            {siblingDraft.pickedLessons.length > 0 && (
+                              <>
+                                <div className="rounded-xl border border-amber-100 bg-amber-50/50 p-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSiblingDraft((current) => current
+                                      ? { ...current, firstLessonIsTrial: !current.firstLessonIsTrial }
+                                      : current)}
+                                    className="flex w-full items-center justify-between gap-3 text-left"
+                                  >
+                                    <div>
+                                      <p className="text-sm font-medium text-amber-900">{t('compSch.firstLessonTrial')}</p>
+                                      <p className="text-xs text-amber-800/80">{t('compSch.firstLessonTrialDesc')}</p>
+                                    </div>
+                                    <div className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full ${siblingDraft.firstLessonIsTrial ? 'bg-amber-500' : 'bg-gray-300'}`}>
+                                      <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${siblingDraft.firstLessonIsTrial ? 'translate-x-6' : 'translate-x-1'}`} />
+                                    </div>
+                                  </button>
+                                </div>
+                                <p className="text-[11px] text-gray-500">{t('findLesson.willCreateOnSave')}</p>
+                              </>
+                            )}
+                          </div>
+                        )}
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button type="button" size="sm" variant="outline" onClick={() => setSiblingDraft(null)} disabled={savingSibling}>
+                            {t('common.cancel')}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            data-testid="save-existing-sibling"
+                            disabled={savingSibling || !siblingDraft.full_name.trim()}
+                            onClick={() => void handleAddSiblingToFamily()}
+                          >
+                            {savingSibling ? t('common.saving') : t('compStu.provisionAccounts')}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                 </div>
 
+                <div className="grid items-start gap-4 lg:grid-cols-2">
                 <div className="p-4 rounded-2xl border border-gray-100 bg-white space-y-3">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('compStu.tutorsSection')}</p>
                     <div className="space-y-2">
@@ -5805,7 +6321,7 @@ export default function CompanyStudents() {
 
                 {/* Admin comment */}
                 {selectedStudent && (
-                  <div className="mt-4 pt-4 border-t border-gray-100">
+                  <div className="rounded-2xl border border-gray-100 bg-white p-4">
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="font-semibold text-gray-900 flex items-center gap-2">
                         <MessageSquare className="w-4 h-4 text-blue-500" />
@@ -5869,7 +6385,7 @@ export default function CompanyStudents() {
 
                 {/* Student meeting link */}
                 {selectedStudent && (
-                  <div className="mt-4 pt-4 border-t border-gray-100">
+                  <div className="rounded-2xl border border-gray-100 bg-white p-4">
                     <h4 className="font-semibold text-gray-900 text-sm mb-2">{t('compStu.personalMeetingLink')}</h4>
                     <div className="flex gap-2">
                       <input
@@ -5908,7 +6424,7 @@ export default function CompanyStudents() {
 
                 {/* Individual pricing editor */}
                 {selectedStudent && (
-                  <div className="mt-4 pt-4 border-t border-gray-100">
+                  <div className="rounded-2xl border border-gray-100 bg-white p-4">
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="font-semibold text-gray-900 flex items-center gap-2">
                         <Sparkles className="w-4 h-4 text-amber-500" />
@@ -6130,6 +6646,9 @@ export default function CompanyStudents() {
                   </div>
                 )}
 
+                </div>
+
+                <div className="w-full space-y-4">
                 {showPaymentModelUi && (
                   <StudentPaymentModelSection
                     studentId={selectedStudent.id}
@@ -6202,9 +6721,10 @@ export default function CompanyStudents() {
                     </p>
                   </div>
                 )}
+                </div>
 
                 {/* Packages */}
-                <div>
+                <div className="rounded-2xl border border-gray-100 bg-white p-4">
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="font-semibold text-gray-900 flex items-center gap-2">
                       <Package className="w-4 h-4 text-violet-600" /> {t('compStu.lessonPackages')}
@@ -6583,66 +7103,8 @@ export default function CompanyStudents() {
                   )}
                 </div>
 
-                {/* Book a lesson from the student card (req 4) */}
-                {studentCardBookingEnabled && (
-                  <div className="border-t border-gray-100 pt-4">
-                    <h4 className="font-semibold mb-1 text-gray-900">{t('compStu.bookLessonTitle')}</h4>
-                    <p className="text-xs text-gray-500 mb-3">{t('compStu.bookLessonDesc')}</p>
-                    <Button
-                      variant="outline"
-                      className="rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                      onClick={() => {
-                        setFindLessonBookedIntervals([]);
-                        setFindLessonOpen(true);
-                      }}
-                    >
-                      <Search className="w-4 h-4 mr-2" />
-                      {t('compStu.bookLessonFindTutor')}
-                    </Button>
-                    {findLessonPicks.map((pick) => (
-                      <FindLessonBookDialog
-                        key={availabilitySlotKey(pick)}
-                        variant="inline"
-                        pick={pick}
-                        studentId={selectedStudent?.id ?? ''}
-                        onClose={() =>
-                          setFindLessonPicks((current) =>
-                            current.filter((row) => availabilitySlotKey(row) !== availabilitySlotKey(pick)),
-                          )
-                        }
-                        onBooked={(booking) => {
-                          setFindLessonBookedIntervals((current) => [
-                            ...current,
-                            {
-                              tutor_id: booking.tutorId,
-                              start: new Date(booking.startIso),
-                              end: new Date(booking.endIso),
-                            },
-                          ]);
-                          setFindLessonPicks((current) =>
-                            current.filter((row) => availabilitySlotKey(row) !== availabilitySlotKey(pick)),
-                          );
-                          setModalSessionsRefreshKey((k) => k + 1);
-                          setPackagesRefreshKey((k) => k + 1);
-                          if (booking.trialPaymentSent) {
-                            setToastMessage({ message: t('compStu.trialSent'), type: 'success' });
-                          } else if (booking.recurringCreated) {
-                            setToastMessage({
-                              message: booking.recurringFirstLessonTrial
-                                ? t('findLesson.recurringCreatedWithTrial')
-                                : t('findLesson.recurringCreatedFullPrice'),
-                              type: 'success',
-                            });
-                          }
-                          fetchData();
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
-
                 {/* Sessions */}
-                <div className="border-t border-gray-100 pt-4">
+                <div className="rounded-2xl border border-gray-100 bg-white p-4">
                   <h4 className="font-semibold mb-3 text-gray-900">{t('compStu.studentSessions')}</h4>
                   {loadingModalSessions ? (
                     <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground text-sm">
@@ -6704,7 +7166,13 @@ export default function CompanyStudents() {
                 recurringFrequency: 'weekly',
               };
             });
-            if (addStudentFindTutorChildId) {
+            if (siblingDraft && addStudentFindTutorChildId === siblingDraft.id) {
+              setSiblingDraft((current) => current ? {
+                ...current,
+                tutor_ids: [...new Set([...current.tutor_ids, ...tutorIds])],
+                pickedLessons: appendStudentLessonPicks(current.pickedLessons, nextItems),
+              } : current);
+            } else if (addStudentFindTutorChildId) {
               setMvAdditionalChildren((current) => current.map((child) => child.id === addStudentFindTutorChildId
                 ? {
                     ...child,
@@ -6725,6 +7193,7 @@ export default function CompanyStudents() {
           busyIntervals={[
             ...addStudentPickedLessons,
             ...mvAdditionalChildren.flatMap((child) => child.pickedLessons),
+            ...(siblingDraft?.pickedLessons ?? []),
           ].map((item) => ({
             tutor_id: item.pick.tutorId,
             start: new Date(item.lessonStartIso),
