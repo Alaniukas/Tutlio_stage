@@ -134,6 +134,11 @@ import {
 import { isProKlaseOrg, isMoksloVaisiaiOrg } from '@/lib/marketMoney';
 import { managedFamilyAccountsEnabled } from '@/lib/managedFamilyAccounts';
 import {
+  managedFamilyPaymentPayer,
+  managedFamilyProvisionScope,
+  validateManagedFamilyContact,
+} from '@/lib/managedFamilyContact';
+import {
   credentialsFromProvisionResponse,
   postMvProvisionFamilyAccounts,
   provisionEmailsSent,
@@ -147,7 +152,7 @@ import {
 import MvProvisionDialog, { type MvProvisionDialogSubmit } from '@/components/company/MvProvisionDialog';
 import {
   mergeMvStudentAccountStatus,
-  mvNeedsAnyAccountProvisioning,
+  mvNeedsParentAccount,
   mvProvisionStudentIds,
 } from '@/lib/mvStudentAccountStatus';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
@@ -534,6 +539,7 @@ export default function CompanyStudents() {
   const [mvProvisionDialogOpen, setMvProvisionDialogOpen] = useState(false);
   const [mvProvisionDialogStudent, setMvProvisionDialogStudent] = useState<Student | null>(null);
   const [mvProvisionDialogStudentIds, setMvProvisionDialogStudentIds] = useState<string[]>([]);
+  const [mvProvisionDialogFocus, setMvProvisionDialogFocus] = useState<'auto' | 'parent' | 'student'>('auto');
   const [mvCreateProvisionDelivery, setMvCreateProvisionDelivery] = useState<MvEmailDelivery>(
     defaultMvProvisionDelivery().emailDelivery,
   );
@@ -2025,30 +2031,25 @@ export default function CompanyStudents() {
     if (
       !isSchoolView &&
       supportsManagedFamilyAccounts &&
-      newStudent.invite_target === 'provision' &&
-      !newStudent.payer_name.trim()
+      newStudent.invite_target === 'provision'
     ) {
-      setToastMessage({ message: t('compStu.parentInviteNameRequired'), type: 'error' });
-      return;
-    }
-    if (
-      !isSchoolView &&
-      supportsManagedFamilyAccounts &&
-      newStudent.invite_target === 'provision' &&
-      !newStudent.payer_email.trim()
-    ) {
-      setToastMessage({ message: t('compStu.parentInviteEmailRequired'), type: 'error' });
-      return;
-    }
-    if (
-      !isSchoolView &&
-      supportsManagedFamilyAccounts &&
-      newStudent.invite_target === 'provision' &&
-      newStudent.email.trim() &&
-      newStudent.payer_email.trim().toLowerCase() === newStudent.email.trim().toLowerCase()
-    ) {
-      setToastMessage({ message: t('compStu.provisionEmailsMustDiffer'), type: 'error' });
-      return;
+      const primaryContactError = validateManagedFamilyContact({
+        studentEmail: newStudent.email,
+        parentEmail: newStudent.payer_email,
+        parentName: newStudent.payer_name,
+      });
+      if (primaryContactError === 'missing_contact') {
+        setToastMessage({ message: t('compStu.siblingCreateParentFirst'), type: 'error' });
+        return;
+      }
+      if (primaryContactError === 'missing_parent_name') {
+        setToastMessage({ message: t('compStu.parentInviteNameRequired'), type: 'error' });
+        return;
+      }
+      if (primaryContactError === 'emails_must_differ') {
+        setToastMessage({ message: t('compStu.provisionEmailsMustDiffer'), type: 'error' });
+        return;
+      }
     }
     if (canAddAdditionalChildren) {
       const childEmails = [newStudent.email, ...mvAdditionalChildren.map((child) => child.email)]
@@ -2073,6 +2074,7 @@ export default function CompanyStudents() {
         }
         if (
           child.email.trim() &&
+          newStudent.payer_email.trim() &&
           child.email.trim().toLowerCase() === newStudent.payer_email.trim().toLowerCase()
         ) {
           setToastMessage({ message: t('compStu.provisionEmailsMustDiffer'), type: 'error' });
@@ -2159,6 +2161,9 @@ export default function CompanyStudents() {
       ? primaryAddrLine
       : newStudent.parent_secondary_address.trim();
     const contactParent = isSchoolView && newStudent.contact_parent === 'secondary' ? secondaryParent : primaryParent;
+    const provisionPaymentPayer = shouldProvisionAccountsOnCreate(newStudent.invite_target) && !isSchoolView
+      ? managedFamilyPaymentPayer(newStudent.email, newStudent.payer_email)
+      : newStudent.payment_payer;
     const tutorIdsToInsert = newStudent.tutor_ids.length > 0 ? newStudent.tutor_ids : [null];
     for (const tutorId of tutorIdsToInsert) {
       const inviteCode = generateInviteCode();
@@ -2196,7 +2201,7 @@ export default function CompanyStudents() {
               }
             : {}),
           invite_code: inviteCode,
-          payment_payer: newStudent.payment_payer,
+          payment_payer: provisionPaymentPayer,
           ...(() => {
             const matchWindows = addStudentPickedLessons.filter((item) => item.pick.tutorId === tutorId);
             if (matchWindows.length === 0) return {};
@@ -2244,7 +2249,7 @@ export default function CompanyStudents() {
               payer_phone: primaryParent.phone || null,
               contact_parent: 'primary',
               invite_code: inviteCode,
-              payment_payer: newStudent.payment_payer,
+              payment_payer: provisionPaymentPayer,
               ...(proKlaseAdminUi
                 ? {
                     admin_comment: child.admin_comment.trim() || null,
@@ -2480,6 +2485,7 @@ export default function CompanyStudents() {
             rows,
           })),
         ];
+        const createProvisionScope = managedFamilyProvisionScope(newStudent.payer_email);
         for (const child of childrenToProvision) {
           const row = child.rows[0]!;
           const provisionResult = await postMvProvisionFamilyAccounts(
@@ -2491,7 +2497,7 @@ export default function CompanyStudents() {
               studentFullName: child.fullName,
               studentEmail: child.email,
               locale: orgPreferredLocale || locale,
-              scope: 'both',
+              scope: createProvisionScope,
               emailDelivery: mvCreateProvisionDelivery,
               parentNotifyEmail: mvCreateParentNotifyEmail.trim() || undefined,
               studentNotifyEmail:
@@ -2665,21 +2671,30 @@ export default function CompanyStudents() {
     const fullName = siblingDraft.full_name.trim();
     const parentName = (selectedStudent.payer_name || '').trim();
     const parentEmail = (selectedStudent.payer_email || '').trim();
+    const studentEmail = siblingDraft.email.trim();
+    const siblingContactError = validateManagedFamilyContact({
+      studentEmail,
+      parentEmail,
+      parentName,
+    });
     if (!fullName) {
       setToastMessage({ message: t('compStu.fullNameRequired'), type: 'error' });
       return;
     }
-    if (!parentName || !parentEmail.includes('@')) {
-      setToastMessage({ message: t('compStu.parentInviteEmailRequired'), type: 'error' });
+    if (siblingContactError === 'missing_contact') {
+      setToastMessage({ message: t('compStu.siblingCreateParentFirst'), type: 'error' });
       return;
     }
-    if (
-      siblingDraft.email.trim()
-      && siblingDraft.email.trim().toLowerCase() === parentEmail.toLowerCase()
-    ) {
+    if (siblingContactError === 'missing_parent_name') {
+      setToastMessage({ message: t('compStu.parentInviteNameRequired'), type: 'error' });
+      return;
+    }
+    if (siblingContactError === 'emails_must_differ') {
       setToastMessage({ message: t('compStu.provisionEmailsMustDiffer'), type: 'error' });
       return;
     }
+    const hasStudentEmail = studentEmail.includes('@');
+    const hasParentEmail = parentEmail.includes('@');
     if (siblingDraft.phone.trim() && !validateLocalizedPhone(siblingDraft.phone, locale)) {
       setToastMessage({ message: t('compStu.phoneFormat'), type: 'error' });
       return;
@@ -2717,16 +2732,17 @@ export default function CompanyStudents() {
         .insert({
           ...(tutorId ? { tutor_id: tutorId } : {}),
           full_name: fullName,
-          email: siblingDraft.email.trim() || null,
+          email: studentEmail || null,
           phone: siblingDraft.phone.trim() || null,
           grade: (normalizeStudentGrade1to12(siblingDraft.grade) ?? siblingDraft.grade) || null,
           enrollment_status: 'active',
-          payer_name: parentName,
-          payer_email: parentEmail,
+          payer_name: parentName || null,
+          payer_email: parentEmail || null,
           payer_phone: (selectedStudent.payer_phone || '').trim() || null,
           contact_parent: 'primary',
           invite_code: inviteCode,
-          payment_payer: 'parent',
+          ...(selectedStudent.parent_user_id ? { parent_user_id: selectedStudent.parent_user_id } : {}),
+          payment_payer: managedFamilyPaymentPayer(studentEmail, parentEmail),
           ...(proKlaseAdminUi
             ? {
                 admin_comment: siblingDraft.admin_comment.trim() || null,
@@ -2862,15 +2878,15 @@ export default function CompanyStudents() {
       {
         studentId: rows[0]!.id,
         studentIds: rows.map((row) => row.id),
-        parentName,
-        parentEmail,
+        parentName: parentName || undefined,
+        parentEmail: parentEmail || undefined,
         studentFullName: fullName,
-        studentEmail: siblingDraft.email.trim(),
+        studentEmail,
         locale: orgPreferredLocale || locale,
-        scope: 'both',
+        scope: 'student',
         emailDelivery: 'separate',
-        studentNotifyEmail: siblingDraft.email.trim() || parentEmail,
-        parentNotifyEmail: parentEmail,
+        studentNotifyEmail: studentEmail || parentEmail,
+        parentNotifyEmail: parentEmail || undefined,
       },
       authHeaders,
     );
@@ -3298,12 +3314,17 @@ export default function CompanyStudents() {
     if (!ok) setToastMessage({ message: t('compStu.contractOpenFail'), type: 'error' });
   };
 
-  const openMvProvisionDialog = (student: Student, relatedRows: Student[] = [student]) => {
+  const openMvProvisionDialog = (
+    student: Student,
+    relatedRows: Student[] = [student],
+    focus: 'auto' | 'parent' | 'student' = 'auto',
+  ) => {
     setMvProvisionDialogStudent({
       ...student,
       ...mergeMvStudentAccountStatus(relatedRows),
     });
     setMvProvisionDialogStudentIds(mvProvisionStudentIds(relatedRows));
+    setMvProvisionDialogFocus(focus);
     setMvProvisionDialogOpen(true);
   };
 
@@ -5860,19 +5881,16 @@ export default function CompanyStudents() {
                           </Button>
                         );
                       })()}
-                      {supportsManagedFamilyAccounts
-                        && selectedStudent
-                        && mvNeedsAnyAccountProvisioning(selectedMvAccountStatus)
-                        && (
+                      {supportsManagedFamilyAccounts && selectedStudent && mvNeedsParentAccount(selectedMvAccountStatus) && (
                         <Button
                           type="button"
                           size="sm"
                           variant="default"
                           className="h-7 px-2.5 text-[11px] bg-emerald-700 hover:bg-emerald-800"
                           disabled={provisioningExistingStudent}
-                          onClick={() => openMvProvisionDialog(selectedStudent, selectedStudentGroup)}
+                          onClick={() => openMvProvisionDialog(selectedStudent, selectedStudentGroup, 'parent')}
                         >
-                          {provisioningExistingStudent ? t('common.loading') : t('compStu.provisionAccountsExisting')}
+                          {provisioningExistingStudent ? t('common.loading') : t('compStu.provisionCreateParentAccount')}
                         </Button>
                       )}
                       {!supportsManagedFamilyAccounts && (selectedStudent.payer_email || selectedStudent.parent_secondary_email) && (
@@ -5949,11 +5967,15 @@ export default function CompanyStudents() {
                             {' · '}
                             {(selectedStudent.payer_email || '').trim() || '—'}
                           </p>
+                          {mvNeedsParentAccount(selectedMvAccountStatus) && (
+                            <p className="mt-1 text-xs text-amber-800">{t('compStu.siblingCreateParentFirstHint')}</p>
+                          )}
                         </div>
                         <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-3">
                         <div className="space-y-2">
                           <Label>{t('compStu.fullNameRequired')}</Label>
                           <Input
+                            data-testid="sibling-child-name"
                             value={siblingDraft.full_name}
                             onChange={(e) => setSiblingDraft((current) => current ? { ...current, full_name: e.target.value } : current)}
                             placeholder={t('compStu.namePlaceholder')}
@@ -6133,7 +6155,7 @@ export default function CompanyStudents() {
                             disabled={savingSibling || !siblingDraft.full_name.trim()}
                             onClick={() => void handleAddSiblingToFamily()}
                           >
-                            {savingSibling ? t('common.saving') : t('compStu.provisionAccounts')}
+                            {savingSibling ? t('common.saving') : t('compStu.addAnotherChildSave')}
                           </Button>
                         </div>
                       </div>
@@ -7515,9 +7537,11 @@ export default function CompanyStudents() {
               if (!open) {
                 setMvProvisionDialogStudent(null);
                 setMvProvisionDialogStudentIds([]);
+                setMvProvisionDialogFocus('auto');
               }
             }}
             student={mvProvisionDialogStudent}
+            focus={mvProvisionDialogFocus}
             loading={provisioningExistingStudent}
             onSubmit={(payload) =>
               void provisionMvAccountsForStudent(mvProvisionDialogStudent, payload, true)

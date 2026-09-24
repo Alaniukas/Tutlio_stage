@@ -482,7 +482,7 @@ describe('CompanyStudents Pro Klasė list', () => {
     render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
     fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
-    fireEvent.change(screen.getByPlaceholderText('Jonas Jonaitis'), { target: { value: 'Toma' } });
+    fireEvent.change(screen.getByTestId('sibling-child-name'), { target: { value: 'Toma' } });
     fireEvent.change(screen.getByPlaceholderText('jonas@example.com'), { target: { value: 'toma@example.test' } });
     fireEvent.click(screen.getByTestId('save-existing-sibling'));
 
@@ -502,7 +502,71 @@ describe('CompanyStudents Pro Klasė list', () => {
       parentEmail: 'renata@example.test',
       studentFullName: 'Toma',
       studentEmail: 'toma@example.test',
-      scope: 'both',
+      scope: 'student',
     });
+  });
+
+  it('adds a sibling with only a student email when the card has no parent inbox', async () => {
+    const existing = testState.cache.students[0] as Record<string, unknown>;
+    existing.payer_name = '';
+    existing.payer_email = '';
+    existing.parent_user_id = 'parent-1';
+    mockStudentSaveQueries();
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        success: true,
+        student: { email: 'test@test.lt', userId: 'student-test1', created: true, emailSent: true, password: 'temp' },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
+    fireEvent.change(screen.getByTestId('sibling-child-name'), { target: { value: 'test1' } });
+    fireEvent.change(screen.getByPlaceholderText('jonas@example.com'), { target: { value: 'test@test.lt' } });
+    fireEvent.click(screen.getByTestId('save-existing-sibling'));
+
+    await waitFor(() => expect(testState.studentInserts).toHaveLength(1));
+    expect(testState.studentInserts[0]).toMatchObject({
+      full_name: 'test1',
+      email: 'test@test.lt',
+      payer_email: null,
+      parent_user_id: 'parent-1',
+      payment_payer: 'self',
+    });
+    const provisionCall = fetchMock.mock.calls.find(([url]) => url === '/api/mv-provision-family-accounts');
+    expect(JSON.parse(String(provisionCall?.[1]?.body))).toMatchObject({
+      studentFullName: 'test1',
+      studentEmail: 'test@test.lt',
+      scope: 'student',
+    });
+  });
+
+  it('shows create parent account action when only the parent account is missing', async () => {
+    const existing = testState.cache.students[0] as Record<string, unknown>;
+    existing.linked_user_id = 'student-existing';
+    existing.parent_user_id = null;
+    existing.payer_name = 'Renata';
+    existing.payer_email = 'renata@example.test';
+
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
+
+    expect(screen.getByRole('button', { name: 'Sukurti tėvų paskyrą' })).toBeTruthy();
+  });
+
+  it('does not show a separate student account button on the card', async () => {
+    const existing = testState.cache.students[0] as Record<string, unknown>;
+    existing.linked_user_id = null;
+    existing.parent_user_id = 'parent-1';
+    existing.payer_name = 'Renata';
+    existing.payer_email = 'renata@example.test';
+
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
+
+    expect(screen.queryByRole('button', { name: 'Sukurti mokinio paskyrą' })).toBeNull();
   });
 });

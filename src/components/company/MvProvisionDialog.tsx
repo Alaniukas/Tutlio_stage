@@ -39,6 +39,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   student: MvStudentAccountRow & { id: string };
   loading?: boolean;
+  focus?: 'auto' | 'parent' | 'student';
   onSubmit: (payload: MvProvisionDialogSubmit) => void | Promise<void>;
 };
 
@@ -47,11 +48,14 @@ export default function MvProvisionDialog({
   onOpenChange,
   student,
   loading = false,
+  focus = 'auto',
   onSubmit,
 }: Props) {
   const { t } = useTranslation();
   const needsParent = mvNeedsParentAccount(student);
   const needsStudent = mvNeedsStudentAccount(student);
+  const parentOnly = focus === 'parent';
+  const studentOnly = focus === 'student';
 
   const [parentName, setParentName] = useState('');
   const [parentEmail, setParentEmail] = useState('');
@@ -75,9 +79,9 @@ export default function MvProvisionDialog({
     setParentNotifyEmail('');
     setStudentNotifyEmail('');
     setBothNotifyEmail('');
-    setCreateParent(needsParent);
-    setCreateStudent(needsStudent);
-  }, [open, student, needsParent, needsStudent]);
+    setCreateParent(parentOnly ? true : studentOnly ? false : needsParent);
+    setCreateStudent(studentOnly ? true : parentOnly ? false : needsStudent);
+  }, [open, student, needsParent, needsStudent, parentOnly, studentOnly]);
 
   const previewTargets = useMemo(
     () =>
@@ -92,8 +96,29 @@ export default function MvProvisionDialog({
     [delivery, parentEmail, studentEmail, parentNotifyEmail, studentNotifyEmail, bothNotifyEmail],
   );
 
-  const scope: MvProvisionDialogSubmit['scope'] =
-    createParent && createStudent ? 'both' : createParent ? 'parent' : createStudent ? 'student' : 'auto';
+  const scope: MvProvisionDialogSubmit['scope'] = parentOnly
+    ? 'parent'
+    : studentOnly
+      ? 'student'
+      : createParent && createStudent
+        ? 'both'
+        : createParent
+          ? 'parent'
+          : createStudent
+            ? 'student'
+            : 'auto';
+
+  const dialogTitle = parentOnly
+    ? t('compStu.provisionCreateParentAccount')
+    : studentOnly
+      ? t('compStu.provisionCreateStudentAccount')
+      : t('compStu.provisionDialogTitle');
+
+  const submitLabel = parentOnly
+    ? t('compStu.provisionCreateParentAccount')
+    : studentOnly
+      ? t('compStu.provisionCreateStudentAccount')
+      : t('compStu.provisionAccountsExisting');
 
   const canSubmit =
     (createParent ? parentName.trim() && parentEmail.trim().includes('@') : true) &&
@@ -111,40 +136,42 @@ export default function MvProvisionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg rounded-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{t('compStu.provisionDialogTitle')}</DialogTitle>
+          <DialogTitle>{dialogTitle}</DialogTitle>
           <DialogDescription>{t('compStu.provisionDialogDesc')}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-1">
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-              {t('compStu.provisionCreateWhich')}
-            </p>
-            <div className="flex flex-wrap gap-3">
-              {needsParent && (
-                <label className="flex items-center gap-2 text-sm text-gray-800">
-                  <input
-                    type="checkbox"
-                    checked={createParent}
-                    onChange={(e) => setCreateParent(e.target.checked)}
-                    className="rounded border-gray-300"
-                  />
-                  {t('compStu.provisionParentAccount')}
-                </label>
-              )}
-              {needsStudent && (
-                <label className="flex items-center gap-2 text-sm text-gray-800">
-                  <input
-                    type="checkbox"
-                    checked={createStudent}
-                    onChange={(e) => setCreateStudent(e.target.checked)}
-                    className="rounded border-gray-300"
-                  />
-                  {t('compStu.provisionStudentAccount')}
-                </label>
-              )}
+          {focus === 'auto' && (needsParent || needsStudent) && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                {t('compStu.provisionCreateWhich')}
+              </p>
+              <div className="flex flex-wrap gap-3">
+                {needsParent && (
+                  <label className="flex items-center gap-2 text-sm text-gray-800">
+                    <input
+                      type="checkbox"
+                      checked={createParent}
+                      onChange={(e) => setCreateParent(e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    {t('compStu.provisionParentAccount')}
+                  </label>
+                )}
+                {needsStudent && (
+                  <label className="flex items-center gap-2 text-sm text-gray-800">
+                    <input
+                      type="checkbox"
+                      checked={createStudent}
+                      onChange={(e) => setCreateStudent(e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    {t('compStu.provisionStudentAccount')}
+                  </label>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {createParent && (
             <div className="rounded-xl border border-gray-200 p-3 space-y-3">
@@ -295,7 +322,7 @@ export default function MvProvisionDialog({
               })
             }
           >
-            {loading ? t('common.loading') : t('compStu.provisionAccountsExisting')}
+            {loading ? t('common.loading') : submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
