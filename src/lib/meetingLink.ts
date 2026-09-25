@@ -15,6 +15,16 @@ export function meetingLinkWasPersisted(
   return normalizeMeetingLinkValue(requested) === normalizeMeetingLinkValue(persisted);
 }
 
+/** Leave the profile column untouched when an admin saves unrelated tutor details. */
+export function tutorMeetingLinkUpdatePatch(
+  loaded: string | null | undefined,
+  edited: string | null | undefined,
+): { personal_meeting_link?: string | null } {
+  return meetingLinkWasPersisted(loaded, edited)
+    ? {}
+    : { personal_meeting_link: normalizeMeetingLinkValue(edited) };
+}
+
 /**
  * Prefer a freshly fetched profile row over the org-tutors list cache.
  * The list is hydrated from a 5-minute in-memory cache, so the modal can

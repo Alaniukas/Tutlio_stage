@@ -6,6 +6,7 @@ import {
   normalizeMeetingLinkValue,
   resolveLessonMeetingLink,
   resolveSessionMeetingLink,
+  tutorMeetingLinkUpdatePatch,
 } from '../../src/lib/meetingLink';
 
 describe('meeting-link persistence', () => {
@@ -44,6 +45,20 @@ describe('meeting-link persistence', () => {
         { personal_meeting_link: 'https://meet.google.com/cached' },
       ),
     ).toBe('');
+  });
+
+  it('omits an unchanged link so saving other tutor details preserves a newer database value', () => {
+    expect(tutorMeetingLinkUpdatePatch('https://meet.example/original', ' https://meet.example/original ')).toEqual({});
+    expect(tutorMeetingLinkUpdatePatch(null, '')).toEqual({});
+  });
+
+  it('writes an intentional replacement or removal', () => {
+    expect(tutorMeetingLinkUpdatePatch('https://meet.example/old', ' https://meet.example/new ')).toEqual({
+      personal_meeting_link: 'https://meet.example/new',
+    });
+    expect(tutorMeetingLinkUpdatePatch('https://meet.example/old', ' ')).toEqual({
+      personal_meeting_link: null,
+    });
   });
 });
 

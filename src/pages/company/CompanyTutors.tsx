@@ -44,7 +44,7 @@ import { sumProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
 import { authHeaders } from '@/lib/apiHelpers';
 import { isPlMarket } from '@/lib/market';
 import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
-import { meetingLinkFromTutorRows, meetingLinkWasPersisted } from '@/lib/meetingLink';
+import { meetingLinkFromTutorRows, meetingLinkWasPersisted, tutorMeetingLinkUpdatePatch } from '@/lib/meetingLink';
 import { buildTutorPayUpdatePatch } from '@/lib/orgTutorDefaultPay';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -535,6 +535,8 @@ export default function CompanyTutors() {
   const [editMeetingLink, setEditMeetingLink] = useState('');
   /** False until the editor has a fresh (or confirmed cached) meeting-link value — avoids wiping DB on save. */
   const [meetingLinkHydrated, setMeetingLinkHydrated] = useState(false);
+  const [meetingLinkLoadError, setMeetingLinkLoadError] = useState(false);
+  const [retryingMeetingLink, setRetryingMeetingLink] = useState(false);
   const [tutorInvoiceProfile, setTutorInvoiceProfile] = useState<Record<string, string | null> | null>(null);
   const [penaltyManualAmount, setPenaltyManualAmount] = useState('');
   const [penaltyManualReason, setPenaltyManualReason] = useState('');
@@ -1028,6 +1030,7 @@ export default function CompanyTutors() {
 
   const openTutor = async (tutor: Tutor) => {
     setMeetingLinkHydrated(false);
+    setMeetingLinkLoadError(false);
     baseTutorPayEditedRef.current = false;
     subjectTutorPayEditedRef.current = false;
     const [{ data: subjects }, { data: freshProfile, error: profileErr }] = await Promise.all([
@@ -1107,6 +1110,7 @@ export default function CompanyTutors() {
     subjectTutorPayEditedRef.current = false;
     setEditMeetingLink(hydratedMeetingLink);
     setMeetingLinkHydrated(Boolean(freshProfile && !profileErr));
+    setMeetingLinkLoadError(!freshProfile || Boolean(profileErr));
     if (freshProfile && !profileErr) {
       setTutors((prev) => prev.map((tu) => (tu.id === tutor.id ? { ...tu, ...tutorRow } : tu)));
     }
@@ -1131,11 +1135,45 @@ export default function CompanyTutors() {
     }
   };
 
+  const retryMeetingLinkLoad = async () => {
+    if (!selectedTutor) return;
+    setRetryingMeetingLink(true);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('personal_meeting_link')
+        .eq('id', selectedTutor.id)
+        .maybeSingle();
+      if (error || !data) throw error || new Error('Tutor profile not found');
+      const link = meetingLinkFromTutorRows(data);
+      setEditMeetingLink(link);
+      setSelectedTutor((prev) => prev ? { ...prev, personal_meeting_link: data.personal_meeting_link } : prev);
+      setTutors((prev) => prev.map((tu) => tu.id === selectedTutor.id
+        ? { ...tu, personal_meeting_link: data.personal_meeting_link }
+        : tu));
+      setMeetingLinkHydrated(true);
+      setMeetingLinkLoadError(false);
+      setTutorSaveError(null);
+    } catch (error) {
+      console.error('[CompanyTutors] tutor meeting link load failed:', error);
+      setMeetingLinkHydrated(false);
+      setMeetingLinkLoadError(true);
+    } finally {
+      setRetryingMeetingLink(false);
+    }
+  };
+
   const handleSaveTutor = async () => {
     if (!selectedTutor) return;
+    if (!meetingLinkHydrated) {
+      setTutorSaveError(t('compTut.personalMeetingLinkLoadFailed'));
+      return;
+    }
     setSavingTutor(true);
     setTutorSaveError(null);
     const personalLink = editMeetingLink.trim() || null;
+    const meetingLinkPatch = tutorMeetingLinkUpdatePatch(selectedTutor.personal_meeting_link, personalLink);
+    const meetingLinkChanged = 'personal_meeting_link' in meetingLinkPatch;
     const basePayEdited = baseTutorPayEditedRef.current;
     const subjectPayEdited = subjectTutorPayEditedRef.current;
     const savedSubjectPay = compactTutorPayBySubject(editSubjectPay);
@@ -1157,7 +1195,7 @@ export default function CompanyTutors() {
         break_between_lessons: editBreakBetween,
         min_booking_hours: editMinBooking,
         ...tutorPayPatch,
-        ...(meetingLinkHydrated ? { personal_meeting_link: personalLink } : {}),
+        ...meetingLinkPatch,
         teaching_notes: editTeachingNotes.trim() || null,
       })
         .eq('id', selectedTutor.id)
@@ -1171,14 +1209,14 @@ export default function CompanyTutors() {
         error
         || !savedRow
         || (basePayEdited && Number(savedRow.company_commission_percent) !== editCommissionPercent)
-        || (meetingLinkHydrated && !meetingLinkWasPersisted(personalLink, savedRow.personal_meeting_link))
+        || (meetingLinkChanged && !meetingLinkWasPersisted(personalLink, savedRow.personal_meeting_link))
         || (isManoKorepetitoriusAdmin && subjectPayEdited
           && JSON.stringify(persistedSubjectPay ?? {}) !== JSON.stringify(savedSubjectPay ?? {}))
       ) {
         throw error || new Error('Tutor profile update was not persisted');
       }
 
-      if (personalLink) {
+      if (meetingLinkChanged && personalLink) {
         await backfillTutorMeetingLinks(supabase, selectedTutor.id, personalLink);
       }
 
@@ -1192,7 +1230,7 @@ export default function CompanyTutors() {
         break_between_lessons: editBreakBetween,
         min_booking_hours: editMinBooking,
         ...(basePayEdited ? { company_commission_percent: editCommissionPercent } : {}),
-        ...(meetingLinkHydrated ? { personal_meeting_link: personalLink } : {}),
+        personal_meeting_link: savedRow.personal_meeting_link,
         teaching_notes: editTeachingNotes.trim() || null,
         ...(isManoKorepetitoriusAdmin && subjectPayEdited
           ? { company_commission_by_subject: savedSubjectPay }
@@ -1971,9 +2009,18 @@ export default function CompanyTutors() {
                   <Input
                     value={editMeetingLink}
                     onChange={e => setEditMeetingLink(e.target.value)}
+                    disabled={!meetingLinkHydrated || retryingMeetingLink}
                     placeholder="https://meet.google.com/xxx-xxxx-xxx"
                     className="rounded-xl"
                   />
+                  {meetingLinkLoadError && (
+                    <p role="alert" className="mt-2 text-sm text-red-700">
+                      {t('compTut.personalMeetingLinkLoadFailed')}{' '}
+                      <button type="button" onClick={() => void retryMeetingLinkLoad()} disabled={retryingMeetingLink} className="underline font-medium">
+                        {t('stuSess.retryLoad')}
+                      </button>
+                    </p>
+                  )}
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">{t('compTut.lessonSettings')}</p>
@@ -2192,7 +2239,7 @@ export default function CompanyTutors() {
             <Button variant="destructive" onClick={handleArchiveTutor} disabled={archivingTutor || savingTutor}>
               {archivingTutor ? t('compTut.archiving') : t('compTut.archive')}
             </Button>
-            <Button onClick={handleSaveTutor} disabled={savingTutor}>{savingTutor ? t('compTut.saving') : t('compTut.save')}</Button>
+            <Button onClick={handleSaveTutor} disabled={savingTutor || !meetingLinkHydrated || retryingMeetingLink}>{savingTutor ? t('compTut.saving') : t('compTut.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

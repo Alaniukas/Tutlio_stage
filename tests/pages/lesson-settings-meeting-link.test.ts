@@ -16,6 +16,7 @@ describe('CompanyTutors meeting-link editor', () => {
     const source = readFileSync('src/pages/company/CompanyTutors.tsx', 'utf8');
     expect(source).toContain('meetingLinkFromTutorRows(freshProfile, tutor)');
     expect(source).toContain('setMeetingLinkHydrated(Boolean(freshProfile && !profileErr))');
-    expect(source).toContain("...(meetingLinkHydrated ? { personal_meeting_link: personalLink } : {})");
+    expect(source).toContain('const meetingLinkPatch = tutorMeetingLinkUpdatePatch(selectedTutor.personal_meeting_link, personalLink)');
+    expect(source).toContain('...meetingLinkPatch,');
   });
 });

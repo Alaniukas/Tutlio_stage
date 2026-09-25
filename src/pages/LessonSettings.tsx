@@ -226,6 +226,8 @@ export default function LessonSettingsPage() {
 
   // Tutor's permanent meeting link (profiles.personal_meeting_link)
   const [personalMeetingLink, setPersonalMeetingLink] = useState('');
+  const [personalLinkHydrated, setPersonalLinkHydrated] = useState(false);
+  const [personalLinkLoadError, setPersonalLinkLoadError] = useState(false);
   const [savingPersonalLink, setSavingPersonalLink] = useState(false);
   const [personalLinkSaved, setPersonalLinkSaved] = useState(false);
   const [emailOptOut, setEmailOptOut] = useState<EmailOptOutKey[]>([]);
@@ -264,15 +266,26 @@ export default function LessonSettingsPage() {
   const fetchData = async () => {
     if (!ctxUser) return;
     setLoading(true);
+    setPersonalLinkHydrated(false);
+    setPersonalLinkLoadError(false);
+    setPersonalLinkSaved(false);
     try {
     const user = ctxUser;
     setUserId(user.id);
 
-    const { data: tutorData } = await supabase
+    const { data: tutorData, error: profileError } = await supabase
       .from('profiles')
       .select('cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, payment_timing, payment_deadline_hours, personal_meeting_link, organization_id, email_notification_opt_out')
       .eq('id', user.id)
       .single();
+    if (profileError || !tutorData) {
+      console.error('[LessonSettings] profile load', profileError || 'Profile not found');
+      setPersonalLinkLoadError(true);
+      return;
+    }
+
+    setPersonalMeetingLink(tutorData.personal_meeting_link || '');
+    setPersonalLinkHydrated(true);
 
     if (tutorData?.organization_id) {
       const org = await fetchOrganizationRow<{ name?: string }>(supabase as any, tutorData.organization_id, 'name');
@@ -289,7 +302,6 @@ export default function LessonSettingsPage() {
     });
     setPaymentTiming((tutorData?.payment_timing as 'before_lesson' | 'after_lesson') ?? 'before_lesson');
     setPaymentDeadlineHours(tutorData?.payment_deadline_hours ?? null);
-    setPersonalMeetingLink((tutorData as { personal_meeting_link?: string | null })?.personal_meeting_link || '');
     setEmailOptOut(parseEmailOptOutList((tutorData as { email_notification_opt_out?: unknown })?.email_notification_opt_out));
 
     const { data: subjectsData, error } = await supabase
@@ -299,6 +311,10 @@ export default function LessonSettingsPage() {
       .order('name');
 
     if (!error) setSubjects(subjectsData || []);
+    } catch (error) {
+      console.error('[LessonSettings] profile load', error);
+      setPersonalLinkLoadError(true);
+      setPersonalLinkHydrated(false);
     } finally {
       setLoading(false);
     }
@@ -320,7 +336,7 @@ export default function LessonSettingsPage() {
   const showSubjectPrices = !orgPolicy.isOrgTutor || (!orgPolicy.loading && orgPolicy.editPricing);
 
   const handleSaveAll = async () => {
-    if (!ctxUser) return;
+    if (!ctxUser || personalLinkLoadError || !personalLinkHydrated) return;
     setSaving(true);
     const user = ctxUser;
 
@@ -362,7 +378,7 @@ export default function LessonSettingsPage() {
   };
 
   const handleSavePersonalLink = async () => {
-    if (!ctxUser) return;
+    if (!ctxUser || personalLinkLoadError || !personalLinkHydrated) return;
     setSavingPersonalLink(true);
     const requestedLink = normalizeMeetingLinkValue(personalMeetingLink);
     try {
@@ -512,7 +528,7 @@ export default function LessonSettingsPage() {
             )}
             <Button
               onClick={handleSaveAll}
-              disabled={saving || loading}
+              disabled={saving || loading || personalLinkLoadError || !personalLinkHydrated}
               className="rounded-xl gap-2"
             >
               <Save className="w-4 h-4" />
@@ -547,15 +563,24 @@ export default function LessonSettingsPage() {
                 type="url"
                 placeholder="https://meet.google.com/xxx-xxxx-xxx"
                 value={personalMeetingLink}
+                disabled={loading || !personalLinkHydrated}
                 onChange={(e) => setPersonalMeetingLink(e.target.value)}
                 className="rounded-xl"
               />
               <p className="text-xs text-gray-500">{t('lessonSet.personalLinkHint')}</p>
+              {personalLinkLoadError && (
+                <p role="alert" className="text-sm text-red-700">
+                  {t('lessonSet.personalLinkLoadFailed')}{' '}
+                  <button type="button" onClick={() => void fetchData()} disabled={loading} className="underline font-medium">
+                    {t('stuSess.retryLoad')}
+                  </button>
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <Button
                 onClick={handleSavePersonalLink}
-                disabled={savingPersonalLink || loading}
+                disabled={savingPersonalLink || loading || personalLinkLoadError || !personalLinkHydrated}
                 size="sm"
                 className="rounded-xl gap-2"
               >

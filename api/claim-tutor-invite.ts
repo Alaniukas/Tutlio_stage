@@ -76,9 +76,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id, preferred_locale')
+      .select('id, organization_id, preferred_locale')
       .eq('id', user.id)
       .maybeSingle();
+
+    // Login can replay the saved org token. A fully claimed invite must not
+    // reapply its old defaults over settings the tutor changed afterward.
+    if (
+      invite.used
+      && invite.used_by_profile_id === user.id
+      && profile?.organization_id === invite.organization_id
+    ) {
+      return res.status(200).json({ success: true, organizationId: invite.organization_id });
+    }
 
     // Org tutors default to the organization's UI/email locale (e.g. Pro Klasė → lt).
     // A locale the tutor already picked themselves is never overwritten.
@@ -88,6 +98,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('id', invite.organization_id)
       .maybeSingle();
     const orgLocale = (orgRow?.preferred_locale || '').trim() || null;
+    const inviteMeetingLink = String(invite.personal_meeting_link || '').trim() || null;
 
     const commonProfileFields = {
       email: user.email || null,
@@ -99,19 +110,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       break_between_lessons: invite.break_between_lessons ?? 0,
       min_booking_hours: invite.min_booking_hours ?? 1,
       company_commission_percent: invite.company_commission_percent ?? 0,
-      personal_meeting_link: invite.personal_meeting_link || null,
       teaching_notes: invite.teaching_notes || null,
     };
 
     if (profile) {
       const localePatch = orgLocale && !profile.preferred_locale ? { preferred_locale: orgLocale } : {};
-      await supabase.from('profiles').update({ ...commonProfileFields, ...localePatch }).eq('id', user.id);
+      await supabase.from('profiles').update({
+        ...commonProfileFields,
+        // An invite without a link must not erase a tutor's existing personal room.
+        ...(inviteMeetingLink ? { personal_meeting_link: inviteMeetingLink } : {}),
+        ...localePatch,
+      }).eq('id', user.id);
     } else {
       await supabase.from('profiles').insert({
         id: user.id,
         full_name: String(user.user_metadata?.full_name || ''),
         phone: String(user.user_metadata?.phone || ''),
         ...commonProfileFields,
+        personal_meeting_link: inviteMeetingLink,
         ...(orgLocale ? { preferred_locale: orgLocale } : {}),
       });
     }
