@@ -437,7 +437,7 @@ export default function CompanyTvarkarastis() {
   const showTrialToggleInCreate =
     !isSchoolOrgView &&
     !featuresLoading &&
-    (isMvOrg ||
+    (isMvOrg || isManoKorepetitoriusOrg(organizationId) ||
       (proKlaseAdminUi &&
         (hasFeature('trial_reservation_flow') || hasFeature('auto_trial_first_lesson'))));
   const hideAdminPrices = pkFeat('hide_admin_lesson_prices');
@@ -4074,7 +4074,7 @@ export default function CompanyTvarkarastis() {
                 >
                   <div>
                     <p className="text-sm font-medium text-amber-900">{t('compSch.trialLesson')}</p>
-                    <p className="text-xs text-amber-800/80 hidden sm:block">{t('compSch.trialLessonDesc')}</p>
+                    <p className="text-xs text-amber-800/80 hidden sm:block">{isManoKorepetitoriusOrg(organizationId) ? trialPricingCopy(locale, 'trialLessonDesc') : t('compSch.trialLessonDesc')}</p>
                   </div>
                   <div className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${createIsTrial ? 'bg-amber-500' : 'bg-gray-300'}`}>
                     <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${createIsTrial ? 'translate-x-6' : 'translate-x-1'}`} />

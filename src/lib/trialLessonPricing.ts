@@ -33,22 +33,25 @@ export function trialLessonPrice(pricing: TrialLessonPricing, regularPrice: numb
 // Mano Korepetitorius-only settings copy; other app locales use English here.
 const TRIAL_PRICING_COPY = {
   lt: {
-    mode: 'Bandomosios kainodara', fixed: 'Fiksuota kaina', discount: 'Nuolaida nuo pamokos kainos',
+    mode: 'Bandomosios pamokos kainodara', fixed: 'Fiksuota kaina', discount: 'Nuolaida nuo pamokos kainos',
     percent: 'Nuolaida (%)', help: 'Taikoma pasirinkto dalyko įprastai kainai pagal mokinį ir klasę.',
     invalid: 'Bandomosios pamokos nuolaida turi būti nuo 0 iki 100 %.',
     priceNote: 'Kaina apskaičiuota nuo pasirinkto dalyko pamokos kainos. Galite koreguoti.',
+    trialLessonDesc: 'Pamoka bus pažymėta kaip bandomoji.',
   },
   en: {
     mode: 'Trial pricing', fixed: 'Fixed price', discount: 'Discount from lesson price',
     percent: 'Discount (%)', help: 'Applied to the regular price for the selected subject, student and grade.',
     invalid: 'The trial lesson discount must be between 0 and 100%.',
     priceNote: 'Calculated from the selected subject’s regular lesson price. You can adjust it.',
+    trialLessonDesc: 'The lesson will be marked as a trial.',
   },
   pl: {
     mode: 'Cena lekcji próbnej', fixed: 'Stała cena', discount: 'Rabat od ceny lekcji',
     percent: 'Rabat (%)', help: 'Naliczany od zwykłej ceny wybranego przedmiotu dla ucznia i klasy.',
     invalid: 'Rabat na lekcję próbną musi wynosić od 0 do 100%.',
     priceNote: 'Cena obliczona od zwykłej ceny wybranego przedmiotu. Możesz ją zmienić.',
+    trialLessonDesc: 'Lekcja zostanie oznaczona jako próbna.',
   },
 } as const;
 
