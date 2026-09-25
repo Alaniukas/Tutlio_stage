@@ -167,7 +167,10 @@ describe('insertSessionRowsInChunks', () => {
 });
 
 describe('resolveOrCreateTrialSubject', () => {
-  it('uses the organization trial price and duration and refreshes an existing trial subject', async () => {
+  it.each([
+    { mode: 'fixed', discountPercent: null, regularPrice: 40, expectedPrice: 10 },
+    { mode: 'discount_percent', discountPercent: 25, regularPrice: 40, expectedPrice: 30 },
+  ])('uses $mode pricing for the first recurring trial lesson', async ({ mode, discountPercent, regularPrice, expectedPrice }) => {
     const subjectUpdates: Array<Record<string, unknown>> = [];
     const from = vi.fn((table: string) => {
       if (table === 'profiles') {
@@ -189,6 +192,8 @@ describe('resolveOrCreateTrialSubject', () => {
                     trial_lesson_topic: 'Bandomoji pamoka',
                     trial_lesson_duration_minutes: 45,
                     trial_lesson_price_eur: 10,
+                    trial_lesson_price_mode: mode,
+                    trial_lesson_discount_percent: discountPercent,
                   },
                 },
                 error: null,
@@ -228,10 +233,10 @@ describe('resolveOrCreateTrialSubject', () => {
       { from } as unknown as import('@supabase/supabase-js').SupabaseClient,
       'tutor-1',
       undefined,
-      { useOrgPriceOnly: true },
+      { useOrgPriceOnly: true, regularPrice },
     );
 
-    expect(result.price).toBe(10);
+    expect(result.price).toBe(expectedPrice);
     expect(result.durationMinutes).toBe(45);
     expect(result.subject).toMatchObject({
       id: 'trial-subject',

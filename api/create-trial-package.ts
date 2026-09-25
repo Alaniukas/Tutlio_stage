@@ -118,8 +118,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const trialTopic = typeof topic === 'string' && topic.trim() ? topic.trim() : defaultTopic;
     const trialDuration =
       typeof durationMinutes === 'number' && Number.isFinite(durationMinutes) ? Math.max(15, Math.round(durationMinutes)) : defaultDuration;
-    const trialPriceEur =
+    let trialPriceEur =
       typeof priceEur === 'number' && Number.isFinite(priceEur) ? Math.max(0, priceEur) : defaultPriceEur;
+    if (features.trial_lesson_price_mode === 'discount_percent' && !sessionId) {
+      return json(res, 400, { error: 'Procentinei bandomosios pamokos kainai reikia pasirinktos pamokos' });
+    }
 
     const { data: student, error: studentErr } = await supabase
       .from('students')
@@ -141,7 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (sessionId) {
       const { data: sessionRow, error: sessionErr } = await supabase
         .from('sessions')
-        .select('id, tutor_id, student_id, status, paid')
+        .select('id, tutor_id, student_id, status, paid, price')
         .eq('id', sessionId)
         .maybeSingle();
       if (sessionErr || !sessionRow) {
@@ -150,6 +153,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (sessionRow.tutor_id !== tutorId || sessionRow.student_id !== studentId || sessionRow.status !== 'active') {
         return json(res, 400, { error: 'Pamoka neatitinka mokinio ar korepetitoriaus' });
       }
+      const sessionPrice = sessionRow.price == null ? NaN : Number(sessionRow.price);
+      if (!Number.isFinite(sessionPrice) || sessionPrice < 0) {
+        return json(res, 400, { error: 'Pamokos kaina nenustatyta' });
+      }
+      // The session has already locked its price. The payment package and email
+      // must use that amount even if org trial settings change after booking.
+      trialPriceEur = sessionPrice;
       linkedSession = { id: sessionRow.id, paid: sessionRow.paid };
     }
 

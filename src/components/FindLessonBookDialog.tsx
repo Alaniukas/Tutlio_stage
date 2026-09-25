@@ -34,6 +34,7 @@ import {
   fetchStudentLessonPricingContext,
   resolveLessonCreatePrice,
 } from '@/lib/studentLessonPricing';
+import { parseTrialLessonPricing, trialLessonPrice } from '@/lib/trialLessonPricing';
 
 /** A free availability window picked from FindTutorModal, to be narrowed to a lesson slot. */
 export interface FindLessonBookPick {
@@ -116,6 +117,7 @@ export default function FindLessonBookDialog({
   const [autoTrialOn, setAutoTrialOn] = useState(false);
   const userClearedAutoTrialRef = useRef(false);
   const [trialDefaults, setTrialDefaults] = useState<TrialDefaults>({ topic: '', durationMinutes: 60, priceEur: 0 });
+  const [trialPricing, setTrialPricing] = useState(() => parseTrialLessonPricing({}));
   const [isTrial, setIsTrial] = useState(false);
   const [firstLessonIsTrial, setFirstLessonIsTrial] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
@@ -201,6 +203,7 @@ export default function FindLessonBookDialog({
       const feat = (data as any)?.features;
       const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
       setTrialPolicy(parseOrgTrialPolicy(featObj));
+      setTrialPricing(parseTrialLessonPricing(featObj));
       setTrialDefaults({
         topic: typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
           ? featObj.trial_lesson_topic.trim()
@@ -300,11 +303,25 @@ export default function FindLessonBookDialog({
         tutorId: pick.tutorId,
         subjectId: pick.subjectId,
       });
+      const regularPrice = resolveLessonCreatePrice({
+        isTrial: false,
+        isRecurring: isTrial ? false : isRecurring,
+        firstLessonIsTrial: false,
+        trialPrice: trialDefaults.priceEur,
+        individualPrice: bookingPricing.individualPrice,
+        subjectPrice: Number(subject.price ?? 0),
+        dynamicPricingRules: bookingPricing.dynamicPricingRules,
+        student: bookingPricing.student,
+        recurringWeekdays,
+      });
+      const derivedTrialPrice = isTrial || firstLessonIsTrial
+        ? trialLessonPrice(trialPricing, regularPrice)
+        : trialDefaults.priceEur;
       const price = resolveLessonCreatePrice({
         isTrial,
         isRecurring: isTrial ? false : isRecurring,
         firstLessonIsTrial: isRecurring && firstLessonIsTrial,
-        trialPrice: trialDefaults.priceEur,
+        trialPrice: derivedTrialPrice,
         individualPrice: bookingPricing.individualPrice,
         subjectPrice: Number(subject.price ?? 0),
         dynamicPricingRules: bookingPricing.dynamicPricingRules,
@@ -351,7 +368,7 @@ export default function FindLessonBookDialog({
       if (
         (isTrial || (isRecurring && firstLessonIsTrial)) &&
         !isPaid &&
-        price > 0 &&
+        derivedTrialPrice > 0 &&
         pkFeat('trial_creation_payment_email') &&
         result.createdSessionIds.length > 0
       ) {
@@ -365,7 +382,7 @@ export default function FindLessonBookDialog({
               sessionId: result.createdSessionIds[0],
               topic: topic || trialDefaults.topic || undefined,
               durationMinutes: isTrial ? trialDefaults.durationMinutes : trialDefaults.durationMinutes,
-              priceEur: isTrial || firstLessonIsTrial ? trialDefaults.priceEur : price,
+              priceEur: derivedTrialPrice,
             }),
           });
           if (!resp.ok) {

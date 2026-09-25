@@ -16,6 +16,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
 import { packageCoversLessonDate } from '@/lib/pooledPackageBookingWindow';
 import { defaultSessionPaymentStatusForStudent } from '@/lib/studentPaymentModel';
+import { parseTrialLessonPricing, trialLessonPrice } from '@/lib/trialLessonPricing';
 import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
 import { consumeAvailabilityForCreatedSessions } from '@/lib/consumeSessionAvailability';
 import {
@@ -86,7 +87,7 @@ export async function resolveOrCreateTrialSubject(
   supabase: SupabaseClient,
   tutorId: string,
   priceOverride?: number,
-  options?: { useOrgPriceOnly?: boolean },
+  options?: { useOrgPriceOnly?: boolean; regularPrice?: number | null },
 ): Promise<TrialSubjectMeta> {
   const { data: tutorOrgRow } = await supabase
     .from('profiles')
@@ -116,6 +117,7 @@ export async function resolveOrCreateTrialSubject(
     typeof featObj.trial_lesson_price_eur === 'number'
       ? Math.max(0, featObj.trial_lesson_price_eur as number)
       : 0;
+  const trialPricing = parseTrialLessonPricing(featObj);
 
   const { data: existingTrials } = await supabase
     .from('subjects')
@@ -168,10 +170,10 @@ export async function resolveOrCreateTrialSubject(
   const requestedPrice = Number(priceOverride);
   const price =
     options?.useOrgPriceOnly
-      ? trialPriceDefault
+      ? trialLessonPrice(trialPricing, options.regularPrice)
       : Number.isFinite(requestedPrice) && requestedPrice >= 0
         ? requestedPrice
-        : Number(trialSubject.price ?? trialPriceDefault);
+        : trialLessonPrice(trialPricing, options?.regularPrice);
 
   return {
     subject: trialSubject,
@@ -928,7 +930,10 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
         }, null)
       : null;
     const firstTrialMeta = firstTrialTemplate
-      ? await resolveOrCreateTrialSubject(supabase, createTutorId, undefined, { useOrgPriceOnly: true })
+      ? await resolveOrCreateTrialSubject(supabase, createTutorId, undefined, {
+          useOrgPriceOnly: true,
+          regularPrice: priceByStudentId.get(firstTrialTemplate.student_id),
+        })
       : null;
 
     type PackageForRecurring = {
@@ -1089,7 +1094,8 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     if (firstTrialMeta && firstTrialTemplate) {
       const trialStartMs = firstTrialTemplate.firstOccurrence.getTime();
       const trialSessionIds = (inserted || [])
-        .filter((row) => new Date(String(row.start_time)).getTime() === trialStartMs)
+        .filter((row) => row.student_id === firstTrialTemplate.student_id
+          && new Date(String(row.start_time)).getTime() === trialStartMs)
         .map((row) => row.id)
         .filter(Boolean);
       if (trialSessionIds.length > 0) {

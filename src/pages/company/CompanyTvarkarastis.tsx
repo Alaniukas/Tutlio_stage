@@ -81,6 +81,8 @@ import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg, proKlaseOrgAdminContext, proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isLaisviVaikaiOrg, isManoKorepetitoriusOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { canEditFutureOrgSeries, canEditOrgSession, orgSessionEditNotice, orgSessionPriceChangingIds } from '@/lib/orgSessionEdit';
+import { fetchInvoiceIdsForSessionIds } from '@/lib/invoiceLineItemsForSessions';
 import {
   parseOrgTrialPolicy,
   shouldAutoMarkNextLessonTrial,
@@ -197,7 +199,9 @@ import {
 import {
   resolveOrgMeetingLink,
   resolveOrgSessionSubjectDefaults,
+  type OrgTrialDefaults,
 } from '@/lib/orgSessionSubjectDefaults';
+import { parseTrialLessonPricing, trialPricingCopy } from '@/lib/trialLessonPricing';
 import { enrichSessionMeetingLink } from '@/lib/meetingLink';
 import { canDeleteIndividualOrgSession } from '@/lib/orgSessionDeletion';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
@@ -611,7 +615,7 @@ export default function CompanyTvarkarastis() {
   /** One click can fire both onSelectSlot and onSelectEvent for the same block. */
   const availabilityClickGuardRef = useRef<{ id: string; at: number } | null>(null);
   /** Org trial-lesson defaults (topic/duration/price) for the trial toggle and auto-trial. */
-  const [trialDefaults, setTrialDefaults] = useState<{ topic: string; durationMinutes: number; priceEur: number }>({
+  const [trialDefaults, setTrialDefaults] = useState<OrgTrialDefaults>({
     topic: '',
     durationMinutes: 60,
     priceEur: 0,
@@ -683,6 +687,7 @@ export default function CompanyTvarkarastis() {
       const feat = (data as any)?.features;
       const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
       setTrialPolicy(parseOrgTrialPolicy(featObj));
+      const trialPricing = parseTrialLessonPricing(featObj);
       setTrialDefaults({
         topic: typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
           ? featObj.trial_lesson_topic.trim()
@@ -693,6 +698,8 @@ export default function CompanyTvarkarastis() {
         priceEur: typeof featObj.trial_lesson_price_eur === 'number' && Number.isFinite(featObj.trial_lesson_price_eur)
           ? Math.max(0, featObj.trial_lesson_price_eur)
           : 0,
+        priceMode: trialPricing.mode,
+        discountPercent: trialPricing.discountPercent,
       });
     })();
     return () => {
@@ -735,7 +742,6 @@ export default function CompanyTvarkarastis() {
         setCreateIsRecurring(false);
         setCreateRecurringEndDate('');
         setCreateRecurringWeekdays([]);
-        setCreatePrice(trialDefaults.priceEur);
         setCreateTopic((prev) => (prev.trim() ? prev : trialDefaults.topic));
         setCreateEndTime((prevEnd) => {
           if (!createStartTime) return prevEnd;
@@ -1667,8 +1673,24 @@ export default function CompanyTvarkarastis() {
   useEffect(() => {
     if (!createSubjectId || !createStudentId) return;
     if (createIsTrial) {
-      setCreatePrice(trialDefaults.priceEur);
       const subject = subjects.find((row) => row.id === createSubjectId);
+      if (subject) {
+        const defaults = resolveOrgSessionSubjectDefaults({
+          subject,
+          studentId: createStudentId,
+          tutorId: createTutorId,
+          students,
+          individualPricing,
+          dynamicPricingRules,
+          orgSubjectTemplates,
+          tutorSubjectPrices,
+          trialDefaults,
+          forceTrialPricing: true,
+          lessonsPerWeek: contractedLessonsPerWeek(createIsRecurring, createRecurringWeekdays,
+            students.find((row) => row.id === createStudentId)?.pricing_lessons_per_week),
+        });
+        setCreatePrice(defaults.price);
+      }
       if (subject && createStartTime && createStartTime.includes('T')) {
         const newStart = new Date(createStartTime);
         if (!Number.isNaN(newStart.getTime())) {
@@ -1721,6 +1743,7 @@ export default function CompanyTvarkarastis() {
     students,
     subjects,
     tutorSubjectPrices,
+    trialDefaults,
   ]);
 
   const handleCreateStartTimeChange = (newVal: string) => {
@@ -1972,6 +1995,25 @@ export default function CompanyTvarkarastis() {
     if (!selectedEvent || !canEditSessions) return;
     setSaving(true);
     try {
+      if (!canEditOrgSession(selectedEvent, organizationId)) {
+        throw new Error(orgSessionEditNotice(locale, 'noLongerAllowed'));
+      }
+      if (groupEditChoice === 'all_future' && !canEditFutureOrgSeries(selectedEvent)) {
+        throw new Error(orgSessionEditNotice(locale, 'noLongerAllowed'));
+      }
+      if (!Number.isFinite(editPrice) || editPrice < 0) {
+        throw new Error(orgSessionEditNotice(locale, 'invalidPrice'));
+      }
+      if (isManoKorepetitoriusOrg(organizationId)) {
+        const changingIds = await orgSessionPriceChangingIds(
+          supabase, selectedEvent, groupEditChoice, editPrice,
+        );
+        if (changingIds.length > 0) {
+          if (!canOrgAdmin('finance.view')) throw new Error(t('compSch.saveFailedPermissions'));
+          const invoiceIds = await fetchInvoiceIdsForSessionIds(supabase, changingIds);
+          if (invoiceIds.size > 0) throw new Error(orgSessionEditNotice(locale, 'alreadyInvoiced'));
+        }
+      }
       const newStart = new Date(editStartTime);
       if (Number.isNaN(newStart.getTime())) {
         throw new Error(t('compSch.invalidStartDateTime'));
@@ -3078,12 +3120,9 @@ export default function CompanyTvarkarastis() {
       enabled:
         (createIsTrial || (createIsRecurring && createFirstLessonIsTrial))
         && !createIsPaid
-        && createPrice > 0
         && pkFeat('trial_creation_payment_email'),
-      studentId: createStudentId,
       tutorId: createTutorId,
       topic: createTopic,
-      price: createPrice,
       durationMinutes: createIsTrial
         ? (() => {
             const start = new Date(createStartTime);
@@ -3104,21 +3143,42 @@ export default function CompanyTvarkarastis() {
 
       if (trialFollowUp.enabled && createResult.createdSessionIds.length > 0) {
         try {
-          const resp = await fetch('/api/create-trial-package', {
-            method: 'POST',
-            headers: await authHeaders(),
-            body: JSON.stringify({
-              studentId: trialFollowUp.studentId,
-              tutorId: trialFollowUp.tutorId,
-              sessionId: createResult.createdSessionIds[0],
-              topic: trialFollowUp.topic || trialFollowUp.fallbackTopic,
-              durationMinutes: trialFollowUp.durationMinutes,
-              priceEur: trialFollowUp.price,
-            }),
-          });
-          if (!resp.ok) {
-            const txt = await resp.text().catch(() => '');
-            console.error('[CompanyTvarkarastis] trial payment email failed:', resp.status, txt);
+          const { data: createdRows, error: rowsError } = await supabase
+            .from('sessions')
+            .select('id, student_id, subject_id, price')
+            .in('id', createResult.createdSessionIds);
+          if (rowsError) throw rowsError;
+          const subjectIds = [...new Set((createdRows || []).map((row) => row.subject_id).filter(Boolean))];
+          const { data: trialSubjects, error: subjectsError } = await supabase
+            .from('subjects')
+            .select('id')
+            .in('id', subjectIds)
+            .eq('is_trial', true);
+          if (subjectsError) throw subjectsError;
+          const trialIds = new Set((trialSubjects || []).map((row) => row.id));
+          const trialRow = (createdRows || []).find((row) => trialIds.has(row.subject_id));
+          if (!trialRow) throw new Error('Created trial lesson was not found');
+          const lockedTrialPrice = trialRow.price == null ? NaN : Number(trialRow.price);
+          if (!Number.isFinite(lockedTrialPrice) || lockedTrialPrice < 0) {
+            throw new Error('Created trial lesson has no valid price');
+          }
+          if (Number.isFinite(lockedTrialPrice) && lockedTrialPrice > 0) {
+            const resp = await fetch('/api/create-trial-package', {
+              method: 'POST',
+              headers: await authHeaders(),
+              body: JSON.stringify({
+                studentId: trialRow.student_id,
+                tutorId: trialFollowUp.tutorId,
+                sessionId: trialRow.id,
+                topic: trialFollowUp.topic || trialFollowUp.fallbackTopic,
+                durationMinutes: trialFollowUp.durationMinutes,
+                priceEur: lockedTrialPrice,
+              }),
+            });
+            if (!resp.ok) {
+              const txt = await resp.text().catch(() => '');
+              console.error('[CompanyTvarkarastis] trial payment email failed:', resp.status, txt);
+            }
           }
         } catch (trialErr) {
           console.error('[CompanyTvarkarastis] trial payment email failed:', trialErr);
@@ -3977,7 +4037,7 @@ export default function CompanyTvarkarastis() {
                 <div className="space-y-2">
                   <Label>{t('compSch.price')}</Label>
                   <Input type="number" value={createPrice} onChange={(e) => setCreatePrice(Number(e.target.value))} className="rounded-xl" />
-                  {createIsTrial && <p className="text-xs text-amber-700">{t('compSch.trialPriceNote')}</p>}
+                  {createIsTrial && <p className="text-xs text-amber-700">{trialDefaults.priceMode === 'discount_percent' ? trialPricingCopy(locale, 'priceNote') : t('compSch.trialPriceNote')}</p>}
                 </div>
               )}
               <div className="border border-green-100 rounded-xl p-3 sm:p-4 bg-green-50/50 flex flex-col justify-center min-h-[4.5rem]">
@@ -4005,7 +4065,6 @@ export default function CompanyTvarkarastis() {
                       setCreateFirstLessonIsTrial(false);
                       setCreateRecurringEndDate('');
                       setCreateRecurringWeekdays([]);
-                      setCreatePrice(trialDefaults.priceEur);
                       setCreateTopic((prev) => (prev.trim() ? prev : trialDefaults.topic));
                     } else {
                       setAutoTrialStudentId(null);
@@ -4713,19 +4772,18 @@ export default function CompanyTvarkarastis() {
                     </Button>
                   )}
 
+                  {canEditOrgSession(selectedEvent, organizationId) && (
+                    <Button
+                      variant="outline"
+                      className="w-full rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                      onClick={() => beginSessionEdit(selectedEvent)}
+                    >
+                      <Pencil className="w-4 h-4 mr-2" />
+                      {t('compSess.editLesson')}
+                    </Button>
+                  )}
                   {selectedEvent.status === 'active' && selectedEvent.start_time > new Date() && (
                     <>
-                      <Button
-                        variant="outline"
-                        className="w-full rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                        onClick={() => {
-                          if (!selectedEvent) return;
-                          beginSessionEdit(selectedEvent);
-                        }}
-                      >
-                        <Pencil className="w-4 h-4 mr-2" />
-                        {t('compSess.editLesson')}
-                      </Button>
                       <Button variant="outline" className="w-full rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => {
                         const firstActive = selectedGroupSessions.find((s) => s.status === 'active');
                         setClassGroupCancelScope(isClassGroupSession ? 'whole_occurrence' : 'one_student');
@@ -4818,7 +4876,7 @@ export default function CompanyTvarkarastis() {
           {selectedEvent && isEditingSession && (
             <div className="space-y-4">
               {/* Recurring choice banner */}
-              {selectedEvent.recurring_session_id && !isClassGroupSession && (
+              {selectedEvent.recurring_session_id && !isClassGroupSession && canEditFutureOrgSeries(selectedEvent) && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
                   <p className="text-xs font-semibold text-amber-800 mb-2">{t('compSch.recurringSeriesPart')}</p>
                   <div className="flex gap-2">
@@ -4988,7 +5046,10 @@ export default function CompanyTvarkarastis() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.price')}</Label>
-                  <Input type="number" value={editPrice} onChange={(e) => setEditPrice(parseFloat(e.target.value) || 0)} className="rounded-xl" />
+                  <Input type="number" min={0} step="0.01" inputMode="decimal" value={editPrice} onChange={(e) => setEditPrice(Number(e.target.value))} className="rounded-xl" />
+                  {isManoKorepetitoriusOrg(organizationId) && (editPrice !== Number(selectedEvent.price ?? 0) || groupEditChoice === 'all_future') && (
+                    <p className="mt-1 text-xs text-amber-700">{orgSessionEditNotice(locale, 'paymentUnchanged')}</p>
+                  )}
                 </div>
               </div>
 

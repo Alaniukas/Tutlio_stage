@@ -37,7 +37,7 @@ import { cn } from '@/lib/utils';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg } from '@/lib/orgIntakeMode';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS } from '@/lib/orgUi';
-import { isProKlaseOrg } from '@/lib/marketMoney';
+import { isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMoney';
 import { parseOrgTrialPolicy } from '@/lib/orgTrialPolicy';
 import { Checkbox } from '@/components/ui/checkbox';
 import { parseEmailOptOutList, toggleEmailOptOut, type EmailOptOutKey } from '@/lib/emailNotificationOptOut';
@@ -48,6 +48,7 @@ import {
   type ParentNotificationKey,
 } from '@/lib/parentNotificationPreferences';
 import { resolveDefaultTutorPayForSave } from '@/lib/orgTutorDefaultPay';
+import { parseTrialLessonPricing, trialPricingCopy, type TrialLessonPriceMode } from '@/lib/trialLessonPricing';
 
 type TrialCommentMode = 'student_and_parent' | 'internal_only';
 
@@ -98,7 +99,7 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function CompanySettings() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const orgEntityType = useOrgEntityType();
   const isSchoolOrgView = isSchoolOrg(orgEntityType);
   const sc = getCached<any>('company_settings');
@@ -145,6 +146,8 @@ export default function CompanySettings() {
   const [trialTopic, setTrialTopic] = useState(sc?.trialTopic ?? t('compSet.trialTopicDefault'));
   const [trialDurationMinutes, setTrialDurationMinutes] = useState(sc?.trialDurationMinutes ?? 60);
   const [trialPriceEur, setTrialPriceEur] = useState(sc?.trialPriceEur ?? 0);
+  const [trialPriceMode, setTrialPriceMode] = useState<TrialLessonPriceMode>(sc?.trialPriceMode ?? 'fixed');
+  const [trialDiscountPercent, setTrialDiscountPercent] = useState(sc?.trialDiscountPercent ?? 0);
   const [trialCommentMode, setTrialCommentMode] = useState<TrialCommentMode>(
     sc?.trialCommentMode ?? 'internal_only'
   );
@@ -207,6 +210,8 @@ export default function CompanySettings() {
     let nextTrialTopic = t('compSet.trialTopicDefault');
     let nextTrialDurationMinutes = 60;
     let nextTrialPriceEur = 0;
+    let nextTrialPriceMode: TrialLessonPriceMode = 'fixed';
+    let nextTrialDiscountPercent = 0;
     let nextTrialCommentMode: TrialCommentMode = 'internal_only';
     let nextTrialCommentRequired = false;
     let nextTrialLessonsPerStudent = 1;
@@ -231,6 +236,9 @@ export default function CompanySettings() {
       if (typeof fd === 'number' && Number.isFinite(fd) && fd > 0) nextTrialDurationMinutes = Math.round(fd);
       const fp = featObj['trial_lesson_price_eur'];
       if (typeof fp === 'number' && Number.isFinite(fp) && fp >= 0) nextTrialPriceEur = fp;
+      const trialPricing = parseTrialLessonPricing(featObj);
+      nextTrialPriceMode = trialPricing.mode;
+      nextTrialDiscountPercent = trialPricing.discountPercent ?? 0;
       const fcm = featObj['trial_lesson_comment_mode'];
       if (fcm === 'student_and_parent' || fcm === 'internal_only') nextTrialCommentMode = fcm;
       const fcr = featObj['trial_comment_required'];
@@ -272,6 +280,8 @@ export default function CompanySettings() {
       setTrialTopic(nextTrialTopic);
       setTrialDurationMinutes(nextTrialDurationMinutes);
       setTrialPriceEur(nextTrialPriceEur);
+      setTrialPriceMode(nextTrialPriceMode);
+      setTrialDiscountPercent(nextTrialDiscountPercent);
       setTrialCommentMode(nextTrialCommentMode);
       setTrialCommentRequired(nextTrialCommentRequired);
       setTrialLessonsPerStudent(nextTrialLessonsPerStudent);
@@ -378,6 +388,8 @@ export default function CompanySettings() {
         trialTopic: nextTrialTopic,
         trialDurationMinutes: nextTrialDurationMinutes,
         trialPriceEur: nextTrialPriceEur,
+        trialPriceMode: nextTrialPriceMode,
+        trialDiscountPercent: nextTrialDiscountPercent,
         trialCommentMode: nextTrialCommentMode,
         trialCommentRequired: nextTrialCommentRequired,
         trialLessonsPerStudent: nextTrialLessonsPerStudent,
@@ -742,6 +754,11 @@ export default function CompanySettings() {
 
   const handleSave = async () => {
     if (!orgId) return;
+    if (isManoKorepetitoriusOrg(orgId) && trialPriceMode === 'discount_percent'
+      && (!Number.isFinite(trialDiscountPercent) || trialDiscountPercent < 0 || trialDiscountPercent > 100)) {
+      alert(trialPricingCopy(locale, 'invalid'));
+      return;
+    }
     const overwriteExistingTutors = confirm(t('compSet.confirmOverwrite'));
     if (!overwriteExistingTutors) {
       return;
@@ -785,6 +802,10 @@ export default function CompanySettings() {
       trial_lesson_topic: trialTopic.trim() || t('compSet.trialTopicDefault'),
       trial_lesson_duration_minutes: Math.max(15, Number(trialDurationMinutes) || 60),
       trial_lesson_price_eur: Math.max(0, Number(trialPriceEur) || 0),
+      ...(isManoKorepetitoriusOrg(orgId) ? {
+        trial_lesson_price_mode: trialPriceMode,
+        trial_lesson_discount_percent: trialPriceMode === 'discount_percent' ? trialDiscountPercent : null,
+      } : {}),
       trial_lesson_comment_mode: trialCommentMode,
       trial_comment_required: trialCommentRequired,
       trial_lessons_per_student: Math.min(5, Math.max(1, Math.round(Number(trialLessonsPerStudent) || 1))),
@@ -896,6 +917,8 @@ export default function CompanySettings() {
       trialTopic,
       trialDurationMinutes,
       trialPriceEur,
+      trialPriceMode,
+      trialDiscountPercent,
       trialCommentMode,
       trialCommentRequired,
       trialLessonsPerStudent,
@@ -1164,16 +1187,37 @@ export default function CompanySettings() {
                   className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
                 />
               </div>
+              {isManoKorepetitoriusOrg(orgId) && <div className="space-y-1.5">
+                <Label htmlFor="trial-price-mode" className="text-xs">{trialPricingCopy(locale, 'mode')}</Label>
+                <Select value={trialPriceMode} onValueChange={(value) => setTrialPriceMode(value as TrialLessonPriceMode)}>
+                  <SelectTrigger id="trial-price-mode" className="rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="fixed">{trialPricingCopy(locale, 'fixed')}</SelectItem>
+                    <SelectItem value="discount_percent">{trialPricingCopy(locale, 'discount')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>}
               <div className="space-y-1.5">
-                <Label className="text-xs">{t('compSet.priceEur')}</Label>
+                <Label htmlFor="trial-price-value" className="text-xs">{isManoKorepetitoriusOrg(orgId) && trialPriceMode === 'discount_percent' ? trialPricingCopy(locale, 'percent') : t('compSet.priceEur')}</Label>
                 <input
+                  id="trial-price-value"
                   type="number"
+                  inputMode="decimal"
                   min={0}
-                  step={1}
-                  value={trialPriceEur}
-                  onChange={(e) => setTrialPriceEur(Number(e.target.value))}
+                  max={isManoKorepetitoriusOrg(orgId) && trialPriceMode === 'discount_percent' ? 100 : undefined}
+                  step={isManoKorepetitoriusOrg(orgId) && trialPriceMode === 'discount_percent' ? 0.1 : 0.01}
+                  value={isManoKorepetitoriusOrg(orgId) && trialPriceMode === 'discount_percent' ? (Number.isFinite(trialDiscountPercent) ? trialDiscountPercent : '') : trialPriceEur}
+                  onChange={(e) => isManoKorepetitoriusOrg(orgId) && trialPriceMode === 'discount_percent'
+                    ? setTrialDiscountPercent(e.target.value === '' ? Number.NaN : Number(e.target.value))
+                    : setTrialPriceEur(Number(e.target.value))}
+                  aria-invalid={isManoKorepetitoriusOrg(orgId) && trialPriceMode === 'discount_percent' && (!Number.isFinite(trialDiscountPercent) || trialDiscountPercent < 0 || trialDiscountPercent > 100)}
+                  aria-describedby={isManoKorepetitoriusOrg(orgId) && trialPriceMode === 'discount_percent' ? 'trial-discount-help' : undefined}
                   className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
                 />
+                {isManoKorepetitoriusOrg(orgId) && trialPriceMode === 'discount_percent' && <p id="trial-discount-help" className="text-xs text-gray-500">{trialPricingCopy(locale, 'help')}</p>}
+                {isManoKorepetitoriusOrg(orgId) && trialPriceMode === 'discount_percent'
+                  && (!Number.isFinite(trialDiscountPercent) || trialDiscountPercent < 0 || trialDiscountPercent > 100)
+                  && <p role="alert" className="text-xs text-red-600">{trialPricingCopy(locale, 'invalid')}</p>}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">{t('compSet.commentVisibility')}</Label>

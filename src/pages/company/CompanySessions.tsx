@@ -68,6 +68,8 @@ import { defaultStatsDateRange } from '@/lib/statsDateRange';
 import { schoolCalendarInstant, schoolDate } from '@/lib/schoolTime';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { canDeleteIndividualOrgSession } from '@/lib/orgSessionDeletion';
+import { canEditFutureOrgSeries, canEditOrgSession, orgSessionEditNotice, orgSessionPriceChangingIds } from '@/lib/orgSessionEdit';
+import { fetchInvoiceIdsForSessionIds } from '@/lib/invoiceLineItemsForSessions';
 import {
   schoolActivitySummary,
   schoolMeetingOccurrences,
@@ -842,6 +844,25 @@ export default function CompanySessions() {
     if (!selectedSession) return;
     setSavingEdit(true);
     try {
+      if (!canEditOrgSession(selectedSession, organizationId, new Date(), true)) {
+        throw new Error(orgSessionEditNotice(locale, 'noLongerAllowed'));
+      }
+      if (groupEditChoice === 'all_future' && !canEditFutureOrgSeries(selectedSession)) {
+        throw new Error(orgSessionEditNotice(locale, 'noLongerAllowed'));
+      }
+      if (!Number.isFinite(editPrice) || editPrice < 0) {
+        throw new Error(orgSessionEditNotice(locale, 'invalidPrice'));
+      }
+      if (isManoKorepetitoriusOrg(organizationId)) {
+        const changingIds = await orgSessionPriceChangingIds(
+          supabase, selectedSession, groupEditChoice, editPrice,
+        );
+        if (changingIds.length > 0) {
+          if (!canOrgAdmin('finance.view')) throw new Error(t('compSch.saveFailedPermissions'));
+          const invoiceIds = await fetchInvoiceIdsForSessionIds(supabase, changingIds);
+          if (invoiceIds.size > 0) throw new Error(orgSessionEditNotice(locale, 'alreadyInvoiced'));
+        }
+      }
       const newStart = new Date(editStartTime);
       if (Number.isNaN(newStart.getTime())) throw new Error(t('compSch.invalidStartDateTime'));
       const newEnd = new Date(newStart.getTime() + editDurationMinutes * 60 * 1000);
@@ -1545,7 +1566,7 @@ export default function CompanySessions() {
 
               {editMode && canEditSessions ? (
                 <div className="space-y-4">
-                  {selectedSession.recurring_session_id && !selectedSession.class_group_id && (
+                  {selectedSession.recurring_session_id && !selectedSession.class_group_id && canEditFutureOrgSeries(selectedSession) && (
                     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
                       <p className="text-xs font-semibold text-amber-800 mb-2">{t('compSch.recurringSeriesPart')}</p>
                       <div className="flex gap-2">
@@ -1636,7 +1657,10 @@ export default function CompanySessions() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.price')}</Label>
-                      <Input type="number" value={editPrice} onChange={e => setEditPrice(parseFloat(e.target.value) || 0)} className="rounded-xl" />
+                      <Input type="number" min={0} step="0.01" inputMode="decimal" value={editPrice} onChange={e => setEditPrice(Number(e.target.value))} className="rounded-xl" />
+                      {isManoKorepetitoriusOrg(organizationId) && (editPrice !== Number(selectedSession.price ?? 0) || groupEditChoice === 'all_future') && (
+                        <p className="mt-1 text-xs text-amber-700">{orgSessionEditNotice(locale, 'paymentUnchanged')}</p>
+                      )}
                     </div>
                     <div>
                       <Label className="text-xs text-gray-500 mb-1 block">{t('compSch.meetingLinkLabel')}</Label>
@@ -1909,10 +1933,7 @@ export default function CompanySessions() {
                         </Button>
                       )}
 
-                      {(
-                        (Boolean(selectedSession.class_group_id) && (selectedSession.status === 'active' || selectedSession.status === 'completed'))
-                        || (selectedSession.status === 'active' && isFutureSession(selectedSession))
-                      ) && (
+                      {canEditOrgSession(selectedSession, organizationId, new Date(), true) && (
                         <Button variant="outline" className="w-full rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50" onClick={() => setEditMode(true)}>
                           <Pencil className="w-4 h-4 mr-2" />
                           {t('compSess.editLesson')}

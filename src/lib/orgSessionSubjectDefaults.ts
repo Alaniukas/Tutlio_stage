@@ -2,6 +2,7 @@ import {
   resolveOrganizationLessonPrice,
   type OrganizationDynamicPricingRule,
 } from './organizationDynamicPricing';
+import { trialLessonPrice, type TrialLessonPriceMode } from './trialLessonPricing';
 
 export type OrgSubjectForDefaults = {
   id: string;
@@ -24,6 +25,8 @@ export type OrgTrialDefaults = {
   topic: string;
   durationMinutes: number;
   priceEur: number;
+  priceMode?: TrialLessonPriceMode;
+  discountPercent?: number | null;
 };
 
 /** Mokinys → korepetitorius → dalykas (kaip Calendar / org create). */
@@ -100,18 +103,22 @@ export function resolveOrgSessionSubjectDefaults(args: {
     ? individualPricing.find((p) => p.student_id === studentId && p.subject_id === subject.id)
     : undefined;
 
-  let price = fallbackPrice;
-  if (useTrialDefaults) {
-    price = trialDefaults!.priceEur;
-  } else if (studentId && !subject.is_group && !isTrialSubject) {
-    price = resolveOrganizationLessonPrice({
+  const regularPrice = studentId && !subject.is_group && !isTrialSubject
+    ? resolveOrganizationLessonPrice({
       rules: dynamicPricingRules,
       student,
       lessonsPerWeek: lessonsPerWeek ?? student?.pricing_lessons_per_week ?? 1,
       individualPrice: pricing?.price,
       fallbackPrice,
-    });
-  }
+    })
+    : fallbackPrice;
+  const price = forceTrialPricing && trialDefaults
+    ? trialLessonPrice({
+        mode: trialDefaults.priceMode ?? 'fixed',
+        fixedPriceEur: trialDefaults.priceEur,
+        discountPercent: trialDefaults.discountPercent ?? null,
+      }, regularPrice)
+    : useTrialDefaults ? trialDefaults!.priceEur : regularPrice;
 
   let durationMinutes = tsp?.duration_minutes ?? subject.duration_minutes ?? 60;
   if (useTrialDefaults) {

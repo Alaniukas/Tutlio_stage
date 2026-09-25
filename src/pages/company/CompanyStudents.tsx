@@ -169,6 +169,7 @@ import {
   loadStudentIndividualPrice,
   resolveRegularLessonBookingPrice,
 } from '@/lib/studentLessonPricing';
+import { parseTrialLessonPricing, trialLessonPrice } from '@/lib/trialLessonPricing';
 import { formatLocalYmd, monthlyPackagePeriodFrom } from '@/lib/monthlyPackagePlan';
 import { canEditPendingPackage } from '@/lib/pendingPackageEdit';
 import { displayStudentGrade, normalizeStudentGrade1to12, proKlaseGradeSelectValue } from '@/lib/studentGrade';
@@ -2320,6 +2321,7 @@ export default function CompanyStudents() {
           : 60;
       const trialPrice =
         typeof featObj.trial_lesson_price_eur === 'number' ? Math.max(0, featObj.trial_lesson_price_eur) : 0;
+      const trialPricing = parseTrialLessonPricing(featObj);
       const trialTopic =
         typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
           ? featObj.trial_lesson_topic.trim()
@@ -2377,7 +2379,7 @@ export default function CompanyStudents() {
             ),
             isGroupSubject: Boolean((subj as { is_group?: boolean | null }).is_group),
           });
-          const trialCharge = item.isTrial ? trialPrice : regularPrice;
+          const trialCharge = item.isTrial ? trialLessonPrice(trialPricing, regularPrice) : regularPrice;
           const result = await runOrgAdminCreateSession({
             supabase,
             createTutorId: item.pick.tutorId,
@@ -2838,6 +2840,7 @@ export default function CompanyStudents() {
           : {};
       const trialPrice =
         typeof featObj.trial_lesson_price_eur === 'number' ? Math.max(0, featObj.trial_lesson_price_eur) : 0;
+      const trialPricing = parseTrialLessonPricing(featObj);
       const trialTopic =
         typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
           ? featObj.trial_lesson_topic.trim()
@@ -2890,6 +2893,7 @@ export default function CompanyStudents() {
             ),
             isGroupSubject: Boolean((subj as { is_group?: boolean | null }).is_group),
           });
+          const trialCharge = item.isTrial ? trialLessonPrice(trialPricing, regularPrice) : regularPrice;
           const result = await runOrgAdminCreateSession({
             supabase,
             createTutorId: item.pick.tutorId,
@@ -2907,7 +2911,7 @@ export default function CompanyStudents() {
             createRecurringFrequency: item.recurringFrequency,
             createRecurringWeekdays: [new Date(item.lessonStartIso).getDay()],
             createIsPaid: false,
-            createPrice: createRecurring ? regularPrice : (item.isTrial ? trialPrice : regularPrice),
+            createPrice: createRecurring ? regularPrice : trialCharge,
             createIsTrial: item.isTrial && !createRecurring,
             createFirstLessonIsTrial: item.isTrial && createRecurring,
             createTutorComment: '',
@@ -2927,7 +2931,7 @@ export default function CompanyStudents() {
           });
           if (
             item.isTrial &&
-            trialPrice > 0 &&
+            trialCharge > 0 &&
             pkFeat('trial_creation_payment_email') &&
             result.createdSessionIds.length > 0
           ) {
@@ -2940,7 +2944,7 @@ export default function CompanyStudents() {
                 sessionId: result.createdSessionIds[0],
                 topic: trialTopic || undefined,
                 durationMinutes: trialDuration,
-                priceEur: trialPrice,
+                priceEur: trialCharge,
                 suppressRegistrationInvite: true,
               }),
             });
