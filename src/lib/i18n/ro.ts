@@ -1215,6 +1215,7 @@ export const roOverrides: Record<string, string> = {
   "compTut.commission": "Comision",
   "compTut.personalMeetingLink": "Link personal al întâlnirii",
   "compTut.personalMeetingLinkDesc": "Un link permanent pentru acest profesor. Poate fi folosit în locul linkurilor materiilor.",
+  'compTut.personalMeetingLinkLoadFailed': "Linkul salvat nu a putut fi încărcat. Modificările nu au fost salvate.",
   "compTut.license": "Licență",
   "compTut.licenseDesc": "Profesorii fără licență își pot gestiona doar programul.",
   "compTut.licensed": "Cu licență",
@@ -2511,6 +2512,7 @@ export const roOverrides: Record<string, string> = {
   "lessonSet.personalLinkTitle": "Link personal al întâlnirii",
   "lessonSet.personalLinkDesc": "Linkul tău permanent pentru lecții (Zoom / Meet)",
   "lessonSet.personalLinkHint": "Folosit pentru toate lecțiile tale în locul linkului materiei. Linkul personal al elevului, dacă există, are prioritate.",
+  'lessonSet.personalLinkLoadFailed': "Linkul salvat nu a putut fi încărcat. Modificările nu au fost salvate.",
 
   // att
   "att.bothJoined": "Ambii s-au conectat",
