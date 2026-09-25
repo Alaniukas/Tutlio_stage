@@ -157,10 +157,18 @@ import {
 } from '@/lib/mvStudentAccountStatus';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import {
+  contractedLessonsPerWeek,
   parseStudentGrade,
   resolveOrganizationLessonPrice,
   type OrganizationDynamicPricingRule,
 } from '@/lib/organizationDynamicPricing';
+import {
+  individualPricingRowsForSession,
+  loadOrganizationDynamicPricingRules,
+  loadStudentForPricing,
+  loadStudentIndividualPrice,
+  resolveRegularLessonBookingPrice,
+} from '@/lib/studentLessonPricing';
 import { formatLocalYmd, monthlyPackagePeriodFrom } from '@/lib/monthlyPackagePlan';
 import { canEditPendingPackage } from '@/lib/pendingPackageEdit';
 import { displayStudentGrade, normalizeStudentGrade1to12, proKlaseGradeSelectValue } from '@/lib/studentGrade';
@@ -2316,6 +2324,9 @@ export default function CompanyStudents() {
         typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
           ? featObj.trial_lesson_topic.trim()
           : '';
+      const dynamicPricingRules = effectiveOrgId
+        ? await loadOrganizationDynamicPricingRules(supabase, effectiveOrgId)
+        : [];
       for (const { item, rows } of plannedStudentLessons) {
         const lessonRow = rows.find((row) => row.tutor_id === item.pick.tutorId) || rows[0];
         try {
@@ -2325,12 +2336,48 @@ export default function CompanyStudents() {
             .eq('id', item.pick.subjectId)
             .maybeSingle();
           if (!subj || !lessonRow?.id) continue;
-          const regularPrice = Number((subj as { price?: number | null }).price ?? 0);
-          const trialCharge = item.isTrial ? trialPrice : regularPrice;
+          const pendingIndividualPrice =
+            useIndividualPrice &&
+            selectedSubjectForInvite === item.pick.subjectId &&
+            customPrice !== ''
+              ? Number(customPrice)
+              : null;
+          const [student, dbIndividualPrice] = await Promise.all([
+            loadStudentForPricing(supabase, lessonRow.id),
+            pendingIndividualPrice === null
+              ? loadStudentIndividualPrice(
+                  supabase,
+                  lessonRow.id,
+                  item.pick.tutorId,
+                  item.pick.subjectId,
+                )
+              : Promise.resolve(null),
+          ]);
+          const individualPrice = pendingIndividualPrice ?? dbIndividualPrice;
+          const individualPricingRows = individualPricingRowsForSession(
+            lessonRow.id,
+            item.pick.subjectId,
+            individualPrice,
+          );
           const recurringEndDate = proKlaseAdminUi
             ? proKlaseSchoolYearEndDate(new Date(item.lessonStartIso))
             : '';
           const createRecurring = Boolean(recurringEndDate);
+          const regularPrice = resolveRegularLessonBookingPrice({
+            isTrialBooking: false,
+            trialPrice,
+            individualPrice,
+            subjectPrice: Number((subj as { price?: number | null }).price ?? 0),
+            dynamicPricingRules,
+            student,
+            lessonsPerWeek: contractedLessonsPerWeek(
+              createRecurring,
+              [new Date(item.lessonStartIso).getDay()],
+              student?.pricing_lessons_per_week,
+            ),
+            isGroupSubject: Boolean((subj as { is_group?: boolean | null }).is_group),
+          });
+          const trialCharge = item.isTrial ? trialPrice : regularPrice;
           const result = await runOrgAdminCreateSession({
             supabase,
             createTutorId: item.pick.tutorId,
@@ -2363,7 +2410,8 @@ export default function CompanyStudents() {
                 max_students: (subj as { max_students?: number | null }).max_students ?? null,
               },
             ],
-            individualPricing: [],
+            individualPricing: individualPricingRows,
+            dynamicPricingRules,
             suppressSuccessAlert: true,
             suppressClientBookingEmails: proKlaseAdminUi,
           });
@@ -2798,6 +2846,9 @@ export default function CompanyStudents() {
         typeof featObj.trial_lesson_duration_minutes === 'number'
           ? Math.max(15, Math.round(featObj.trial_lesson_duration_minutes))
           : 60;
+      const dynamicPricingRules = orgId
+        ? await loadOrganizationDynamicPricingRules(supabase, orgId)
+        : [];
       for (const item of lessons) {
         const lessonRow = rows.find((row) => row.tutor_id === item.pick.tutorId) || rows[0];
         try {
@@ -2807,11 +2858,38 @@ export default function CompanyStudents() {
             .eq('id', item.pick.subjectId)
             .maybeSingle();
           if (!subj || !lessonRow?.id) continue;
-          const regularPrice = Number((subj as { price?: number | null }).price ?? 0);
+          const [student, individualPrice] = await Promise.all([
+            loadStudentForPricing(supabase, lessonRow.id),
+            loadStudentIndividualPrice(
+              supabase,
+              lessonRow.id,
+              item.pick.tutorId,
+              item.pick.subjectId,
+            ),
+          ]);
+          const individualPricingRows = individualPricingRowsForSession(
+            lessonRow.id,
+            item.pick.subjectId,
+            individualPrice,
+          );
           const recurringEndDate = proKlaseAdminUi
             ? proKlaseSchoolYearEndDate(new Date(item.lessonStartIso))
             : '';
           const createRecurring = Boolean(recurringEndDate);
+          const regularPrice = resolveRegularLessonBookingPrice({
+            isTrialBooking: false,
+            trialPrice,
+            individualPrice,
+            subjectPrice: Number((subj as { price?: number | null }).price ?? 0),
+            dynamicPricingRules,
+            student,
+            lessonsPerWeek: contractedLessonsPerWeek(
+              createRecurring,
+              [new Date(item.lessonStartIso).getDay()],
+              student?.pricing_lessons_per_week,
+            ),
+            isGroupSubject: Boolean((subj as { is_group?: boolean | null }).is_group),
+          });
           const result = await runOrgAdminCreateSession({
             supabase,
             createTutorId: item.pick.tutorId,
@@ -2842,7 +2920,8 @@ export default function CompanyStudents() {
               is_group: (subj as { is_group?: boolean | null }).is_group ?? null,
               max_students: (subj as { max_students?: number | null }).max_students ?? null,
             }],
-            individualPricing: [],
+            individualPricing: individualPricingRows,
+            dynamicPricingRules,
             suppressSuccessAlert: true,
             suppressClientBookingEmails: proKlaseAdminUi,
           });

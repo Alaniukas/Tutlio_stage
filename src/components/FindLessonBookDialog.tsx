@@ -30,6 +30,10 @@ import { ASSIGN_STUDENT_FREE_SLOT_DIALOG_CONTENT_CLASS } from '@/components/Assi
 import RecurrenceFields, { type RecurrenceFrequency } from '@/components/RecurrenceFields';
 import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
 import { proKlaseAvailabilitySearchRecurrence } from '@/lib/proKlaseBooking';
+import {
+  fetchStudentLessonPricingContext,
+  resolveLessonCreatePrice,
+} from '@/lib/studentLessonPricing';
 
 /** A free availability window picked from FindTutorModal, to be narrowed to a lesson slot. */
 export interface FindLessonBookPick {
@@ -98,7 +102,6 @@ export default function FindLessonBookDialog({
   const isMvOrg = isMoksloVaisiaiOrg(organizationId);
   const isProKlaseBooking = isProKlaseOrg(organizationId);
   const [subject, setSubject] = useState<SubjectRow | null>(null);
-  const [overridePrice, setOverridePrice] = useState<number | null>(null);
   const [lessonStartIso, setLessonStartIso] = useState('');
   const [lessonEndIso, setLessonEndIso] = useState('');
   const [topic, setTopic] = useState('');
@@ -123,7 +126,6 @@ export default function FindLessonBookDialog({
   useEffect(() => {
     if (!pick) {
       setSubject(null);
-      setOverridePrice(null);
       setSessionCount(null);
       setIsTrial(false);
       setAutoTrialOn(false);
@@ -141,20 +143,12 @@ export default function FindLessonBookDialog({
     }
     let cancelled = false;
     (async () => {
-      const [{ data: subj }, { data: pricing }, historyResult] = await Promise.all([
+      const [{ data: subj }, historyResult] = await Promise.all([
         supabase
           .from('subjects')
           .select('id, name, price, duration_minutes, is_group, max_students, meeting_link')
           .eq('id', pick.subjectId)
           .maybeSingle(),
-        studentId
-          ? supabase
-              .from('student_individual_pricing')
-              .select('price')
-              .eq('student_id', studentId)
-              .eq('subject_id', pick.subjectId)
-              .maybeSingle()
-          : Promise.resolve({ data: null }),
         studentId
           ? supabase
               .from('sessions')
@@ -164,7 +158,6 @@ export default function FindLessonBookDialog({
       ]);
       if (cancelled) return;
       setSubject((subj as SubjectRow) ?? null);
-      setOverridePrice(pricing ? Number((pricing as { price: number }).price) : null);
       const counts = countTrialsFromHistory((historyResult as { data?: unknown[] }).data || []);
       setHistoryCounts(counts);
       setSessionCount(counts.trialCount + counts.regularCount);
@@ -301,9 +294,23 @@ export default function FindLessonBookDialog({
     }
     setSaving(true);
     try {
-      const price = isTrial
-        ? trialDefaults.priceEur
-        : (overridePrice ?? subject.price ?? 0);
+      const bookingPricing = await fetchStudentLessonPricingContext(supabase, {
+        organizationId: organizationId ?? null,
+        studentId,
+        tutorId: pick.tutorId,
+        subjectId: pick.subjectId,
+      });
+      const price = resolveLessonCreatePrice({
+        isTrial,
+        isRecurring: isTrial ? false : isRecurring,
+        firstLessonIsTrial: isRecurring && firstLessonIsTrial,
+        trialPrice: trialDefaults.priceEur,
+        individualPrice: bookingPricing.individualPrice,
+        subjectPrice: Number(subject.price ?? 0),
+        dynamicPricingRules: bookingPricing.dynamicPricingRules,
+        student: bookingPricing.student,
+        recurringWeekdays,
+      });
       const result = await runOrgAdminCreateSession({
         supabase,
         createTutorId: pick.tutorId,
@@ -334,7 +341,8 @@ export default function FindLessonBookDialog({
             max_students: subject.max_students,
           },
         ],
-        individualPricing: [],
+        individualPricing: bookingPricing.individualPricingRows,
+        dynamicPricingRules: bookingPricing.dynamicPricingRules,
         suppressSuccessAlert: true,
       });
 

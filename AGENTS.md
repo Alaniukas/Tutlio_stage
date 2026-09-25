@@ -524,8 +524,9 @@ Išėję / baigę (`left`, `graduated`) — archyvas (šiukšlinė), ne pagrindi
 2. Langas rodomas formoje / kortelėje (`PickedAvailabilityTimeEditor`) — data užrakinta, **pradžia/pabaiga redaguojamos minutėmis** rėmuose.
 3. Esamo mokinio kortelėje `FindLessonBookDialog` `variant="inline"` (ne antras overlay). 15 min. select nebėra.
 4. Naujam mokiniui: išsaugant įrašomas `preferred_availability` iš lango ir sukuriama pamoka patikslintu laiku (`runOrgAdminCreateSession`).
+5. **Kainos prioritetas** (`studentLessonPricing.ts` → `resolveOrganizationLessonPrice`): **individuali** (`student_individual_pricing`, su `tutor_id`) > org **dinaminė** (klasė + pamokų sk./sav.) > dalyko / tutor fallback. Taikoma `FindLessonBookDialog`, naujo mokinio / sibling pamokų kūrime (`CompanyStudents`) ir org kalendoriuje (`CompanyTvarkarastis`). **Bandomoji** (vienkartinė arba `createFirstLessonIsTrial`) visada org `trial_lesson_price_eur` — individuali jos neperrašo.
 
-**Failai:** `src/lib/pickedAvailabilityTime.ts`, `src/components/company/PickedAvailabilityTimeEditor.tsx`, `FindLessonBookDialog.tsx`, `FindTutorModal.tsx`. Testai: `tests/lib/picked-availability-time.test.ts`.
+**Failai:** `src/lib/pickedAvailabilityTime.ts`, `src/lib/studentLessonPricing.ts`, `src/components/company/PickedAvailabilityTimeEditor.tsx`, `FindLessonBookDialog.tsx`, `FindTutorModal.tsx`. Testai: `tests/lib/picked-availability-time.test.ts`, `tests/lib/student-lesson-pricing.test.ts`.
 
 ### Buhalterijos suvestinė ir eksportas
 
@@ -816,7 +817,7 @@ npm run security:pencheck
 | „Prisijungti“ langas (tėvai / mokiniai) | `components/JoinLessonButton.tsx`, `lib/attendance.ts` |
 | Viešo AI widget'o rodymas (tik landing, niekur kitur) | `supportWidgetVisibility.ts` (`isLandingPath`) |
 | School mokiniai + filtrai | `CompanyStudents.tsx`, `schoolStudentEnrollment.ts`, `authSession.ts`, `schoolStudentsExport.ts` |
-| Pamoka iš mokinio kortelės / tikslus laikas | `FindTutorModal.tsx`, `FindLessonBookDialog.tsx`, `PickedAvailabilityTimeEditor.tsx`, `pickedAvailabilityTime.ts` |
+| Pamoka iš mokinio kortelės / tikslus laikas | `FindTutorModal.tsx`, `FindLessonBookDialog.tsx`, `PickedAvailabilityTimeEditor.tsx`, `pickedAvailabilityTime.ts`, `studentLessonPricing.ts` |
 | School mokėjimai | `CompanyPayments.tsx`, `useSchoolPaymentsData.ts` |
 | School finansų eksportas | `schoolFinanceExport.ts`, `schoolFinanceXlsxExport.ts` |
 | Complimentary pamoka | `sessionComplimentary.ts`, `api/mark-session-complimentary.ts` |
