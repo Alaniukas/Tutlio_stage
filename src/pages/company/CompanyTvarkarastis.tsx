@@ -4094,9 +4094,6 @@ export default function CompanyTvarkarastis() {
                   onClick={() => {
                     const next = !createFirstLessonIsTrial;
                     setCreateFirstLessonIsTrial(next);
-                    if (next) {
-                      setCreateTopic((prev) => (prev.trim() ? prev : trialDefaults.topic));
-                    }
                   }}
                   className="flex items-center justify-between gap-3 w-full text-left"
                 >

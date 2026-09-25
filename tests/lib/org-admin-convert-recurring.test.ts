@@ -5,6 +5,7 @@ import {
   filterRowsAgainstBusyTutorSlots,
   insertSessionRowsInChunks,
   ORG_ADMIN_SESSION_INSERT_CHUNK,
+  regularTopicForRecurringSeries,
   resolveOrCreateTrialSubject,
   SessionRowsInsertError,
 } from '@/pages/company/orgAdminSessionCreate';
@@ -200,19 +201,17 @@ describe('resolveOrCreateTrialSubject', () => {
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                maybeSingle: vi.fn(async () => ({
-                  data: {
-                    id: 'trial-subject',
-                    name: 'Old trial',
-                    price: 25,
-                    duration_minutes: 60,
-                    is_group: false,
-                    max_students: null,
-                    is_trial: true,
-                  },
-                  error: null,
-                })),
+              eq: vi.fn(async () => ({
+                data: [{
+                  id: 'trial-subject',
+                  name: 'Bandomoji pamoka',
+                  price: 25,
+                  duration_minutes: 60,
+                  is_group: false,
+                  max_students: null,
+                  is_trial: true,
+                }],
+                error: null,
               })),
             })),
           })),
@@ -244,6 +243,15 @@ describe('resolveOrCreateTrialSubject', () => {
       duration_minutes: 45,
       price: 10,
     }]);
+  });
+});
+
+describe('regularTopicForRecurringSeries', () => {
+  it('keeps a normal series topic and replaces a copied trial title with the subject name', () => {
+    expect(regularTopicForRecurringSeries('Matematika', 'Bandomoji pamoka', 'MATEMATIKA')).toBe('Matematika');
+    expect(regularTopicForRecurringSeries('Bandomoji pamoka', 'Bandomoji pamoka', 'MATEMATIKA')).toBe('MATEMATIKA');
+    expect(regularTopicForRecurringSeries('  bandomoji pamoka ', 'Bandomoji pamoka', 'Chemija')).toBe('Chemija');
+    expect(regularTopicForRecurringSeries('', null, 'Chemija')).toBeNull();
   });
 });
 

@@ -67,6 +67,21 @@ type TrialSubjectMeta = {
 };
 
 /** Resolve org trial defaults and the tutor's trial subject (create if missing). */
+/** Later lessons keep the series topic. A copied trial title falls back to the subject name. */
+export function regularTopicForRecurringSeries(
+  seriesTopic: string | null | undefined,
+  trialTopic: string | null | undefined,
+  subjectName: string | null | undefined,
+): string | null {
+  const series = String(seriesTopic || '').trim();
+  const trial = String(trialTopic || '').trim();
+  if (trial && series.toLowerCase() === trial.toLowerCase()) {
+    const subject = String(subjectName || '').trim();
+    return subject || null;
+  }
+  return seriesTopic || null;
+}
+
 export async function resolveOrCreateTrialSubject(
   supabase: SupabaseClient,
   tutorId: string,
@@ -102,14 +117,17 @@ export async function resolveOrCreateTrialSubject(
       ? Math.max(0, featObj.trial_lesson_price_eur as number)
       : 0;
 
-  const { data: existingTrial } = await supabase
+  const { data: existingTrials } = await supabase
     .from('subjects')
     .select('id, name, price, duration_minutes, is_group, max_students, is_trial')
     .eq('tutor_id', tutorId)
-    .eq('is_trial', true)
-    .maybeSingle();
+    .eq('is_trial', true);
+  const trialNameKey = trialName.trim().toLowerCase();
+  const existingTrial = ((existingTrials || []) as SubjectLite[]).find(
+    (row) => String(row.name || '').trim().toLowerCase() === trialNameKey,
+  ) ?? null;
 
-  let trialSubject = existingTrial as SubjectLite | null;
+  let trialSubject = existingTrial;
   if (!trialSubject) {
     const { data: createdTrial, error: trialErr } = await supabase
       .from('subjects')
@@ -945,6 +963,12 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       }
     }
 
+    const regularSeriesTopic = regularTopicForRecurringSeries(
+      createTopic,
+      firstTrialMeta?.topic,
+      subj.name,
+    );
+
     const sessionsRows: SessionInsertRow[] = [];
     const packagesUsage = new Map<string, number>();
     const endLimit = recurringMaterializeEndDate(createRecurringEndDate, startDate);
@@ -1000,7 +1024,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           end_time: sessionEnd.toISOString(),
           status: 'active',
           meeting_link: createMeetingLink || null,
-          topic: trialMetaForOccurrence ? trialMetaForOccurrence.topic : (createTopic || null),
+          topic: trialMetaForOccurrence ? trialMetaForOccurrence.topic : regularSeriesTopic,
           price: trialMetaForOccurrence
             ? trialMetaForOccurrence.price
             : (priceByStudentId.get(template.student_id) ?? createPrice),
@@ -1060,6 +1084,27 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       }
       await cleanupRecurringTemplates();
       throw insErr;
+    }
+
+    if (firstTrialMeta && firstTrialTemplate) {
+      const trialStartMs = firstTrialTemplate.firstOccurrence.getTime();
+      const trialSessionIds = (inserted || [])
+        .filter((row) => new Date(String(row.start_time)).getTime() === trialStartMs)
+        .map((row) => row.id)
+        .filter(Boolean);
+      if (trialSessionIds.length > 0) {
+        const { error: trialPriceErr } = await supabase
+          .from('sessions')
+          .update({
+            subject_id: firstTrialMeta.subject.id,
+            topic: firstTrialMeta.topic,
+            price: firstTrialMeta.price,
+          })
+          .in('id', trialSessionIds);
+        if (trialPriceErr) {
+          console.error('[OrgSchedule] trial lesson price lock failed:', trialPriceErr.message);
+        }
+      }
     }
 
     await consumeAvailabilityForCreatedSessions(supabase, createTutorId, inserted || []);

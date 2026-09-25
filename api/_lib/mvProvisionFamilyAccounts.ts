@@ -213,6 +213,34 @@ async function linkParentToStudents(
     : await studentUpdate.in('id', studentIds);
   if (studentErr) throw studentErr;
 
+  const parentEmailKey = parentEmail.trim().toLowerCase();
+  const studentRowsQuery = supabase
+    .from('students')
+    .select('id, email, linked_user_id');
+  const { data: studentRows, error: studentRowsErr } = studentIds.length === 1
+    ? await studentRowsQuery.eq('id', studentIds[0])
+    : await studentRowsQuery.in('id', studentIds);
+  if (studentRowsErr) throw studentRowsErr;
+
+  const sharedLoginStudentIds = (studentRows || [])
+    .filter((row: { id?: string; email?: string | null; linked_user_id?: string | null }) => {
+      if (row.linked_user_id) return false;
+      const studentEmail = String(row.email || '').trim().toLowerCase();
+      return Boolean(studentEmail && studentEmail === parentEmailKey);
+    })
+    .map((row: { id?: string }) => row.id)
+    .filter(Boolean) as string[];
+  if (sharedLoginStudentIds.length > 0) {
+    const sharedLoginUpdate = supabase
+      .from('students')
+      .update({ linked_user_id: parentUserId })
+      .is('linked_user_id', null);
+    const { error: sharedLoginErr } = sharedLoginStudentIds.length === 1
+      ? await sharedLoginUpdate.eq('id', sharedLoginStudentIds[0])
+      : await sharedLoginUpdate.in('id', sharedLoginStudentIds);
+    if (sharedLoginErr) throw sharedLoginErr;
+  }
+
   const studentSelect = supabase.from('students').select('linked_user_id');
   const { data: students } = studentIds.length === 1
     ? await studentSelect.eq('id', studentIds[0])

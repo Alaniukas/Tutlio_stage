@@ -22,7 +22,7 @@ vi.mock('../../api/_lib/sendMvFamilyAccountsEmail.js', () => ({
 
 import { provisionMvFamilyAccounts } from '../../api/_lib/mvProvisionFamilyAccounts';
 
-type Scenario = 'parent' | 'student';
+type Scenario = 'parent' | 'student' | 'shared-email';
 
 function database(scenario: Scenario) {
   let studentQueryCount = 0;
@@ -58,7 +58,11 @@ function database(scenario: Scenario) {
             data: {
               id: 'student-1',
               full_name: 'Child',
-              email: scenario === 'student' ? 'child@example.test' : null,
+              email: scenario === 'student'
+                ? 'child@example.test'
+                : scenario === 'shared-email'
+                  ? 'parent@example.test'
+                  : null,
               tutor_id: 'tutor-1',
               organization_id: MOKSLO_VAISIAI_ORG_ID,
               linked_user_id: null,
@@ -74,6 +78,12 @@ function database(scenario: Scenario) {
             // The second students query in the student scenario checks whether
             // the existing auth user is already linked elsewhere.
             if (scenario === 'student' && call === 2) return resolve({ data: [], error: null });
+            if (scenario === 'shared-email' && call === 3) {
+              return resolve({
+                data: [{ id: 'student-1', email: 'parent@example.test', linked_user_id: null }],
+                error: null,
+              });
+            }
             return resolve({ data: [{ linked_user_id: null }], error: null });
           },
         };
@@ -175,6 +185,29 @@ describe('Mokslo Vaisiai existing account linking', () => {
       student_id: 'student-1',
     });
     expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it('links student login to the parent account when the child email matches the payer email', async () => {
+    mocks.findAuthUserByEmail.mockResolvedValue({ id: 'existing-parent' });
+    mocks.getUserById.mockResolvedValue({
+      data: {
+        user: {
+          id: 'existing-parent',
+          user_metadata: { role: 'parent', full_name: 'Parent' },
+          app_metadata: { provisioned_by_organization: MOKSLO_VAISIAI_ORG_ID },
+        },
+      },
+      error: null,
+    });
+
+    const result = await provisionMvFamilyAccounts(database('shared-email'), {
+      studentId: 'student-1',
+      scope: 'parent',
+      appOrigin: 'https://tutlio.lt',
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(mocks.studentUpdates).toContainEqual({ linked_user_id: 'existing-parent' });
   });
 
   it('links the student row to its already-registered student auth account', async () => {
