@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import JoinLessonButton from '@/components/JoinLessonButton';
 import StudentLayout from '@/components/StudentLayout';
 import ParentLayout from '@/components/ParentLayout';
@@ -6,7 +6,7 @@ import StatusBadge from '@/components/StatusBadge';
 import { supabase } from '@/lib/supabase';
 import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { startPerlasPayment } from '@/lib/perlasPay';
-import { dedupeAsync } from '@/lib/dataCache';
+import { dedupeAsync, invalidateCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { enrichSessionMeetingLink } from '@/lib/meetingLink';
 import { format, addDays, getDay, startOfWeek, parse, addHours, isBefore, isAfter, parseISO, differenceInHours, startOfMonth, endOfMonth, startOfDay, endOfDay } from 'date-fns';
@@ -14,9 +14,11 @@ import { lt } from 'date-fns/locale';
 import { useTranslation } from '@/lib/i18n';
 import { Calendar as BigCalendar, dateFnsLocalizer, Views, View } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
-import { ChevronLeft, ChevronRight, LayoutGrid, CalendarDays, List, Check, CalendarIcon, XCircle, ShieldAlert, Clock, Wallet, Info, CreditCard, Loader2, Users, Landmark } from 'lucide-react';
+import { ChevronLeft, ChevronRight, LayoutGrid, CalendarDays, List, Check, CalendarIcon, XCircle, ShieldAlert, Clock, Wallet, Info, CreditCard, Loader2, Users, Landmark, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { DeleteSessionDialog } from '@/components/DeleteSessionDialog';
+import { canFamilyDeleteSession, deleteSessionViaApi, isRecurringSession, type SessionDeleteScope } from '@/lib/sessionDeletion';
 import { cn, normalizeUrl } from '@/lib/utils';
 import WhiteboardButton from '@/components/WhiteboardButton';
 import SessionFiles from '@/components/SessionFiles';
@@ -86,6 +88,9 @@ interface ExistingSession {
     show_comment_to_student?: boolean;
     subject_id?: string | null;
     class_group_id?: string | null;
+    recurring_session_id?: string | null;
+    cancellation_penalty_amount?: number | null;
+    penalty_resolution?: string | null;
     available_spots?: number | null;
     subjects?: { is_group?: boolean; max_students?: number; name?: string } | null;
 }
@@ -113,7 +118,7 @@ interface LessonPackageSummary {
 
 /** Be įterptų `subjects(*)`: RLS/postgres užklausos nerą lūžta nuo 57014 (statement timeout). */
 const PARENT_SCHEDULE_SESSION_COLS =
-    'id,start_time,end_time,status,paid,price,topic,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,student_id,class_group_id,available_spots';
+    'id,start_time,end_time,status,paid,price,topic,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,student_id,class_group_id,recurring_session_id,available_spots,cancellation_penalty_amount,penalty_resolution';
 
 async function enrichScheduleSessionsWithSubjects(
     client: typeof supabase,
@@ -177,6 +182,7 @@ interface SlotEvent {
     sessionId?: string;
     isMySession: boolean;
     isPast: boolean;
+    isCancelled?: boolean;
     isBackground?: boolean;
 }
 
@@ -243,6 +249,8 @@ export default function StudentSchedule() {
     const [breakBetweenLessons, setBreakBetweenLessons] = useState(0);
     const [isMySessionModalOpen, setIsMySessionModalOpen] = useState(false);
     const [mySessionData, setMySessionData] = useState<ExistingSession | null>(null);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
     const [waitlistCount, setWaitlistCount] = useState(0);
     const [availableSlots, setAvailableSlots] = useState<Date[]>([]);
     const [selectedTime, setSelectedTime] = useState<Date | null>(null);
@@ -468,7 +476,18 @@ export default function StudentSchedule() {
         };
 
         existingSessions.forEach(s => {
-            if (s.status !== 'cancelled') {
+            if (s.status === 'cancelled') {
+                generatedEvents.push({
+                    start: new Date(s.start_time),
+                    end: new Date(s.end_time),
+                    title: `${s.subjects?.name || s.topic || t('common.lesson')} · ${t('status.cancelled')}`,
+                    occupied: false,
+                    sessionId: s.id,
+                    isMySession: true,
+                    isPast: isBefore(new Date(s.start_time), now),
+                    isCancelled: true,
+                });
+            } else {
                 const isGroup = s.subjects?.is_group === true;
                 const classGroupName = classGroupDisplayName(s.class_group_id, classGroupMeta);
                 addOccupiedEvent(
@@ -1068,6 +1087,7 @@ export default function StudentSchedule() {
         startDate: Date,
         endDate: Date,
         scope?: {
+            force?: boolean;
             studentId?: string;
             sessionStudentIds?: string[];
             tutorId?: string;
@@ -1077,7 +1097,7 @@ export default function StudentSchedule() {
         },
     ) => {
         // Don't fetch if already loaded
-        if (isRangeLoaded(startDate, endDate)) {
+        if (!scope?.force && isRangeLoaded(startDate, endDate)) {
             return;
         }
 
@@ -1195,6 +1215,37 @@ export default function StudentSchedule() {
         await fetchInitialData();
     };
 
+    const openDeleteSession = () => {
+        if (!canFamilyDeleteSession(mySessionData)) return;
+        setIsMySessionModalOpen(false);
+        setIsDeleteModalOpen(true);
+    };
+
+    const handleDeleteSession = async (scope: SessionDeleteScope) => {
+        if (!mySessionData || !canFamilyDeleteSession(mySessionData) || deleting) return;
+        setDeleting(true);
+        try {
+            const result = await deleteSessionViaApi(mySessionData.id, scope);
+            const deletedIds = new Set(result.deletedSessionIds ?? [mySessionData.id]);
+            setExistingSessions((previous) => previous.filter((session) => !deletedIds.has(session.id)));
+            invalidateCache('student_sessions');
+            invalidateCache('student_dashboard');
+            invalidateCache('parent_lessons_');
+            invalidateCache('parent_dashboard');
+            setIsDeleteModalOpen(false);
+            setMySessionData(null);
+            await fetchInitialData();
+            // Refresh the visible range as well as the initial range; the user
+            // may be cleaning up a series several months into the school year.
+            await fetchDateRange(startOfMonth(currentDate), endOfMonth(currentDate), { force: true });
+        } catch (error) {
+            console.error('[StudentSchedule] delete lesson:', error);
+            alert(t('cal.deleteFailed'));
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     const lessonCreditBreakdown = (lessonPrice: number | null | undefined) => {
         const p = Math.max(0, Number(lessonPrice) || 0);
         const creditApplied = Math.min(creditBalance, p);
@@ -1270,7 +1321,7 @@ export default function StudentSchedule() {
         }
 
         // 2. Is start inside any occupied event?
-        const insideOccupied = events.find(e => start >= e.start && start < e.end);
+        const insideOccupied = events.find(e => e.occupied && start >= e.start && start < e.end);
         if (insideOccupied) {
             return; // Let handleSelectEvent catch it or ignore
         }
@@ -1902,6 +1953,9 @@ export default function StudentSchedule() {
         if (event.isBackground) {
             return { style: { backgroundColor: '#d1fae5', opacity: 0.5, border: 'none', color: '#065f46', fontSize: '12px' } };
         }
+        if (event.isCancelled) {
+            return { style: { backgroundColor: '#fef2f2', border: '1px dashed #fca5a5', borderRadius: '6px', color: '#991b1b', fontWeight: 600, fontSize: '13px', opacity: 0.7 } };
+        }
 
         let backgroundColor = '#9ca3af'; // Occupied (Gray)
         let opacity = 0.8;
@@ -1958,12 +2012,7 @@ export default function StudentSchedule() {
         return new Date(0, 0, 0, h, m, 0);
     }, [availability]);
 
-    const RoleLayout = ({ children: layoutChildren }: { children: ReactNode }) => {
-        if (isParentRoute) {
-            return <ParentLayout>{layoutChildren}</ParentLayout>;
-        }
-        return <StudentLayout>{layoutChildren}</StudentLayout>;
-    };
+    const RoleLayout = isParentRoute ? ParentLayout : StudentLayout;
 
     const showPerLessonPayment = shouldShowPerLessonPaymentUi(
         studentPaymentModel,
@@ -2426,6 +2475,7 @@ export default function StudentSchedule() {
                     <ParentLessonDetailModal
                         open={isMySessionModalOpen}
                         onOpenChange={setIsMySessionModalOpen}
+                        onDelete={mySessionData && canFamilyDeleteSession(mySessionData) ? openDeleteSession : undefined}
                         stripePayerEmail={studentPayerEmail ?? ''}
                         session={
                             mySessionData
@@ -2675,6 +2725,12 @@ export default function StudentSchedule() {
                             )}
                         </div>
                         <DialogFooter>
+                            {mySessionData && canFamilyDeleteSession(mySessionData) && (
+                                <Button variant="destructive" onClick={openDeleteSession} className="rounded-xl gap-2">
+                                    <Trash2 className="w-4 h-4" />
+                                    {t('cal.deleteSession')}
+                                </Button>
+                            )}
                             <Button variant="outline" onClick={() => { setIsMySessionModalOpen(false); navigate(parentSessionsPath); }} className="rounded-xl">
                                 {t('stuSched.viewAll')}
                             </Button>
@@ -2682,6 +2738,15 @@ export default function StudentSchedule() {
                     </DialogContent>
                 </Dialog>
                 )}
+
+                <DeleteSessionDialog
+                    open={isDeleteModalOpen}
+                    onOpenChange={setIsDeleteModalOpen}
+                    recurring={isRecurringSession(mySessionData)}
+                    familyOnlyCancelled
+                    busy={deleting}
+                    onDelete={(scope) => void handleDeleteSession(scope)}
+                />
 
             </RoleLayout>
 

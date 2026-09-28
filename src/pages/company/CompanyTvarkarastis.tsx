@@ -203,7 +203,9 @@ import {
 } from '@/lib/orgSessionSubjectDefaults';
 import { parseTrialLessonPricing, trialPricingCopy } from '@/lib/trialLessonPricing';
 import { enrichSessionMeetingLink } from '@/lib/meetingLink';
-import { canDeleteIndividualOrgSession } from '@/lib/orgSessionDeletion';
+import { canDeleteOrgSession } from '@/lib/orgSessionDeletion';
+import { DeleteSessionDialog } from '@/components/DeleteSessionDialog';
+import { deleteSessionViaApi, isRecurringSession, type SessionDeleteScope } from '@/lib/sessionDeletion';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 import { useUser } from '@/contexts/UserContext';
 import {
@@ -2587,7 +2589,7 @@ export default function CompanyTvarkarastis() {
   const selectedEventSubject = selectedEvent?.subject_id
     ? subjects.find((subject) => subject.id === selectedEvent.subject_id)
     : undefined;
-  const canDeleteSelectedEvent = canDeleteIndividualOrgSession(
+  const canDeleteSelectedEvent = canDeleteOrgSession(
     selectedEvent
       ? {
           classGroupId: selectedEvent.class_group_id,
@@ -2676,34 +2678,22 @@ export default function CompanyTvarkarastis() {
     setSaving(false);
   };
 
-  const hardDeleteScheduleSession = async (sessionId: string, deleteScope: 'single' | 'future' = 'single') => {
-    const headers = await authHeaders();
-    const resp = await fetch('/api/delete-session', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ sessionId, deleteScope }),
-    });
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      throw new Error(text || t('cal.deleteFailed'));
-    }
-  };
+  const hardDeleteScheduleSession = (sessionId: string, deleteScope: SessionDeleteScope = 'single') =>
+    deleteSessionViaApi(sessionId, deleteScope, { groupScope: isClassGroupSession ? 'whole_occurrence' : 'one_student' });
 
-  const hardDeleteScheduleSessionWithApproval = async (deleteScope: 'single' | 'future') => {
-    if (!selectedEvent) return;
+  const hardDeleteScheduleSessionWithApproval = async (deleteScope: SessionDeleteScope) => {
+    if (!selectedEvent || saving || !canDeleteSelectedEvent) return;
     const targetSessionId = selectedEvent.id;
-    const msg =
-      deleteScope === 'future' ? t('cal.deleteConfirmFuture') : t('cal.deleteConfirmSingle');
-    if (!confirm(msg)) return;
 
     setSaving(true);
     setIsDeleteRecurringDialogOpen(false);
     setIsEventDetailOpen(false);
     setSelectedEvent(null);
-    setSessions((prev) => prev.filter((s) => s.id !== targetSessionId));
 
     try {
-      await hardDeleteScheduleSession(targetSessionId, deleteScope);
+      const result = await hardDeleteScheduleSession(targetSessionId, deleteScope);
+      const deletedIds = new Set(result.deletedSessionIds);
+      setSessions((prev) => prev.filter((session) => !deletedIds.has(session.id)));
       fetchData();
     } catch (e: any) {
       alert(e?.message || t('cal.deleteFailed'));
@@ -2714,12 +2704,8 @@ export default function CompanyTvarkarastis() {
   };
 
   const handleHardDeleteScheduleSession = () => {
-    if (!selectedEvent) return;
-    if (selectedEvent.recurring_session_id) {
-      setIsDeleteRecurringDialogOpen(true);
-      return;
-    }
-    void hardDeleteScheduleSessionWithApproval('single');
+    if (!selectedEvent || saving || !canDeleteSelectedEvent) return;
+    setIsDeleteRecurringDialogOpen(true);
   };
 
   const handleSaveAvailability = async () => {
@@ -4844,21 +4830,10 @@ export default function CompanyTvarkarastis() {
                     </Button>
                   )}
 
-                  {canDeleteSelectedEvent && (
-                    <Button
-                      variant="outline"
-                      className="w-full rounded-xl border-red-200 text-red-700 hover:bg-red-50"
-                      disabled={saving}
-                      onClick={() => void handleHardDeleteScheduleSession()}
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      {t('cal.deleteSession')}
-                    </Button>
-                  )}
                 </div>
               )}
 
-              {isSchoolOrgView && !cancelConfirmOpen && canDeleteSelectedEvent && (
+              {!cancelConfirmOpen && canDeleteSelectedEvent && (
                 <Button
                   variant="outline"
                   className="w-full rounded-xl border-red-200 text-red-700 hover:bg-red-50"
@@ -5557,45 +5532,14 @@ export default function CompanyTvarkarastis() {
         onConfirm={(w) => void confirmMarkStudentNoShowSchedule(w)}
       />
 
-      <Dialog open={isDeleteRecurringDialogOpen} onOpenChange={setIsDeleteRecurringDialogOpen}>
-        <DialogContent className="w-[95vw] sm:max-w-[440px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Trash2 className="w-5 h-5 text-red-600" />
-              {t('cal.deleteRecurringTitle')}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="text-sm text-gray-600 space-y-2">
-            <p>{t('cal.deleteChoose')}</p>
-            <p className="text-xs text-gray-500">{t('cal.deleteHint')}</p>
-          </div>
-          <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-            <Button
-              variant="outline"
-              onClick={() => setIsDeleteRecurringDialogOpen(false)}
-              className="rounded-xl"
-              disabled={saving}
-            >
-              {t('cal.cancelBtn')}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => void hardDeleteScheduleSessionWithApproval('single')}
-              className="rounded-xl border-red-200 text-red-700 hover:bg-red-50"
-              disabled={saving}
-            >
-              {t('cal.deleteOnlyThis')}
-            </Button>
-            <Button
-              onClick={() => void hardDeleteScheduleSessionWithApproval('future')}
-              className="rounded-xl bg-red-600 hover:bg-red-700 text-white"
-              disabled={saving}
-            >
-              {t('cal.deleteThisAndFuture')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteSessionDialog
+        open={isDeleteRecurringDialogOpen}
+        onOpenChange={setIsDeleteRecurringDialogOpen}
+        recurring={isRecurringSession(selectedEvent)}
+        wholeGroup={isClassGroupSession}
+        busy={saving}
+        onDelete={hardDeleteScheduleSessionWithApproval}
+      />
 
       <AssignStudentFreeSlotDialog
         open={findLessonBook !== null}

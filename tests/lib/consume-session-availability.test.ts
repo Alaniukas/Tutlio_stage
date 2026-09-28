@@ -3,6 +3,8 @@ import {
   consumeAvailabilityForCreatedSessions,
   consumeSessionSlotAvailability,
 } from '@/lib/consumeSessionAvailability';
+import { sliceTimeRangeBySessions } from '@/lib/availabilityCalendarBlocks';
+import { computeTutorSlots } from '@/lib/tutorMatching';
 
 type Row = Record<string, unknown>;
 
@@ -68,7 +70,7 @@ describe('consumeSessionSlotAvailability', () => {
     vi.restoreAllMocks();
   });
 
-  it('shortens a one-time availability block after a lesson at the start', async () => {
+  it('keeps a one-time availability block after a lesson at the start', async () => {
     const { supabase, state } = mockSupabase([
       {
         id: 'a1',
@@ -88,8 +90,41 @@ describe('consumeSessionSlotAvailability', () => {
     });
 
     expect(state.rows).toHaveLength(1);
-    expect(state.rows[0].start_time).toBe('12:45');
+    expect(state.rows[0].start_time).toBe('12:00');
     expect(state.rows[0].end_time).toBe('13:00');
+  });
+
+  it('preserves a fully booked source and reveals it unchanged when the lesson is deleted', async () => {
+    const original = {
+      id: 'a1', tutor_id: 't1', is_recurring: false,
+      specific_date: '2026-05-21', day_of_week: null,
+      start_time: '12:00', end_time: '13:00',
+      subject_ids: ['subject1', 'subject2'],
+      meeting_link: 'https://meet.example/original',
+      public_bookable: true,
+    };
+    const { supabase, state } = mockSupabase([original]);
+    const booked = {
+      start_time: '2026-05-21T09:00:00.000Z',
+      end_time: '2026-05-21T10:00:00.000Z',
+      status: 'active',
+    };
+    await consumeSessionSlotAvailability(supabase as never, {
+      tutorId: 't1', startTime: booked.start_time, endTime: booked.end_time,
+    });
+    expect(state.rows).toEqual([original]);
+
+    const block = { start: new Date(booked.start_time), end: new Date(booked.end_time) };
+    expect(sliceTimeRangeBySessions(block, [booked])).toEqual([]);
+    expect(sliceTimeRangeBySessions(block, [])).toEqual([block]);
+    expect(sliceTimeRangeBySessions(block, [{ ...booked, status: 'cancelled' }])).toEqual([block]);
+
+    const params = { dateFrom: '2026-05-21', dateTo: '2026-05-21', timeFrom: '12:00', timeTo: '13:00' };
+    const subjects = ['subject1', 'subject2'].map((id) => ({ id, tutor_id: 't1', name: id, price: 10, duration_minutes: 60 }));
+    const busy = [{ tutor_id: 't1', start: new Date(2026, 4, 21, 12), end: new Date(2026, 4, 21, 13) }];
+    expect(computeTutorSlots(state.rows as never, busy, subjects, { t1: 'Teacher' }, params)).toEqual([]);
+    expect(computeTutorSlots(state.rows as never, [], subjects, { t1: 'Teacher' }, params).map((slot) => slot.subjectId))
+      .toEqual(['subject1', 'subject2']);
   });
 
   it('adds a date-specific remainder row for recurring availability', async () => {
@@ -140,6 +175,7 @@ describe('consumeSessionSlotAvailability', () => {
     ]);
 
     expect(state.selectCalls).toBe(1);
-    expect(state.rows).toHaveLength(3);
+    expect(state.rows).toHaveLength(1);
+    expect(state.rows[0]).toMatchObject({ start_time: '08:00', end_time: '18:00' });
   });
 });

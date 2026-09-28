@@ -10,6 +10,7 @@ const CACHE_KEY = 'parent_school_org';
 export type ParentSchoolOrgState = {
   hasSchoolOrg: boolean;
   lessonRecordingsEnabled: boolean;
+  familyPortalEnabled?: boolean;
   /** Union of the school orgs' wording flags; `null` while unresolved or when no school org. */
   terminology: SchoolTerminology | null;
 };
@@ -81,6 +82,7 @@ export function useParentSchoolOrg(): ParentSchoolOrgState {
       finish({
         hasSchoolOrg: true,
         lessonRecordingsEnabled: schools.some((school) => school.features?.school_lesson_recordings === true),
+        familyPortalEnabled: schools.some((school) => school.features?.school_family_portal === true),
         terminology,
       });
     })();

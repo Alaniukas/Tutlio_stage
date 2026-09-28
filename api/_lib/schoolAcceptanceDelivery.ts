@@ -26,8 +26,10 @@ export async function deliverAcceptanceOnce(params: {
   }
   if (row.sent_at) return { id: row.provider_message_id, alreadySent: true };
   // Resend deduplicates for 24h. Do not blindly duplicate an uncertain delivery after that window.
+  // The reservation uses the DB clock, which can be slightly ahead of the application clock.
+  const clockSkewToleranceMs = 60_000;
   const age = Date.now() - Date.parse(row.attempted_at);
-  if (!Number.isFinite(age) || age < 0 || age >= 23 * 3600000) return { error: 'Delivery outcome requires review' };
+  if (!Number.isFinite(age) || age < -clockSkewToleranceMs || age >= 23 * 3600000) return { error: 'Delivery outcome requires review' };
   const result = await params.send(row.payload, key);
   if (result.error || !result.id) return { error: result.error || 'Provider did not confirm delivery' };
   const saved = await db.from('school_acceptance_deliveries').update({ sent_at: new Date().toISOString(), provider_message_id: result.id }).eq('id', key);

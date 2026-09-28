@@ -1,8 +1,9 @@
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { deliverAcceptanceOnce, validAcceptanceDeliveryKey } from '../../api/_lib/schoolAcceptanceDelivery';
 const jobId = '00000000-0000-4000-8000-000000000001';
 const key = `school-acceptance/${jobId}/confirmation`;
-function database() {
+afterEach(() => vi.restoreAllMocks());
+function database(attemptedAt?: string) {
   let row: any = null;
   let failStamp = false;
   const db: any = { from: (table: string) => {
@@ -10,7 +11,7 @@ function database() {
     const q: any = {
       select: () => q, eq: () => q,
       maybeSingle: async () => ({ data: table === 'school_acceptance_jobs' ? { finalized_at: 'today' } : row }),
-      insert: (payload: any) => { row = { ...payload, attempted_at: new Date().toISOString() }; return q; },
+      insert: (payload: any) => { row = { ...payload, attempted_at: attemptedAt ?? new Date().toISOString() }; return q; },
       single: async () => ({ data: row }),
       update: (payload: any) => { update = payload; return q; },
       then: (resolve: any) => { if (!failStamp) row = { ...row, ...update }; resolve({ error: failStamp ? { message: 'DB offline' } : null }); },
@@ -39,6 +40,50 @@ it('does not duplicate uncertain mail after the provider deduplication window', 
   state.age();
   expect((await deliverAcceptanceOnce(params)).error).toContain('requires review');
   expect(send).toHaveBeenCalledOnce();
+});
+
+it.each([288, 60_000])('allows a new DB reservation %i ms ahead of the application clock', async (futureMs) => {
+  const now = Date.parse('2026-09-28T16:04:01.022Z');
+  vi.spyOn(Date, 'now').mockReturnValue(now);
+  const state = database(new Date(now + futureMs).toISOString());
+  const send = vi.fn(async () => ({ id: 'provider-id' }));
+  const payload = { html: 'frozen confirmation' };
+  expect(await deliverAcceptanceOnce({ db: state.db, jobId, organizationId: 'org', key, payload, send }))
+    .toEqual({ id: 'provider-id' });
+  expect(send).toHaveBeenCalledExactlyOnceWith(payload, key);
+});
+
+it.each([60_001, 5 * 60_000])('requires review for a DB reservation %i ms in the future', async (futureMs) => {
+  const now = Date.parse('2026-09-28T16:04:01.022Z');
+  vi.spyOn(Date, 'now').mockReturnValue(now);
+  const state = database(new Date(now + futureMs).toISOString());
+  const send = vi.fn(async () => ({ id: 'provider-id' }));
+  expect(await deliverAcceptanceOnce({ db: state.db, jobId, organizationId: 'org', key, payload: {}, send }))
+    .toEqual({ error: 'Delivery outcome requires review' });
+  expect(send).not.toHaveBeenCalled();
+});
+
+it('requires review for an invalid reservation date', async () => {
+  const state = database('not-a-date');
+  const send = vi.fn(async () => ({ id: 'provider-id' }));
+  expect(await deliverAcceptanceOnce({ db: state.db, jobId, organizationId: 'org', key, payload: {}, send }))
+    .toEqual({ error: 'Delivery outcome requires review' });
+  expect(send).not.toHaveBeenCalled();
+});
+
+it.each([23 * 3_600_000 - 1, 23 * 3_600_000])('retains the 23-hour cutoff for reservation age %i ms', async (ageMs) => {
+  const now = Date.parse('2026-09-28T16:04:01.022Z');
+  vi.spyOn(Date, 'now').mockReturnValue(now);
+  const state = database(new Date(now - ageMs).toISOString());
+  const send = vi.fn(async () => ({ id: 'provider-id' }));
+  const result = await deliverAcceptanceOnce({ db: state.db, jobId, organizationId: 'org', key, payload: {}, send });
+  if (ageMs < 23 * 3_600_000) {
+    expect(result).toEqual({ id: 'provider-id' });
+    expect(send).toHaveBeenCalledOnce();
+  } else {
+    expect(result).toEqual({ error: 'Delivery outcome requires review' });
+    expect(send).not.toHaveBeenCalled();
+  }
 });
 
 it('restricts provider keys to the correct job and email type', () => {

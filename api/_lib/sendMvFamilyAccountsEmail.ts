@@ -84,6 +84,7 @@ export async function sendMvAccountActivationEmail(
   to: string,
   data: MvAccountActivationEmailData,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (process.env.TUTLIO_DEV_SUPPRESS_EMAIL === '1') return { ok: false, error: 'email_suppressed_for_qa' };
   const apiKey = getResendApiKey();
   if (!apiKey) {
     return { ok: false, error: resendNotConfiguredMessage() };

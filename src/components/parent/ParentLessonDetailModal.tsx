@@ -10,6 +10,7 @@ import {
   Phone,
   Play,
   ShieldAlert,
+  Trash2,
   Users,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -89,6 +90,7 @@ export function ParentLessonDetailModal({
   dateFnsLocale,
   stripePayerEmail,
   perlasEnabled,
+  onDelete,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -103,6 +105,8 @@ export function ParentLessonDetailModal({
   /** Prefer parent login email so Stripe Checkout matches payer; fallback is student payer_email server-side */
   stripePayerEmail?: string | null;
   perlasEnabled?: boolean;
+  /** Cleanup action for a cancelled lesson, when supplied by the owning page. */
+  onDelete?: () => void;
 }) {
   const headline =
     session?.classGroupName ||
@@ -471,6 +475,17 @@ export function ParentLessonDetailModal({
               </div>
               )
             )}
+
+          {session.status === 'cancelled' && onDelete && (
+            <Button
+              variant="destructive"
+              onClick={onDelete}
+              className="w-full rounded-xl gap-2"
+            >
+              <Trash2 className="w-4 h-4" />
+              {t('cal.deleteSession')}
+            </Button>
+          )}
 
           {childId && (
             <Button

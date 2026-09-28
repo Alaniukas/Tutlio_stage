@@ -134,6 +134,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 group.sourceId,
                 access.studentIds || [],
                 access.adminOrganizationId === group.organizationId || group.tutorId === auth.userId,
+                { organizationId: group.organizationId, features: group.features },
               ),
               recordingSlotTags(supabase, group.sourceId),
               canManageGroup

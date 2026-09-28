@@ -6,6 +6,9 @@ import { appOrigin, internalApiOrigin } from './_lib/extraLessonsContractShared.
 import {
   newSchoolDiscountAgreementNumber,
   newSchoolDiscountToken,
+  ensureSchoolDiscountProposalPdf,
+  isSchoolDiscountContractEligible,
+  schoolDiscountContractLinks,
   schoolDiscountAcceptUrl,
   signSchoolDiscountPdf,
   schoolDiscountTokenHash,
@@ -16,6 +19,7 @@ import {
 } from '../src/lib/schoolDiscountAgreement.js';
 import { snapshotFromRow } from './_lib/extraLessonsContractShared.js';
 import type { ExtraLessonsOrderSnapshot } from '../src/lib/extraLessonsContract.js';
+import { SCHOOL_CONTRACTS_BUCKET, extractSchoolContractStoragePath, sanitizeContractNumberForFilename } from './_lib/schoolContractPdfPath.js';
 
 type ActivityOption = {
   subjectId: string | null;
@@ -44,7 +48,7 @@ async function loadAgreementHistory(
     validUntil: row.valid_until,
     status: row.status,
     acceptedAt: row.accepted_at,
-    pdfUrl: row.status === 'accepted' ? await signSchoolDiscountPdf(supabase, row.pdf_path) : null,
+    pdfUrl: await signSchoolDiscountPdf(supabase, row.pdf_path),
   })));
 }
 
@@ -101,7 +105,20 @@ async function loadStudentActivities(
     activities.set(activityKey(option.subjectId, option.tutorId), option);
   }
   const first = activities.values().next().value as ActivityOption | undefined;
-  return first ? [{ ...first, label: String(order.service_name || first.label) }] : [];
+  if (first) return [{ ...first, label: String(order.service_name || first.label) }];
+  // Before acceptance there may be no lessons or recurring series yet.
+  if (order.service_type === 'individual' && order.subject_id) {
+    const { data: subject } = await supabase.from('subjects')
+      .select('id, name, tutor_id').eq('id', order.subject_id).maybeSingle();
+    if (subject?.tutor_id) {
+      const { data: tutor } = await supabase.from('profiles')
+        .select('id, full_name').eq('id', subject.tutor_id)
+        .eq('organization_id', organizationId).maybeSingle();
+      if (tutor) return [{ subjectId: String(subject.id), tutorId: String(tutor.id),
+        label: String(order.service_name || `${subject.name || 'Užsiėmimas'} - ${tutor.full_name || 'mokytojas'}`) }];
+    }
+  }
+  return [];
 }
 
 async function sendOfferEmail(req: VercelRequest, params: {
@@ -119,7 +136,11 @@ async function sendOfferEmail(req: VercelRequest, params: {
   validUntil: string;
   note?: string | null;
   acceptUrl: string;
-}): Promise<{ ok: boolean; error: string | null }> {
+  contractAccepted: boolean;
+  contractAcceptUrl: string | null;
+  contractPdfUrl: string | null;
+  pdfUrl: string | null;
+}, attachments: Array<{ filename: string; content: string }> = []): Promise<{ ok: boolean; error: string | null }> {
   try {
     const response = await fetch(`${internalApiOrigin(req)}/api/send-email`, {
       method: 'POST',
@@ -130,7 +151,8 @@ async function sendOfferEmail(req: VercelRequest, params: {
       body: JSON.stringify({
         type: 'school_discount_offer',
         to: params.to,
-        data: params,
+        data: { ...params, documentsAttached: attachments.length > 0 },
+        attachments,
       }),
     });
     const body = await response.text();
@@ -155,7 +177,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const studentId = String(body.studentId || '').trim();
   const requestedContractId = String(body.contractId || '').trim();
   if (!studentId) return res.status(400).json({ error: 'Pasirinkite mokinį.' });
-  if (!requestedContractId) return res.status(400).json({ error: 'Pasirinkite pasirašytą užsiėmimų sutartį.' });
+  if (!requestedContractId) return res.status(400).json({ error: 'Pasirinkite užsiėmimų sutartį.' });
   const [{ data: student }, { data: org }] = await Promise.all([
     supabase.from('students')
       .select('id, organization_id, full_name, payer_name, payer_email, email')
@@ -167,25 +189,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!student || !org) return res.status(404).json({ error: 'Mokinys arba mokykla nerasta.' });
 
   const { data: contract } = await supabase.from('school_contracts')
-    .select('id, contract_number, class_group_id, order_snapshot')
+    .select('id, contract_number, class_group_id, order_snapshot, kind, signing_status, accepted_at, archived_at, terminated_at, withdrawal_requested_at, pdf_url, signed_contract_url')
     .eq('id', requestedContractId)
     .eq('organization_id', organizationId)
     .eq('student_id', studentId)
     .eq('kind', 'extra_lessons')
-    .eq('signing_status', 'signed')
-    .not('accepted_at', 'is', null)
     .is('archived_at', null)
     .is('terminated_at', null)
     .is('withdrawal_requested_at', null)
     .maybeSingle();
-  if (!contract) return res.status(409).json({ error: 'Mokinys neturi aktyvios pasirašytos užsiėmimų sutarties.' });
+  if (!contract || !isSchoolDiscountContractEligible(contract)) {
+    return res.status(409).json({ error: 'Nuolaidos priedą galima sudaryti išsiųstai arba patvirtintai aktyviai užsiėmimų sutarčiai.' });
+  }
 
   if (body.action === 'options') {
     const [activities, agreements] = await Promise.all([
       loadStudentActivities(supabase, organizationId, studentId, contract),
       loadAgreementHistory(supabase, organizationId, contract.id),
     ]);
-    return res.status(200).json({ ok: true, activities, agreements });
+    return res.status(200).json({
+      ok: true, activities, agreements,
+      contractAccepted: contract.signing_status === 'signed' && Boolean(contract.accepted_at),
+    });
   }
   if (body.action !== 'create') return res.status(400).json({ error: 'Nežinomas veiksmas.' });
 
@@ -206,15 +231,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const recipientEmail = String(student.payer_email || student.email || '').trim();
     if (!recipientEmail) throw new Error('Mokiniui nėra nurodytas mokėtojo el. paštas.');
 
-    let pending = supabase.from('school_discount_agreements')
-      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-      .eq('organization_id', organizationId)
-      .eq('student_id', studentId)
-      .eq('contract_id', contract.id)
-      .eq('status', 'pending');
-    pending = input.subjectId ? pending.eq('subject_id', input.subjectId) : pending.is('subject_id', null);
-    pending = input.tutorId ? pending.eq('tutor_id', input.tutorId) : pending.is('tutor_id', null);
-    await pending;
+    let contractLinks;
+    try {
+      contractLinks = await schoolDiscountContractLinks(supabase, contract, appOrigin(req));
+    } catch {
+      return res.status(503).json({ error: 'Nepavyko paruošti užsiėmimų sutarties PDF. Laiškas neišsiųstas.', emailSent: false });
+    }
 
     const token = newSchoolDiscountToken();
     const agreementNumber = newSchoolDiscountAgreementNumber();
@@ -237,8 +259,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       acceptance_token_hash: schoolDiscountTokenHash(token),
       token_expires_at: tokenExpiresAt,
       created_by: access.access.userId,
-    }).select('id, agreement_number').single();
+    }).select('*').single();
     if (insertError || !agreement) throw new Error(insertError?.message || 'Nepavyko išsaugoti nuolaidos pasiūlymo.');
+
+    let proposal;
+    let attachments: Array<{ filename: string; content: string }>;
+    try {
+      proposal = await ensureSchoolDiscountProposalPdf(supabase, agreement, contract, student, org);
+      const documents = [{
+        path: proposal.pdfPath,
+        filename: `Nuolaidos-priedas-${sanitizeContractNumberForFilename(agreementNumber)}.pdf`,
+      }];
+      if (!contractLinks.contractAccepted) documents.unshift({
+        path: extractSchoolContractStoragePath(contract.pdf_url),
+        filename: `Sutartis-${sanitizeContractNumberForFilename(contract.contract_number || contract.id)}.pdf`,
+      });
+      attachments = await Promise.all(documents.map(async ({ path, filename }) => {
+        const { data: file, error } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).download(path);
+        if (error || !file) throw error || new Error('PDF download failed');
+        return { filename, content: Buffer.from(await file.arrayBuffer()).toString('base64') };
+      }));
+    } catch (error) {
+      await supabase.from('school_discount_agreements').update({
+        status: 'cancelled',
+        email_error: error instanceof Error ? error.message : 'PDF generation failed',
+        updated_at: new Date().toISOString(),
+      }).eq('id', agreement.id).eq('status', 'pending');
+      return res.status(503).json({
+        error: 'Nepavyko paruošti nuolaidos priedo PDF. Laiškas neišsiųstas. Bandykite dar kartą.',
+        agreementId: agreement.id,
+        emailSent: false,
+      });
+    }
+
+    // Keep the previous parent link valid until the replacement PDF is ready.
+    let pending = supabase.from('school_discount_agreements')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('organization_id', organizationId)
+      .eq('student_id', studentId)
+      .eq('contract_id', contract.id)
+      .eq('status', 'pending').neq('id', agreement.id);
+    pending = input.subjectId ? pending.eq('subject_id', input.subjectId) : pending.is('subject_id', null);
+    pending = input.tutorId ? pending.eq('tutor_id', input.tutorId) : pending.is('tutor_id', null);
+    const { error: replacementError } = await pending;
+    if (replacementError) {
+      await supabase.from('school_discount_agreements').update({
+        status: 'cancelled', email_error: replacementError.message, updated_at: new Date().toISOString(),
+      }).eq('id', agreement.id).eq('status', 'pending');
+      return res.status(503).json({ error: 'Nepavyko pakeisti nuolaidos pasiūlymo. Laiškas neišsiųstas.', emailSent: false });
+    }
 
     const acceptUrl = schoolDiscountAcceptUrl(appOrigin(req), token);
     const delivery = await sendOfferEmail(req, {
@@ -256,7 +325,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       validUntil: input.validUntil,
       note: input.note,
       acceptUrl,
-    });
+      ...contractLinks,
+      // Personal links stay usable; PDF copies are attached instead of expiring URLs.
+      contractPdfUrl: null,
+      pdfUrl: null,
+    }, attachments);
     await supabase.from('school_discount_agreements').update({
       sent_at: delivery.ok ? new Date().toISOString() : null,
       email_error: delivery.error,
@@ -270,6 +343,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       emailSent: delivery.ok,
       emailTo: recipientEmail,
       emailError: delivery.error,
+      ...contractLinks,
+      pdfUrl: proposal.pdfUrl,
     });
   } catch (error) {
     return res.status(400).json({ error: error instanceof Error ? error.message : 'Nepavyko suteikti nuolaidos.' });

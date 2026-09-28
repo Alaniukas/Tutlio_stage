@@ -1,7 +1,24 @@
+import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolConsultationsEn } from './schoolConsultationsTranslations.js';
+import { schoolInvoiceReviewEn } from './schoolInvoiceReviewTranslations.js';
 
 export const en: Record<string, string> = {
+  ...schoolFamilyMaterialTranslations.en,
+  ...schoolInvoiceReviewEn,
+  'school.recordings.access.title': 'Recording access',
+  'school.recordings.access.scopeHelp': 'Remove or restore a student’s or parent’s access in this school. Accounts, child links and payment details are preserved.',
+  'school.recordings.access.legacyHelp': 'Applies when signed in. Existing shared child links that work without signing in remain active.',
+  'school.recordings.access.email': 'Person’s email',
+  'school.recordings.access.revoke': 'Remove access',
+  'school.recordings.access.restore': 'Restore access',
+  'school.recordings.access.empty': 'No recording access has been removed.',
+  'school.recordings.access.failed': 'Could not update or load access settings.',
+  'school.recordings.access.invalidEmail': 'Enter a valid email address.',
+  'school.recordings.access.personNotInSchool': 'This person is not linked to a student in this school.',
+  'school.recordings.access.setupRequired': 'The access management database migration has not been applied.',
+  'school.recordings.access.revoked': 'Recording access removed.',
+  'school.recordings.access.restored': 'Recording access restored.',
   'parent.childAlreadyExists': 'This child is already in your list. You do not need another entry. Use the existing child card to create their account.',
   'login.emailOrUsername': 'Email or student username',
   'login.resetIdentifierDesc': 'Enter your email or student username. For children without email, the reset link is sent to their parent.',
@@ -738,6 +755,11 @@ export const en: Record<string, string> = {
   'cal.deleteFromCalendar': 'Delete from calendar',
   'cal.deleteRecurringTitle': 'Delete recurring lesson',
   'cal.deleteChoose': 'Choose what you want to delete.',
+  "cal.deleteAllRemaining": "All remaining lessons in this series",
+  "cal.deleteAllRemainingHint": "Removes future planned and cancelled lessons in this series. Completed lesson history is kept.",
+  "cal.deleteConfirmAll": "Delete all remaining planned and cancelled lessons in this series? Completed lesson history is kept.",
+  "cal.deleteGroupHint": "For a class group, the selection applies to all its students.",
+  "cal.deleteCancelledOnlyHint": "Only your or your child's cancelled lessons within the chosen scope are deleted.",
   'cal.deleteHint': 'You will confirm the action after choosing.',
   'cal.deleteOnlyThis': 'Only this one',
   'cal.deleteThisAndFuture': 'This and all future',
@@ -6200,6 +6222,9 @@ export const en: Record<string, string> = {
   'school.groups.editTitle': "Edit group",
   'school.groups.platform': "Platform",
   'school.groups.duration': "Duration (min)",
+  'school.groups.minimumActiveStudents': 'Minimum active students',
+  'school.groups.minimumActiveStudentsHint': 'This group and its contracts pause automatically when fewer active students remain.',
+  'school.groups.suspendedMinimum': 'Paused: fewer than {n} active students in the group',
   'school.groups.meetingLink': "Meeting link",
   'school.groups.slots': "Weekly schedule",
   'school.groups.addSlot': "Add a day",
@@ -6475,4 +6500,7 @@ export const en: Record<string, string> = {
   'compare.customChip2': 'Tutor pay rules',
   'compare.customChip3': 'Parent acceptance links',
   'compare.customChip4': 'Branded portals',
+  'em.schoolJoinSubject': 'Join your lesson on {date} at {time}',
+  'em.schoolJoinHeader': 'Join your lesson',
+  'em.schoolJoinBody': 'Your lesson starts on {date} at {time}. Use the join link below.',
 };

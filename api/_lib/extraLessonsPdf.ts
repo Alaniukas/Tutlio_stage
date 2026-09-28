@@ -77,12 +77,22 @@ function extraLessonsDocxPayload(params: {
   extraLessonsPayload?: Record<string, string>;
   contractNumber?: string | null;
 }): Record<string, string | boolean> {
+  // An offer's preparation date is not evidence of the parent's acceptance.
+  const extraLessonsPayload = params.extraLessonsPayload
+    ? {
+      ...params.extraLessonsPayload,
+      ...(params.extraLessonsPayload.sutikimo_su_salygomis_busena === 'TAIP' ? {} : {
+        data_laikas_Europe_Vilnius: '—',
+        data: '—',
+      }),
+    }
+    : undefined;
   return buildSchoolContractTemplatePayload({
     contractNumber: params.contractNumber,
     annualFee: params.indicativeMonthlyEur,
     schoolName: params.extraLessonsPayload?.school_name,
     student: params.student,
-    extraLessonsPayload: params.extraLessonsPayload,
+    extraLessonsPayload,
   });
 }
 

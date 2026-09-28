@@ -27,7 +27,7 @@ export async function deliverSchoolMonthlyInvoiceOnce(params: {
   const { supabase, invoiceId, organizationId } = params;
   const now = params.now || new Date();
   const { data: invoice, error: invoiceError } = await supabase.from('school_monthly_invoices')
-    .select('id, organization_id, payment_status, total_eur, invoice_email_sent_at, billing_model, contract:school_contracts(filled_body,order_snapshot)')
+    .select('id, organization_id, payment_status, total_eur, invoice_email_sent_at, billing_model, contract:school_contracts(filled_body,order_snapshot), student:students(payer_email)')
     .eq('id', invoiceId).eq('organization_id', organizationId).maybeSingle();
   if (invoiceError || !invoice) return { sent: false, reason: invoiceError?.message || 'invoice not found in organization' };
   if (invoice.invoice_email_sent_at) return { sent: false, alreadySent: true };
@@ -42,12 +42,20 @@ export async function deliverSchoolMonthlyInvoiceOnce(params: {
     && !(invoice.payment_status === 'paid' && Number(invoice.total_eur) === 0)) {
     return { sent: false, reason: 'invoice is not pending' };
   }
+  const student = Array.isArray(invoice.student) ? invoice.student[0] : invoice.student;
+  const payerEmail = String(student?.payer_email || '').trim().toLowerCase();
+  const matchesPayer = (payload: SchoolInvoiceRenderedEmail | null | undefined) => Boolean(payerEmail)
+    && Array.isArray(payload?.to) && payload.to.length === 1
+    && String(payload.to[0] || '').trim().toLowerCase() === payerEmail;
 
   const load = () => supabase.from('school_monthly_invoice_deliveries').select('*')
     .eq('id', invoiceId).eq('organization_id', organizationId).maybeSingle();
   let { data: delivery, error } = await load();
   if (error) return { sent: false, reason: `delivery state unavailable: ${error.message}` };
   if (!delivery) {
+    if (!matchesPayer(params.payload)) {
+      return { sent: false, reason: payerEmail ? 'invoice recipient must be the payer' : 'no payer email' };
+    }
     const inserted = await supabase.from('school_monthly_invoice_deliveries').insert({
       id: invoiceId, organization_id: organizationId, payload: params.payload, attempted_at: now.toISOString(),
     }).select('*').single();
@@ -71,6 +79,11 @@ export async function deliverSchoolMonthlyInvoiceOnce(params: {
   const age = now.getTime() - Date.parse(delivery.attempted_at);
   if (!delivery.payload || !Number.isFinite(age) || age < 0 || age >= SCHOOL_INVOICE_RETRY_WINDOW_MS) {
     return { sent: false, reason: 'delivery requires review: provider deduplication window expired or legacy state' };
+  }
+  // An uncertain legacy request must never retry to the child's old recipient,
+  // or overwrite the payload already frozen under the provider idempotency key.
+  if (!matchesPayer(params.payload) || !matchesPayer(delivery.payload)) {
+    return { sent: false, reason: 'delivery requires review: payer recipient changed or missing' };
   }
 
   let outcome: { id?: string; error?: string };

@@ -20,6 +20,7 @@ import { sendSchoolMonthlyInvoiceEmail, type SchoolMonthlyInvoiceRow } from './_
 import { publicAppOrigin } from './_lib/publicLinkToken.js';
 import { computeCanonicalSchoolMonthlyBill, groupOccurrenceKey, hasSchoolOccurrenceEvidence, schoolContractBillingModel, schoolInvoiceDueDate } from '../src/lib/schoolCanonicalBilling.js';
 import { schoolContractSuspensionOverlapsPeriod } from '../src/lib/schoolContractLifecycle.js';
+import { latestSchoolBillingDecisions } from '../src/lib/schoolInvoiceSessionReview.js';
 import { isSchoolConsultationsOrg } from '../src/lib/schoolConsultationsOrg.js';
 import { discountExtraLessonsBill, type ExtraLessonsDiscountAgreement } from '../src/lib/schoolExtraLessonsDiscount.js';
 
@@ -233,9 +234,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (sessionsError) return res.status(500).json({ error: sessionsError.message, created, emailed });
 
     const groupEvidence = new Set(sessions.filter(hasSchoolOccurrenceEvidence).map(groupOccurrenceKey));
-    const matchingSessions = sessions.filter((session) => sessionMatchesExtraLessonsContract(session, scope)
+    let matchingSessions = sessions.filter((session) => sessionMatchesExtraLessonsContract(session, scope)
       && (model !== 'actual' || session.student_id === contract.student_id))
       .map((session) => ({ ...session, group_occurred: Boolean(session.class_group_id) && groupEvidence.has(groupOccurrenceKey(session)) }));
+    const [{ data: billingDecisions, error: decisionError }, { data: issuedInvoices, error: issuedError }] = await Promise.all([
+      supabase.from('school_session_billing_decisions').select('id, session_reference_id, excluded, reason, created_at')
+        .eq('organization_id', contract.organization_id).eq('student_id', contract.student_id).order('id', { ascending: false }),
+      supabase.from('school_monthly_invoices').select('id, billed_session_ids, extra_session_ids, lines:school_monthly_invoice_lines(session_id,session_ids)')
+        .eq('organization_id', contract.organization_id).eq('student_id', contract.student_id)
+        .lte('period_start', end).gte('period_end', start),
+    ]);
+    if (decisionError || issuedError) {
+      held++; review.push({ contract_id: contract.id, reason: 'billing_review_state_unavailable' }); continue;
+    }
+    const decisions = latestSchoolBillingDecisions(billingDecisions || []);
+    const excludedSessions = matchingSessions.filter((session) => decisions.get(session.id)?.excluded);
+    const issuedSessionIds = new Set<string>((issuedInvoices || []).flatMap((invoice: any) => [
+      ...(invoice.billed_session_ids || []), ...(invoice.extra_session_ids || []),
+      ...(invoice.lines || []).flatMap((line: any) => [line.session_id, ...(line.session_ids || [])].filter(Boolean)),
+    ]));
+    if (matchingSessions.some((session) => issuedSessionIds.has(session.id))) {
+      held++; review.push({ contract_id: contract.id, reason: 'sessions_already_in_issued_invoice' }); continue;
+    }
+    if (excludedSessions.length && model === 'fixed') {
+      held++; review.push({ contract_id: contract.id, reason: 'fixed_contract_requires_review_for_billing_exclusions', session_ids: excludedSessions.map((session) => session.id) }); continue;
+    }
+    if (excludedSessions.length) matchingSessions = matchingSessions.filter((session) => !decisions.get(session.id)?.excluded);
     if (model === 'actual' && matchingSessions.length === 0) {
       const windowStart = serviceStartYmd && serviceStartYmd > start ? serviceStartYmd : start;
       const windowEnd = [end, order?.end_date || end, contract.withdrawal_requested_at ? sessionYmdVilnius(contract.withdrawal_requested_at) : end].sort()[0];

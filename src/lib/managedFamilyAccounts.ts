@@ -12,7 +12,8 @@ export function managedFamilyAccountsEnabled(
   features: Record<string, unknown> | null | undefined,
 ): boolean {
   if (isMoksloVaisiaiOrg(organizationId) || isProKlaseOrg(organizationId)) return true;
-  return features?.[MANAGED_FAMILY_ACCOUNTS_FEATURE_ID] === true;
+  return features?.[MANAGED_FAMILY_ACCOUNTS_FEATURE_ID] === true
+    || features?.school_family_portal === true || features?.school_family_accounts_setup === true;
 }
 
 /** Brand-neutral prefix for organizations that adopted the portable feature. */

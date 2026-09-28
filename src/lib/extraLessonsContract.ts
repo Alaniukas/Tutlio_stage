@@ -5,6 +5,7 @@
  */
 
 import { EXTRA_LESSONS_LEGAL_BODY } from './extraLessonsLegalBody.js';
+import { isSchoolRecordingAccessMode, schoolRecordingPlanLabel, type SchoolRecordingAccessMode } from './schoolRecordingPlan.js';
 
 export { EXTRA_LESSONS_LEGAL_BODY };
 
@@ -90,6 +91,7 @@ export type ExtraLessonsOrderSnapshot = {
   platform: string;
   duration_minutes: number;
   schedule_slots: ExtraLessonsScheduleSlot[];
+  recording_access?: SchoolRecordingAccessMode;
   schedule_label: string;
   start_date: string;
   end_date: string;
@@ -160,6 +162,7 @@ export function buildExtraLessonsOrderSnapshot(input: {
   platform?: string;
   duration_minutes: number;
   schedule_slots?: ExtraLessonsScheduleSlot[];
+  recording_access?: SchoolRecordingAccessMode;
   schedule_label?: string;
   start_date: string;
   end_date: string;
@@ -191,6 +194,7 @@ export function buildExtraLessonsOrderSnapshot(input: {
       : String(input.platform).trim(),
     duration_minutes: durationRaw > 0 ? Math.round(durationRaw) : 0,
     schedule_slots: slots,
+    ...(input.recording_access === undefined ? {} : { recording_access: input.recording_access }),
     schedule_label: type === 'individual'
       ? INDIVIDUAL_EXTRA_LESSONS_SCHEDULE_LABEL
       : String(input.schedule_label || formatScheduleLabel(slots)).trim(),
@@ -221,12 +225,16 @@ export function buildExtraLessonsOrderSnapshot(input: {
 export function validateExtraLessonsOffer(order: ExtraLessonsOrderSnapshot): string[] {
   const errors: string[] = [];
   if (!(order.unit_price_eur > 0)) errors.push('unit_price_eur');
+  if (order.recording_access !== undefined && !isSchoolRecordingAccessMode(order.recording_access)) errors.push('recording_access');
+  if (order.recording_access === 'none' && order.schedule_slots.length !== 1) errors.push('schedule_slots');
   return errors;
 }
 
 /** Before click-wrap accept — all contract order fields must be present. */
 export function validateExtraLessonsOrder(order: ExtraLessonsOrderSnapshot): string[] {
   const errors: string[] = [];
+  if (order.recording_access !== undefined && !isSchoolRecordingAccessMode(order.recording_access)) errors.push('recording_access');
+  if (order.recording_access === 'none' && (order.service_type !== 'group' || !order.group_id || order.schedule_slots.length !== 1)) errors.push('recording_access');
   if (!order.service_name) errors.push('service_name');
   if (order.service_type !== 'group' && order.service_type !== 'individual') errors.push('service_type');
   if (!order.platform) errors.push('platform');
@@ -246,17 +254,19 @@ export function mergeExtraLessonsOrderPatch(
   return buildExtraLessonsOrderSnapshot({
     ...base,
     ...patch,
-    schedule_slots: patch.schedule_slots ?? base.schedule_slots,
-    schedule_label: patch.schedule_label ?? base.schedule_label,
+    schedule_slots: base.recording_access === undefined ? patch.schedule_slots ?? base.schedule_slots : base.schedule_slots,
+    // The offered access plan belongs to the school, not the public form.
+    recording_access: base.recording_access,
+    schedule_label: base.recording_access === undefined ? patch.schedule_label ?? base.schedule_label : base.schedule_label,
     service_name: patch.service_name ?? base.service_name,
-    service_type: patch.service_type ?? base.service_type,
+    service_type: base.recording_access === undefined ? patch.service_type ?? base.service_type : base.service_type,
     platform: patch.platform ?? base.platform,
     duration_minutes: patch.duration_minutes ?? base.duration_minutes,
     start_date: patch.start_date ?? base.start_date,
     end_date: patch.end_date ?? base.end_date,
-    unit_price_eur: patch.unit_price_eur ?? base.unit_price_eur,
-    base_lessons_per_month: patch.base_lessons_per_month ?? base.base_lessons_per_month,
-    group_id: patch.group_id !== undefined ? patch.group_id : base.group_id,
+    unit_price_eur: base.recording_access === undefined ? patch.unit_price_eur ?? base.unit_price_eur : base.unit_price_eur,
+    base_lessons_per_month: base.recording_access === undefined ? patch.base_lessons_per_month ?? base.base_lessons_per_month : base.base_lessons_per_month,
+    group_id: base.recording_access === undefined && patch.group_id !== undefined ? patch.group_id : base.group_id,
     group_name: patch.group_name !== undefined ? patch.group_name : base.group_name,
     tutor_name: patch.tutor_name !== undefined ? patch.tutor_name : base.tutor_name,
     subject_id: patch.subject_id !== undefined ? patch.subject_id : base.subject_id,
@@ -282,7 +292,12 @@ export function canonicalExtraLessonsPayload(input: {
     contract_number: input.contract_number,
     redakcijos_ID: o.revision_label,
     revision_label: o.revision_label,
-    paslaugos_pavadinimas: o.service_name,
+    paslaugos_pavadinimas: o.recording_access === undefined ? o.service_name
+      : `${o.service_name}; įrašų prieiga: ${schoolRecordingPlanLabel(o.recording_access)}`,
+    ...(o.recording_access === undefined ? {} : {
+      recording_access: o.recording_access,
+      recording_access_label: schoolRecordingPlanLabel(o.recording_access),
+    }),
     grupine_ar_individuali:
       o.service_type === 'group' ? 'grupinė' : o.service_type === 'individual' ? 'individuali' : '',
     platforma: o.platform,

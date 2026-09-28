@@ -152,7 +152,8 @@ export async function sendSchoolMonthlyInvoiceEmail(
     && !(invoice.payment_status === 'paid' && Number(invoice.total_eur) === 0)) {
     return { sent: false, alreadySent: true };
   }
-  const to = String(ctx.student.payer_email || ctx.student.email || '').trim();
+  // Financial documents go to the payer, including when the child has their own inbox.
+  const to = String(ctx.student.payer_email || '').trim();
   if (!to) return { sent: false, reason: 'no payer email' };
   const data = buildSchoolMonthlyInvoiceEmailData(invoice, ctx);
   let attachments: { filename: string; content: string }[] | undefined;

@@ -361,6 +361,14 @@ if (hasFeature('school_contract_esign')) { /* GoSign flow */ }
 
 **Pastaba:** `AvailabilityManager` (meniu „Darbo laiko nustatymai“) — atskiras srautas; su `prefill` automatiškai perjungia į skirtuką „Konkreti data“.
 
+### Pamokų trynimas ir laisvo laiko atkūrimas
+
+- Tutor ir org / school admin gali trinti ir atšauktas pamokas; adminui reikia `sessions.edit`. Mokinys / tėvas gali pašalinti tik savo / vaiko atšauktas pamokas be neišspręsto atšaukimo mokesčio.
+- Tutor kalendoriaus „Atšauktos“ sąrašas atskirai įkelia ir po 12 val. paslėptas pamokas; paspaudus mokinio eilutę galima pašalinti tik jo pamoką / seriją, neliečiant kitų grupės dalyvių.
+- Bendras `DeleteSessionDialog` pasikartojančioms individualioms ir klasės grupių pamokoms siūlo `single`, `future` arba `all` (visos likusios suplanuotos ir atšauktos; įvykusių pamokų istorija išlieka). `groupScope` atskiria visos grupės pamoką nuo vieno mokinio pašalinimo.
+- `/api/delete-session` naudoja atominį `delete_sessions_with_recurrence` RPC. Migracija `20260928140000_session_deletion_recurrence_exclusions.sql` būtina prieš aktyvuojant pakeitimą; išimtys neleidžia materializatoriui atkurti ištrintų pamokų.
+- `consumeSessionAvailability.ts` išsaugo vienkartinio laisvo laiko šaltinį ir jo nustatymus; užimtą laiką paslepia pamokų filtrai. `releaseSessionAvailability.ts` užpildo seniau sunaudotus tarpus, nekurdamas laisvo laiko ten, kur liko kita pamoka.
+
 ### Vizualūs skirtumai kalendoriuje
 
 **Failas:** `src/lib/calendarSessionEventStyle.ts` — naudojamas `Calendar.tsx` ir `CompanyTvarkarastis.tsx`
@@ -636,6 +644,8 @@ Viešas widget `src/components/support/SupportWidget.tsx` (lazy `App.tsx`) — t
 | Rinkos (EUR/PLN) | `api/_lib/market.ts`, `src/lib/marketMoney.ts` |
 
 Webhook: `api/stripe-webhook.ts` — apdoroja subscriptions, checkout, Connect, school installments.
+
+Pamokos Checkout (`tutlio_session_id`) apmokėjimas sinchronizuoja ir susietą vienos pamokos `lesson_packages` įrašą per `api/_lib/sessionPackagePayment.ts` (webhook + `confirm-stripe-payment`). Kartotinis patvirtinimas sutvarko paketą net jei pamoka jau apmokėta; apmokėti, atšaukti ir kelių pamokų paketai nekeičiami. Siunčiami esami pamokos mokėjimo laiškai, papildomi paketo laiškai nesiunčiami.
 
 ---
 

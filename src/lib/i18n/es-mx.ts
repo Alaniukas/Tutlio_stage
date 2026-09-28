@@ -6,6 +6,14 @@ import { en } from './en.js';
  * retain English. See docs/MEXICAN_SPANISH_LOCALIZATION_REVIEW.md before release.
  */
 export const esMxOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Todas las clases restantes de esta serie",
+  "cal.deleteAllRemainingHint": "Elimina las clases futuras programadas y las clases canceladas de esta serie. Se conserva el historial de las clases realizadas.",
+  "cal.deleteConfirmAll": "¿Eliminar todas las clases programadas y canceladas restantes de esta serie? Se conserva el historial de las clases realizadas.",
+  "cal.deleteGroupHint": "Para un grupo de clase, la selección se aplica a todos sus alumnos.",
+  "cal.deleteCancelledOnlyHint": "Solo se eliminan las clases canceladas de usted o de su hijo dentro del alcance elegido.",
+  "em.schoolJoinSubject": "Únase a su clase el {date} a las {time}",
+  "em.schoolJoinHeader": "Únase a su clase",
+  "em.schoolJoinBody": "Su clase comienza el {date} a las {time}. Use el enlace de abajo para ingresar.",
   'compSess.markAttended': 'El alumno asistió',
   'att.confirmedManually': 'Asistencia confirmada',
   'att.unconfirmed': 'Asistencia sin confirmar',

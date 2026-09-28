@@ -150,6 +150,7 @@ import {
   type MvEmailDelivery,
 } from '@/lib/mvProvisionOptions';
 import MvProvisionDialog, { type MvProvisionDialogSubmit } from '@/components/company/MvProvisionDialog';
+import SchoolFamilyAccountsDialog from '@/components/company/SchoolFamilyAccountsDialog';
 import {
   mergeMvStudentAccountStatus,
   mvNeedsParentAccount,
@@ -452,7 +453,7 @@ export default function CompanyStudents() {
   const { fmt } = useMarketMoney();
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
   const { user: authUser } = useUser();
-  const { membership } = useOrgAdminAccess();
+  const { membership, can } = useOrgAdminAccess();
   const [orgId, setOrgId] = useState<string | null>(() => membership?.organizationId ?? null);
   const proKlaseAdminUi = proKlaseOrgAdminContext(orgId, orgEntityType, orgFeaturesLoading);
   const pkFeat = (flagId: string) =>
@@ -3568,6 +3569,8 @@ export default function CompanyStudents() {
               <span className="text-base font-medium text-gray-400">({filteredGroups.length})</span>
             </h1>
             <div className="flex items-center gap-2 flex-wrap shrink-0">
+              {isSchoolView && !orgFeaturesLoading && (hasFeature('school_family_portal') || hasFeature('school_family_accounts_setup'))
+                && <SchoolFamilyAccountsDialog canEdit={can('students.edit')} onChanged={() => void fetchData()} />}
               <Button
                 variant={showTrashBin ? 'default' : 'outline'}
                 size="sm"

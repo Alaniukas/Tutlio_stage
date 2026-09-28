@@ -129,6 +129,10 @@ const SchoolExtraLessonsAccept = lazy(() => import('@/pages/SchoolExtraLessonsAc
 const SchoolDiscountAccept = lazy(() => import('@/pages/SchoolDiscountAccept'));
 const MvAccountActivate = lazy(() => import('@/pages/MvAccountActivate'));
 const SchoolHomework = lazy(() => import('@/pages/SchoolHomework'));
+const SchoolFamilyMaterials = lazy(() => import('@/pages/SchoolFamilyMaterials'));
+const ParentConsultations = lazy(() => import('@/pages/ParentConsultations'));
+const TutorConsultations = lazy(() => import('@/pages/TutorConsultations'));
+const CompanyConsultations = lazy(() => import('@/pages/company/CompanyConsultations'));
 const StripeSuccess = lazy(() => import('@/pages/StripeSuccess'));
 const EnterpriseSuccess = lazy(() => import('@/pages/EnterpriseSuccess'));
 const PerlasSuccess = lazy(() => import('@/pages/PerlasSuccess'));
@@ -486,6 +490,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/groups" element={<TutorClassGroupsPage />} />
           <Route path="/recordings" element={<CompanyLessonRecordings />} />
+          <Route path="/consultations" element={<TutorConsultations />} />
           <Route path="/students" element={<StudentsPage />} />
           <Route path="/waitlist" element={<WaitlistPage />} />
           <Route path="/messages" element={<Messages />} />
@@ -507,6 +512,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/student/schedule" element={<RequireStudentBooking><StudentSchedule /></RequireStudentBooking>} />
           <Route path="/student/sessions" element={<StudentSessions />} />
           <Route path="/student/recordings" element={<CompanyLessonRecordings />} />
+          <Route path="/student/homework" element={<SchoolFamilyMaterials portal="student" />} />
           <Route path="/student/messages" element={<StudentMessages />} />
           <Route path="/student/waitlist" element={<RequireStudentBooking><StudentWaitlist /></RequireStudentBooking>} />
           <Route path="/student/payments" element={<RequireStudentPayments><StudentPayments /></RequireStudentPayments>} />
@@ -524,6 +530,8 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/parent/calendar" element={<StudentSchedule />} />
           <Route path="/parent/lessons" element={<StudentSessions />} />
           <Route path="/parent/recordings" element={<CompanyLessonRecordings />} />
+          <Route path="/parent/homework" element={<SchoolFamilyMaterials portal="parent" />} />
+          <Route path="/parent/consultations" element={<ParentConsultations />} />
           {/* Legacy child routes – redirect everything booking-related to the parent calendar. */}
           <Route
             path="/parent/child/:studentId/schedule"
@@ -581,6 +589,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/schedule" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyTvarkarastis /></OrgPermissionRoute>} />
             <Route path="/school/groups" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyClassGroups /></OrgPermissionRoute>} />
             <Route path="/school/recordings" element={<OrgPermissionRoute permission="recordings.view" editPermission="sessions.edit"><CompanyLessonRecordings /></OrgPermissionRoute>} />
+            <Route path="/school/consultations" element={<OrgPermissionRoute permission="sessions.view"><CompanyConsultations /></OrgPermissionRoute>} />
             <Route path="/school/messages" element={<OrgPermissionRoute permission="messages.view" editPermission="messages.edit"><CompanyMessages /></OrgPermissionRoute>} />
             <Route path="/school/stats" element={<OrgPermissionRoute permission="stats.view"><CompanyStats /></OrgPermissionRoute>} />
             <Route path="/school/instructions" element={<CompanyInstructions />} />

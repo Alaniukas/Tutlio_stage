@@ -1,4 +1,6 @@
+import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
+import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsDe } from './schoolInstructionsTranslations.js';
@@ -6,6 +8,21 @@ import { schoolTeacherContractTranslationsDe } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const de: Record<string, string> = {
+  ...schoolFamilyMaterialTranslations.de,
+  ...schoolInvoiceReviewTranslations.de,
+  'school.recordings.access.title': "Zugriff auf Aufzeichnungen",
+  'school.recordings.access.scopeHelp': "Entfernen oder wiederherstellen Sie den Zugriff eines Schülers oder Elternteils in dieser Schule. Konten, Verknüpfungen mit Kindern und Zahlungsdaten bleiben erhalten.",
+  'school.recordings.access.legacyHelp': "Gilt nach der Anmeldung. Bisherige gemeinsam genutzte Links des Kindes, die ohne Anmeldung funktionieren, bleiben aktiv.",
+  'school.recordings.access.email': "E-Mail-Adresse der Person",
+  'school.recordings.access.revoke': "Zugriff entfernen",
+  'school.recordings.access.restore': "Zugriff wiederherstellen",
+  'school.recordings.access.empty': "Es wurde noch kein Zugriff auf Aufzeichnungen entfernt.",
+  'school.recordings.access.failed': "Die Zugriffseinstellungen konnten nicht geändert oder geladen werden.",
+  'school.recordings.access.invalidEmail': "Geben Sie eine gültige E-Mail-Adresse ein.",
+  'school.recordings.access.personNotInSchool': "Diese Person ist mit keinem Schüler dieser Schule verknüpft.",
+  'school.recordings.access.setupRequired': "Die Datenbankmigration für die Zugriffsverwaltung wurde noch nicht angewendet.",
+  'school.recordings.access.revoked': "Zugriff auf Aufzeichnungen entfernt.",
+  'school.recordings.access.restored': "Zugriff auf Aufzeichnungen wiederhergestellt.",
   'parent.childAlreadyExists': 'Dieses Kind steht bereits in deiner Liste. Erstelle sein Konto über den bestehenden Eintrag.',
   'login.emailOrUsername': 'E-Mail oder Schülerbenutzername',
   'login.studentUsername': 'Schülerbenutzername',
@@ -2005,6 +2022,11 @@ export const de: Record<string, string> = {
   'cal.deleteFailed': 'Stunde konnte nicht gelöscht werden',
   'cal.deleteRecurringTitle': 'Wiederkehrende Stunde löschen',
   'cal.deleteChoose': 'Wählen Sie, was gelöscht werden soll.',
+  "cal.deleteAllRemaining": "Alle verbleibenden Stunden dieser Serie",
+  "cal.deleteAllRemainingHint": "Entfernt zukünftige geplante und abgesagte Stunden dieser Serie. Der Verlauf abgeschlossener Stunden bleibt erhalten.",
+  "cal.deleteConfirmAll": "Alle verbleibenden geplanten und abgesagten Stunden dieser Serie löschen? Der Verlauf abgeschlossener Stunden bleibt erhalten.",
+  "cal.deleteGroupHint": "Bei einer Gruppe gilt die Auswahl für alle ihre Schüler.",
+  "cal.deleteCancelledOnlyHint": "Im gewählten Umfang werden nur Ihre abgesagten Stunden oder die Ihres Kindes gelöscht.",
   'cal.deleteOnlyThis': 'Nur diese',
   'cal.deleteThisAndFuture': 'Diese und alle zukünftigen',
   'cal.duplicateTime': 'Fehler: Dieses Zeitfenster überschneidet sich mit einer anderen Stunde.',
@@ -5366,6 +5388,9 @@ export const de: Record<string, string> = {
   'school.groups.editTitle': "Gruppe bearbeiten",
   'school.groups.platform': "Plattform",
   'school.groups.duration': "Dauer (Min.)",
+  'school.groups.minimumActiveStudents': "Mindestanzahl aktiver Schüler",
+  'school.groups.minimumActiveStudentsHint': "Diese Gruppe und ihre Verträge werden automatisch pausiert, wenn weniger aktive Schüler verbleiben.",
+  'school.groups.suspendedMinimum': "Pausiert: weniger als {n} aktive Schüler in der Gruppe",
   'school.groups.meetingLink': "Unterrichtslink",
   'school.groups.slots': "Wochenplan",
   'school.groups.addSlot': "Tag hinzufügen",
@@ -5665,4 +5690,7 @@ export const de: Record<string, string> = {
   "compare.customChip2": "Vergütungsregeln",
   "compare.customChip3": "Zustimmungslinks für Eltern",
   "compare.customChip4": "Portale in Ihrer Marke",
+  'em.schoolJoinSubject': 'Am {date} um {time} am Unterricht teilnehmen',
+  'em.schoolJoinHeader': 'Am Unterricht teilnehmen',
+  'em.schoolJoinBody': 'Ihr Unterricht beginnt am {date} um {time}. Den Teilnahmelink finden Sie unten.',
 };

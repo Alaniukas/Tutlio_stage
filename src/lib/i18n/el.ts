@@ -5,6 +5,14 @@ import { en } from './en.js';
  * Review scope and release gates: docs/GREEK_LOCALIZATION_REVIEW.md.
  */
 export const elOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Όλα τα υπόλοιπα μαθήματα αυτής της σειράς",
+  "cal.deleteAllRemainingHint": "Αφαιρεί τα μελλοντικά προγραμματισμένα και ακυρωμένα μαθήματα αυτής της σειράς. Το ιστορικό των ολοκληρωμένων μαθημάτων διατηρείται.",
+  "cal.deleteConfirmAll": "Να διαγραφούν όλα τα υπόλοιπα προγραμματισμένα και ακυρωμένα μαθήματα αυτής της σειράς; Το ιστορικό των ολοκληρωμένων μαθημάτων διατηρείται.",
+  "cal.deleteGroupHint": "Για μια ομάδα μαθημάτων, η επιλογή ισχύει για όλους τους μαθητές της.",
+  "cal.deleteCancelledOnlyHint": "Διαγράφονται μόνο τα ακυρωμένα μαθήματα τα δικά σας ή του παιδιού σας μέσα στο επιλεγμένο εύρος.",
+  "em.schoolJoinSubject": "Συνδεθείτε στο μάθημά σας στις {date}, ώρα {time}",
+  "em.schoolJoinHeader": "Συνδεθείτε στο μάθημά σας",
+  "em.schoolJoinBody": "Το μάθημά σας ξεκινά στις {date}, ώρα {time}. Χρησιμοποιήστε τον παρακάτω σύνδεσμο για να συνδεθείτε.",
   'compSess.markAttended': 'Ο μαθητής παρευρέθηκε',
   'att.confirmedManually': 'Η παρουσία επιβεβαιώθηκε',
   'att.unconfirmed': 'Η παρουσία δεν επιβεβαιώθηκε',

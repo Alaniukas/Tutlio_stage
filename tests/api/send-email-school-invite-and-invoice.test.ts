@@ -1,6 +1,22 @@
 // The two school emails that replace the parent portal for families without an
 // account: the post-acceptance invitation and the month-end invoice.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
+  from(table: string) {
+    const filters: Record<string, unknown> = {};
+    const result = () => ({ data: table === 'organizations' && filters.id === 'invoice-qa-school' ? {
+      name: 'QA Mokykla', entity_type: 'school', logo_url: 'https://school.example.invalid/logo.svg',
+      brand_color: '#ef4444', brand_color_secondary: '#dc2626', preferred_locale: 'lt',
+      features: { custom_branding: true, public_name: 'QA Mokykla', contact_email: 'school@example.invalid' },
+    } : null, error: null });
+    const query: any = { select: () => query, eq: (key: string, value: unknown) => { filters[key] = value; return query; },
+      limit: () => query, maybeSingle: async () => result(), then: (resolve: any) => resolve(result()) };
+    return query;
+  },
+}) }));
 
 vi.mock('../../api/_lib/schoolMonthlyInvoiceDelivery.js', () => ({
   schoolMonthlyInvoiceIdempotencyKey: (invoiceId: string) => `school-monthly-invoice/${invoiceId}`,
@@ -137,6 +153,24 @@ describe('school_extra_first_lesson_invite', () => {
 });
 
 describe('school_monthly_invoice', () => {
+  it('renders a distinct teal invoice for a red school while keeping its identity and payer recipient', async () => {
+    const { subject, html } = await sendEmail('school_monthly_invoice', {
+      organizationId: 'invoice-qa-school', schoolName: 'QA Mokykla', studentName: 'QA Mokinys', parentName: 'QA Mokėtojas',
+      invoiceNumber: 'QA-001', periodLabel: '2026 m. rugsėjis', unitPrice: '18.00', baseLessons: 8, baseAmount: '144.00',
+      extraLessons: 1, extraAmount: '18.00', subtotalAmount: '162.00', discountAmount: '12.00', totalAmount: '150.00',
+      dueDate: '2026-10-07', payUrl: 'https://school.example.invalid/pay-qa-invoice',
+    });
+    expect(sendMock.mock.calls[0][0].to).toEqual(['parent@example.com']);
+    expect(html).toContain('QA Mokykla'); expect(html).toContain('school.example.invalid/logo.svg');
+    expect(html).toContain('#0f766e'); expect(html).toContain('150,00');
+    expect(html).not.toContain('#ef4444'); expect(html).not.toContain('#dc2626');
+    const outputPath = process.env.SCHOOL_INVOICE_QA_HTML_PATH;
+    if (outputPath) {
+      mkdirSync(dirname(outputPath), { recursive: true });
+      writeFileSync(outputPath, html, 'utf8');
+    }
+    expect(subject).toContain('QA Mokinys');
+  });
   it('lists the breakdown and a pay button that needs no account', async () => {
     const { subject, html } = await sendEmail('school_monthly_invoice', {
       schoolName: 'Demo Mokykla',

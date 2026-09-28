@@ -4,6 +4,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { serviceSupabase } from './_lib/extraLessonsContractShared.js';
+import { loadSchoolFamilyGuardianAccess, schoolFamilyPortalEnabled } from './_lib/schoolFamilyGuardianAccess.js';
 import {
   HOMEWORK_ALLOWED_EXT,
   HOMEWORK_MAX_BYTES,
@@ -55,7 +56,7 @@ async function resolveSessionAccess(
   userId: string,
   sessionId: string,
 ): Promise<
-  | { ok: true; student: { id: string; full_name: string } }
+  | { ok: true; student: { id: string; full_name: string; organization_id: string | null }; privatePortal: boolean }
   | { ok: false; status: number; error: string }
 > {
   const { data: session } = await supabase
@@ -68,26 +69,35 @@ async function resolveSessionAccess(
   const studentId = String((session as SessionRow).student_id || '');
   const { data: student } = await supabase
     .from('students')
-    .select('id, full_name, linked_user_id')
+    .select('id, full_name, linked_user_id, organization_id')
     .eq('id', studentId)
     .maybeSingle();
   if (!student) return { ok: false, status: 404, error: 'Mokinys nerastas' };
 
+  const org = student.organization_id ? await supabase.from('organizations').select('entity_type,features')
+    .eq('id', student.organization_id).maybeSingle() : { data: null, error: null };
+  if (org.error) return { ok: false, status: 503, error: 'school_family_access_unavailable' };
+  const privatePortal = org.data?.entity_type === 'school' && schoolFamilyPortalEnabled(org.data?.features);
   let allowed = student.linked_user_id === userId;
   if (!allowed) {
-    const { data: parentProfile } = await supabase
-      .from('parent_profiles')
-      .select('id')
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (parentProfile?.id) {
-      const { data: link } = await supabase
-        .from('parent_students')
+    if (privatePortal) {
+      const guardian = await loadSchoolFamilyGuardianAccess(supabase, userId, student.organization_id);
+      allowed = guardian.distinctParent && guardian.studentIds.includes(studentId);
+    } else {
+      const { data: parentProfile } = await supabase
+        .from('parent_profiles')
         .select('id')
-        .eq('parent_id', parentProfile.id)
-        .eq('student_id', studentId)
+        .eq('user_id', userId)
         .maybeSingle();
-      allowed = !!link;
+      if (parentProfile?.id) {
+        const { data: link } = await supabase
+          .from('parent_students')
+          .select('id')
+          .eq('parent_id', parentProfile.id)
+          .eq('student_id', studentId)
+          .maybeSingle();
+        allowed = !!link;
+      }
     }
   }
   if (!allowed) return { ok: false, status: 403, error: 'Forbidden' };
@@ -96,10 +106,17 @@ async function resolveSessionAccess(
   if (!sessionAllowedForStudent(session as SessionRow, memberGroupIds)) {
     return { ok: false, status: 403, error: 'Forbidden' };
   }
+  if (privatePortal && (session as SessionRow).class_group_id) {
+    const group = await supabase.from('school_class_groups').select('id')
+      .eq('id', (session as SessionRow).class_group_id).eq('organization_id', student.organization_id).maybeSingle();
+    if (group.error) return { ok: false, status: 503, error: 'school_family_access_unavailable' };
+    if (!group.data) return { ok: false, status: 403, error: 'Forbidden' };
+  }
 
   return {
     ok: true,
-    student: { id: studentId, full_name: String(student.full_name || '') },
+    student: { id: studentId, full_name: String(student.full_name || ''), organization_id: student.organization_id || null },
+    privatePortal,
   };
 }
 
@@ -113,6 +130,7 @@ function readBody(req: VercelRequest): Record<string, unknown> {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Cache-Control', 'private, no-store');
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed' });
@@ -127,10 +145,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const sessionId = String(body.sessionId || '').trim();
   if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
 
-  const access = await resolveSessionAccess(supabase, auth.userId, sessionId);
+  let access: Awaited<ReturnType<typeof resolveSessionAccess>>;
+  try { access = await resolveSessionAccess(supabase, auth.userId, sessionId); }
+  catch { return res.status(503).json({ error: 'school_family_access_unavailable' }); }
   if (access.ok === false) return res.status(access.status).json({ error: access.error });
 
-  const { student } = access;
+  const { student, privatePortal } = access;
   const mySlug = studentSlug(student.full_name);
 
   if (action === 'list') {
@@ -164,6 +184,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       siblings = (data || []) as SessionRow[];
     }
 
+    if (privatePortal && siblings.length) {
+      const sourceStudents = await supabase.from('students').select('id')
+        .eq('organization_id', student.organization_id).in('id', siblings.map((row) => row.student_id));
+      if (sourceStudents.error) return res.status(503).json({ error: 'school_family_access_unavailable' });
+      const scopedStudents = new Set((sourceStudents.data || []).map((row) => row.id));
+      siblings = siblings.filter((row) => scopedStudents.has(row.student_id));
+    }
     const folders = isGroupSubjectSession(session as SessionRow)
       ? [...new Set([sessionId, ...siblings.map((row) => row.id)])]
       : siblingFolders(
@@ -176,6 +203,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       folderId: string;
       size: number | null;
       signedUrl: string | null;
+      downloadUrl: string | null;
       submission: boolean;
       own: boolean;
     }> = [];
@@ -196,6 +224,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           folderId,
           size: f.metadata?.size != null ? Number(f.metadata.size) : null,
           signedUrl: null,
+          downloadUrl: privatePortal ? `/api/school-material-file?student=${encodeURIComponent(student.id)}&session=${encodeURIComponent(sessionId)}&folder=${encodeURIComponent(folderId)}&file=${encodeURIComponent(f.name)}` : null,
           submission: isHomeworkSubmissionFile(f.name),
           own: isHomeworkSubmissionFile(f.name)
             && folderId === sessionId
@@ -205,7 +234,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const paths = merged.map((f) => `${f.folderId}/${f.name}`);
-    if (paths.length) {
+    if (paths.length && !privatePortal) {
       const { data: signed } = await supabase.storage.from(BUCKET).createSignedUrls(paths, SIGNED_URL_TTL_SECONDS);
       const urlByPath = new Map(
         (signed || []).filter((row) => row.path && row.signedUrl).map((row) => [row.path!, row.signedUrl!]),
@@ -213,6 +242,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       for (const f of merged) {
         f.signedUrl = urlByPath.get(`${f.folderId}/${f.name}`) || null;
       }
+    }
+
+    if (privatePortal) {
+      let current: Awaited<ReturnType<typeof resolveSessionAccess>>;
+      try { current = await resolveSessionAccess(supabase, auth.userId, sessionId); }
+      catch { return res.status(503).json({ error: 'school_family_access_unavailable' }); }
+      if (current.ok === false) return res.status(current.status).json({ error: current.error });
+      if (!current.privatePortal) return res.status(403).json({ error: 'Forbidden' });
     }
 
     return res.status(200).json({

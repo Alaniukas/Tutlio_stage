@@ -94,7 +94,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     );
 
     /** Org portal flags — resolved pre-mount by StudentPolicyProvider, so the nav is correct on first paint. */
-    const { resolved, bookingDisabled, paymentsPageEnabled, lessonRecordingsEnabled, organizationId, waitlistHidden } = useStudentPolicy();
+    const { resolved, bookingDisabled, paymentsPageEnabled, lessonRecordingsEnabled, familyPortalEnabled, organizationId, waitlistHidden } = useStudentPolicy();
     // Students of a school org read "mokytojas" / "užsiėmimas" like their parents and teachers.
     useSchoolTerminology(useOrgTerminologyMode(organizationId));
 
@@ -129,7 +129,9 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
         { href: '/student', label: t('studentNav.home'), icon: LayoutDashboard },
         { href: '/student/schedule', label: t('studentNav.book'), icon: CalendarDays },
         { href: '/student/sessions', label: t('studentNav.sessions'), icon: BookOpen },
-        ...(lessonRecordingsEnabled
+        ...(familyPortalEnabled
+            ? [{ href: '/student/homework', label: t('school.materials.title'), icon: BookOpen }]
+            : lessonRecordingsEnabled
             ? [{ href: '/student/recordings', label: t('companyNav.recordings'), icon: Video }]
             : []),
         { href: '/student/messages', label: t('studentNav.messages'), icon: MessageSquare },

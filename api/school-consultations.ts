@@ -1,4 +1,6 @@
 import type { VercelRequest, VercelResponse } from './types';
+import { maybeHandleFamilyConsultations } from './_lib/schoolFamilyConsultations.js';
+import { loadSchoolFamilyGuardianAccess } from './_lib/schoolFamilyGuardianAccess.js';
 import {
   assertOrgConsultationsEnabled,
   isOrgAdminForOrg,
@@ -57,6 +59,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!auth?.userId) return res.status(401).json({ error: 'Unauthorized' });
   const supabase = serviceSupabase();
   const userId = auth.userId;
+  try {
+    const family = await maybeHandleFamilyConsultations(supabase, userId, req);
+    if (family) return res.status(family.status).json(family.data);
+  } catch {
+    return res.status(503).json({ error: 'Consultation access unavailable' });
+  }
 
   if (req.method === 'GET') {
     const scope = String(req.query?.scope || 'portal');
@@ -199,7 +207,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const linked = await linkedStudentIdsForUser(supabase, userId);
     const isSelf = student.linked_user_id === userId;
-    const isParent = linked.includes(studentId);
+    let isParent = linked.includes(studentId);
+    if (gate.familyPortal) {
+      const guardian = await loadSchoolFamilyGuardianAccess(supabase, userId, student.organization_id);
+      if (!guardian.distinctParent || !guardian.studentIds.includes(studentId)) return res.status(403).json({ error: 'Forbidden' });
+      isParent = true;
+    }
     if (!isParent && !(isSelf && canActWithoutParent(student.child_birth_date))) {
       return res.status(403).json({ error: 'Neturite teisės pateikti poreikio.' });
     }
@@ -241,6 +254,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const isAdmin = await isOrgAdminForOrg(supabase, userId, organizationId);
     const tutorId = String(b.tutor_id || userId);
     if (!isAdmin && tutorId !== userId) return res.status(403).json({ error: 'Forbidden' });
+    if (gate.familyPortal) {
+      const { data: tutor, error } = await supabase.from('profiles').select('organization_id').eq('id', tutorId).maybeSingle();
+      if (error || tutor?.organization_id !== organizationId) return res.status(403).json({ error: 'Forbidden' });
+    }
 
     const mode = String(b.mode || 'individual') as 'individual' | 'group' | 'join_lesson';
     const requestIds = Array.isArray(b.request_ids) ? b.request_ids.map(String) : [String(b.request_id || '')].filter(Boolean);

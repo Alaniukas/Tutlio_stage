@@ -125,7 +125,7 @@ describe('sendSchoolMonthlyInvoiceEmail', () => {
       const db = fakeSupabase({ status: 'pending' });
       const result = await sendSchoolMonthlyInvoiceEmail(db.client, invoice, {
         apiOrigin: 'http://127.0.0.1:3002', publicOrigin: 'https://tutlio.lt', serviceRoleKey: 'service-key-test',
-        student, org, contract: { contract_number: 'PP-1' },
+        student: { ...student, email: 'child@example.com' }, org, contract: { contract_number: 'PP-1' },
       });
       expect(result.sent).toBe(true);
       expect(calls[0].url).toBe('http://127.0.0.1:3002/api/send-email');
@@ -141,7 +141,7 @@ describe('sendSchoolMonthlyInvoiceEmail', () => {
   it('skips when the student has no payer email', async () => {
     const db = fakeSupabase({ status: 'pending' });
     const result = await sendSchoolMonthlyInvoiceEmail(db.client, invoice, {
-      apiOrigin: 'x', publicOrigin: 'x', serviceRoleKey: 'k', student: { full_name: 'A' }, org, contract: {},
+      apiOrigin: 'x', publicOrigin: 'x', serviceRoleKey: 'k', student: { full_name: 'A', email: 'child@example.com' }, org, contract: {},
     });
     expect(result).toEqual({ sent: false, reason: 'no payer email' });
   });

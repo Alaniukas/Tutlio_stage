@@ -22,10 +22,20 @@ function supabaseFixture(opts: {
 }) {
   return {
     from(table: string) {
+      let requestedId: string | undefined;
       const query: any = {
         select: () => query,
-        eq: () => query,
+        eq: (column: string, value: string) => {
+          if (column === 'id') requestedId = value;
+          return query;
+        },
         in: () => query,
+        maybeSingle: async () => ({
+          data: table === 'school_class_groups'
+            ? opts.groups.find((group) => group.id === requestedId) || null
+            : table === 'organizations' ? { id: requestedId, features: {} } : null,
+          error: null,
+        }),
         then: (resolve: (value: unknown) => unknown) => {
           if (table === 'school_class_groups') return resolve({ data: opts.groups, error: null });
           if (table === 'recurring_individual_sessions') return resolve({ data: opts.recurring || [], error: null });

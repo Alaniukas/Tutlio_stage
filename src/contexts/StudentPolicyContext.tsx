@@ -23,6 +23,7 @@ export interface StudentPortalPolicy {
   paymentsPageEnabled: boolean;
   /** School lesson recordings portal section. */
   lessonRecordingsEnabled: boolean;
+  familyPortalEnabled?: boolean;
   /** Waitlist fully disabled (Pro Klasė / disable_waitlist / booking-off). */
   waitlistHidden: boolean;
 }
@@ -130,6 +131,7 @@ export function StudentPolicyProvider({ children }: { children: ReactNode }) {
           rescheduleDisabled: entry?.rescheduleDisabled === true,
           paymentsPageEnabled: entry?.paymentsPageEnabled === true,
           lessonRecordingsEnabled: entry?.lessonRecordingsEnabled === true,
+          familyPortalEnabled: entry?.familyPortalEnabled === true,
           waitlistHidden: entry?.waitlistHidden === true,
         };
         setPolicy(next);

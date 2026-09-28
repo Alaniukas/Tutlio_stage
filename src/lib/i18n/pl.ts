@@ -1,10 +1,27 @@
+import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
+import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolInstructionsTranslationsPl } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsPl } from './schoolTeacherContractTranslations.js';
 import { schoolConsultationsPl } from './schoolConsultationsTranslations.js';
 
 export const pl: Record<string, string> = {
+  ...schoolFamilyMaterialTranslations.pl,
+  ...schoolInvoiceReviewTranslations.pl,
+  'school.recordings.access.title': "Dostęp do nagrań",
+  'school.recordings.access.scopeHelp': "Usuń lub przywróć dostęp ucznia lub rodzica w tej szkole. Konta, powiązania z dziećmi i dane płatności pozostają bez zmian.",
+  'school.recordings.access.legacyHelp': "Dotyczy dostępu po zalogowaniu. Dotychczasowe wspólne linki dziecka działające bez logowania pozostają aktywne.",
+  'school.recordings.access.email': "Adres e-mail osoby",
+  'school.recordings.access.revoke': "Usuń dostęp",
+  'school.recordings.access.restore': "Przywróć dostęp",
+  'school.recordings.access.empty': "Nikomu nie odebrano dostępu do nagrań.",
+  'school.recordings.access.failed': "Nie udało się zmienić lub wczytać ustawień dostępu.",
+  'school.recordings.access.invalidEmail': "Wprowadź prawidłowy adres e-mail.",
+  'school.recordings.access.personNotInSchool': "Ta osoba nie jest powiązana z uczniem tej szkoły.",
+  'school.recordings.access.setupRequired': "Migracja bazy danych zarządzania dostępem nie została jeszcze zastosowana.",
+  'school.recordings.access.revoked': "Dostęp do nagrań usunięty.",
+  'school.recordings.access.restored': "Dostęp do nagrań przywrócony.",
   'parent.childAlreadyExists': 'To dziecko jest już na Twojej liście. Nie twórz kolejnego wpisu. Konto możesz utworzyć w istniejącej karcie dziecka.',
   'login.emailOrUsername': 'E-mail lub login ucznia',
   'login.resetIdentifierDesc': 'Wpisz e-mail lub login ucznia. Jeśli dziecko nie ma e-maila, link do resetowania otrzyma rodzic.',
@@ -701,6 +718,11 @@ export const pl: Record<string, string> = {
   'cal.deleteFromCalendar': 'Usuń z kalendarza',
   'cal.deleteRecurringTitle': 'Usuń cykliczną lekcję',
   'cal.deleteChoose': 'Wybierz, co chcesz usunąć.',
+  "cal.deleteAllRemaining": "Wszystkie pozostałe lekcje w serii",
+  "cal.deleteAllRemainingHint": "Usuwa przyszłe zaplanowane i odwołane lekcje z tej serii. Historia odbytych lekcji pozostaje.",
+  "cal.deleteConfirmAll": "Usunąć wszystkie pozostałe zaplanowane i odwołane lekcje z tej serii? Historia odbytych lekcji pozostaje.",
+  "cal.deleteGroupHint": "W przypadku grupy wybór dotyczy wszystkich jej uczniów.",
+  "cal.deleteCancelledOnlyHint": "Usuwane są tylko odwołane lekcje Twoje lub Twojego dziecka w wybranym zakresie.",
   'cal.deleteHint': 'Po wybraniu potwierdzisz akcję.',
   'cal.deleteOnlyThis': 'Tylko tę',
   'cal.deleteThisAndFuture': 'Tę i wszystkie przyszłe',
@@ -5535,6 +5557,9 @@ export const pl: Record<string, string> = {
   'school.groups.editTitle': "Edytuj grupę",
   'school.groups.platform': "Platforma",
   'school.groups.duration': "Czas trwania (min)",
+  'school.groups.minimumActiveStudents': "Minimalna liczba aktywnych uczniów",
+  'school.groups.minimumActiveStudentsHint': "Ta grupa i jej umowy są automatycznie zawieszane, gdy pozostaje mniej aktywnych uczniów.",
+  'school.groups.suspendedMinimum': "Zawieszona: w grupie jest mniej niż {n} aktywnych uczniów",
   'school.groups.meetingLink': "Link do zajęć",
   'school.groups.slots': "Harmonogram tygodniowy",
   'school.groups.addSlot': "Dodaj dzień",
@@ -5825,4 +5850,7 @@ export const pl: Record<string, string> = {
   "compare.customChip2": "Zasady wynagrodzeń korepetytorów",
   "compare.customChip3": "Linki akceptacyjne dla rodziców",
   "compare.customChip4": "Portale w Twojej marce",
+  'em.schoolJoinSubject': 'Dołącz do lekcji {date} o {time}',
+  'em.schoolJoinHeader': 'Dołącz do lekcji',
+  'em.schoolJoinBody': 'Twoja lekcja rozpoczyna się {date} o {time}. Link do dołączenia znajdziesz poniżej.',
 };

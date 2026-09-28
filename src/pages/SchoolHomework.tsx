@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useTranslation } from '@/lib/i18n';
 import { Download, Loader2, Paperclip, Play, Trash2, Upload, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
@@ -69,6 +70,7 @@ type Payload = {
   sessions: HomeworkSession[];
   retentionDays?: number;
   recordingGroups?: HomeworkRecordingGroup[];
+  loginRequiredForNewMaterials?: boolean;
 };
 
 type HomeworkSection = 'past' | 'upcoming';
@@ -295,6 +297,7 @@ function HomeworkRecordingsBlock({
 }
 
 export default function SchoolHomework() {
+  const { t } = useTranslation();
   const [params] = useSearchParams();
   const studentId = params.get('student') || '';
   const token = params.get('t') || '';
@@ -551,7 +554,7 @@ export default function SchoolHomework() {
               <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
                 <Upload className="w-3.5 h-3.5" /> {tx('submissions')}
               </p>
-              <input
+              {!payload?.loginRequiredForNewMaterials && <><input
                 ref={(el) => { inputs.current[s.id] = el; }}
                 type="file"
                 className="hidden"
@@ -567,7 +570,7 @@ export default function SchoolHomework() {
               >
                 {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5 mr-1" />}
                 {busy ? tx('uploading') : tx('submit')}
-              </Button>
+              </Button></>}
             </div>
             {submissions.length === 0 ? (
               <p className="text-sm text-gray-400">—</p>
@@ -583,7 +586,7 @@ export default function SchoolHomework() {
                           <Download className="w-4 h-4" />
                         </a>
                       )}
-                      {f.own && (
+                      {f.own && !payload?.loginRequiredForNewMaterials && (
                         <button
                           type="button"
                           className="text-red-500 hover:text-red-700"
@@ -622,6 +625,9 @@ export default function SchoolHomework() {
         {notice && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{notice}</div>
         )}
+        {payload?.loginRequiredForNewMaterials && <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm">
+          <p>{t('school.materials.privateHint')}</p><Link to="/login" className="mt-2 inline-block font-semibold text-indigo-700 underline">{t('common.login')}</Link>
+        </div>}
 
         {loading ? (
           <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="w-4 h-4 animate-spin" /> {tx('loading')}</div>

@@ -2,6 +2,14 @@ import { en } from './en.js';
 
 /** Brazilian Portuguese tutor/business copy; deferred modules retain English. */
 export const ptBrOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Todas as aulas restantes desta série",
+  "cal.deleteAllRemainingHint": "Remove as aulas futuras programadas e canceladas desta série. O histórico das aulas concluídas é mantido.",
+  "cal.deleteConfirmAll": "Excluir todas as aulas programadas e canceladas restantes desta série? O histórico das aulas concluídas é mantido.",
+  "cal.deleteGroupHint": "Em uma turma, a seleção se aplica a todos os alunos.",
+  "cal.deleteCancelledOnlyHint": "Somente as aulas canceladas suas ou do seu filho no escopo selecionado são excluídas.",
+  "em.schoolJoinSubject": "Entre na sua aula no dia {date}, às {time}",
+  "em.schoolJoinHeader": "Entre na sua aula",
+  "em.schoolJoinBody": "Sua aula começa no dia {date}, às {time}. Use o link abaixo para entrar.",
   'compSess.markAttended': 'O aluno compareceu',
   'att.confirmedManually': 'Presença confirmada',
   'att.unconfirmed': 'Presença não confirmada',

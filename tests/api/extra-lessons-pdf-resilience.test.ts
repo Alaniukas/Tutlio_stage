@@ -1,7 +1,8 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { buildExtraLessonsOrderSnapshot } from '../../src/lib/extraLessonsContract';
 
-const state = vi.hoisted(() => ({ contract: {} as any, render: vi.fn(), update: vi.fn(), sign: vi.fn(), job: null as any, freeze: vi.fn(), rpc: vi.fn() }));
+const state = vi.hoisted(() => ({ contract: {} as any, render: vi.fn(), update: vi.fn(), sign: vi.fn(), job: null as any, freeze: vi.fn(), rpc: vi.fn(), discountPreviews: vi.fn() }));
+vi.mock('../../api/_lib/schoolDiscountContractPreview.js', () => ({ loadSchoolDiscountContractPreviews: state.discountPreviews }));
 vi.mock('../../api/_lib/schoolAcceptanceJobs.js', async importOriginal => ({
   ...await importOriginal<any>(), getAcceptanceJob: async () => state.job,
 }));
@@ -23,6 +24,7 @@ import handler from '../../api/extra-lessons-contract-accept';
 beforeEach(() => {
   vi.clearAllMocks();
   state.job = null;
+  state.discountPreviews.mockResolvedValue([]);
   state.freeze.mockResolvedValue({ kind: 'docx', base64: 'frozen-source' });
   state.rpc.mockResolvedValue({ data: { id: 'job', contract_id: 'contract', status: 'queued', attempts: 0 }, error: null });
   state.contract = { id: 'contract', organization_id: 'school', contract_number: 'QA', pdf_url: 'stored.pdf',
@@ -43,6 +45,21 @@ it('opens a saved offer without contacting an unavailable converter', async () =
   state.render.mockRejectedValue(new Error('converter down'));
   expect((await request()).pdfUrl).toBe('signed:stored.pdf');
   expect(state.render).not.toHaveBeenCalled();
+});
+
+it('includes related discount documents in the main offer preview', async () => {
+  const discounts = [{ id: 'discount-1', status: 'pending', agreementNumber: 'NPR-1', pdfUrl: 'https://example.com/discount.pdf' }];
+  state.discountPreviews.mockResolvedValue(discounts);
+  expect((await request()).discountAgreements).toEqual(discounts);
+  expect(state.discountPreviews).toHaveBeenCalledWith(expect.anything(), state.contract, 'test', {});
+});
+
+it('does not silently present the full-price contract if its addenda cannot be loaded', async () => {
+  state.discountPreviews.mockRejectedValue(new Error('discount lookup failed'));
+  const response: any = { status: vi.fn().mockReturnThis(), json: vi.fn().mockImplementation(value => value) };
+  const result = await handler({ method: 'GET', query: { token: 'test' } } as any, response);
+  expect(response.status).toHaveBeenCalledWith(503);
+  expect(result.error).toContain('nuolaidos priedų');
 });
 
 it('renders edited fields without changing the saved contract', async () => {

@@ -8,17 +8,19 @@ import StatusBadge from '@/components/StatusBadge';
 import { supabase } from '@/lib/supabase';
 import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { startPerlasPayment } from '@/lib/perlasPay';
-import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
+import { getCached, setCache, dedupeAsync, invalidateCache } from '@/lib/dataCache';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
 import { format, isAfter, differenceInHours, addDays, getDay } from 'date-fns';
 import { sessionFilesListOptions, sessionsToScanForFilesTab } from '@/lib/sessionStorageList';
 import { useTranslation } from '@/lib/i18n';
-import { Clock, CheckCircle, XCircle, CalendarDays, RefreshCw, ShieldAlert, ListOrdered, Mail, Video, ChevronLeft, ChevronRight, CreditCard, Loader2, Package, Users, FileText, Landmark } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, CalendarDays, RefreshCw, ShieldAlert, ListOrdered, Mail, Video, ChevronLeft, ChevronRight, CreditCard, Loader2, Package, Users, FileText, Landmark, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import SessionFiles from '@/components/SessionFiles';
 import WhiteboardButton from '@/components/WhiteboardButton';
 import { Button } from '@/components/ui/button';
+import { DeleteSessionDialog } from '@/components/DeleteSessionDialog';
+import { canFamilyDeleteSession, deleteSessionViaApi, isRecurringSession, type SessionDeleteScope } from '@/lib/sessionDeletion';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DateInput } from '@/components/ui/date-input';
 import { Label } from '@/components/ui/label';
@@ -58,6 +60,7 @@ interface Session {
     price: number | null;
     topic: string | null;
     class_group_id?: string | null;
+    recurring_session_id?: string | null;
     meeting_link?: string | null;
     payment_status?: string;
     tutor_comment?: string | null;
@@ -144,6 +147,8 @@ export default function StudentSessions() {
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
     const [saving, setSaving] = useState(false);
     const [modalStep, setModalStep] = useState<ModalStep>('cancel-confirm');
     const [cancellationHours, setCancellationHours] = useState(24);
@@ -769,7 +774,7 @@ export default function StudentSessions() {
 
         /** Narrow columns + no nested embed — `*, subjects(...)` pegged Postgres/RLS (statement timeouts). */
         const SESSION_LIST_COLUMNS =
-            'id,start_time,end_time,status,paid,price,topic,class_group_id,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,lesson_package_id,is_late_cancelled,cancellation_penalty_amount,penalty_resolution,cancelled_by,no_show_when,reschedule_reason';
+            'id,start_time,end_time,status,paid,price,topic,class_group_id,recurring_session_id,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,lesson_package_id,is_late_cancelled,cancellation_penalty_amount,penalty_resolution,cancelled_by,no_show_when,reschedule_reason';
 
         const secondaryGen = ++sessionsSecondaryGenRef.current;
 
@@ -1015,6 +1020,29 @@ export default function StudentSessions() {
     const getPenaltyAmount = (session: Session) => {
         if (!isLateCancellation(session) || cancellationFeePercent === 0) return 0;
         return ((session.price || 25) * cancellationFeePercent) / 100;
+    };
+
+    const handleDeleteSession = async (scope: SessionDeleteScope) => {
+        if (!selectedSession || !canFamilyDeleteSession(selectedSession) || deleting) return;
+        setDeleting(true);
+        try {
+            const result = await deleteSessionViaApi(selectedSession.id, scope);
+            const deletedIds = new Set(result.deletedSessionIds ?? [selectedSession.id]);
+            setSessions((previous) => previous.filter((session) => !deletedIds.has(session.id)));
+            sessionsSecondaryGenRef.current += 1;
+            invalidateCache('student_sessions');
+            invalidateCache('student_dashboard');
+            invalidateCache('parent_lessons_');
+            invalidateCache('parent_dashboard');
+            setIsDeleteModalOpen(false);
+            setSelectedSession(null);
+            await fetchSessions();
+        } catch (error) {
+            console.error('[StudentSessions] delete lesson:', error);
+            alert(t('cal.deleteFailed'));
+        } finally {
+            setDeleting(false);
+        }
     };
 
     // ── Open cancel flow ──────────────────────────────────────────────────────
@@ -2008,8 +2036,29 @@ export default function StudentSessions() {
                         </DialogFooter>
                         )
                     )}
+                    {selectedSession && canFamilyDeleteSession(selectedSession) && (
+                        <DialogFooter className="mt-2">
+                            <Button
+                                variant="destructive"
+                                onClick={() => { setIsModalOpen(false); setIsDeleteModalOpen(true); }}
+                                className="rounded-xl gap-2"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                                {t('cal.deleteSession')}
+                            </Button>
+                        </DialogFooter>
+                    )}
                 </DialogContent>
             </Dialog>
+
+            <DeleteSessionDialog
+                open={isDeleteModalOpen}
+                onOpenChange={setIsDeleteModalOpen}
+                recurring={isRecurringSession(selectedSession)}
+                familyOnlyCancelled
+                busy={deleting}
+                onDelete={(scope) => void handleDeleteSession(scope)}
+            />
 
             {/* ── Cancel / Reschedule Modal ───────────────────────────────────────── */}
             <Dialog

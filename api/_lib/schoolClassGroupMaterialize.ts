@@ -22,8 +22,10 @@ import {
 } from '../../src/lib/extraLessonsContract.js';
 import { snapshotFromRow } from './extraLessonsContractShared.js';
 import { isSchoolContractSuspended } from '../../src/lib/schoolContractLifecycle.js';
-import { isSchoolClassGroupSuspended } from '../../src/lib/schoolGroupMinimumPolicy.js';
+import { isSchoolClassGroupSuspended, isEligibleAcceptedSchoolGroupContract } from '../../src/lib/schoolGroupMinimumPolicy.js';
 import { memberFollowsGroupSlot, type SchoolMemberSlot } from '../../src/lib/schoolClassGroups.js';
+import { isSessionOccurrenceExcluded, loadSessionRecurrenceExclusions } from './sessionRecurrenceExclusions.js';
+import { restoreExpiredSchoolGroupMemberships } from './schoolGroupMembership.js';
 
 export const CLASS_GROUP_HORIZON_DAYS = 60;
 const INSERT_CHUNK = 400;
@@ -65,7 +67,7 @@ export type MaterializeWindow = {
 };
 
 /** `${studentId}:${groupId}` → first service day (extra-lessons 14-day gate). */
-export type ExtraStartGateMap = Map<string, string>;
+export type ExtraStartGateMap = Map<string, string> & { endYmdByKey?: Map<string, string> };
 
 export type ReconcileResult = {
   groupId: string;
@@ -168,29 +170,35 @@ export async function loadExtraLessonsStartGates(
   supabase: SupabaseClient,
   organizationId?: string | null,
 ): Promise<ExtraStartGateMap> {
+  await restoreExpiredSchoolGroupMemberships(supabase, organizationId);
   const gates: ExtraStartGateMap = new Map();
+  gates.endYmdByKey = new Map();
   let query = supabase
     .from('school_contracts')
-    .select('student_id, class_group_id, accepted_at, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at, suspension_started_at, suspension_until, suspension_resumed_at')
-    .eq('kind', EXTRA_LESSONS_CONTRACT_KIND)
-    .eq('signing_status', 'signed')
-    .not('accepted_at', 'is', null);
+    .select('student_id, class_group_id, accepted_at, signing_status, archived_at, terminated_at, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at, suspension_started_at, suspension_until, suspension_resumed_at')
+    .eq('kind', EXTRA_LESSONS_CONTRACT_KIND);
   if (organizationId) query = query.eq('organization_id', organizationId);
-  const { data } = await query;
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
   for (const row of (data || []) as any[]) {
-    if (row.withdrawal_requested_at) continue;
     const order = snapshotFromRow(row) as ExtraLessonsOrderSnapshot | null;
-    if (!order || !row.accepted_at || !row.student_id) continue;
-    if (isSchoolContractSuspended(row)) {
-      gates.set(`${row.student_id}:${row.class_group_id || order.group_id || ''}`, '9999-12-31');
-      continue;
-    }
+    const groupId = row.class_group_id || order?.group_id;
+    if (!row.student_id || !groupId) continue;
+    const key = `${row.student_id}:${groupId}`;
+    // An explicit ended/unsigned group agreement blocks this child, rather
+    // than disappearing and letting the roster regenerate their lessons.
+    if (!gates.has(key)) gates.set(key, '9999-12-31');
+    if (!order || !isEligibleAcceptedSchoolGroupContract(row) || isSchoolContractSuspended(row)) continue;
     const ymd = extraLessonsServiceStartYmd({
       status: (row.start_within_14_status || (row.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status,
       acceptedAtIso: row.accepted_at,
       order,
     });
-    gates.set(`${row.student_id}:${row.class_group_id || order.group_id || ''}`, ymd);
+    // Several revisions may cover one child/group; an eligible agreement
+    // wins over ended revisions regardless of database row order.
+    if (ymd < gates.get(key)!) gates.set(key, ymd);
+    const endDate = order.end_date || '9999-12-31';
+    if (endDate > (gates.endYmdByKey.get(key) || '')) gates.endYmdByKey.set(key, endDate);
   }
   return gates;
 }
@@ -261,13 +269,20 @@ export async function reconcileClassGroupSessions(
     : (group.members || []).filter((member) => member.student_id && !detached?.has(member.student_id));
 
   const occurrences = expectedClassGroupOccurrences(group, window);
+  const exclusions = await loadSessionRecurrenceExclusions(supabase, { classGroupId: group.id });
   const expected = new Map<string, { student_id: string; startIso: string; endIso: string }>();
   for (const occ of occurrences) {
     for (const member of activeMembers) {
       if (!memberFollowsGroupSlot(member.schedule_slots, occ.slot)) continue;
       const studentId = member.student_id;
-      const gate = options.extraGates?.get(`${studentId}:${group.id}`);
-      if (gate && occ.ymd < gate) {
+      if (isSessionOccurrenceExcluded(exclusions, studentId, occ.startIso)) {
+        result.skipped += 1;
+        continue;
+      }
+      const contractKey = `${studentId}:${group.id}`;
+      const gate = options.extraGates?.get(contractKey);
+      const endDate = options.extraGates?.endYmdByKey?.get(contractKey);
+      if ((gate && occ.ymd < gate) || (endDate && occ.ymd > endDate)) {
         result.skipped += 1;
         continue;
       }
@@ -392,9 +407,13 @@ export async function materializeClassGroupNow(
   groupId: string,
   organizationId?: string | null,
 ): Promise<ReconcileResult | null> {
+  const initialGroup = await loadClassGroupForMaterialize(supabase, groupId);
+  if (!initialGroup || !initialGroup.organization_id
+    || (organizationId && initialGroup.organization_id !== organizationId)) return null;
+  const extraGates = await loadExtraLessonsStartGates(supabase, initialGroup.organization_id);
+  // Expired individual pauses may have restored members while loading gates.
   const group = await loadClassGroupForMaterialize(supabase, groupId);
   if (!group) return null;
-  const extraGates = await loadExtraLessonsStartGates(supabase, organizationId ?? group.organization_id ?? null);
   return reconcileClassGroupSessions(supabase, group, { extraGates });
 }
 

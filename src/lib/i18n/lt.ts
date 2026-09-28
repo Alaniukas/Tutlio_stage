@@ -1,7 +1,24 @@
+import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolConsultationsLt } from './schoolConsultationsTranslations.js';
+import { schoolInvoiceReviewLt } from './schoolInvoiceReviewTranslations.js';
 
 export const lt: Record<string, string> = {
+  ...schoolFamilyMaterialTranslations.lt,
+  ...schoolInvoiceReviewLt,
+  'school.recordings.access.title': 'Prieigos prie įrašų valdymas',
+  'school.recordings.access.scopeHelp': 'Pašalinkite arba atkurkite mokinio ar tėvų prieigą šioje mokykloje. Paskyros, vaikų ryšiai ir mokėjimų duomenys išlieka.',
+  'school.recordings.access.legacyHelp': 'Taikoma prisijungus prie paskyros. Senos bendros vaiko nuorodos be prisijungimo lieka aktyvios.',
+  'school.recordings.access.email': 'Asmens el. paštas',
+  'school.recordings.access.revoke': 'Pašalinti prieigą',
+  'school.recordings.access.restore': 'Atkurti prieigą',
+  'school.recordings.access.empty': 'Pašalintos prieigos įrašų nėra.',
+  'school.recordings.access.failed': 'Nepavyko pakeisti arba įkelti prieigos nustatymų.',
+  'school.recordings.access.invalidEmail': 'Įveskite tinkamą el. paštą.',
+  'school.recordings.access.personNotInSchool': 'Šis asmuo nesusietas su šios mokyklos mokiniu.',
+  'school.recordings.access.setupRequired': 'Prieigos valdymo duomenų bazės migracija dar nepritaikyta.',
+  'school.recordings.access.revoked': 'Prieiga prie įrašų pašalinta.',
+  'school.recordings.access.restored': 'Prieiga prie įrašų atkurta.',
   'parent.childAlreadyExists': 'Šis vaikas jau yra jūsų sąraše. Naujo įrašo kurti nereikia. Jo paskyrą galite sukurti esamoje vaiko kortelėje.',
   'login.emailOrUsername': 'El. paštas arba mokinio prisijungimo vardas',
   'login.resetIdentifierDesc': 'Įveskite el. paštą arba mokinio prisijungimo vardą. Jei vaikas neturi el. pašto, atkūrimo nuorodą gaus tėvai.',
@@ -736,6 +753,11 @@ export const lt: Record<string, string> = {
   'cal.deleteFromCalendar': 'Ištrinti iš kalendoriaus',
   'cal.deleteRecurringTitle': 'Ištrinti pasikartojančią pamoką',
   'cal.deleteChoose': 'Pasirinkite, ką norite ištrinti.',
+  "cal.deleteAllRemaining": "Visas likusias serijos pamokas",
+  "cal.deleteAllRemainingHint": "Ištrinamos būsimos suplanuotos ir atšauktos šios serijos pamokos. Įvykusių pamokų istorija išlieka.",
+  "cal.deleteConfirmAll": "Ar tikrai norite ištrinti visas likusias šios serijos suplanuotas ir atšauktas pamokas? Įvykusių pamokų istorija išlieka.",
+  "cal.deleteGroupHint": "Grupės pamokų pasirinkimas taikomas visiems jos mokiniams.",
+  "cal.deleteCancelledOnlyHint": "Pasirinkta apimtimi ištrinamos tik atšauktos jūsų arba jūsų vaiko pamokos.",
   'cal.deleteHint': 'Po pasirinkimo dar kartą patvirtinsite veiksmą.',
   'cal.deleteOnlyThis': 'Tik šią',
   'cal.deleteThisAndFuture': 'Šią ir visas ateinančias',
@@ -6208,6 +6230,9 @@ export const lt: Record<string, string> = {
   'school.groups.editTitle': "Redaguoti grupę",
   'school.groups.platform': "Platforma",
   'school.groups.duration': "Trukmė (min.)",
+  'school.groups.minimumActiveStudents': 'Mažiausias aktyvių mokinių skaičius',
+  'school.groups.minimumActiveStudentsHint': 'Ši grupė ir jos sutartys automatiškai sustabdomos, kai lieka mažiau aktyvių mokinių.',
+  'school.groups.suspendedMinimum': 'Sustabdyta, grupėje mažiau nei {n} aktyvūs mokiniai',
   'school.groups.meetingLink': "Pamokos nuoroda",
   'school.groups.slots': "Savaitės grafikas",
   'school.groups.addSlot': "Pridėti dieną",
@@ -6483,4 +6508,7 @@ export const lt: Record<string, string> = {
   'compare.customChip2': 'Atlygio taisyklės',
   'compare.customChip3': 'Tėvų pritarimo nuorodos',
   'compare.customChip4': 'Portalai su jūsų ženklu',
+  'em.schoolJoinSubject': 'Prisijungimas prie pamokos {date}, {time}',
+  'em.schoolJoinHeader': 'Prisijunkite prie pamokos',
+  'em.schoolJoinBody': '{date}, {time} prasideda jūsų pamoka. Prisijungimo nuoroda pateikta žemiau.',
 };

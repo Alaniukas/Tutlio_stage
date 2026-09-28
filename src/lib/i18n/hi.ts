@@ -2,6 +2,14 @@ import { en } from './en.js';
 
 /** Hindi tutor/business draft. Scope and release limits: docs/HINDI_LOCALIZATION_REVIEW.md. */
 export const hiOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "इस श्रृंखला की बाकी सभी क्लास",
+  "cal.deleteAllRemainingHint": "इस श्रृंखला की आगे की तय क्लास और रद्द की गई क्लास मिटा दी जाती हैं। पूरी हो चुकी क्लास का इतिहास सुरक्षित रहता है।",
+  "cal.deleteConfirmAll": "इस श्रृंखला की बाकी सभी तय और रद्द की गई क्लास मिटाएँ? पूरी हो चुकी क्लास का इतिहास सुरक्षित रहता है।",
+  "cal.deleteGroupHint": "क्लास समूह के लिए, आपका चयन उसके सभी विद्यार्थियों पर लागू होता है।",
+  "cal.deleteCancelledOnlyHint": "चुने गए दायरे में केवल आपकी या आपके बच्चे की रद्द की गई क्लास मिटाई जाती हैं।",
+  "em.schoolJoinSubject": "अपनी क्लास में {date} को {time} बजे जुड़ें",
+  "em.schoolJoinHeader": "अपनी क्लास में जुड़ें",
+  "em.schoolJoinBody": "आपकी क्लास {date} को {time} बजे शुरू होगी। जुड़ने के लिए नीचे दिए गए लिंक का उपयोग करें।",
   'compSess.markAttended': 'छात्र उपस्थित था',
   'att.confirmedManually': 'उपस्थिति की पुष्टि हो गई',
   'att.unconfirmed': 'उपस्थिति की पुष्टि नहीं हुई',

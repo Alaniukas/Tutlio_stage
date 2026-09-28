@@ -120,6 +120,90 @@ describe('SchoolExtraLessonsAccept', () => {
     expect(screen.getByText(/nuotolinių užsiėmimų elgesio taisyklėmis/)).toBeTruthy();
   });
 
+  it('shows the discount addendum and its PDF before the main contract is confirmed', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        ...preview,
+        discountAgreements: [{
+          id: 'discount-1', agreementNumber: 'NPR-1', activityLabel: 'QA Matematika',
+          discountType: 'percent', discountValue: 25, validFrom: '2026-09-01', validUntil: '2027-06-30',
+          status: 'pending', acceptedAt: null, pdfUrl: 'https://example.com/nuolaida.pdf',
+          acceptUrl: '/school-discount-accept?contractToken=test&agreementId=discount-1',
+        }],
+      }),
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=test']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+
+    await screen.findByRole('heading', { name: 'Nuolaidos priedai' });
+    expect(screen.getByRole('link', { name: 'Atidaryti nuolaidos priedo PDF' }).getAttribute('href'))
+      .toBe('https://example.com/nuolaida.pdf');
+    expect(screen.getByRole('link', { name: 'Peržiūrėti ir patvirtinti nuolaidą' }).getAttribute('href'))
+      .toBe('/school-discount-accept?contractToken=test&agreementId=discount-1');
+    expect(screen.getByText('Laukia jūsų patvirtinimo')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' })).toBeTruthy();
+  });
+
+  it('keeps an unconfirmed discount actionable after the main contract is approved', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        ...preview, alreadyAccepted: true,
+        discountAgreements: [{
+          id: 'discount-1', agreementNumber: 'NPR-1', activityLabel: 'QA Matematika',
+          discountType: 'amount', discountValue: 12, validFrom: '2026-09-01', validUntil: '2027-06-30',
+          status: 'pending', acceptedAt: null, pdfUrl: 'https://example.com/nuolaida.pdf',
+          acceptUrl: '/school-discount-accept?contractToken=test&agreementId=discount-1',
+        }],
+      }),
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=test']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+
+    await screen.findByRole('heading', { name: 'Sutartis sudaryta' });
+    expect(screen.getByRole('link', { name: 'Peržiūrėti ir patvirtinti nuolaidą' })).toBeTruthy();
+  });
+
+  it('keeps the discount confirmation available while the main PDF is being prepared', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        ...preview, pending: true,
+        discountAgreements: [{
+          id: 'discount-1', agreementNumber: 'NPR-1', activityLabel: 'QA Matematika',
+          discountType: 'percent', discountValue: 25, validFrom: '2026-09-01', validUntil: '2027-06-30',
+          status: 'pending', acceptedAt: null, pdfUrl: 'https://example.com/nuolaida.pdf',
+          acceptUrl: '/school-discount-accept?contractToken=test&agreementId=discount-1',
+        }],
+      }),
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=test']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+
+    await screen.findByRole('heading', { name: 'Patvirtinimas išsaugotas' });
+    expect(screen.getByRole('status').textContent).toContain('Nuolaidos priedą patvirtinkite atskirai');
+    expect(screen.getByRole('link', { name: 'Peržiūrėti ir patvirtinti nuolaidą' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Užsakymas su prievole sumokėti' })).toBeNull();
+  });
+
+  it('shows approved discount evidence without asking to approve it again', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        ...preview,
+        discountAgreements: [{
+          id: 'discount-1', agreementNumber: 'NPR-1', activityLabel: 'QA Matematika',
+          discountType: 'percent', discountValue: 25, validFrom: '2026-09-01', validUntil: '2027-06-30',
+          status: 'accepted', acceptedAt: '2026-09-28T10:00:00Z', pdfUrl: 'https://example.com/nuolaida.pdf',
+          acceptUrl: '/school-discount-accept?contractToken=test&agreementId=discount-1',
+        }],
+      }),
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=test']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+
+    await screen.findByText('Nuolaida patvirtinta');
+    expect(screen.getByRole('link', { name: 'Atidaryti nuolaidos priedo PDF' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Peržiūrėti ir patvirtinti nuolaidą' })).toBeNull();
+  });
+
   it('hides the 14-day radios when the first lesson is after the window', async () => {
     fetchMock.mockResolvedValue({
       ok: true,

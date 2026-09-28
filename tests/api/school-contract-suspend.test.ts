@@ -44,6 +44,8 @@ vi.mock('../../api/_lib/schoolGroupMinimumPolicy.js', () => ({
   suspendSchoolGroupIfBelowMinimum: groupPolicy.suspend,
   resumeSchoolGroupIfMinimumMet: groupPolicy.resume,
 }));
+vi.mock('../../api/_lib/schoolGroupMembership.js', () => ({ syncSchoolContractGroupMembership: vi.fn() }));
+vi.mock('../../api/_lib/schoolClassGroupMaterialize.js', () => ({ materializeClassGroupNow: vi.fn() }));
 
 import handler from '../../api/school-contract-suspend';
 
@@ -141,5 +143,12 @@ describe('school contract suspension', () => {
       groupName: '7 klasė',
     }));
     expect(state.patch).toBeNull();
+  });
+
+  it('preserves the original individual suspension start when a saved pause is retried', async () => {
+    Object.assign(state.contract, { suspension_started_at: '2026-09-18T08:00:00.000Z', suspension_started_by: 'first-admin', suspension_scope: 'individual' });
+    const res = response();
+    await handler({ method: 'POST', body: { contractId: 'contract-1', action: 'suspend', reason: 'Laikinai nelanko' } } as any, res);
+    expect(state.patch).toMatchObject({ suspension_started_at: '2026-09-18T08:00:00.000Z', suspension_started_by: 'first-admin' });
   });
 });

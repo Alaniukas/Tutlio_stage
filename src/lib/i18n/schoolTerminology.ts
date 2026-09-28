@@ -365,6 +365,15 @@ export const LT_ACTIVITY_KEY_OVERRIDES: Record<string, string> = {
   'common.lesson': 'Užsiėmimas',
   'parent.sessionsTitle': 'Užsiėmimai',
   'stuSess.allSessions': 'Visi Jūsų užsiėmimai',
+  'cal.deleteRecurringTitle': 'Ištrinti pasikartojantį užsiėmimą',
+  'cal.deleteOnlyThis': 'Tik šį užsiėmimą',
+  'cal.deleteThisAndFuture': 'Šį ir visus ateinančius užsiėmimus',
+  'cal.deleteAllRemaining': 'Visus likusius serijos užsiėmimus',
+  'cal.deleteAllRemainingHint': 'Ištrinami būsimi suplanuoti ir atšaukti šios serijos užsiėmimai. Įvykusių užsiėmimų istorija išlieka.',
+  'cal.deleteCancelledOnlyHint': 'Pasirinkta apimtimi ištrinami tik atšaukti jūsų arba jūsų vaiko užsiėmimai.',
+  'cal.deleteConfirmSingle': 'Ar tikrai norite IŠTRINTI šį užsiėmimą?\n\nTai ne atšaukimas — užsiėmimas bus visam laikui pašalintas iš sistemos.',
+  'cal.deleteConfirmFuture': 'Ar tikrai norite IŠTRINTI šį užsiėmimą IR VISUS ATEINANČIUS pasikartojančius užsiėmimus?\n\nTai ne atšaukimas — užsiėmimai bus visam laikui pašalinti iš sistemos.',
+  'cal.deleteConfirmAll': 'Ar tikrai norite ištrinti visus likusius šios serijos suplanuotus ir atšauktus užsiėmimus? Įvykusių užsiėmimų istorija išlieka.',
 };
 
 export function applySchoolTerminology(

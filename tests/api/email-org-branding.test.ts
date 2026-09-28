@@ -3,9 +3,26 @@ import {
   applyOrgBrandingToHtml,
   DEFAULT_TUTLIO_HEADER_MARKERS,
   resolveEmailOrgBranding,
+  schoolInvoiceEmailBranding,
 } from '../../api/_lib/emailOrgBranding';
 import { headerInlineStyle } from '../../api/_lib/outlookEmail';
 import { PRO_KLASE_ORG_ID, MOKSLO_VAISIAI_ORG_ID } from '../../api/_lib/marketMoney';
+
+describe('school invoice palette', () => {
+  it('retains the target school logo and identity while preventing red billing accents', () => {
+    const brand = { name: 'Another school', logo_url: 'https://cdn.example/target-school.png',
+      brand_color: '#ef4444', brand_color_secondary: '#dc2626' };
+    const html = applyOrgBrandingToHtml(`${DEFAULT_TUTLIO_HEADER_MARKERS[0]}<a style="background:#4f46e5;color:#047857;">Pay</a>`, {
+      branding: schoolInvoiceEmailBranding(brand),
+    });
+    expect(html).toContain('target-school.png');
+    expect(html).toContain('Another school');
+    expect(html).toContain('#0f766e');
+    expect(html).not.toContain('#ef4444');
+    expect(html).not.toContain('#dc2626');
+    expect(brand.brand_color).toBe('#ef4444');
+  });
+});
 
 describe('resolveEmailOrgBranding', () => {
   it('applies full Pro Klasė branding for any role (logo + from + signature)', () => {

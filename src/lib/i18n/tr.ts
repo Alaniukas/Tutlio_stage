@@ -6,6 +6,14 @@
 import { en } from './en.js';
 
 export const trOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Bu seride kalan tüm dersler",
+  "cal.deleteAllRemainingHint": "Bu serideki gelecekte planlanan ve iptal edilen dersleri siler. Tamamlanan derslerin geçmişi korunur.",
+  "cal.deleteConfirmAll": "Bu seride kalan planlanmış ve iptal edilmiş tüm dersler silinsin mi? Tamamlanan derslerin geçmişi korunur.",
+  "cal.deleteGroupHint": "Bir sınıf grubu için seçim, gruptaki tüm öğrencilere uygulanır.",
+  "cal.deleteCancelledOnlyHint": "Seçilen kapsamda yalnızca sizin veya çocuğunuzun iptal edilen dersleri silinir.",
+  "em.schoolJoinSubject": "{date} tarihinde saat {time} dersinize katılın",
+  "em.schoolJoinHeader": "Dersinize katılın",
+  "em.schoolJoinBody": "Dersiniz {date} tarihinde saat {time} başlıyor. Katılmak için aşağıdaki bağlantıyı kullanın.",
   'compSess.markAttended': 'Öğrenci katıldı',
   'att.confirmedManually': 'Katılım doğrulandı',
   'att.unconfirmed': 'Katılım doğrulanmadı',

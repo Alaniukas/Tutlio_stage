@@ -6,6 +6,14 @@
 import { en } from './en.js';
 
 export const thOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "คาบเรียนที่เหลือทั้งหมดในชุดนี้",
+  "cal.deleteAllRemainingHint": "ลบคาบเรียนในอนาคตที่วางแผนไว้และที่ยกเลิกแล้วในชุดนี้ โดยเก็บประวัติคาบเรียนที่เรียนเสร็จแล้วไว้",
+  "cal.deleteConfirmAll": "ต้องการลบคาบเรียนที่วางแผนไว้และที่ยกเลิกแล้วทั้งหมดที่เหลือในชุดนี้หรือไม่? ประวัติคาบเรียนที่เรียนเสร็จแล้วจะยังคงอยู่",
+  "cal.deleteGroupHint": "สำหรับกลุ่มชั้นเรียน ขอบเขตที่เลือกจะมีผลกับนักเรียนทุกคนในกลุ่ม",
+  "cal.deleteCancelledOnlyHint": "จะลบเฉพาะคาบเรียนที่ยกเลิกแล้วของคุณหรือบุตรหลานภายในขอบเขตที่เลือกเท่านั้น",
+  "em.schoolJoinSubject": "เข้าร่วมคาบเรียนวันที่ {date} เวลา {time}",
+  "em.schoolJoinHeader": "เข้าร่วมคาบเรียน",
+  "em.schoolJoinBody": "คาบเรียนของคุณเริ่มวันที่ {date} เวลา {time} ใช้ลิงก์ด้านล่างเพื่อเข้าร่วม",
   'compSess.markAttended': 'นักเรียนเข้าร่วม',
   'att.confirmedManually': 'ยืนยันการเข้าเรียนแล้ว',
   'att.unconfirmed': 'ยังไม่ได้ยืนยันการเข้าเรียน',

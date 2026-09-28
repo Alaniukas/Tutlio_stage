@@ -15,6 +15,7 @@ interface StorageFile {
   metadata: { size: number } | null;
   studentName?: string | null;
   signedUrl?: string | null;
+  downloadUrl?: string | null;
   ownSubmission?: boolean;
 }
 
@@ -118,12 +119,14 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
             folderId: string;
             size: number | null;
             signedUrl?: string | null;
+            downloadUrl?: string | null;
             own?: boolean;
           }) => ({
             name: f.name,
             folderId: f.folderId,
             metadata: f.size != null ? { size: Number(f.size) } : null,
             signedUrl: f.signedUrl ?? null,
+            downloadUrl: f.downloadUrl ?? null,
             ownSubmission: !!f.own,
           })),
         );
@@ -290,8 +293,23 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
   }
 
   async function handleDownload(file: StorageFile) {
+    if (role === 'student' && file.downloadUrl) {
+      try {
+        const response = await fetch(file.downloadUrl, { headers: await authHeaders(), cache: 'no-store' });
+        if (!response.ok) { setError(t('files.downloadFailed')); return; }
+        const objectUrl = URL.createObjectURL(await response.blob());
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = file.name;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+      } catch { setError(t('files.downloadFailed')); }
+      return;
+    }
     let signedUrl = file.signedUrl ?? null;
     if (!signedUrl) {
+      // An expired/revoked student listing must never mint a reusable Storage URL.
+      if (role === 'student') { setError(t('files.downloadFailed')); return; }
       const { data, error } = await supabase.storage
         .from('session-files')
         .createSignedUrl(`${file.folderId}/${file.name}`, 60);

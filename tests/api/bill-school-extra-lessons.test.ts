@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ contracts: [] as any[], sessions: [] as any[], discounts: [] as any[], inserts: [] as any[], filters: [] as any[], sessionError: null as any, emails: 0 }));
+const state = vi.hoisted(() => ({ contracts: [] as any[], sessions: [] as any[], discounts: [] as any[], billingDecisions: [] as any[],
+  issuedInvoices: [] as any[], inserts: [] as any[], filters: [] as any[], sessionError: null as any, billingReviewError: null as any, emails: 0 }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
   from(table: string) {
     let insert: any;
@@ -15,7 +16,12 @@ vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
       insert: (row: any) => { insert = row; state.inserts.push(row); return query; },
       maybeSingle: async () => ({ data: null, error: null }),
       single: async () => ({ data: { id: 'invoice', ...insert }, error: null }),
-      then: (resolve: any) => resolve({ data: afterId ? [] : table === 'school_contracts' ? state.contracts : table === 'school_discount_agreements' ? state.discounts : state.sessions, error: table === 'sessions' ? state.sessionError : null }),
+      then: (resolve: any) => resolve({ data: afterId ? []
+        : table === 'school_contracts' ? state.contracts
+        : table === 'school_discount_agreements' ? state.discounts
+        : table === 'school_session_billing_decisions' ? state.billingDecisions
+        : table === 'school_monthly_invoices' ? state.issuedInvoices : state.sessions,
+      error: table === 'sessions' ? state.sessionError : table === 'school_session_billing_decisions' ? state.billingReviewError : null }),
     };
     return query;
   },
@@ -39,7 +45,8 @@ async function run(query: Record<string, string> = {}) {
 
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-01T04:00:00Z'));
-  state.contracts = []; state.sessions = []; state.discounts = []; state.inserts = []; state.filters = []; state.sessionError = null; state.emails = 0;
+  state.contracts = []; state.sessions = []; state.discounts = []; state.billingDecisions = []; state.issuedInvoices = [];
+  state.inserts = []; state.filters = []; state.sessionError = null; state.billingReviewError = null; state.emails = 0;
 });
 afterEach(() => vi.useRealTimers());
 
@@ -120,6 +127,44 @@ describe('monthly school billing allocation', () => {
     expect(response.status).toHaveBeenCalledWith(409);
     expect(state.inserts).toHaveLength(0);
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({ review: [{ contract_id: 'first', reason: 'missing_session_rows_for_scheduled_service' }] }));
+  });
+  it('applies audited exclusions without rewriting attendance and honors a later restoration', async () => {
+    const organizationId = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
+    state.contracts = [{ ...contract('first', 'individual', null, 'math'), organization_id: organizationId, filled_body: EXTRA_LESSONS_LEGAL_BODY }];
+    state.sessions = ['included', 'excluded'].map((id, index) => ({ id, student_id: 'student', subject_id: 'math',
+      start_time: `2026-08-${10 + index}T10:00:00Z`, status: 'completed', status_confirmed_at: `2026-08-${10 + index}T11:00:00Z`, school_billing_kind: 'base' }));
+    state.billingDecisions = [{ id: 1, session_reference_id: 'excluded', excluded: true, reason: 'Termination was reported late.' }];
+    expect((await run({ dryRun: 'true' })).json).toHaveBeenCalledWith(expect.objectContaining({ planned: [expect.objectContaining({
+      total_eur: 10, billed_session_ids: ['included'],
+    })] }));
+    state.billingDecisions.unshift({ id: 2, session_reference_id: 'excluded', excluded: false, reason: 'Confirmed supplied service.' });
+    expect((await run({ dryRun: 'true' })).json).toHaveBeenCalledWith(expect.objectContaining({ planned: [expect.objectContaining({
+      total_eur: 20, billed_session_ids: ['included', 'excluded'],
+    })] }));
+    expect(state.sessions.map((row) => row.status)).toEqual(['completed', 'completed']);
+    expect(state.inserts).toHaveLength(0); expect(state.emails).toBe(0);
+  });
+  it('holds fixed contracts with exclusions and sessions already included in an issued invoice', async () => {
+    state.contracts = [contract('first', 'individual', null, 'math')];
+    state.sessions = [{ id: 'lesson', student_id: 'student', subject_id: 'math', start_time: '2026-08-10T10:00:00Z', status: 'completed', school_billing_kind: 'extra' }];
+    state.billingDecisions = [{ id: 1, session_reference_id: 'lesson', excluded: true, reason: 'Termination was reported late.' }];
+    expect((await run()).json).toHaveBeenCalledWith(expect.objectContaining({ review: [expect.objectContaining({
+      reason: 'fixed_contract_requires_review_for_billing_exclusions', session_ids: ['lesson'],
+    })] }));
+    state.billingDecisions = [];
+    state.issuedInvoices = [{ id: 'issued', lines: [{ session_ids: ['lesson'] }] }];
+    expect((await run()).json).toHaveBeenCalledWith(expect.objectContaining({ review: [expect.objectContaining({
+      reason: 'sessions_already_in_issued_invoice',
+    })] }));
+    expect(state.inserts).toHaveLength(0); expect(state.emails).toBe(0);
+  });
+  it('holds invoices if billing exclusion state cannot be verified', async () => {
+    state.contracts = [contract('first', 'individual', null, 'math')];
+    state.billingReviewError = { message: 'audit table unavailable' };
+    expect((await run()).json).toHaveBeenCalledWith(expect.objectContaining({ review: [expect.objectContaining({
+      reason: 'billing_review_state_unavailable',
+    })] }));
+    expect(state.inserts).toHaveLength(0); expect(state.emails).toBe(0);
   });
   it('invoices only the matching group or individual service and its own allotment', async () => {
     state.contracts = [contract('group', 'group', 'g1', 'math', 12), contract('individual', 'individual', null, 'english')];

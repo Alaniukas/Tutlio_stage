@@ -6,6 +6,14 @@ import { en } from './en.js';
  * See docs/ITALIAN_LOCALIZATION_REVIEW.md before publishing this locale.
  */
 export const itOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Tutte le lezioni rimanenti di questa serie",
+  "cal.deleteAllRemainingHint": "Elimina le future lezioni programmate e le lezioni annullate di questa serie. La cronologia delle lezioni svolte viene conservata.",
+  "cal.deleteConfirmAll": "Eliminare tutte le lezioni programmate e annullate rimanenti di questa serie? La cronologia delle lezioni svolte viene conservata.",
+  "cal.deleteGroupHint": "Per un gruppo classe, la selezione si applica a tutti i suoi studenti.",
+  "cal.deleteCancelledOnlyHint": "Vengono eliminate solo le lezioni annullate tue o di tuo figlio comprese nell'ambito scelto.",
+  "em.schoolJoinSubject": "Partecipa alla tua lezione il {date} alle {time}",
+  "em.schoolJoinHeader": "Partecipa alla tua lezione",
+  "em.schoolJoinBody": "La tua lezione inizia il {date} alle {time}. Usa il link qui sotto per partecipare.",
   'compSess.markAttended': 'Lo studente ha partecipato',
   'att.confirmedManually': 'Presenza confermata',
   'att.unconfirmed': 'Presenza non confermata',

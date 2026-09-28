@@ -7,7 +7,8 @@ const payload = {
   attachments: [{ filename: 'PAM-762.pdf', content: 'cGRm' }],
 };
 function db(initial: any = null, opts: { stampError?: boolean; missingSchema?: boolean } = {}) {
-  const state = { invoice: { id: 'inv', organization_id: 'org', payment_status: 'pending', invoice_email_sent_at: null as string | null }, delivery: initial };
+  const state = { invoice: { id: 'inv', organization_id: 'org', payment_status: 'pending', invoice_email_sent_at: null as string | null,
+    student: { payer_email: 'parent@example.com' } }, delivery: initial };
   return { state, client: { from(table: string) {
     let patch: any; let inserting = false; const filters: Record<string, any> = {};
     const result = () => {
@@ -55,6 +56,25 @@ describe('durable invoice delivery', () => {
       const database = db({ id: 'inv', organization_id: 'org', payload: storedPayload, attempted_at: '2026-08-30T08:00:00Z' });
       expect(await run(database.client, send)).toMatchObject({ sent: false, reason: expect.stringContaining('requires review') });
     }
+    expect(send).not.toHaveBeenCalled();
+  });
+  it('holds a frozen child recipient and never replaces it under the existing delivery key', async () => {
+    const legacyPayload = { ...payload, to: ['child@example.com'] };
+    const database = db({ id: 'inv', organization_id: 'org', payload: legacyPayload, attempted_at: now.toISOString() });
+    const send = vi.fn();
+    expect(await run(database.client, send)).toMatchObject({ sent: false, reason: expect.stringContaining('payer recipient') });
+    expect(database.state.delivery.payload).toEqual(legacyPayload);
+    expect(send).not.toHaveBeenCalled();
+  });
+  it('validates the live payer before reserving any new delivery, including mixed recipients', async () => {
+    const send = vi.fn();
+    for (const recipients of [['child@example.com'], ['parent@example.com', 'child@example.com']]) {
+      const database = db();
+      expect(await run(database.client, send, { payload: { ...payload, to: recipients } })).toMatchObject({ sent: false });
+      expect(database.state.delivery).toBeNull();
+    }
+    const missing = db(); missing.state.invoice.student.payer_email = '';
+    expect(await run(missing.client, send)).toEqual({ sent: false, reason: 'no payer email' });
     expect(send).not.toHaveBeenCalled();
   });
   it('repairs an invoice stamp failure from durable delivery success without sending again', async () => {

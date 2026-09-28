@@ -39,6 +39,11 @@ export type MvProvisionInput = {
   parentPassword?: string;
   /** The current registration page is already the activation step. */
   suppressParentActivationEmail?: boolean;
+  /** School workflow verifies the immutable signed-guardian evidence before using this server-only context. */
+  schoolGuardianVerification?: { contractId: string; guardianEmail: string; guardianName: string };
+  /** Only the explicit school review action may replace this child's shared login. */
+  schoolSharedIdentityReview?: { expectedUserId: string };
+  suppressStudentActivationEmail?: boolean;
 };
 
 export type MvProvisionAccountResult = {
@@ -73,6 +78,8 @@ export async function ensureMvAuthUser(
     organizationId?: string | null;
     studentLoginName?: string | null;
     studentContactEmail?: string | null;
+    /** Verified school accounts are linked explicitly, without a client signup claim. */
+    explicitStudentLink?: boolean;
   },
 ): Promise<{ userId: string; created: boolean } | { error: string; code?: string }> {
   const email = opts.email.trim().toLowerCase();
@@ -82,12 +89,13 @@ export async function ensureMvAuthUser(
   };
   // Username accounts must not expose their internal alias to the legacy
   // auth trigger. They are linked explicitly after user creation below.
-  if (opts.role === 'student' && opts.studentId && !opts.studentLoginName) {
+  if (opts.role === 'student' && opts.studentId && !opts.studentLoginName && !opts.explicitStudentLink) {
     metadata.student_id = opts.studentId;
   }
 
   const appMetadata: Record<string, unknown> = {};
   if (opts.organizationId) appMetadata.provisioned_by_organization = opts.organizationId;
+  if (opts.explicitStudentLink && opts.studentId) appMetadata.student_id = opts.studentId;
   if (opts.studentLoginName) appMetadata.student_login_name = opts.studentLoginName;
   if (opts.studentContactEmail) appMetadata.student_contact_email = opts.studentContactEmail;
 
@@ -179,6 +187,7 @@ async function linkParentToStudents(
   parentName: string,
   parentEmail: string,
   studentIds: string[],
+  allowSharedLogin = true,
 ) {
   const { data: profileRow, error: profErr } = await supabase
     .from('parent_profiles')
@@ -230,7 +239,7 @@ async function linkParentToStudents(
     })
     .map((row: { id?: string }) => row.id)
     .filter(Boolean) as string[];
-  if (sharedLoginStudentIds.length > 0) {
+  if (allowSharedLogin && sharedLoginStudentIds.length > 0) {
     const sharedLoginUpdate = supabase
       .from('students')
       .update({ linked_user_id: parentUserId })
@@ -318,7 +327,7 @@ async function reusableStudentUserId(
   }
 
   const requestedIds = new Set(students.map((row) => row.id));
-  const metadataStudentId = String(user.user_metadata?.student_id || '');
+  const metadataStudentId = String(user.app_metadata?.student_id || user.user_metadata?.student_id || '');
   const linked = (linkedRows || []) as MvProvisionStudentRow[];
   const linkedOnlyToThisChild = linked.length > 0
     && linked.every((row) => sameMvFamilyIdentity(students[0], row));
@@ -413,6 +422,23 @@ export async function provisionMvFamilyAccounts(
   if (!managedFamilyAccountsEnabled(organizationId, org?.features as Record<string, unknown> | undefined)) {
     return { ok: false, status: 403, error: 'This organization does not support managed family accounts', code: 'org_not_supported' };
   }
+  const schoolFeatures = org?.features as Record<string, unknown> | undefined;
+  const strictSchoolFamily = schoolFeatures?.school_family_portal === true || schoolFeatures?.school_family_accounts_setup === true;
+  if (strictSchoolFamily) {
+    const verified = input.schoolGuardianVerification;
+    if (!verified || !organizationId) {
+      return { ok: false, status: 403, error: 'Use the verified school family account workflow', code: 'school_guardian_verification_required' };
+    }
+    const evidence = await supabase.from('school_family_guardians')
+      .select('annual_contract_id, guardian_email, guardian_name')
+      .eq('organization_id', organizationId).eq('student_id', input.studentId).maybeSingle();
+    if (evidence.error || !evidence.data
+      || evidence.data.annual_contract_id !== verified.contractId
+      || evidence.data.guardian_email !== verified.guardianEmail.trim().toLowerCase()
+      || evidence.data.guardian_name !== verified.guardianName) {
+      return { ok: false, status: 403, error: 'Signed guardian verification is required', code: 'school_guardian_verification_required' };
+    }
+  }
   const studentLoginPrefix = managedStudentLoginPrefix(organizationId);
 
   const loadedStudents = await loadProvisionStudents(supabase, selectedStudent, input.studentIds);
@@ -427,6 +453,14 @@ export async function provisionMvFamilyAccounts(
 
   const linkedStudentIds = [...new Set(studentRows.map((row) => row.linked_user_id).filter(Boolean))] as string[];
   const linkedParentIds = [...new Set(studentRows.map((row) => row.parent_user_id).filter(Boolean))] as string[];
+  const reviewedSharedUserId = strictSchoolFamily ? input.schoolSharedIdentityReview?.expectedUserId : undefined;
+  if (reviewedSharedUserId && (linkedStudentIds.length !== 1 || linkedParentIds.length !== 1
+    || linkedStudentIds[0] !== reviewedSharedUserId || linkedParentIds[0] !== reviewedSharedUserId || scope !== 'student')) {
+    return { ok: false, status: 409, error: 'Shared identity has changed; review again', code: 'school_family_shared_identity_review' };
+  }
+  if (strictSchoolFamily && !reviewedSharedUserId && linkedStudentIds.some((id) => linkedParentIds.includes(id))) {
+    return { ok: false, status: 409, error: 'Shared parent and child identity requires review', code: 'school_family_shared_identity_review' };
+  }
   if (linkedStudentIds.length > 1 || linkedParentIds.length > 1) {
     return {
       ok: false,
@@ -439,12 +473,13 @@ export async function provisionMvFamilyAccounts(
   const parentName = (input.parentName || firstValue('payer_name')).trim();
   const parentEmail = (input.parentEmail || firstValue('payer_email')).trim().toLowerCase();
   const studentFullName = (input.studentFullName || firstValue('full_name')).trim();
+  const contactStudentEmail = (input.studentEmail || firstValue('email')).trim().toLowerCase();
   const studentEmail = (
-    input.forceStudentUsername ? '' : (input.studentEmail || firstValue('email'))
+    input.forceStudentUsername || reviewedSharedUserId || (strictSchoolFamily && contactStudentEmail === parentEmail) ? '' : contactStudentEmail
   ).trim().toLowerCase();
 
   const needsParent = linkedParentIds.length === 0;
-  const needsStudent = linkedStudentIds.length === 0;
+  const needsStudent = linkedStudentIds.length === 0 || Boolean(reviewedSharedUserId);
 
   let doParent = (scope === 'parent' || scope === 'both') && needsParent;
   let doStudent = (scope === 'student' || scope === 'both') && needsStudent;
@@ -525,7 +560,7 @@ export async function provisionMvFamilyAccounts(
     }
     parentUserId = parentAuth.userId;
     try {
-      await linkParentToStudents(supabase, parentAuth.userId, parentName, parentEmail, studentIds);
+      await linkParentToStudents(supabase, parentAuth.userId, parentName, parentEmail, studentIds, !strictSchoolFamily);
     } catch (e: unknown) {
       if (parentAuth.created) await supabase.auth.admin.deleteUser(parentAuth.userId);
       const message = e instanceof Error ? e.message : String(e);
@@ -588,6 +623,7 @@ export async function provisionMvFamilyAccounts(
       organizationId,
       studentLoginName,
       studentContactEmail: studentLoginName ? notifyTargets.studentTo : null,
+      explicitStudentLink: strictSchoolFamily,
     });
     // A generated handle has a very large keyspace, but Auth remains the source of
     // truth for uniqueness. Retry a collision instead of failing the whole flow.
@@ -603,6 +639,7 @@ export async function provisionMvFamilyAccounts(
         organizationId,
         studentLoginName,
         studentContactEmail: notifyTargets.studentTo,
+        explicitStudentLink: strictSchoolFamily,
       });
     }
     if ('error' in studentAuth && studentAuth.code === 'email_already_registered' && validEmail(studentEmail)) {
@@ -637,7 +674,7 @@ export async function provisionMvFamilyAccounts(
 
     const studentUpdate: Record<string, unknown> = {
       full_name: studentFullName,
-      email: studentLoginName ? null : studentEmail,
+      email: studentLoginName ? (strictSchoolFamily ? (contactStudentEmail || null) : null) : studentEmail,
       linked_user_id: studentAuth.userId,
     };
     if (parentUserId) {
@@ -648,25 +685,58 @@ export async function provisionMvFamilyAccounts(
       studentUpdate.payer_email = parentEmail;
     }
 
-    const linkQuery = supabase.from('students').update(studentUpdate);
-    const { error: linkErr } = studentIds.length === 1
-      ? await linkQuery.eq('id', studentIds[0])
-      : await linkQuery.in('id', studentIds);
+    const studentAuthUserId = studentAuth.userId;
+    let currentLinks: Array<{ linked_user_id: string | null }> = [];
+    if (strictSchoolFamily) {
+      // Auth may have run an earlier signup trigger before its server metadata
+      // was saved. Accept only this exact Auth identity, never another account.
+      const current = await supabase.from('students').select('id,linked_user_id,parent_user_id')
+        .eq('organization_id', organizationId).is('detached_at', null).in('id', studentIds);
+      if (current.error) {
+        if (studentAuth.created) await supabase.auth.admin.deleteUser(studentAuth.userId);
+        return { ok: false, status: 500, error: current.error.message, code: 'link_student_failed' };
+      }
+      if (current.data?.length !== studentIds.length || current.data.some((row) => row.parent_user_id !== parentUserId
+        || (reviewedSharedUserId ? row.linked_user_id !== reviewedSharedUserId
+          : row.linked_user_id && row.linked_user_id !== studentAuthUserId))) {
+        if (studentAuth.created) await supabase.auth.admin.deleteUser(studentAuth.userId);
+        return { ok: false, status: 409, error: 'Student account changed during provisioning', code: 'related_account_conflict' };
+      }
+      currentLinks = current.data;
+    }
+    let linkQuery = supabase.from('students').update(studentUpdate);
+    if (strictSchoolFamily) {
+      linkQuery = linkQuery.eq('organization_id', organizationId).is('detached_at', null);
+      linkQuery = parentUserId ? linkQuery.eq('parent_user_id', parentUserId) : linkQuery.is('parent_user_id', null);
+    }
+    if (reviewedSharedUserId) linkQuery = linkQuery.eq('linked_user_id', reviewedSharedUserId);
+    else if (strictSchoolFamily) {
+      if (currentLinks.every((row) => row.linked_user_id === studentAuthUserId)) linkQuery = linkQuery.eq('linked_user_id', studentAuthUserId);
+      else if (currentLinks.every((row) => !row.linked_user_id)) linkQuery = linkQuery.is('linked_user_id', null);
+      else linkQuery = linkQuery.or(`linked_user_id.is.null,linked_user_id.eq.${studentAuth.userId}`);
+    }
+    const scopedLinkQuery = studentIds.length === 1 ? linkQuery.eq('id', studentIds[0]) : linkQuery.in('id', studentIds);
+    const linkedResult = strictSchoolFamily ? await scopedLinkQuery.select('id') : await scopedLinkQuery;
+    const linkErr = linkedResult.error;
     if (linkErr) {
       if (studentAuth.created) await supabase.auth.admin.deleteUser(studentAuth.userId);
       return { ok: false, status: 500, error: linkErr.message, code: 'link_student_failed' };
     }
+    if (strictSchoolFamily && (linkedResult.data?.length || 0) !== studentIds.length) {
+      if (studentAuth.created) await supabase.auth.admin.deleteUser(studentAuth.userId);
+      return { ok: false, status: 409, error: 'Student account changed during provisioning', code: 'related_account_conflict' };
+    }
 
     if (parentUserId && validEmail(parentEmail) && parentName) {
       try {
-        await linkParentToStudents(supabase, parentUserId, parentName, parentEmail, studentIds);
+        await linkParentToStudents(supabase, parentUserId, parentName, parentEmail, studentIds, !strictSchoolFamily);
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
         return { ok: false, status: 500, error: message, code: 'link_parent_failed' };
       }
     }
 
-    if (studentAuth.created) {
+    if (studentAuth.created && !input.suppressStudentActivationEmail) {
       const studentNotifyTo = notifyTargets.studentTo;
       const studentRecipientName =
         studentNotifyTo === notifyTargets.parentTo && parentName ? parentName : studentFullName;
@@ -697,10 +767,10 @@ export async function provisionMvFamilyAccounts(
       };
     } else {
       result.student = {
-        email: studentEmail,
+        email: studentLoginName || studentEmail,
         userId: studentAuth.userId,
-        created: false,
-        reused: true,
+        created: studentAuth.created,
+        ...(studentAuth.created ? { password: studentPassword } : { reused: true }),
         emailSent: false,
         activationUrl: '',
         notifyEmail: notifyTargets.studentTo,

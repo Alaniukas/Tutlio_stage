@@ -23,6 +23,7 @@ export interface StudentPortalPolicyEntry {
   paymentsPageEnabled: boolean;
   /** School feature school_lesson_recordings. */
   lessonRecordingsEnabled: boolean;
+  familyPortalEnabled?: boolean;
   /** Waitlist fully disabled for this org (Pro Klasė / disable_waitlist). */
   waitlistHidden: boolean;
 }
@@ -83,7 +84,7 @@ export async function fetchStudentPortalPolicyMap(
     const orgIds = [...new Set(Object.values(orgOfStudent).filter((v): v is string => !!v))];
     const policyByOrg: Record<
       string,
-      { bookingDisabled: boolean; actionsDisabled: boolean; rescheduleDisabled: boolean; paymentsPageEnabled: boolean; lessonRecordingsEnabled: boolean; waitlistHidden: boolean }
+      { bookingDisabled: boolean; actionsDisabled: boolean; rescheduleDisabled: boolean; paymentsPageEnabled: boolean; lessonRecordingsEnabled: boolean; familyPortalEnabled: boolean; waitlistHidden: boolean }
     > = {};
     if (orgIds.length > 0) {
       const { data: orgs } = await supabase
@@ -108,6 +109,7 @@ export async function fetchStudentPortalPolicyMap(
           ),
           lessonRecordingsEnabled:
             o.entity_type === 'school' && o.features?.school_lesson_recordings === true,
+          familyPortalEnabled: o.entity_type === 'school' && o.features?.school_family_portal === true,
           waitlistHidden,
         };
       }
@@ -123,6 +125,7 @@ export async function fetchStudentPortalPolicyMap(
         rescheduleDisabled: policy?.rescheduleDisabled === true,
         paymentsPageEnabled: policy?.paymentsPageEnabled === true,
         lessonRecordingsEnabled: policy?.lessonRecordingsEnabled === true,
+        familyPortalEnabled: policy?.familyPortalEnabled === true,
         waitlistHidden:
           policy?.waitlistHidden === true || isWaitlistHiddenForOrg(orgId),
       };

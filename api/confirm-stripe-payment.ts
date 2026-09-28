@@ -6,6 +6,7 @@ import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
 import { retrieveConnectCheckoutSession } from './_lib/stripeDirectCharge.js';
 import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
+import { markLinkedPackagePaidForSession } from './_lib/sessionPackagePayment.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -240,6 +241,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             if (!updatedSession) {
+                await markLinkedPackagePaidForSession(supabase, sessionId, checkoutSession!);
                 return res.status(200).json({ success: true, already_paid: true });
             }
 
@@ -337,6 +339,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }
             }
 
+            await markLinkedPackagePaidForSession(supabase, sessionId, checkoutSession!);
             return res.status(200).json({ success: true });
         } else {
             return res.status(400).json({ error: 'Payment not successful yet' });

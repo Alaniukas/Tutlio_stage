@@ -16,6 +16,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { useStaffLabels } from '@/hooks/useStaffLabels';
 import { usesLaisviStyleExtraLessonsPrefill } from '@/lib/laisviVaikaiExtraLessonsDefaults';
 import { useTranslation } from '@/lib/i18n';
+import { schoolRecordingAccessMode, type SchoolRecordingAccessMode } from '@/lib/schoolRecordingPlan';
 import {
   addMinutesToTime,
   defaultSchoolYearRange,
@@ -87,6 +88,7 @@ export default function ClassGroupFormDialog(props: {
   canDelete?: boolean;
   defaultTutorId: string;
   organizationId?: string | null;
+  recordingPlanEnabled?: boolean;
   onSaved: (result?: { materializeError?: string | null }) => void;
   /** Resolves true when the group is gone; the dialog closes itself. */
   onDelete?: (group: SchoolClassGroupRecord) => Promise<boolean>;
@@ -120,6 +122,7 @@ export default function ClassGroupFormDialog(props: {
   const [yearEnd, setYearEnd] = useState('');
   const [platform, setPlatform] = useState('Google Meet');
   const [duration, setDuration] = useState(45);
+  const [minimumActiveStudents, setMinimumActiveStudents] = useState<2 | 3>(3);
   const [meetingLink, setMeetingLink] = useState('');
   const [adminActionRequired, setAdminActionRequired] = useState(false);
   const [adminActionNote, setAdminActionNote] = useState('');
@@ -128,6 +131,7 @@ export default function ClassGroupFormDialog(props: {
   );
   const [studentIds, setStudentIds] = useState<string[]>([]);
   const [memberSlots, setMemberSlots] = useState<Record<string, SchoolMemberSlot[] | null>>({});
+  const [memberRecordingAccess, setMemberRecordingAccess] = useState<Record<string, SchoolRecordingAccessMode>>({});
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -145,12 +149,14 @@ export default function ClassGroupFormDialog(props: {
       setYearEnd(draft.school_year_end);
       setPlatform(draft.platform || 'Google Meet');
       setDuration(draft.duration_minutes || 45);
+      setMinimumActiveStudents(draft.minimum_active_students === 2 ? 2 : 3);
       setMeetingLink(draft.meeting_link || '');
       setAdminActionRequired(draft.admin_action_required === true);
       setAdminActionNote(draft.admin_action_note || '');
       setSlots(draft.slots.length ? draft.slots : emptyDraft(draft.tutor_id).slots);
       setStudentIds(draft.student_ids || []);
       setMemberSlots(Object.fromEntries((draft.members || []).map((member) => [member.student_id, member.schedule_slots])));
+      setMemberRecordingAccess(Object.fromEntries((draft.members || []).map((member) => [member.student_id, schoolRecordingAccessMode(member.recording_access)])));
       return;
     }
     const blank = emptyDraft(props.defaultTutorId);
@@ -161,12 +167,14 @@ export default function ClassGroupFormDialog(props: {
     setYearEnd(blank.school_year_end);
     setPlatform(blank.platform);
     setDuration(blank.duration_minutes);
+    setMinimumActiveStudents(3);
     setMeetingLink(blank.meeting_link);
     setAdminActionRequired(false);
     setAdminActionNote('');
     setSlots(blank.slots);
     setStudentIds([]);
     setMemberSlots({});
+    setMemberRecordingAccess({});
   }, [props.open, props.mode, props.group, props.defaultTutorId]);
 
   const normalizedSlots = useMemo(
@@ -219,6 +227,7 @@ export default function ClassGroupFormDialog(props: {
     const members = studentIds.map((student_id) => ({
       student_id,
       schedule_slots: normalizedSlots.length === 1 ? null : memberSlots[student_id] ?? null,
+      ...(memberRecordingAccess[student_id] === undefined ? {} : { recording_access: memberRecordingAccess[student_id] }),
     }));
     const draft = {
       name,
@@ -251,6 +260,7 @@ export default function ClassGroupFormDialog(props: {
         slots: normalizedSlots,
         student_ids: props.canEditMembers ? studentIds : undefined,
         members: props.canEditMembers ? members : undefined,
+        minimum_active_students: props.canEditMembers ? minimumActiveStudents : undefined,
       };
       if (props.mode === 'edit' && props.group) payload.id = props.group.id;
       const res = await fetch('/api/school-class-groups', {
@@ -377,6 +387,21 @@ export default function ClassGroupFormDialog(props: {
                 className="rounded-xl"
               />
             </div>
+            {props.canEditMembers && (
+              <div className="sm:col-span-2">
+                <Label htmlFor="class-group-minimum">{t('school.groups.minimumActiveStudents')}</Label>
+                <select
+                  id="class-group-minimum"
+                  className="w-full border rounded-xl h-9 px-2 text-sm bg-white"
+                  value={minimumActiveStudents}
+                  onChange={(event) => setMinimumActiveStudents(event.target.value === '2' ? 2 : 3)}
+                >
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                </select>
+                <p className="mt-1 text-xs text-gray-500">{t('school.groups.minimumActiveStudentsHint')}</p>
+              </div>
+            )}
             <div className="sm:col-span-2">
               <Label>{t('school.groups.slots')}</Label>
               <div className="mt-1">
@@ -420,6 +445,29 @@ export default function ClassGroupFormDialog(props: {
                 </span>
               ))}
             </div>
+            {props.canEditMembers && props.recordingPlanEnabled && selectedStudents.length > 0 && (
+              <div className="rounded-lg border bg-white p-2.5 space-y-2">
+                <p className="text-xs font-medium text-gray-700">{t('school.recordingPlan.label')}</p>
+                <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                  {selectedStudents.map((student) => (
+                    <label key={student.id} className="block text-xs text-gray-800">
+                      {student.full_name}
+                      <select aria-label={`${t('school.recordingPlan.label')}: ${student.full_name}`}
+                        className="mt-1 w-full border rounded-md h-9 px-2 bg-white text-sm"
+                        value={memberRecordingAccess[student.id] || 'schedule'}
+                        onChange={(event) => setMemberRecordingAccess((previous) => ({
+                          ...previous, [student.id]: schoolRecordingAccessMode(event.target.value),
+                        }))}>
+                        <option value="schedule">{t('school.recordingPlan.schedule')}</option>
+                        <option value="group">{t('school.recordingPlan.group')}</option>
+                        <option value="none">{t('school.recordingPlan.none')}</option>
+                      </select>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500">{t('school.recordingPlan.contractHint')}</p>
+              </div>
+            )}
             {props.canEditMembers && normalizedSlots.length > 1 && selectedStudents.length > 0 && (
               <div className="rounded-lg border bg-white p-2.5 space-y-2">
                 <p className="text-xs font-medium text-gray-700">Kuriuos grupės laikus lanko kiekvienas vaikas?</p>

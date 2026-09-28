@@ -1,4 +1,5 @@
 import { isArchivedEnrollmentStatus, suggestSchoolYear } from './schoolStudentEnrollment.js';
+import { isSchoolRecordingAccessMode, type SchoolRecordingAccessMode } from './schoolRecordingPlan.js';
 
 export type SchoolClassGroupSlot = {
   weekday: number;
@@ -11,6 +12,7 @@ export type SchoolClassGroupMemberWrite = {
   student_id: string;
   /** Null means every weekly time; a nonempty subset limits this student. */
   schedule_slots: SchoolMemberSlot[] | null;
+  recording_access?: SchoolRecordingAccessMode;
 };
 
 export function schoolMemberSlotKey(slot: SchoolMemberSlot): string {
@@ -33,6 +35,7 @@ export function validateSchoolMemberSchedules(
   const students = new Set<string>();
   for (const member of members) {
     if (!member.student_id || students.has(member.student_id)) return false;
+    if (member.recording_access !== undefined && !isSchoolRecordingAccessMode(member.recording_access)) return false;
     students.add(member.student_id);
     if (member.schedule_slots === null) continue;
     if (!member.schedule_slots.length) return false;
@@ -52,6 +55,7 @@ export type SchoolClassGroupDraft = {
   school_year_end: string;
   platform?: string;
   duration_minutes?: number;
+  minimum_active_students?: number;
   meeting_link?: string | null;
   /** Teacher-requested review; an administrator clears it by saving the group. */
   admin_action_required?: boolean;
@@ -62,6 +66,7 @@ export type SchoolClassGroupDraft = {
 export type SchoolClassGroupMember = {
   student_id: string;
   schedule_slots?: SchoolMemberSlot[] | null;
+  recording_access?: SchoolRecordingAccessMode;
   student?: { full_name: string; grade?: string | null; email?: string | null } | null;
 };
 
@@ -222,6 +227,7 @@ export function validateSchoolClassGroup(draft: SchoolClassGroupDraft): string[]
   if (!draft.tutor_id) errors.push('tutor_id');
   if (!draft.school_year_start) errors.push('school_year_start');
   if (!draft.school_year_end) errors.push('school_year_end');
+  if (draft.minimum_active_students != null && ![2, 3].includes(draft.minimum_active_students)) errors.push('minimum_active_students');
   if (!draft.slots.length) errors.push('slots');
   for (const slot of draft.slots) {
     if (slot.weekday < 0 || slot.weekday > 6) errors.push('weekday');
@@ -261,6 +267,7 @@ export function parseClassGroupWriteBody(
     school_year_end: String(body.school_year_end || '').slice(0, 10),
     platform: String(body.platform || 'Google Meet').trim() || 'Google Meet',
     duration_minutes: Number.isFinite(duration) && duration > 0 ? duration : 45,
+    ...(body.minimum_active_students == null ? {} : { minimum_active_students: Number(body.minimum_active_students) }),
     meeting_link: body.meeting_link == null || String(body.meeting_link).trim() === ''
       ? null
       : String(body.meeting_link).trim(),
@@ -275,6 +282,7 @@ export function parseClassGroupWriteBody(
           const member = raw as Record<string, unknown>;
           return {
             student_id: String(member.student_id || '').trim(),
+            ...(member.recording_access === undefined ? {} : { recording_access: member.recording_access as SchoolRecordingAccessMode }),
             schedule_slots: member.schedule_slots == null ? null : Array.isArray(member.schedule_slots)
               ? member.schedule_slots.map((choice) => ({
                   weekday: Number((choice as SchoolMemberSlot).weekday),
@@ -297,6 +305,7 @@ export function classGroupRowFields(draft: SchoolClassGroupDraft): Record<string
     school_year_end: draft.school_year_end,
     platform: draft.platform || 'Google Meet',
     duration_minutes: draft.duration_minutes || 45,
+    ...(draft.minimum_active_students == null ? {} : { minimum_active_students: draft.minimum_active_students }),
     meeting_link: draft.meeting_link ?? null,
     admin_action_required: draft.admin_action_required === true,
     admin_action_note: draft.admin_action_note ?? null,
@@ -314,6 +323,7 @@ export function groupToWriteDraft(group: SchoolClassGroupRecord): SchoolClassGro
     school_year_end: String(group.school_year_end || '').slice(0, 10),
     platform: group.platform || 'Google Meet',
     duration_minutes: duration,
+    minimum_active_students: group.minimum_active_students === 2 ? 2 : 3,
     meeting_link: group.meeting_link ?? null,
     admin_action_required: group.admin_action_required === true,
     admin_action_note: group.admin_action_note ?? null,
@@ -322,6 +332,7 @@ export function groupToWriteDraft(group: SchoolClassGroupRecord): SchoolClassGro
     members: (group.members || []).map((member) => ({
       student_id: member.student_id,
       schedule_slots: member.schedule_slots ?? null,
+      ...(member.recording_access === undefined ? {} : { recording_access: member.recording_access }),
     })),
   };
 }

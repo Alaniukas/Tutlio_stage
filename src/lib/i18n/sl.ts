@@ -4,6 +4,14 @@ import { en } from './en.js';
  * Keep unpublished until the release checks in docs/SLOVENIAN_LOCALIZATION_REVIEW.md are complete.
  */
 export const slOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Vse preostale ure v tem nizu",
+  "cal.deleteAllRemainingHint": "Odstrani prihodnje načrtovane in odpovedane ure v tem nizu. Zgodovina zaključenih ur se ohrani.",
+  "cal.deleteConfirmAll": "Želite izbrisati vse preostale načrtovane in odpovedane ure v tem nizu? Zgodovina zaključenih ur se ohrani.",
+  "cal.deleteGroupHint": "Pri skupini se izbira nanaša na vse njene učence.",
+  "cal.deleteCancelledOnlyHint": "V izbranem obsegu se izbrišejo samo vaše odpovedane ure ali odpovedane ure vašega otroka.",
+  "em.schoolJoinSubject": "Pridružite se svoji uri {date} ob {time}",
+  "em.schoolJoinHeader": "Pridružite se svoji uri",
+  "em.schoolJoinBody": "Vaša ura se začne {date} ob {time}. Pridružite se prek spodnje povezave.",
   'compSess.markAttended': 'Učenec se je udeležil',
   'att.confirmedManually': 'Prisotnost potrjena',
   'att.unconfirmed': 'Prisotnost ni potrjena',

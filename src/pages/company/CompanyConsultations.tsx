@@ -9,11 +9,14 @@ import { CONSULTATION_STATUS_I18N, type ConsultationStatus } from '@/lib/schoolC
 import ConsultationProposeDialog from '@/components/consultations/ConsultationProposeDialog';
 import { downloadSchoolConsultationsXlsx } from '@/lib/schoolConsultationsXlsxExport';
 import { consultationSchoolYear } from '@/lib/schoolConsultationYear';
+import ConsultationNotesDialog from '@/components/consultations/ConsultationNotesDialog';
+import { schoolFamilyConsultationText } from '@/lib/i18n/schoolFamilyConsultationTranslations';
 
 export default function CompanyConsultations() {
-  const { t } = useTranslation();
-  const { features, organizationId } = useOrgFeatures();
-  const enabled = schoolConsultationsEnabled(organizationId, features as Record<string, unknown>);
+  const { t, locale } = useTranslation();
+  const { features, organizationId, entityType } = useOrgFeatures();
+  const enabled = schoolConsultationsEnabled(organizationId, features as Record<string, unknown>) || (entityType === 'school' && features.school_family_portal === true);
+  const [notesId, setNotesId] = useState<string | null>(null);
   const [requests, setRequests] = useState<any[]>([]);
   const [consultations, setConsultations] = useState<any[]>([]);
   const [proposeOpen, setProposeOpen] = useState(false);
@@ -107,11 +110,12 @@ export default function CompanyConsultations() {
             <ul className="space-y-2">
               {consultations.map((c) => (
                 <li key={c.id} className="rounded-lg border p-3">
-                  <p className="font-medium">{c.student?.full_name}</p>
+                  <p className="font-medium">{c.target_kind === 'family' ? schoolFamilyConsultationText(locale, 'family') : c.student?.full_name}</p>
                   <p className="text-sm text-muted-foreground">
                     {c.start_time ? new Date(c.start_time).toLocaleString('lt-LT') : '—'}
                   </p>
                   <Badge variant="secondary">{statusLabel(c.status)}</Badge>
+                  {c.canReadNotes && <Button className="ml-2" variant="outline" size="sm" onClick={() => setNotesId(c.id)}>{schoolFamilyConsultationText(locale, c.canWriteNotes ? 'notesEdit' : 'notesOpen')}</Button>}
                 </li>
               ))}
             </ul>
@@ -126,6 +130,7 @@ export default function CompanyConsultations() {
         requestIds={proposeRequestIds}
         onProposed={load}
       />
+      <ConsultationNotesDialog consultationId={notesId} onClose={() => setNotesId(null)} />
     </>
   );
 }

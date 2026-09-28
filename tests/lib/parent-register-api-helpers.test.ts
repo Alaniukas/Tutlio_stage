@@ -38,6 +38,16 @@ describe('PostgREST missing RPC', () => {
 });
 
 describe('findAuthUserByEmail', () => {
+  it('treats a successful RPC miss as authoritative without scanning unrelated Auth users', async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const listUsers = vi.fn();
+    const supabase = { rpc, auth: { admin: { listUsers } } } as any;
+    const { findAuthUserByEmail } = await import('../../api/_lib/findAuthUserByEmail');
+    expect(await findAuthUserByEmail(supabase, '  new-child@example.com  ')).toBeNull();
+    expect(rpc).toHaveBeenCalledWith('get_auth_user_id_by_email', { p_email: 'new-child@example.com' });
+    expect(listUsers).not.toHaveBeenCalled();
+  });
+
   it('uses the auth.users RPC instead of scanning the first listUsers page', async () => {
     const rpc = vi.fn(async () => ({ data: '7cdcd471-057d-46d0-a105-b36a2eae0232', error: null }));
     const listUsers = vi.fn();

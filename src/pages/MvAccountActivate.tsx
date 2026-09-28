@@ -4,6 +4,9 @@ import { useTranslation } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Loader2, CheckCircle2 } from 'lucide-react';
 import { isStudentLoginName } from '@/lib/studentLoginIdentity';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { schoolFamilyAccountCopy, schoolFamilyAccountError } from '@/lib/schoolFamilyAccountCopy';
 
 type Preview = {
   role: 'parent' | 'student';
@@ -17,11 +20,13 @@ type Preview = {
     brandColorSecondary: string;
   } | null;
   alreadyActivated: boolean;
+  requiresPasswordSetup?: boolean;
   loginUrl: string;
 };
 
 export default function MvAccountActivate() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  const copy = schoolFamilyAccountCopy(locale);
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const token = (params.get('t') || '').trim();
@@ -31,6 +36,8 @@ export default function MvAccountActivate() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [password, setPassword] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
 
   useEffect(() => {
     if (!token) {
@@ -44,7 +51,7 @@ export default function MvAccountActivate() {
         const res = await fetch(`/api/mv-account-activate?t=${encodeURIComponent(token)}`);
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
-          setError((json as { error?: string }).error || t('mvActivate.invalidLink'));
+          setError(token.startsWith('sf1.') ? t('mvActivate.invalidLink') : (json as { error?: string }).error || t('mvActivate.invalidLink'));
           return;
         }
         setPreview(json as Preview);
@@ -59,17 +66,18 @@ export default function MvAccountActivate() {
 
   const handleActivate = async () => {
     if (!token) return;
+    if (preview?.requiresPasswordSetup && password !== passwordConfirm) { setError(copy.passwordMismatch); return; }
     setActivating(true);
     setError(null);
     try {
       const res = await fetch('/api/mv-account-activate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, ...(preview?.requiresPasswordSetup ? { password } : {}) }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError((json as { error?: string }).error || t('common.error'));
+        setError(token.startsWith('sf1.') ? schoolFamilyAccountError((json as { error?: string }).error || '', copy) : (json as { error?: string }).error || t('common.error'));
         return;
       }
       setDone(true);
@@ -115,10 +123,13 @@ export default function MvAccountActivate() {
           </div>
         )}
 
-        {preview && !error && (
+        {preview && (
           <>
             <p className="text-sm text-gray-600 leading-relaxed">
-              {preview.role === 'parent'
+              {token.startsWith('sf1.')
+                ? done ? copy.activationReadyIntro
+                  : (preview.role === 'parent' ? copy.activationParentIntro : copy.activationStudentIntro).replace('{org}', preview.orgName || '')
+                : preview.role === 'parent'
                 ? t('mvActivate.parentDesc', { org: preview.orgName || '', student: preview.studentName })
                 : t('mvActivate.studentDesc', { org: preview.orgName || '', student: preview.studentName })}
             </p>
@@ -131,7 +142,7 @@ export default function MvAccountActivate() {
             {done ? (
               <div className="flex flex-col items-center gap-3 text-center">
                 <CheckCircle2 className="w-10 h-10 text-emerald-600" />
-                <p className="text-sm text-emerald-800 font-medium">{t('mvActivate.success')}</p>
+                <p className="text-sm text-emerald-800 font-medium">{token.startsWith('sf1.') ? copy.activationSuccess : t('mvActivate.success')}</p>
                 <Button
                   type="button"
                   className="rounded-xl w-full"
@@ -142,15 +153,23 @@ export default function MvAccountActivate() {
                 </Button>
               </div>
             ) : (
+              <>
+              {preview.requiresPasswordSetup && <div className="space-y-3">
+                <p className="text-sm font-medium">{copy.choosePassword}</p>
+                <p className="text-xs text-gray-600">{copy.passwordHint}</p>
+                <div className="space-y-1"><Label htmlFor="family-new-password">{t('auth.newPassword')}</Label><Input id="family-new-password" type="password" minLength={10} maxLength={128} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></div>
+                <div className="space-y-1"><Label htmlFor="family-confirm-password">{t('onboard.confirmPassword')}</Label><Input id="family-confirm-password" type="password" autoComplete="new-password" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} /></div>
+              </div>}
               <Button
                 type="button"
                 className="rounded-xl w-full bg-emerald-700 hover:bg-emerald-800"
                 style={preview.branding ? { backgroundColor: preview.branding.brandColor } : undefined}
-                disabled={activating}
+                disabled={activating || (preview.requiresPasswordSetup && (password.length < 10 || password !== passwordConfirm))}
                 onClick={() => void handleActivate()}
               >
                 {activating ? <Loader2 className="w-4 h-4 animate-spin" /> : t('mvActivate.confirmBtn')}
               </Button>
+              </>
             )}
           </>
         )}

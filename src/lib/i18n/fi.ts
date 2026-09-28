@@ -1,4 +1,6 @@
+import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
+import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsFi } from './schoolInstructionsTranslations.js';
@@ -6,6 +8,21 @@ import { schoolTeacherContractTranslationsFi } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const fi: Record<string, string> = {
+  ...schoolFamilyMaterialTranslations.fi,
+  ...schoolInvoiceReviewTranslations.fi,
+  'school.recordings.access.title': "Tallenteiden käyttöoikeus",
+  'school.recordings.access.scopeHelp': "Poista tai palauta oppilaan tai vanhemman käyttöoikeus tässä koulussa. Tilit, yhteydet lapsiin ja maksutiedot säilyvät.",
+  'school.recordings.access.legacyHelp': "Koskee kirjautuneita käyttäjiä. Lapsen aiemmat jaetut linkit, jotka toimivat ilman kirjautumista, pysyvät aktiivisina.",
+  'school.recordings.access.email': "Henkilön sähköpostiosoite",
+  'school.recordings.access.revoke': "Poista käyttöoikeus",
+  'school.recordings.access.restore': "Palauta käyttöoikeus",
+  'school.recordings.access.empty': "Tallenteiden käyttöoikeuksia ei ole poistettu.",
+  'school.recordings.access.failed': "Käyttöoikeusasetuksia ei voitu muuttaa tai ladata.",
+  'school.recordings.access.invalidEmail': "Anna kelvollinen sähköpostiosoite.",
+  'school.recordings.access.personNotInSchool': "Tätä henkilöä ei ole yhdistetty tämän koulun oppilaaseen.",
+  'school.recordings.access.setupRequired': "Käyttöoikeuksien hallinnan tietokantamigraatiota ei ole vielä suoritettu.",
+  'school.recordings.access.revoked': "Tallenteiden käyttöoikeus poistettu.",
+  'school.recordings.access.restored': "Tallenteiden käyttöoikeus palautettu.",
   'parent.childAlreadyExists': 'Lapsi on jo luettelossasi. Luo tili lapsen nykyisen kortin kautta.',
   'login.emailOrUsername': 'Sähköposti tai oppilaan käyttäjätunnus',
   'login.studentUsername': 'Oppilaan käyttäjätunnus',
@@ -849,6 +866,11 @@ export const fi: Record<string, string> = {
   'cal.deleteFromCalendar': 'Poista kalenterista',
   'cal.deleteRecurringTitle': 'Poista toistuva tunti',
   'cal.deleteChoose': 'Valitse, mitä haluat poistaa.',
+  "cal.deleteAllRemaining": "Kaikki sarjan jäljellä olevat oppitunnit",
+  "cal.deleteAllRemainingHint": "Poistaa sarjan tulevat suunnitellut ja perutut oppitunnit. Pidettyjen oppituntien historia säilyy.",
+  "cal.deleteConfirmAll": "Poistetaanko kaikki sarjan jäljellä olevat suunnitellut ja perutut oppitunnit? Pidettyjen oppituntien historia säilyy.",
+  "cal.deleteGroupHint": "Ryhmän oppitunneilla valinta koskee kaikkia ryhmän oppilaita.",
+  "cal.deleteCancelledOnlyHint": "Vain sinun tai lapsesi perutut oppitunnit poistetaan valitussa laajuudessa.",
   'cal.deleteHint': 'Vahvistat toiminnon valinnan jälkeen.',
   'cal.deleteOnlyThis': 'Vain tämä',
   'cal.deleteThisAndFuture': 'Tämä ja kaikki tulevat',
@@ -5366,6 +5388,9 @@ export const fi: Record<string, string> = {
   'school.groups.editTitle': "Muokkaa ryhmää",
   'school.groups.platform': "Alusta",
   'school.groups.duration': "Kesto (min)",
+  'school.groups.minimumActiveStudents': "Aktiivisten oppilaiden vähimmäismäärä",
+  'school.groups.minimumActiveStudentsHint': "Tämä ryhmä ja sen sopimukset keskeytetään automaattisesti, kun aktiivisia oppilaita jää vähemmän.",
+  'school.groups.suspendedMinimum': "Keskeytetty: ryhmässä on alle {n} aktiivista oppilasta",
   'school.groups.meetingLink': "Tunnin linkki",
   'school.groups.slots': "Viikkoaikataulu",
   'school.groups.addSlot': "Lisää päivä",
@@ -5666,4 +5691,7 @@ export const fi: Record<string, string> = {
   "compare.customChip2": "Palkkiosäännöt",
   "compare.customChip3": "Vanhempien hyväksyntälinkit",
   "compare.customChip4": "Portaalit omalla ilmeellä",
+  'em.schoolJoinSubject': 'Liity oppitunnille {date} klo {time}',
+  'em.schoolJoinHeader': 'Liity oppitunnille',
+  'em.schoolJoinBody': 'Oppituntisi alkaa {date} klo {time}. Liittymislinkki on alla.',
 };

@@ -6,6 +6,14 @@ import { en } from './en.js';
  * See docs/KOREAN_LOCALIZATION_REVIEW.md before publishing this locale.
  */
 export const koOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "이 반복 일정에 남아 있는 모든 수업",
+  "cal.deleteAllRemainingHint": "이 반복 일정의 앞으로 예정된 수업과 취소된 수업을 삭제합니다. 완료된 수업 기록은 유지됩니다.",
+  "cal.deleteConfirmAll": "이 반복 일정에 남아 있는 예정된 수업과 취소된 수업을 모두 삭제할까요? 완료된 수업 기록은 유지됩니다.",
+  "cal.deleteGroupHint": "반 그룹의 경우 선택한 범위가 모든 학생에게 적용됩니다.",
+  "cal.deleteCancelledOnlyHint": "선택한 범위에서 본인 또는 자녀의 취소된 수업만 삭제됩니다.",
+  "em.schoolJoinSubject": "{date} {time} 수업에 참여하세요",
+  "em.schoolJoinHeader": "수업에 참여하기",
+  "em.schoolJoinBody": "수업은 {date} {time}에 시작합니다. 아래 링크로 참여하세요.",
   'compSess.markAttended': '학생이 참석했습니다',
   'att.confirmedManually': '출석 확인됨',
   'att.unconfirmed': '출석 미확인',

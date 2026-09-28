@@ -1,4 +1,6 @@
+import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
+import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsDk } from './schoolInstructionsTranslations.js';
@@ -121,6 +123,21 @@ const DK_DPA_HTML = [
 ].join('');
 
 export const dk: Record<string, string> = {
+  ...schoolFamilyMaterialTranslations.dk,
+  ...schoolInvoiceReviewTranslations.dk,
+  'school.recordings.access.title': "Adgang til optagelser",
+  'school.recordings.access.scopeHelp': "Fjern eller gendan en elevs eller forælders adgang på denne skole. Konti, forbindelser til børn og betalingsoplysninger bevares.",
+  'school.recordings.access.legacyHelp': "Gælder efter login. Barnets eksisterende delte links, der virker uden login, er fortsat aktive.",
+  'school.recordings.access.email': "Personens e-mailadresse",
+  'school.recordings.access.revoke': "Fjern adgang",
+  'school.recordings.access.restore': "Gendan adgang",
+  'school.recordings.access.empty': "Ingen adgang til optagelser er blevet fjernet.",
+  'school.recordings.access.failed': "Adgangsindstillingerne kunne ikke ændres eller indlæses.",
+  'school.recordings.access.invalidEmail': "Indtast en gyldig e-mailadresse.",
+  'school.recordings.access.personNotInSchool': "Denne person er ikke tilknyttet en elev på denne skole.",
+  'school.recordings.access.setupRequired': "Databasemigreringen til adgangsstyring er endnu ikke anvendt.",
+  'school.recordings.access.revoked': "Adgangen til optagelser er fjernet.",
+  'school.recordings.access.restored': "Adgangen til optagelser er gendannet.",
   'parent.childAlreadyExists': 'Barnet er allerede på listen. Brug barnets eksisterende kort til at oprette kontoen.',
   'login.emailOrUsername': 'E-mail eller elevens brugernavn',
   'login.studentUsername': 'Elevens brugernavn',
@@ -853,6 +870,11 @@ export const dk: Record<string, string> = {
   'cal.deleteFromCalendar': 'Slet fra kalender',
   'cal.deleteRecurringTitle': 'Slet tilbagevendende lektion',
   'cal.deleteChoose': 'Vælg hvad du vil slette.',
+  "cal.deleteAllRemaining": "Alle resterende lektioner i serien",
+  "cal.deleteAllRemainingHint": "Sletter fremtidige planlagte og aflyste lektioner i serien. Historikken for afsluttede lektioner bevares.",
+  "cal.deleteConfirmAll": "Slet alle resterende planlagte og aflyste lektioner i serien? Historikken for afsluttede lektioner bevares.",
+  "cal.deleteGroupHint": "For en gruppe gælder valget alle dens elever.",
+  "cal.deleteCancelledOnlyHint": "Kun dine eller dit barns aflyste lektioner inden for det valgte omfang slettes.",
   'cal.deleteHint': 'Du bekræfter handlingen efter valget.',
   'cal.deleteOnlyThis': 'Kun denne',
   'cal.deleteThisAndFuture': 'Denne og alle fremtidige',
@@ -5418,6 +5440,9 @@ export const dk: Record<string, string> = {
   'school.groups.editTitle': "Rediger gruppe",
   'school.groups.platform': "Platform",
   'school.groups.duration': "Varighed (min)",
+  'school.groups.minimumActiveStudents': "Mindste antal aktive elever",
+  'school.groups.minimumActiveStudentsHint': "Denne gruppe og dens aftaler sættes automatisk på pause, når færre aktive elever er tilbage.",
+  'school.groups.suspendedMinimum': "Sat på pause: færre end {n} aktive elever i gruppen",
   'school.groups.meetingLink': "Link til lektionen",
   'school.groups.slots': "Ugeskema",
   'school.groups.addSlot': "Tilføj dag",
@@ -5717,4 +5742,7 @@ export const dk: Record<string, string> = {
   "compare.customChip2": "Honorarregler",
   "compare.customChip3": "Accept-links til forældre",
   "compare.customChip4": "Portaler i dit brand",
+  'em.schoolJoinSubject': 'Deltag i lektionen {date} kl. {time}',
+  'em.schoolJoinHeader': 'Deltag i lektionen',
+  'em.schoolJoinBody': 'Din lektion starter {date} kl. {time}. Brug linket nedenfor.',
 };

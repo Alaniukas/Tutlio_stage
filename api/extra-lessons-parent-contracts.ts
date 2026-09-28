@@ -3,11 +3,37 @@ import { isParentVisibleSchoolContract, mapParentSchoolContract, uniqueStudentId
 import { verifyRequestAuth } from './_lib/auth.js';
 import { serviceSupabase } from './_lib/extraLessonsContractShared.js';
 import { extractSchoolContractStoragePath, SCHOOL_CONTRACTS_BUCKET } from './_lib/schoolContractPdfPath.js';
+import { loadSchoolFamilyGuardianAccess, schoolFamilyPortalEnabled } from './_lib/schoolFamilyGuardianAccess.js';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+type ParentContractStudent = {
+  id: string;
+  full_name: string | null;
+  linked_user_id: string | null;
+  organization_id: string | null;
+};
+
+/** Legacy links remain candidates, but never grant parent contract access in an opted-in school. */
+async function allowedParentContractStudents(db: SupabaseClient, userId: string, candidates: ParentContractStudent[]) {
+  const orgIds = [...new Set(candidates.map((student) => student.organization_id).filter((id): id is string => !!id))];
+  if (!orgIds.length) return candidates;
+  const organizations = await db.from('organizations').select('id,entity_type,features').in('id', orgIds);
+  if (organizations.error || (organizations.data || []).length !== orgIds.length) throw new Error('school_family_access_unavailable');
+  const enabled = (organizations.data || []).filter((org) => org.entity_type === 'school' && schoolFamilyPortalEnabled(org.features));
+  const grants = new Map<string, Set<string>>();
+  await Promise.all(enabled.map(async (org) => {
+    const access = await loadSchoolFamilyGuardianAccess(db, userId, org.id);
+    grants.set(org.id, new Set(access.distinctParent ? access.studentIds : []));
+  }));
+  return candidates.filter((student) => !student.organization_id || !grants.has(student.organization_id)
+    || grants.get(student.organization_id)!.has(student.id));
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   const auth = await verifyRequestAuth(req);
   if (!auth?.userId) return res.status(401).json({ error: 'Unauthorized' });
+  res.setHeader('Cache-Control', 'private, no-store');
   const supabase = serviceSupabase();
 
   const { data: parentProfile } = await supabase
@@ -19,17 +45,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ? await supabase.from('parent_students').select('student_id').eq('parent_id', parentProfile.id)
     : { data: [] as { student_id: string }[] };
   const linkIds = (parentLinks || []).map((l) => l.student_id).filter(Boolean);
-  const studentCols = 'id, full_name, linked_user_id';
-  const [{ data: byAuth }, { data: byParentUser }, byIdsRes] = await Promise.all([
+  const studentCols = 'id, full_name, linked_user_id, organization_id';
+  const [byAuthRes, byParentUserRes, byIdsRes] = await Promise.all([
     supabase.from('students').select(studentCols).eq('linked_user_id', auth.userId),
     supabase.from('students').select(studentCols).eq('parent_user_id', auth.userId),
     linkIds.length
       ? supabase.from('students').select(studentCols).in('id', linkIds)
-      : Promise.resolve({ data: [] as { id: string; full_name: string | null; linked_user_id: string | null }[] }),
+      : Promise.resolve({ data: [] as ParentContractStudent[], error: null }),
   ]);
-  const linked = [...(byAuth || []), ...(byParentUser || []), ...((byIdsRes as any).data || [])];
+  if (byAuthRes.error || byParentUserRes.error || byIdsRes.error) {
+    return res.status(503).json({ error: 'school_family_access_unavailable' });
+  }
+  const candidates = [...(byAuthRes.data || []), ...(byParentUserRes.data || []), ...(byIdsRes.data || [])] as ParentContractStudent[];
+  let linked: ParentContractStudent[];
+  try {
+    linked = await allowedParentContractStudents(supabase, auth.userId, candidates);
+  } catch {
+    return res.status(503).json({ error: 'school_family_access_unavailable' });
+  }
   const studentIds = uniqueStudentIds(linked);
-  if (!studentIds.length) return res.status(200).json({ ok: true, contracts: [] });
+  if (!studentIds.length) {
+    if (req.query?.file && req.query?.contract_id) return res.status(404).json({ error: 'not_found' });
+    return res.status(200).json({ ok: true, contracts: [] });
+  }
 
   const selectCols =
     'id, contract_number, revision_label, accepted_at, signing_status, signed_contract_url, pdf_url, extra_end_statement_path, withdrawal_requested_at, extra_end_kind, start_within_14_status, student_id, kind, party_kind, created_at';
@@ -50,7 +88,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     error = fallback.error;
   }
   if (error) return res.status(500).json({ error: error.message });
-  const visible = (rows || []).filter(isParentVisibleSchoolContract);
+  // Recheck after the query so a revoked annual binding or newly enabled portal cannot disclose a stale grant.
+  try {
+    linked = await allowedParentContractStudents(supabase, auth.userId, linked);
+  } catch {
+    return res.status(503).json({ error: 'school_family_access_unavailable' });
+  }
+  const currentStudentIds = new Set(linked.map((student) => student.id));
+  const visible = (rows || []).filter((row) => currentStudentIds.has(row.student_id) && isParentVisibleSchoolContract(row));
 
   const file = String(req.query?.file || '').trim();
   const contractId = String(req.query?.contract_id || '').trim();
@@ -61,6 +106,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const path = raw ? extractSchoolContractStoragePath(String(raw)) : '';
     if (!path) return res.status(404).json({ error: 'no_file' });
     const { data: signed } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).createSignedUrl(path, 60);
+    try {
+      const current = await allowedParentContractStudents(supabase, auth.userId, linked.filter((student) => student.id === row.student_id));
+      if (!current.length) return res.status(404).json({ error: 'not_found' });
+    } catch {
+      return res.status(503).json({ error: 'school_family_access_unavailable' });
+    }
     return res.status(200).json({ ok: true, url: signed?.signedUrl || null });
   }
 

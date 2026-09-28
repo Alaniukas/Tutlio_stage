@@ -3,6 +3,14 @@ import { en } from './en.js';
 /** Hong Kong Traditional Chinese draft. School/admin/full legal copy stays English.
  * Scope and release limits: docs/HONG_KONG_LOCALIZATION_REVIEW.md. */
 export const zhHkOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "此系列所有剩餘課堂",
+  "cal.deleteAllRemainingHint": "刪除此系列未來已安排及已取消的課堂。已完成課堂的紀錄會保留。",
+  "cal.deleteConfirmAll": "要刪除此系列所有剩餘的已安排及已取消課堂嗎？已完成課堂的紀錄會保留。",
+  "cal.deleteGroupHint": "如屬班級群組，所選範圍會套用至所有學生。",
+  "cal.deleteCancelledOnlyHint": "只會刪除所選範圍內你或子女已取消的課堂。",
+  "em.schoolJoinSubject": "於 {date} {time} 參加課堂",
+  "em.schoolJoinHeader": "參加課堂",
+  "em.schoolJoinBody": "你的課堂將於 {date} {time} 開始。請使用下方連結加入。",
   'compSess.markAttended': '學生已出席',
   'att.confirmedManually': '出席已確認',
   'att.unconfirmed': '出席尚未確認',

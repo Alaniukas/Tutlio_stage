@@ -4,6 +4,7 @@ import {
   isSchoolClassGroupSuspended,
   resumableSchoolGroupStudentIds,
   schoolGroupExitImpact,
+  schoolGroupMinimumStudents,
 } from '../../src/lib/schoolGroupMinimumPolicy';
 
 const signed = (id: string, studentId: string, extra: Record<string, unknown> = {}) => ({
@@ -24,6 +25,13 @@ describe('school group minimum policy', () => {
       remainingActiveStudentCount: 2,
       willFallBelowMinimum: true,
     });
+  });
+
+  it('honors a selected minimum of two while retaining three as the default', () => {
+    const contracts = [signed('c1', 's1'), signed('c2', 's2'), signed('c3', 's3')];
+    expect(schoolGroupExitImpact(contracts, 'c1', now, 2).willFallBelowMinimum).toBe(false);
+    expect(schoolGroupMinimumStudents({ minimum_active_students: 2 })).toBe(2);
+    expect(schoolGroupMinimumStudents({})).toBe(3);
   });
 
   it('counts students rather than duplicate contract rows', () => {

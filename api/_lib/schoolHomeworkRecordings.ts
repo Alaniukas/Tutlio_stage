@@ -3,8 +3,10 @@ import {
   listDriveRecordings,
   recordingRetentionDays,
 } from './googleDriveRecordings.js';
-import { createSchoolHomeworkRecordingTicket } from './schoolRecordingTicket.js';
-import { recordingSlotScope, recordingSlotTags, recordingVisibleToScope } from './schoolRecordingSlotAccess.js';
+import { createSchoolHomeworkRecordingTicket, createSchoolRecordingTicket } from './schoolRecordingTicket.js';
+import { canStudentAccessSchoolGroupRecordings, recordingSlotScope, recordingSlotTags, recordingVisibleToScope } from './schoolRecordingSlotAccess.js';
+import { registerDrivePublications, schoolRecordingPublicationAllowsLegacyAccess } from './schoolMaterialPublications.js';
+import { schoolFamilyPortalEnabled } from './schoolFamilyGuardianAccess.js';
 
 export type HomeworkRecordingFile = {
   id: string;
@@ -51,9 +53,10 @@ function mapRecordingFiles(
   studentId: string,
   targetId: string,
   recordings: Awaited<ReturnType<typeof listDriveRecordings>>,
+  viewerUserId?: string | null,
 ): HomeworkRecordingFile[] {
   return recordings.map((file) => {
-    const ticket = createSchoolHomeworkRecordingTicket({
+    const ticket = viewerUserId ? createSchoolRecordingTicket({ userId: viewerUserId, groupId: targetId, fileId: file.id }) : createSchoolHomeworkRecordingTicket({
       studentId,
       groupId: targetId,
       fileId: file.id,
@@ -83,6 +86,8 @@ export async function listHomeworkGroupRecordings(
     recordingsEnabled: boolean;
     listFiles?: boolean;
     groupId?: string;
+    viewerUserId?: string | null;
+    features?: Record<string, unknown> | null;
   },
 ): Promise<{ retentionDays: number; groups: HomeworkRecordingGroup[] }> {
   const retentionDays = recordingRetentionDays();
@@ -135,7 +140,7 @@ export async function listHomeworkGroupRecordings(
       subjectsById.set(raw.subject_id, String(subject.name || ''));
     }
   }
-  const groups = [
+  let groups = [
     ...((groupRows || []) as Array<{ id: string; name: string | null }>).map((row) => ({
       id: row.id,
       name: row.name || '',
@@ -149,6 +154,12 @@ export async function listHomeworkGroupRecordings(
     .filter((row) => !requestedGroupId || row.id === requestedGroupId)
     .sort((a, b) => a.name.localeCompare(b.name, 'lt'))
     .slice(0, HOMEWORK_RECORDING_GROUP_LIMIT);
+  const planContext = { organizationId: params.organizationId, features: params.features };
+  if (schoolFamilyPortalEnabled(params.features)) {
+    const allowed = await Promise.all(groups.map(async (group) => group.id.startsWith('subject:')
+      || await canStudentAccessSchoolGroupRecordings(supabase, group.id, params.studentId, planContext)));
+    groups = groups.filter((_, index) => allowed[index]);
+  }
 
   if (!params.listFiles) {
     return {
@@ -171,19 +182,29 @@ export async function listHomeworkGroupRecordings(
         HOMEWORK_DRIVE_LIST_TIMEOUT_MS,
         'Drive list timed out',
       );
-      const visible = group.id.startsWith('subject:')
+      if (schoolFamilyPortalEnabled(params.features)) await registerDrivePublications(supabase, {
+        organizationId: params.organizationId, targetId: group.id, files: recordings, features: params.features,
+      });
+      let visible = group.id.startsWith('subject:')
         ? recordings
         : await (async () => {
             const [scope, tags] = await Promise.all([
-              recordingSlotScope(supabase, group.id, [params.studentId]),
+              recordingSlotScope(supabase, group.id, [params.studentId], false, planContext),
               recordingSlotTags(supabase, group.id),
             ]);
             return recordings.filter((file) => recordingVisibleToScope(scope, tags.get(file.id) || null));
           })();
+      if (!params.viewerUserId && schoolFamilyPortalEnabled(params.features)) {
+        const allowed = await Promise.all(visible.map((file) => schoolRecordingPublicationAllowsLegacyAccess(supabase, {
+          organizationId: params.organizationId, targetId: group.id, fileId: file.id,
+          createdTime: file.createdTime, modifiedTime: file.modifiedTime, features: params.features,
+        })));
+        visible = visible.filter((_, index) => allowed[index]);
+      }
       return {
         id: group.id,
         name: group.name,
-        recordings: mapRecordingFiles(params.studentId, group.id, visible),
+        recordings: mapRecordingFiles(params.studentId, group.id, visible, params.viewerUserId),
         loadError: null,
         pending: false,
       } satisfies HomeworkRecordingGroup;

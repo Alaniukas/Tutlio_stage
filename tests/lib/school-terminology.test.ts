@@ -106,6 +106,27 @@ describe('applySchoolTerminology', () => {
   it('uses the explicit per-key override for ambiguous keys', () => {
     expect(applySchoolTerminology('Pamoka', 'lt', { staff: false, activity: true }, 'common.lesson')).toBe('Užsiėmimas');
   });
+
+  it.each([
+    ['cal.deleteRecurringTitle', 'Ištrinti pasikartojantį užsiėmimą'],
+    ['cal.deleteOnlyThis', 'Tik šį užsiėmimą'],
+    ['cal.deleteThisAndFuture', 'Šį ir visus ateinančius užsiėmimus'],
+    ['cal.deleteAllRemaining', 'Visus likusius serijos užsiėmimus'],
+    ['cal.deleteAllRemainingHint', 'Ištrinami būsimi suplanuoti ir atšaukti šios serijos užsiėmimai. Įvykusių užsiėmimų istorija išlieka.'],
+    ['cal.deleteCancelledOnlyHint', 'Pasirinkta apimtimi ištrinami tik atšaukti jūsų arba jūsų vaiko užsiėmimai.'],
+    ['cal.deleteConfirmSingle', 'Ar tikrai norite IŠTRINTI šį užsiėmimą?\n\nTai ne atšaukimas — užsiėmimas bus visam laikui pašalintas iš sistemos.'],
+    ['cal.deleteConfirmFuture', 'Ar tikrai norite IŠTRINTI šį užsiėmimą IR VISUS ATEINANČIUS pasikartojančius užsiėmimus?\n\nTai ne atšaukimas — užsiėmimai bus visam laikui pašalinti iš sistemos.'],
+    ['cal.deleteConfirmAll', 'Ar tikrai norite ištrinti visus likusius šios serijos suplanuotus ir atšauktus užsiėmimus? Įvykusių užsiėmimų istorija išlieka.'],
+  ])('inflects school deletion copy for %s without changing tutor copy', (key, expected) => {
+    const tutorCopy = lt[key];
+    expect(applySchoolTerminology(tutorCopy, 'lt', { staff: false, activity: true }, key)).toBe(expected);
+    expect(applySchoolTerminology(tutorCopy, 'lt', { staff: false, activity: false }, key)).toBe(tutorCopy);
+  });
+
+  it('keeps the LT deletion overrides out of other locales', () => {
+    expect(applySchoolTerminology('Delete recurring lesson', 'en', { staff: false, activity: true }, 'cal.deleteRecurringTitle'))
+      .toBe('Delete recurring session');
+  });
 });
 
 describe('terminologyStore', () => {

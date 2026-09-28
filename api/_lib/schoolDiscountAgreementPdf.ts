@@ -12,7 +12,8 @@ export type SchoolDiscountAgreementPdfData = {
   agreementNumber: string;
   contractNumber: string;
   issueDate: string;
-  acceptedAt: string;
+  acceptedAt?: string | null;
+  contractAccepted?: boolean;
   schoolName: string;
   schoolCompanyCode?: string | null;
   schoolAddress?: string | null;
@@ -26,7 +27,7 @@ export type SchoolDiscountAgreementPdfData = {
   validFrom: string;
   validUntil: string;
   note?: string | null;
-  acceptanceStatement: string;
+  acceptanceStatement?: string | null;
   branding?: InvoicePdfBranding | null;
 };
 
@@ -103,11 +104,12 @@ function drawDetailRow(
   return y - height;
 }
 
-/** One-page click-wrap addendum attached to an accepted lessons contract. */
+/** One-page proposal or confirmed click-wrap addendum for a lessons contract. */
 export async function generateSchoolDiscountAgreementPdf(
   data: SchoolDiscountAgreementPdfData,
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  const accepted = Boolean(data.acceptedAt && data.acceptanceStatement?.trim());
   doc.registerFontkit(fontkit);
   const font = await doc.embedFont(new Uint8Array(readFileSync(resolveInvoiceFontPath('regular'))), { subset: true });
   const bold = await doc.embedFont(new Uint8Array(readFileSync(resolveInvoiceFontPath('bold'))), { subset: true });
@@ -129,8 +131,10 @@ export async function generateSchoolDiscountAgreementPdf(
     });
   }
 
-  page.drawText(data.schoolName, { x: 330, y: PAGE_H - 66, size: 10, font: bold, color: BLACK });
-  let schoolY = PAGE_H - 82;
+  let schoolY = drawWrapped(page, data.schoolName, {
+    x: 330, y: PAGE_H - 66, width: PAGE_W - 330 - MARGIN,
+    font: bold, size: 10, lineHeight: 13,
+  }) - 3;
   const schoolLines = [
     data.schoolCompanyCode ? `Įmonės kodas ${data.schoolCompanyCode}` : '',
     data.schoolAddress || '',
@@ -167,7 +171,16 @@ export async function generateSchoolDiscountAgreementPdf(
     font,
     color: BLACK,
   });
-  y -= 25;
+  y -= 17;
+  const status = accepted ? 'PRIEDAS PATVIRTINTAS' : 'PASIŪLYMAS - PRIEDAS NEPATVIRTINTAS';
+  page.drawText(status, {
+    x: (PAGE_W - bold.widthOfTextAtSize(status, 8)) / 2,
+    y,
+    size: 8,
+    font: bold,
+    color: BLACK,
+  });
+  y -= 23;
 
   y = drawDetailRow(page, y, 'Mokinys', data.studentName, font, bold);
   y = drawDetailRow(page, y, 'Mokėtojas / atstovas', data.parentName, font, bold);
@@ -201,7 +214,7 @@ export async function generateSchoolDiscountAgreementPdf(
     lineHeight: 12.5,
   });
   y -= 6;
-  y = drawWrapped(page, '3. Šis priedas yra neatskiriama Sutarties dalis ir įsigalioja nuo elektroninio patvirtinimo momento.', {
+  y = drawWrapped(page, '3. Šis priedas yra neatskiriama Sutarties dalis. Nuolaida taikoma, kai elektroniniu būdu patvirtinta ir Sutartis, ir šis priedas, tik šiame priede nurodytu galiojimo laikotarpiu. Dokumentus galima patvirtinti bet kuria eilės tvarka.', {
     x: MARGIN,
     y,
     width: PAGE_W - MARGIN * 2,
@@ -222,36 +235,52 @@ export async function generateSchoolDiscountAgreementPdf(
   }
 
   y -= 18;
-  page.drawText('ELEKTRONINIO PATVIRTINIMO DUOMENYS', { x: MARGIN, y, size: 8.5, font: bold, color: BLACK });
-  y -= 16;
-  y = drawWrapped(page, `Patvirtino: ${data.parentName} (${data.parentEmail})`, {
-    x: MARGIN,
-    y,
-    width: PAGE_W - MARGIN * 2,
-    font,
-    size: 8.2,
-    lineHeight: 11,
-  });
-  y = drawWrapped(page, `Patvirtinimo data ir laikas: ${data.acceptedAt}`, {
-    x: MARGIN,
-    y,
-    width: PAGE_W - MARGIN * 2,
-    font,
-    size: 8.2,
-    lineHeight: 11,
-  });
-  y = drawWrapped(page, data.acceptanceStatement, {
-    x: MARGIN,
-    y,
-    width: PAGE_W - MARGIN * 2,
-    font,
-    size: 7.8,
-    lineHeight: 10.5,
-  });
+  if (accepted) {
+    page.drawText('ELEKTRONINIO PATVIRTINIMO DUOMENYS', { x: MARGIN, y, size: 8.5, font: bold, color: BLACK });
+    y -= 16;
+    y = drawWrapped(page, `Patvirtino: ${data.parentName} (${data.parentEmail})`, {
+      x: MARGIN,
+      y,
+      width: PAGE_W - MARGIN * 2,
+      font,
+      size: 8.2,
+      lineHeight: 11,
+    });
+    y = drawWrapped(page, `Patvirtinimo data ir laikas: ${data.acceptedAt}`, {
+      x: MARGIN,
+      y,
+      width: PAGE_W - MARGIN * 2,
+      font,
+      size: 8.2,
+      lineHeight: 11,
+    });
+    y = drawWrapped(page, String(data.acceptanceStatement), {
+      x: MARGIN,
+      y,
+      width: PAGE_W - MARGIN * 2,
+      font,
+      size: 7.8,
+      lineHeight: 10.5,
+    });
+  }
+  if (!accepted || data.contractAccepted === false) {
+    drawWrapped(page, accepted
+      ? 'Šio priedo patvirtinimo metu užsiėmimų sutartis dar nepatvirtinta. Nuolaida bus taikoma patvirtinus ir užsiėmimų sutartį.'
+      : 'Šis pasiūlymas dar nepatvirtintas. Peržiūrėkite užsiėmimų sutartį ir šį priedą prieš patvirtindami dokumentus.', {
+      x: MARGIN,
+      y: accepted ? y - 8 : y,
+      width: PAGE_W - MARGIN * 2,
+      font,
+      size: 8.2,
+      lineHeight: 11,
+    });
+  }
 
-  const footer = `Priedo sudarymo data: ${data.issueDate}`;
+  const footer = `${accepted ? 'Priedo sudarymo' : 'Pasiūlymo parengimo'} data: ${data.issueDate}`;
   page.drawText(footer, { x: MARGIN, y: 40, size: 7.8, font, color: BLACK });
-  page.drawText('Dokumentas patvirtintas elektroniniu būdu Tutlio sistemoje.', {
+  page.drawText(accepted
+    ? 'Dokumentas patvirtintas elektroniniu būdu Tutlio sistemoje.'
+    : 'Pasiūlymas parengtas Tutlio sistemoje. Elektroninis patvirtinimas negautas.', {
     x: MARGIN,
     y: 27,
     size: 7.8,

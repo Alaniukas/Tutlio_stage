@@ -16,7 +16,7 @@ import ClassGroupFormDialog, {
   type ClassGroupTutorOption,
 } from '@/components/company/ClassGroupFormDialog';
 import { usesLaisviStyleExtraLessonsPrefill } from '@/lib/laisviVaikaiExtraLessonsDefaults';
-import { isSchoolClassGroupSuspended } from '@/lib/schoolGroupMinimumPolicy';
+import { isSchoolClassGroupSuspended, schoolGroupMinimumStudents } from '@/lib/schoolGroupMinimumPolicy';
 import {
   classGroupCalendarLabel,
   classGroupMatchesQuery,
@@ -291,7 +291,7 @@ export default function CompanyClassGroups() {
             <div className="font-semibold text-gray-900">{g.name}</div>
             {isSchoolClassGroupSuspended(g) ? (
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
-                Sustabdyta, grupėje mažiau nei 3 aktyvūs mokiniai
+                {t('school.groups.suspendedMinimum', { n: schoolGroupMinimumStudents(g) })}
               </span>
             ) : null}
           </div>
@@ -458,6 +458,7 @@ export default function CompanyClassGroups() {
         canDelete={isOrgAdmin}
         defaultTutorId={isOrgAdmin ? (tutors.length === 1 ? tutors[0].id : '') : userId}
         organizationId={orgId}
+        recordingPlanEnabled={hasFeature('school_family_portal') && hasFeature('school_lesson_recordings')}
         onSaved={(result) => {
           setMaterializeWarning(result?.materializeError ? t('school.groups.materializeWarningBody') : null);
           dropCalendarCaches();

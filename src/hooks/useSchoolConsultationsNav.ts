@@ -4,6 +4,7 @@ import { getCached, setCache } from '@/lib/dataCache';
 import { parentStudentLinksDeduped } from '@/lib/preload';
 import { supabase } from '@/lib/supabase';
 import { schoolConsultationsEnabled } from '@/lib/schoolConsultationsOrg';
+import { authHeaders } from '@/lib/apiHelpers';
 
 const CACHE_KEY = 'school_consultations_nav_visible';
 
@@ -26,6 +27,16 @@ export function useSchoolConsultationsNav(): boolean {
       });
       const studentIds = studentsRaw.map((s) => s?.id).filter(Boolean) as string[];
       if (!studentIds.length) {
+        // Recorded annual guardians may have no legacy parent_students link.
+        try {
+          const headers = await authHeaders();
+          const response = await fetch('/api/school-consultations?scope=portal', { headers });
+          const portal = await response.json();
+          if (response.ok && portal.familyPortal === true && portal.eligibleStudentIds?.length) {
+            if (!cancelled) { setVisible(true); setCache(CACHE_KEY, true); }
+            return;
+          }
+        } catch { /* Legacy role discovery remains available when the family endpoint is unavailable. */ }
         const { data: selfStudent } = await supabase
           .from('students')
           .select('id, organization_id')
@@ -75,10 +86,18 @@ export function useSchoolConsultationsNav(): boolean {
 async function orgHasConsultations(orgId: string, studentId: string): Promise<boolean> {
   const { data: org } = await supabase
     .from('organizations')
-    .select('features')
+    .select('features, entity_type')
     .eq('id', orgId)
     .maybeSingle();
   const features = (org?.features || {}) as Record<string, unknown>;
+  if (org?.entity_type === 'school' && features.school_family_portal === true) {
+    try {
+      const headers = await authHeaders();
+      const response = await fetch(`/api/school-consultations?scope=portal&organization_id=${encodeURIComponent(orgId)}`, { headers });
+      const data = await response.json();
+      return response.ok && data.familyPortal === true && data.eligibleStudentIds?.includes(studentId);
+    } catch { return false; }
+  }
   if (!schoolConsultationsEnabled(orgId, features)) return false;
   const { data: contract } = await supabase
     .from('school_contracts')

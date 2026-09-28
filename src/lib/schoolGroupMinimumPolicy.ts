@@ -2,10 +2,25 @@ import { isSchoolContractSuspended, isSchoolContractTerminated } from './schoolC
 
 export const SCHOOL_GROUP_MINIMUM_STUDENTS = 3;
 
+export function schoolGroupMinimumStudents(group: { minimum_active_students?: number | null }): 2 | 3 {
+  return group.minimum_active_students === 2 ? 2 : SCHOOL_GROUP_MINIMUM_STUDENTS;
+}
+
+export type SuspendedGroupMembership = {
+  group_id: string;
+  student_id: string;
+  enrolled_at: string;
+  schedule_slots: Array<{ weekday: number; start_time: string }> | null;
+  recording_access?: 'schedule' | 'group' | 'none';
+  legacy_recording_scope?: { schedule_slots: Array<{ weekday: number; start_time: string }> | null } | null;
+};
+
 export type SchoolGroupContractState = {
   id: string;
   student_id?: string | null;
   signing_status?: string | null;
+  accepted_at?: string | null;
+  order_snapshot?: { end_date?: string | null } | null;
   archived_at?: string | null;
   terminated_at?: string | null;
   withdrawal_requested_at?: string | null;
@@ -13,6 +28,7 @@ export type SchoolGroupContractState = {
   suspension_until?: string | null;
   suspension_resumed_at?: string | null;
   suspension_scope?: string | null;
+  suspended_group_membership?: SuspendedGroupMembership | null;
 };
 
 export type SchoolClassGroupSuspensionState = {
@@ -50,6 +66,14 @@ export function isEligibleSchoolGroupContract(contract: SchoolGroupContractState
     && !isSchoolContractTerminated(contract);
 }
 
+/** Extra group service requires a completed click-wrap and an unexpired order. */
+export function isEligibleAcceptedSchoolGroupContract(contract: SchoolGroupContractState, now = new Date()): boolean {
+  const acceptedAt = Date.parse(contract.accepted_at || '');
+  const endDate = String(contract.order_snapshot?.end_date || '').slice(0, 10);
+  return isEligibleSchoolGroupContract(contract) && Number.isFinite(acceptedAt) && acceptedAt <= now.getTime()
+    && (!endDate || endDate >= schoolYmd(now));
+}
+
 export function activeSchoolGroupStudentIds(
   contracts: SchoolGroupContractState[],
   now: Date = new Date(),
@@ -67,6 +91,7 @@ export function schoolGroupExitImpact(
   contracts: SchoolGroupContractState[],
   targetContractId: string,
   now: Date = new Date(),
+  minimumStudentCount: number = SCHOOL_GROUP_MINIMUM_STUDENTS,
 ): {
   targetStudentId: string | null;
   activeStudentCount: number;
@@ -90,12 +115,12 @@ export function schoolGroupExitImpact(
     targetStudentId,
     activeStudentCount: active.size,
     remainingActiveStudentCount: remaining.size,
-    willFallBelowMinimum: targetWasActive && remaining.size < SCHOOL_GROUP_MINIMUM_STUDENTS,
+    willFallBelowMinimum: targetWasActive && remaining.size < minimumStudentCount,
   };
 }
 
 /**
- * Members paused only because the whole group fell below three count toward a
+ * Members paused only because the whole group fell below its minimum count toward a
  * possible group restart. Individually paused members do not.
  */
 export function resumableSchoolGroupStudentIds(

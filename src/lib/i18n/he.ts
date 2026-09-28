@@ -2,6 +2,14 @@ import { en } from './en.js';
 
 /** Hebrew for Israel: tutor/business draft; dedicated school/admin/legal sections fall back to English. */
 export const heOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "כל השיעורים שנותרו בסדרה זו",
+  "cal.deleteAllRemainingHint": "השיעורים המתוכננים העתידיים והשיעורים שבוטלו בסדרה זו יימחקו. היסטוריית השיעורים שהושלמו תישמר.",
+  "cal.deleteConfirmAll": "למחוק את כל השיעורים המתוכננים והשיעורים שבוטלו שנותרו בסדרה זו? היסטוריית השיעורים שהושלמו תישמר.",
+  "cal.deleteGroupHint": "בקבוצת לימוד, הבחירה חלה על כל התלמידים בקבוצה.",
+  "cal.deleteCancelledOnlyHint": "יימחקו רק השיעורים שלך או של ילדך שבוטלו ושנמצאים בטווח שנבחר.",
+  "em.schoolJoinSubject": "כניסה לשיעור שלך ב-{date} בשעה {time}",
+  "em.schoolJoinHeader": "כניסה לשיעור שלך",
+  "em.schoolJoinBody": "השיעור שלך מתחיל ב-{date} בשעה {time}. אפשר להצטרף באמצעות הקישור למטה.",
   'compSess.markAttended': 'התלמיד השתתף',
   'att.confirmedManually': 'הנוכחות אושרה',
   'att.unconfirmed': 'הנוכחות לא אושרה',

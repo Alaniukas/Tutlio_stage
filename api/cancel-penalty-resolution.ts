@@ -73,6 +73,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'Penalty already resolved', current: session.penalty_resolution });
     }
 
+    if (session.cancellation_penalty_amount == null) {
+        return res.status(409).json({ error: 'Cancellation is still being processed', code: 'cancellation_in_progress' });
+    }
+
     const penaltyAmount = Number(session.cancellation_penalty_amount || 0);
     const sessionPrice = Number(session.price || 0);
     const refundableAmount = sessionPrice - penaltyAmount;

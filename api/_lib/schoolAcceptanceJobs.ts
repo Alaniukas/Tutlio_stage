@@ -5,6 +5,8 @@ import { convertDocxBufferToPdfWithFallbacks } from './docxConverter.js';
 import { sendFirstLessonInvite } from './extraLessonsFirstLessonInvite.js';
 import { internalApiOrigin } from './extraLessonsContractShared.js';
 import { SCHOOL_CONTRACTS_BUCKET } from './schoolContractPdfPath.js';
+import { reconcileSchoolGroupMinimum } from './schoolGroupMinimumPolicy.js';
+import { applyAcceptedSchoolGroupRecordingPlan } from './schoolGroupMembership.js';
 
 export async function getAcceptanceJob(db: SupabaseClient, contractId: string) {
   const { data, error } = await db.from('school_acceptance_jobs')
@@ -65,6 +67,15 @@ export async function processAcceptanceJob(db: SupabaseClient, req: VercelReques
       job.finalized_at = new Date().toISOString();
     }
     await persistStrippedSource();
+    if (p.acceptance?.order_snapshot?.recording_access !== undefined) {
+      await applyAcceptedSchoolGroupRecordingPlan(db, job.contract_id, job.organization_id);
+    }
+    if (p.invite?.classGroupId) {
+      await reconcileSchoolGroupMinimum(req, db, {
+        organizationId: job.organization_id, groupId: p.invite.classGroupId,
+        actorUserId: p.acceptance?.accepted_by_user_id || null,
+      });
+    }
     if (!job.confirmation_sent) {
       if (p.confirmation.to) {
         const downloaded = await db.storage.from(SCHOOL_CONTRACTS_BUCKET).download(job.pdf_path);
@@ -84,7 +95,7 @@ export async function processAcceptanceJob(db: SupabaseClient, req: VercelReques
     }
     if (!job.invite_sent) {
       const invite = await sendFirstLessonInvite(db, req, p.invite, { acceptanceJobId: job.id });
-      if (!invite.sent && p.invite.payerEmail) throw new Error(`First lesson invitation failed: ${invite.reason}`);
+      if (!invite.sent && p.invite.payerEmail && invite.reason !== 'single_prelesson_policy') throw new Error(`First lesson invitation failed: ${invite.reason}`);
       await stamp({ invite_sent: true });
     }
     await stamp({ status: 'completed', completed_at: new Date().toISOString(), locked_until: null, lease_id: null, last_error: null });

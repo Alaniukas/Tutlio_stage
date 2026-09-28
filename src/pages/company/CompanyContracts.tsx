@@ -119,6 +119,7 @@ interface Contract {
   additional_fee_purpose?: string | null;
   kind?: 'annual' | 'extra_lessons' | null;
   accepted_at?: string | null;
+  archived_at?: string | null;
   terminated_at?: string | null;
   termination_reason?: string | null;
   suspension_started_at?: string | null;
@@ -1855,8 +1856,8 @@ export default function CompanyContracts() {
         message: action === 'suspend'
           ? groupWasNewlySuspended
             ? notificationsIncomplete || Number(body.notificationsAttempted || 0) === 0
-              ? `Sutartis ir grupė „${body.groupName || ''}“ sustabdyta, nes liko mažiau nei 3 aktyvūs mokiniai. Ne visas šeimas pavyko informuoti el. paštu.`
-              : `Sutartis ir grupė „${body.groupName || ''}“ sustabdyta, nes liko mažiau nei 3 aktyvūs mokiniai. Šeimos informuotos.`
+              ? `Sutartis ir grupė „${body.groupName || ''}“ sustabdyta, nes liko mažiau nei ${body.minimumStudentCount || 3} aktyvūs mokiniai. Ne visas šeimas pavyko informuoti el. paštu.`
+              : `Sutartis ir grupė „${body.groupName || ''}“ sustabdyta, nes liko mažiau nei ${body.minimumStudentCount || 3} aktyvūs mokiniai. Šeimos informuotos.`
             : 'Sutartis sustabdyta. Prieiga, priminimai ir naujas skaičiavimas pristabdyti.'
           : body.groupResumed
             ? `Grupė „${body.groupName || ''}“ ir jos sutartys atnaujintos.`
@@ -2550,6 +2551,11 @@ export default function CompanyContracts() {
 
                       {(() => {
                         const extra = isExtraLessonsContractKind(c.kind);
+                        const canOfferDiscount = isSchoolView && extra && Boolean(c.student_id)
+                          && ((c.signing_status === 'sent' && !c.accepted_at)
+                            || (c.signing_status === 'signed' && Boolean(c.accepted_at)))
+                          && !c.archived_at && !c.terminated_at && !c.withdrawal_requested_at
+                          && schoolExtraLessonsDiscountEnabled(orgId, orgFeatures);
                         const menuActions = [
                           !extra && eSignEnabled && c.signing_status === 'signed_by_school',
                           !extra && !eSignEnabled && (c.signing_status === 'sent'
@@ -2559,9 +2565,7 @@ export default function CompanyContracts() {
                           extra && c.signing_status === 'sent' && !c.accepted_at,
                           !extra && c.signing_status !== 'draft',
                           isSchoolView && !c.terminated_at && !c.withdrawal_requested_at,
-                          isSchoolView && extra && c.signing_status === 'signed' && Boolean(c.accepted_at)
-                            && !c.terminated_at && !c.withdrawal_requested_at
-                            && schoolExtraLessonsDiscountEnabled(orgId, orgFeatures),
+                          canOfferDiscount,
                         ].some(Boolean);
                         if (!menuActions) return null;
                         return (
@@ -2627,13 +2631,7 @@ export default function CompanyContracts() {
                                 Atnaujinti PDF pagal DOCX
                               </button>
                             )}
-                            {isSchoolView
-                              && extra
-                              && c.signing_status === 'signed'
-                              && c.accepted_at
-                              && !c.terminated_at && !c.withdrawal_requested_at
-                              && schoolExtraLessonsDiscountEnabled(orgId, orgFeatures)
-                              && c.student_id && (
+                            {canOfferDiscount && (
                               <button
                                 type="button"
                                 className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left text-emerald-700 hover:bg-emerald-50"
@@ -2863,6 +2861,7 @@ export default function CompanyContracts() {
           }))}
           initialStudentId={discountContract.student_id}
           contractId={discountContract.id}
+          contractAccepted={Boolean(discountContract.accepted_at)}
           lockStudent
           onSaved={(message, type) => setToast({ message, type })}
         />
@@ -3540,6 +3539,7 @@ export default function CompanyContracts() {
         open={extraOfferOpen}
         onOpenChange={setExtraOfferOpen}
         organizationId={orgId}
+        recordingPlanEnabled={orgFeatures.school_family_portal === true && orgFeatures.school_lesson_recordings === true}
         students={students}
         groups={classGroups}
         individualSubjects={extraIndividualSubjects}

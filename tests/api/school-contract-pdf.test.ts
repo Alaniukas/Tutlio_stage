@@ -239,6 +239,28 @@ describe('renderAndStoreExtraLessonsPdf', () => {
     expect(result.uploadedPath).toBe(uploads[0].path);
   });
 
+  it.each(['—', 'TAIP'])('fills acceptance dates only for recorded consent in an extra-lessons DOCX: %s', async (consent) => {
+    const { supabase } = makeExtraSupabase();
+    mocks.renderDocxBuffer.mockResolvedValueOnce(Buffer.from('%PDF-1.7 date-review'));
+    const extraLessonsPayload = {
+      ...extraParams.extraLessonsPayload,
+      data_laikas_Europe_Vilnius: '2026-09-28 18:49:53',
+      data: '2026-09-28',
+      sutikimo_su_salygomis_busena: consent,
+      el_pastas_ir_issiuntimo_data_laikas: 'parent@example.com · 2026-09-28 18:50:00',
+    };
+    await renderAndStoreExtraLessonsPdf(supabase as any, {
+      ...extraParams,
+      contract: { ...extraParams.contract, organization_id: 'c3a00000-7e57-4000-8000-000000000001' },
+      extraLessonsPayload,
+    });
+    const renderedPayload = mocks.renderDocxBuffer.mock.calls[0][0].payload;
+    expect(renderedPayload.data_laikas_Europe_Vilnius).toBe(consent === 'TAIP' ? '2026-09-28 18:49:53' : '—');
+    expect(renderedPayload.data).toBe(consent === 'TAIP' ? '2026-09-28' : '—');
+    expect(renderedPayload.el_pastas_ir_issiuntimo_data_laikas).toBe('parent@example.com · 2026-09-28 18:50:00');
+    expect(extraLessonsPayload.data_laikas_Europe_Vilnius).toBe('2026-09-28 18:49:53');
+  });
+
   it('does not publish a text fallback when the bundled DOCX converter fails', async () => {
     const { supabase, uploads } = makeExtraSupabase();
     mocks.renderDocxBuffer.mockRejectedValueOnce(new Error('converter unavailable'));

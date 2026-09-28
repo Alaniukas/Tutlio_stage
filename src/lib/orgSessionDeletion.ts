@@ -3,15 +3,12 @@ export type OrgSessionDeletionCandidate = {
   isGroupLesson?: boolean | null;
 };
 
-/** Hard deletion is an admin-only escape hatch for individual lesson rows. */
-export function canDeleteIndividualOrgSession(
+/** Editors can remove lesson rows, including cancelled and group lessons. */
+export function canDeleteOrgSession(
   session: OrgSessionDeletionCandidate | null | undefined,
   hasEditPermission: boolean,
 ): boolean {
   return Boolean(
-    hasEditPermission
-      && session
-      && !session.classGroupId
-      && session.isGroupLesson !== true,
+    hasEditPermission && session,
   );
 }

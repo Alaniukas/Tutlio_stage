@@ -67,7 +67,9 @@ import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { defaultStatsDateRange } from '@/lib/statsDateRange';
 import { schoolCalendarInstant, schoolDate } from '@/lib/schoolTime';
 import { fetchAllRows } from '@/lib/fetchAllRows';
-import { canDeleteIndividualOrgSession } from '@/lib/orgSessionDeletion';
+import { canDeleteOrgSession } from '@/lib/orgSessionDeletion';
+import { DeleteSessionDialog } from '@/components/DeleteSessionDialog';
+import { deleteSessionViaApi, isRecurringSession, type SessionDeleteScope } from '@/lib/sessionDeletion';
 import { canEditFutureOrgSeries, canEditOrgSession, orgSessionEditNotice, orgSessionPriceChangingIds } from '@/lib/orgSessionEdit';
 import { fetchInvoiceIdsForSessionIds } from '@/lib/invoiceLineItemsForSessions';
 import {
@@ -687,7 +689,7 @@ export default function CompanySessions() {
   const selectedSessionEnded = Boolean(
     selectedSession && Date.parse(selectedSession.end_time) <= Date.now(),
   );
-  const canDeleteSelectedSession = canDeleteIndividualOrgSession(
+  const canDeleteSelectedSession = canDeleteOrgSession(
     selectedSession
       ? {
           classGroupId: selectedSession.class_group_id,
@@ -797,24 +799,12 @@ export default function CompanySessions() {
     setStatsSessions(prev => prev.map(s => s.id === selectedSession.id ? { ...s, ...patch } : s));
   };
 
-  const hardDeleteCompanySession = async (sessionId: string, deleteScope: 'single' | 'future' = 'single') => {
-    const resp = await fetch('/api/delete-session', {
-      method: 'POST',
-      headers: await authHeaders(),
-      body: JSON.stringify({ sessionId, deleteScope }),
-    });
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      throw new Error(text || t('cal.deleteFailed'));
-    }
-  };
+  const hardDeleteCompanySession = (sessionId: string, deleteScope: SessionDeleteScope = 'single') =>
+    deleteSessionViaApi(sessionId, deleteScope, { groupScope: 'one_student' });
 
-  const hardDeleteCompanySessionWithApproval = async (deleteScope: 'single' | 'future') => {
-    if (!selectedSession) return;
+  const hardDeleteCompanySessionWithApproval = async (deleteScope: SessionDeleteScope) => {
+    if (!selectedSession || deletingSession || !canDeleteSelectedSession) return;
     const targetId = selectedSession.id;
-    const msg =
-      deleteScope === 'future' ? t('cal.deleteConfirmFuture') : t('cal.deleteConfirmSingle');
-    if (!confirm(msg)) return;
 
     setDeletingSession(true);
     setDeleteRecurringOpen(false);
@@ -822,22 +812,18 @@ export default function CompanySessions() {
 
     try {
       await hardDeleteCompanySession(targetId, deleteScope);
-      loadData();
+      void loadData({ reset: true });
     } catch (e: any) {
       alert(e?.message || t('cal.deleteFailed'));
-      loadData();
+      void loadData({ reset: true });
     } finally {
       setDeletingSession(false);
     }
   };
 
   const handleHardDeleteCompanySession = () => {
-    if (!selectedSession) return;
-    if (selectedSession.recurring_session_id) {
-      setDeleteRecurringOpen(true);
-      return;
-    }
-    void hardDeleteCompanySessionWithApproval('single');
+    if (!selectedSession || deletingSession || !canDeleteSelectedSession) return;
+    setDeleteRecurringOpen(true);
   };
 
   const handleSaveEdit = async () => {
@@ -2036,45 +2022,13 @@ export default function CompanySessions() {
         onConfirm={handleMarkStudentNoShow}
       />
 
-      <Dialog open={deleteRecurringOpen} onOpenChange={setDeleteRecurringOpen}>
-        <DialogContent className="w-[95vw] sm:max-w-[440px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Trash2 className="w-5 h-5 text-red-600" />
-              {t('cal.deleteRecurringTitle')}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="text-sm text-gray-600 space-y-2">
-            <p>{t('cal.deleteChoose')}</p>
-            <p className="text-xs text-gray-500">{t('cal.deleteHint')}</p>
-          </div>
-          <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-            <Button
-              variant="outline"
-              onClick={() => setDeleteRecurringOpen(false)}
-              className="rounded-xl"
-              disabled={deletingSession}
-            >
-              {t('cal.cancelBtn')}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => void hardDeleteCompanySessionWithApproval('single')}
-              className="rounded-xl border-red-200 text-red-700 hover:bg-red-50"
-              disabled={deletingSession}
-            >
-              {t('cal.deleteOnlyThis')}
-            </Button>
-            <Button
-              onClick={() => void hardDeleteCompanySessionWithApproval('future')}
-              className="rounded-xl bg-red-600 hover:bg-red-700 text-white"
-              disabled={deletingSession}
-            >
-              {t('cal.deleteThisAndFuture')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteSessionDialog
+        open={deleteRecurringOpen}
+        onOpenChange={setDeleteRecurringOpen}
+        recurring={isRecurringSession(selectedSession)}
+        busy={deletingSession}
+        onDelete={hardDeleteCompanySessionWithApproval}
+      />
     </>
   );
 }

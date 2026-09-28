@@ -6,6 +6,7 @@ import { localizedFromEmail } from './i18n.js';
 import { resolveEmailOrgBranding } from './emailOrgBranding.js';
 import { managedFamilyAccountsEnabled } from '../../src/lib/managedFamilyAccounts.js';
 import { studentLoginNameFromEmail } from '../../src/lib/studentLoginIdentity.js';
+import { loadSchoolFamilyGuardianAccess } from './schoolFamilyGuardianAccess.js';
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -23,13 +24,14 @@ export async function sendStudentUsernameRecovery(
   authEmail: string,
   redirectTo: string,
 ): Promise<void> {
+  if (process.env.TUTLIO_DEV_SUPPRESS_EMAIL === '1') return;
   const existing = await findAuthUserByEmail(db, authEmail);
   if (!existing) return;
 
   const { data, error } = await db.auth.admin.getUserById(existing.id);
   const user = data.user;
   const loginName = user?.app_metadata?.student_login_name;
-  const recipient = user?.app_metadata?.student_contact_email;
+  let recipient = user?.app_metadata?.student_contact_email;
   const organizationId = typeof user?.app_metadata?.provisioned_by_organization === 'string'
     ? user.app_metadata.provisioned_by_organization
     : '';
@@ -52,6 +54,22 @@ export async function sendStudentUsernameRecovery(
     ? org.features as Record<string, unknown>
     : null;
   if (!org || !managedFamilyAccountsEnabled(organizationId, features)) return;
+  if (features?.school_family_portal === true || features?.school_family_accounts_setup === true) {
+    const children = await db.from('students').select('id').eq('organization_id', organizationId)
+      .eq('linked_user_id', user.id).eq('enrollment_status', 'active').is('detached_at', null);
+    if (children.error || !children.data?.length) return;
+    const guardians = await db.from('school_family_guardians').select('student_id,guardian_user_id,guardian_email')
+      .eq('organization_id', organizationId).in('student_id', children.data.map((child) => child.id));
+    if (guardians.error || !guardians.data?.length) return;
+    const recipients = new Set<string>();
+    for (const guardian of guardians.data) {
+      if (!guardian.guardian_user_id) continue;
+      const access = await loadSchoolFamilyGuardianAccess(db, guardian.guardian_user_id, organizationId);
+      if (access.distinctParent && access.studentIds.includes(guardian.student_id)) recipients.add(guardian.guardian_email);
+    }
+    if (recipients.size !== 1) return;
+    recipient = [...recipients][0];
+  }
 
   const resolved = resolveEmailOrgBranding(organizationId, org);
   const brandName = resolved.publicName || resolved.branding?.name || 'Tutlio';

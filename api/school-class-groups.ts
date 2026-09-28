@@ -14,8 +14,9 @@ import {
   removeFutureClassGroupSessions,
   type ReconcileResult,
 } from './_lib/schoolClassGroupMaterialize.js';
+import { reconcileSchoolGroupMinimum } from './_lib/schoolGroupMinimumPolicy.js';
 
-const GROUP_SELECT = '*, tutor:profiles!school_class_groups_tutor_id_fkey(full_name), slots:school_class_group_slots(*), members:school_class_group_members(student_id, enrolled_at, schedule_slots, student:students(full_name, email, grade))';
+const GROUP_SELECT = '*, tutor:profiles!school_class_groups_tutor_id_fkey(full_name), slots:school_class_group_slots(*), members:school_class_group_members(student_id, enrolled_at, schedule_slots, recording_access, student:students(full_name, email, grade))';
 
 async function ownedMembers(
   supabase: ReturnType<typeof serviceSupabase>,
@@ -40,9 +41,11 @@ async function saveGroupMembers(
 ): Promise<void> {
   if (members === null) return;
   const { data: existing, error: loadError } = await supabase.from('school_class_group_members')
-    .select('student_id, enrolled_at').eq('group_id', groupId);
+    .select('student_id, enrolled_at, recording_access, legacy_recording_scope').eq('group_id', groupId);
   if (loadError) throw loadError;
   const enrolledAtByStudent = new Map((existing || []).map((row) => [row.student_id, row.enrolled_at]));
+  const recordingAccessByStudent = new Map((existing || []).map((row) => [row.student_id, row.recording_access]));
+  const legacyScopeByStudent = new Map((existing || []).map((row) => [row.student_id, row.legacy_recording_scope]));
   const wanted = new Set(members.map((member) => member.student_id));
   const removed = (existing || []).map((row) => row.student_id).filter((id) => !wanted.has(id));
   if (removed.length) {
@@ -55,11 +58,17 @@ async function saveGroupMembers(
       members.map((member) => ({
         group_id: groupId,
         ...member,
+        // Older clients omit the entitlement. A schedule edit must retain it.
+        recording_access: member.recording_access ?? recordingAccessByStudent.get(member.student_id) ?? 'schedule',
+        ...(legacyScopeByStudent.get(member.student_id) !== undefined
+          ? { legacy_recording_scope: legacyScopeByStudent.get(member.student_id) } : {}),
         ...(enrolledAtByStudent.has(member.student_id)
           ? { enrolled_at: enrolledAtByStudent.get(member.student_id) }
           : {}),
       })),
-      { onConflict: 'group_id,student_id' },
+      // New members omit enrolled_at; use its DB default instead of NULL when
+      // the same batch also preserves existing members' enrollment dates.
+      { onConflict: 'group_id,student_id', defaultToNull: false },
     );
     if (error) throw error;
   }
@@ -203,9 +212,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const createAdmin = await requireOrgAdminAccess(req, supabase, 'sessions.edit');
     const body = (req.body || {}) as Record<string, unknown>;
     const draft = parseClassGroupWriteBody(body, createAdmin.ok ? '' : auth.userId);
+    if (!createAdmin.ok && draft.minimum_active_students != null) {
+      return res.status(403).json({ error: 'Only administrators can choose the group minimum' });
+    }
     const errors = validateSchoolClassGroup(draft);
     if (errors.length) return res.status(400).json({ error: 'Invalid group', fields: errors });
     const requestedMembers = draft.members ?? draft.student_ids?.map((student_id) => ({ student_id, schedule_slots: null })) ?? null;
+    if (!createAdmin.ok && requestedMembers?.some((member) => 'recording_access' in member)) {
+      return res.status(403).json({ error: 'Only administrators can set recording plans' });
+    }
     if (!validateSchoolMemberSchedules(draft.slots, requestedMembers)) {
       return res.status(400).json({ error: 'Pasirinkite bent vieną galiojantį laiką kiekvienam grupės mokiniui.' });
     }
@@ -264,6 +279,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await supabase.from('school_class_groups').delete().eq('id', group.id);
       return res.status(500).json({ error: (memberError as Error).message });
     }
+    await reconcileSchoolGroupMinimum(req, supabase, { organizationId: orgId, groupId: group.id, actorUserId: auth.userId });
     const sync = await syncGroupSessions(supabase, group.id, orgId);
     return res.status(200).json({ ok: true, group, ...sync });
   }
@@ -289,6 +305,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const draft = parseClassGroupWriteBody(body, existing.tutor_id);
+    if (!editAdmin.ok && draft.minimum_active_students != null) {
+      return res.status(403).json({ error: 'Only administrators can choose the group minimum' });
+    }
     if (!editAdmin.ok) draft.tutor_id = existing.tutor_id;
     const errors = validateSchoolClassGroup(draft);
     if (errors.length) return res.status(400).json({ error: 'Invalid group', fields: errors });
@@ -380,6 +399,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('organization_id', orgId);
     if (attentionError) return res.status(500).json({ error: attentionError.message });
 
+    await reconcileSchoolGroupMinimum(req, supabase, { organizationId: orgId, groupId, actorUserId: auth.userId });
     const sync = await syncGroupSessions(supabase, groupId, orgId);
     return res.status(200).json({ ok: true, ...sync });
   }

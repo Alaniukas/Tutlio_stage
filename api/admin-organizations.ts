@@ -478,6 +478,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
+      if (features?.school_family_portal === true && before.features?.school_family_portal !== true) {
+        const readiness = await supabase.rpc('school_family_portal_readiness', { p_organization_id: idParam });
+        if (readiness.error) return res.status(503).json({ error: 'School family setup is unavailable. Apply the reviewed migrations first.' });
+        if (readiness.data?.baselineReady !== true || readiness.data?.pendingCount !== 0) {
+          return res.status(409).json({
+            error: 'Prepare existing material links and verify all eligible family accounts before enabling the family portal.',
+            readiness: readiness.data,
+          });
+        }
+      }
+
       const patch: Record<string, unknown> = {};
       if (tutor_limit !== undefined) {
         if (tutor_limit < 1 || tutor_limit > 10000) return res.status(400).json({ error: 'tutor_limit out of range' });

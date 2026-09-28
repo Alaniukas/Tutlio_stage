@@ -1,4 +1,6 @@
+import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
+import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsEe } from './schoolInstructionsTranslations.js';
@@ -6,6 +8,21 @@ import { schoolTeacherContractTranslationsEe } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const ee: Record<string, string> = {
+  ...schoolFamilyMaterialTranslations.ee,
+  ...schoolInvoiceReviewTranslations.ee,
+  'school.recordings.access.title': "Juurdepääs salvestistele",
+  'school.recordings.access.scopeHelp': "Eemaldage või taastage õpilase või vanema juurdepääs selles koolis. Kontod, seosed lastega ja makseandmed säilivad.",
+  'school.recordings.access.legacyHelp': "Kehtib sisselogitud kasutajale. Olemasolevad lapse ühised lingid, mis töötavad sisselogimiseta, jäävad aktiivseks.",
+  'school.recordings.access.email': "Isiku e-post",
+  'school.recordings.access.revoke': "Eemalda juurdepääs",
+  'school.recordings.access.restore': "Taasta juurdepääs",
+  'school.recordings.access.empty': "Kelleltki pole salvestistele juurdepääsu eemaldatud.",
+  'school.recordings.access.failed': "Juurdepääsu seadete muutmine või laadimine ebaõnnestus.",
+  'school.recordings.access.invalidEmail': "Sisestage kehtiv e-posti aadress.",
+  'school.recordings.access.personNotInSchool': "See isik pole seotud selle kooli õpilasega.",
+  'school.recordings.access.setupRequired': "Juurdepääsu haldamise andmebaasi migratsiooni pole veel rakendatud.",
+  'school.recordings.access.revoked': "Juurdepääs salvestistele eemaldatud.",
+  'school.recordings.access.restored': "Juurdepääs salvestistele taastatud.",
   'parent.childAlreadyExists': 'See laps on juba nimekirjas. Konto loomiseks kasutage olemasolevat lapse kaarti.',
   'login.emailOrUsername': 'E-post või õpilase kasutajanimi',
   'login.studentUsername': 'Õpilase kasutajanimi',
@@ -2058,6 +2075,11 @@ export const ee: Record<string, string> = {
   'cal.deleteFromCalendar': 'Kustuta kalendrist',
   'cal.deleteRecurringTitle': 'Kustuta korduv tund',
   'cal.deleteChoose': 'Valige, mida soovite kustutada.',
+  "cal.deleteAllRemaining": "Kõik selle sarja ülejäänud tunnid",
+  "cal.deleteAllRemainingHint": "Kustutab selle sarja tulevased planeeritud ja tühistatud tunnid. Toimunud tundide ajalugu säilib.",
+  "cal.deleteConfirmAll": "Kas kustutada kõik selle sarja ülejäänud planeeritud ja tühistatud tunnid? Toimunud tundide ajalugu säilib.",
+  "cal.deleteGroupHint": "Rühmatundide puhul kehtib valik kõigile rühma õpilastele.",
+  "cal.deleteCancelledOnlyHint": "Valitud ulatuses kustutatakse ainult teie või teie lapse tühistatud tunnid.",
   'cal.deleteHint': 'Kinnitad tegevuse pärast valimist.',
   'cal.deleteOnlyThis': 'Ainult see',
   'cal.deleteThisAndFuture': 'See ja kõik tulevased',
@@ -5947,6 +5969,9 @@ export const ee: Record<string, string> = {
   'school.groups.editTitle': "Muuda rühma",
   'school.groups.platform': "Platvorm",
   'school.groups.duration': "Kestus (min)",
+  'school.groups.minimumActiveStudents': "Aktiivsete õpilaste miinimumarv",
+  'school.groups.minimumActiveStudentsHint': "See rühm ja selle lepingud peatatakse automaatselt, kui aktiivseid õpilasi jääb vähemaks.",
+  'school.groups.suspendedMinimum': "Peatatud: rühmas on vähem kui {n} aktiivset õpilast",
   'school.groups.meetingLink': "Tunni link",
   'school.groups.slots': "Nädala ajakava",
   'school.groups.addSlot': "Lisa päev",
@@ -6195,4 +6220,7 @@ export const ee: Record<string, string> = {
   "compare.customChip2": "Tasureeglid",
   "compare.customChip3": "Lapsevanemate kinnituslingid",
   "compare.customChip4": "Portaalid teie brändiga",
+  'em.schoolJoinSubject': 'Liitu tunniga {date} kell {time}',
+  'em.schoolJoinHeader': 'Liitu tunniga',
+  'em.schoolJoinBody': 'Sinu tund algab {date} kell {time}. Liitumislink on allpool.',
 };

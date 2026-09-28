@@ -47,28 +47,18 @@ export default function ParentSessions() {
     (async () => {
       setLoading(true);
 
-      const { data: parentRow, error: parentErr } = await supabase
-        .rpc('get_parent_profile_id_by_user_id', { p_user_id: user.id });
-      if (parentErr) {
-        console.warn('[ParentSessions] parent profile rpc failed:', parentErr);
-      }
-
-      if (!parentRow) {
-        setLoading(false);
-        setValidChild(false);
-        return;
-      }
-
-      const { data: link } = await supabase
-        .from('parent_students')
-        .select('id')
-        .eq('parent_id', parentRow)
+      // Parent scope is stricter than a child's own session RLS. A retained shared
+      // Auth identity must not turn its old parent_students link into parent notes access.
+      const { data: children, error: childError } = await supabase
+        .rpc('get_parent_child_ids', { p_user_id: user.id })
         .eq('student_id', studentId)
-        .maybeSingle();
+        .limit(1);
 
-      if (!link) {
+      if (childError || !children?.some((child) => child.student_id === studentId)) {
         setLoading(false);
         setValidChild(false);
+        setSessions([]);
+        setStudentName('');
         return;
       }
       setValidChild(true);

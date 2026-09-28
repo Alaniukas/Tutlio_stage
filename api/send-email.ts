@@ -14,6 +14,7 @@ import { isMoksloVaisiaiOrg, isProKlaseOrg } from './_lib/marketMoney.js';
 import {
   applyOrgBrandingToHtml,
   resolveEmailOrgBranding,
+  schoolInvoiceEmailBranding,
   type EmailBranding,
 } from './_lib/emailOrgBranding.js';
 import { Resend } from 'resend';
@@ -51,7 +52,7 @@ import {
   maybeMvPayerFirstFeeNoticeFooter,
 } from './_lib/mvPayerFeeNotice.js';
 import { checkSchoolSessionStudentAccess } from './_lib/schoolContractAccess.js';
-import { shouldSkipParentNotification } from './_lib/parentNotificationPreferences.js';
+import { filterParentNotificationRecipients, shouldSkipParentNotification } from './_lib/parentNotificationPreferences.js';
 import { shouldSkipTutorNotification } from './_lib/tutorNotificationPreferences.js';
 
 
@@ -596,7 +597,22 @@ function sessionStudentNoShowPayer(d: any, locale: Locale) {
   };
 }
 
+function compactSchoolJoinEmail(d: any, locale: Locale) {
+  return {
+    subject: t(locale, 'em.schoolJoinSubject', { date: d.date, time: d.time }),
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#0f766e', '#115e59')}"><h1>${t(locale, 'em.schoolJoinHeader')}</h1></div>
+      <div class="body">
+        <p class="greeting">${t(locale, 'em.hiName', { name: d.recipientName || d.studentName || t(locale, 'em.roleStudent') })}</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.schoolJoinBody', { date: d.date, time: d.time })}</p>
+        ${d.studentName ? `<p>${escapeHtml(d.studentName)}</p>` : ''}
+        ${d.meetingLink ? `<div style="text-align:center; margin-top:20px;">${outlookEmailButton(String(d.meetingLink), t(locale, 'em.btnJoinNow'), '#0f766e', { fontWeight: '600', fontSize: '15px', padding: '14px 32px' })}</div>` : ''}
+      </div>${footerFor(locale, d.unsubscribeEmail)}`, locale),
+  };
+}
+
 function sessionReminder(d: any, locale: Locale) {
+  if (d.schoolFlow === true && d.schoolJoinOnly === true && !d.isTutor) return compactSchoolJoinEmail(d, locale);
   const sessionId = d.sessionId ? encodeURIComponent(String(d.sessionId)) : '';
   const dateParam = d.date ? encodeURIComponent(String(d.date)) : '';
   const schoolFlow = d.schoolFlow === true && !d.isTutor;
@@ -639,6 +655,7 @@ function sessionReminder(d: any, locale: Locale) {
 }
 
 function sessionReminderPayer(d: any, locale: Locale) {
+  if (d.schoolFlow === true && d.schoolJoinOnly === true) return compactSchoolJoinEmail(d, locale);
   const sessionId = d.sessionId ? encodeURIComponent(String(d.sessionId)) : '';
   const studentId = d.studentId ? encodeURIComponent(String(d.studentId)) : '';
   const calendarUrl = studentId
@@ -2509,6 +2526,8 @@ function schoolStaffConsentChoicesRequest(d: any, _locale: Locale) {
 
 function schoolDiscountOffer(d: any, locale: Locale) {
   const contact = schoolParentContactEmail(d);
+  const combinedOffer = d.contractAccepted === false;
+  const title = combinedOffer ? 'Peržiūrėkite sutartį ir nuolaidos priedą' : 'Jums suteikta nuolaida';
   const rows = [
     td('Mokinys', esc(d.studentName || '—')),
     td('Užsiėmimai', esc(d.activityLabel || '—')),
@@ -2516,22 +2535,29 @@ function schoolDiscountOffer(d: any, locale: Locale) {
     td('Galioja', `${esc(d.validFrom || '—')} - ${esc(d.validUntil || '—')}`),
     d.note ? td('Pastaba', esc(d.note)) : '',
     td('Sutarties Nr.', esc(d.contractNumber || '—')),
+    d.agreementNumber ? td('Priedo Nr.', esc(d.agreementNumber)) : '',
   ].join('');
   return {
-    subject: `Jums suteikta nuolaida - ${d.studentName || 'mokinys'}`,
+    subject: `${combinedOffer ? 'Užsiėmimų sutartis ir nuolaidos priedas' : 'Jums suteikta nuolaida'} - ${d.studentName || 'mokinys'}`,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
-        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Jums suteikta nuolaida</h1>
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${title}</h1>
         <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
       </div>
       <div class="body" style="text-align:center;">
         <p class="greeting" style="text-align:center;">Sveiki, ${esc(d.parentName || '')},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.65; text-align:center; margin:0 auto; max-width:500px;">
-          Mokiniui <strong>${esc(d.studentName || '')}</strong> suteikta nuolaida. Jums nieko papildomai daryti nereikia - tik peržiūrėkite informaciją ir paspauskite <strong>„Sutinku“</strong>. Patvirtinus automatiškai bus suformuotas priedas prie metinės sutarties.
+          ${combinedOffer
+            ? `${esc(d.schoolName || 'Mokykla')} mokiniui <strong>${esc(d.studentName || '')}</strong> parengė užsiėmimų sutartį ir nuolaidos priedą. Prieš patvirtindami galite peržiūrėti abu dokumentus.`
+            : `Mokiniui <strong>${esc(d.studentName || '')}</strong> suteikta nuolaida. Peržiūrėkite parengtą priedą prie užsiėmimų sutarties ir paspauskite <strong>„Sutinku“</strong>.`}
         </p>
+        ${combinedOffer && d.documentsAttached === true ? '<p style="color:#4b5563; font-size:14px; line-height:1.6; text-align:center;">Abu PDF dokumentai pridėti prie šio laiško.</p>' : ''}
         <div class="info-card" style="text-align:left;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>
-        ${d.acceptUrl ? `<div style="text-align:center; margin:24px 0 10px;">${outlookEmailButton(String(d.acceptUrl), 'Sutinku', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 40px' })}</div>` : ''}
-        <p style="color:#6b7280; font-size:12px; line-height:1.5; text-align:center;">Nuorodoje dar kartą matysite visas sąlygas. Nuolaida įsigalios tik po patvirtinimo.</p>
+        ${combinedOffer && d.contractAcceptUrl ? `<div style="text-align:center; margin:24px 0 10px;">${outlookEmailButton(String(d.contractAcceptUrl), 'Peržiūrėti ir patvirtinti sutartį', '#047857', { fontWeight: '600', fontSize: '15px', padding: '14px 28px' })}</div>` : ''}
+        ${d.acceptUrl ? `<div style="text-align:center; margin:${combinedOffer ? '12px' : '24px'} 0 10px;">${outlookEmailButton(String(d.acceptUrl), combinedOffer ? 'Peržiūrėti ir patvirtinti priedą' : 'Sutinku', '#059669', { fontWeight: '600', fontSize: '15px', padding: '14px 28px' })}</div>` : ''}
+        <p style="color:#6b7280; font-size:12px; line-height:1.5; text-align:center;">${combinedOffer
+          ? 'Abu dokumentus patvirtinkite atskirai bet kuria eilės tvarka. Nuolaida bus taikoma, kai patvirtinti abu dokumentai, priede nurodytu galiojimo laikotarpiu.'
+          : 'Nuorodoje dar kartą matysite visas sąlygas. Nuolaida įsigalios tik po priedo patvirtinimo, priede nurodytu galiojimo laikotarpiu.'}</p>
         ${contact ? `<p style="color:#6b7280; font-size:13px; text-align:center;">Jei turite klausimų, susisiekite su mokykla: ${esc(contact)}</p>` : ''}
       </div>${footerFor(locale)}`, locale),
   };
@@ -3354,7 +3380,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { type, to, data: rawData, locale: bodyLocale } = req.body;
+    const { type, data: rawData, locale: bodyLocale } = req.body;
+    let to = req.body.to;
     const requestedIdempotencyKey = req.body?.idempotencyKey;
     const acceptanceDelivery = validAcceptanceDeliveryKey(type, rawData?.acceptanceJobId, requestedIdempotencyKey);
     const sessionReminderDelivery = validSessionReminderDeliveryKey(type, to, rawData, requestedIdempotencyKey);
@@ -3396,7 +3423,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           serviceKey,
           supabaseServiceRoleClientOptions(),
         );
-        if (await shouldSkipParentNotification(preferenceClient, to, type, rawData)) {
+        if (Array.isArray(to)) {
+          to = await filterParentNotificationRecipients(preferenceClient, to, type, rawData);
+        }
+        if ((Array.isArray(to) && !to.length) || await shouldSkipParentNotification(preferenceClient, to, type, rawData)) {
           return res.status(200).json({
             success: true,
             skipped: true,
@@ -3624,6 +3654,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               }
             }
             const features = (org.features && typeof org.features === 'object' ? org.features : {}) as Record<string, unknown>;
+            if (isSchoolOrg && features.school_family_portal === true
+              && ['booking_confirmation', 'recurring_booking_confirmation', 'session_comment_added', 'school_extra_first_lesson_invite', 'session_student_no_show'].includes(String(type))) {
+              return res.status(200).json({ success: true, skipped: true, reason: 'school_family_digest_policy' });
+            }
             // Optional per-org "questions" contact address (e.g. irminta@) shown in
             // school emails. Signed contracts still go to the org email (schoolEmail).
             const orgContactEmail = String((features.contact_email as string) || '').trim();
@@ -3680,8 +3714,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Patch the email HTML post-generation to inject org branding into the wrap() header
     function applyBranding(result: { subject: string; html: string }): { subject: string; html: string } {
+      const templateBranding = type === 'school_monthly_invoice'
+        ? schoolInvoiceEmailBranding(orgBranding)
+        : orgBranding;
       let html = applyOrgBrandingToHtml(result.html, {
-        branding: orgBranding,
+        branding: templateBranding,
         emailTeamSignature: (data as any).emailTeamSignature,
         locale,
         emailContactPhone: (data as any).emailContactPhone,
@@ -3691,9 +3728,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (suppressTutlioEmailUnsub) {
         html = html.replace(/<p\b[^>]*>[\s\S]*?info@tutlio\.lt[\s\S]*?<\/p>/gi, '');
       }
-      if (orgBranding) {
+      if (templateBranding) {
         // Legacy templates sometimes use indigo text without the shared helper's full set.
-        html = html.replaceAll('color:#6366f1;', `color:${orgBranding.brand_color};`);
+        html = html.replaceAll('color:#6366f1;', `color:${templateBranding.brand_color};`);
       }
       return { subject: result.subject, html };
     }

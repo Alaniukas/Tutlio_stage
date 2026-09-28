@@ -1,4 +1,6 @@
+import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
+import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolInstructionsTranslationsLv } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsLv } from './schoolTeacherContractTranslations.js';
@@ -6,6 +8,21 @@ import { supportTranslations } from './supportTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 
 export const lv: Record<string, string> = {
+  ...schoolFamilyMaterialTranslations.lv,
+  ...schoolInvoiceReviewTranslations.lv,
+  'school.recordings.access.title': "Piekļuve ierakstiem",
+  'school.recordings.access.scopeHelp': "Noņemiet vai atjaunojiet skolēna vai vecāku piekļuvi šajā skolā. Konti, saites ar bērniem un maksājumu dati tiek saglabāti.",
+  'school.recordings.access.legacyHelp': "Attiecas uz piekļuvi pēc pieslēgšanās. Esošās kopīgās bērna saites, kas darbojas bez pieslēgšanās, paliek aktīvas.",
+  'school.recordings.access.email': "Personas e-pasts",
+  'school.recordings.access.revoke': "Noņemt piekļuvi",
+  'school.recordings.access.restore': "Atjaunot piekļuvi",
+  'school.recordings.access.empty': "Nevienam nav noņemta piekļuve ierakstiem.",
+  'school.recordings.access.failed': "Neizdevās mainīt vai ielādēt piekļuves iestatījumus.",
+  'school.recordings.access.invalidEmail': "Ievadiet derīgu e-pasta adresi.",
+  'school.recordings.access.personNotInSchool': "Šī persona nav saistīta ar šīs skolas skolēnu.",
+  'school.recordings.access.setupRequired': "Piekļuves pārvaldības datubāzes migrācija vēl nav piemērota.",
+  'school.recordings.access.revoked': "Piekļuve ierakstiem noņemta.",
+  'school.recordings.access.restored': "Piekļuve ierakstiem atjaunota.",
   'parent.childAlreadyExists': 'Šis bērns jau ir sarakstā. Konta izveidei izmantojiet esošo bērna kartīti.',
   'login.emailOrUsername': 'E-pasts vai skolēna lietotājvārds',
   'login.studentUsername': 'Skolēna lietotājvārds',
@@ -2945,6 +2962,11 @@ export const lv: Record<string, string> = {
   'cal.deleteFromCalendar': 'Dzēst no kalendāra',
   'cal.deleteRecurringTitle': 'Dzēst atkārtojošu nodarbību',
   'cal.deleteChoose': 'Izvēlieties, ko vēlaties dzēst.',
+  "cal.deleteAllRemaining": "Visas atlikušās nodarbības šajā sērijā",
+  "cal.deleteAllRemainingHint": "Dzēš turpmākās plānotās un atceltās nodarbības šajā sērijā. Notikušo nodarbību vēsture tiek saglabāta.",
+  "cal.deleteConfirmAll": "Dzēst visas atlikušās plānotās un atceltās nodarbības šajā sērijā? Notikušo nodarbību vēsture tiek saglabāta.",
+  "cal.deleteGroupHint": "Grupas nodarbību izvēle attiecas uz visiem tās skolēniem.",
+  "cal.deleteCancelledOnlyHint": "Izvēlētajā apjomā tiek dzēstas tikai jūsu vai jūsu bērna atceltās nodarbības.",
   'cal.deleteHint': 'Darbību apstiprināsiet pēc izvēles.',
   'cal.deleteOnlyThis': 'Tikai šo',
   'cal.deleteThisAndFuture': 'Šo un visas nākotnes',
@@ -5967,6 +5989,9 @@ export const lv: Record<string, string> = {
   'school.groups.editTitle': "Rediģēt grupu",
   'school.groups.platform': "Platforma",
   'school.groups.duration': "Ilgums (min)",
+  'school.groups.minimumActiveStudents': "Minimālais aktīvo skolēnu skaits",
+  'school.groups.minimumActiveStudentsHint': "Šī grupa un tās līgumi tiek automātiski apturēti, ja paliek mazāk aktīvo skolēnu.",
+  'school.groups.suspendedMinimum': "Apturēta: grupā ir mazāk nekā {n} aktīvo skolēnu",
   'school.groups.meetingLink': "Nodarbības saite",
   'school.groups.slots': "Nedēļas grafiks",
   'school.groups.addSlot': "Pievienot dienu",
@@ -6215,4 +6240,7 @@ export const lv: Record<string, string> = {
   "compare.customChip2": "Atalgojuma noteikumi",
   "compare.customChip3": "Vecāku apstiprinājuma saites",
   "compare.customChip4": "Portāli jūsu zīmolā",
+  'em.schoolJoinSubject': 'Pievienojieties nodarbībai {date}, {time}',
+  'em.schoolJoinHeader': 'Pievienojieties nodarbībai',
+  'em.schoolJoinBody': 'Jūsu nodarbība sākas {date} plkst. {time}. Pievienošanās saite ir zemāk.',
 };

@@ -97,6 +97,12 @@ describe('school dashboard action queues', () => {
     expect(actions[0]).toMatchObject({ id: 'group-minimum:group-low', priority: 3 });
   });
 
+  it('uses the configured minimum of two in paused group details', () => {
+    const input = { contracts: [], invoices: [], sessions: [], groups: [{ id: 'group', name: 'STEAM', minimum_active_students: 2, suspension_started_at: '2026-09-18T08:00:00.000Z', updated_at: '2026-09-18T08:00:00.000Z' }] };
+    expect(buildSchoolAdminActionQueue(input)[0].detail).toContain('mažiau nei 2');
+    expect(buildSchoolActivityFeed(input)[0].detail).toContain('mažiau nei 2');
+  });
+
   it('keeps an uploaded but unfinished contract copy in the document review queue', () => {
     const actions = buildSchoolAdminActionQueue({
       now: new Date('2026-09-18T12:00:00.000Z'),

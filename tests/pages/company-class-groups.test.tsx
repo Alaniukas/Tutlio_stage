@@ -191,6 +191,7 @@ describe('CompanyClassGroups edit modal', () => {
     });
 
     fireEvent.click(screen.getByLabelText('Pašalinti mokinį'));
+    fireEvent.change(screen.getByLabelText('Mažiausias aktyvių mokinių skaičius'), { target: { value: '2' } });
     fireEvent.click(screen.getByText('Eglė Kazlauskaitė').closest('label')!.querySelector('input')!);
     fireEvent.click(screen.getByRole('button', { name: 'Išsaugoti' }));
 
@@ -202,6 +203,7 @@ describe('CompanyClassGroups edit modal', () => {
       expect(body.name).toBe('QA Legal Matematika');
       expect(body.tutor_id).toBe('t1');
       expect(body.student_ids).toEqual(['s2']);
+      expect(body.minimum_active_students).toBe(2);
       expect(body.slots).toEqual([{ weekday: 2, start_time: '16:00', end_time: '16:45' }]);
     });
   });

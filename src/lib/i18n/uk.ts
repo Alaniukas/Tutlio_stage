@@ -2,6 +2,14 @@ import { en } from './en.js';
 
 /** Ukrainian tutor/business draft. Dedicated school, admin and full legal copy retains English. */
 export const ukOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Усі заняття, що залишилися в цій серії",
+  "cal.deleteAllRemainingHint": "Видаляє майбутні заплановані та скасовані заняття в цій серії. Історія завершених занять зберігається.",
+  "cal.deleteConfirmAll": "Видалити всі заплановані та скасовані заняття, що залишилися в цій серії? Історія завершених занять зберігається.",
+  "cal.deleteGroupHint": "Для групи вибір застосовується до всіх її учнів.",
+  "cal.deleteCancelledOnlyHint": "У вибраному обсязі видаляються лише ваші скасовані заняття або скасовані заняття вашої дитини.",
+  "em.schoolJoinSubject": "Приєднайтеся до заняття {date} о {time}",
+  "em.schoolJoinHeader": "Приєднайтеся до заняття",
+  "em.schoolJoinBody": "Ваше заняття починається {date} о {time}. Скористайтеся посиланням нижче, щоб приєднатися.",
   'compSess.markAttended': 'Учень був присутній',
   'att.confirmedManually': 'Відвідування підтверджено',
   'att.unconfirmed': 'Відвідування не підтверджено',

@@ -6,6 +6,14 @@ import { en } from './en.js';
  * See docs/CROATIAN_LOCALIZATION_REVIEW.md before publishing this locale.
  */
 export const hrOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Svi preostali satovi u ovom nizu",
+  "cal.deleteAllRemainingHint": "Uklanja buduće planirane i otkazane satove iz ovog niza. Povijest održanih satova ostaje sačuvana.",
+  "cal.deleteConfirmAll": "Izbrisati sve preostale planirane i otkazane satove iz ovog niza? Povijest održanih satova ostaje sačuvana.",
+  "cal.deleteGroupHint": "Za nastavnu grupu odabir se odnosi na sve njezine učenike.",
+  "cal.deleteCancelledOnlyHint": "Unutar odabranog opsega brišu se samo tvoji otkazani satovi ili otkazani satovi tvog djeteta.",
+  "em.schoolJoinSubject": "Pridruži se svom satu {date} u {time}",
+  "em.schoolJoinHeader": "Pridruži se svom satu",
+  "em.schoolJoinBody": "Tvoj sat počinje {date} u {time}. Pridruži se putem poveznice u nastavku.",
   'compSess.markAttended': 'Učenik je prisustvovao',
   'att.confirmedManually': 'Dolazak potvrđen',
   'att.unconfirmed': 'Dolazak nije potvrđen',

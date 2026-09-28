@@ -5,6 +5,14 @@ import { en } from './en.js';
  * Locale remains unpublished; see docs/BULGARIAN_LOCALIZATION_REVIEW.md.
  */
 export const bgOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Всички оставащи уроци в тази серия",
+  "cal.deleteAllRemainingHint": "Премахва бъдещите планирани и отменени уроци в тази серия. Историята на проведените уроци се запазва.",
+  "cal.deleteConfirmAll": "Да се изтрият ли всички оставащи планирани и отменени уроци в тази серия? Историята на проведените уроци се запазва.",
+  "cal.deleteGroupHint": "За учебна група изборът се прилага за всички нейни ученици.",
+  "cal.deleteCancelledOnlyHint": "Изтриват се само отменените уроци на вас или на детето ви в избрания обхват.",
+  "em.schoolJoinSubject": "Присъединете се към урока си на {date} в {time}",
+  "em.schoolJoinHeader": "Присъединете се към урока си",
+  "em.schoolJoinBody": "Урокът ви започва на {date} в {time}. Използвайте връзката за присъединяване по-долу.",
   'compSess.markAttended': 'Ученикът присъства',
   'att.confirmedManually': 'Присъствието е потвърдено',
   'att.unconfirmed': 'Присъствието не е потвърдено',

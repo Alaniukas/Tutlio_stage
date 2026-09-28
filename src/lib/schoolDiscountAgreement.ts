@@ -1,5 +1,19 @@
 export type SchoolDiscountType = 'percent' | 'amount';
 
+export type SchoolDiscountContractPreview = {
+  id: string;
+  agreementNumber: string;
+  activityLabel: string;
+  discountType: SchoolDiscountType;
+  discountValue: number;
+  validFrom: string;
+  validUntil: string;
+  status: 'pending' | 'accepted';
+  acceptedAt: string | null;
+  pdfUrl: string | null;
+  acceptUrl: string;
+};
+
 export type SchoolDiscountAgreementInput = {
   subjectId: string | null;
   tutorId?: string | null;

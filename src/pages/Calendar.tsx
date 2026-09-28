@@ -51,6 +51,9 @@ import { sendEmail } from '@/lib/email';
 import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
 import { buildLessonRescheduleRecipients } from '@/lib/lessonRescheduleNotify';
 import { authHeaders } from '@/lib/apiHelpers';
+import { DeleteSessionDialog } from '@/components/DeleteSessionDialog';
+import { deleteSessionViaApi, isRecurringSession, type SessionDeleteScope } from '@/lib/sessionDeletion';
+import { loadCancelledCalendarSessions } from '@/lib/cancelledCalendarSessions';
 import { autoCloseBillingBatchIfAllPaid } from '@/lib/autoCloseBillingBatch';
 import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
 import { packageCoversLessonDate } from '@/lib/pooledPackageBookingWindow';
@@ -103,6 +106,7 @@ import {
   CreditCard,
   Loader2,
   Trash2,
+  EyeOff,
   Users,
   UserX,
   RotateCcw,
@@ -359,7 +363,6 @@ export default function CalendarPage() {
   const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
   const isLaisviVaikai = isLaisviVaikaiOrg(organizationId) || isLaisviVaikaiOrg(ctxProfile?.organization_id);
   const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
-  const hideProKlaseOrgTutorDelete = hideProKlaseOrgTutorCancel;
   const showProKlaseCalendarFeatures =
     orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
@@ -421,6 +424,7 @@ export default function CalendarPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [isDeleteRecurringDialogOpen, setIsDeleteRecurringDialogOpen] = useState(false);
+  const [participantToDelete, setParticipantToDelete] = useState<Session | null>(null);
   const handleEventModalOpenChange = (open: boolean) => {
     setIsEventModalOpen(open);
     if (!open) {
@@ -438,6 +442,10 @@ export default function CalendarPage() {
   const [isAvailabilityModalOpen, setIsAvailabilityModalOpen] = useState(false);
   const [isUpcomingListModalOpen, setIsUpcomingListModalOpen] = useState(false);
   const [isCancelledListModalOpen, setIsCancelledListModalOpen] = useState(false);
+  const [cancelledListRows, setCancelledListRows] = useState<Session[]>([]);
+  const [cancelledListLoading, setCancelledListLoading] = useState(false);
+  const [cancelledListError, setCancelledListError] = useState<string | null>(null);
+  const [cancelledListRevision, setCancelledListRevision] = useState(0);
   const [isMassCancelModalOpen, setIsMassCancelModalOpen] = useState(false);
 
   // BigCalendar Setup
@@ -580,6 +588,47 @@ export default function CalendarPage() {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctxUser?.id]);
+
+  useEffect(() => {
+    if (!isCancelledListModalOpen || !ctxUser?.id) return;
+    let current = true;
+    setCancelledListLoading(true);
+    setCancelledListError(null);
+    loadCancelledCalendarSessions(supabase, ctxUser.id)
+      .then((rows) => {
+        if (current) setCancelledListRows(rows);
+      })
+      .catch((error: unknown) => {
+        if (current) setCancelledListError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (current) setCancelledListLoading(false);
+      });
+    return () => { current = false; };
+  }, [isCancelledListModalOpen, ctxUser?.id, cancelledListRevision]);
+
+  const cancelledListSessions = useMemo(() => {
+    const studentsById = new Map(students.map((student) => [student.id, student]));
+    const subjectsById = new Map(subjects.map((subject) => [subject.id, subject]));
+    return cancelledListRows.map((session) => {
+      const student = studentsById.get(session.student_id);
+      const subject = session.subject_id ? subjectsById.get(session.subject_id) : undefined;
+      return {
+        ...session,
+        student: student ? {
+          ...student,
+          payer_email: student.payer_email ?? undefined,
+          parent_secondary_email: student.parent_secondary_email ?? undefined,
+        } : session.student,
+        subjects: subject ? { name: subject.name, is_trial: subject.is_trial ?? false } : session.subjects,
+      };
+    });
+  }, [cancelledListRows, students, subjects]);
+
+  const refreshCancelledList = () => {
+    setCancelledListRows([]);
+    setCancelledListRevision((revision) => revision + 1);
+  };
 
   useEffect(() => {
     if (!showClassGroups) {
@@ -3911,50 +3960,27 @@ export default function CalendarPage() {
     setSaving(false);
   };
 
-  const hardDeleteSession = async (sessionId: string, deleteScope: 'single' | 'future' = 'single') => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    if (!token) throw new Error('Neautorizuota');
+  const hardDeleteSession = (sessionId: string, deleteScope: SessionDeleteScope = 'single', wholeGroup = false) =>
+    deleteSessionViaApi(sessionId, deleteScope, { groupScope: wholeGroup ? 'whole_occurrence' : 'one_student' });
 
-    const resp = await fetch('/api/delete-session', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({ sessionId, deleteScope }),
-    });
-
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      throw new Error(text || t('cal.deleteFailed'));
-    }
-  };
-
-  const hardDeleteSelectedWithApproval = async (deleteScope: 'single' | 'future') => {
-    if (!selectedEvent) return;
+  const hardDeleteSelectedWithApproval = async (deleteScope: SessionDeleteScope) => {
+    if (!selectedEvent || saving) return;
     const targetSessionId = selectedEvent.id;
-    const msg =
-      deleteScope === 'future'
-        ? t('cal.deleteConfirmFuture')
-        : t('cal.deleteConfirmSingle');
-    const confirmed = confirm(msg);
-    if (!confirmed) return;
 
     setSaving(true);
-    // Optimistic UI: close modal and remove the lesson immediately.
     setIsDeleteRecurringDialogOpen(false);
     setIsEventModalOpen(false);
     setSelectedEvent(null);
     setSelectedGroupSessions([]);
-    setSessions((prev) => prev.filter((s) => s.id !== targetSessionId));
 
     try {
-      await hardDeleteSession(targetSessionId, deleteScope);
+      const result = await hardDeleteSession(targetSessionId, deleteScope, isClassGroupSession);
+      const deletedIds = new Set(result.deletedSessionIds);
+      setSessions((prev) => prev.filter((session) => !deletedIds.has(session.id)));
+      refreshCancelledList();
       fetchData();
     } catch (e: any) {
       alert(e?.message || t('cal.deleteFailed'));
-      // Re-sync from backend in case optimistic removal was wrong.
       fetchData();
     } finally {
       setSaving(false);
@@ -3962,13 +3988,9 @@ export default function CalendarPage() {
   };
 
   const handleHardDeleteSelected = async () => {
-    if (!selectedEvent) return;
-    const isRecurring = Boolean((selectedEvent as any)?.recurring_session_id);
-    if (isRecurring) {
-      setIsDeleteRecurringDialogOpen(true);
-      return;
-    }
-    await hardDeleteSelectedWithApproval('single');
+    if (!selectedEvent || saving) return;
+    setParticipantToDelete(null);
+    setIsDeleteRecurringDialogOpen(true);
   };
 
   /**
@@ -4498,14 +4520,19 @@ export default function CalendarPage() {
     setSaving(false);
   };
 
-  const handleRemoveStudentFromGroup = async (sessionToRemove: Session) => {
-    if (!selectedEvent) return;
+  const handleRemoveStudentFromGroup = (sessionToRemove: Session) => {
+    if (!selectedEvent || saving) return;
+    setParticipantToDelete(sessionToRemove);
+    setIsDeleteRecurringDialogOpen(true);
+  };
 
-    const studentName = sessionToRemove.student?.full_name || t('cal.thisStudent');
-    const confirmed = confirm(t('cal.confirmRemoveStudent', { name: studentName }));
-    if (!confirmed) return;
+  const removeStudentFromGroupWithApproval = async (deleteScope: SessionDeleteScope) => {
+    if (!selectedEvent || !participantToDelete || saving) return;
+    const sessionToRemove = participantToDelete;
 
     setSaving(true);
+    setIsDeleteRecurringDialogOpen(false);
+    setParticipantToDelete(null);
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -4514,7 +4541,8 @@ export default function CalendarPage() {
       const subject = subjects.find(s => s.id === selectedEvent.subject_id);
 
       try {
-        await hardDeleteSession(sessionToRemove.id);
+        await hardDeleteSession(sessionToRemove.id, deleteScope);
+        refreshCancelledList();
       } catch (e: any) {
         alert(t('cal.failedToRemove'));
         setSaving(false);
@@ -5471,24 +5499,23 @@ export default function CalendarPage() {
             <DialogTitle className="flex flex-wrap items-center gap-2 pr-2 min-w-0">
               <CalendarDays className="w-5 h-5 text-indigo-600 flex-shrink-0" />
               <span className="flex-1 min-w-0 truncate">{t('cal.lessonInfo')}</span>
-              {!isEditingSession && (selectedEvent?.status === 'active' || selectedEvent?.status === 'completed') && (
+              {!isEditingSession && selectedEvent && (
                 <div className="flex items-center gap-1 flex-shrink-0">
                 {selectedEvent?.status === 'active' && (
                 <Button variant="ghost" size="sm" onClick={openSessionEditor} className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 h-8 px-2 flex-shrink-0">
                   <Edit2 className="w-3.5 h-3.5 mr-1" /> <span className="hidden sm:inline">{t('cal.editBtn')}</span>
                 </Button>
                 )}
-                {!hideProKlaseOrgTutorDelete && (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => void handleHardDeleteSelected()}
                   className="text-red-600 hover:text-red-700 hover:bg-red-50 h-8 px-2 flex-shrink-0"
                   title={t('cal.deleteSession')}
+                  disabled={saving}
                 >
                   <Trash2 className="w-3.5 h-3.5 mr-1" /> <span className="hidden sm:inline">{t('cal.delete')}</span>
                 </Button>
-                )}
                 </div>
               )}
             </DialogTitle>
@@ -6428,8 +6455,8 @@ export default function CalendarPage() {
                   }}
                   className="rounded-xl flex-1 text-gray-600 border-gray-300"
                 >
-                  <Trash2 className="w-4 h-4 mr-1" />
-                  {t('cal.deleteFromCalendar')}
+                  <EyeOff className="w-4 h-4 mr-1" />
+                  {t('common.hide')}
                 </Button>
               )}
 
@@ -6466,45 +6493,17 @@ export default function CalendarPage() {
       </Dialog>
 
       {/* === RECURRING DELETE SCOPE DIALOG === */}
-      <Dialog open={isDeleteRecurringDialogOpen} onOpenChange={setIsDeleteRecurringDialogOpen}>
-        <DialogContent className="w-[95vw] sm:max-w-[440px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Trash2 className="w-5 h-5 text-red-600" />
-              {t('cal.deleteRecurringTitle')}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="text-sm text-gray-600 space-y-2">
-            <p>{t('cal.deleteChoose')}</p>
-            <p className="text-xs text-gray-500">{t('cal.deleteHint')}</p>
-          </div>
-          <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-            <Button
-              variant="outline"
-              onClick={() => setIsDeleteRecurringDialogOpen(false)}
-              className="rounded-xl"
-              disabled={saving}
-            >
-              {t('cal.cancelBtn')}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => void hardDeleteSelectedWithApproval('single')}
-              className="rounded-xl border-red-200 text-red-700 hover:bg-red-50"
-              disabled={saving}
-            >
-              {t('cal.deleteOnlyThis')}
-            </Button>
-            <Button
-              onClick={() => void hardDeleteSelectedWithApproval('future')}
-              className="rounded-xl bg-red-600 hover:bg-red-700 text-white"
-              disabled={saving}
-            >
-              {t('cal.deleteThisAndFuture')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteSessionDialog
+        open={isDeleteRecurringDialogOpen}
+        onOpenChange={(open) => {
+          setIsDeleteRecurringDialogOpen(open);
+          if (!open) setParticipantToDelete(null);
+        }}
+        recurring={isRecurringSession(participantToDelete || selectedEvent)}
+        wholeGroup={!participantToDelete && isClassGroupSession}
+        busy={saving}
+        onDelete={participantToDelete ? removeStudentFromGroupWithApproval : hardDeleteSelectedWithApproval}
+      />
 
       {/* === ADD STUDENT TO GROUP MODAL === */}
       <Dialog open={isAddToGroupOpen} onOpenChange={(open) => {
@@ -7112,21 +7111,42 @@ export default function CalendarPage() {
           </DialogHeader>
 
           <div className="space-y-3 max-h-[60vh] py-2 pr-1">
-            {sessions.filter(s => s.status === 'cancelled')
-              .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime()).length === 0 ? (
+            {cancelledListLoading ? (
+              <div className="flex justify-center py-8" role="status">
+                <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+                <span className="sr-only">{t('cal.loadingCalendar')}</span>
+              </div>
+            ) : cancelledListError ? (
+              <div className="space-y-2 text-center py-8" role="alert">
+                <p className="text-sm text-red-600">{t('cal.errorGeneric')}</p>
+                <Button variant="outline" onClick={refreshCancelledList}>
+                  <RotateCcw className="w-4 h-4" />
+                  {t('stuSess.retry')}
+                </Button>
+              </div>
+            ) : cancelledListSessions.length === 0 ? (
               <div className="text-center py-8 text-gray-400">
                 <XCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">{t('cal.noCancelledLessons')}</p>
               </div>
             ) : (
-              sessions.filter(s => s.status === 'cancelled')
-                .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
-                .map(s => {
+              cancelledListSessions.map(s => {
                   const start = new Date(s.start_time);
                   return (
-                    <div
+                    <button
+                      type="button"
                       key={s.id}
-                      className="flex flex-col gap-2 p-4 rounded-xl border border-red-100 bg-red-50/30"
+                      className="flex w-full text-left flex-col gap-2 p-4 rounded-xl border border-red-100 bg-red-50/30 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-500 cursor-pointer"
+                      onClick={() => {
+                        setIsCancelledListModalOpen(false);
+                        setIsClassGroupSession(false);
+                        setIsGroupSession(false);
+                        setSelectedGroupSessions([]);
+                        setClassGroupParticipants([]);
+                        setParticipantToDelete(null);
+                        setSelectedEvent(s);
+                        setIsEventModalOpen(true);
+                      }}
                     >
                       <div className="flex items-center justify-between">
                         <p className="text-sm font-semibold text-gray-900">{s.student?.full_name}</p>
@@ -7142,7 +7162,7 @@ export default function CalendarPage() {
                           {s.cancellation_reason}
                         </div>
                       )}
-                    </div>
+                    </button>
                   );
                 })
             )}

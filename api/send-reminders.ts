@@ -15,6 +15,8 @@ import { isMissingPostgrestRpc } from './_lib/postgrestRpc.js';
 import { moksloVaisiaiRoutesLessonCommsToPayer } from './_lib/moksloVaisiaiLessonComms.js';
 import { buildSchoolHomeworkUrl, publicAppOrigin } from './_lib/publicLinkToken.js';
 import { resolveSessionMeetingLink } from '../src/lib/meetingLink.js';
+import { schoolCompactNotificationsEnabled, schoolJoinContact } from '../src/lib/schoolNotificationPolicy.js';
+import { schoolMaterialRecipient } from './_lib/schoolMaterialPublications.js';
 import {
   sessionReminderDeliveryKey,
   sessionReminderDeliveryOutcome,
@@ -184,7 +186,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const student = session.student as any;
         if (!tutor || !student) continue;
 
-        const reminderStudentHours = Number(tutor?.reminder_student_hours ?? 2);
+        let reminderStudentHours = Number(tutor?.reminder_student_hours ?? 2);
         const reminderTutorHours = Number(tutor?.reminder_tutor_hours ?? 2);
         const durationMinutes = Math.round((new Date(session.end_time).getTime() - startTime.getTime()) / 60000);
         const tz = 'Europe/Vilnius';
@@ -197,6 +199,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const studentOrgFeatures = studentOrgId && studentOrgId !== orgId
           ? await getOrgFeatures(studentOrgId)
           : orgFeatures;
+        const compactSchoolNotifications = schoolCompactNotificationsEnabled(await getOrgRow(studentOrgId));
+        const familyPortalNotifications = schoolFlowForSession && studentOrgFeatures?.school_family_portal === true;
+        if (familyPortalNotifications) reminderStudentHours = 0.25;
+        const compactJoinContact = compactSchoolNotifications
+          ? familyPortalNotifications ? await schoolMaterialRecipient(supabase, { ...student, organization_id: studentOrgId }) : schoolJoinContact(student)
+          : null;
         const homeworkUrl = schoolFlowForSession && student?.id
           ? buildSchoolHomeworkUrl(publicAppOrigin(), String(student.id))
           : undefined;
@@ -225,7 +233,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ...(orgId ? { organizationId: orgId } : {}),
         };
 
-        if (reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
+        if ((!compactSchoolNotifications || resolvedMeetingLink) && reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
           try {
             emailAttempts += 1;
             const reminderDeliveryScope = `student:${session.id}`;
@@ -243,6 +251,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     ? {
                       organizationId: studentOrgId,
                       schoolFlow: true,
+                      ...(compactSchoolNotifications ? { schoolJoinOnly: true } : {}),
                       homeworkUrl,
                       recordingsUrl,
                     }
@@ -270,7 +279,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Default: only the paying parent (payment_payer==='parent').
         // With flexible_invitations on: remind ALL parent contacts (payer +
         // secondary + registered parents), decoupled from who pays.
-        if (reminderStudentHours > 0 && !session.reminder_payer_sent && diffHours <= reminderStudentHours && diffHours >= 0) {
+        if ((!compactSchoolNotifications || resolvedMeetingLink) && reminderStudentHours > 0 && !session.reminder_payer_sent && diffHours <= reminderStudentHours && diffHours >= 0) {
           if (schoolFlowForSession && payerOccurrenceKey) {
             activeSchoolPayerOccurrence = payerOccurrenceKey;
           }
@@ -289,8 +298,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           // whether or not that parent ever registered (schools run on emails only).
           const schoolFlow = schoolFlowForSession;
           const candidates: ReminderRecipient[] = [];
+          let compactRegisteredParentFallback = false;
+          let compactParentsOptedOut = false;
+          let compactParentLookupFailed = false;
 
-          if (schoolFlow && !flexibleInvites) {
+          if (compactSchoolNotifications) {
+            if (compactJoinContact?.kind === 'student') {
+              // The child delivery keeps its own retry flag. Parents intentionally
+              // receive no copy, including when delivery to the child is retried.
+              await supabase.from('sessions').update({ reminder_payer_sent: true }).eq('id', session.id);
+            } else if (compactJoinContact) {
+              candidates.push({ email: compactJoinContact.email, name: compactJoinContact.name });
+            } else if (familyPortalNotifications) {
+              compactParentLookupFailed = true;
+            } else {
+              compactRegisteredParentFallback = true;
+              try {
+                const { data: links, error: linksError } = await supabase
+                  .from('parent_students')
+                  .select('parent_id')
+                  .eq('student_id', student.id);
+                if (linksError) throw linksError;
+                const parentIds = [...new Set((links || []).map((link: any) => link.parent_id).filter(Boolean))];
+                if (parentIds.length > 0) {
+                  const { data: profiles, error: profilesError } = await supabase
+                    .from('parent_profiles')
+                    .select('id, email, full_name, disable_lesson_reminders')
+                    .in('id', parentIds)
+                    .order('id', { ascending: true });
+                  if (profilesError) throw profilesError;
+                  const contacts = (profiles || []).filter((profile: any) => String(profile.email || '').trim());
+                  const parent = contacts.find((profile: any) => profile.disable_lesson_reminders === false);
+                  if (parent) {
+                    candidates.push({ email: String(parent.email).trim().toLowerCase(), name: parent.full_name || null });
+                  } else {
+                    compactParentsOptedOut = contacts.length > 0 && contacts.every((profile: any) => profile.disable_lesson_reminders === true);
+                  }
+                }
+              } catch (error) {
+                compactParentLookupFailed = true;
+                console.error('[send-reminders] compact parent lookup failed:', error);
+              }
+            }
+          } else if (schoolFlow && !flexibleInvites) {
             if (payerEmail) candidates.push({ email: payerEmail, name: payerName });
             const secEmail = (student as any)?.parent_secondary_email?.trim() || '';
             if (secEmail) candidates.push({ email: secEmail, name: (student as any)?.parent_secondary_name || null });
@@ -324,19 +374,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const optedOut = new Set<string>();
           if (candidates.length > 0) {
             const lookupEmails = [...new Set(candidates.map((c) => c.email.trim().toLowerCase()))];
-            const { data: optRows } = await supabase
-              .from('parent_profiles')
-              .select('email, disable_lesson_reminders')
-              .in('email', lookupEmails);
-            for (const r of optRows || []) {
-              if (r?.disable_lesson_reminders && r?.email) optedOut.add(String(r.email).toLowerCase());
+            try {
+              const { data: optRows, error: optRowsError } = await supabase
+                .from('parent_profiles')
+                .select('email, disable_lesson_reminders')
+                .in('email', lookupEmails);
+              if (compactRegisteredParentFallback && optRowsError) throw optRowsError;
+              for (const r of optRows || []) {
+                if (r?.disable_lesson_reminders && r?.email) optedOut.add(String(r.email).toLowerCase());
+              }
+              if (compactRegisteredParentFallback) {
+                const { data: optOutRows, error: optOutError } = await supabase
+                  .from('email_reminder_opt_outs')
+                  .select('email')
+                  .in('email', lookupEmails);
+                if (optOutError) throw optOutError;
+                for (const row of optOutRows || []) optedOut.add(String(row.email).trim().toLowerCase());
+              } else {
+                const tableOptOuts = await loadReminderOptOuts(supabase, lookupEmails);
+                for (const e of tableOptOuts) optedOut.add(e);
+              }
+            } catch (error) {
+              if (!compactRegisteredParentFallback) throw error;
+              compactParentLookupFailed = true;
+              console.error('[send-reminders] compact parent preferences lookup failed:', error);
             }
-            const tableOptOuts = await loadReminderOptOuts(supabase, lookupEmails);
-            for (const e of tableOptOuts) optedOut.add(e);
           }
 
           // Dedup, drop the student's own email and opt-outs.
-          const recipients = dedupeReminderRecipients(candidates, {
+          const recipients = compactParentLookupFailed ? [] : dedupeReminderRecipients(candidates, {
             studentEmail: studentEmailNorm,
             optedOutEmails: optedOut,
           });
@@ -345,7 +411,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           // either provider-confirmed or intentionally opted out. With
           // idempotency enabled, a partial failure can safely retry the whole
           // recipient set without duplicating already accepted messages.
-          let allParentHandled = candidates.length > 0 && recipients.length === 0;
+          let allParentHandled = !compactParentLookupFailed && (compactParentsOptedOut || (candidates.length > 0 && recipients.length === 0));
           if (recipients.length > 0) allParentHandled = true;
           for (const r of recipients) {
             if (!canSendAnotherReminderEmail(
@@ -375,6 +441,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                       ? {
                         organizationId: studentOrgId,
                         schoolFlow: true,
+                        ...(compactSchoolNotifications ? { schoolJoinOnly: true } : {}),
                         // Homework / materials page — the only "portal" a parent without an account has.
                         homeworkUrl,
                         recordingsUrl,

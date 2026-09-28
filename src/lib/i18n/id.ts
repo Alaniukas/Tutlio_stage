@@ -6,6 +6,14 @@ import { en } from './en.js';
  * See docs/INDONESIAN_LOCALIZATION_REVIEW.md before publication.
  */
 export const idOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Semua sesi les yang tersisa dalam rangkaian ini",
+  "cal.deleteAllRemainingHint": "Menghapus sesi les mendatang yang dijadwalkan dan sesi les yang dibatalkan dalam rangkaian ini. Riwayat sesi les yang telah selesai tetap tersimpan.",
+  "cal.deleteConfirmAll": "Hapus semua sesi les yang tersisa dalam rangkaian ini, baik yang dijadwalkan maupun dibatalkan? Riwayat sesi les yang telah selesai tetap tersimpan.",
+  "cal.deleteGroupHint": "Untuk kelompok kelas, pilihan berlaku bagi semua siswanya.",
+  "cal.deleteCancelledOnlyHint": "Hanya sesi les Anda atau anak Anda yang dibatalkan dalam cakupan pilihan yang dihapus.",
+  "em.schoolJoinSubject": "Bergabunglah dalam sesi les Anda pada {date} pukul {time}",
+  "em.schoolJoinHeader": "Bergabunglah dalam sesi les Anda",
+  "em.schoolJoinBody": "Sesi les Anda dimulai pada {date} pukul {time}. Gunakan tautan bergabung di bawah.",
   'compSess.markAttended': 'Siswa hadir',
   'att.confirmedManually': 'Kehadiran dikonfirmasi',
   'att.unconfirmed': 'Kehadiran belum dikonfirmasi',

@@ -1,0 +1,140 @@
+import { extraLessonsServiceStartYmd, type ExtraLessonsOrderSnapshot, type StartWithin14Status } from './extraLessonsContract.js';
+import { canonicalSessionCharge, type CanonicalBillableSession } from './schoolCanonicalBilling.js';
+import { isSessionInExtraLessonsServiceWindow, sessionMatchesExtraLessonsContract, sessionYmdVilnius } from './schoolExtraLessonsBilling.js';
+
+export type SchoolInvoiceContractWindow = {
+  id: string;
+  class_group_id?: string | null;
+  signing_status?: string;
+  accepted_at?: string | null;
+  withdrawal_requested_at?: string | null;
+  terminated_at?: string | null;
+  start_within_14_status?: string | null;
+  start_within_14_days?: boolean | null;
+  order_snapshot?: ExtraLessonsOrderSnapshot | null;
+  suspension_started_at?: string | null;
+  suspension_until?: string | null;
+  suspension_resumed_at?: string | null;
+};
+
+export type SchoolSessionBillingDecision = {
+  id: string | number;
+  session_reference_id: string;
+  excluded: boolean;
+  reason: string;
+  created_at: string;
+};
+
+export type SchoolInvoiceReviewReason = 'payable' | 'unconfirmed' | 'free' | 'outside_contract' | 'suspended'
+  | 'contract_review' | 'excluded' | 'already_invoiced' | 'not_ended';
+
+export type SchoolInvoiceReviewSession = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  status: string;
+  statusConfirmedAt: string | null;
+  subjectName: string;
+  tutorName: string;
+  unitPriceEur: number;
+  included: boolean;
+  reason: SchoolInvoiceReviewReason;
+  exclusionReason: string | null;
+  decisionId: string | number | null;
+  alreadyInvoiced: boolean;
+  canConfirm: boolean;
+};
+
+function inSuspension(session: CanonicalBillableSession, contract: SchoolInvoiceContractWindow): boolean {
+  const suspended = Date.parse(contract.suspension_started_at || '');
+  const start = Date.parse(session.start_time);
+  if (!Number.isFinite(suspended) || start < suspended) return false;
+  const resumed = Date.parse(contract.suspension_resumed_at || '');
+  if (Number.isFinite(resumed)) return start < resumed;
+  return !contract.suspension_until || sessionYmdVilnius(session.start_time) <= contract.suspension_until;
+}
+
+export function schoolInvoiceSessionMatchesContract(session: CanonicalBillableSession, contract: SchoolInvoiceContractWindow): boolean {
+  const order = contract.order_snapshot;
+  if (!order) return Boolean(contract.class_group_id) && contract.class_group_id === session.class_group_id;
+  return sessionMatchesExtraLessonsContract(session, { ...order, group_id: contract.class_group_id || order.group_id });
+}
+
+/** Historical service windows restrict charges; an absence alone does not waive a group charge. */
+export function schoolInvoiceContractReason(
+  session: CanonicalBillableSession,
+  contracts: SchoolInvoiceContractWindow[],
+): 'payable' | 'outside_contract' | 'suspended' | 'contract_review' {
+  const matching = contracts.filter((contract) => schoolInvoiceSessionMatchesContract(session, contract));
+  if (matching.some((contract) => !contract.order_snapshot)
+    || contracts.some((contract) => !contract.order_snapshot && !contract.class_group_id)) return 'contract_review';
+  // Older/direct school lessons do not necessarily have an extra-lessons agreement.
+  if (!matching.length) return 'payable';
+  const valid = matching.filter((contract) => {
+    if (!contract.accepted_at || !contract.order_snapshot || contract.signing_status !== 'signed') return false;
+    if (Date.parse(session.start_time) < Date.parse(contract.accepted_at)) return false;
+    const order = contract.order_snapshot;
+    const endedAt = [contract.withdrawal_requested_at, contract.terminated_at]
+      .filter((value): value is string => Boolean(value)).sort()[0];
+    return (!order.end_date || sessionYmdVilnius(session.start_time) <= order.end_date)
+      && isSessionInExtraLessonsServiceWindow(session.start_time, {
+        serviceStartYmd: extraLessonsServiceStartYmd({
+          status: (contract.start_within_14_status || (contract.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status,
+          acceptedAtIso: contract.accepted_at,
+          order,
+        }),
+        endedAtIso: endedAt,
+      });
+  });
+  if (valid.length > 1) return 'contract_review';
+  if (!valid.length) return 'outside_contract';
+  if (inSuspension(session, valid[0])) return 'suspended';
+  const endedAt = [valid[0].withdrawal_requested_at, valid[0].terminated_at]
+    .filter((value): value is string => Boolean(value)).sort()[0];
+  if (endedAt && session.end_time && Date.parse(session.end_time) > Date.parse(endedAt)) return 'contract_review';
+  return 'payable';
+}
+
+export function reviewSchoolInvoiceSession(
+  session: CanonicalBillableSession & { subject?: any; tutor?: any; price?: number | null },
+  contracts: SchoolInvoiceContractWindow[],
+  decision: SchoolSessionBillingDecision | undefined,
+  alreadyInvoiced: boolean,
+  nowMs = Date.now(),
+): SchoolInvoiceReviewSession {
+  const subject = Array.isArray(session.subject) ? session.subject[0] : session.subject;
+  const tutor = Array.isArray(session.tutor) ? session.tutor[0] : session.tutor;
+  const ended = Number.isFinite(Date.parse(session.end_time || '')) && Date.parse(session.end_time || '') <= nowMs;
+  const contractReason = schoolInvoiceContractReason(session, contracts);
+  const charge = canonicalSessionCharge(session, session.class_group_id ? 'group' : 'individual');
+  const reason: SchoolInvoiceReviewReason = alreadyInvoiced ? 'already_invoiced'
+    : decision?.excluded ? 'excluded'
+    : !ended ? 'not_ended'
+    : contractReason !== 'payable' ? contractReason
+    : charge === 'free' ? 'free'
+    : charge === 'review' ? 'unconfirmed'
+    : 'payable';
+  return {
+    id: session.id,
+    startTime: session.start_time,
+    endTime: session.end_time || '',
+    status: session.status,
+    statusConfirmedAt: session.status_confirmed_at || null,
+    subjectName: String(subject?.name || 'Užsiėmimas'),
+    tutorName: String(tutor?.full_name || 'mokytojas'),
+    unitPriceEur: Number(session.price ?? subject?.price ?? 0),
+    included: reason === 'payable',
+    reason,
+    exclusionReason: decision?.excluded ? decision.reason : null,
+    decisionId: decision?.id ?? null,
+    alreadyInvoiced,
+    canConfirm: !alreadyInvoiced && ended && ['active', 'completed', 'no_show'].includes(session.status),
+  };
+}
+
+/** Rows are loaded in descending identity order, so restore entries retain the earlier exclusion audit. */
+export function latestSchoolBillingDecisions(rows: SchoolSessionBillingDecision[]): Map<string, SchoolSessionBillingDecision> {
+  const latest = new Map<string, SchoolSessionBillingDecision>();
+  for (const row of rows) if (!latest.has(row.session_reference_id)) latest.set(row.session_reference_id, row);
+  return latest;
+}

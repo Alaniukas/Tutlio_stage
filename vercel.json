@@ -256,6 +256,10 @@
             "path": "/api/send-reminders",
             "schedule": "*/5 * * * *"
         },
+    {
+      "path": "/api/process-school-materials",
+      "schedule": "*/5 * * * *"
+    },
         {
             "path": "/api/expire-packages",
             "schedule": "0 */6 * * *"

@@ -26,7 +26,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (loadError) return res.status(500).json({ error: loadError.message });
   if (!contract) return res.status(404).json({ error: 'Contract not found' });
   if (contract.terminated_at || contract.withdrawal_requested_at) {
-    return res.status(200).json({ success: true, alreadyTerminated: true });
+    // A previous attempt may have saved the end state before roster/session
+    // reconciliation failed. Retrying must complete that work.
+    const groupResult = contract.class_group_id
+      ? await suspendSchoolGroupIfBelowMinimum(req, supabase, {
+          organizationId: admin.access.organizationId, groupId: contract.class_group_id,
+          triggerContractId: contract.id, adminUserId: admin.access.userId,
+        })
+      : null;
+    return res.status(200).json({ success: true, alreadyTerminated: true, ...(groupResult || {}) });
   }
 
   const groupImpact = contract.class_group_id

@@ -11,6 +11,11 @@ const mocks = vi.hoisted(() => ({
   mapping: { drive_folder_id: 'folder-allowed' } as Record<string, unknown> | null,
   slotScope: vi.fn(),
   slotTag: vi.fn(),
+  legacyPublication: vi.fn(),
+}));
+
+vi.mock('../../api/_lib/schoolMaterialPublications.js', () => ({
+  schoolRecordingPublicationAllowsLegacyAccess: mocks.legacyPublication,
 }));
 
 vi.mock('../../api/_lib/schoolRecordingTicket.js', () => ({
@@ -112,6 +117,7 @@ describe('GET /api/school-lesson-recording-stream', () => {
     mocks.fetchRange.mockReset();
     mocks.slotScope.mockReset().mockResolvedValue({ unrestricted: true, schedules: [] });
     mocks.slotTag.mockReset().mockResolvedValue(null);
+    mocks.legacyPublication.mockReset().mockResolvedValue(true);
   });
 
   it('rejects a copied playback URL when the browser has no matching viewer session', async () => {
@@ -175,6 +181,19 @@ describe('GET /api/school-lesson-recording-stream', () => {
     expect(mocks.fetchRange).not.toHaveBeenCalled();
   });
 
+  it('re-checks access on the next range even when the playback ticket and viewer cookie still work', async () => {
+    const first = mockRes();
+    await handler({ method: 'HEAD', query: { t: 'signed' }, headers: { range: 'bytes=0-999' } } as any, first);
+    expect(first.getResult().statusCode).toBe(206);
+    // An admin revoked the viewer between requests; the signed ticket is unchanged.
+    mocks.resolveAccess.mockResolvedValue({ groups: [], organizationIds: [], studentIds: [] });
+    const next = mockRes();
+    await handler({ method: 'HEAD', query: { t: 'signed' }, headers: { range: 'bytes=1000-1999' } } as any, next);
+    expect(next.getResult().statusCode).toBe(403);
+    expect(mocks.resolveAccess).toHaveBeenCalledTimes(2);
+    expect(mocks.getMetadata).toHaveBeenCalledTimes(1);
+  });
+
   it('lets a homework HMAC ticket stream without a Tutlio login cookie', async () => {
     mocks.verifyHomeworkTicket.mockReturnValue({
       studentId: 'student-row',
@@ -204,5 +223,30 @@ describe('GET /api/school-lesson-recording-stream', () => {
 
     expect(res.getResult().statusCode).toBe(403);
     expect(mocks.getMetadata).not.toHaveBeenCalled();
+  });
+
+  it.each(['GET', 'HEAD'])('checks anonymous publication privacy before every %s or Range response', async (method) => {
+    mocks.verifyHomeworkTicket.mockReturnValue({ studentId: 'student-row', groupId: 'group-a', fileId: 'file-a' });
+    mocks.resolveHomeworkGroup.mockResolvedValue({ id: 'group-a', sourceId: 'group-a', kind: 'class_group', organizationId: 'org-a', features: { school_family_portal: true } });
+    mocks.getMetadata.mockResolvedValue({ id: 'file-a', name: 'Pamoka.mp4', mimeType: 'video/mp4', createdTime: '2026-09-10T10:00:00Z', modifiedTime: '2026-09-28T12:00:00Z', size: 1000, parents: ['folder-allowed'], canDownload: true });
+    mocks.legacyPublication.mockResolvedValue(false);
+    const res = mockRes();
+    await handler({ method, query: { t: 'same-old-homework' }, headers: { range: 'bytes=0-99' } } as any, res);
+    expect(res.getResult().statusCode).toBe(403);
+    expect(mocks.legacyPublication).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ organizationId: 'org-a', targetId: 'group-a', fileId: 'file-a', modifiedTime: '2026-09-28T12:00:00Z', features: { school_family_portal: true } }));
+    expect(mocks.fetchRange).not.toHaveBeenCalled();
+  });
+
+  it('rechecks a newly chosen no-recording plan for an already issued authenticated ticket', async () => {
+    const first = mockRes();
+    await handler({ method: 'HEAD', query: { t: 'signed' }, headers: {} } as any, first);
+    expect(first.getResult().statusCode).toBe(206);
+    mocks.slotScope.mockResolvedValue({ unrestricted: false, schedules: [] });
+    const next = mockRes();
+    await handler({ method: 'GET', query: { t: 'signed' }, headers: { range: 'bytes=100-199' } } as any, next);
+    expect(next.getResult().statusCode).toBe(403);
+    expect(mocks.slotScope).toHaveBeenCalledTimes(2);
+    expect(mocks.fetchRange).not.toHaveBeenCalled();
+    expect(mocks.legacyPublication).not.toHaveBeenCalled();
   });
 });

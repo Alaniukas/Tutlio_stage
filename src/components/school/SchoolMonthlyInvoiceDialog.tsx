@@ -2,10 +2,15 @@ import { useEffect, useState } from 'react';
 import { addDays, endOfMonth, format, subMonths } from 'date-fns';
 import { Check, ExternalLink, FileCheck2, FileText, Loader2, Send, ShieldCheck } from 'lucide-react';
 import { authHeaders } from '@/lib/apiHelpers';
+import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
+import { useTranslation } from '@/lib/i18n';
+import { LOCALE_FORMAT_TAGS } from '@/lib/i18n/locales';
+import type { SchoolInvoiceReviewSession } from '@/lib/schoolInvoiceSessionReview';
 import { Button } from '@/components/ui/button';
 import { DateInput } from '@/components/ui/date-input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { MonthFilterInput } from '@/components/ui/month-filter-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -39,7 +44,14 @@ export type SchoolMonthlyInvoicePreview = {
   discountAmountEur: number;
   totalEur: number;
   reviewSessionIds?: string[];
+  organizationName?: string;
+  payerEmail?: string;
+  sessions?: SchoolInvoiceReviewSession[];
+  canEditAttendance?: boolean;
+  canEditBilling?: boolean;
 };
+
+type InvoiceReview = Pick<SchoolMonthlyInvoicePreview, 'sessions' | 'payerEmail' | 'organizationName' | 'canEditAttendance' | 'canEditBilling'>;
 
 type Props = {
   open: boolean;
@@ -69,7 +81,7 @@ export function SchoolMonthlyInvoicePreviewCard({ preview }: { preview: SchoolMo
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700">VšĮ „Laisvi vaikai“</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700">{preview.organizationName || ''}</p>
           <h3 className="mt-1 text-base font-bold text-slate-900">Sąskaitos peržiūra</h3>
           <p className="mt-0.5 text-xs text-slate-500">{preview.periodLabel} · {preview.student.fullName}{preview.student.grade ? ` · ${preview.student.grade} klasė` : ''}</p>
         </div>
@@ -130,6 +142,7 @@ export default function SchoolMonthlyInvoiceDialog({
   onSent,
   previewFixture,
 }: Props) {
+  const { t, locale } = useTranslation();
   const defaultMonth = format(subMonths(new Date(), 1), 'yyyy-MM');
   const defaultStudent = students[0]?.id || '';
   const [studentId, setStudentId] = useState(defaultStudent);
@@ -139,8 +152,11 @@ export default function SchoolMonthlyInvoiceDialog({
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<SchoolMonthlyInvoicePreview | null>(previewFixture || null);
   const [pdfUrl, setPdfUrl] = useState('');
+  const [review, setReview] = useState<InvoiceReview | null>(previewFixture || null);
+  const [decisionEditor, setDecisionEditor] = useState<{ sessionId: string; excluded: boolean } | null>(null);
+  const [decisionReason, setDecisionReason] = useState('');
 
-  const payload = (action: 'preview' | 'send') => {
+  const payload = (action: 'review' | 'billing-decision' | 'preview' | 'send') => {
     const range = monthRange(month);
     return {
       action,
@@ -151,6 +167,62 @@ export default function SchoolMonthlyInvoiceDialog({
       dueDate,
       previewToken: preview?.previewToken,
     };
+  };
+
+  const requestReview = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch('/api/school-monthly-invoice-admin', {
+        method: 'POST', headers: await authHeaders(), body: JSON.stringify(payload('review')),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || t('school.invoice.review.loadError'));
+      setReview(json as InvoiceReview);
+      return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t('school.invoice.review.loadError'));
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const confirmAttendance = async (session: SchoolInvoiceReviewSession, status: 'completed' | 'no_show') => {
+    setLoading(true);
+    setError('');
+    setPreview(null);
+    try {
+      await confirmSessionOutcome({ sessionId: session.id, currentStatus: session.status, status,
+        startTime: session.startTime, endTime: session.endTime });
+      await requestReview();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t('school.invoice.review.saveError'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveBillingDecision = async () => {
+    if (!decisionEditor) return;
+    setLoading(true);
+    setError('');
+    setPreview(null);
+    try {
+      const response = await fetch('/api/school-monthly-invoice-admin', {
+        method: 'POST', headers: await authHeaders(),
+        body: JSON.stringify({ ...payload('billing-decision'), ...decisionEditor, reason: decisionReason.trim() }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || t('school.invoice.review.saveError'));
+      setReview(json as InvoiceReview);
+      setDecisionEditor(null);
+      setDecisionReason('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t('school.invoice.review.saveError'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -179,6 +251,7 @@ export default function SchoolMonthlyInvoiceDialog({
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json.error || 'Nepavyko suformuoti peržiūros.');
       setPreview(json as SchoolMonthlyInvoicePreview);
+      setReview(json as InvoiceReview);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Nepavyko suformuoti peržiūros.');
     } finally {
@@ -222,6 +295,67 @@ export default function SchoolMonthlyInvoiceDialog({
           <p className="text-sm text-slate-500">Pirmiausia patikrinkite sumas ir PDF. Sąskaita siunčiama tik paspaudus „Išsiųsti sąskaitą“.</p>
         </DialogHeader>
 
+        {review?.sessions && (
+          <section className="space-y-3 border-b border-slate-200 px-6 py-5" aria-labelledby="invoice-attendance-title">
+            <h3 id="invoice-attendance-title" className="text-base font-semibold text-slate-900">{t('school.invoice.review.title')}</h3>
+            <p className="text-xs leading-5 text-slate-600">{t('school.invoice.review.help')}</p>
+            {review.payerEmail ? (
+              <p className="text-sm text-slate-600">{t('school.invoice.review.payer', { email: review.payerEmail })}</p>
+            ) : (
+              <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{t('school.invoice.review.noPayer')}</p>
+            )}
+            <div className="max-h-[360px] overflow-auto rounded-xl border border-slate-200">
+              <table className="w-full min-w-[700px] text-left text-xs">
+                <thead className="sticky top-0 bg-slate-50 text-slate-600"><tr>
+                  <th className="p-3">{t('school.invoice.review.lesson')}</th>
+                  <th className="p-3">{t('school.invoice.review.attendance')}</th>
+                  <th className="p-3">{t('school.invoice.review.billing')}</th>
+                </tr></thead>
+                <tbody>{review.sessions.map((session) => (
+                  <tr key={session.id} className="border-t border-slate-100 align-top">
+                    <td className="p-3"><p className="font-medium text-slate-900">{session.subjectName}</p>
+                      <p className="mt-1 text-slate-500">{new Intl.DateTimeFormat(LOCALE_FORMAT_TAGS[locale], { dateStyle: 'short', timeStyle: 'short', timeZone: 'Europe/Vilnius' }).format(new Date(session.startTime))}</p>
+                      <p className="mt-1 text-slate-500">{session.tutorName} · {money(session.unitPriceEur)}</p>
+                    </td>
+                    <td className="p-3">
+                      <p>{t(`school.invoice.review.status.${session.status}`)}</p>
+                      {!session.statusConfirmedAt && <p className="mt-1 text-amber-700">{t('school.invoice.review.unconfirmed')}</p>}
+                      {session.canConfirm && review.canEditAttendance && !previewFixture && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          <Button size="sm" variant="outline" disabled={loading} onClick={() => void confirmAttendance(session, 'completed')}>{t('school.invoice.review.attended')}</Button>
+                          <Button size="sm" variant="outline" disabled={loading} onClick={() => void confirmAttendance(session, 'no_show')}>{t('school.invoice.review.absent')}</Button>
+                        </div>
+                      )}
+                    </td>
+                    <td className="p-3">
+                      <p className={session.included ? 'font-medium text-emerald-700' : 'text-slate-600'}>{t(`school.invoice.review.reason.${session.reason}`)}</p>
+                      {session.exclusionReason && <p className="mt-1 max-w-sm break-words text-slate-500">{session.exclusionReason}</p>}
+                      {review.canEditBilling && !session.alreadyInvoiced && session.reason !== 'not_ended' && !previewFixture && (
+                        <Button className="mt-2" size="sm" variant="outline" disabled={loading} onClick={() => {
+                          setDecisionEditor({ sessionId: session.id, excluded: session.reason !== 'excluded' });
+                          setDecisionReason('');
+                        }}>{t(session.reason === 'excluded' ? 'school.invoice.review.restore' : 'school.invoice.review.exclude')}</Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}</tbody>
+              </table>
+              {!review.sessions.length && <p className="p-4 text-sm text-slate-500">{t('school.invoice.review.empty')}</p>}
+            </div>
+            {decisionEditor && (
+              <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <Label htmlFor="invoice-billing-reason">{t('school.invoice.review.reasonLabel')}</Label>
+                <Textarea id="invoice-billing-reason" value={decisionReason} maxLength={1000} disabled={loading} onChange={(event) => setDecisionReason(event.target.value)} />
+                <p className="text-xs text-slate-500">{t('school.invoice.review.auditHelp')}</p>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" disabled={loading} onClick={() => setDecisionEditor(null)}>{t('school.invoice.review.cancel')}</Button>
+                  <Button disabled={loading || decisionReason.trim().length < 3} onClick={() => void saveBillingDecision()}>{t('school.invoice.review.save')}</Button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
         {preview ? (
           <div className="space-y-5 p-6">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
@@ -248,7 +382,7 @@ export default function SchoolMonthlyInvoiceDialog({
             {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <Button type="button" variant="outline" disabled={loading || !!previewFixture} onClick={() => setPreview(null)}>Grįžti redaguoti</Button>
-              <Button type="button" className="gap-2 bg-emerald-700 hover:bg-emerald-800" disabled={loading} onClick={() => void sendInvoice()}>
+              <Button type="button" className="gap-2 bg-emerald-700 hover:bg-emerald-800" disabled={loading || (!previewFixture && (!review?.payerEmail || !review?.canEditBilling || !!preview.reviewSessionIds?.length))} onClick={() => void sendInvoice()}>
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 Išsiųsti sąskaitą
               </Button>
@@ -260,7 +394,7 @@ export default function SchoolMonthlyInvoiceDialog({
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Mokinys</Label>
-                  <Select value={studentId} onValueChange={(value) => { setStudentId(value); setPreview(null); }}>
+                  <Select value={studentId} onValueChange={(value) => { setStudentId(value); setPreview(null); setReview(null); setDecisionEditor(null); }}>
                     <SelectTrigger><SelectValue placeholder="Pasirinkite mokinį" /></SelectTrigger>
                     <SelectContent>{students.map((student) => <SelectItem key={student.id} value={student.id}>{student.fullName}</SelectItem>)}</SelectContent>
                   </Select>
@@ -270,6 +404,8 @@ export default function SchoolMonthlyInvoiceDialog({
                   <MonthFilterInput value={month} onChange={(value) => {
                     setMonth(value);
                     setPreview(null);
+                    setReview(null);
+                    setDecisionEditor(null);
                   }} />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
@@ -297,7 +433,7 @@ export default function SchoolMonthlyInvoiceDialog({
               <ul className="mt-3 space-y-2 text-sm text-emerald-900">
                 <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0" /> Kiekvieno užsiėmimo pradinė kaina ir suma.</li>
                 <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0" /> Atskira nuolaidos reikšmė bei galutinė suma „Mokėti“.</li>
-                <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0" /> PDF pagal „Laisvi vaikai“ PAM sąskaitos struktūrą.</li>
+                <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0" /> PDF su mokyklos rekvizitais ir sąskaitos duomenimis.</li>
                 <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0" /> Sąskaita neišsiunčiama, kol nepatvirtinate peržiūros.</li>
               </ul>
             </aside>
@@ -306,9 +442,10 @@ export default function SchoolMonthlyInvoiceDialog({
               {error && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Atšaukti</Button>
-                <Button type="button" className="gap-2 bg-emerald-700 hover:bg-emerald-800" onClick={() => void requestPreview()} disabled={loading || !studentId || !month}>
+                {review && <Button type="button" variant="outline" onClick={() => void requestReview()} disabled={loading}>{t('school.invoice.review.refresh')}</Button>}
+                <Button type="button" className="gap-2 bg-emerald-700 hover:bg-emerald-800" onClick={() => void (review ? requestPreview() : requestReview())} disabled={loading || !studentId || !month}>
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                  Formuoti peržiūrai
+                  {review ? 'Formuoti peržiūrai' : t('school.invoice.review.open')}
                 </Button>
               </div>
             </div>

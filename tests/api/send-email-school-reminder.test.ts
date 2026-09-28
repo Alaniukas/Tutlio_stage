@@ -86,6 +86,17 @@ beforeEach(() => {
 });
 
 describe('session_reminder_payer for school parents', () => {
+  it('renders a short join-only email with no price, contacts, homework or recording buttons', async () => {
+    const { html, subject } = await sendEmail({ ...base, schoolFlow: true, schoolJoinOnly: true,
+      price: 99, homeworkUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc',
+      recordingsUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc#recordings' });
+    expect(subject).toContain('19:00');
+    expect(html).toContain('/api/join-session?');
+    expect(html).not.toContain('school-homework');
+    expect(html).not.toContain('#recordings');
+    expect(html).not.toContain('99');
+    expect(html).not.toContain('ana@example.com');
+  });
   it('leads with the join button and never links the parent portal or registration', async () => {
     const { html } = await sendEmail({ ...base, schoolFlow: true });
     expect(html).toContain('Prisijungti prie pamokos');

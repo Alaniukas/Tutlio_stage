@@ -17,6 +17,8 @@ import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
 import Layout from '@/components/Layout';
 import StudentLayout from '@/components/StudentLayout';
 import ParentLayout from '@/components/ParentLayout';
+import RecordingAccessPanel from '@/components/school/RecordingAccessPanel';
+import SchoolMaterialBaselinePanel from '@/components/school/SchoolMaterialBaselinePanel';
 
 type Recording = {
   id: string;
@@ -385,6 +387,9 @@ export default function SchoolLessonRecordings() {
           {error}
         </div>
       )}
+
+      {data?.canManage && data.enabled && <RecordingAccessPanel />}
+      {data?.canManage && data.enabled && <SchoolMaterialBaselinePanel />}
 
       {data && !data.enabled ? (
         <div className="rounded-2xl border bg-white p-6 text-sm text-gray-600">

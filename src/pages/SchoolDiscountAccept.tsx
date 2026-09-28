@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, Download, Loader2, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, Download, ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { schoolDiscountTermsLabel, type SchoolDiscountType } from '@/lib/schoolDiscountAgreement';
+import { useTranslation } from '@/lib/i18n';
+import { schoolDiscountText } from '@/lib/i18n/schoolDiscountCopy';
 
 export type AgreementPreview = {
   status: 'pending' | 'accepted';
@@ -10,6 +12,9 @@ export type AgreementPreview = {
   acceptedAt?: string | null;
   agreementNumber: string;
   contractNumber: string;
+  contractAccepted?: boolean;
+  contractAcceptUrl?: string | null;
+  contractPdfUrl?: string | null;
   schoolName: string;
   studentName: string;
   parentName: string;
@@ -25,8 +30,11 @@ export type AgreementPreview = {
 type Props = { previewFixture?: AgreementPreview };
 
 export default function SchoolDiscountAccept({ previewFixture }: Props = {}) {
+  const { locale } = useTranslation();
   const [params] = useSearchParams();
   const token = params.get('token') || '';
+  const contractToken = params.get('contractToken') || '';
+  const agreementId = params.get('agreementId') || '';
   const [preview, setPreview] = useState<AgreementPreview | null>(previewFixture || null);
   const [loading, setLoading] = useState(!previewFixture);
   const [submitting, setSubmitting] = useState(false);
@@ -34,15 +42,19 @@ export default function SchoolDiscountAccept({ previewFixture }: Props = {}) {
 
   useEffect(() => {
     if (previewFixture) return;
-    if (!token) {
+    setPreview(null);
+    setError('');
+    if (!token && (!contractToken || !agreementId)) {
       setError('Patvirtinimo nuoroda neteisinga.');
       setLoading(false);
       return;
     }
     let cancelled = false;
+    setLoading(true);
     void (async () => {
       try {
-        const response = await fetch(`/api/school-discount-accept?token=${encodeURIComponent(token)}`);
+        const authorization: Record<string, string> = token ? { token } : { contractToken, agreementId };
+        const response = await fetch(`/api/school-discount-accept?${new URLSearchParams(authorization)}`);
         const json = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(json.error || 'Nepavyko įkelti nuolaidos pasiūlymo.');
         if (!cancelled) setPreview(json as AgreementPreview);
@@ -53,7 +65,7 @@ export default function SchoolDiscountAccept({ previewFixture }: Props = {}) {
       }
     })();
     return () => { cancelled = true; };
-  }, [previewFixture, token]);
+  }, [previewFixture, token, contractToken, agreementId]);
 
   const discountDescription = preview
     ? schoolDiscountTermsLabel(preview.discountType, preview.discountValue)
@@ -70,7 +82,7 @@ export default function SchoolDiscountAccept({ previewFixture }: Props = {}) {
       const response = await fetch('/api/school-discount-accept', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify(token ? { token } : { contractToken, agreementId }),
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json.error || 'Nepavyko patvirtinti nuolaidos.');
@@ -102,6 +114,7 @@ export default function SchoolDiscountAccept({ previewFixture }: Props = {}) {
   }
 
   const accepted = preview.alreadyAccepted || preview.status === 'accepted';
+  const contractAccepted = preview.contractAccepted !== false;
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-10 sm:py-16">
       <div className="mx-auto w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/50">
@@ -111,12 +124,12 @@ export default function SchoolDiscountAccept({ previewFixture }: Props = {}) {
           </div>
           <p className="mt-3 text-sm font-semibold text-emerald-700">{preview.schoolName}</p>
           <h1 className="mt-1 text-2xl font-bold text-slate-950">
-            {accepted ? 'Nuolaida patvirtinta' : 'Jums suteikta nuolaida'}
+            {accepted ? schoolDiscountText(locale, 'discountConfirmed') : 'Jums suteikta nuolaida'}
           </h1>
           <p className="mt-2 text-sm text-slate-600">
             {accepted
-              ? 'Jums nieko daugiau daryti nereikia. Sutarties priedas suformuotas automatiškai.'
-              : 'Peržiūrėkite informaciją. Nuolaida įsigalios paspaudus „Sutinku“.'}
+              ? schoolDiscountText(locale, contractAccepted ? 'acceptedSaved' : 'acceptedMainPending')
+              : schoolDiscountText(locale, 'pendingIntro')}
           </p>
         </header>
 
@@ -142,6 +155,26 @@ export default function SchoolDiscountAccept({ previewFixture }: Props = {}) {
               <span className="font-semibold">Pastaba:</span> {preview.note}
             </div>
           )}
+          {(preview.contractPdfUrl || preview.pdfUrl || !contractAccepted) && <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+            {preview.contractPdfUrl && (
+              <a className="flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:underline" href={preview.contractPdfUrl} target="_blank" rel="noreferrer">
+                <ExternalLink className="h-4 w-4 shrink-0" /> {schoolDiscountText(locale, 'openMainPdf')}
+              </a>
+            )}
+            {preview.pdfUrl && (
+              <a className="flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:underline" href={preview.pdfUrl} target="_blank" rel="noreferrer">
+                <ExternalLink className="h-4 w-4 shrink-0" /> {schoolDiscountText(locale, 'discountOpenPdf')}
+              </a>
+            )}
+            {!contractAccepted && (
+              <p className="text-sm text-slate-600">{schoolDiscountText(locale, 'discountBothRequired')}</p>
+            )}
+            {!contractAccepted && preview.contractAcceptUrl && (
+              <Button asChild variant="outline" className="h-auto w-full whitespace-normal text-center">
+                <a href={preview.contractAcceptUrl}>{schoolDiscountText(locale, 'acceptMainContract')}</a>
+              </Button>
+            )}
+          </div>}
           {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
 
           {accepted ? (
@@ -151,7 +184,6 @@ export default function SchoolDiscountAccept({ previewFixture }: Props = {}) {
                   <a href={preview.pdfUrl} target="_blank" rel="noreferrer"><Download className="h-4 w-4" /> Atsisiųsti sutarties priedą</a>
                 </Button>
               )}
-              <p className="text-xs text-slate-500">Patvirtintas priedas išsaugotas prie mokinio užsiėmimų sutarties.</p>
             </div>
           ) : (
             <div className="space-y-3 pt-2 text-center">
@@ -160,7 +192,7 @@ export default function SchoolDiscountAccept({ previewFixture }: Props = {}) {
                 Sutinku
               </Button>
               <p className="text-xs leading-relaxed text-slate-500">
-                Paspausdami „Sutinku“ patvirtinate aukščiau nurodytas nuolaidos sąlygas ir sutinkate, kad būtų suformuotas priedas prie užsiėmimų sutarties.
+                {schoolDiscountText(locale, 'acceptStatement')}
               </p>
             </div>
           )}

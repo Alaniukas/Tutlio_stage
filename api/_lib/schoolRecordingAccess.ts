@@ -1,6 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getOrgAdminAccessByUserId } from './orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../../src/lib/orgAdminPermissions.js';
+import { deniedRecordingOrganizations, recordingViewerEmailPattern } from './schoolRecordingAccessDenials.js';
+import { loadSchoolFamilyGuardianAccess, schoolFamilyPortalEnabled } from './schoolFamilyGuardianAccess.js';
+import { canStudentAccessSchoolGroupRecordings, recordingSlotScope } from './schoolRecordingSlotAccess.js';
 
 export interface RecordingViewerGroup {
   id: string;
@@ -9,6 +12,7 @@ export interface RecordingViewerGroup {
   organizationId: string;
   name: string;
   tutorId: string | null;
+  features?: Record<string, unknown> | null;
 }
 
 export interface RecordingViewerAccess {
@@ -96,7 +100,7 @@ async function recordingStudentIds(
   const [{ data: direct, error: directError }, { data: parentProfile, error: parentError }] = await Promise.all([
     supabase
       .from('students')
-      .select('id')
+      .select('id, linked_user_id')
       .or(`linked_user_id.eq.${userId},parent_user_id.eq.${userId}`),
     supabase.from('parent_profiles').select('id, email').eq('user_id', userId).maybeSingle(),
   ]);
@@ -115,27 +119,62 @@ async function recordingStudentIds(
   const emails = await viewerEmails(supabase, userId, (parentProfile as { email?: string | null } | null)?.email);
   let payerStudentIds: string[] = [];
   if (emails.length) {
-    const orFilter = emails
-      .flatMap((email) => {
-        const quoted = `"${email.replace(/"/g, '')}"`;
-        return [`payer_email.ilike.${quoted}`, `parent_secondary_email.ilike.${quoted}`];
-      })
-      .join(',');
-    const { data, error } = await supabase
-      .from('students')
-      .select('id')
-      .or(orFilter);
+    const results = await Promise.all(emails.flatMap((email) =>
+      ['payer_email', 'parent_secondary_email'].map((column) => supabase.from('students')
+        .select('id').ilike(column, recordingViewerEmailPattern(email)))));
+    const error = results.find((result) => result.error)?.error;
     if (error) throw error;
-    payerStudentIds = (data || []).map((row: { id: string }) => row.id);
+    payerStudentIds = results.flatMap((result) => (result.data || []).map((row: { id: string }) => row.id));
   }
 
+  const guardianCandidates: Array<{ organization_id: string; student_id: string }> = [];
+  for (let offset = 0; ; offset += 200) {
+    const bindings = await supabase.from('school_family_guardians')
+      .select('organization_id, student_id').eq('guardian_user_id', userId)
+      .order('organization_id').order('student_id').range(offset, offset + 199);
+    // Before the opt-in migration there are no verified guardian grants. Legacy
+    // schools still work, and an opted-in school below must pass the strict helper.
+    if (bindings.error && ['42P01', 'PGRST205'].includes(bindings.error.code)) break;
+    if (bindings.error) throw bindings.error;
+    guardianCandidates.push(...(bindings.data || []));
+    if ((bindings.data || []).length < 200) break;
+  }
   const allowed = uniqueStrings([
     ...(direct || []).map((row: { id: string }) => row.id),
     ...parentStudentIds,
     ...payerStudentIds,
+    ...guardianCandidates.map((row) => row.student_id),
   ]);
-  if (!requestedStudentId) return allowed;
-  return allowed.includes(requestedStudentId) ? [requestedStudentId] : [];
+  const selected = requestedStudentId
+    ? allowed.filter((id) => id === requestedStudentId)
+    : allowed;
+  if (!selected.length) return [];
+  const { data: students, error } = await supabase.from('students')
+    .select('id, organization_id').in('id', selected);
+  if (error) throw error;
+  const organizationIds = uniqueStrings((students || []).map((row) => row.organization_id));
+  const { data: organizations, error: organizationError } = await supabase.from('organizations')
+    .select('id, entity_type, features').in('id', organizationIds);
+  if (organizationError) throw organizationError;
+  const privateOrgIds = new Set((organizations || []).filter((org) =>
+    org.entity_type === 'school' && schoolFamilyPortalEnabled(org.features)).map((org) => org.id));
+  const guardianIds = new Set<string>();
+  const strictGrants = await Promise.all([...privateOrgIds].map(async (organizationId) => {
+    const grant = await loadSchoolFamilyGuardianAccess(supabase, userId, organizationId);
+    return grant.distinctParent ? grant.studentIds : [];
+  }));
+  strictGrants.flat().forEach((id) => guardianIds.add(id));
+  const ownChildIds = new Set((direct || []).filter((row) => row.linked_user_id === userId).map((row) => row.id));
+  const legacyIds = new Set([...parentStudentIds, ...payerStudentIds, ...(direct || []).map((row) => row.id)]);
+  const deniedOrganizations = await deniedRecordingOrganizations(supabase, organizationIds, userId, emails);
+  // Only the child relationship is denied. Independent admin/teacher grants
+  // are resolved separately below and must not disappear with a family denial.
+  return (students || [])
+    .filter((row) => privateOrgIds.has(row.organization_id)
+      ? ownChildIds.has(row.id) || guardianIds.has(row.id)
+      : legacyIds.has(row.id))
+    .filter((row) => !deniedOrganizations.has(row.organization_id))
+    .map((row) => String(row.id));
 }
 
 async function groupRowsForViewer(
@@ -300,12 +339,14 @@ export async function resolveRecordingViewerAccess(
   ]);
 
   let enabledOrgIds = new Set<string>();
+  const featuresByOrg = new Map<string, Record<string, unknown> | null>();
   if (candidateOrgIds.length) {
     const { data: organizations, error } = await supabase
       .from('organizations')
       .select('id, entity_type, features')
       .in('id', candidateOrgIds);
     if (error) throw error;
+    for (const organization of organizations || []) featuresByOrg.set(organization.id, organization.features);
     enabledOrgIds = new Set(
       ((organizations || []) as Array<{
         id: string;
@@ -317,8 +358,17 @@ export async function resolveRecordingViewerAccess(
     );
   }
 
-  const groups: RecordingViewerGroup[] = rows
-    .filter((row) => enabledOrgIds.has(row.organization_id))
+  const familyRows = await Promise.all(rows.filter((row) => enabledOrgIds.has(row.organization_id))
+    .map(async (row) => {
+      if (row.organization_id === accessParams.adminOrgId || row.tutor_id === userId
+        || !schoolFamilyPortalEnabled(featuresByOrg.get(row.organization_id))) return row;
+      const scope = await recordingSlotScope(supabase, row.id, studentIds, false, {
+        organizationId: row.organization_id, features: featuresByOrg.get(row.organization_id),
+      });
+      return scope.schedules.length ? row : null;
+    }));
+  const groups: RecordingViewerGroup[] = familyRows
+    .filter((row): row is GroupRow => row !== null)
     .map((row) => ({
       id: row.id,
       sourceId: row.id,
@@ -326,6 +376,7 @@ export async function resolveRecordingViewerAccess(
       organizationId: row.organization_id,
       name: row.name,
       tutorId: row.tutor_id,
+      features: featuresByOrg.get(row.organization_id),
     }));
   groups.push(...individualRows
     .filter((row) => enabledOrgIds.has(row.organization_id))
@@ -336,6 +387,7 @@ export async function resolveRecordingViewerAccess(
       organizationId: row.organization_id,
       name: row.name,
       tutorId: row.tutor_id,
+      features: featuresByOrg.get(row.organization_id),
     })));
   groups
     .sort((a, b) => a.name.localeCompare(b.name, 'lt'));
@@ -422,6 +474,7 @@ export async function resolveHomeworkRecordingGroup(
       organizationId,
       name: subject.name || '',
       tutorId: recurring.tutor_id,
+      features,
     };
   }
 
@@ -442,6 +495,9 @@ export async function resolveHomeworkRecordingGroup(
     .maybeSingle();
   if (groupError) throw groupError;
   if (!group?.id || !group.organization_id) return null;
+  if (schoolFamilyPortalEnabled(features) && !await canStudentAccessSchoolGroupRecordings(
+    supabase, target.sourceId, studentId, { organizationId, features },
+  )) return null;
   return {
     id: group.id,
     sourceId: group.id,
@@ -449,5 +505,6 @@ export async function resolveHomeworkRecordingGroup(
     organizationId: group.organization_id,
     name: group.name || '',
     tutorId: group.tutor_id || null,
+    features,
   };
 }

@@ -1,4 +1,6 @@
+import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
+import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsNl } from './schoolInstructionsTranslations.js';
@@ -7,6 +9,21 @@ import { supportTranslations } from './supportTranslations.js';
 import { nlQuiz } from './nlQuiz.js';
 
 export const nl: Record<string, string> = {
+  ...schoolFamilyMaterialTranslations.nl,
+  ...schoolInvoiceReviewTranslations.nl,
+  'school.recordings.access.title': "Toegang tot opnames",
+  'school.recordings.access.scopeHelp': "Verwijder of herstel de toegang van een leerling of ouder op deze school. Accounts, koppelingen met kinderen en betaalgegevens blijven behouden.",
+  'school.recordings.access.legacyHelp': "Geldt na het inloggen. Bestaande gedeelde links van het kind die zonder inloggen werken, blijven actief.",
+  'school.recordings.access.email': "E-mailadres van de persoon",
+  'school.recordings.access.revoke': "Toegang verwijderen",
+  'school.recordings.access.restore': "Toegang herstellen",
+  'school.recordings.access.empty': "Er is nog geen toegang tot opnames verwijderd.",
+  'school.recordings.access.failed': "De toegangsinstellingen konden niet worden gewijzigd of geladen.",
+  'school.recordings.access.invalidEmail': "Voer een geldig e-mailadres in.",
+  'school.recordings.access.personNotInSchool': "Deze persoon is niet gekoppeld aan een leerling van deze school.",
+  'school.recordings.access.setupRequired': "De databasemigratie voor toegangsbeheer is nog niet toegepast.",
+  'school.recordings.access.revoked': "Toegang tot opnames verwijderd.",
+  'school.recordings.access.restored': "Toegang tot opnames hersteld.",
   'parent.childAlreadyExists': 'Dit kind staat al in je lijst. Gebruik de bestaande kindkaart om het account aan te maken.',
   'login.emailOrUsername': 'E-mail of leerlinggebruikersnaam',
   'login.studentUsername': 'Leerlinggebruikersnaam',
@@ -915,6 +932,11 @@ export const nl: Record<string, string> = {
   "cal.deleteFromCalendar": "Verwijderen uit agenda",
   "cal.deleteRecurringTitle": "Terugkerende les verwijderen",
   "cal.deleteChoose": "Kies wat je wilt verwijderen.",
+  "cal.deleteAllRemaining": "Alle resterende lessen in deze reeks",
+  "cal.deleteAllRemainingHint": "Verwijdert toekomstige geplande en geannuleerde lessen in deze reeks. De geschiedenis van voltooide lessen blijft bewaard.",
+  "cal.deleteConfirmAll": "Alle resterende geplande en geannuleerde lessen in deze reeks verwijderen? De geschiedenis van voltooide lessen blijft bewaard.",
+  "cal.deleteGroupHint": "Bij een groep geldt de keuze voor alle leerlingen in die groep.",
+  "cal.deleteCancelledOnlyHint": "Alleen jouw geannuleerde lessen of die van je kind binnen de gekozen omvang worden verwijderd.",
   "cal.deleteHint": "Bevestig je keuze om door te gaan.",
   "cal.deleteOnlyThis": "Alleen deze",
   "cal.deleteThisAndFuture": "Deze en alle toekomstige lessen",
@@ -5534,6 +5556,9 @@ export const nl: Record<string, string> = {
   'school.groups.editTitle': "Groep bewerken",
   'school.groups.platform': "Platform",
   'school.groups.duration': "Duur (min)",
+  'school.groups.minimumActiveStudents': "Minimumaantal actieve leerlingen",
+  'school.groups.minimumActiveStudentsHint': "Deze groep en de bijbehorende overeenkomsten worden automatisch gepauzeerd wanneer er minder actieve leerlingen overblijven.",
+  'school.groups.suspendedMinimum': "Gepauzeerd: minder dan {n} actieve leerlingen in de groep",
   'school.groups.meetingLink': "Leslink",
   'school.groups.slots': "Weekrooster",
   'school.groups.addSlot': "Dag toevoegen",
@@ -5788,4 +5813,7 @@ export const nl: Record<string, string> = {
   "compare.customChip2": "Vergoedingsregels",
   "compare.customChip3": "Akkoordlinks voor ouders",
   "compare.customChip4": "Portalen in uw huisstijl",
+  'em.schoolJoinSubject': 'Neem deel aan je les op {date} om {time}',
+  'em.schoolJoinHeader': 'Neem deel aan je les',
+  'em.schoolJoinBody': 'Je les begint op {date} om {time}. Gebruik de link hieronder.',
 };

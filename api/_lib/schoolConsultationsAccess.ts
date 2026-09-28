@@ -11,6 +11,20 @@ export function serviceSupabase(): SupabaseClient {
   return createClient(url, key);
 }
 
+/** Private notes retain the caller's JWT so live RLS also protects the final read/write. */
+export function userConsultationSupabase(req: VercelRequest): SupabaseClient {
+  const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const key = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  const authorization = req.headers?.authorization;
+  if (!url || !key || typeof authorization !== 'string' || !/^Bearer\s+\S+$/i.test(authorization)) {
+    throw new Error('Consultation session unavailable');
+  }
+  return createClient(url, key, {
+    global: { headers: { Authorization: authorization } },
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}
+
 export async function requireConsultationsAuth(req: VercelRequest) {
   const auth = await verifyRequestAuth(req);
   if (!auth?.userId && !auth?.isInternal) return null;
@@ -20,18 +34,19 @@ export async function requireConsultationsAuth(req: VercelRequest) {
 export async function assertOrgConsultationsEnabled(
   supabase: SupabaseClient,
   organizationId: string,
-): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+): Promise<{ ok: true; familyPortal: boolean } | { ok: false; status: number; error: string }> {
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, slug, features')
+    .select('id, slug, features, entity_type')
     .eq('id', organizationId)
     .maybeSingle();
   if (!org) return { ok: false, status: 404, error: 'Organizacija nerasta.' };
   const features = (org.features || {}) as Record<string, unknown>;
-  if (!schoolConsultationsEnabled(org.id, features) && !schoolConsultationsEnabled(org.slug, features)) {
+  const familyPortal = org.entity_type === 'school' && features.school_family_portal === true;
+  if (!familyPortal && !schoolConsultationsEnabled(org.id, features) && !schoolConsultationsEnabled(org.slug, features)) {
     return { ok: false, status: 404, error: 'Funkcija nepasiekiama.' };
   }
-  return { ok: true };
+  return { ok: true, familyPortal };
 }
 
 export async function assertOrgExtraLessonsDiscountEnabled(

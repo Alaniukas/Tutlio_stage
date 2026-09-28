@@ -1,4 +1,6 @@
+import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
+import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsNo } from './schoolInstructionsTranslations.js';
@@ -6,6 +8,21 @@ import { schoolTeacherContractTranslationsNo } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const no: Record<string, string> = {
+  ...schoolFamilyMaterialTranslations.no,
+  ...schoolInvoiceReviewTranslations.no,
+  'school.recordings.access.title': "Tilgang til opptak",
+  'school.recordings.access.scopeHelp': "Fjern eller gjenopprett en elevs eller forelders tilgang på denne skolen. Kontoer, koblinger til barn og betalingsopplysninger bevares.",
+  'school.recordings.access.legacyHelp': "Gjelder etter innlogging. Barnets eksisterende delte lenker som fungerer uten innlogging, forblir aktive.",
+  'school.recordings.access.email': "Personens e-postadresse",
+  'school.recordings.access.revoke': "Fjern tilgang",
+  'school.recordings.access.restore': "Gjenopprett tilgang",
+  'school.recordings.access.empty': "Ingen tilgang til opptak er fjernet.",
+  'school.recordings.access.failed': "Kunne ikke endre eller laste inn tilgangsinnstillingene.",
+  'school.recordings.access.invalidEmail': "Skriv inn en gyldig e-postadresse.",
+  'school.recordings.access.personNotInSchool': "Denne personen er ikke knyttet til en elev på denne skolen.",
+  'school.recordings.access.setupRequired': "Databasemigreringen for tilgangsstyring er ikke gjennomført ennå.",
+  'school.recordings.access.revoked': "Tilgangen til opptak er fjernet.",
+  'school.recordings.access.restored': "Tilgangen til opptak er gjenopprettet.",
   'parent.childAlreadyExists': 'Barnet finnes allerede i listen. Bruk barnets eksisterende kort for å opprette kontoen.',
   'login.emailOrUsername': 'E-post eller elevens brukernavn',
   'login.studentUsername': 'Elevens brukernavn',
@@ -683,6 +700,11 @@ export const no: Record<string, string> = {
   'cal.deleteFromCalendar': 'Slett fra kalender',
   'cal.deleteRecurringTitle': 'Slett gjentakende time',
   'cal.deleteChoose': 'Velg hva du vil slette.',
+  "cal.deleteAllRemaining": "Alle gjenværende timer i serien",
+  "cal.deleteAllRemainingHint": "Sletter fremtidige planlagte og avlyste timer i serien. Historikken for gjennomførte timer beholdes.",
+  "cal.deleteConfirmAll": "Slette alle gjenværende planlagte og avlyste timer i serien? Historikken for gjennomførte timer beholdes.",
+  "cal.deleteGroupHint": "For en gruppe gjelder valget alle elevene i gruppen.",
+  "cal.deleteCancelledOnlyHint": "Bare dine eller barnets avlyste timer innenfor det valgte omfanget slettes.",
   'cal.deleteHint': 'Du bekrefter handlingen etter valget.',
   'cal.deleteOnlyThis': 'Bare denne',
   'cal.deleteThisAndFuture': 'Denne og alle fremtidige',
@@ -5307,6 +5329,9 @@ export const no: Record<string, string> = {
   'school.groups.editTitle': "Rediger gruppe",
   'school.groups.platform': "Plattform",
   'school.groups.duration': "Varighet (min)",
+  'school.groups.minimumActiveStudents': "Minste antall aktive elever",
+  'school.groups.minimumActiveStudentsHint': "Denne gruppen og dens avtaler settes automatisk på pause når færre aktive elever er igjen.",
+  'school.groups.suspendedMinimum': "Satt på pause: færre enn {n} aktive elever i gruppen",
   'school.groups.meetingLink': "Lenke til timen",
   'school.groups.slots': "Ukeplan",
   'school.groups.addSlot': "Legg til dag",
@@ -5606,4 +5631,7 @@ export const no: Record<string, string> = {
   "compare.customChip2": "Godtgjørelsesregler",
   "compare.customChip3": "Godkjenningslenker for foreldre",
   "compare.customChip4": "Portaler i din merkevare",
+  'em.schoolJoinSubject': 'Bli med på timen {date} kl. {time}',
+  'em.schoolJoinHeader': 'Bli med på timen',
+  'em.schoolJoinBody': 'Timen din begynner {date} kl. {time}. Bruk lenken nedenfor.',
 };

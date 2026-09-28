@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => {
     createClient: vi.fn(() => client),
     sessions: [] as any[],
     updateCalls: [] as Array<Record<string, unknown>>,
+    parentLinks: [] as Array<{ student_id: string; parent_id: string }>,
+    parentProfiles: [] as Array<{ id: string; email: string; full_name: string; disable_lesson_reminders: boolean }>,
+    emailOptOuts: [] as Array<{ email: string }>,
+    lookupErrors: {} as Record<string, { message: string }>,
     organization: null as { entity_type: string; features: Record<string, unknown> } | null,
   };
 });
@@ -80,6 +84,9 @@ function futureSession(index = 1) {
 
 function tableBuilder(table: string) {
   let updatePayload: Record<string, unknown> | null = null;
+  const filters: Array<(row: any) => boolean> = [];
+  const orderColumns: string[] = [];
+  let emailLookup = false;
   const builder: any = {
     select: () => builder,
     update(payload: Record<string, unknown>) {
@@ -87,10 +94,20 @@ function tableBuilder(table: string) {
       mocks.updateCalls.push(payload);
       return builder;
     },
-    in: () => builder,
+    in(column: string, values: unknown[]) {
+      if (column === 'email') emailLookup = true;
+      filters.push(row => values.includes(row[column]));
+      return builder;
+    },
     is: () => builder,
-    eq: () => builder,
-    order: () => builder,
+    eq(column: string, value: unknown) {
+      filters.push(row => row[column] === value);
+      return builder;
+    },
+    order(column: string) {
+      orderColumns.push(column);
+      return builder;
+    },
     limit: () => builder,
     gte: () => builder,
     lt: () => builder,
@@ -99,9 +116,21 @@ function tableBuilder(table: string) {
       error: null,
     }),
     then(resolve: (value: any) => unknown, reject: (reason: unknown) => unknown) {
-      const result = table === 'sessions' && !updatePayload
-        ? { data: mocks.sessions, error: null }
-        : { data: null, error: null };
+      const error = mocks.lookupErrors[emailLookup && table === 'parent_profiles' ? 'parent_profiles_email' : table];
+      const rows = table === 'parent_students' ? mocks.parentLinks
+        : table === 'parent_profiles' ? mocks.parentProfiles
+          : table === 'email_reminder_opt_outs' ? mocks.emailOptOuts
+            : null;
+      const filteredRows = rows?.filter(row => filters.every(filter => filter(row))).sort((left, right) => {
+        for (const column of orderColumns) {
+          const comparison = String((left as any)[column]).localeCompare(String((right as any)[column]));
+          if (comparison) return comparison;
+        }
+        return 0;
+      });
+      const result = error ? { data: null, error }
+        : table === 'sessions' && !updatePayload ? { data: mocks.sessions, error: null }
+          : { data: filteredRows ?? null, error: null };
       return Promise.resolve(result).then(resolve, reject);
     },
   };
@@ -117,11 +146,41 @@ function emailResponse(ok: boolean, body?: Record<string, unknown>): Response {
   });
 }
 
+function registeredParentOnlySchoolSession() {
+  const session = futureSession();
+  Object.assign(session.student, { email: '', organization_id: 'school-1' });
+  session.tutor.organization_id = 'school-1';
+  session.reminder_tutor_sent = true;
+  mocks.organization = { entity_type: 'school', features: { school_compact_notifications: true, flexible_invitations: true } };
+  mocks.sessions.push(session);
+  mocks.parentLinks.push(
+    { student_id: session.student.id, parent_id: 'parent-b' },
+    { student_id: session.student.id, parent_id: 'parent-a' },
+    { student_id: 'another-student', parent_id: 'parent-0' },
+  );
+  mocks.parentProfiles.push(
+    { id: 'parent-b', email: 'second@example.test', full_name: 'Second Parent', disable_lesson_reminders: false },
+    { id: 'parent-a', email: 'first@example.test', full_name: 'First Parent', disable_lesson_reminders: false },
+    { id: 'parent-0', email: 'unrelated@example.test', full_name: 'Unrelated Parent', disable_lesson_reminders: false },
+  );
+  return session;
+}
+
+function reminderRequestBodies(fetchMock: ReturnType<typeof vi.fn>) {
+  return fetchMock.mock.calls
+    .filter(([url]) => String(url).endsWith('/api/send-email'))
+    .map(([, init]) => JSON.parse(String(init?.body || '{}')));
+}
+
 describe('session reminder capacity behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.sessions.length = 0;
     mocks.updateCalls.length = 0;
+    mocks.parentLinks.length = 0;
+    mocks.parentProfiles.length = 0;
+    mocks.emailOptOuts.length = 0;
+    mocks.lookupErrors = {};
     mocks.organization = null;
     vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
     vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'service-role-test');
@@ -175,6 +234,159 @@ describe('session reminder capacity behavior', () => {
     expect(response.getResult()).toMatchObject({ statusCode: 200, body: { sent: 1, emailAttempts: 2 } });
     expect(mocks.updateCalls).not.toContainEqual({ reminder_student_sent: true });
     expect(mocks.updateCalls).toContainEqual({ reminder_tutor_sent: true });
+  });
+
+  it('routes one compact school join email only to the child, even with flexible parent invitations', async () => {
+    const session = futureSession();
+    Object.assign(session.student, { organization_id: 'school-1', payer_email: 'payer@example.test', parent_secondary_email: 'second@example.test' });
+    session.tutor.organization_id = 'school-1';
+    session.reminder_tutor_sent = true;
+    mocks.organization = { entity_type: 'school', features: { school_compact_notifications: true, flexible_invitations: true } };
+    mocks.sessions.push(session);
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+    await handler(mockReq(), mockRes());
+    const reminders = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body || '{}'))).filter(body => String(body.type || '').startsWith('session_reminder'));
+    expect(reminders).toHaveLength(1);
+    expect(reminders[0]).toMatchObject({ to: session.student.email, data: { schoolFlow: true, schoolJoinOnly: true } });
+    expect(mocks.updateCalls).toContainEqual({ reminder_payer_sent: true });
+  });
+
+  it('uses one parent fallback when a compact-school child has no email', async () => {
+    const session = futureSession();
+    Object.assign(session.student, { email: '', organization_id: 'school-1', payer_email: 'payer@example.test', parent_secondary_email: 'second@example.test' });
+    session.tutor.organization_id = 'school-1';
+    session.reminder_tutor_sent = true;
+    mocks.organization = { entity_type: 'school', features: { school_compact_notifications: true } };
+    mocks.sessions.push(session);
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+    await handler(mockReq(), mockRes());
+    const reminders = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body || '{}'))).filter(body => String(body.type || '').startsWith('session_reminder'));
+    expect(reminders).toHaveLength(1);
+    expect(reminders[0]).toMatchObject({ type: 'session_reminder_payer', to: 'payer@example.test', data: { schoolJoinOnly: true } });
+  });
+
+  it('chooses exactly one linked registered parent in stable order when student contacts are empty', async () => {
+    registeredParentOnlySchoolSession();
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = mockRes();
+    await handler(mockReq(), response);
+
+    expect(reminderRequestBodies(fetchMock)).toMatchObject([{
+      type: 'session_reminder_payer',
+      to: 'first@example.test',
+      data: { recipientName: 'First Parent', schoolJoinOnly: true },
+    }]);
+    expect(reminderRequestBodies(fetchMock)).toHaveLength(1);
+    expect(mocks.updateCalls).toContainEqual({ reminder_payer_sent: true });
+    expect(response.getResult()).toMatchObject({ statusCode: 200, body: { sent: 1, emailAttempts: 1 } });
+  });
+
+  it('skips an opted-out linked parent and selects one enabled parent', async () => {
+    registeredParentOnlySchoolSession();
+    mocks.parentProfiles.find(parent => parent.id === 'parent-a')!.disable_lesson_reminders = true;
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handler(mockReq(), mockRes());
+
+    expect(reminderRequestBodies(fetchMock)).toHaveLength(1);
+    expect(reminderRequestBodies(fetchMock)[0]).toMatchObject({ to: 'second@example.test' });
+    expect(mocks.updateCalls).toContainEqual({ reminder_payer_sent: true });
+  });
+
+  it('handles confirmed opt-outs for all linked parents without sending a compact reminder', async () => {
+    registeredParentOnlySchoolSession();
+    for (const parent of mocks.parentProfiles) parent.disable_lesson_reminders = true;
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handler(mockReq(), mockRes());
+
+    expect(reminderRequestBodies(fetchMock)).toEqual([]);
+    expect(mocks.updateCalls).toContainEqual({ reminder_payer_sent: true });
+  });
+
+  it('honors the selected registered parent email opt-out without sending a second copy', async () => {
+    registeredParentOnlySchoolSession();
+    mocks.emailOptOuts.push({ email: 'first@example.test' });
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handler(mockReq(), mockRes());
+
+    expect(reminderRequestBodies(fetchMock)).toEqual([]);
+    expect(mocks.updateCalls).toContainEqual({ reminder_payer_sent: true });
+  });
+
+  it.each(['parent_students', 'parent_profiles', 'parent_profiles_email', 'email_reminder_opt_outs'])(
+    'keeps a registered-parent compact reminder pending when %s lookup fails, then retries',
+    async (table) => {
+      registeredParentOnlySchoolSession();
+      mocks.lookupErrors[table] = { message: 'Temporary lookup failure' };
+      const fetchMock = vi.fn(async () => emailResponse(true));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await handler(mockReq(), mockRes());
+
+      expect(reminderRequestBodies(fetchMock)).toEqual([]);
+      expect(mocks.updateCalls).not.toContainEqual({ reminder_payer_sent: true });
+
+      delete mocks.lookupErrors[table];
+      await handler(mockReq(), mockRes());
+
+      expect(reminderRequestBodies(fetchMock)).toHaveLength(1);
+      expect(reminderRequestBodies(fetchMock)[0]).toMatchObject({ to: 'first@example.test' });
+      expect(mocks.updateCalls).toContainEqual({ reminder_payer_sent: true });
+    },
+  );
+
+  it.each([false, undefined])('preserves all flexible registered-parent recipients with compact flag %s', async (compactFlag) => {
+    registeredParentOnlySchoolSession();
+    mocks.organization!.features = {
+      flexible_invitations: true,
+      ...(compactFlag === undefined ? {} : { school_compact_notifications: compactFlag }),
+    };
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handler(mockReq(), mockRes());
+
+    const reminders = reminderRequestBodies(fetchMock);
+    expect(reminders.map(body => body.to).sort()).toEqual(['first@example.test', 'second@example.test']);
+    expect(reminders.every(body => body.data.schoolJoinOnly === undefined)).toBe(true);
+  });
+
+  it('keeps the child join email retryable without falling back to a parent after delivery failure', async () => {
+    const session = futureSession();
+    Object.assign(session.student, { organization_id: 'school-1', payer_email: 'payer@example.test' });
+    session.tutor.organization_id = 'school-1';
+    session.reminder_tutor_sent = true;
+    mocks.organization = { entity_type: 'school', features: { school_compact_notifications: true } };
+    mocks.sessions.push(session);
+    const fetchMock = vi.fn(async () => emailResponse(false));
+    vi.stubGlobal('fetch', fetchMock);
+    await handler(mockReq(), mockRes());
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/api/send-email'))).toHaveLength(1);
+    expect(mocks.updateCalls).not.toContainEqual({ reminder_student_sent: true });
+  });
+
+  it('keeps compact-school invitations pending until a join link is available', async () => {
+    const session = futureSession();
+    Object.assign(session.student, { organization_id: 'school-1', payer_email: 'payer@example.test' });
+    session.tutor.organization_id = 'school-1';
+    session.meeting_link = '';
+    session.reminder_tutor_sent = true;
+    mocks.organization = { entity_type: 'school', features: { school_compact_notifications: true } };
+    mocks.sessions.push(session);
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+    await handler(mockReq(), mockRes());
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/api/send-email'))).toHaveLength(0);
+    expect(mocks.updateCalls).toEqual([]);
   });
 
   it('adds the school homework and recordings links to the student reminder', async () => {

@@ -29,16 +29,17 @@ function group(overrides: Partial<MaterializeGroupRow> = {}): MaterializeGroupRo
 type Row = Record<string, any>;
 
 /** Minimal in-memory `sessions` + `students` tables behind a supabase-like query builder. */
-function fakeSupabase(sessions: Row[], students: Row[] = [{ id: 's1', detached_at: null }, { id: 's2', detached_at: null }]) {
+function fakeSupabase(sessions: Row[], students: Row[] = [{ id: 's1', detached_at: null }, { id: 's2', detached_at: null }], exclusions: Row[] = []) {
   const inserted: Row[] = [];
   const deleted: string[] = [];
   const updated: Array<{ id: string; patch: Row }> = [];
-  const tables: Record<string, Row[]> = { sessions, students };
+  const tables: Record<string, Row[]> = { sessions, students, session_recurrence_exclusions: exclusions };
 
   function builder(table: string) {
     const filters: Array<(row: Row) => boolean> = [];
     let mode: 'select' | 'delete' | 'update' = 'select';
     let patch: Row = {};
+    let page: { from: number; to: number } | null = null;
     const api: any = {
       select() { return api; },
       eq(col: string, v: unknown) { filters.push((r) => r[col] === v); return api; },
@@ -48,6 +49,8 @@ function fakeSupabase(sessions: Row[], students: Row[] = [{ id: 's1', detached_a
       gte(col: string, v: string) { filters.push((r) => Date.parse(r[col]) >= Date.parse(v)); return api; },
       lte(col: string, v: string) { filters.push((r) => Date.parse(r[col]) <= Date.parse(v)); return api; },
       not() { return api; },
+      order() { return api; },
+      range(from: number, to: number) { page = { from, to }; return api; },
       delete() { mode = 'delete'; return api; },
       update(p: Row) { mode = 'update'; patch = p; return api; },
       insert(rows: Row[]) {
@@ -72,7 +75,8 @@ function fakeSupabase(sessions: Row[], students: Row[] = [{ id: 's1', detached_a
           for (const r of rows) { Object.assign(r, patch); updated.push({ id: r.id, patch }); }
           return Promise.resolve({ error: null }).then(resolve, reject);
         }
-        return Promise.resolve({ data: rows.map((r) => ({ ...r })), error: null }).then(resolve, reject);
+        const selected = page ? rows.slice(page.from, page.to + 1) : rows;
+        return Promise.resolve({ data: selected.map((r) => ({ ...r })), error: null }).then(resolve, reject);
       },
     };
     return api;
@@ -100,6 +104,30 @@ describe('expectedClassGroupOccurrences', () => {
 });
 
 describe('reconcileClassGroupSessions', () => {
+  it('does not regenerate a deleted member occurrence while keeping other students and dates', async () => {
+    const excludedStart = '2026-09-04T16:00:00.000Z';
+    const db = fakeSupabase([], undefined, [{
+      id: 'exclusion-1', recurring_session_id: null, class_group_id: 'g1', student_id: 's1', scope: 'single', start_time: excludedStart,
+    }]);
+    const window = materializationWindow(NOW, 14);
+    const result = await reconcileClassGroupSessions(db.client, group(), { window });
+    expect(result.created).toBe(5);
+    expect(db.tables.sessions.some((row) => row.student_id === 's1' && row.start_time === excludedStart)).toBe(false);
+    expect(db.tables.sessions.some((row) => row.student_id === 's2' && row.start_time === excludedStart)).toBe(true);
+    const again = await reconcileClassGroupSessions(db.client, group(), { window });
+    expect(again.created).toBe(0);
+    expect(db.tables.sessions).toHaveLength(5);
+  });
+
+  it('keeps a deleted group series absent through later reconciliation windows', async () => {
+    const db = fakeSupabase([], undefined, [{
+      id: 'exclusion-all', recurring_session_id: null, class_group_id: 'g1', student_id: null, scope: 'all', start_time: null,
+    }]);
+    expect((await reconcileClassGroupSessions(db.client, group(), { window: materializationWindow(NOW, 60) })).created).toBe(0);
+    expect((await reconcileClassGroupSessions(db.client, group(), { window: materializationWindow(new Date('2026-11-01T12:00:00Z'), 60) })).created).toBe(0);
+    expect(db.tables.sessions).toEqual([]);
+  });
+
   it('creates one lesson per member and occurrence, then is idempotent', async () => {
     const db = fakeSupabase([]);
     const window = materializationWindow(NOW, 14);

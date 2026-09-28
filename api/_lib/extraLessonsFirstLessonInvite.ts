@@ -140,6 +140,9 @@ export async function sendFirstLessonInvite(
     .maybeSingle();
   const recordingsEnabled = ((orgRow as { features?: Record<string, unknown> | null } | null)?.features || {})
     .school_lesson_recordings === true;
+  if (orgRow?.features?.school_family_portal === true) {
+    return { sent: false, sessionId: session?.id || null, serviceStartYmd, reason: 'single_prelesson_policy' };
+  }
   const data: Record<string, unknown> = {
     organizationId: input.organizationId,
     schoolName: input.schoolName || '',

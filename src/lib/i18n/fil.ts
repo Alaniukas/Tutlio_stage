@@ -6,6 +6,14 @@
 import { en } from './en.js';
 
 export const filOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Lahat ng natitirang sesyon sa seryeng ito",
+  "cal.deleteAllRemainingHint": "Binubura ang mga nakatakdang susunod na sesyon at mga nakanselang sesyon sa seryeng ito. Nananatili ang tala ng mga natapos na sesyon.",
+  "cal.deleteConfirmAll": "Burahin ang lahat ng natitirang nakatakda at nakanselang sesyon sa seryeng ito? Nananatili ang tala ng mga natapos na sesyon.",
+  "cal.deleteGroupHint": "Para sa isang pangkat sa klase, ang pinili mo ay ilalapat sa lahat ng estudyante nito.",
+  "cal.deleteCancelledOnlyHint": "Ang mga nakanselang sesyon mo o ng anak mo lamang na sakop ng pinili mo ang buburahin.",
+  "em.schoolJoinSubject": "Sumali sa iyong sesyon sa {date} nang {time}",
+  "em.schoolJoinHeader": "Sumali sa iyong sesyon",
+  "em.schoolJoinBody": "Magsisimula ang iyong sesyon sa {date} nang {time}. Gamitin ang link sa ibaba para sumali.",
   'compSess.markAttended': 'Dumalo ang estudyante',
   'att.confirmedManually': 'Nakumpirma ang pagdalo',
   'att.unconfirmed': 'Hindi pa nakumpirma ang pagdalo',

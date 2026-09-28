@@ -35,7 +35,7 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
   const { openSupportAgent } = useInAppSupportAgent();
   const location = useLocation();
   const chatUnreadTotal = useTotalChatUnread();
-  const { hasSchoolOrg, lessonRecordingsEnabled, terminology } = useParentSchoolOrg();
+  const { hasSchoolOrg, lessonRecordingsEnabled, familyPortalEnabled, terminology } = useParentSchoolOrg();
   // School parents read "mokytojas" / "užsiėmimas" everywhere in the portal.
   useSchoolTerminology(terminology);
   const [activeChildId, setActiveChildId] = useState(() => getParentActiveChildId());
@@ -64,7 +64,9 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
           label: t('parent.sessionsTitle') || 'Pamokos',
           icon: BookOpen,
         },
-        ...(lessonRecordingsEnabled
+        ...(familyPortalEnabled
+          ? [{ href: `/parent/homework${childQs}`, path: '/parent/homework', label: t('school.materials.title'), icon: BookOpen }]
+          : lessonRecordingsEnabled
           ? [{
               href: `/parent/recordings${childQs}`,
               path: '/parent/recordings',
@@ -81,7 +83,7 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
       ];
       return items;
     },
-    [t, hasSchoolOrg, lessonRecordingsEnabled, activeChildId],
+    [t, hasSchoolOrg, lessonRecordingsEnabled, familyPortalEnabled, activeChildId],
   );
 
   return (
@@ -94,6 +96,7 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
           <BrandedLogo size="sm" nameClassName="text-sm sm:text-base" />
         </Link>
         <div className="flex items-center gap-2">
+          {familyPortalEnabled && <Link to="/parent/consultations" className="rounded-xl bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700">{t('schoolConsult.title')}</Link>}
           <span className="hidden sm:inline text-[11px] font-semibold tracking-wide text-[color-mix(in_srgb,var(--org-brand)_55%,#64748b)] shrink-0">
             {t('parent.portalLabel')}
           </span>

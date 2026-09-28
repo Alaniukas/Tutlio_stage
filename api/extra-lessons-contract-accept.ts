@@ -16,6 +16,7 @@ import {
 import { freezeExtraLessonsPdfSource, renderAndStoreExtraLessonsPdf, renderExtraLessonsAnnexPdf, signSchoolContractPdf } from './_lib/extraLessonsPdf.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { acceptanceJobStatus, getAcceptanceJob } from './_lib/schoolAcceptanceJobs.js';
+import { loadSchoolDiscountContractPreviews } from './_lib/schoolDiscountContractPreview.js';
 import {
   extraLessonsPayloadForContract,
   extraLessonsTemplateSource,
@@ -117,14 +118,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       termsAcceptedLabel: payload.sutikimo_su_salygomis_busena,
     });
 
-    let pdfUrl: string | null = null;
-    if (contract.accepted_at || opts.alreadyAccepted) {
-      pdfUrl = await signSchoolContractPdf(supabase, contract.signed_contract_url || contract.pdf_url);
-    } else {
-      // Unsaved form previews must never replace the stored offer or a signed PDF.
-      if (!opts.forceRender) pdfUrl = await signSchoolContractPdf(supabase, contract.pdf_url);
-      if (!pdfUrl && !job) pdfUrl = await renderPreviewPdf(payload, filled, !opts.forceRender);
-    }
+    const [pdfUrl, discountAgreements] = await Promise.all([
+      (async () => {
+        if (contract.accepted_at || opts.alreadyAccepted) {
+          return signSchoolContractPdf(supabase, contract.signed_contract_url || contract.pdf_url);
+        }
+        // Unsaved form previews must never replace the stored offer or a signed PDF.
+        const storedUrl = !opts.forceRender ? await signSchoolContractPdf(supabase, contract.pdf_url) : null;
+        return storedUrl || (job ? null : renderPreviewPdf(payload, filled, !opts.forceRender));
+      })(),
+      loadSchoolDiscountContractPreviews(supabase, contract, token, orgFeatures),
+    ]);
 
     return {
       ok: true,
@@ -142,6 +146,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       withdrawn: Boolean(contract.withdrawal_requested_at),
       extraEndKind: contract.extra_end_kind || null,
       pdfUrl,
+      discountAgreements,
       order,
       parentEditableFields: incomplete,
       summary: payload,
@@ -208,7 +213,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(500).json({ error: 'Nepavyko paruošti priedo PDF' });
       }
     }
-    return res.status(200).json(await jsonPreview());
+    try {
+      return res.status(200).json(await jsonPreview());
+    } catch (error) {
+      console.error('[extra-lessons-contract-accept] preview', error);
+      return res.status(503).json({ error: 'Nepavyko įkelti nuolaidos priedų. Bandykite dar kartą.' });
+    }
   }
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -220,7 +230,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (body.preview === true) {
-    return res.status(200).json(await jsonPreview({ forceRender: true }));
+    try {
+      return res.status(200).json(await jsonPreview({ forceRender: true }));
+    } catch (error) {
+      console.error('[extra-lessons-contract-accept] preview', error);
+      return res.status(503).json({ error: 'Nepavyko įkelti nuolaidos priedų. Bandykite dar kartą.' });
+    }
   }
 
   if (contract.accepted_at) return res.status(409).json({ error: 'Already accepted' });

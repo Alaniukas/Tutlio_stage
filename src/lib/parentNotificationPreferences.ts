@@ -19,6 +19,8 @@ const EMAIL_TYPE_TO_PARENT_NOTIFICATION: Readonly<Record<string, ParentNotificat
   recurring_booking_confirmation: 'lesson_updates',
   lesson_rescheduled: 'lesson_updates',
   session_cancelled_parent: 'lesson_updates',
+  session_comment_added: 'lesson_updates',
+  school_material_digest: 'lesson_updates',
   session_student_no_show: 'attendance_updates',
   payment_reminder: 'payment_reminders',
   payment_after_lesson_reminder: 'payment_reminders',

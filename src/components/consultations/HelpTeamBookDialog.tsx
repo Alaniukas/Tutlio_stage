@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
 import { HELP_TEAM_CATEGORY_I18N, type HelpTeamCategory } from '@/lib/schoolHelpTeamQuota';
+import { schoolFamilyConsultationText } from '@/lib/i18n/schoolFamilyConsultationTranslations';
 
 export default function HelpTeamBookDialog(props: {
   open: boolean;
@@ -18,8 +19,11 @@ export default function HelpTeamBookDialog(props: {
   specialists: { id: string; full_name: string }[];
   helpQuota?: { nextIsPaid: boolean; remaining: number };
   onBooked: () => void;
+  familyPortal?: boolean;
+  initialStudentId?: string;
 }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  const [target, setTarget] = useState<'family' | 'child'>('family');
   const [studentId, setStudentId] = useState('');
   const [specialistId, setSpecialistId] = useState('');
   const [startTime, setStartTime] = useState('');
@@ -30,9 +34,16 @@ export default function HelpTeamBookDialog(props: {
   const [error, setError] = useState<string | null>(null);
 
   const isPaid = props.helpQuota?.nextIsPaid ?? false;
+  useEffect(() => {
+    if (!props.open || !props.familyPortal) return;
+    setTarget(props.initialStudentId ? 'child' : 'family');
+    setStudentId(props.initialStudentId || ''); setSpecialistId('');
+    setStartTime(''); setEndTime(''); setAudienceNote(''); setPayAck(false); setError(null);
+  }, [props.open, props.category, props.familyPortal, props.initialStudentId]);
 
   const submit = async () => {
-    if (!studentId || !specialistId || !startTime || !endTime) return;
+    const targetStudentId = props.familyPortal && target === 'family' ? props.students[0]?.id : studentId;
+    if (!targetStudentId || !specialistId || !startTime || !endTime) return;
     if (isPaid && !payAck) return;
     setBusy(true);
     setError(null);
@@ -44,12 +55,13 @@ export default function HelpTeamBookDialog(props: {
         body: JSON.stringify({
           action: 'book_help',
           organization_id: props.organizationId,
-          student_id: studentId,
+          student_id: targetStudentId,
+          ...(props.familyPortal ? { target_kind: target } : {}),
           tutor_id: specialistId,
           help_team_category: props.category,
           start_time: new Date(startTime).toISOString(),
           end_time: new Date(endTime).toISOString(),
-          audience_note: audienceNote,
+          ...(props.familyPortal ? {} : { audience_note: audienceNote }),
           pay_ack: payAck,
         }),
       });
@@ -74,7 +86,17 @@ export default function HelpTeamBookDialog(props: {
           <DialogTitle>{t(HELP_TEAM_CATEGORY_I18N[props.category])}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="space-y-2">
+          {props.familyPortal && <div className="space-y-2">
+            <Label>{schoolFamilyConsultationText(locale, 'target')}</Label>
+            <Select value={target} onValueChange={value => setTarget(value as 'family' | 'child')}>
+            <SelectTrigger aria-label={schoolFamilyConsultationText(locale, 'target')}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="family">{schoolFamilyConsultationText(locale, 'family')}</SelectItem>
+                <SelectItem value="child">{schoolFamilyConsultationText(locale, 'child')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>}
+          {(!props.familyPortal || target === 'child') && <div className="space-y-2">
             <Label>{t('compStu.student')}</Label>
             <Select value={studentId} onValueChange={setStudentId}>
               <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
@@ -84,7 +106,7 @@ export default function HelpTeamBookDialog(props: {
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </div>}
           <div className="space-y-2">
             <Label>{t('compSch.tutor')}</Label>
             <Select value={specialistId} onValueChange={setSpecialistId}>
@@ -104,10 +126,10 @@ export default function HelpTeamBookDialog(props: {
             <Label>{t('compSch.end')}</Label>
             <Input type="datetime-local" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
           </div>
-          <div className="space-y-2">
+          {!props.familyPortal && <div className="space-y-2">
             <Label>{t('schoolConsult.audienceNote')}</Label>
             <Input value={audienceNote} onChange={(e) => setAudienceNote(e.target.value)} />
-          </div>
+          </div>}
           {isPaid && (
             <label className="flex items-start gap-2 text-sm">
               <Checkbox checked={payAck} onChange={(e) => setPayAck(e.target.checked)} />

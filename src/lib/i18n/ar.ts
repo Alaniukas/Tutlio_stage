@@ -2,6 +2,14 @@ import { en } from './en.js';
 
 /** Modern Standard Arabic for individual tutors and tutoring businesses. */
 export const arOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "كل الدروس المتبقية في هذه السلسلة",
+  "cal.deleteAllRemainingHint": "يحذف الدروس المستقبلية المجدولة والدروس الملغاة في هذه السلسلة. يبقى سجل الدروس المكتملة محفوظًا.",
+  "cal.deleteConfirmAll": "هل تريد حذف كل الدروس المجدولة والملغاة المتبقية في هذه السلسلة؟ يبقى سجل الدروس المكتملة محفوظًا.",
+  "cal.deleteGroupHint": "في مجموعة الصف، ينطبق الاختيار على جميع طلابها.",
+  "cal.deleteCancelledOnlyHint": "تُحذف فقط الدروس الملغاة الخاصة بك أو بطفلك ضمن النطاق المختار.",
+  "em.schoolJoinSubject": "انضم إلى درسك يوم {date} الساعة {time}",
+  "em.schoolJoinHeader": "انضم إلى درسك",
+  "em.schoolJoinBody": "يبدأ درسك يوم {date} الساعة {time}. استخدم رابط الانضمام أدناه.",
   'compSess.markAttended': 'حضر الطالب',
   'att.confirmedManually': 'تم تأكيد الحضور',
   'att.unconfirmed': 'لم يتم تأكيد الحضور',

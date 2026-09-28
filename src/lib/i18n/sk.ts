@@ -5,6 +5,14 @@ import { en } from './en.js';
  * Review scope and source exceptions: docs/SLOVAK_LOCALIZATION_REVIEW.md.
  */
 export const skOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Všetky zostávajúce hodiny v tejto sérii",
+  "cal.deleteAllRemainingHint": "Odstráni budúce naplánované a zrušené hodiny v tejto sérii. História dokončených hodín zostane zachovaná.",
+  "cal.deleteConfirmAll": "Odstrániť všetky zostávajúce naplánované a zrušené hodiny v tejto sérii? História dokončených hodín zostane zachovaná.",
+  "cal.deleteGroupHint": "Pri skupine sa výber vzťahuje na všetkých jej žiakov.",
+  "cal.deleteCancelledOnlyHint": "V rámci zvoleného rozsahu sa odstránia iba vaše zrušené hodiny alebo zrušené hodiny vášho dieťaťa.",
+  "em.schoolJoinSubject": "Pripojte sa k hodine dňa {date} o {time}",
+  "em.schoolJoinHeader": "Pripojte sa k hodine",
+  "em.schoolJoinBody": "Vaša hodina sa začína dňa {date} o {time}. Pripojte sa pomocou odkazu nižšie.",
   'compSess.markAttended': 'Študent sa zúčastnil',
   'att.confirmedManually': 'Účasť potvrdená',
   'att.unconfirmed': 'Účasť nepotvrdená',

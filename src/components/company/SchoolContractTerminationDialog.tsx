@@ -17,6 +17,7 @@ export type SchoolContractTerminationImpact = {
   activeStudentCount: number;
   remainingActiveStudentCount: number;
   groupAlreadySuspended: boolean;
+  minimumStudentCount?: number;
 };
 
 type Props = {
@@ -78,7 +79,7 @@ export default function SchoolContractTerminationDialog({
                 <div>
                   <p className="font-bold">Nutraukus sutartį iširs grupė „{impact.groupName}“.</p>
                   <p className="mt-1 leading-6">
-                    Aktyvių mokinių skaičius sumažės iki {impact.remainingActiveStudentCount}. Kadangi grupiniam užsiėmimui reikia bent 3, visa grupė ir likusių mokinių grupinės sutartys bus automatiškai sustabdytos, o šeimos informuotos el. paštu.
+                    Aktyvių mokinių skaičius sumažės iki {impact.remainingActiveStudentCount}. Kadangi grupiniam užsiėmimui reikia bent {impact.minimumStudentCount || 3}, visa grupė ir likusių mokinių grupinės sutartys bus automatiškai sustabdytos, o šeimos informuotos el. paštu.
                   </p>
                 </div>
               </div>

@@ -18,6 +18,7 @@ import { sendTrialReservationConfirmedNotifications } from './_lib/trialReservat
 import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
 import { markSchoolMonthlyInvoicePaid } from './_lib/schoolMonthlyInvoiceEmail.js';
 import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
+import { markLinkedPackagePaidForSession } from './_lib/sessionPackagePayment.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -951,6 +952,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                 console.log(`[stripe-webhook] Lesson session ${sessionId} confirmed and emails sent`);
                             } else {
                                 console.log(`[stripe-webhook] Lesson session ${sessionId} was already paid, skipping duplicate emails`);
+                            }
+
+                            if (!updateErr) {
+                                await markLinkedPackagePaidForSession(supabase, sessionId, session);
                             }
                         }
                     }

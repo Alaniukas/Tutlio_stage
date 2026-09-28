@@ -5,6 +5,14 @@ import { en } from './en.js';
  * Locale publication is controlled separately in locales.ts.
  */
 export const jaOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "このシリーズの残りのレッスンすべて",
+  "cal.deleteAllRemainingHint": "このシリーズの今後の予定済み・キャンセル済みレッスンを削除します。終了済みレッスンの履歴は保持されます。",
+  "cal.deleteConfirmAll": "このシリーズの残りの予定済み・キャンセル済みレッスンをすべて削除しますか？終了済みレッスンの履歴は保持されます。",
+  "cal.deleteGroupHint": "クラスグループの場合、選択内容はグループ内のすべての受講者に適用されます。",
+  "cal.deleteCancelledOnlyHint": "選択した範囲内で、ご自身またはお子さまのキャンセル済みレッスンのみが削除されます。",
+  "em.schoolJoinSubject": "{date}の{time}からのレッスンに参加",
+  "em.schoolJoinHeader": "レッスンに参加",
+  "em.schoolJoinBody": "レッスンは{date}の{time}に始まります。以下のリンクから参加してください。",
   'compSess.markAttended': '生徒は出席しました',
   'att.confirmedManually': '出席を確認済み',
   'att.unconfirmed': '出席未確認',

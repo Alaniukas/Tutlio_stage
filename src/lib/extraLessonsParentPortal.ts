@@ -17,10 +17,11 @@ export function parentMayEndExtraLessonsContract(input: {
   acceptedByUserId?: string | null;
   studentLinkedUserId?: string | null;
   studentParentUserId?: string | null;
+  linkedParent?: boolean;
 }): boolean {
   const uid = input.authUserId;
   if (!uid) return false;
-  return uid === input.acceptedByUserId
+  return input.linkedParent === true || uid === input.acceptedByUserId
     || uid === input.studentLinkedUserId
     || uid === input.studentParentUserId;
 }

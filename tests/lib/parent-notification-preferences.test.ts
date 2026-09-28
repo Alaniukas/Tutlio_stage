@@ -4,7 +4,7 @@ import {
   parseParentNotificationOptOut,
   setParentNotificationEnabled,
 } from '../../src/lib/parentNotificationPreferences';
-import { shouldSkipParentNotification } from '../../api/_lib/parentNotificationPreferences';
+import { filterParentNotificationRecipients, shouldSkipParentNotification } from '../../api/_lib/parentNotificationPreferences';
 
 function preferenceClient(row: unknown, error: unknown = null) {
   return {
@@ -35,6 +35,7 @@ describe('parent notification preferences', () => {
 
   it('maps only optional parent-facing emails to configurable categories', () => {
     expect(parentNotificationKeyForEmailType('session_cancelled_parent')).toBe('lesson_updates');
+    expect(parentNotificationKeyForEmailType('session_comment_added')).toBe('lesson_updates');
     expect(parentNotificationKeyForEmailType('session_reminder_payer')).toBe('lesson_reminders');
     expect(parentNotificationKeyForEmailType('session_student_no_show')).toBe('attendance_updates');
     expect(parentNotificationKeyForEmailType('payment_after_lesson_reminder')).toBe('payment_reminders');
@@ -65,6 +66,25 @@ describe('parent notification preferences', () => {
       'parent@example.com',
       'session_cancelled_parent',
     )).resolves.toBe(false);
+  });
+
+  it('filters opted-out parent comment recipients individually and retains the child copy', async () => {
+    const client: any = { from(table: string) {
+      const filters: Record<string, string> = {};
+      const query: any = { select: () => query, limit: () => query,
+        eq: (key: string, value: string) => { filters[key] = value; return query; },
+        maybeSingle: async () => {
+          const data = table === 'organizations' ? { features: { parent_email_opt_out: ['lesson_updates'] } }
+            : table === 'students' && filters.payer_email === 'parent@example.com' ? { id: 'child' }
+            : null;
+          return { data, error: null };
+        },
+      };
+      return query;
+    } };
+    await expect(filterParentNotificationRecipients(client,
+      ['child@example.com', 'parent@example.com'], 'session_comment_added', { organizationId: 'school' }))
+      .resolves.toEqual(['child@example.com']);
   });
 
   it('lets an organization admin disable a parent notification category for every parent', async () => {

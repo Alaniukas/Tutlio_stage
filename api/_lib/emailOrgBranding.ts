@@ -17,6 +17,11 @@ export type EmailBranding = {
   logoOnDark?: boolean;
 };
 
+/** Financial mail keeps a distinct, calm palette while retaining the school's identity. */
+export function schoolInvoiceEmailBranding(branding: EmailBranding | null): EmailBranding | null {
+  return branding ? { ...branding, brand_color: '#0f766e', brand_color_secondary: '#115e59' } : null;
+}
+
 export type OrgRowForEmailBranding = {
   name?: string | null;
   logo_url?: string | null;

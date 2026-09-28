@@ -743,6 +743,25 @@ const PARENT_STUDENT_LINK_SELECT =
 
 export function parentStudentLinksDeduped(userId: string) {
   return dedupeAsync(`parent_student_links:${userId}`, async () => {
+    const authorizedIds: string[] = [];
+    let scopeError: unknown = null;
+    for (let offset = 0; ; offset += 200) {
+      try {
+        const scope = await supabase.rpc('get_parent_child_ids', { p_user_id: userId }).range(offset, offset + 199);
+        if (scope.error) { scopeError = scope.error; break; }
+        authorizedIds.push(...(scope.data || []).map((row: { student_id: string }) => row.student_id));
+        if ((scope.data?.length || 0) < 200) break;
+      } catch (queryError) { scopeError = queryError; break; }
+    }
+    if (!scopeError) {
+      const authorizedStudents: Array<Record<string, unknown>> = [];
+      for (let offset = 0; offset < authorizedIds.length; offset += 200) {
+        const result = await supabase.from('students').select(PARENT_STUDENT_LINK_SELECT).in('id', authorizedIds.slice(offset, offset + 200));
+        if (result.error) return { data: null, error: result.error };
+        authorizedStudents.push(...(result.data || []));
+      }
+      return { data: dedupeParentChildren(authorizedStudents).map((student) => ({ student_id: student.id, students: student })), error: null };
+    }
     const [linksRes, directRes] = await Promise.all([
       supabase
         .from('parent_students')
@@ -770,9 +789,21 @@ export function parentStudentLinksDeduped(userId: string) {
     const canonicalStudents = dedupeParentChildren(
       relationStudents.filter((student) => Boolean(student?.id)),
     );
+    // A rolling deploy may lack the new RPC. In that case only legacy organizations
+    // use old links; an enabled school cannot fall back to mutable contacts.
+    const orgIds = [...new Set(canonicalStudents.map((student) => student.organization_id).filter(Boolean))];
+    const enabledSchoolIds = new Set<string>();
+    if (orgIds.length) {
+      const organizations = await supabase.from('organizations').select('id,entity_type,features').in('id', orgIds);
+      if (organizations.error) return { data: [], error: organizations.error };
+      for (const org of organizations.data || []) {
+        if (org.entity_type === 'school' && org.features?.school_family_portal === true) enabledSchoolIds.add(org.id);
+      }
+    }
     return {
       ...linksRes,
-      data: canonicalStudents.map((student) => ({ student_id: student.id, students: student })),
+      data: canonicalStudents.filter((student) => !enabledSchoolIds.has(String(student.organization_id || '')))
+        .map((student) => ({ student_id: student.id, students: student })),
     };
   });
 }

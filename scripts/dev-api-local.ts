@@ -1,6 +1,7 @@
 /**
  * Local API dev server — same routes as Vercel `/api/*`, no `vercel login` required.
  * Listens on DEV_API_PORT (default 3002) for Vite proxy.
+ * TUTLIO_DEV_SUPPRESS_EMAIL=1 skips POST /api/send-email during local workflow QA.
  */
 process.env.NODE_TLS_REJECT_UNAUTHORIZED ??= '0';
 import http from 'node:http';
@@ -87,6 +88,10 @@ loadEnvFile('.env');
 loadEnvFile('.env.local');
 /** Let API handlers infer browser origin on localhost even if VERCEL=1 leaked into .env */
 process.env.TUTLIO_DEV_API_LOCAL = '1';
+const suppressLocalSendEmail = process.env.TUTLIO_DEV_SUPPRESS_EMAIL === '1';
+if (suppressLocalSendEmail) {
+  console.warn('[dev-api-local] Local QA email suppression enabled for POST /api/send-email');
+}
 
 /** Known-dead Supabase projects — drop so VITE_* / fresh .env can win. */
 const STALE_SUPABASE_HOST = 'xklzjhfztjxltrdkplog';
@@ -294,6 +299,13 @@ const server = http.createServer(async (req, res) => {
     if (!route || route.startsWith('_') || route.includes('..')) {
       res.statusCode = 404;
       res.end('Not found');
+      return;
+    }
+
+    if (suppressLocalSendEmail && req.method === 'POST' && url.pathname === '/api/send-email') {
+      req.resume();
+      console.log('[dev-api-local] Suppressed POST /api/send-email for local QA');
+      patchResponse(res).status(200).json({ success: true, suppressed: true });
       return;
     }
 

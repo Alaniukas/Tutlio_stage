@@ -4,6 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/supabase';
+import { useTranslation } from '@/lib/i18n';
+import { schoolDiscountText } from '@/lib/i18n/schoolDiscountCopy';
+import { schoolDiscountValueLabel, type SchoolDiscountContractPreview } from '@/lib/schoolDiscountAgreement';
 import {
   EXTRA_LESSONS_FULL_TERMS_CHECKBOX_TEXT,
   EXTRA_LESSONS_GROUP_MONTHLY_BILLING_NOTE,
@@ -45,6 +48,7 @@ type Preview = {
   recordingsEnabled?: boolean;
   legalLinks?: { withdrawalForm?: string; privacyMailto?: string | null };
   acceptedAt?: string;
+  discountAgreements?: SchoolDiscountContractPreview[];
 };
 
 function PageShell({ children, centered = false }: { children: ReactNode; centered?: boolean }) {
@@ -75,7 +79,48 @@ function BrandMark() {
   );
 }
 
+function DiscountAddenda({ agreements = [] }: { agreements?: SchoolDiscountContractPreview[] }) {
+  const { locale } = useTranslation();
+  if (!agreements.length) return null;
+  return (
+    <section className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+      <div>
+        <h2 className="font-semibold text-emerald-950">{schoolDiscountText(locale, 'discountAddendaTitle')}</h2>
+        <p className="mt-1 text-sm text-emerald-900">{schoolDiscountText(locale, 'discountBothRequired')}</p>
+      </div>
+      {agreements.map((agreement) => (
+        <div key={agreement.id} className="space-y-2 rounded-lg border border-emerald-200 bg-white p-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-semibold text-gray-900">
+              {schoolDiscountValueLabel(agreement.discountType, agreement.discountValue)} · {agreement.activityLabel}
+            </h3>
+            <span className={agreement.status === 'accepted' ? 'text-emerald-700' : 'text-amber-700'}>
+              {schoolDiscountText(locale, agreement.status === 'accepted' ? 'discountConfirmed' : 'discountAwaitingConfirmation')}
+            </span>
+          </div>
+          <p className="text-xs text-gray-600">
+            {agreement.agreementNumber} · {schoolDiscountText(locale, 'discountValidity')} {agreement.validFrom} - {agreement.validUntil}
+          </p>
+          <div className="flex flex-wrap gap-x-4 gap-y-2">
+            {agreement.pdfUrl && (
+              <a className="font-semibold text-emerald-700 hover:underline" href={agreement.pdfUrl} target="_blank" rel="noreferrer">
+                {schoolDiscountText(locale, 'discountOpenPdf')}
+              </a>
+            )}
+            {agreement.status === 'pending' && (
+              <a className="font-semibold text-emerald-700 underline" href={agreement.acceptUrl}>
+                {schoolDiscountText(locale, 'discountReviewAccept')}
+              </a>
+            )}
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 export default function SchoolExtraLessonsAccept() {
+  const { locale, t } = useTranslation();
   const [params] = useSearchParams();
   const token = (params.get('token') || '').trim();
   const [loading, setLoading] = useState(true);
@@ -356,10 +401,13 @@ export default function SchoolExtraLessonsAccept() {
           <BrandMark />
           <h1 className="text-2xl font-bold text-gray-900">Patvirtinimas išsaugotas</h1>
           <p role="status" className="text-sm text-gray-600">
-            Ruošiame galutinį sutarties PDF. Galite uždaryti šį puslapį - darbą tęsime automatiškai.
-            Kai dokumentas bus paruoštas, užbaigsime sutartį ir išsiųsime kopiją el. paštu.
-            Pakartotinai patvirtinti nereikia.
+            {preview.discountAgreements?.some((agreement) => agreement.status === 'pending')
+              ? schoolDiscountText(locale, 'mainProcessingWithDiscount')
+              : <>Ruošiame galutinį sutarties PDF. Galite uždaryti šį puslapį - darbą tęsime automatiškai.
+                Kai dokumentas bus paruoštas, užbaigsime sutartį ir išsiųsime kopiją el. paštu.
+                Pakartotinai patvirtinti nereikia.</>}
           </p>
+          <DiscountAddenda agreements={preview.discountAgreements} />
           {needsAttention && (
             <p className="text-sm text-amber-700">
               Dokumento paruošimas užtruko. Jūsų patvirtinimas išsaugotas. Dėl skubios pagalbos kreipkitės į mokyklą{preview.schoolEmail ? `: ${preview.schoolEmail}` : '.'}
@@ -428,6 +476,7 @@ export default function SchoolExtraLessonsAccept() {
             </Button>
           )}
           {done.sha256 && <p className="text-xs text-gray-500 break-all">Dokumento SHA-256: {done.sha256}</p>}
+          <DiscountAddenda agreements={preview.discountAgreements} />
           {error && <p className="text-sm text-red-600">{error}</p>}
           {withdrawn && (
             <p className="text-sm text-amber-700">
@@ -465,6 +514,8 @@ export default function SchoolExtraLessonsAccept() {
           {preview.contractNumber && <p><span className="font-semibold">Sutarties Nr.:</span> {preview.contractNumber}</p>}
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
+
+        <DiscountAddenda agreements={preview.discountAgreements} />
 
         <div className="overflow-hidden rounded-xl border border-gray-200">
           <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-gray-50 px-4 py-3">
@@ -570,6 +621,7 @@ export default function SchoolExtraLessonsAccept() {
           <div><span className="font-semibold">Laikotarpis:</span> {startDate || o.start_date || '—'} – {endDate || o.end_date || '—'}</div>
           <div><span className="font-semibold">Kaina:</span> {Number(o.unit_price_eur).toFixed(2)} € / užsiėmimas</div>
           <div><span className="font-semibold">Orientacinė / mėn.:</span> {Number(o.indicative_monthly_eur).toFixed(2)} €</div>
+          {o.recording_access && <div><span className="font-semibold">{t('school.recordingPlan.termsLabel')}:</span> {t(`school.recordingPlan.${o.recording_access}`)}</div>}
         </div>
 
         {(serviceType === 'group' || o.service_type === 'group') && (

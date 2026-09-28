@@ -47,6 +47,10 @@ describe('extraLessonsParentPortal', () => {
     })).toBe(false);
   });
 
+  it('accepts a verified parent_students relationship without legacy user-id links', () => {
+    expect(parentMayEndExtraLessonsContract({ authUserId: 'linked-parent', acceptedByUserId: null, studentLinkedUserId: null, studentParentUserId: null, linkedParent: true })).toBe(true);
+  });
+
   it('shows Atsisakyti inside 14 days and Nutraukti after, never both', () => {
     const base = {
       id: 'c1',

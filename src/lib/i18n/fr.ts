@@ -1,4 +1,6 @@
+import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
+import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsFr } from './schoolInstructionsTranslations.js';
@@ -6,6 +8,21 @@ import { schoolTeacherContractTranslationsFr } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const fr: Record<string, string> = {
+  ...schoolFamilyMaterialTranslations.fr,
+  ...schoolInvoiceReviewTranslations.fr,
+  'school.recordings.access.title': "Accès aux enregistrements",
+  'school.recordings.access.scopeHelp': "Retirez ou rétablissez l’accès d’un élève ou d’un parent dans cette école. Les comptes, les liens avec les enfants et les données de paiement sont conservés.",
+  'school.recordings.access.legacyHelp': "S’applique après connexion. Les anciens liens partagés de l’enfant qui fonctionnent sans connexion restent actifs.",
+  'school.recordings.access.email': "Adresse e-mail de la personne",
+  'school.recordings.access.revoke': "Retirer l’accès",
+  'school.recordings.access.restore': "Rétablir l’accès",
+  'school.recordings.access.empty': "Aucun accès aux enregistrements n’a été retiré.",
+  'school.recordings.access.failed': "Impossible de modifier ou de charger les paramètres d’accès.",
+  'school.recordings.access.invalidEmail': "Saisissez une adresse e-mail valide.",
+  'school.recordings.access.personNotInSchool': "Cette personne n’est liée à aucun élève de cette école.",
+  'school.recordings.access.setupRequired': "La migration de la base de données de gestion des accès n’a pas encore été appliquée.",
+  'school.recordings.access.revoked': "Accès aux enregistrements retiré.",
+  'school.recordings.access.restored': "Accès aux enregistrements rétabli.",
   'parent.childAlreadyExists': "Cet enfant figure déjà dans votre liste. Utilisez sa fiche existante pour créer son compte.",
   'login.emailOrUsername': 'E-mail ou identifiant élève',
   'login.studentUsername': 'Identifiant élève',
@@ -816,6 +833,11 @@ export const fr: Record<string, string> = {
   'cal.deleteFromCalendar': 'Supprimer du calendrier',
   'cal.deleteRecurringTitle': 'Supprimer le cours récurrent',
   'cal.deleteChoose': 'Choisissez ce que vous souhaitez supprimer.',
+  "cal.deleteAllRemaining": "Tous les cours restants de cette série",
+  "cal.deleteAllRemainingHint": "Supprime les cours futurs planifiés et les cours annulés de cette série. L’historique des cours terminés est conservé.",
+  "cal.deleteConfirmAll": "Supprimer tous les cours restants planifiés et annulés de cette série ? L’historique des cours terminés est conservé.",
+  "cal.deleteGroupHint": "Pour un groupe, le choix s’applique à tous ses élèves.",
+  "cal.deleteCancelledOnlyHint": "Seuls vos cours annulés ou ceux de votre enfant sont supprimés dans la portée choisie.",
   'cal.deleteHint': 'Vous confirmerez l\'action après avoir choisi.',
   'cal.deleteOnlyThis': 'Uniquement celui-ci',
   'cal.deleteThisAndFuture': 'Celui-ci et tous les futurs',
@@ -5307,6 +5329,9 @@ export const fr: Record<string, string> = {
   'school.groups.editTitle': "Modifier le groupe",
   'school.groups.platform': "Plateforme",
   'school.groups.duration': "Durée (min)",
+  'school.groups.minimumActiveStudents': "Nombre minimum d’élèves actifs",
+  'school.groups.minimumActiveStudentsHint': "Ce groupe et ses contrats sont automatiquement suspendus lorsque le nombre d’élèves actifs est inférieur au minimum.",
+  'school.groups.suspendedMinimum': "Suspendu : moins de {n} élèves actifs dans le groupe",
   'school.groups.meetingLink': "Lien du cours",
   'school.groups.slots': "Emploi du temps hebdomadaire",
   'school.groups.addSlot': "Ajouter un jour",
@@ -5606,4 +5631,7 @@ export const fr: Record<string, string> = {
   "compare.customChip2": "Règles de rémunération",
   "compare.customChip3": "Liens d'acceptation pour les parents",
   "compare.customChip4": "Espaces à votre marque",
+  'em.schoolJoinSubject': 'Rejoignez votre cours le {date} à {time}',
+  'em.schoolJoinHeader': 'Rejoignez votre cours',
+  'em.schoolJoinBody': 'Votre cours commence le {date} à {time}. Utilisez le lien ci-dessous.',
 };

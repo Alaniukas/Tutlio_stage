@@ -7,6 +7,14 @@ import { en } from './en.js';
  * Dictionary coverage does not publish the locale or certify market readiness.
  */
 export const huOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "A sorozat összes hátralévő órája",
+  "cal.deleteAllRemainingHint": "Törli a sorozat jövőbeli tervezett és lemondott óráit. A megtartott órák előzményei megmaradnak.",
+  "cal.deleteConfirmAll": "Törlöd a sorozat összes hátralévő tervezett és lemondott óráját? A megtartott órák előzményei megmaradnak.",
+  "cal.deleteGroupHint": "Tanulócsoport esetén a kiválasztás a csoport minden diákjára vonatkozik.",
+  "cal.deleteCancelledOnlyHint": "A kiválasztott körben csak a te vagy a gyermeked lemondott órái törlődnek.",
+  "em.schoolJoinSubject": "Csatlakozz az órádhoz: {date}, {time}",
+  "em.schoolJoinHeader": "Csatlakozz az órádhoz",
+  "em.schoolJoinBody": "Az órád kezdési időpontja: {date}, {time}. A csatlakozáshoz használd az alábbi linket.",
   'compSess.markAttended': 'A tanuló részt vett',
   'att.confirmedManually': 'A részvétel megerősítve',
   'att.unconfirmed': 'A részvétel nincs megerősítve',

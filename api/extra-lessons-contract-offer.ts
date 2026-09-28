@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgAdminAccess } from './_lib/orgAdminAccess.js';
 import { isInternalRequest } from './_lib/auth.js';
+import { isSchoolRecordingAccessMode } from '../src/lib/schoolRecordingPlan.js';
 import {
   EXTRA_LESSONS_CONTRACT_KIND,
   EXTRA_LESSONS_DEFAULT_BODY,
@@ -13,6 +14,7 @@ import {
   type ExtraLessonsOrderSnapshot,
 } from '../src/lib/extraLessonsContract.js';
 import { renderAndStoreExtraLessonsPdf } from './_lib/extraLessonsPdf.js';
+import { ensureExtraLessonsCompletionToken } from './_lib/extraLessonsCompletionToken.js';
 import {
   appOrigin,
   extraLessonsAcceptUrl,
@@ -33,30 +35,6 @@ async function discardIncompleteExtraLessonsOffer(
 ): Promise<void> {
   await supabase.from('school_contract_completion_tokens').delete().eq('contract_id', contractId);
   await supabase.from('school_contracts').delete().eq('id', contractId);
-}
-
-async function ensureExtraLessonsCompletionToken(
-  supabase: SupabaseClient,
-  contractId: string,
-): Promise<string> {
-  const { data: existing } = await supabase
-    .from('school_contract_completion_tokens')
-    .select('token, expires_at')
-    .eq('contract_id', contractId)
-    .order('expires_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (existing?.token && (!existing.expires_at || new Date(existing.expires_at).getTime() > Date.now())) {
-    return String(existing.token);
-  }
-  const token = randomToken();
-  const { error } = await supabase.from('school_contract_completion_tokens').insert({
-    contract_id: contractId,
-    token,
-    expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
-  });
-  if (error) throw new Error(error.message);
-  return token;
 }
 
 async function sendExtraLessonsOfferEmail(
@@ -265,6 +243,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .from('students')
     .select('id, full_name, email, grade, payer_name, payer_email, payer_phone, organization_id, tutor_id')
     .eq('id', studentId)
+    .eq('organization_id', access.access.organizationId)
     .maybeSingle();
   if (!student) return res.status(404).json({ error: 'Student not found' });
 
@@ -275,12 +254,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (serviceType === 'individual') groupId = null;
   const subjectId = serviceType === 'group' ? null : (body.subject_id ? String(body.subject_id) : null);
   let subjectName = body.subject_name ? String(body.subject_name).trim() : '';
-  if (groupId && !tutorName) {
+  let offeredGroupSlots: Array<{ weekday: number; start_time: string }> = [];
+  if (groupId) {
     const { data: grp } = await supabase
       .from('school_class_groups')
-      .select('name, tutor:profiles!school_class_groups_tutor_id_fkey(full_name)')
+      .select('name, tutor:profiles!school_class_groups_tutor_id_fkey(full_name), slots:school_class_group_slots(weekday, start_time)')
       .eq('id', groupId)
+      .eq('organization_id', access.access.organizationId)
       .maybeSingle();
+    if (!grp) return res.status(400).json({ error: 'Group is not in this organization' });
+    offeredGroupSlots = grp.slots || [];
     const tutorRel = grp?.tutor as { full_name?: string } | { full_name?: string }[] | null | undefined;
     const tutorRow = Array.isArray(tutorRel) ? tutorRel[0] : tutorRel;
     if (tutorRow?.full_name) tutorName = String(tutorRow.full_name);
@@ -303,12 +286,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  if (body.recording_access !== undefined && (!isSchoolRecordingAccessMode(body.recording_access)
+    || org?.entity_type !== 'school' || org?.features?.school_family_portal !== true
+    || org?.features?.school_lesson_recordings !== true || serviceType !== 'group' || !groupId)) {
+    return res.status(400).json({ error: 'Invalid recording plan' });
+  }
   const order = buildExtraLessonsOrderSnapshot({
     service_name: String(body.service_name || subjectName || groupName || ''),
     service_type: serviceType,
     platform: String(body.platform || ''),
     duration_minutes: Number(body.duration_minutes || 0),
     schedule_slots: Array.isArray(body.schedule_slots) ? body.schedule_slots as any : [],
+    ...(isSchoolRecordingAccessMode(body.recording_access) ? { recording_access: body.recording_access } : {}),
     schedule_label: String(body.schedule_label || ''),
     start_date: String(body.start_date || ''),
     end_date: String(body.end_date || ''),
@@ -327,6 +316,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
   const missing = validateExtraLessonsOffer(order);
   if (missing.length) return res.status(400).json({ error: 'Invalid order', fields: missing });
+  if (order.recording_access !== undefined && order.schedule_slots.some((slot) => !offeredGroupSlots.some((groupSlot) =>
+    Number(groupSlot.weekday) === slot.weekday && String(groupSlot.start_time).slice(0, 5) === slot.start_time.slice(0, 5)))) {
+    return res.status(400).json({ error: 'The recording plan must use the selected group schedule', fields: ['schedule_slots'] });
+  }
   const payerEmail = String(student.payer_email || '').trim();
   if (body.send !== false && !payerEmail) {
     return res.status(400).json({
@@ -454,11 +447,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
-  if (order.group_id) {
-    await supabase.from('school_class_group_members').upsert({
+  if (order.group_id && order.recording_access === undefined) {
+    await supabase.from('school_class_group_members').upsert([{
       group_id: order.group_id,
       student_id: studentId,
-    }, { onConflict: 'group_id,student_id' });
+    }], { onConflict: 'group_id,student_id', ignoreDuplicates: true, defaultToNull: false });
   }
 
   let emailSent = false;

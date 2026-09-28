@@ -562,6 +562,37 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'premium',
   },
 
+  school_family_accounts_setup: {
+    id: 'school_family_accounts_setup',
+    name: 'Mokyklos šeimos paskyrų paruošimas',
+    nameEn: 'Prepare school family accounts',
+    description: 'Administracija patikrina metinės sutarties pasirašiusį tėvą ir paruošia atskiras vaikų paskyras prieš įjungiant šeimos portalą.',
+    descriptionEn: 'Verify the annual-contract guardian and prepare separate student accounts before enabling the family portal.',
+    category: 'advanced',
+    defaultValue: false,
+  },
+
+  school_family_portal: {
+    id: 'school_family_portal',
+    name: 'Mokyklos šeimos ir mokinių paskyros',
+    nameEn: 'School family and student accounts',
+    description: 'Atskiros vaikų ir metinės sutarties tėvų paskyros, privatūs namų darbai, dienos medžiagos suvestinė, konsultacijų privatumas ir grupių įrašų planai. Prieš įjungiant būtina patikrinti šeimų ryšius ir paruošti senų medžiagos nuorodų prieigą.',
+    descriptionEn: 'Separate student and annual-contract guardian accounts, private homework, daily material digest, consultation privacy and group recording plans. Verify family bindings and prepare existing material-link access before enabling.',
+    category: 'advanced',
+    defaultValue: false,
+    requiresSetup: true,
+  },
+
+  school_compact_notifications: {
+    id: 'school_compact_notifications',
+    name: 'Trumpi periodiniai mokyklos kvietimai į užsiėmimus',
+    nameEn: 'Compact periodic school lesson invitations',
+    description: 'Periodinis kvietimas prieš užsiėmimą: vienas trumpas laiškas su prisijungimo nuoroda vaikui, jei jis turi el. paštą; kitu atveju vienam iš tėvų. Mokytojo priminimai valdomi atskirai.',
+    descriptionEn: 'Periodic invitation before a lesson: one short join-link email to the child when an email is available, otherwise one parent. Teacher reminders are managed separately.',
+    category: 'automation',
+    defaultValue: false,
+  },
+
   school_teacher_labels: {
     id: 'school_teacher_labels',
     name: 'Terminologija „mokytojas“ / „mokinys“',

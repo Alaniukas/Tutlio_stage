@@ -85,16 +85,21 @@ export function fillExtraLessonsBody(params: {
   for (const [key, value] of Object.entries(params.payload)) {
     braced[`{{${key}}}`] = value;
   }
-  const when = params.acceptedAtLabel || params.payload.data_laikas_Europe_Vilnius || vilniusDateTimeLabel();
+  const termsAcceptedLabel = params.termsAcceptedLabel || params.payload.sutikimo_su_salygomis_busena || '—';
+  const accepted = termsAcceptedLabel === 'TAIP';
+  const when = accepted
+    ? params.acceptedAtLabel || params.payload.data_laikas_Europe_Vilnius || '—'
+    : '—';
   const sha = params.sha256 || params.payload.dokumento_sha256 || '—';
   return fillPlaceholders(body, {
     ...braced,
     '{{data_laikas_Europe_Vilnius}}': when,
+    '{{data}}': accepted ? params.payload.data || when.split(' ')[0] : '—',
     '{{dokumento_sha256}}': sha,
     '{{SHA-256_ar_kitas_integralumo_ID}}': sha,
     '{{start_within_14_label}}': params.startWithin14Label || params.payload.start_within_14_label || 'NETAIKOMA',
     '{{recording_consent_label}}': params.recordingConsentLabel || params.payload.recording_consent_label || 'NETAIKOMA',
-    '{{sutikimo_su_salygomis_busena}}': params.termsAcceptedLabel || params.payload.sutikimo_su_salygomis_busena || '—',
+    '{{sutikimo_su_salygomis_busena}}': termsAcceptedLabel,
     '{{el_pastas_ir_issiuntimo_data_laikas}}': params.confirmationSentLabel || params.payload.el_pastas_ir_issiuntimo_data_laikas || '—',
     '{{TAIP}}': 'TAIP',
   });
@@ -205,6 +210,7 @@ export async function endExtraLessonsContract(params: {
   contract: any;
   intendedKind?: 'withdrawal' | 'termination' | null;
   origin: string;
+  actorUserId?: string | null;
 }): Promise<{ ok: true; kind: 'withdrawal' | 'termination'; statementPath: string | null } | { ok: false; status: number; error: string }> {
   const { extraLessonsEndKind } = await import('../../src/lib/extraLessonsContract.js');
   const { createSimpleContractPdf } = await import('./schoolContractPdf.js');
@@ -273,6 +279,9 @@ Sis pranesimas uzregistruotas Tutlio paskyroje. Mokytojo atskirai informuoti ner
     withdrawal_reason: kind === 'withdrawal' ? 'parent_withdrawal' : 'parent_termination',
     extra_end_kind: kind,
     extra_end_statement_path: statementPath,
+    ...(kind === 'termination' ? {
+      terminated_at: now.toISOString(), termination_reason: 'parent_termination', terminated_by: params.actorUserId || null,
+    } : {}),
   }).eq('id', params.contract.id);
   if (error) return { ok: false, status: 500, error: error.message };
 

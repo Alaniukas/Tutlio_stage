@@ -104,7 +104,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: existingSession, error: loadSessionError } = await supabase
         .from('sessions')
-        .select('tutor_id, student_id, status, start_time, end_time')
+        .select('tutor_id, student_id, status, start_time, end_time, cancellation_penalty_amount, penalty_resolution, is_late_cancelled')
         .eq('id', sessionId)
         .maybeSingle();
 
@@ -205,6 +205,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
     }
 
+    // A retry must not repeat package refunds or replace a settled fee with the
+    // provisional marker used while the original cancellation is still running.
+    if (existingSession.status === 'cancelled') {
+        if (existingSession.penalty_resolution === 'pending' && existingSession.cancellation_penalty_amount == null) {
+            return res.status(409).json({ error: 'Cancellation is still being processed', code: 'cancellation_in_progress' });
+        }
+        return res.status(200).json({
+            success: true,
+            penaltyAmount: Number(existingSession.cancellation_penalty_amount || 0),
+            isLate: existingSession.is_late_cancelled === true,
+            needsPenaltyChoice: existingSession.penalty_resolution === 'pending',
+        });
+    }
+
     // Org feature: students/parents may be blocked from cancelling entirely
     // (disable_student_reschedule_cancel). Tutor/org-admin cancels are unaffected.
     if (cancelledBy === 'student' && !auth.isInternal) {
@@ -233,16 +247,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('sessions')
         .update({
             status: 'cancelled',
+            // Family cleanup and refund choice must wait for fee/credit work,
+            // including the notifications awaited below, to finish.
+            penalty_resolution: 'pending',
+            cancellation_penalty_amount: null,
             cancellation_reason: reasonTrimmed,
             cancellation_reason_code: reasonCode,
             cancelled_by: cancelledBy,  // Track who cancelled (tutor or student)
             cancelled_at: new Date().toISOString()  // Track when cancelled for auto-hide
         })
         .eq('id', sessionId)
+        .neq('status', 'cancelled')
         .select('*')
         .single();
 
     if (cancelError || !session) {
+        if (cancelError?.code === 'PGRST116') {
+            return res.status(409).json({ error: 'Cancellation has already started; refresh the lesson', code: 'cancellation_in_progress' });
+        }
         console.error('Cancel error:', cancelError);
         return res.status(500).json({ error: 'Failed to cancel session', details: cancelError });
     }
@@ -550,6 +572,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 .eq('id', sessionId);
         }
         needsPenaltyChoice = true;
+    }
+
+    if (!hasPenaltyFee && !needsPenaltyChoice) {
+        const { error: finalizeError } = await supabase
+            .from('sessions')
+            .update({ cancellation_penalty_amount: 0, penalty_resolution: null })
+            .eq('id', sessionId)
+            .eq('penalty_resolution', 'pending')
+            .is('cancellation_penalty_amount', null);
+        if (finalizeError) {
+            console.error('[cancel-session] finalize cancellation failed:', finalizeError);
+            return res.status(500).json({ error: 'Failed to finish cancellation' });
+        }
     }
 
     res.status(200).json({ success: true, penaltyAmount, isLate: hasPenaltyFee, needsPenaltyChoice });

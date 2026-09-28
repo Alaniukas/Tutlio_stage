@@ -11,6 +11,7 @@ import { findActivePackageForBooking } from '../src/lib/lessonPackageBooking.js'
 import { defaultSessionPaymentStatusForStudent } from '../src/lib/studentPaymentModel.js';
 import {
   loadClassGroupsForOrg,
+  loadClassGroupForMaterialize,
   loadExtraLessonsStartGates,
   materializationWindow,
   reconcileClassGroupSessions,
@@ -19,6 +20,9 @@ import {
   buildMeetingLinkFallbackMaps,
   resolveTemplateMeetingLink,
 } from './_lib/sessionMeetingLink.js';
+import { isSessionOccurrenceExcluded, loadSessionRecurrenceExclusions } from './_lib/sessionRecurrenceExclusions.js';
+import { isSchoolClassGroupSuspended } from '../src/lib/schoolGroupMinimumPolicy.js';
+import { resumeSchoolGroupIfMinimumMet } from './_lib/schoolGroupMinimumPolicy.js';
 
 const HORIZON_DAYS = 60;
 export const MATERIALIZER_BATCH_SIZE = 100;
@@ -119,6 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const dates = buildRollingOccurrenceDates(template, windowStartYmd, windowEndYmd);
     if (dates.length === 0) continue;
     const occurrenceStarts = dates.map((date) => wallClockToUtc(date, template.start_time));
+    const exclusions = await loadSessionRecurrenceExclusions(supabase, { recurringSessionId: template.id });
     const rangeStart = occurrenceStarts[0]!.toISOString();
     const rangeEnd = new Date(occurrenceStarts.at(-1)!.getTime() + durationMs).toISOString();
 
@@ -162,6 +167,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const rows: Array<Record<string, unknown>> = [];
     for (const start of occurrenceStarts) {
       const startIso = start.toISOString();
+      if (isSessionOccurrenceExcluded(exclusions, template.student_id, startIso)) continue;
       if (existing.has(startIso)) continue;
       const end = new Date(start.getTime() + durationMs);
       const overlaps = busy.some((interval) => {
@@ -261,7 +267,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const groups = await loadClassGroupsForOrg(supabase, org.id, groupWindow);
     for (const group of groups) {
       try {
-        const outcome = await reconcileClassGroupSessions(supabase, group, { window: groupWindow, extraGates });
+        let currentGroup = group;
+        let currentGates = extraGates;
+        if (isSchoolClassGroupSuspended(group, now)) {
+          const resumed = await resumeSchoolGroupIfMinimumMet(supabase, {
+            organizationId: org.id, groupId: group.id, resumeContractId: null, adminUserId: null, materialize: false,
+          });
+          if (resumed.resumed) {
+            currentGroup = await loadClassGroupForMaterialize(supabase, group.id) || group;
+            currentGates = await loadExtraLessonsStartGates(supabase, org.id);
+          }
+        }
+        const outcome = await reconcileClassGroupSessions(supabase, currentGroup, { window: groupWindow, extraGates: currentGates });
         groupCreated += outcome.created;
         groupDeleted += outcome.deleted;
         groupUpdated += outcome.updated + outcome.adopted;

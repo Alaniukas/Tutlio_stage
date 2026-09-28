@@ -423,6 +423,10 @@ export default function Login() {
       if (error) {
         setError(t('auth.invalidCredentials'));
       } else if (data.user) {
+        if (data.session?.access_token) {
+          void fetch('/api/school-family-account-session', { method: 'POST',
+            headers: { Authorization: `Bearer ${data.session.access_token}` } }).catch(() => {});
+        }
         const loginPortal: LoginPortal | null =
           role === 'tutor' ? 'tutor' : role === 'student' ? 'student' : role === 'parent' ? 'parent' : null;
 

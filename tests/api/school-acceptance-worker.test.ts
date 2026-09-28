@@ -1,8 +1,10 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-const state = vi.hoisted(() => ({ convert: vi.fn(), invite: vi.fn() }));
+const state = vi.hoisted(() => ({ convert: vi.fn(), invite: vi.fn(), groupMinimum: vi.fn(), applyRecordingPlan: vi.fn() }));
 vi.mock('../../api/_lib/docxConverter.js', () => ({ convertDocxBufferToPdfWithFallbacks: state.convert }));
 vi.mock('../../api/_lib/extraLessonsFirstLessonInvite.js', () => ({ sendFirstLessonInvite: state.invite }));
 vi.mock('../../api/_lib/extraLessonsContractShared.js', () => ({ internalApiOrigin: () => 'https://internal.example' }));
+vi.mock('../../api/_lib/schoolGroupMinimumPolicy.js', () => ({ reconcileSchoolGroupMinimum: state.groupMinimum }));
+vi.mock('../../api/_lib/schoolGroupMembership.js', () => ({ applyAcceptedSchoolGroupRecordingPlan: state.applyRecordingPlan }));
 import {
   processAcceptanceJob,
   acceptanceRetrySeconds,
@@ -61,6 +63,27 @@ it('converts frozen bytes then atomically finalizes before notification completi
   expect(state.convert.mock.calls[0][0].toString()).toBe('frozen');
   expect(db.rpc.mock.calls[0][0]).toBe('finalize_school_acceptance');
   expect(writes.at(-1).status).toBe('completed');
+});
+
+it('checks the group minimum after finalization before sending the first lesson invitation', async () => {
+  const { db } = database();
+  const pending: any = job();
+  pending.payload.invite.classGroupId = 'group';
+  pending.payload.acceptance.accepted_by_user_id = 'parent';
+  expect(await processAcceptanceJob(db, {} as any, pending)).toEqual({ completed: true });
+  expect(state.groupMinimum).toHaveBeenCalledWith(expect.anything(), db, { organizationId: 'org', groupId: 'group', actorUserId: 'parent' });
+  expect(state.groupMinimum.mock.invocationCallOrder[0]).toBeLessThan(state.invite.mock.invocationCallOrder[0]);
+});
+
+it('applies only an explicit accepted recording plan before minimum checks and invitations', async () => {
+  const { db } = database();
+  const pending: any = job();
+  pending.payload.invite.classGroupId = 'group';
+  pending.payload.acceptance.order_snapshot = { recording_access: 'none' };
+  expect(await processAcceptanceJob(db, {} as any, pending)).toEqual({ completed: true });
+  expect(state.applyRecordingPlan).toHaveBeenCalledWith(db, 'contract', 'org');
+  expect(state.applyRecordingPlan.mock.invocationCallOrder[0]).toBeLessThan(state.groupMinimum.mock.invocationCallOrder[0]);
+  expect(state.applyRecordingPlan.mock.invocationCallOrder[0]).toBeLessThan(state.invite.mock.invocationCallOrder[0]);
 });
 
 it('drops source bytes from Postgres after the final PDF is stored', async () => {

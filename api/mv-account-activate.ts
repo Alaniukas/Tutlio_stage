@@ -9,6 +9,7 @@ import { orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js
 import { loginIdentifierToEmail } from '../src/lib/studentLoginIdentity.js';
 import { managedFamilyAccountsEnabled } from '../src/lib/managedFamilyAccounts.js';
 import { resolveEmailOrgBranding } from './_lib/emailOrgBranding.js';
+import { loadSchoolFamilyInvitation, activateSchoolFamilyInvitation, SCHOOL_FAMILY_TOKEN_PREFIX } from './_lib/schoolFamilyAccounts.js';
 
 function parseJsonBody(req: VercelRequest): Record<string, unknown> {
   const raw = req.body;
@@ -96,6 +97,9 @@ async function loadPreview(
   }
   if (!managedFamilyAccountsEnabled(organizationId, orgFeatures)) {
     return { status: 403 as const, body: { error: 'Invalid organization', code: 'org_not_supported' } };
+  }
+  if (orgFeatures?.school_family_portal === true || orgFeatures?.school_family_accounts_setup === true) {
+    return { status: 400 as const, body: { error: 'Request a new school family invitation', code: 'expired' } };
   }
 
   const authUser = await findAuthUserByEmail(supabase, loginIdentifierToEmail(loginIdentifier));
@@ -197,6 +201,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = (req.method === 'GET' ? queryToken : bodyToken || queryToken).trim();
 
     if (!token) return res.status(400).json({ error: 'Token is required', code: 'missing_token' });
+
+    if (token.startsWith(SCHOOL_FAMILY_TOKEN_PREFIX)) {
+      try {
+        if (req.method === 'GET') return res.status(200).json((await loadSchoolFamilyInvitation(supabase, token, appOrigin)).preview);
+        if (req.method === 'POST') return res.status(200).json(await activateSchoolFamilyInvitation(supabase, token,
+          typeof body.password === 'string' ? body.password : '', appOrigin));
+        return res.status(405).json({ error: 'Method not allowed' });
+      } catch (error) {
+        const code = (error as Error).message;
+        return res.status(400).json({ error: code, code });
+      }
+    }
 
     if (req.method === 'GET') {
       const preview = await loadPreview(supabase, token, appOrigin);

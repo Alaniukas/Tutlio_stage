@@ -12,6 +12,7 @@ import {
   resolveRecordingViewerAccess,
 } from './_lib/schoolRecordingAccess.js';
 import { recordingSlotScope, recordingSlotTag, recordingVisibleToScope } from './_lib/schoolRecordingSlotAccess.js';
+import { schoolRecordingPublicationAllowsLegacyAccess } from './_lib/schoolMaterialPublications.js';
 import {
   verifySchoolHomeworkRecordingTicket,
   verifySchoolRecordingTicket,
@@ -91,6 +92,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ) {
       return res.status(404).json({ error: 'Įrašas nerastas arba jo saugojimo terminas pasibaigė.' });
     }
+    if (homeworkTicket && !await schoolRecordingPublicationAllowsLegacyAccess(supabase, {
+      organizationId: group.organizationId, targetId: group.id, fileId,
+      createdTime: file.createdTime, modifiedTime: file.modifiedTime, features: group.features,
+    })) {
+      return res.status(403).json({ error: 'Prisijunkite prie mokyklos paskyros, kad galėtumėte peržiūrėti šį įrašą.' });
+    }
     if (group.kind === 'class_group') {
       const [scope, tag] = await Promise.all([
         recordingSlotScope(
@@ -98,6 +105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           group.sourceId,
           homeworkTicket ? [homeworkTicket.studentId] : access?.studentIds || [],
           !homeworkTicket && (access?.adminOrganizationId === group.organizationId || group.tutorId === loginTicket?.userId),
+          { organizationId: group.organizationId, features: group.features },
         ),
         recordingSlotTag(supabase, group.sourceId, fileId),
       ]);

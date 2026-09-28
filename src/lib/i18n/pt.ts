@@ -2,6 +2,14 @@ import { en } from './en.js';
 
 /** European Portuguese tutor/business draft; release review: docs/PORTUGUESE_LOCALIZATION_REVIEW.md. */
 export const ptOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Todas as aulas restantes desta série",
+  "cal.deleteAllRemainingHint": "Remove as aulas futuras planeadas e canceladas desta série. O histórico das aulas concluídas é mantido.",
+  "cal.deleteConfirmAll": "Eliminar todas as aulas planeadas e canceladas restantes desta série? O histórico das aulas concluídas é mantido.",
+  "cal.deleteGroupHint": "Num grupo de turma, a seleção aplica-se a todos os alunos.",
+  "cal.deleteCancelledOnlyHint": "Só são eliminadas as aulas canceladas suas ou do seu filho no âmbito selecionado.",
+  "em.schoolJoinSubject": "Entre na sua aula no dia {date}, às {time}",
+  "em.schoolJoinHeader": "Entre na sua aula",
+  "em.schoolJoinBody": "A sua aula começa no dia {date}, às {time}. Use a ligação abaixo para entrar.",
   'compSess.markAttended': 'O aluno participou',
   'att.confirmedManually': 'Presença confirmada',
   'att.unconfirmed': 'Presença não confirmada',

@@ -1,4 +1,4 @@
-import { isSchoolClassGroupSuspended } from './schoolGroupMinimumPolicy.js';
+import { isSchoolClassGroupSuspended, schoolGroupMinimumStudents } from './schoolGroupMinimumPolicy.js';
 
 export type SchoolDashboardContract = {
   kind?: string | null;
@@ -109,6 +109,7 @@ type ActionGroup = {
   suspension_until?: string | null;
   suspension_resumed_at?: string | null;
   suspension_reason?: string | null;
+  minimum_active_students?: number | null;
 };
 
 const instant = (value?: string | null) => {
@@ -250,7 +251,7 @@ export function buildSchoolAdminActionQueue(input: {
         id: `group-minimum:${group.id}`,
         category: 'groups',
         title: `Sustabdyta grupė: ${group.name}`,
-        detail: group.suspension_reason || 'Grupėje liko mažiau nei 3 aktyvūs mokiniai.',
+        detail: group.suspension_reason || `Grupėje liko mažiau nei ${schoolGroupMinimumStudents(group)} aktyvūs mokiniai.`,
         href: '/school/contracts',
         occurredAt: group.suspension_started_at || group.updated_at || now.toISOString(),
         priority: 3,
@@ -311,7 +312,7 @@ export function buildSchoolActivityFeed(input: {
       id: `group:${group.id}`,
       title: suspended ? `Sustabdyta grupė: ${group.name}` : `Atnaujinta grupė: ${group.name}`,
       detail: suspended
-        ? group.suspension_reason || 'Grupėje liko mažiau nei 3 aktyvūs mokiniai.'
+        ? group.suspension_reason || `Grupėje liko mažiau nei ${schoolGroupMinimumStudents(group)} aktyvūs mokiniai.`
         : group.admin_action_note || 'Tvarkaraštis arba grupės sudėtis',
       actor: group.tutor_name || 'Administracija',
       occurredAt: group.updated_at,

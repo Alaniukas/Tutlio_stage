@@ -76,6 +76,7 @@ export function buildCompanyNavItems(
   showGroups = false,
   showRecordings = false,
   showStaffDocuments = false,
+  showConsultations = false,
 ): CompanyNavItem[] {
   const base: CompanyNavItem[] = [
     { href: `${orgBasePath}`, label: t('companyNav.overview'), icon: LayoutDashboard, exact: true, permission: 'dashboard.view', section: 'work' },
@@ -95,6 +96,9 @@ export function buildCompanyNavItems(
   }
   if (showPublicPage) {
     base.push({ href: `${orgBasePath}/public-page`, label: t('companyNav.publicPage'), icon: Globe, permission: 'settings.view', section: 'manage' });
+  }
+  if (isSchool && showConsultations) {
+    base.push({ href: `${orgBasePath}/consultations`, label: t('schoolConsult.title'), icon: CalendarDays, permission: 'sessions.view', section: 'work' });
   }
   if (isSchool) {
     base.push({ href: `${orgBasePath}/contracts`, label: t('companyNav.contracts'), icon: FileText, permission: 'contracts.view', section: 'manage' });
@@ -188,6 +192,7 @@ export default function CompanyLayout() {
         hasFeature('school_class_groups'),
         SCHOOL_LESSON_RECORDINGS_NAV_READY && isSchool && hasFeature('school_lesson_recordings'),
         isSchool && organizationId === LAISVI_VAIKIAI_ORG_ID && hasFeature('school_staff_documents'),
+        isSchool && hasFeature('school_family_portal'),
       )
       .filter((item) => item.permission === null || can(item.permission)),
     [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage, showInstructions, can, hasFeature, organizationId],

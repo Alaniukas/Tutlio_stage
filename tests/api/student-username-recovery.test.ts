@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { schoolFamilyMemoryDatabase } from '../fixtures/schoolFamilyMemoryDatabase';
 
 const mocks = vi.hoisted(() => ({
   find: vi.fn(),
@@ -48,6 +49,7 @@ const user = {
 };
 
 beforeEach(() => {
+  vi.stubEnv('TUTLIO_DEV_SUPPRESS_EMAIL', '0');
   vi.clearAllMocks();
   mocks.find.mockResolvedValue({ id: 'child' });
   mocks.get.mockResolvedValue({ data: { user } });
@@ -67,6 +69,7 @@ beforeEach(() => {
     error: null,
   });
 });
+afterEach(() => vi.unstubAllEnvs());
 
 describe('student username password recovery', () => {
   it('generates recovery for the child and sends only to the server-stored parent contact', async () => {
@@ -163,6 +166,36 @@ describe('student username password recovery', () => {
     } } });
     await sendStudentUsernameRecovery(db, authEmail, redirect);
     expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it('uses live annual guardian evidence during school preparation instead of an old or edited card email', async () => {
+    const alias = 'st-abcd-2345@student-login.tutlio.invalid';
+    const strictUser = { ...user, email: alias, app_metadata: { provisioned_by_organization: 'school-one',
+      student_login_name: 'st-abcd-2345', student_contact_email: 'obsolete@example.test' } };
+    const memory = schoolFamilyMemoryDatabase({
+      organizations: [{ id: 'school-one', name: 'Demo School', entity_type: 'school', features: { school_family_accounts_setup: true } }],
+      students: [{ id: 'child-row', organization_id: 'school-one', linked_user_id: 'child', enrollment_status: 'active', detached_at: null,
+        payer_email: 'edited-contact@example.test' }],
+      school_contracts: [{ id: 'annual-one', organization_id: 'school-one', student_id: 'child-row', kind: 'annual', signing_status: 'signed', archived_at: null, terminated_at: null }],
+      school_family_guardians: [{ organization_id: 'school-one', student_id: 'child-row', annual_contract_id: 'annual-one', guardian_user_id: 'parent',
+        guardian_email: 'verified-guardian@example.test', guardian_name: 'Verified Parent', evidence_source: 'admin_verified', signature_id: null }],
+    }, [strictUser]);
+    memory.db.auth.admin.generateLink = mocks.generate;
+    await sendStudentUsernameRecovery(memory.db, alias, redirect);
+    expect(mocks.send.mock.calls[0][0].to).toBe('verified-guardian@example.test');
+    expect(mocks.generate).toHaveBeenCalledWith({ type: 'recovery', email: alias, options: { redirectTo: redirect } });
+    expect(memory.updateUserById.mock.calls[0][1]).not.toHaveProperty('password');
+    mocks.send.mockClear(); mocks.generate.mockClear();
+    memory.tables.school_contracts[0].terminated_at = '2026-09-28T00:00:00Z';
+    await sendStudentUsernameRecovery(memory.db, alias, redirect);
+    expect(mocks.send).not.toHaveBeenCalled(); expect(mocks.generate).not.toHaveBeenCalled();
+  });
+
+  it('suppresses username recovery before any Auth operation in local Demo QA', async () => {
+    vi.stubEnv('TUTLIO_DEV_SUPPRESS_EMAIL', '1');
+    await sendStudentUsernameRecovery(db, authEmail, redirect);
+    expect(mocks.find).not.toHaveBeenCalled(); expect(mocks.update).not.toHaveBeenCalled(); expect(mocks.generate).not.toHaveBeenCalled();
     expect(mocks.send).not.toHaveBeenCalled();
   });
 });

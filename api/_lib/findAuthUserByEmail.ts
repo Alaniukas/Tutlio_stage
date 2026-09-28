@@ -16,7 +16,9 @@ export async function findAuthUserByEmail(
   if (!normalized) return null;
 
   const fromRpc = await findAuthUserIdByRpc(supabase, normalized);
-  if (fromRpc) return fromRpc;
+  // A successful null lookup is authoritative. Scanning Auth after a miss is
+  // both expensive and unnecessary for new accounts on an up-to-date schema.
+  if (fromRpc.available) return fromRpc.user;
 
   return findAuthUserByEmailViaList(supabase, normalized);
 }
@@ -24,11 +26,11 @@ export async function findAuthUserByEmail(
 async function findAuthUserIdByRpc(
   supabase: SupabaseClient,
   normalized: string,
-): Promise<AuthUserHit | null> {
+): Promise<{ available: boolean; user: AuthUserHit | null }> {
   const { data, error } = await supabase.rpc('get_auth_user_id_by_email', { p_email: normalized });
-  if (error || !data) return null;
+  if (error) return { available: false, user: null };
   const id = typeof data === 'string' ? data : null;
-  return id ? { id } : null;
+  return { available: true, user: id ? { id } : null };
 }
 
 async function findAuthUserByEmailViaList(

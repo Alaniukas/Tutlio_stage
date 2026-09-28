@@ -1,4 +1,6 @@
+import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
+import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 import { schoolInstructionsTranslationsEs } from './schoolInstructionsTranslations.js';
@@ -6,6 +8,21 @@ import { schoolTeacherContractTranslationsEs } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const es: Record<string, string> = {
+  ...schoolFamilyMaterialTranslations.es,
+  ...schoolInvoiceReviewTranslations.es,
+  'school.recordings.access.title': "Acceso a las grabaciones",
+  'school.recordings.access.scopeHelp': "Retira o restaura el acceso de un alumno o progenitor en este centro. Se conservan las cuentas, los vínculos con los hijos y los datos de pago.",
+  'school.recordings.access.legacyHelp': "Se aplica al iniciar sesión. Los enlaces compartidos anteriores del hijo que funcionan sin iniciar sesión siguen activos.",
+  'school.recordings.access.email': "Correo electrónico de la persona",
+  'school.recordings.access.revoke': "Retirar acceso",
+  'school.recordings.access.restore': "Restaurar acceso",
+  'school.recordings.access.empty': "No se ha retirado ningún acceso a las grabaciones.",
+  'school.recordings.access.failed': "No se pudieron cambiar o cargar los ajustes de acceso.",
+  'school.recordings.access.invalidEmail': "Introduce una dirección de correo válida.",
+  'school.recordings.access.personNotInSchool': "Esta persona no está vinculada a ningún alumno de este centro.",
+  'school.recordings.access.setupRequired': "Todavía no se ha aplicado la migración de la base de datos de gestión de acceso.",
+  'school.recordings.access.revoked': "Acceso a las grabaciones retirado.",
+  'school.recordings.access.restored': "Acceso a las grabaciones restaurado.",
   'parent.childAlreadyExists': 'Este menor ya está en tu lista. Usa su ficha existente para crear su cuenta.',
   'login.emailOrUsername': 'Correo o usuario del alumno',
   'login.studentUsername': 'Usuario del alumno',
@@ -2090,6 +2107,11 @@ export const es: Record<string, string> = {
   'cal.deleteFailed': 'Error al eliminar la clase',
   'cal.deleteRecurringTitle': 'Eliminar clase recurrente',
   'cal.deleteChoose': 'Elija qué desea eliminar.',
+  "cal.deleteAllRemaining": "Todas las clases restantes de esta serie",
+  "cal.deleteAllRemainingHint": "Elimina las clases futuras planificadas y las canceladas de esta serie. Se conserva el historial de las clases completadas.",
+  "cal.deleteConfirmAll": "¿Eliminar todas las clases restantes planificadas y canceladas de esta serie? Se conserva el historial de las clases completadas.",
+  "cal.deleteGroupHint": "En un grupo, la selección se aplica a todos sus alumnos.",
+  "cal.deleteCancelledOnlyHint": "Solo se eliminan tus clases canceladas o las de tu hijo dentro del alcance elegido.",
   'cal.deleteOnlyThis': 'Solo esta',
   'cal.deleteThisAndFuture': 'Esta y todas las futuras',
   'cal.duplicateTime': 'Error: este horario se solapa con otra clase.',
@@ -5445,6 +5467,9 @@ export const es: Record<string, string> = {
   'school.groups.editTitle': "Editar grupo",
   'school.groups.platform': "Plataforma",
   'school.groups.duration': "Duración (min)",
+  'school.groups.minimumActiveStudents': "Número mínimo de alumnos activos",
+  'school.groups.minimumActiveStudentsHint': "Este grupo y sus contratos se suspenden automáticamente cuando quedan menos alumnos activos.",
+  'school.groups.suspendedMinimum': "Suspendido: menos de {n} alumnos activos en el grupo",
   'school.groups.meetingLink': "Enlace de la clase",
   'school.groups.slots': "Horario semanal",
   'school.groups.addSlot': "Añadir día",
@@ -5693,4 +5718,7 @@ export const es: Record<string, string> = {
   "compare.customChip2": "Reglas de retribución",
   "compare.customChip3": "Enlaces de aceptación para padres",
   "compare.customChip4": "Portales con su marca",
+  'em.schoolJoinSubject': 'Únete a tu clase el {date} a las {time}',
+  'em.schoolJoinHeader': 'Únete a tu clase',
+  'em.schoolJoinBody': 'Tu clase empieza el {date} a las {time}. Usa el enlace de abajo.',
 };

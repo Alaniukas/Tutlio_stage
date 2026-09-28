@@ -42,6 +42,24 @@ export async function shouldSkipParentNotification(
   const email = normalizedSingleRecipient(to);
   if (!key || !email) return false;
 
+  // Comment emails can contain both child and parent recipients. Parent settings
+  // must not mute the child's copy; match parent contacts even before activation.
+  if (emailType === 'session_comment_added') {
+    const orgId = String(payload?.organizationId || payload?.organization_id || '').trim();
+    const { data: parent } = await supabase.from('parent_profiles').select('id')
+      .eq('email', email).limit(1).maybeSingle();
+    if (!parent) {
+      if (!orgId) return false;
+      const results = await Promise.all([
+        supabase.from('students').select('id').eq('organization_id', orgId)
+          .eq('payer_email', email).limit(1).maybeSingle(),
+        supabase.from('students').select('id').eq('organization_id', orgId)
+          .eq('parent_secondary_email', email).limit(1).maybeSingle(),
+      ]);
+      if (!results.some((result) => result.data)) return false;
+    }
+  }
+
   const orgOptOut = await orgParentOptOut(supabase, payload);
   if (orgOptOut.includes(key)) return true;
 
@@ -58,4 +76,18 @@ export async function shouldSkipParentNotification(
     data.disable_lesson_reminders === true,
   );
   return optOut.includes(key);
+}
+
+/** Apply preferences to every recipient of a mixed student/parent comment email. */
+export async function filterParentNotificationRecipients(
+  supabase: SupabaseClient,
+  recipients: string[],
+  emailType: unknown,
+  payload?: Record<string, unknown> | null,
+): Promise<string[]> {
+  const decisions = await Promise.all(recipients.map(async (email) => ({
+    email,
+    skipped: await shouldSkipParentNotification(supabase, email, emailType, payload),
+  })));
+  return decisions.filter((decision) => !decision.skipped).map((decision) => decision.email);
 }

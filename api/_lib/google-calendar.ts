@@ -410,8 +410,10 @@ export async function syncSessionToGoogle(sessionId: string, userId: string): Pr
   }
 }
 
-// Delete session from Google Calendar
-export async function deleteSessionFromGoogle(sessionId: string, userId: string): Promise<void> {
+// A known event id lets the caller delete from Google after its database
+// transaction committed, even though the session row has already been removed.
+export async function deleteSessionFromGoogle(sessionId: string, userId: string, knownEventId?: string | null): Promise<void> {
+  if (knownEventId !== undefined && !knownEventId) return;
   try {
     const { data: profile } = await supabase
       .from('profiles')
@@ -428,18 +430,24 @@ export async function deleteSessionFromGoogle(sessionId: string, userId: string)
       return;
     }
 
-    const { data: session } = await supabase
-      .from('sessions')
-      .select('google_calendar_event_id')
-      .eq('id', sessionId)
-      .single();
-
-    if (session?.google_calendar_event_id) {
-      await deleteGoogleEvent(accessToken, session.google_calendar_event_id);
-      await supabase
+    let eventId = knownEventId;
+    if (eventId === undefined) {
+      const { data: session } = await supabase
         .from('sessions')
-        .update({ google_calendar_event_id: null })
-        .eq('id', sessionId);
+        .select('google_calendar_event_id')
+        .eq('id', sessionId)
+        .single();
+      eventId = session?.google_calendar_event_id;
+    }
+
+    if (eventId) {
+      await deleteGoogleEvent(accessToken, eventId);
+      if (knownEventId === undefined) {
+        await supabase
+          .from('sessions')
+          .update({ google_calendar_event_id: null })
+          .eq('id', sessionId);
+      }
     }
   } catch (err) {
     console.error('Error deleting session from Google:', err);

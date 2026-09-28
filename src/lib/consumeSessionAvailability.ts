@@ -59,66 +59,6 @@ function remainingSegments(
   });
 }
 
-function removeRowFromState(rows: AvailabilityRow[], id: string): void {
-  const idx = rows.findIndex((r) => r.id === id);
-  if (idx >= 0) rows.splice(idx, 1);
-}
-
-function updateRowInState(rows: AvailabilityRow[], id: string, patch: Partial<AvailabilityRow>): void {
-  const idx = rows.findIndex((r) => r.id === id);
-  if (idx >= 0) rows[idx] = { ...rows[idx], ...patch };
-}
-
-async function applySegmentsToOneTimeRow(
-  supabase: SupabaseClient,
-  row: AvailabilityRow,
-  segments: Array<{ start: string; end: string }>,
-  rows: AvailabilityRow[],
-): Promise<void> {
-  if (segments.length === 0) {
-    const { error } = await supabase.from('availability').delete().eq('id', row.id);
-    if (error) throw error;
-    removeRowFromState(rows, row.id);
-    return;
-  }
-  if (segments.length === 1) {
-    const { error } = await supabase
-      .from('availability')
-      .update({ start_time: segments[0].start, end_time: segments[0].end })
-      .eq('id', row.id);
-    if (error) throw error;
-    updateRowInState(rows, row.id, { start_time: segments[0].start, end_time: segments[0].end });
-    return;
-  }
-  const { error: updateErr } = await supabase
-    .from('availability')
-    .update({ start_time: segments[0].start, end_time: segments[0].end })
-    .eq('id', row.id);
-  if (updateErr) throw updateErr;
-  updateRowInState(rows, row.id, { start_time: segments[0].start, end_time: segments[0].end });
-  const { data: inserted, error: insertErr } = await supabase.from('availability').insert({
-    tutor_id: row.tutor_id,
-    specific_date: row.specific_date,
-    start_time: segments[1].start,
-    end_time: segments[1].end,
-    is_recurring: false,
-    subject_ids: row.subject_ids ?? [],
-    meeting_link: row.meeting_link,
-    public_bookable: row.public_bookable,
-  }).select('id').single();
-  if (insertErr) throw insertErr;
-  if (inserted?.id) {
-    rows.push({
-      ...row,
-      id: inserted.id as string,
-      specific_date: row.specific_date,
-      start_time: segments[1].start,
-      end_time: segments[1].end,
-      is_recurring: false,
-    });
-  }
-}
-
 async function insertSpecificDateSegments(
   supabase: SupabaseClient,
   row: AvailabilityRow,
@@ -184,24 +124,21 @@ async function consumeSessionSlotAvailabilityOnRows(
 
   for (const row of rows) {
     if (row.tutor_id !== params.tutorId) continue;
-    const applies = row.is_recurring
-      ? recurringAvailabilityAppliesOnDate(row, specificDate, dayOfWeek)
-      : row.specific_date === specificDate;
-    if (!applies) continue;
+    // The lesson masks booked time in calendar and booking views. Keeping the
+    // source row lets deletion/cancellation reveal it with all original settings.
+    if (!row.is_recurring) continue;
+    if (!recurringAvailabilityAppliesOnDate(row, specificDate, dayOfWeek)) continue;
     if (!rangesOverlap(row.start_time, row.end_time, startTime, endTime)) continue;
 
     const segments = remainingSegments(row.start_time, row.end_time, startTime, endTime);
-    if (row.is_recurring) {
-      await insertSpecificDateSegments(supabase, row, specificDate, segments, rows);
-    } else {
-      await applySegmentsToOneTimeRow(supabase, row, segments, rows);
-    }
+    await insertSpecificDateSegments(supabase, row, specificDate, segments, rows);
   }
 }
 
 /**
- * Shortens overlapping availability when a lesson is booked inside free time.
- * One-time rows are trimmed in place; recurring rules get date-specific remainder rows.
+ * Keeps original availability when a lesson is booked inside free time.
+ * Recurring rules retain their date-specific remainder rows. One-time rows are
+ * masked by active lessons instead of being shortened or deleted.
  */
 export async function consumeSessionSlotAvailability(
   supabase: SupabaseClient,
@@ -242,10 +179,10 @@ export async function consumeAvailabilityForCreatedSessions(
     sessionsByDate.set(specificDate, sameDate);
   }
 
-  // Different dates never mutate the same one-time availability row. Process a
+  // Different dates never create the same one-time remainder row. Process a
   // few dates concurrently so a school-year series does not wait on 30-40
   // sequential database round trips. Sessions on the same date remain ordered
-  // and share state, preserving the slot-splitting behaviour.
+  // and share state, preventing duplicate remainder rows.
   const dateGroups = [...sessionsByDate.entries()];
   const workerCount = Math.min(6, dateGroups.length);
   let nextGroupIndex = 0;

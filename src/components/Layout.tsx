@@ -83,6 +83,7 @@ export default function Layout({ children }: LayoutProps) {
       { href: '/calendar', label: t('nav.calendar'), icon: Calendar },
       { href: '/groups', label: t('companyNav.groups'), icon: Users, feature: 'school_class_groups' as const },
       { href: '/recordings', label: t('companyNav.recordings'), icon: Video, feature: 'school_lesson_recordings' as const, schoolOnly: true },
+      { href: '/consultations', label: t('schoolConsult.title'), icon: Calendar, feature: 'school_family_portal' as const, schoolOnly: true },
       { href: '/students', label: t('nav.students'), icon: Users },
       { href: '/waitlist', label: t('nav.waitlist'), icon: ListOrdered, highlight: true },
       { href: '/messages', label: t('nav.messages'), icon: MessageSquare },

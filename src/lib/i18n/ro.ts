@@ -5,6 +5,14 @@ import { en } from './en.js';
  * Review scope and release limits: docs/ROMANIAN_LOCALIZATION_REVIEW.md.
  */
 export const roOverrides: Record<string, string> = {
+  "cal.deleteAllRemaining": "Toate lecțiile rămase din această serie",
+  "cal.deleteAllRemainingHint": "Șterge lecțiile viitoare programate și anulate din această serie. Istoricul lecțiilor finalizate se păstrează.",
+  "cal.deleteConfirmAll": "Ștergi toate lecțiile programate și anulate rămase din această serie? Istoricul lecțiilor finalizate se păstrează.",
+  "cal.deleteGroupHint": "Pentru o grupă, selecția se aplică tuturor elevilor.",
+  "cal.deleteCancelledOnlyHint": "Se șterg doar lecțiile anulate ale tale sau ale copilului tău din selecția făcută.",
+  "em.schoolJoinSubject": "Intră la lecție pe {date}, la {time}",
+  "em.schoolJoinHeader": "Intră la lecție",
+  "em.schoolJoinBody": "Lecția ta începe pe {date}, la {time}. Folosește linkul de mai jos pentru a intra.",
   'compSess.markAttended': 'Elevul a participat',
   'att.confirmedManually': 'Prezență confirmată',
   'att.unconfirmed': 'Prezență neconfirmată',

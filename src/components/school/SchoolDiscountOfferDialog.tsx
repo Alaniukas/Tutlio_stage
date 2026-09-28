@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { BadgePercent, ExternalLink, Loader2, MailCheck } from 'lucide-react';
 import { authHeaders } from '@/lib/apiHelpers';
+import { useTranslation } from '@/lib/i18n';
+import { schoolDiscountText } from '@/lib/i18n/schoolDiscountCopy';
 import { Button } from '@/components/ui/button';
 import { DateInput } from '@/components/ui/date-input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -30,6 +32,7 @@ type Props = {
   students: SchoolMonthlyInvoiceStudentOption[];
   initialStudentId?: string;
   contractId?: string;
+  contractAccepted?: boolean;
   lockStudent?: boolean;
   onSaved: (message: string, type: 'success' | 'error') => void;
 };
@@ -58,9 +61,11 @@ export default function SchoolDiscountOfferDialog({
   students,
   initialStudentId,
   contractId,
+  contractAccepted = true,
   lockStudent = false,
   onSaved,
 }: Props) {
+  const { locale } = useTranslation();
   const [studentId, setStudentId] = useState(initialStudentId || students[0]?.id || '');
   const [activities, setActivities] = useState<ActivityOption[]>([]);
   const [agreements, setAgreements] = useState<AgreementHistory[]>([]);
@@ -73,6 +78,7 @@ export default function SchoolDiscountOfferDialog({
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [baseAccepted, setBaseAccepted] = useState(contractAccepted);
 
   const selectedActivity = activities.find((option) => optionKey(option) === activityKey);
   const selectedStudent = students.find((student) => student.id === studentId);
@@ -82,6 +88,9 @@ export default function SchoolDiscountOfferDialog({
     let cancelled = false;
     setOptionsLoading(true);
     setError('');
+    setActivities([]);
+    setAgreements([]);
+    setBaseAccepted(contractAccepted);
     void (async () => {
       try {
         const response = await fetch('/api/school-discount-offer', {
@@ -94,6 +103,7 @@ export default function SchoolDiscountOfferDialog({
         if (cancelled) return;
         const next = (json.activities || []) as ActivityOption[];
         setActivities(next);
+        setBaseAccepted(typeof json.contractAccepted === 'boolean' ? json.contractAccepted : contractAccepted);
         setAgreements((json.agreements || []) as AgreementHistory[]);
         setActivityKey(next[0] ? optionKey(next[0]) : '');
       } catch (cause) {
@@ -103,7 +113,7 @@ export default function SchoolDiscountOfferDialog({
       }
     })();
     return () => { cancelled = true; };
-  }, [open, organizationId, studentId, contractId]);
+  }, [open, organizationId, studentId, contractId, contractAccepted]);
 
   useEffect(() => {
     if (open) setStudentId(initialStudentId || students[0]?.id || '');
@@ -135,7 +145,9 @@ export default function SchoolDiscountOfferDialog({
       if (!response.ok) throw new Error(json.error || 'Nepavyko išsiųsti nuolaidos pasiūlymo.');
       onSaved(
         json.emailSent
-          ? `Nuolaidos pasiūlymas ${json.agreementNumber} išsiųstas ${json.emailTo}. Nuolaida įsigalios tėvams patvirtinus.`
+          ? (json.contractAccepted ?? baseAccepted)
+            ? `Nuolaidos pasiūlymas ${json.agreementNumber} išsiųstas ${json.emailTo}. Nuolaida įsigalios tėvams patvirtinus.`
+            : schoolDiscountText(locale, 'offerSentTogether', { agreementNumber: json.agreementNumber, emailTo: json.emailTo })
           : `Pasiūlymas ${json.agreementNumber} išsaugotas, bet laiško išsiųsti nepavyko.`,
         json.emailSent ? 'success' : 'error',
       );
@@ -156,7 +168,7 @@ export default function SchoolDiscountOfferDialog({
           <DialogTitle className="flex items-center gap-2 text-xl">
             <BadgePercent className="h-5 w-5 text-emerald-700" /> Sukurti nuolaidos priedą
           </DialogTitle>
-          <p className="text-sm text-slate-500">Tėvams bus išsiųstas patvirtinimo laiškas. Nuolaida sąskaitoms bus taikoma tik paspaudus „Sutinku“.</p>
+          <p className="text-sm text-slate-500">{schoolDiscountText(locale, baseAccepted ? 'offerSignedIntro' : 'offerUnsignedIntro')}</p>
         </DialogHeader>
 
         <div className="grid gap-4 py-3 sm:grid-cols-2">
@@ -212,7 +224,7 @@ export default function SchoolDiscountOfferDialog({
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
           <div className="flex items-start gap-2">
             <MailCheck className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>Paspaudus „Išsaugoti ir siųsti“ nuolaida dar nebus aktyvi. Tėvams patvirtinus, sistema automatiškai sukurs priedą prie pasirašytos užsiėmimų sutarties.</p>
+            <p>{schoolDiscountText(locale, 'discountBothRequired')}</p>
           </div>
         </div>
         {!!agreements.length && (
@@ -253,7 +265,7 @@ export default function SchoolDiscountOfferDialog({
           <Button variant="outline" disabled={saving} onClick={() => onOpenChange(false)}>Atšaukti</Button>
           <Button className="gap-2 bg-emerald-700 hover:bg-emerald-800" disabled={saving || optionsLoading || !studentId || !selectedActivity || !discountValue || !validFrom || !validUntil} onClick={() => void submit()}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <MailCheck className="h-4 w-4" />}
-            Išsaugoti ir siųsti
+            {baseAccepted ? 'Išsaugoti ir siųsti' : schoolDiscountText(locale, 'offerSendTogether')}
           </Button>
         </div>
       </DialogContent>
