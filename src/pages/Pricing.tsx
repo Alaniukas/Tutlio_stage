@@ -240,7 +240,7 @@ export default function Pricing() {
         </section>
       </main>
 
-      <LandingFooter />
+      <LandingFooter audience={pricingAudience} />
       <EnterpriseContactModal open={enterpriseOpen} onOpenChange={setEnterpriseOpen} />
     </div>
   );

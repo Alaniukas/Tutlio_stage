@@ -5,22 +5,27 @@ import { buildLocalizedPath, localizedPagePath, useTranslation } from '@/lib/i18
 import { LOCALE_FORMAT_TAGS } from '@/lib/i18n/locales';
 import { localeAvailabilityParams } from '@/lib/i18n/localeAvailability';
 import Reveal from '../Reveal';
+import type { LandingAudience } from './audience';
 
 /**
- * Same five questions the bot renderer already serves as FAQPage JSON-LD
- * (api/page-render.ts). Keep this list in sync with LANDING_FAQ_KEYS there.
+ * Keep both sets aligned with the visible FAQ and FAQPage JSON-LD in
+ * api/page-render.ts.
  */
-const FAQ_KEYS = ['whatIs', 'whoFor', 'waitlist', 'freeTrial', 'languages'] as const;
+const SOLO_FAQ_KEYS = ['whatIs', 'whoFor', 'waitlist', 'freeTrial', 'languages'] as const;
+const AGENCY_FAQ_KEYS = ['whatIs', 'team', 'customization', 'pricing', 'demo'] as const;
 
 /** Bump whenever an answer above changes — shown as the freshness signal. */
 const FAQ_LAST_UPDATED = '2026-09-01';
 
-export default function FaqSection() {
+export default function FaqSection({ audience }: { audience: LandingAudience }) {
   const { t, locale } = useTranslation();
-  const [open, setOpen] = useState<string | null>(FAQ_KEYS[0]);
+  const [open, setOpen] = useState<string | null>('whatIs');
+  const dedicatedAgencyFaq = audience === 'biz' && (locale === 'lt' || locale === 'en' || locale === 'pl');
+  const faqKeys: readonly string[] = dedicatedAgencyFaq ? AGENCY_FAQ_KEYS : SOLO_FAQ_KEYS;
+  const faqPrefix = dedicatedAgencyFaq ? 'landing.agencyFaq' : 'landing.faq';
   const languageParams = localeAvailabilityParams(locale);
 
-  const lastUpdated = new Date(`${FAQ_LAST_UPDATED}T12:00:00`).toLocaleDateString(LOCALE_FORMAT_TAGS[locale], {
+  const lastUpdated = new Date(`${dedicatedAgencyFaq ? '2026-09-29' : FAQ_LAST_UPDATED}T12:00:00`).toLocaleDateString(LOCALE_FORMAT_TAGS[locale], {
     year: 'numeric',
     month: 'long',
   });
@@ -33,16 +38,13 @@ export default function FaqSection() {
             <h2 className="font-display text-2xl font-bold tracking-[-1px] text-zinc-900 sm:text-3xl sm:tracking-[-1.5px] lg:text-5xl">
               {t('landing.faqTitle')}
             </h2>
-            <p className="max-w-[600px] text-[15px] leading-[1.7] text-zinc-600 sm:text-base">
-              {t('landing.v2.faqSub')}
-            </p>
             <p className="text-sm text-zinc-500">{lastUpdated}</p>
           </div>
         </Reveal>
 
         <div className="flex w-full flex-col gap-6 sm:gap-8">
           <div className="space-y-3 sm:space-y-4">
-            {FAQ_KEYS.map((key) => {
+            {faqKeys.map((key) => {
               const isOpen = open === key;
               return (
                 <div key={key} className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
@@ -55,7 +57,7 @@ export default function FaqSection() {
                       className="flex w-full items-center justify-between p-4 text-left sm:p-5 lg:p-6"
                     >
                       <span className="pr-3 text-sm font-semibold text-zinc-900 sm:pr-4 sm:text-base">
-                        {t(`landing.faq.${key}Q`)}
+                        {t(`${faqPrefix}.${key}Q`)}
                       </span>
                       <span className="shrink-0 rounded-full bg-zinc-900 p-1 text-white">
                         {isOpen
@@ -70,7 +72,7 @@ export default function FaqSection() {
                       className="border-t border-zinc-100 px-4 pb-4 pt-3 sm:px-5 sm:pb-5 sm:pt-4 lg:px-6 lg:pb-6"
                     >
                       <p className="text-sm leading-relaxed text-zinc-600 sm:text-base">
-                        {t(`landing.faq.${key}A`, key === 'languages' ? languageParams : undefined)}
+                        {t(`${faqPrefix}.${key}A`, key === 'languages' ? languageParams : undefined)}
                       </p>
                     </div>
                   )}

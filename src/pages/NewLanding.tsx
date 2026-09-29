@@ -35,11 +35,10 @@ export default function NewLanding({ audience }: { audience: LandingAudience }) 
     storeMarketingAudience(marketingAudience);
   }, [marketingAudience]);
 
-  // The solo page has its own search metadata; the homepage keeps the
-  // default document meta applied by LocaleProvider.
+  // Route changes between the two SPA landings must update document metadata
+  // even when the locale stays the same.
   useEffect(() => {
-    if (audience !== 'solo') return;
-    const meta = getSeoMeta(locale, 'forTutors');
+    const meta = getSeoMeta(locale, audience === 'solo' ? 'forTutors' : 'landing');
     applyPageDocumentMeta(meta.title, meta.description);
   }, [audience, locale]);
 
@@ -58,10 +57,10 @@ export default function NewLanding({ audience }: { audience: LandingAudience }) 
         <VideoSection audience={audience} />
         {/* These fictional English fallbacks are not approved Thai customer claims. */}
         {locale !== 'th' && <><CaseStudySection /><Testimonials /></>}
-        <FaqSection />
+        <FaqSection key={audience} audience={audience} />
         <FinalCta audience={audience} />
       </main>
-      <LandingFooter />
+      <LandingFooter audience={marketingAudience} />
     </div>
   );
 }

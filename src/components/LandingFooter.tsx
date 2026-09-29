@@ -4,7 +4,7 @@ import type { Locale } from '@/lib/i18n';
 import { usePlatform } from '@/contexts/PlatformContext';
 import { FEATURE_PAGES } from '@/lib/featurePages';
 import { COMPARE_HUB_PATH } from '@/lib/comparisonPages';
-import { landingPathForAudience } from '@/lib/marketingAudience';
+import { landingPathForAudience, readStoredMarketingAudience, type MarketingAudience } from '@/lib/marketingAudience';
 
 const HEADING_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500';
 const LIST_CLASS = 'mt-4 space-y-2.5 sm:mt-5 sm:space-y-3';
@@ -21,13 +21,15 @@ function schoolsLandingHref(locale: Locale): string {
   return `/schools${localeSegment}`;
 }
 
-export default function LandingFooter() {
+export default function LandingFooter({ audience }: { audience?: MarketingAudience }) {
   const { t, locale } = useTranslation();
   const { platform } = usePlatform();
 
   const isSchools = platform === 'schools' || platform === 'teachers';
+  const selectedAudience = audience ?? readStoredMarketingAudience() ?? 'agency';
   const brandName = isSchools ? t('nav.brandSchools') : 'Tutlio';
   const lp = (path: string) => buildLocalizedPath(path, locale);
+  const pricingHref = isSchools ? lp('/pricing') : `${lp('/pricing')}?audience=${selectedAudience}`;
 
   const columns: { title: string; links: { to: string; label: string; external?: boolean }[] }[] = [
     {
@@ -39,7 +41,7 @@ export default function LandingFooter() {
         { to: lp(FEATURE_PAGES.waitlist.path), label: t('landing.feature.waitlist') },
         { to: lp(FEATURE_PAGES.payments.path), label: t('landing.feature.payments') },
         { to: lp(FEATURE_PAGES.reminders.path), label: t('landing.feature.reminders') },
-        { to: lp('/pricing'), label: t('common.prices') },
+        { to: pricingHref, label: t('common.prices') },
       ],
     },
     {

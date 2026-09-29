@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePlatform } from '@/contexts/PlatformContext';
 import NewLanding from '@/pages/NewLanding';
+import SchoolsLanding from '@/pages/SchoolsLanding';
 import type { LandingAudience } from '@/components/landing/v2/audience';
 import { supabase } from '@/lib/supabase';
 import { isStandalonePwa, loginPathForLastPortal } from '@/lib/pwaPortal';
@@ -10,8 +11,8 @@ import { isStandalonePwa, loginPathForLastPortal } from '@/lib/pwaPortal';
 const ORG_ADMIN_LOGIN_STORAGE_KEY = 'tutlio_org_admin_login';
 
 /**
- * `/` is the agency/school (B2B) landing, `/for-tutors` (audience="solo") the
- * solo-tutor landing. The `/schools` platform always shows the business pitch.
+ * `/` is the agency landing, `/for-tutors` (audience="solo") the solo-tutor
+ * landing, and `/schools` the school landing.
  */
 export default function Landing({ audience = 'biz' }: { audience?: LandingAudience }) {
   const { platform } = usePlatform();
@@ -45,7 +46,7 @@ export default function Landing({ audience = 'biz' }: { audience?: LandingAudien
   if (platform === 'schools' || platform === 'teachers') {
     // `/schools` is the public marketing surface. Keep `/school` reserved for
     // the authenticated admin portal, which is routed separately in App.tsx.
-    return <NewLanding audience="biz" />;
+    return <SchoolsLanding />;
   }
 
   return <NewLanding audience={audience} />;

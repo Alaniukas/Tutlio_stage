@@ -100,12 +100,12 @@ const SEO_META: Record<Locale, Record<CoreSeoPage, SeoMeta>> = withEnglishLocale
     forTutors: { title: 'برنامج للمدرّسين الخصوصيين المستقلين | Tutlio', description: 'تقويم، حجز ذاتي للطلاب، مدفوعات Stripe، فواتير، تذكيرات بالبريد الإلكتروني وصفحة مدرّس عامة - كل ما يحتاجه المدرّس المستقل في تطبيق واحد. 7 أيام مجانًا.' },
   },
   lt: {
-    landing: { title: 'Korepetitorių ir mokyklų valdymo programa | Tutlio', description: 'Valdykite pamokas, mokinius, tvarkaraštį, laukimo eilę, mokėjimus, sąskaitas ir priminimus vienoje korepetitorių platformoje.' },
+    landing: { title: 'Korepetitorių agentūrų valdymo programa | Tutlio', description: 'Valdykite korepetitorių komandą, pamokų tvarkaraščius, tėvų paskyras, mokėjimus ir ataskaitas vienoje sistemoje.' },
     pricing: { title: 'Korepetitorių platformos kainos ir planai | Tutlio', description: 'Peržiūrėkite Tutlio planus korepetitoriams ir mokykloms. Kalendorius, mokėjimai, sąskaitos, priminimai ir mokinių valdymas vienoje vietoje.' },
     forTutors: { title: 'Programa korepetitoriams: kalendorius ir mokėjimai | Tutlio', description: 'Kalendorius, mokinių registracija, Stripe mokėjimai, sąskaitos, priminimai ir vizitinė kortelė - viskas individualiam korepetitoriui vienoje vietoje. 7 dienos nemokamai.' },
   },
   en: {
-    landing: { title: 'Tutoring Management Software for Tutors & Schools | Tutlio', description: 'Manage lessons, students, scheduling, waitlists, payments, invoices, and reminders in one tutoring management platform.' },
+    landing: { title: 'Tutoring Agency Management Software | Tutlio', description: 'Manage tutor schedules, students, parent accounts, payments and reports in one platform for tutoring agencies.' },
     pricing: { title: 'Tutoring Software Pricing & Plans | Tutlio', description: 'Compare Tutlio plans for private tutors and tutoring schools, with scheduling, payments, invoicing, reminders, and student management included.' },
     forTutors: { title: 'Tutoring Software for Private Tutors | Tutlio', description: 'Calendar, student self-booking, Stripe payments, invoices, email reminders and a public tutor page - everything a solo tutor needs in one app. 7-day free trial.' },
   },
@@ -135,7 +135,7 @@ const SEO_META: Record<Locale, Record<CoreSeoPage, SeoMeta>> = withEnglishLocale
     forTutors: { title: 'Software per tutor privati indipendenti | Tutlio', description: 'Calendario, prenotazioni autonome degli studenti, pagamenti Stripe, fatture, promemoria via e-mail e pagina pubblica del tutor - tutto ciò che serve a un tutor indipendente in un’unica app. 7 giorni gratis.' },
   },
   pl: {
-    landing: { title: 'Program do zarządzania korepetycjami i szkołą | Tutlio', description: 'Zarządzaj lekcjami, uczniami, grafikiem, listą oczekujących, płatnościami, fakturami i przypomnieniami w jednej platformie.' },
+    landing: { title: 'Program do zarządzania agencją korepetycji | Tutlio', description: 'Zarządzaj zespołem korepetytorów, grafikiem lekcji, kontami rodziców, płatnościami i raportami w jednym systemie.' },
     pricing: { title: 'Cennik programu dla korepetytorów i szkół | Tutlio', description: 'Porównaj plany Tutlio dla korepetytorów i szkół: grafik, płatności, faktury, przypomnienia i zarządzanie uczniami.' },
     forTutors: { title: 'Program dla korepetytora: kalendarz i płatności | Tutlio', description: 'Kalendarz, rezerwacje uczniów, płatności Stripe, faktury, przypomnienia e-mail i publiczna wizytówka - wszystko dla korepetytora solo w jednej aplikacji. 7 dni za darmo.' },
   },

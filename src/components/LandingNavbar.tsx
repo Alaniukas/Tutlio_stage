@@ -4,7 +4,7 @@ import { useTranslation, buildLocalizedPath, localizedPagePath, defaultLocaleFor
 import type { Locale } from '@/lib/i18n';
 import LanguageSelector from '@/components/LanguageSelector';
 import { usePlatform } from '@/contexts/PlatformContext';
-import { landingPathForAudience, type MarketingAudience } from '@/lib/marketingAudience';
+import { landingPathForAudience, readStoredMarketingAudience, type MarketingAudience } from '@/lib/marketingAudience';
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 
 interface LandingNavbarProps {
@@ -35,6 +35,7 @@ interface SolutionLinkItem {
   key: string;
   href: string;
   label: string;
+  current: boolean;
   /** Same router basename: client-side navigation is safe. */
   samePlatform: boolean;
 }
@@ -60,9 +61,9 @@ function SolutionLink({
   onNavigate?: () => void;
 }) {
   if (link.samePlatform) {
-    return <Link to={link.href} onClick={onNavigate} className={className}>{link.label}</Link>;
+    return <Link to={link.href} onClick={onNavigate} className={className} aria-current={link.current ? 'page' : undefined}>{link.label}</Link>;
   }
-  return <a href={link.href} onClick={onNavigate} className={className}>{link.label}</a>;
+  return <a href={link.href} onClick={onNavigate} className={className} aria-current={link.current ? 'page' : undefined}>{link.label}</a>;
 }
 
 /** Horizontal space inside the shrunken pill that isn't nav content. */
@@ -94,11 +95,10 @@ export function resolveLandingNavbarExpandedWidth(pillWidth: number, availableWi
   );
 }
 
-export default function LandingNavbar({
-  audience = 'solo',
-}: LandingNavbarProps) {
+export default function LandingNavbar({ audience }: LandingNavbarProps) {
   const { t, locale } = useTranslation();
   const { platform } = usePlatform();
+  const selectedAudience = audience ?? readStoredMarketingAudience() ?? 'agency';
   const [platformOpen, setPlatformOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -147,7 +147,7 @@ export default function LandingNavbar({
       cancelled = true;
       window.removeEventListener('resize', measurePill);
     };
-  }, [measurePill, locale, platform, audience]);
+  }, [measurePill, locale, platform, selectedAudience]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -181,19 +181,23 @@ export default function LandingNavbar({
   const orgAdminLoginHref = buildLocalizedPath('/login', locale);
   const brandName = isSchools ? t('nav.brandSchools') : 'Tutlio';
   const dropdownLabel = t('landing.footerSolutions');
+  const selectedSolution = isSchools ? 'schools' : selectedAudience === 'agency' ? 'agencies' : 'tutors';
+  const selectedSolutionLabel = t(isSchools ? 'nav.forSchools' : selectedAudience === 'agency' ? 'nav.forAgencies' : 'nav.forTutors');
   const solutionLinks: SolutionLinkItem[] = [
-    { key: 'tutors', href: buildLocalizedPath(landingPathForAudience('solo'), locale), label: t('nav.forTutors'), samePlatform: !isSchools },
-    { key: 'agencies', href: buildLocalizedPath(landingPathForAudience('biz'), locale), label: t('nav.forAgencies'), samePlatform: !isSchools },
-    { key: 'schools', href: isSchools ? buildLocalizedPath('/', locale) : schoolsLandingHref(locale), label: t('nav.forSchools'), samePlatform: isSchools },
+    { key: 'tutors', href: buildLocalizedPath(landingPathForAudience('solo'), locale), label: t('nav.forTutors'), samePlatform: !isSchools, current: selectedSolution === 'tutors' },
+    { key: 'agencies', href: buildLocalizedPath(landingPathForAudience('biz'), locale), label: t('nav.forAgencies'), samePlatform: !isSchools, current: selectedSolution === 'agencies' },
+    { key: 'schools', href: isSchools ? buildLocalizedPath('/', locale) : schoolsLandingHref(locale), label: t('nav.forSchools'), samePlatform: isSchools, current: selectedSolution === 'schools' },
   ];
-  const isAgency = audience === 'agency';
-  const pricingHref = `${buildLocalizedPath('/pricing', locale)}?audience=${audience}`;
-  const primaryCtaLabel = t(isAgency ? 'pricing.bookDemo' : 'landing.startFree');
+  const isAgency = selectedAudience === 'agency';
+  const pricingHref = isSchools
+    ? buildLocalizedPath(localizedPagePath('contacts', locale), locale)
+    : `${buildLocalizedPath('/pricing', locale)}?audience=${selectedAudience}`;
+  const primaryCtaLabel = t(isSchools ? 'schoolsLanding.heroCta' : isAgency ? 'pricing.bookDemo' : 'landing.startFree');
 
   const navLinks = [
     { to: buildLocalizedPath(localizedPagePath('about', locale), locale), label: t('nav.aboutUs') },
     { to: buildLocalizedPath('/features', locale), label: t('nav.features') },
-    { to: buildLocalizedPath('/pricing', locale), label: t('common.prices') },
+    { to: isSchools ? buildLocalizedPath('/pricing', locale) : pricingHref, label: t('common.prices') },
     { to: buildLocalizedPath(localizedPagePath('contacts', locale), locale), label: t('common.contacts') },
   ];
 
@@ -240,9 +244,11 @@ export default function LandingNavbar({
               <button
                 type="button"
                 onClick={() => setPlatformOpen(v => !v)}
+                aria-label={`${dropdownLabel}: ${selectedSolutionLabel}`}
+                aria-expanded={platformOpen}
                 className="flex items-center gap-1 text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium whitespace-nowrap"
               >
-                {dropdownLabel}
+                {selectedSolutionLabel}
                 <ChevronDown className={`w-3 h-3 transition-transform ${platformOpen ? 'rotate-180' : ''}`} />
               </button>
               {platformOpen && (
@@ -252,7 +258,7 @@ export default function LandingNavbar({
                       key={link.key}
                       link={link}
                       onNavigate={() => setPlatformOpen(false)}
-                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50 text-gray-700"
+                      className={`block w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${link.current ? 'bg-indigo-50 font-semibold text-indigo-700' : 'text-gray-700'}`}
                     />
                   ))}
                 </div>
@@ -344,7 +350,7 @@ export default function LandingNavbar({
                 key={link.key}
                 link={link}
                 onNavigate={() => setMobileOpen(false)}
-                className="block w-full text-left py-2.5 text-[14px] text-gray-600 hover:text-gray-900 transition-colors"
+                className={`block w-full text-left py-2.5 text-[14px] hover:text-gray-900 transition-colors ${link.current ? 'font-semibold text-indigo-700' : 'text-gray-600'}`}
               />
             ))}
           </div>

@@ -12,7 +12,17 @@ const CHIPS = ['landing.v2.chip1', 'landing.v2.chip2', 'landing.v2.chip3'];
 
 export default function FinalCta({ audience }: { audience: LandingAudience }) {
   const { t, locale } = useTranslation();
+  const isSolo = audience === 'solo';
+  const localizedAgencyCta = locale === 'lt' || locale === 'en' || locale === 'pl';
   const pricingHref = `${buildLocalizedPath('/pricing', locale)}?audience=${marketingAudienceFromLanding(audience)}`;
+  const title = isSolo
+    ? t('landing.ctaTitle')
+    : localizedAgencyCta
+      ? t('landing.agencyCta.title')
+      : `${t('landing.v2.heroTitleBiz')}${t('landing.v2.heroTitleBizHighlight')}`;
+  const description = isSolo
+    ? t('landing.ctaDesc')
+    : t(localizedAgencyCta ? 'landing.agencyCta.desc' : 'landing.v2.heroSubBiz');
 
   return (
     <section className="bg-zinc-50">
@@ -20,16 +30,16 @@ export default function FinalCta({ audience }: { audience: LandingAudience }) {
         <Reveal>
           <div className="mx-auto max-w-3xl rounded-2xl border border-zinc-200 bg-white p-8 text-center shadow-sm sm:p-10 lg:p-12">
             <h2 className="font-display text-2xl font-bold tracking-[-1px] text-zinc-900 sm:text-3xl">
-              {t('landing.ctaTitle')}
+              {title}
             </h2>
-            <p className="mx-auto mt-3 max-w-lg text-base text-zinc-600">{t('landing.ctaDesc')}</p>
+            <p className="mx-auto mt-3 max-w-lg text-base text-zinc-600">{description}</p>
 
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4">
               <Link
                 to={pricingHref}
                 className="w-full rounded-lg bg-zinc-900 px-7 py-3.5 font-semibold text-white transition-colors hover:bg-zinc-800 sm:w-auto sm:px-8"
               >
-                {t('landing.startFree')}
+                {t(isSolo ? 'landing.startFree' : 'landing.v2.heroCtaBiz')}
               </Link>
               <Link
                 to={buildLocalizedPath('/features', locale)}
@@ -39,14 +49,16 @@ export default function FinalCta({ audience }: { audience: LandingAudience }) {
               </Link>
             </div>
 
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
-              {CHIPS.map((key) => (
-                <div key={key} className="flex items-center gap-1.5 text-sm text-zinc-500">
-                  <Check className="h-4 w-4 text-emerald-500" />
-                  <span>{t(key, key === 'landing.v2.chip3' ? { count: UI_RELEASED_LOCALES.length } : undefined)}</span>
-                </div>
-              ))}
-            </div>
+            {isSolo && (
+              <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
+                {CHIPS.map((key) => (
+                  <div key={key} className="flex items-center gap-1.5 text-sm text-zinc-500">
+                    <Check className="h-4 w-4 text-emerald-500" />
+                    <span>{t(key, key === 'landing.v2.chip3' ? { count: UI_RELEASED_LOCALES.length } : undefined)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </Reveal>
       </div>

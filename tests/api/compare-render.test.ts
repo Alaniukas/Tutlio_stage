@@ -72,6 +72,10 @@ describe('landing audience split', () => {
     expect(res.body).not.toContain('/landing/calendar-');
     expect(res.body).toContain('"@type":"SoftwareApplication"');
     expect(res.body).toContain('"@type":"FAQPage"');
+    expect(res.body).toContain(`<summary>${ssrText('en', 'landing.agencyFaq.teamQ')}</summary>`);
+    expect(res.body).toContain(`<h2>${ssrText('en', 'landing.agencyCta.title')}</h2>`);
+    expect(visibleText(res.body)).not.toContain(ssrText('en', 'landing.faq.freeTrialQ'));
+    expect(visibleText(res.body)).not.toContain(ssrText('en', 'landing.ctaTitle'));
     // The solo page is reachable from the footer only.
     expect(res.body).toContain('href="/for-tutors"');
     expect(visibleText(res.body)).not.toMatch(KEY_LEAK);
@@ -94,6 +98,8 @@ describe('landing audience split', () => {
     expect(res.body).toContain('href="/pricing?audience=solo"');
     expect(res.body).toContain('"@type":"SoftwareApplication"');
     expect(res.body).toContain('"@type":"FAQPage"');
+    expect(res.body).toContain(`<summary>${ssrText('en', 'landing.faq.freeTrialQ')}</summary>`);
+    expect(res.body).not.toContain(`<summary>${ssrText('en', 'landing.agencyFaq.teamQ')}</summary>`);
     expect(res.body).toContain('"@id":"https://www.tutlio.com/for-tutors#breadcrumb"');
     expect(res.body).toContain(ssrText('en', 'landing.custom.soloNote'));
     expect(res.body).not.toContain('/landing/calendar-');
@@ -111,6 +117,17 @@ describe('landing audience split', () => {
     await pageRender(mockReq({ page: 'for-tutors', locale: 'pl' }, 'www.tutlio.pl'), pl);
     expect(pl.body).toContain('<link rel="canonical" href="https://www.tutlio.pl/for-tutors" />');
     expect(pl.body).not.toContain('class="footer-langs"');
+  });
+
+  it.each([
+    ['lt', 'www.tutlio.lt'],
+    ['pl', 'www.tutlio.pl'],
+  ])('keeps the %s agency FAQ and final CTA distinct from the solo page', async (locale, host) => {
+    const res = mockRes();
+    await pageRender(mockReq({ page: 'landing', locale }, host), res);
+    expect(res.body).toContain(`<summary>${ssrText(locale as 'lt' | 'pl', 'landing.agencyFaq.teamQ')}</summary>`);
+    expect(res.body).toContain(`<h2>${ssrText(locale as 'lt' | 'pl', 'landing.agencyCta.title')}</h2>`);
+    expect(visibleText(res.body)).not.toContain(ssrText(locale as 'lt' | 'pl', 'landing.faq.freeTrialQ'));
   });
 });
 

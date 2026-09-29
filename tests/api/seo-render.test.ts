@@ -58,6 +58,8 @@ describe('schools-render', () => {
     expect(res.body).toContain('href="https://www.tutlio.pl/schools"');
     expect(res.body).toContain('hreflang="x-default" href="https://www.tutlio.com/schools"');
     expect(res.body).toContain('href="/schools/pricing"');
+    expect(res.body).toContain('<h3>What is Tutlio for schools?</h3>');
+    expect(res.body).toContain('<h3>How does school pricing work?</h3>');
   });
 
   it('serves locale-nested schools pricing canonicals', async () => {
@@ -115,7 +117,7 @@ describe('page-render about/contact canonical slugs', () => {
 
   it('renders the released 36-language list in HTML and FAQ structured data', async () => {
     const res = mockRes();
-    await pageRender(mockReq({ page: 'landing', locale: 'en' }, 'www.tutlio.com'), res);
+    await pageRender(mockReq({ page: 'for-tutors', locale: 'en' }, 'www.tutlio.com'), res);
 
     const answer = ssrText('en', 'landing.faq.languagesA', localeAvailabilityParams('en'));
     expect(answer).toContain('36 languages');

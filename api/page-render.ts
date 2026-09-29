@@ -87,6 +87,11 @@ const LANDING_FEATURE_CARDS: { key: string; isNew?: boolean }[] = [
 const CUSTOM_EXAMPLE_KEYS = ['ex1', 'ex2', 'ex3', 'ex4'] as const;
 
 const LANDING_FAQ_KEYS = ['whatIs', 'whoFor', 'waitlist', 'freeTrial', 'languages'];
+const AGENCY_FAQ_KEYS = ['whatIs', 'team', 'customization', 'pricing', 'demo'];
+
+function hasDedicatedAgencyFaq(locale: Locale): boolean {
+  return locale === 'en' || locale === 'lt' || locale === 'pl';
+}
 
 type LandingAudience = 'solo' | 'biz';
 
@@ -103,6 +108,9 @@ function landingSharedSections(locale: Locale, domain: DomainKey, audience: Land
   const contactsPath = buildPath(localizedPagePath('contacts', locale), locale, domain);
   const tx = (key: string, params?: Record<string, string | number>) => esc(t(locale, key, params));
   const audienceQuery = audience === 'biz' ? 'agency' : 'solo';
+  const dedicatedAgencyFaq = audience === 'biz' && hasDedicatedAgencyFaq(locale);
+  const faqKeys = dedicatedAgencyFaq ? AGENCY_FAQ_KEYS : LANDING_FAQ_KEYS;
+  const faqPrefix = dedicatedAgencyFaq ? 'landing.agencyFaq' : 'landing.faq';
 
   const oldToolsHtml = LANDING_OLD_TOOL_KEYS.map((k) => `<li>${tx(`landing.v2.app.${k}`)}</li>`).join('');
   const oldPillsHtml = ['oldPill1', 'oldPill2', 'oldPill3'].map((k) => `<li>${tx(`landing.v2.${k}`)}</li>`).join('');
@@ -155,27 +163,37 @@ function landingSharedSections(locale: Locale, domain: DomainKey, audience: Land
 
   const faqHtml = `<div class="section">
   <h2>${tx('landing.faqTitle')}</h2>
-  <p>${tx('landing.v2.faqSub')}</p>
 </div>
-<div class="faq">${LANDING_FAQ_KEYS
+<div class="faq">${faqKeys
     .map(
       (f) => `<details>
-    <summary>${tx(`landing.faq.${f}Q`)}</summary>
-    <p>${tx(`landing.faq.${f}A`, f === 'languages' ? languageParams : undefined)}</p>
+    <summary>${tx(`${faqPrefix}.${f}Q`)}</summary>
+    <p>${tx(`${faqPrefix}.${f}A`, f === 'languages' ? languageParams : undefined)}</p>
   </details>`,
     )
     .join('\n')}
   <p style="margin-top:24px"><a href="${featuresPath}">${tx('landing.v2.exploreAll')}</a> &middot; <a href="${contactsPath}">${tx('common.contacts')}</a></p>
 </div>`;
 
-  const chipsHtml = ['chip1', 'chip2', 'chip3']
-    .map((k) => `<li>${tx(`landing.v2.${k}`, k === 'chip3' ? { count: languageParams.count } : undefined)}</li>`)
-    .join('');
+  const chipsHtml = audience === 'solo'
+    ? `<ul class="chips">${['chip1', 'chip2', 'chip3']
+      .map((k) => `<li>${tx(`landing.v2.${k}`, k === 'chip3' ? { count: languageParams.count } : undefined)}</li>`)
+      .join('')}</ul>`
+    : '';
+  const finalTitle = audience === 'solo'
+    ? tx('landing.ctaTitle')
+    : dedicatedAgencyFaq
+      ? tx('landing.agencyCta.title')
+      : `${tx('landing.v2.heroTitleBiz')}${tx('landing.v2.heroTitleBizHighlight')}`;
+  const finalDesc = audience === 'solo'
+    ? tx('landing.ctaDesc')
+    : tx(dedicatedAgencyFaq ? 'landing.agencyCta.desc' : 'landing.v2.heroSubBiz');
+  const finalCta = tx(audience === 'solo' ? 'landing.startFree' : 'landing.v2.heroCtaBiz');
   const finalHtml = `<div class="section" style="text-align:center;padding:60px 24px">
-  <h2>${tx('landing.ctaTitle')}</h2>
-  <p>${tx('landing.ctaDesc')}</p>
-  <p><a href="${pricingPath}?audience=${audienceQuery}" class="btn">${tx('landing.startFree')}</a> <a href="${featuresPath}" class="btn btn-secondary">${tx('landing.v2.ctaSecondary')}</a></p>
-  <ul class="chips">${chipsHtml}</ul>
+  <h2>${finalTitle}</h2>
+  <p>${finalDesc}</p>
+  <p><a href="${pricingPath}?audience=${audienceQuery}" class="btn">${finalCta}</a> <a href="${featuresPath}" class="btn btn-secondary">${tx('landing.v2.ctaSecondary')}</a></p>
+  ${chipsHtml}
 </div>`;
 
   return { compareHtml, pillarsHtml, featuresHtml, faqHtml, finalHtml };
@@ -481,9 +499,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let jsonLd: string;
   if (page === 'landing' || page === 'for-tutors') {
     const languageParams = localeAvailabilityParams(locale);
-    const landingFaq = LANDING_FAQ_KEYS.map((f) => ({
-      question: t(locale, `landing.faq.${f}Q`),
-      answer: t(locale, `landing.faq.${f}A`, f === 'languages' ? languageParams : undefined),
+    const dedicatedAgencyFaq = page === 'landing' && hasDedicatedAgencyFaq(locale);
+    const faqPrefix = dedicatedAgencyFaq ? 'landing.agencyFaq' : 'landing.faq';
+    const landingFaq = (dedicatedAgencyFaq ? AGENCY_FAQ_KEYS : LANDING_FAQ_KEYS).map((f) => ({
+      question: t(locale, `${faqPrefix}.${f}Q`),
+      answer: t(locale, `${faqPrefix}.${f}A`, f === 'languages' ? languageParams : undefined),
     }));
     // The homepage carries the site-wide Organization/WebSite graph; both
     // landings describe the same product, so both carry SoftwareApplication.

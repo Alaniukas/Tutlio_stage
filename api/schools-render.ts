@@ -70,6 +70,13 @@ function renderSchoolsLanding(locale: Locale, domain: DomainKey): string {
     )
     .join('\n');
 
+  const faqHtml = SCHOOLS_FAQ_KEYS
+    .map((key) => `<div class="card">
+    <h3>${esc(t(locale, `schoolsLanding.faq.${key}Q`))}</h3>
+    <p>${esc(t(locale, `schoolsLanding.faq.${key}A`))}</p>
+  </div>`)
+    .join('\n');
+
   return `
 <div class="hero">
   <h1>${esc(t(locale, 'schoolsLanding.heroTitle'))}${esc(t(locale, 'schoolsLanding.heroTitleHighlight'))}</h1>
@@ -90,6 +97,10 @@ function renderSchoolsLanding(locale: Locale, domain: DomainKey): string {
   <h2>${esc(t(locale, 'schoolsLanding.highlightsTitle'))}${esc(t(locale, 'schoolsLanding.highlightsHighlight'))}</h2>
   <p>${esc(t(locale, 'schoolsLanding.highlightsSubtitle'))}</p>
   <div class="grid">${highlightsHtml}</div>
+</div>
+<div class="section">
+  <h2>${esc(t(locale, 'landing.faqTitle'))}</h2>
+  <div class="grid">${faqHtml}</div>
 </div>
 <div class="section" style="text-align:center;padding:60px 24px">
   <h2>${esc(t(locale, 'schoolsLanding.ctaBannerTitle'))}</h2>
