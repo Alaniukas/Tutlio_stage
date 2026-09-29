@@ -360,41 +360,43 @@ export default function CompanyDashboard() {
       // Req 8 (flag-gated): students whose trial lesson is done but no real
       // (non-trial) package has been sent yet — needs a follow-up.
       if (trialFollowupAlertEnabled) {
-        const { data: trialSessions } = await supabase
-          .from('sessions')
-          .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, meeting_link, tutor_joined_at, student_joined_at, tutor_comment, student:students(full_name), subjects!inner(is_trial)')
-          .in('tutor_id', tutorIds)
-          .eq('status', 'completed')
-          .eq('subjects.is_trial', true)
-          .gte('start_time', past30.toISOString())
-          .order('start_time', { ascending: false })
-          .limit(200);
-
-        const trialStudentIds = [...new Set((trialSessions || []).map((s: any) => s.student_id).filter(Boolean))] as string[];
-        const studentsWithPackage = new Set<string>();
-        if (trialStudentIds.length > 0) {
-          const { data: pkgs } = await supabase
-            .from('lesson_packages')
-            .select('student_id, subjects(is_trial)')
-            .in('student_id', trialStudentIds);
-          for (const p of pkgs || []) {
-            const subj = Array.isArray((p as any).subjects) ? (p as any).subjects[0] : (p as any).subjects;
-            // A real (non-trial) package means the follow-up is done.
-            if (subj?.is_trial !== true) studentsWithPackage.add((p as any).student_id);
+        try {
+          // The server checks all tutor rows for the same child and excludes
+          // annulled packages. Pooled package rows are hidden by direct-read RLS.
+          const response = await fetch('/api/proklase-student-packages?summary=trial-followup', {
+            headers: await authHeaders(),
+          });
+          const summary = await response.json().catch(() => ({})) as { studentIds?: unknown; error?: unknown };
+          if (!response.ok || !Array.isArray(summary.studentIds)) {
+            throw new Error(typeof summary.error === 'string' ? summary.error : 'Unable to load trial follow-up status');
           }
-        }
+          const needsPackageIds = new Set<string>(summary.studentIds.filter((value): value is string => typeof value === 'string'));
+          if (needsPackageIds.size > 0) {
+            const { data: trialSessions } = await supabase
+              .from('sessions')
+              .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, meeting_link, tutor_joined_at, student_joined_at, tutor_comment, student:students(full_name), subjects!inner(is_trial)')
+              .in('tutor_id', tutorIds)
+              .eq('status', 'completed')
+              .eq('subjects.is_trial', true)
+              .gte('start_time', past30.toISOString())
+              .order('start_time', { ascending: false })
+              .limit(200);
 
-        const seenTrialStudents = new Set<string>();
-        for (const s of trialSessions || []) {
-          const sid = (s as any).student_id;
-          if (!sid || seenTrialStudents.has(sid) || studentsWithPackage.has(sid)) continue;
-          seenTrialStudents.add(sid);
-          const normalized: OrgSessionRow = {
-            ...(s as any),
-            tutor_name: tutorMap.get((s as any).tutor_id)?.full_name || t('common.tutor'),
-            student: Array.isArray((s as any).student) ? (s as any).student[0] ?? null : (s as any).student ?? null,
-          };
-          addAttentionReason(normalized, 'trial_no_package');
+            const seenTrialStudents = new Set<string>();
+            for (const s of trialSessions || []) {
+              const sid = (s as any).student_id;
+              if (!sid || seenTrialStudents.has(sid) || !needsPackageIds.has(sid)) continue;
+              seenTrialStudents.add(sid);
+              const normalized: OrgSessionRow = {
+                ...(s as any),
+                tutor_name: tutorMap.get((s as any).tutor_id)?.full_name || t('common.tutor'),
+                student: Array.isArray((s as any).student) ? (s as any).student[0] ?? null : (s as any).student ?? null,
+              };
+              addAttentionReason(normalized, 'trial_no_package');
+            }
+          }
+        } catch (error) {
+          console.error('Error loading Pro Klasė trial package follow-up status:', error);
         }
       }
 

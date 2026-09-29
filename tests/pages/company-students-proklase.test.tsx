@@ -360,6 +360,10 @@ describe('CompanyStudents Pro Klasė list', () => {
     const secondChild = screen.getByTestId('additional-child-2');
     fireEvent.click(within(secondChild).getByRole('button', { name: 'Ieškoti pagal laisvą laiką' }));
     fireEvent.click(within(screen.getByTestId('proklase-availability-search')).getByText('Pasirinkti laisvą laiką'));
+    const notifyStudent = screen.getByRole('checkbox', { name: 'Informuoti mokinį el. paštu' }) as HTMLInputElement;
+    expect(notifyStudent.checked).toBe(true);
+    fireEvent.click(notifyStudent);
+    expect(notifyStudent.checked).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Pridėti', exact: true }));
 
     await waitFor(() => expect(testState.sendEmailDetailed).toHaveBeenCalledTimes(2));
@@ -383,6 +387,7 @@ describe('CompanyStudents Pro Klasė list', () => {
       createStudentId: 'created-child-2',
       createTutorId: 'tutor-second-child',
       createSubjectId: 'math-second-child',
+      suppressClientBookingEmails: true,
     }));
   });
 

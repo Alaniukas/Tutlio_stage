@@ -108,6 +108,7 @@ export default function FindLessonBookDialog({
   const [topic, setTopic] = useState('');
   const [meetingLink, setMeetingLink] = useState('');
   const [isPaid, setIsPaid] = useState(false);
+  const [notifyStudent, setNotifyStudent] = useState(true);
   const [saving, setSaving] = useState(false);
   const [createdIntervals, setCreatedIntervals] = useState<Array<{ start: number; end: number }>>([]);
   const [successMessage, setSuccessMessage] = useState('');
@@ -126,6 +127,7 @@ export default function FindLessonBookDialog({
   const [recurringEndDate, setRecurringEndDate] = useState('');
 
   useEffect(() => {
+    setNotifyStudent(true);
     if (!pick) {
       setSubject(null);
       setSessionCount(null);
@@ -361,6 +363,7 @@ export default function FindLessonBookDialog({
         individualPricing: bookingPricing.individualPricingRows,
         dynamicPricingRules: bookingPricing.dynamicPricingRules,
         suppressSuccessAlert: true,
+        suppressClientBookingEmails: isProKlaseBooking && !notifyStudent,
       });
 
       let trialPaymentSent = false;
@@ -370,6 +373,7 @@ export default function FindLessonBookDialog({
         !isPaid &&
         derivedTrialPrice > 0 &&
         pkFeat('trial_creation_payment_email') &&
+        (!isProKlaseBooking || notifyStudent) &&
         result.createdSessionIds.length > 0
       ) {
         try {
@@ -597,6 +601,17 @@ export default function FindLessonBookDialog({
                 </div>
               </button>
             </div>
+            {isProKlaseBooking && (
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notifyStudent}
+                  onChange={(e) => setNotifyStudent(e.target.checked)}
+                  className="rounded border-gray-300 text-indigo-600"
+                />
+                {t('compSch.notifyStudentEmail')}
+              </label>
+            )}
           </div>
   );
 

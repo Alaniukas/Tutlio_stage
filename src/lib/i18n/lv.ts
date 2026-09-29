@@ -3307,6 +3307,7 @@ export const lv: Record<string, string> = {
   'compSch.seriesSummaryHtml': "No {fromDate} šīs sērijas turpmāko nodarbību laiks: {weekday}, {timeRange}.",
   'compSch.show': 'Rādīt',
   'compSch.showMore': '+{total} vēl',
+  'compSch.notifyStudentEmail': 'Informēt skolēnu pa e-pastu',
   'compSch.showToStudent': 'Rādīt skolēnam',
   'compSch.specifyReasonPlaceholder': 'Norādiet iemeslu...',
   'compSch.start': 'Sākums',

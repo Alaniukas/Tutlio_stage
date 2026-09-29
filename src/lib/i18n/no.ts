@@ -1597,6 +1597,7 @@ export const no: Record<string, string> = {
   'compSch.seriesSummaryHtml': "Fra {fromDate} holdes kommende timer i denne serien: {weekday}, {timeRange}.",
   'compSch.show': 'Vis',
   'compSch.showMore': '+{total} til',
+  'compSch.notifyStudentEmail': 'Varsle eleven på e-post',
   'compSch.showToStudent': 'Vis for elev',
   'compSch.specifyReasonPlaceholder': 'Oppgi årsak...',
   'compSch.start': 'Start',

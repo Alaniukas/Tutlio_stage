@@ -47,6 +47,7 @@ import {
 } from '@/lib/statsDateRange';
 import { schoolCalendarInstant } from '@/lib/schoolTime';
 import { fetchAllRows } from '@/lib/fetchAllRows';
+import { authHeaders } from '@/lib/apiHelpers';
 import {
   schoolActivitySummary,
   type SchoolActivitySummary,
@@ -175,8 +176,9 @@ export default function CompanyStats() {
     if (proKlase) {
       const { data: packages } = await supabase
         .from('lesson_packages')
-        .select('tutor_id, total_price, price_per_lesson, total_lessons, paid, payment_status, paid_at')
+        .select('tutor_id, total_price, price_per_lesson, total_lessons, pool_organization_id, paid, payment_status, paid_at')
         .in('tutor_id', tutorIds)
+        .is('pool_organization_id', null)
         .eq('paid', true)
         .gte('paid_at', startIso)
         .lte('paid_at', endIso)
@@ -187,6 +189,18 @@ export default function CompanyStats() {
           tutorId,
           (packagesByTutor.get(tutorId) || 0) + packageClientPaidEur(pkg as any, proKlaseFeeProfile),
         );
+      }
+      if (showFinanceTotals) {
+        const query = new URLSearchParams({ summary: 'finance', start: startIso, end: endIso });
+        const response = await fetch(`/api/proklase-student-packages?${query}`, { headers: await authHeaders() });
+        const summary = await response.json() as { totalsByTutor?: Record<string, number>; error?: string };
+        if (!response.ok || !summary.totalsByTutor || typeof summary.totalsByTutor !== 'object') {
+          throw new Error(summary.error || 'Unable to load pooled package totals');
+        }
+        for (const [tutorId, total] of Object.entries(summary.totalsByTutor)) {
+          if (!Number.isFinite(total)) throw new Error('Invalid pooled package total');
+          packagesByTutor.set(tutorId, (packagesByTutor.get(tutorId) || 0) + total);
+        }
       }
     }
 

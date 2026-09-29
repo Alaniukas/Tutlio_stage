@@ -108,4 +108,44 @@ describe('POST /api/cancel-pending-package', () => {
     expect(mocks.retrieve).not.toHaveBeenCalled();
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
+
+  it.each(['paid', 'cancelled'])('does not reveal a %s package owned by another organization', async (status) => {
+    mocks.pkg.pool_organization_id = 'org-2';
+    mocks.pkg.payment_status = status;
+    mocks.pkg.paid = status === 'paid';
+    expect(await cancelPackage()).toMatchObject({ statusCode: 403 });
+    expect(mocks.retrieve).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('cancels the package when its Checkout Session already expired', async () => {
+    mocks.retrieve.mockResolvedValue({
+      session: { status: 'expired', payment_status: 'unpaid' },
+      stripeAccount: 'acct_org',
+    });
+    expect(await cancelPackage()).toMatchObject({ statusCode: 200, body: { success: true } });
+    expect(mocks.expire).not.toHaveBeenCalled();
+    expect(mocks.rpc).toHaveBeenCalledOnce();
+  });
+
+  it('cancels the package without a Checkout Session', async () => {
+    mocks.pkg.stripe_checkout_session_id = null;
+    mocks.resolveAccount.mockRejectedValue(new Error('No connected Stripe account'));
+    expect(await cancelPackage()).toMatchObject({ statusCode: 200, body: { success: true } });
+    expect(mocks.resolveAccount).not.toHaveBeenCalled();
+    expect(mocks.retrieve).not.toHaveBeenCalled();
+    expect(mocks.expire).not.toHaveBeenCalled();
+    expect(mocks.rpc).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the package pending when the open Checkout Session cannot be expired', async () => {
+    mocks.expire.mockRejectedValue(new Error('Stripe unavailable'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(await cancelPackage()).toMatchObject({ statusCode: 500 });
+      expect(mocks.rpc).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
 });

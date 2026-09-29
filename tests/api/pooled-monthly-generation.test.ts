@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ensurePooledMonthlyRenewal, generatePooledMonthlyPackage } from '../../api/_lib/pooledMonthlyGeneration';
 
-const mocks = vi.hoisted(() => ({ preview: vi.fn(), email: vi.fn() }));
+const mocks = vi.hoisted(() => ({ preview: vi.fn(), email: vi.fn(), pricing: vi.fn() }));
 vi.mock('../../api/_lib/monthlyStudentPackage.js', () => ({ previewMonthlyStudentPackage: mocks.preview }));
 vi.mock('../../api/_lib/sendPendingPackageEmail.js', () => ({
   pooledPackageEmailIdempotencyKey: (packageId: string) => `pooled-package/${packageId}/offer`,
   sendPendingPackagePaymentEmail: mocks.email,
 }));
 vi.mock('../../api/_lib/marketMoney.js', () => ({ isProKlaseOrg: (id: string) => id === 'pro' }));
-vi.mock('../../src/lib/orgStudentPricing.js', () => ({ fetchOrgStudentDynamicPrice: async () => ({ price: 27, lessonsPerWeek: 2, studentIds: ['s1', 's2'] }) }));
+vi.mock('../../src/lib/orgStudentPricing.js', () => ({ fetchOrgStudentDynamicPrice: mocks.pricing }));
 
 function database() {
   const tables: Record<string, any[]> = {
@@ -52,6 +52,7 @@ const args = { organizationId: 'pro', studentId: 's1', periodStart: '2026-10-01'
 
 describe('pooled monthly service renewal and retries', () => {
   beforeEach(() => {
+    mocks.pricing.mockReset().mockResolvedValue({ price: 27, lessonsPerWeek: 2, studentIds: ['s1', 's2'] });
     mocks.preview.mockReset().mockResolvedValue({ studentIds: ['s1', 's2'], items: [{ subjectId: 'math', totalLessons: 7 }],
       pricePerLesson: 27, periodStart: '2026-10-01', periodEnd: '2026-10-31', previewToken: 'calendar', sessionIds: ['actual'] });
     mocks.email.mockReset().mockResolvedValue({ ok: true });
@@ -64,6 +65,38 @@ describe('pooled monthly service renewal and retries', () => {
     expect(tables.recurring_monthly_package_plans.filter(row => row.active)).toEqual([
       expect.objectContaining({ id: 'p1', next_generation_date: '2026-11-01', auto_from_schedule: true, subject_id: null }),
     ]);
+  });
+
+  it('keeps an override-only package sale successful when no automatic renewal can be scheduled', async () => {
+    const { db, rpc, tables } = database();
+    mocks.pricing.mockResolvedValue({ price: null, lessonsPerWeek: null, studentIds: ['s1', 's2'] });
+    mocks.preview.mockResolvedValue({ studentIds: ['s1', 's2'], items: [
+      { subjectId: 'math', totalLessons: 7, pricePerLesson: 25, itemTotalPrice: 175 },
+    ], pricePerLesson: null, totalPrice: 175, periodStart: '2026-10-01', periodEnd: '2026-10-31',
+    previewToken: 'calendar', sessionIds: ['actual'] });
+
+    await expect(generatePooledMonthlyPackage(db, args)).resolves.toEqual(expect.objectContaining({
+      packageId: 'pooled-2026-10-31', emailSent: true,
+    }));
+    expect(rpc).toHaveBeenCalledWith('create_org_student_package', expect.objectContaining({
+      p_unit_price: null,
+      p_items: [expect.objectContaining({ pricePerLesson: 25 })],
+    }));
+    expect(mocks.email).toHaveBeenCalledTimes(1);
+    expect(tables.recurring_monthly_package_plans).toHaveLength(0);
+  });
+
+  it('advances an existing renewal after an override-only sale even when frequency is missing', async () => {
+    const { db, tables } = database();
+    tables.recurring_monthly_package_plans.push({ id: 'renewal', student_id: 's1', organization_id: 'pro',
+      grade: 5, lessons_per_week: 2, active: true, next_generation_date: '2026-10-01' });
+    mocks.pricing.mockResolvedValue({ price: null, lessonsPerWeek: null, studentIds: ['s1', 's2'] });
+
+    await ensurePooledMonthlyRenewal(db, { ...args, studentIds: ['s1', 's2'] });
+    expect(tables.recurring_monthly_package_plans[0]).toEqual(expect.objectContaining({
+      grade: 5, lessons_per_week: 2, next_generation_date: '2026-11-01',
+      last_generated_period_start: '2026-10-01',
+    }));
   });
 
   it('a retry reuses the package and renewal, without another creation or email', async () => {

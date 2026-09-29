@@ -2668,6 +2668,7 @@ export const de: Record<string, string> = {
   'compSch.selectedDay': 'Ausgewählter Tag',
   'compSch.seriesSummaryHtml': "Ab {fromDate} finden die künftigen Stunden dieser Serie am {weekday} von {timeRange} statt.",
   'compSch.showMore': '+{total} weitere',
+  'compSch.notifyStudentEmail': 'Schüler per E-Mail benachrichtigen',
   'compSch.showToStudent': 'Dem Schüler anzeigen',
   'compSch.specifyReasonPlaceholder': 'Grund angeben…',
   'compSch.statusActive': 'Aktiv',

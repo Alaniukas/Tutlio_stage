@@ -1159,6 +1159,7 @@ export const pl: Record<string, string> = {
   'compSch.seriesSummaryHtml': "Od {fromDate} przyszłe lekcje w tej serii będą odbywać się: {weekday}, {timeRange}.",
   'compSch.show': 'Pokaż',
   'compSch.showMore': '+{total} więcej',
+  'compSch.notifyStudentEmail': 'Powiadom ucznia e-mailem',
   'compSch.showToStudent': 'Pokaż uczniowi',
   'compSch.specifyReasonPlaceholder': 'Podaj powód...',
   'compSch.start': 'Rozpoczęcie',

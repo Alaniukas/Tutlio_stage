@@ -1243,6 +1243,7 @@ export const en: Record<string, string> = {
   'compSch.seriesSummaryHtml': "From {fromDate}, future lessons in this series move to {weekday}, {timeRange}.",
   'compSch.show': 'Show',
   'compSch.showMore': '+{total} more',
+  'compSch.notifyStudentEmail': 'Notify student by email',
   'compSch.showToStudent': 'Show to student',
   'compSch.specifyReasonPlaceholder': 'Specify the reason...',
   'compSch.start': 'Start',

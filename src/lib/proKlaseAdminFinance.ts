@@ -28,6 +28,7 @@ export type ProKlasePaidPackage = {
   total_price: number | null;
   price_per_lesson?: number | null;
   total_lessons?: number | null;
+  pool_organization_id?: string | null;
   paid?: boolean | null;
   payment_status?: string | null;
 };
@@ -67,6 +68,12 @@ export function packageClientPaidEur(
   feeProfile?: OrgFeeProfile | null,
 ): number {
   if (pkg.paid === true || pkg.payment_status === 'paid' || pkg.payment_status === 'confirmed') {
+    // Pooled packages store the sum of their quoted item prices as the base.
+    // Their parent per-lesson price is null when subjects have different rates.
+    if (pkg.pool_organization_id) {
+      const base = Number(pkg.total_price);
+      return Number.isFinite(base) && base > 0 ? Math.round(base * 100) / 100 : 0;
+    }
     const lessons = Number(pkg.total_lessons);
     const perLesson = Number(pkg.price_per_lesson);
     if (Number.isFinite(lessons) && lessons > 0 && Number.isFinite(perLesson) && perLesson > 0) {

@@ -1304,6 +1304,7 @@ export const lt: Record<string, string> = {
   'compSch.seriesSummaryHtml': "Nuo {fromDate} būsimos šios serijos pamokos vyks: {weekday}, {timeRange}.",
   'compSch.show': 'Rodyti',
   'compSch.showMore': '+{total} daugiau',
+  'compSch.notifyStudentEmail': 'Informuoti mokinį el. paštu',
   'compSch.showToStudent': 'Rodyti mokiniui',
   'compSch.specifyReasonPlaceholder': 'Nurodykite priežastį...',
   'compSch.start': 'Pradžia',

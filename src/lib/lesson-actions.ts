@@ -16,6 +16,8 @@ export type CancelSessionParams = {
     /** Tutor cancel: when true, freed slot becomes bookable availability for other students */
     leaveFreeTime?: boolean;
     cancellationReasonCode?: string;
+    /** Pro Klasė admin: omit student and parent cancellation emails for this action. */
+    notifyStudent?: boolean;
 };
 
 export type ReleaseSessionSlotParams = {

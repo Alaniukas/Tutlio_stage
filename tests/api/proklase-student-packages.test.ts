@@ -4,6 +4,7 @@ import { PRO_KLASE_ORG_ID } from '../../src/lib/marketMoney';
 const mocks = vi.hoisted(() => ({
   requireAccess: vi.fn(),
   tables: {} as Record<string, any[]>,
+  from: vi.fn(),
 }));
 
 vi.mock('../../api/_lib/orgAdminAccess.js', () => ({
@@ -11,20 +12,7 @@ vi.mock('../../api/_lib/orgAdminAccess.js', () => ({
 }));
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
-    from: (table: string) => {
-      const chain: any = new Proxy({}, {
-        get: (_target, prop) => {
-          if (prop === 'then') {
-            return (resolve: (value: unknown) => void) => resolve({
-              data: mocks.tables[table] || [],
-              error: null,
-            });
-          }
-          return () => chain;
-        },
-      });
-      return chain;
-    },
+    from: mocks.from,
   }),
 }));
 
@@ -51,7 +39,7 @@ describe('GET /api/proklase-student-packages', () => {
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role';
     mocks.requireAccess.mockResolvedValue({
       ok: true,
-      access: { organizationId: PRO_KLASE_ORG_ID, userId: 'admin-1' },
+      access: { organizationId: PRO_KLASE_ORG_ID, userId: 'admin-1', role: 'owner', permissions: {} },
     });
     mocks.tables = {
       profiles: [{ id: 'tutor-1' }, { id: 'tutor-2' }],
@@ -76,6 +64,32 @@ describe('GET /api/proklase-student-packages', () => {
         lesson_package_items: [],
       }],
     };
+    mocks.from.mockImplementation((table: string) => {
+      const filters: Array<(row: any) => boolean> = [];
+      let slice: [number, number] | null = null;
+      const chain: any = new Proxy({}, {
+        get: (_target, prop) => {
+          if (prop === 'then') {
+            return (resolve: (value: unknown) => void) => {
+              let data = (mocks.tables[table] || []).filter(row => filters.every(filter => filter(row)));
+              if (slice) data = data.slice(slice[0], slice[1] + 1);
+              return resolve({ data, error: null });
+            };
+          }
+          return (key: any, value: any) => {
+            if (table === 'lesson_packages') {
+              if (prop === 'eq') filters.push(row => row[key] === value);
+              if (prop === 'in') filters.push(row => value.includes(row[key]));
+              if (prop === 'gte') filters.push(row => row[key] >= value);
+              if (prop === 'lte') filters.push(row => row[key] <= value);
+              if (prop === 'range') slice = [key, value];
+            }
+            return chain;
+          };
+        },
+      });
+      return chain;
+    });
   });
 
   it('does not flag an identity whose pooled package email was sent on another tutor row', async () => {
@@ -98,5 +112,57 @@ describe('GET /api/proklase-student-packages', () => {
     const { res, result } = response();
     await handler({ method: 'GET', query: { studentId: 'other-student' }, headers: {} } as any, res);
     expect(result.statusCode).toBe(404);
+  });
+
+  it('returns only this organization’s paid pooled base totals and reads every page', async () => {
+    const { default: handler } = await import('../../api/proklase-student-packages');
+    mocks.tables.lesson_packages = [
+      ...Array.from({ length: 1000 }, (_, index) => ({
+        id: `pool-${index}`, tutor_id: 'tutor-1', total_price: 1.25,
+        pool_organization_id: PRO_KLASE_ORG_ID, paid: true, paid_at: '2026-09-15T00:00:00.000Z',
+        lesson_package_items: [{ total_price: 1.25, subjects: { tutor_id: 'tutor-1' } }],
+      })),
+      { id: 'last-page', tutor_id: 'tutor-2', total_price: 249, pool_organization_id: PRO_KLASE_ORG_ID,
+        paid: true, paid_at: '2026-09-16T00:00:00.000Z', lesson_package_items: [
+          { total_price: 124, subjects: { tutor_id: 'tutor-1' } },
+          { total_price: 125, subjects: { tutor_id: 'tutor-2' } },
+        ] },
+      { id: 'foreign', tutor_id: 'tutor-1', total_price: 999, pool_organization_id: 'another-org',
+        paid: true, paid_at: '2026-09-16T00:00:00.000Z' },
+      { id: 'pending', tutor_id: 'tutor-1', total_price: 999, pool_organization_id: PRO_KLASE_ORG_ID,
+        paid: false, paid_at: '2026-09-16T00:00:00.000Z' },
+      { id: 'later', tutor_id: 'tutor-1', total_price: 999, pool_organization_id: PRO_KLASE_ORG_ID,
+        paid: true, paid_at: '2026-10-01T00:00:00.000Z' },
+    ];
+    const { res, result } = response();
+    await handler({ method: 'GET', query: { summary: 'finance', start: '2026-09-01T00:00:00.000Z',
+      end: '2026-09-30T23:59:59.999Z' }, headers: {} } as any, res);
+    expect(mocks.requireAccess).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'stats.view');
+    expect(result).toEqual({ statusCode: 200, body: { totalsByTutor: { 'tutor-1': 1374, 'tutor-2': 125 } } });
+  });
+
+  it('rejects a pooled package whose subject items do not reconcile to its sale total', async () => {
+    const { default: handler } = await import('../../api/proklase-student-packages');
+    mocks.tables.lesson_packages = [{ id: 'broken', total_price: 249, pool_organization_id: PRO_KLASE_ORG_ID,
+      paid: true, paid_at: '2026-09-16T00:00:00.000Z', lesson_package_items: [
+        { total_price: 124, subjects: { tutor_id: 'tutor-1' } },
+        { total_price: 124, subjects: { tutor_id: 'tutor-2' } },
+      ] }];
+    const { res, result } = response();
+    await handler({ method: 'GET', query: { summary: 'finance', start: '2026-09-01T00:00:00.000Z',
+      end: '2026-09-30T23:59:59.999Z' }, headers: {} } as any, res);
+    expect(result.statusCode).toBe(500);
+    expect(result.body.totalsByTutor).toBeUndefined();
+  });
+
+  it('requires finance totals permission before querying pooled finance rows', async () => {
+    const { default: handler } = await import('../../api/proklase-student-packages');
+    mocks.requireAccess.mockResolvedValue({ ok: true, access: { organizationId: PRO_KLASE_ORG_ID,
+      userId: 'stats-only', role: 'custom', permissions: { 'stats.view': true } } });
+    const { res, result } = response();
+    await handler({ method: 'GET', query: { summary: 'finance', start: '2026-09-01T00:00:00.000Z',
+      end: '2026-09-30T23:59:59.999Z' }, headers: {} } as any, res);
+    expect(result.statusCode).toBe(403);
+    expect(mocks.from).not.toHaveBeenCalledWith('lesson_packages');
   });
 });

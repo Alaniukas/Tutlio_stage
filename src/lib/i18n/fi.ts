@@ -1763,6 +1763,7 @@ export const fi: Record<string, string> = {
   'compSch.seriesSummaryHtml': "Alkaen {fromDate} tämän sarjan tulevat oppitunnit pidetään: {weekday}, {timeRange}.",
   'compSch.show': 'Näytä',
   'compSch.showMore': '+{total} lisää',
+  'compSch.notifyStudentEmail': 'Ilmoita oppilaalle sähköpostitse',
   'compSch.showToStudent': 'Näytä oppilaalle',
   'compSch.specifyReasonPlaceholder': 'Kirjoita syy...',
   'compSch.start': 'Alku',

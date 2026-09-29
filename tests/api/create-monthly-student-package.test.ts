@@ -31,8 +31,10 @@ beforeEach(() => {
   mocks.auth.mockResolvedValue({ userId: 'admin' });
   mocks.access.mockResolvedValue({ organizationId: 'org', role: 'owner', permissions: {} });
   mocks.isPro.mockReturnValue(true);
-  mocks.preview.mockResolvedValue({ items: [{ subjectId: 'lt', totalLessons: 4 }, { subjectId: 'math', totalLessons: 5 }],
-    totalLessons: 9, pricePerLesson: 27, totalPrice: 243, studentIds: ['student','sibling-row'], sessionIds: ['session'],
+  mocks.preview.mockResolvedValue({ items: [
+    { subjectId: 'lt', subjectName: 'Lietuvių kalba', totalLessons: 4, pricePerLesson: 31, itemTotalPrice: 124 },
+    { subjectId: 'math', subjectName: 'Matematika', totalLessons: 5, pricePerLesson: 25, itemTotalPrice: 125 },
+  ], totalLessons: 9, pricePerLesson: 31, totalPrice: 249, studentIds: ['student','sibling-row'], sessionIds: ['session'],
     periodStart: '2026-09-01', periodEnd: '2026-09-30', previewToken: 'snapshot' });
   mocks.rpc.mockResolvedValue({ data: 'package', error: null });
   mocks.deliver.mockResolvedValue({ status: 'sent' });
@@ -75,10 +77,18 @@ describe('consolidated monthly endpoint', () => {
     expect((await call({ studentId: 'student', preview: false, previewToken: 'old' })).status).toHaveBeenCalledWith(409);
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
-  it('uses the authoritative common rate and trusted server URL for delivery', async () => {
-    const body = { studentId: 'student', preview: false, previewToken: 'snapshot', pricePerLesson: 1, totalLessons: 999 };
+  it('uses authoritative per-subject rates and the trusted server URL for delivery', async () => {
+    const body = { studentId: 'student', preview: false, previewToken: 'snapshot', pricePerLesson: 1, totalLessons: 999,
+      items: [{ subjectId: 'math', totalLessons: 999, pricePerLesson: 1 }] };
     await call(body);
-    expect(mocks.rpc).toHaveBeenCalledWith('create_org_student_package', expect.objectContaining({ p_unit_price: 27, p_student_ids: ['student','sibling-row'] }));
+    expect(mocks.rpc).toHaveBeenCalledWith('create_org_student_package', expect.objectContaining({
+      p_unit_price: 31,
+      p_student_ids: ['student','sibling-row'],
+      p_items: [
+        expect.objectContaining({ subjectId: 'lt', totalLessons: 4, pricePerLesson: 31 }),
+        expect.objectContaining({ subjectId: 'math', totalLessons: 5, pricePerLesson: 25 }),
+      ],
+    }));
     expect(mocks.deliver).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       appOrigin: 'https://tutlio.lt', sendEmailOrigin: 'https://tutlio.lt', packageId: 'package',
     }));

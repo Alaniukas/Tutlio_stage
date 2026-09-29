@@ -47,6 +47,8 @@ export type AssignStudentFreeSlotDialogProps = {
   onMeetingLinkChange: (value: string) => void;
   isPaid: boolean;
   onIsPaidChange: (value: boolean) => void;
+  notifyStudent?: boolean;
+  onNotifyStudentChange?: (value: boolean) => void;
   showSuccess?: boolean;
   showCrossTutorHint?: boolean;
   showTrialButton?: boolean;
@@ -86,6 +88,8 @@ export default function AssignStudentFreeSlotDialog({
   onMeetingLinkChange,
   isPaid,
   onIsPaidChange,
+  notifyStudent = true,
+  onNotifyStudentChange,
   showSuccess = false,
   showCrossTutorHint = false,
   showTrialButton = false,
@@ -240,6 +244,17 @@ export default function AssignStudentFreeSlotDialog({
               </div>
             </button>
           </div>
+          {onNotifyStudentChange && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={notifyStudent}
+                onChange={(e) => onNotifyStudentChange(e.target.checked)}
+                className="rounded border-gray-300 text-indigo-600"
+              />
+              {t('compSch.notifyStudentEmail')}
+            </label>
+          )}
         </div>
 
         <DialogFooter className="!flex !flex-col w-full min-w-0 gap-2 sm:!flex-col sm:space-x-0">
@@ -251,7 +266,7 @@ export default function AssignStudentFreeSlotDialog({
               variant="outline"
               className="h-auto min-h-10 w-full whitespace-normal rounded-xl border-amber-300 py-2 text-center text-amber-700 hover:bg-amber-50"
               onClick={() => onReserveTrial?.()}
-              disabled={trialSending || saving || slots.length === 0 || !studentId}
+              disabled={trialSending || saving || slots.length === 0 || !studentId || !notifyStudent}
             >
               {trialSending ? (
                 <>

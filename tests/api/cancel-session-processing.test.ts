@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import cancelSession from '../../api/cancel-session.js';
 import resolvePenalty from '../../api/cancel-penalty-resolution.js';
 import type { VercelRequest, VercelResponse } from '../../api/types';
+import { PRO_KLASE_QA_ORG_ID } from '../../src/lib/marketMoney';
 
 const state = vi.hoisted(() => ({
   session: {} as Record<string, unknown>,
@@ -10,9 +11,14 @@ const state = vi.hoisted(() => ({
   item: {} as Record<string, unknown>,
   writes: [] as Array<{ table: string; values: Record<string, unknown> }>,
   failFinalize: false,
+  auth: { isInternal: true, userId: undefined as string | undefined },
+  adminOrg: null as string | null,
+  tutor: {} as Record<string, unknown>,
 }));
 
-vi.mock('../../api/_lib/auth.js', () => ({ verifyRequestAuth: async () => ({ isInternal: true }) }));
+vi.mock('../../api/_lib/auth.js', () => ({ verifyRequestAuth: async () => state.auth }));
+vi.mock('../../api/_lib/orgAdminAccess.js', () => ({ getOrgAdminAccessByUserId: async () => state.adminOrg
+  ? { organizationId: state.adminOrg, role: 'owner', permissions: {} } : null }));
 vi.mock('../../api/_lib/google-calendar.js', () => ({ deleteSessionFromGoogle: async () => {}, syncSessionToGoogle: async () => {} }));
 vi.mock('../../api/_lib/release-session-availability.js', () => ({ releaseSessionSlotAsAvailability: async () => ({ created: false }) }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
@@ -21,7 +27,7 @@ vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
     let mutation: Record<string, unknown> | null = null;
     const source = () => table === 'sessions' ? [state.session]
       : table === 'students' ? [state.student]
-      : table === 'profiles' ? [{ id: 'tutor', email: null, organization_id: null }]
+      : table === 'profiles' ? [state.tutor]
       : table === 'lesson_packages' ? [state.pkg]
       : table === 'lesson_package_items' ? [state.item]
       : [];
@@ -90,6 +96,9 @@ beforeEach(() => {
   state.item = { id: 'item', package_id: 'package', subject_id: 'maths', available_lessons: 2, reserved_lessons: 1 };
   state.writes = [];
   state.failFinalize = false;
+  state.auth = { isInternal: true, userId: undefined };
+  state.adminOrg = null;
+  state.tutor = { id: 'tutor', email: null, organization_id: null };
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -97,6 +106,24 @@ beforeEach(() => {
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('cancellation processing guard', () => {
+  it.each([true, false])('honors Pro Klasė admin notifyStudent=%s while keeping tutor email', async (notifyStudent) => {
+    state.auth = { isInternal: false, userId: 'admin' };
+    state.adminOrg = PRO_KLASE_QA_ORG_ID;
+    state.tutor = { id: 'tutor', email: 'teacher@example.com', organization_id: PRO_KLASE_QA_ORG_ID };
+    state.student.email = 'student@example.com';
+    state.student.payer_email = 'parent@example.com';
+    const { res, capture } = response();
+    await cancelSession(request({ cancelledBy: 'tutor', notifyStudent }), res);
+    expect(capture.status).toBe(200);
+    const recipients = vi.mocked(fetch).mock.calls
+      .filter(([url]) => String(url).includes('/api/send-email'))
+      .map(([, options]) => JSON.parse(String(options?.body)).to).sort();
+    expect(recipients).toEqual(notifyStudent
+      ? ['parent@example.com', 'student@example.com', 'teacher@example.com']
+      : ['teacher@example.com']);
+    expect(state.session.status).toBe('cancelled');
+  });
+
   it('blocks family cleanup while notifications are pending and clears the guard after a free cancellation finishes', async () => {
     state.student.email = 'ada@example.com';
     const emailStarted = deferred<void>();

@@ -183,9 +183,9 @@ import {
 } from '@/lib/orgStudentIdentity';
 
 type MonthlyStudentPackagePreview = {
-  items: Array<{ subjectId: string; subjectName: string; totalLessons: number }>;
+  items: Array<{ subjectId: string; subjectName: string; totalLessons: number; pricePerLesson: number; itemTotalPrice: number }>;
   totalLessons: number;
-  pricePerLesson: number;
+  pricePerLesson: number | null;
   totalPrice: number;
   lessonsPerWeek: number;
   periodStart: string;
@@ -487,6 +487,7 @@ export default function CompanyStudents() {
   const [addStudentFindTutorChildId, setAddStudentFindTutorChildId] = useState<string | null>(null);
   const [addStudentPickedLessons, setAddStudentPickedLessons] = useState<AddStudentLessonPick[]>([]);
   const [addStudentFirstLessonIsTrial, setAddStudentFirstLessonIsTrial] = useState(false);
+  const [addStudentNotifyEmail, setAddStudentNotifyEmail] = useState(true);
   const [saving, setSaving] = useState(false);
   const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [baseUrl, setBaseUrl] = useState('');
@@ -534,6 +535,7 @@ export default function CompanyStudents() {
   const canAddAdditionalChildren = provisionAccounts || (proKlaseAdminUi && !parentFirstInvite);
   const canAddSiblingToExisting = !isSchoolView && (proKlaseAdminUi || supportsManagedFamilyAccounts);
   const [siblingDraft, setSiblingDraft] = useState<MvAdditionalChildDraft | null>(null);
+  const [siblingNotifyEmail, setSiblingNotifyEmail] = useState(true);
   const [savingSibling, setSavingSibling] = useState(false);
   const searchChildIndex = mvAdditionalChildren.findIndex((child) => child.id === addStudentFindTutorChildId);
   const searchContextLabel = siblingDraft && addStudentFindTutorChildId === siblingDraft.id
@@ -1923,6 +1925,7 @@ export default function CompanyStudents() {
       setNewPriceCancellationHours(24);
       setNewPriceCancellationFeePercent(0);
       await reloadStudentIndividualPricing();
+      setMonthlyPreviewRefresh((value) => value + 1);
     } catch (e: any) {
       setToastMessage({ message: e?.message || t('compStu.individualPriceSaveFailed'), type: 'error' });
     } finally {
@@ -1940,6 +1943,7 @@ export default function CompanyStudents() {
       if (error) throw error;
       setToastMessage({ message: t('compStu.individualPriceDeleted'), type: 'success' });
       await reloadStudentIndividualPricing();
+      setMonthlyPreviewRefresh((value) => value + 1);
     } catch (e: any) {
       setToastMessage({ message: e?.message || t('compStu.individualPriceDeleteFailed'), type: 'error' });
     } finally {
@@ -2416,12 +2420,13 @@ export default function CompanyStudents() {
             individualPricing: individualPricingRows,
             dynamicPricingRules,
             suppressSuccessAlert: true,
-            suppressClientBookingEmails: proKlaseAdminUi,
+            suppressClientBookingEmails: proKlaseAdminUi && !addStudentNotifyEmail,
           });
           if (
             item.isTrial &&
             trialCharge > 0 &&
             pkFeat('trial_creation_payment_email') &&
+            (!proKlaseAdminUi || addStudentNotifyEmail) &&
             result.createdSessionIds.length > 0
           ) {
             const resp = await fetch('/api/create-trial-package', {
@@ -2671,6 +2676,7 @@ export default function CompanyStudents() {
     setIsDialogOpen(false);
     setAddStudentFirstLessonIsTrial(false);
     setAddStudentPickedLessons([]);
+    setAddStudentNotifyEmail(true);
     setMvAdditionalChildren([]);
     setNewStudent({
       full_name: '',
@@ -2928,12 +2934,13 @@ export default function CompanyStudents() {
             individualPricing: individualPricingRows,
             dynamicPricingRules,
             suppressSuccessAlert: true,
-            suppressClientBookingEmails: proKlaseAdminUi,
+            suppressClientBookingEmails: proKlaseAdminUi && !siblingNotifyEmail,
           });
           if (
             item.isTrial &&
             trialCharge > 0 &&
             pkFeat('trial_creation_payment_email') &&
+            (!proKlaseAdminUi || siblingNotifyEmail) &&
             result.createdSessionIds.length > 0
           ) {
             await fetch('/api/create-trial-package', {
@@ -2990,6 +2997,7 @@ export default function CompanyStudents() {
       setProvisionCredentialsOpen(true);
     }
     setSiblingDraft(null);
+    setSiblingNotifyEmail(true);
     invalidateCache('company_contracts');
     fetchData();
     setSavingSibling(false);
@@ -3586,6 +3594,7 @@ export default function CompanyStudents() {
                   setIsDialogOpen(open);
                   if (!open) {
                     setAddStudentPickedLessons([]);
+                    setAddStudentNotifyEmail(true);
                     setMvAdditionalChildren([]);
                     setAddStudentFindTutorChildId(null);
                   }
@@ -4279,6 +4288,17 @@ export default function CompanyStudents() {
                         {t('compStu.addAnotherChild')}
                       </Button>
                     </div>
+                  )}
+                  {proKlaseAdminUi && (
+                    addStudentPickedLessons.length > 0 || mvAdditionalChildren.some((child) => child.pickedLessons.length > 0)
+                  ) && (
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox
+                        checked={addStudentNotifyEmail}
+                        onChange={(e) => setAddStudentNotifyEmail(e.target.checked)}
+                      />
+                      {t('compSch.notifyStudentEmail')}
+                    </label>
                   )}
                   </>
                   )}
@@ -6017,7 +6037,10 @@ export default function CompanyStudents() {
                         type="button"
                         variant="outline"
                         className="mt-3 w-full rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                        onClick={() => setSiblingDraft(createMvAdditionalChildDraft())}
+                        onClick={() => {
+                          setSiblingNotifyEmail(true);
+                          setSiblingDraft(createMvAdditionalChildDraft());
+                        }}
                       >
                         <Plus className="mr-2 h-4 w-4" />
                         {t('compStu.addAnotherChild')}
@@ -6224,6 +6247,13 @@ export default function CompanyStudents() {
                                     </div>
                                   </button>
                                 </div>
+                                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                  <Checkbox
+                                    checked={siblingNotifyEmail}
+                                    onChange={(e) => setSiblingNotifyEmail(e.target.checked)}
+                                  />
+                                  {t('compSch.notifyStudentEmail')}
+                                </label>
                                 <p className="text-[11px] text-gray-500">{t('findLesson.willCreateOnSave')}</p>
                               </>
                             )}
@@ -6880,8 +6910,8 @@ export default function CompanyStudents() {
                               </p>
                               {monthlyPreview.items.map((item) => (
                                 <p className="text-xs" key={item.subjectId}>
-                                  {item.subjectName}: {item.totalLessons} × {fmt(monthlyPreview.pricePerLesson)} ={' '}
-                                  {fmt(item.totalLessons * monthlyPreview.pricePerLesson)}
+                                  {item.subjectName}: {item.totalLessons} × {fmt(item.pricePerLesson)} ={' '}
+                                  {fmt(item.itemTotalPrice)}
                                 </p>
                               ))}
                               <p className="text-xs font-semibold">

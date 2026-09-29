@@ -30,24 +30,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .select('id, tutor_id, paid, payment_status, stripe_checkout_session_id, pool_organization_id')
       .eq('id', packageId).maybeSingle();
     if (packageError || !pkg) return json(res, 404, { error: 'Paketas nerastas' });
-    if (pkg.paid || pkg.payment_status === 'paid') {
-      return json(res, 409, { error: 'Paketas jau apmokėtas', code: 'paid' });
-    }
-    if (pkg.payment_status === 'cancelled') return json(res, 200, { success: true, alreadyCancelled: true });
-
     const { data: tutor } = await db.from('profiles')
       .select('organization_id').eq('id', pkg.tutor_id).maybeSingle();
     const ownerOrganizationId = pkg.pool_organization_id || tutor?.organization_id || null;
     if (ownerOrganizationId !== auth.access.organizationId) {
       return json(res, 403, { error: 'Package belongs to another organization' });
     }
+    if (pkg.paid || pkg.payment_status === 'paid') {
+      return json(res, 409, { error: 'Paketas jau apmokėtas', code: 'paid' });
+    }
+    if (pkg.payment_status === 'cancelled') return json(res, 200, { success: true, alreadyCancelled: true });
 
-    const accountId = await resolveTutorStripeAccount(
-      db,
-      pkg.tutor_id,
-      ownerOrganizationId,
-    );
     if (pkg.stripe_checkout_session_id) {
+      const accountId = await resolveTutorStripeAccount(
+        db,
+        pkg.tutor_id,
+        ownerOrganizationId,
+      );
       const secret = process.env.STRIPE_SECRET_KEY || '';
       if (!secret) return json(res, 500, { error: 'Stripe configuration error' });
       const stripe = new Stripe(secret, { apiVersion: '2023-10-16' as any });

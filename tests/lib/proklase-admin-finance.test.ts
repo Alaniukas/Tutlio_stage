@@ -95,6 +95,14 @@ describe('proKlaseAdminFinance', () => {
     expect(sumProKlaseRealizedPaidTutorPayEur(sessions, 25)).toBe(25);
   });
 
+  it('uses the quoted base total for a paid pooled package with mixed subject rates', () => {
+    const p = orgFeeProfile('proklase');
+    expect(packageClientPaidEur({
+      tutor_id: 't', pool_organization_id: 'pro', total_price: 249,
+      price_per_lesson: null, total_lessons: 9, paid: true,
+    }, p)).toBe(249);
+  });
+
   it('does not count confirmed-only sessions as client cash or paid tutor work', () => {
     const lesson = paidLesson({
       status: 'completed',

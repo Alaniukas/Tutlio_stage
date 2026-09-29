@@ -21,14 +21,18 @@ export async function ensurePooledMonthlyRenewal(db: SupabaseClient, args: Renew
   if (!anchor) throw new Error('No active tutor pairing for renewal');
   const pricing = await fetchOrgStudentDynamicPrice(db, anchor.id);
   const grade = parseStudentGrade(anchor.grade);
-  if (!grade || !pricing.lessonsPerWeek) throw new Error('Missing renewal grade or frequency');
   const plans = await db.from('recurring_monthly_package_plans').select('id,next_generation_date,auto_from_schedule')
     .eq('organization_id', args.organizationId).in('student_id', args.studentIds).eq('active', true).order('id');
   if (plans.error) throw new Error(plans.error.message);
   const primary = plans.data?.[0];
+  // An override-only sale can succeed without the grade or frequency required
+  // to create a plan. If a plan already exists, still advance its due date so
+  // the cron does not retry the same delivered package on every run.
+  if ((!grade || !pricing.lessonsPerWeek) && !primary) return;
   const next = nextMonthFirstYmd(args.periodStart);
   const patch = { subject_id: null, auto_from_schedule: true, active: true,
-    grade, lessons_per_week: Math.min(7, pricing.lessonsPerWeek), payment_method: 'stripe', attach_sales_invoice: true,
+    ...(grade && pricing.lessonsPerWeek ? { grade, lessons_per_week: Math.min(7, pricing.lessonsPerWeek) } : {}),
+    payment_method: 'stripe', attach_sales_invoice: true,
     next_generation_date: primary?.next_generation_date && primary.next_generation_date > next ? primary.next_generation_date : next,
     last_generated_period_start: args.periodStart, last_generated_period_end: endOfMonthYmd(args.periodStart), updated_at: new Date().toISOString() };
   if (primary) {

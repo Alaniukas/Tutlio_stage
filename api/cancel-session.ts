@@ -65,6 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         penaltyPaidViaStripe,
         leaveFreeTime,
         cancellationReasonCode,
+        notifyStudent,
     } = req.body as {
         sessionId: string;
         tutorId: string;
@@ -82,6 +83,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         leaveFreeTime?: boolean;
         /** Pro Klasė: tutor_no_show | admin | ... */
         cancellationReasonCode?: string;
+        notifyStudent?: boolean;
     };
 
     if (!sessionId || !tutorId) {
@@ -116,6 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'tutorId does not match session' });
     }
 
+    let suppressClientEmails = false;
     if (!auth.isInternal) {
         const userId = auth.userId;
         if (!userId) {
@@ -141,6 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (!canTutorSideCancelSession(userId, tutorId, isOrgAdminForTutorOrg)) {
                 return res.status(403).json({ error: 'Forbidden' });
             }
+            suppressClientEmails = notifyStudent === false && isOrgAdminForTutorOrg && isProKlaseOrg(orgId);
             // Pro Klasė org tutors may not cancel their own lessons (org admin may).
             if (
                 userId === tutorId &&
@@ -428,6 +432,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : [];
     const orgPayload = orgId ? { organizationId: orgId } : {};
     for (const recipient of notifyRecipients) {
+        if (suppressClientEmails && recipient.kind !== 'tutor') continue;
         if (recipient.kind === 'parent') {
             cancellationEmailTasks.push(
                 sendEmailWithTimeout({

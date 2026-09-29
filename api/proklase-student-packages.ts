@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { requireOrgAdminAccess } from './_lib/orgAdminAccess.js';
 import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { orgStudentIdentityGroupKey } from '../src/lib/orgStudentIdentity.js';
 import { proKlaseTrialFollowupStudentIds } from '../src/lib/proKlasePackageStatus.js';
 
@@ -56,11 +57,62 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!db) return json(res, 500, { error: 'Server configuration error' });
 
   try {
-    const auth = await requireOrgAdminAccess(req, db, 'students.view');
+    const financeSummary = req.query.summary === 'finance';
+    const auth = await requireOrgAdminAccess(req, db, financeSummary ? 'stats.view' : 'students.view');
     if (auth.ok === false) return json(res, auth.status, { error: auth.error });
     const organizationId = auth.access.organizationId;
     if (!isProKlaseOrg(organizationId)) {
       return json(res, 403, { error: 'This package view is not enabled for this organization' });
+    }
+
+    if (financeSummary) {
+      if (!hasOrgAdminPermission(auth.access.role, auth.access.permissions, 'finance.totals')) {
+        return json(res, 403, { error: 'Forbidden' });
+      }
+      const start = typeof req.query.start === 'string' ? new Date(req.query.start) : null;
+      const end = typeof req.query.end === 'string' ? new Date(req.query.end) : null;
+      if (!start || !end || !Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end) {
+        return json(res, 400, { error: 'Invalid date range' });
+      }
+      const centsByTutor = new Map<string, number>();
+      const pageSize = 1000;
+      for (let offset = 0; ; offset += pageSize) {
+        const page = await db.from('lesson_packages')
+          .select('id,total_price,lesson_package_items(total_price,subjects!inner(tutor_id))')
+          .eq('pool_organization_id', organizationId)
+          .eq('paid', true)
+          .gte('paid_at', start.toISOString())
+          .lte('paid_at', end.toISOString())
+          .order('id', { ascending: true })
+          .range(offset, offset + pageSize - 1);
+        if (page.error) throw new Error(page.error.message);
+        for (const pkg of page.data || []) {
+          const packageTotal = Number(pkg.total_price);
+          const items = Array.isArray(pkg.lesson_package_items) ? pkg.lesson_package_items : [];
+          if (!Number.isFinite(packageTotal) || packageTotal <= 0 || !items.length) {
+            throw new Error('Invalid pooled package finance row');
+          }
+          let itemTotalCents = 0;
+          for (const item of items) {
+            const subject = Array.isArray(item.subjects) ? item.subjects[0] : item.subjects;
+            const tutorId = String(subject?.tutor_id || '');
+            const itemTotal = Number(item.total_price);
+            if (!tutorId || !Number.isFinite(itemTotal) || itemTotal <= 0) {
+              throw new Error('Invalid pooled package item finance row');
+            }
+            const itemCents = Math.round(itemTotal * 100);
+            itemTotalCents += itemCents;
+            centsByTutor.set(tutorId, (centsByTutor.get(tutorId) || 0) + itemCents);
+          }
+          if (itemTotalCents !== Math.round(packageTotal * 100)) {
+            throw new Error('Pooled package item totals do not match the package sale');
+          }
+        }
+        if ((page.data || []).length < pageSize) break;
+      }
+      return json(res, 200, {
+        totalsByTutor: Object.fromEntries([...centsByTutor].map(([tutorId, cents]) => [tutorId, cents / 100])),
+      });
     }
 
     const students = await loadOrganizationStudents(db, organizationId);

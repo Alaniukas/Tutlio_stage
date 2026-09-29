@@ -1767,6 +1767,7 @@ export const dk: Record<string, string> = {
   'compSch.seriesSummaryHtml': "Fra {fromDate} afholdes kommende lektioner i denne serie: {weekday}, {timeRange}.",
   'compSch.show': 'Vis',
   'compSch.showMore': '+{total} mere',
+  'compSch.notifyStudentEmail': 'Giv eleven besked via e-mail',
   'compSch.showToStudent': 'Vis for elev',
   'compSch.specifyReasonPlaceholder': 'Angiv årsagen...',
   'compSch.start': 'Start',

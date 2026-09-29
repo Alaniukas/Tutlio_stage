@@ -368,7 +368,7 @@ export async function confirmTutorBreakConflictOverride(
 }
 
 /** Emails to tutor + student + payer (if parent) for created sessions. */
-async function notifyAfterOrgAdminSessionsCreated(
+export async function notifyAfterOrgAdminSessionsCreated(
   supabase: SupabaseClient,
   tutorId: string,
   sessionsForNotify: CreatedSessionRow[],
@@ -1327,7 +1327,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       });
     }
 
-    if ((effectiveShowCommentToStudent || effectiveShowCommentToParent) && createTutorComment.trim()) {
+    if (!suppressClientBookingEmails && (effectiveShowCommentToStudent || effectiveShowCommentToParent) && createTutorComment.trim()) {
       let showToParent = effectiveShowCommentToParent;
       if (!showToParent && effectiveShowCommentToStudent) {
         try {
@@ -1411,6 +1411,7 @@ export type ConvertOrgAdminSessionToRecurringInput = {
   frequency: 'weekly' | 'biweekly' | 'monthly';
   weekdays: number[];
   recurringEndDate: string;
+  suppressClientBookingEmails?: boolean;
 };
 
 export interface ConvertOrgAdminSessionToRecurringResult {
@@ -1890,6 +1891,7 @@ export async function convertOrgAdminSessionToRecurring(
       topic || 'Pamoka',
       true,
       !endTrim,
+      p.suppressClientBookingEmails,
     );
   }
 

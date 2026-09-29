@@ -1921,6 +1921,7 @@ export const se: Record<string, string> = {
   'compSch.seriesSummaryHtml': 'Alla framtida lektioner i samma serie använder den nya tiden: {weekday} kl. {timeRange} från och med {fromDate}',
   'compSch.show': 'Visa',
   'compSch.showMore': '+{total} fler',
+  'compSch.notifyStudentEmail': 'Meddela eleven via e-post',
   'compSch.showToStudent': 'Visa för elev',
   'compSch.specifyReasonPlaceholder': 'Ange orsaken...',
   'compSch.start': 'Start',

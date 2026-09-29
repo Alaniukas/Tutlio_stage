@@ -2567,6 +2567,7 @@ export const ee: Record<string, string> = {
   'compSch.seriesSummaryHtml': "Alates {fromDate} toimuvad selle sarja järgmised tunnid: {weekday}, {timeRange}.",
   'compSch.show': 'Näita',
   'compSch.showMore': '+ veel {total}',
+  'compSch.notifyStudentEmail': 'Teavita õpilast e-posti teel',
   'compSch.showToStudent': 'Näita õpilasele',
   'compSch.specifyReasonPlaceholder': 'Täpsustage põhjus...',
   'compSch.start': 'Algus',

@@ -533,6 +533,8 @@ export default function CompanyTvarkarastis() {
   const [editStatus, setEditStatus] = useState<'active' | 'completed' | 'cancelled' | 'no_show'>('active');
   const [editTutorComment, setEditTutorComment] = useState('');
   const [editShowCommentToStudent, setEditShowCommentToStudent] = useState(false);
+  const [editNotifyStudent, setEditNotifyStudent] = useState(true);
+  const [cancelNotifyStudent, setCancelNotifyStudent] = useState(true);
   const [editShowCommentToParent, setEditShowCommentToParent] = useState(false);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
@@ -628,6 +630,7 @@ export default function CompanyTvarkarastis() {
   const [createPrice, setCreatePrice] = useState(0);
   const [createTutorComment, setCreateTutorComment] = useState('');
   const [createShowCommentToStudent, setCreateShowCommentToStudent] = useState(false);
+  const [createNotifyStudent, setCreateNotifyStudent] = useState(true);
   const [createShowCommentToParent, setCreateShowCommentToParent] = useState(false);
   const [createSelectedFreeSlot, setCreateSelectedFreeSlot] = useState('');
   const [individualPricing, setIndividualPricing] = useState<
@@ -660,6 +663,7 @@ export default function CompanyTvarkarastis() {
   const [findLessonBookSaving, setFindLessonBookSaving] = useState(false);
   const [findLessonBookSelectedSlot, setFindLessonBookSelectedSlot] = useState('');
   const [findLessonBookIsPaid, setFindLessonBookIsPaid] = useState(false);
+  const [findLessonBookNotifyStudent, setFindLessonBookNotifyStudent] = useState(true);
   const [findLessonBookMeetingLink, setFindLessonBookMeetingLink] = useState('');
   const [findLessonBookTutorMeetingLink, setFindLessonBookTutorMeetingLink] = useState('');
   const [findLessonBookTrialSending, setFindLessonBookTrialSending] = useState(false);
@@ -1991,6 +1995,7 @@ export default function CompanyTvarkarastis() {
     setEditRecurringWeekdays([]);
     setEditRecurringEndDate('');
     setIsEditingSession(true);
+    setEditNotifyStudent(true);
   };
 
   const handleSaveSession = async () => {
@@ -2081,6 +2086,7 @@ export default function CompanyTvarkarastis() {
           frequency: editRecurringFrequency,
           weekdays: editRecurringWeekdays,
           recurringEndDate: editRecurringEndDate,
+          suppressClientBookingEmails: isProKlase && !editNotifyStudent,
         });
         if (result.skippedOccurrenceStarts.length > 0) {
           const skippedDates = result.skippedOccurrenceStarts
@@ -2314,6 +2320,7 @@ export default function CompanyTvarkarastis() {
           : { ...baseEmails, isRecurringSeriesUpdate: false as const };
 
         const sendRes = (to: string | undefined, recipientRole: 'tutor' | 'student' | 'payer') => {
+          if (recipientRole !== 'tutor' && isProKlase && !editNotifyStudent) return;
           if (!to) return;
           void sendEmail({
             type: 'lesson_rescheduled',
@@ -2336,6 +2343,7 @@ export default function CompanyTvarkarastis() {
 
       if (
         !isClassGroupSession
+        && (!isProKlase || editNotifyStudent)
         && (editShowCommentToStudent || showCommentToParent)
         && editTutorComment.trim()
       ) {
@@ -2437,6 +2445,7 @@ export default function CompanyTvarkarastis() {
           tutorEmail: null,
           leaveFreeTime: isClassGroupSession ? false : leaveFreeTimeOnCancel,
           cancellationReasonCode: isProKlaseOrg(organizationId) ? cancelReasonCode : undefined,
+          notifyStudent: !isProKlase || cancelNotifyStudent,
         });
         if (success) successCount++;
         else lastError = error;
@@ -2972,6 +2981,7 @@ export default function CompanyTvarkarastis() {
         orgSubjectTemplateId: matchedTpl?.id,
         dynamicPricingRules,
         suppressSuccessAlert: true,
+        suppressClientBookingEmails: isProKlase && !findLessonBookNotifyStudent,
       };
 
       setFindLessonBook(null);
@@ -2980,6 +2990,7 @@ export default function CompanyTvarkarastis() {
       setFindLessonBookTopic('');
       setFindLessonBookSelectedSlot('');
       setFindLessonBookIsPaid(false);
+      setFindLessonBookNotifyStudent(true);
       setFindLessonBookMeetingLink('');
       setFindLessonBookTutorMeetingLink('');
       setFindLessonBookCreatedIntervals([]);
@@ -3001,6 +3012,7 @@ export default function CompanyTvarkarastis() {
   // auto-release after the org deadline.
   const handleFindLessonBookReserveTrial = async () => {
     if (!findLessonBook) return;
+    if (isProKlase && !findLessonBookNotifyStudent) return;
     if (!findLessonBookStudentId) {
       alert(t('compSch.selectStudentAlert'));
       return;
@@ -3100,12 +3112,14 @@ export default function CompanyTvarkarastis() {
       dynamicPricingRules,
       classGroupId: createClassGroupId || null,
       suppressSuccessAlert: true,
+      suppressClientBookingEmails: isProKlase && !createNotifyStudent,
     };
 
     const trialFollowUp = {
       enabled:
         (createIsTrial || (createIsRecurring && createFirstLessonIsTrial))
         && !createIsPaid
+        && (!isProKlase || createNotifyStudent)
         && pkFeat('trial_creation_payment_email'),
       tutorId: createTutorId,
       topic: createTopic,
@@ -3196,6 +3210,7 @@ export default function CompanyTvarkarastis() {
     setCreatePrice(0);
     setCreateTutorComment('');
     setCreateShowCommentToStudent(false);
+    setCreateNotifyStudent(true);
     setCreateShowCommentToParent(false);
     setCreateSelectedFreeSlot('');
     setCreateFromAvailabilityBlock(null);
@@ -4112,6 +4127,18 @@ export default function CompanyTvarkarastis() {
               )}
             </div>
 
+            {isProKlase && (
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={createNotifyStudent}
+                  onChange={(e) => setCreateNotifyStudent(e.target.checked)}
+                  className="rounded border-gray-300 text-indigo-600"
+                />
+                {t('compSch.notifyStudentEmail')}
+              </label>
+            )}
+
             {orgAdminShowsCreateRecurrenceFields() && (
               <RecurrenceFields
                 enabled={createIsRecurring}
@@ -4315,6 +4342,7 @@ export default function CompanyTvarkarastis() {
                     );
                     setClassGroupCancelScope(isClassGroupSession ? 'whole_occurrence' : 'one_student');
                     setClassGroupCancelStudentId(firstCancellable?.student_id || selectedEvent?.student_id || '');
+                    setCancelNotifyStudent(true);
                     setCancelConfirmOpen(true);
                   }}
                 >
@@ -4650,6 +4678,18 @@ export default function CompanyTvarkarastis() {
                       }))}
                     />
                   )}
+                  {isProKlase && (
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={cancelNotifyStudent}
+                        onChange={(e) => setCancelNotifyStudent(e.target.checked)}
+                        className="rounded border-gray-300 text-indigo-600"
+                      />
+                      {t('compSch.notifyStudentEmail')}
+                    </label>
+                  )}
+
                   <p className="text-sm font-semibold text-red-800">{t('compSch.cancellationReasonRequired')}</p>
                   <Input
                     value={cancellationReason}
@@ -4697,6 +4737,7 @@ export default function CompanyTvarkarastis() {
                     );
                     setClassGroupCancelScope(isClassGroupSession ? 'whole_occurrence' : 'one_student');
                     setClassGroupCancelStudentId(firstCancellable?.student_id || selectedEvent.student_id || '');
+                    setCancelNotifyStudent(true);
                     setCancelConfirmOpen(true);
                   }}
                 >
@@ -4774,6 +4815,7 @@ export default function CompanyTvarkarastis() {
                         const firstActive = selectedGroupSessions.find((s) => s.status === 'active');
                         setClassGroupCancelScope(isClassGroupSession ? 'whole_occurrence' : 'one_student');
                         setClassGroupCancelStudentId(firstActive?.student_id || selectedEvent.student_id || '');
+                        setCancelNotifyStudent(true);
                         setCancelConfirmOpen(true);
                       }}>
                         <Ban className="w-4 h-4 mr-2" />
@@ -5063,6 +5105,18 @@ export default function CompanyTvarkarastis() {
                   </label>
                 )}
               </div>
+
+              {isProKlase && (
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editNotifyStudent}
+                    onChange={(e) => setEditNotifyStudent(e.target.checked)}
+                    className="rounded border-gray-300 text-indigo-600"
+                  />
+                  {t('compSch.notifyStudentEmail')}
+                </label>
+              )}
 
               {orgAdminShowsConvertToRecurringFields({
                 organizationId,
@@ -5576,6 +5630,8 @@ export default function CompanyTvarkarastis() {
         onMeetingLinkChange={setFindLessonBookMeetingLink}
         isPaid={findLessonBookIsPaid}
         onIsPaidChange={setFindLessonBookIsPaid}
+        notifyStudent={findLessonBookNotifyStudent}
+        onNotifyStudentChange={isProKlase ? setFindLessonBookNotifyStudent : undefined}
         showSuccess={findLessonBookSuccess}
         showCrossTutorHint={findLessonBookCrossTutor}
         showTrialButton={proKlaseAdminUi && hasFeature('trial_reservation_flow')}
@@ -5589,6 +5645,7 @@ export default function CompanyTvarkarastis() {
           setFindLessonBookTopic('');
           setFindLessonBookSelectedSlot('');
           setFindLessonBookIsPaid(false);
+          setFindLessonBookNotifyStudent(true);
           setFindLessonBookMeetingLink('');
           setFindLessonBookTutorMeetingLink('');
           setFindLessonBookCreatedIntervals([]);
@@ -5621,6 +5678,7 @@ export default function CompanyTvarkarastis() {
           setFindLessonBookTopic(slot.subjectName);
           setFindLessonBookSelectedSlot('');
           setFindLessonBookIsPaid(false);
+          setFindLessonBookNotifyStudent(true);
           setFindLessonBookMeetingLink('');
           setFindLessonBookTutorMeetingLink('');
           setFindLessonBookCreatedIntervals([]);

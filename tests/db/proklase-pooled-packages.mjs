@@ -18,13 +18,14 @@ try {
     CREATE TABLE organization_admins(organization_id uuid, user_id uuid);
     CREATE TABLE profiles(id uuid PRIMARY KEY, organization_id uuid);
     CREATE TABLE students(id uuid PRIMARY KEY, tutor_id uuid, organization_id uuid, linked_user_id uuid,
-      email text, full_name text, detached_at timestamptz);
+      email text, full_name text, detached_at timestamptz, payer_email text);
     CREATE TABLE subjects(id uuid PRIMARY KEY, tutor_id uuid, name text, is_trial boolean DEFAULT false);
     CREATE TABLE lesson_packages(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tutor_id uuid, student_id uuid,
       subject_id uuid, total_lessons int NOT NULL, available_lessons int NOT NULL CHECK(available_lessons>=0),
       reserved_lessons int NOT NULL DEFAULT 0, completed_lessons int NOT NULL DEFAULT 0, price_per_lesson numeric,
       total_price numeric, paid boolean NOT NULL DEFAULT false, payment_status text, active boolean,
       payment_method text, billing_period_start date, billing_period_end date, expires_at timestamptz,
+      stripe_checkout_session_id text, cancelled_at timestamptz, cancelled_by uuid,
       updated_at timestamptz DEFAULT now(), created_at timestamptz DEFAULT now());
     CREATE TABLE lesson_package_items(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       package_id uuid REFERENCES lesson_packages(id) ON DELETE CASCADE, subject_id uuid,
@@ -35,7 +36,8 @@ try {
     CREATE TABLE sessions(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), student_id uuid, tutor_id uuid,
       subject_id uuid, start_time timestamptz, status text DEFAULT 'active', paid boolean DEFAULT false,
       payment_status text, price numeric DEFAULT 29, lesson_package_id uuid REFERENCES lesson_packages(id),
-      is_complimentary boolean DEFAULT false, is_makeup boolean DEFAULT false, is_late_cancelled boolean DEFAULT false);
+      is_complimentary boolean DEFAULT false, is_makeup boolean DEFAULT false, is_late_cancelled boolean DEFAULT false,
+      reservation_expires_at timestamptz);
   `);
   await db.exec(await readFile(new URL('../../supabase/migrations/20260908170000_org_student_pooled_packages.sql', import.meta.url), 'utf8'));
   await db.query(`INSERT INTO organizations(id) VALUES($1)`, [id(999)]);
@@ -46,6 +48,8 @@ try {
     ) VALUES($1,$2,$3,1,1,0,0,27,27,false,'pending',true,'2099-08-01','2099-08-31',$4,'legacy',$5,$6,$7)`,
     [id(998),id(997),id(996),id(999),[id(996)],'legacy-preview',[id(995)]]);
   await db.exec(await readFile(new URL('../../supabase/migrations/20260910174000_org_student_pooled_packages.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../../supabase/migrations/20260916170000_atomic_package_cancellation.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../../supabase/migrations/20260929092902_proklase_pooled_package_item_prices.sql', import.meta.url), 'utf8'));
   assert.deepEqual((await db.query(`SELECT preview_token,session_ids FROM pooled_package_quotes WHERE package_id=$1`, [id(998)])).rows[0],
     {preview_token:'legacy-preview',session_ids:[id(995)]}, 'legacy checkout state must move to the private quote table');
   assert.equal((await db.query(`SELECT count(*)::int AS count FROM pg_policies
@@ -55,7 +59,8 @@ try {
   await db.query('INSERT INTO organizations VALUES ($1),($2)', [proOrgId, id(2)]);
   await db.query('INSERT INTO profiles VALUES ($1,$3),($2,$3),($4,$5)', [id(10), id(11), proOrgId, id(12), id(2)]);
   for (const [student, tutor, org, user, name] of [[20,10,proOrgId,50,'Same Child'],[21,11,proOrgId,50,'Same Child'],[22,10,proOrgId,51,'Different Child'],[23,12,id(2),50,'Same Child']]) {
-    await db.query('INSERT INTO students VALUES ($1,$2,$3,$4,$5,$6,null)', [id(student),id(tutor),org,id(user),'parent@example.test',name]);
+    await db.query('INSERT INTO students(id,tutor_id,organization_id,linked_user_id,email,full_name,detached_at) VALUES ($1,$2,$3,$4,$5,$6,null)',
+      [id(student),id(tutor),org,id(user),'parent@example.test',name]);
   }
   await db.query('INSERT INTO subjects(id,tutor_id,name) VALUES ($1,$2,$3),($4,$5,$6),($7,$5,$8)',
     [id(30),id(10),'Lithuanian',id(31),id(11),'Maths',id(32),'Physics']);
@@ -76,6 +81,62 @@ try {
   assert.equal((await db.query(createSql,params)).rows[0].id,pkg,'same send is idempotent');
   assert.deepEqual((await db.query('SELECT total_lessons,total_price::text FROM lesson_packages WHERE id=$1',[pkg])).rows[0],
     {total_lessons:9,total_price:'243'});
+  assert.deepEqual((await db.query('SELECT price_per_lesson::text AS price FROM lesson_package_items WHERE package_id=$1 ORDER BY position',[pkg])).rows,
+    [{price:'27'},{price:'27'}], 'older callers still use the common fallback price');
+  // A custom EUR25 rate on one subject must change both the item and the
+  // checkout total; the second subject still uses the EUR31 common fallback.
+  await db.query("INSERT INTO sessions(id,student_id,tutor_id,subject_id,start_time) VALUES($1,$2,$3,$4,'2099-10-02T12:00:00Z'),($5,$6,$7,$8,'2099-10-03T12:00:00Z')",
+    [id(201),id(20),id(10),id(30),id(202),id(21),id(11),id(31)]);
+  const mixedItems = [{subjectId:id(30),totalLessons:1,pricePerLesson:25},{subjectId:id(31),totalLessons:1}];
+  const mixedParams = [id(20),proOrgId,[id(20),id(21)],JSON.stringify(mixedItems),31,'2099-10-01','2099-10-31','mixed-preview',[id(201),id(202)]];
+  await assert.rejects(db.query(createSql, mixedParams.map((value,index) => index === 3
+    ? JSON.stringify([{...mixedItems[0],pricePerLesson:25.001},mixedItems[1]]) : value)),
+  /Invalid package item price/, 'rates with fractions of a cent must be rejected');
+  await assert.rejects(db.query(createSql, mixedParams.map((value,index) => index === 3
+    ? JSON.stringify([{...mixedItems[0],pricePerLesson:'25'},mixedItems[1]]) : value)),
+  /Invalid package item price/, 'item rates must be JSON numbers');
+  const mixedPkg = (await db.query(createSql,mixedParams)).rows[0].id;
+  assert.deepEqual((await db.query('SELECT total_lessons,price_per_lesson,total_price::text FROM lesson_packages WHERE id=$1',[mixedPkg])).rows[0],
+    {total_lessons:2,price_per_lesson:null,total_price:'56'});
+  assert.deepEqual((await db.query('SELECT price_per_lesson::text AS price,total_price::text AS total FROM lesson_package_items WHERE package_id=$1 ORDER BY position',[mixedPkg])).rows,
+    [{price:'25',total:'25'},{price:'31',total:'31'}]);
+  // A wrong EUR31 November offer blocks a second send until it is annulled.
+  // The old quote stays as an audit record, while the same identity and month
+  // become available for a fresh EUR25 offer and payment link.
+  await db.query("INSERT INTO sessions(id,student_id,tutor_id,subject_id,start_time) VALUES($1,$2,$3,$4,'2099-11-03T12:00:00Z')",
+    [id(203),id(21),id(11),id(31)]);
+  const oldOfferParams = [id(20),proOrgId,[id(20),id(21)],JSON.stringify([{subjectId:id(31),totalLessons:1}]),
+    31,'2099-11-01','2099-11-30','wrong-price-preview',[id(203)]];
+  const oldOfferId = (await db.query(createSql,oldOfferParams)).rows[0].id;
+  await db.query('UPDATE lesson_packages SET stripe_checkout_session_id=$1 WHERE id=$2', ['cs_old_checkout',oldOfferId]);
+  const correctedOfferParams = oldOfferParams.map((value,index) =>
+    index === 3 ? JSON.stringify([{subjectId:id(31),totalLessons:1,pricePerLesson:25}])
+      : index === 7 ? 'corrected-price-preview' : value);
+  await assert.rejects(db.query(createSql,correctedOfferParams),
+    /A package already exists for this student and period/, 'a live wrong-price offer must block a duplicate');
+  const cancelSql = 'SELECT cancel_pending_lesson_package($1,$2,$3) AS id';
+  assert.equal((await db.query(cancelSql,[oldOfferId,proOrgId,id(52)])).rows[0].id,oldOfferId);
+  const oldOffer = (await db.query(`SELECT paid,payment_status,active,total_price::text AS total_price,
+    stripe_checkout_session_id,cancelled_at IS NOT NULL AS was_cancelled,cancelled_by
+    FROM lesson_packages WHERE id=$1`,[oldOfferId])).rows[0];
+  assert.deepEqual(oldOffer,{
+    paid:false,payment_status:'cancelled',active:false,total_price:'31',
+    stripe_checkout_session_id:null,was_cancelled:true,cancelled_by:id(52),
+  });
+  const visibleOffers = async () => (await db.query(`SELECT id FROM lesson_packages
+    WHERE pool_organization_id=$1 AND pool_identity_key=package_student_identity((SELECT s FROM students s WHERE id=$2))
+      AND billing_period_end='2099-11-30' AND (active IS DISTINCT FROM false OR payment_status='pending')
+      AND payment_status<>'cancelled' ORDER BY created_at`,[proOrgId,id(21)])).rows.map(row => row.id);
+  assert.deepEqual(await visibleOffers(),[], 'annulled package must disappear from the admin offer list');
+  const correctedOfferId = (await db.query(createSql,correctedOfferParams)).rows[0].id;
+  assert.notEqual(correctedOfferId,oldOfferId, 'resending after annulment must create a new package');
+  assert.deepEqual(await visibleOffers(),[correctedOfferId]);
+  assert.deepEqual((await db.query('SELECT payment_status,total_price::text AS total_price FROM lesson_packages WHERE id=$1',[correctedOfferId])).rows[0],
+    {payment_status:'pending',total_price:'25'});
+  assert.deepEqual((await db.query('SELECT price_per_lesson::text AS price,total_price::text AS total FROM lesson_package_items WHERE package_id=$1',[correctedOfferId])).rows,
+    [{price:'25',total:'25'}]);
+  assert.equal((await db.query('SELECT preview_token FROM pooled_package_quotes WHERE package_id=$1',[oldOfferId])).rows[0].preview_token,
+    'wrong-price-preview', 'cancelled quote remains available for audit without blocking the new package');
   await assert.rejects(db.query('UPDATE sessions SET lesson_package_id=$1 WHERE id=$2',[pkg,id(100)]), /unavailable/);
   await db.query("UPDATE lesson_packages SET paid=true,payment_status='paid' WHERE id=$1",[pkg]);
   const counters = async () => (await db.query('SELECT available_lessons,reserved_lessons,completed_lessons FROM lesson_packages WHERE id=$1',[pkg])).rows[0];
@@ -120,7 +181,7 @@ try {
   await assert.rejects(db.query("INSERT INTO sessions(student_id,tutor_id,subject_id,start_time,lesson_package_id) VALUES($1,$2,$3,'2099-09-30T21:00Z',$4)",
     [id(21),id(11),id(31),pkg]), /unavailable/, 'October in Vilnius must not consume September credits');
   assert.deepEqual(await counters(), {available_lessons:1,reserved_lessons:7,completed_lessons:1});
-  console.log('PASS: migration executes; 4+5=9 credits at EUR27; idempotent creation; payment allocation; completion/cancellation; cross-tutor cross-subject reuse; overbooking and identity guards.');
+  console.log('PASS: migrations execute; mixed and legacy prices; annulled offers disappear and can be recreated at corrected prices; payment allocation; cross-tutor reuse and identity guards.');
 } catch (error) {
   console.error(error.message, error.internalQuery || '', error.where || '');
   process.exitCode = 1;

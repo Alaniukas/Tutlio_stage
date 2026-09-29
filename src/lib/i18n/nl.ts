@@ -1406,6 +1406,7 @@ export const nl: Record<string, string> = {
   "compSch.show": "Toon",
   "compSch.showMore": "+{total} meer",
   "compSch.showToStudent": "Laat zien aan leerling",
+  "compSch.notifyStudentEmail": "Leerling per e-mail informeren",
   "compSch.specifyReasonPlaceholder": "Geef de reden op...",
   "compSch.start": "Begin",
   "compSch.startTimeRequired": "Starttijd vereist",
