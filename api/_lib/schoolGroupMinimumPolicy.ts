@@ -183,6 +183,34 @@ async function sendGroupSuspensionEmails(
   };
 }
 
+async function pauseActiveGroupContracts(
+  supabase: SupabaseClient,
+  context: SchoolGroupMinimumContext,
+  now: Date,
+  reason: string,
+  startedBy: string | null,
+): Promise<number> {
+  const activeContractIds = rosterContracts(context)
+    .filter((contract) => isEligibleSchoolGroupContract(contract) && !isSchoolContractSuspended(contract, now))
+    .map((contract) => contract.id);
+  if (!activeContractIds.length) return 0;
+
+  const { error } = await supabase.from('school_contracts').update({
+    suspension_started_at: now.toISOString(),
+    // The group pause has no date of its own: it is lifted only after the
+    // minimum is met again. An individual pause is excluded above.
+    suspension_until: null,
+    suspension_reason: reason,
+    suspension_started_by: startedBy,
+    suspension_resumed_at: null,
+    suspension_resumed_by: null,
+    suspension_scope: 'group_under_minimum',
+    suspension_group_id: context.group.id,
+  }).in('id', activeContractIds);
+  if (error) throw new Error(error.message);
+  return activeContractIds.length;
+}
+
 /** Run after the trigger contract has already been suspended or terminated. */
 export async function suspendSchoolGroupIfBelowMinimum(
   req: VercelRequest,
@@ -216,31 +244,18 @@ export async function suspendSchoolGroupIfBelowMinimum(
     return { groupSuspended: false, groupJustSuspended: false, groupName: context.group.name, activeStudentCount, suspendedContractCount: 0, notificationsSent: 0, notificationsAttempted: 0, minimumStudentCount };
   }
   if (isSchoolClassGroupSuspended(context.group, now)) {
+    // An agreement may be accepted after the group was paused. Keep its
+    // contract state in step with the group without restarting the pause or
+    // notifying families again.
+    const reason = `Grupė sustabdyta, kol joje bus bent ${minimumStudentCount} aktyvūs mokiniai.`;
+    const suspendedContractCount = await pauseActiveGroupContracts(supabase, context, now, reason, null);
     await materializeClassGroupNow(supabase, params.groupId, params.organizationId);
-    return { groupSuspended: true, groupJustSuspended: false, groupName: context.group.name, activeStudentCount, suspendedContractCount: 0, notificationsSent: 0, notificationsAttempted: 0, minimumStudentCount };
+    return { groupSuspended: true, groupJustSuspended: false, groupName: context.group.name, activeStudentCount, suspendedContractCount, notificationsSent: 0, notificationsAttempted: 0, minimumStudentCount };
   }
 
   const nowIso = now.toISOString();
   const reason = `Aktyvių mokinių skaičius grupėje sumažėjo iki ${activeStudentCount}. Grupinis užsiėmimas vyksta tik nuo ${minimumStudentCount} mokinių.`;
-  const activeContractIds = rosterContracts(context)
-    .filter((contract) => isEligibleSchoolGroupContract(contract) && !isSchoolContractSuspended(contract, now))
-    .map((contract) => contract.id);
-  if (activeContractIds.length > 0) {
-    const { error } = await supabase.from('school_contracts').update({
-      suspension_started_at: nowIso,
-      // The group pause has no date of its own: it is lifted only after the
-      // minimum is met again. The triggering student's individual date stays
-      // on that student's contract.
-      suspension_until: null,
-      suspension_reason: reason,
-      suspension_started_by: params.adminUserId,
-      suspension_resumed_at: null,
-      suspension_resumed_by: null,
-      suspension_scope: 'group_under_minimum',
-      suspension_group_id: params.groupId,
-    }).in('id', activeContractIds);
-    if (error) throw new Error(error.message);
-  }
+  const suspendedContractCount = await pauseActiveGroupContracts(supabase, context, now, reason, params.adminUserId);
   const { error: groupError } = await supabase.from('school_class_groups').update({
     suspension_started_at: nowIso,
     suspension_until: null,
@@ -261,7 +276,7 @@ export async function suspendSchoolGroupIfBelowMinimum(
     groupJustSuspended: true,
     groupName: context.group.name,
     activeStudentCount,
-    suspendedContractCount: activeContractIds.length,
+    suspendedContractCount,
     notificationsSent: notificationDelivery.sent,
     notificationsAttempted: notificationDelivery.attempted,
     minimumStudentCount,
@@ -327,7 +342,14 @@ export async function reconcileSchoolGroupMinimum(
   const resumed = await resumeSchoolGroupIfMinimumMet(supabase, {
     ...params, resumeContractId: null, adminUserId: params.actorUserId,
   });
-  if (resumed.groupWasSuspended) return;
+  if (resumed.groupWasSuspended) {
+    if (!resumed.resumed) {
+      await suspendSchoolGroupIfBelowMinimum(req, supabase, {
+        ...params, triggerContractId: null, adminUserId: params.actorUserId,
+      });
+    }
+    return;
+  }
   await suspendSchoolGroupIfBelowMinimum(req, supabase, {
     ...params, triggerContractId: null, adminUserId: params.actorUserId,
   });

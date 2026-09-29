@@ -7,6 +7,7 @@ import { en } from './en.js';
  * Dictionary coverage does not publish the locale or certify market readiness.
  */
 export const huOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Tanuló értesítése e-mailben',
   "cal.deleteAllRemaining": "A sorozat összes hátralévő órája",
   "cal.deleteAllRemainingHint": "Törli a sorozat jövőbeli tervezett és lemondott óráit. A megtartott órák előzményei megmaradnak.",
   "cal.deleteConfirmAll": "Törlöd a sorozat összes hátralévő tervezett és lemondott óráját? A megtartott órák előzményei megmaradnak.",

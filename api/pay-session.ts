@@ -21,6 +21,7 @@ import {
   type OrgFeeProfile,
 } from './_lib/marketMoney.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { stripeCheckoutLocale } from './_lib/stripeLocale.js';
 import {
     directChargeOptions,
     expireConnectCheckoutSession,
@@ -44,6 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const market = marketFromRequest(req);
     const currency = chargeCurrency(market);
     const appOrigin = publicOriginFromRequest(req);
+    const checkoutLocale = stripeCheckoutLocale(req.query.ui_locale);
 
     const sessionId = typeof req.query.session === 'string' ? req.query.session.trim() : '';
     if (!sessionId) return res.status(400).send(errorPage('Klaida', 'Trūksta pamokos identifikatoriaus.'));
@@ -160,7 +162,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 if (existingLookup.stripeAccount === stripeAccountId
                     && existing.status === 'open'
                     && existing.url
-                    && existing.amount_total === expectedTotalCents) {
+                    && existing.amount_total === expectedTotalCents
+                    && existing.locale === checkoutLocale) {
                     return res.redirect(303, existing.url);
                 }
                 if (existing.status === 'open') {
@@ -191,6 +194,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const { chargeCents, applicationFeeCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
+                locale: checkoutLocale,
                 customer_email: customerEmail,
                 customer_creation: 'always',
                 payment_method_types: ['card'],
@@ -208,6 +212,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const applicationFeeCents = directChargeApplicationFeeCents(basePriceEur, market, feeProfile, feeSplit);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
+                locale: checkoutLocale,
                 customer_email: customerEmail,
                 customer_creation: 'always',
                 payment_method_types: ['card'],

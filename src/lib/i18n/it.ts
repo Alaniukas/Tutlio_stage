@@ -6,6 +6,7 @@ import { en } from './en.js';
  * See docs/ITALIAN_LOCALIZATION_REVIEW.md before publishing this locale.
  */
 export const itOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Avvisa lo studente via email',
   "cal.deleteAllRemaining": "Tutte le lezioni rimanenti di questa serie",
   "cal.deleteAllRemainingHint": "Elimina le future lezioni programmate e le lezioni annullate di questa serie. La cronologia delle lezioni svolte viene conservata.",
   "cal.deleteConfirmAll": "Eliminare tutte le lezioni programmate e annullate rimanenti di questa serie? La cronologia delle lezioni svolte viene conservata.",

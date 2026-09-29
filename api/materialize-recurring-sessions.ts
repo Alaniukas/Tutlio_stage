@@ -100,6 +100,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const paymentModelByStudent = new Map(
     (studentRows || []).map((student: any) => [student.id as string, student.payment_model as string | null]),
   );
+  const tutorIds = [...new Set(templates.map((template) => template.tutor_id))];
+  const { data: tutorRows } = await supabase.from('profiles')
+    .select('id, organization_id, enable_per_lesson, enable_monthly_billing')
+    .in('id', tutorIds);
+  const orgIds = [...new Set((tutorRows || [])
+    .map((tutor: any) => tutor.organization_id as string | null)
+    .filter((id): id is string => !!id))];
+  const { data: orgRows } = orgIds.length
+    ? await supabase.from('organizations')
+        .select('id, enable_per_lesson, enable_monthly_billing')
+        .in('id', orgIds)
+    : { data: [] };
+  const orgById = new Map((orgRows || []).map((org: any) => [org.id as string, org]));
+  const billingFlagsByTutor = new Map((tutorRows || []).map((tutor: any) => {
+    const owner = tutor.organization_id ? orgById.get(tutor.organization_id) : tutor;
+    return [tutor.id as string, {
+      enable_per_lesson: owner?.enable_per_lesson === true,
+      enable_monthly_billing: owner?.enable_monthly_billing === true,
+    }] as const;
+  }));
   const detachedStudentIds = new Set(
     (studentRows || []).filter((student: any) => student.detached_at != null).map((student: any) => student.id as string),
   );
@@ -201,7 +221,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         paid: usesPackage,
         payment_status: defaultSessionPaymentStatusForStudent(
           paymentModelByStudent.get(template.student_id) ?? null,
-          { paid: false, hasPackage: usesPackage },
+          {
+            paid: false,
+            hasPackage: usesPackage,
+            billingFlags: billingFlagsByTutor.get(template.tutor_id),
+          },
         ),
         lesson_package_id: usesPackage ? packageMatch!.pkg.id : null,
         recurring_session_id: template.id,

@@ -5,6 +5,7 @@ import { en } from './en.js';
  * Review scope and source exceptions: docs/SLOVAK_LOCALIZATION_REVIEW.md.
  */
 export const skOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Upozorniť študenta e-mailom',
   "cal.deleteAllRemaining": "Všetky zostávajúce hodiny v tejto sérii",
   "cal.deleteAllRemainingHint": "Odstráni budúce naplánované a zrušené hodiny v tejto sérii. História dokončených hodín zostane zachovaná.",
   "cal.deleteConfirmAll": "Odstrániť všetky zostávajúce naplánované a zrušené hodiny v tejto sérii? História dokončených hodín zostane zachovaná.",

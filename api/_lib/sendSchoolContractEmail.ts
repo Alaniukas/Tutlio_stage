@@ -4,6 +4,7 @@
  */
 import { Resend } from 'resend';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
+import { resolveOrgEmailReplyToWithServiceClient } from './orgEmailReplyTo.js';
 import { localizedFromEmail, type Locale } from './i18n.js';
 import { headerInlineStyle, outlookEmailButton } from './outlookEmail.js';
 
@@ -60,6 +61,7 @@ function footerFor(locale: Locale): string {
 }
 
 export type SchoolContractEmailData = {
+  organizationId?: string | null;
   schoolName?: string;
   schoolEmail?: string;
   studentName?: string;
@@ -146,9 +148,11 @@ export async function sendSchoolContractEmail(
   const locale: Locale = data.locale === 'en' ? 'en' : 'lt';
   const emailContent = buildSchoolContractEmail(data, locale);
   const resend = new Resend(apiKey);
+  const replyTo = await resolveOrgEmailReplyToWithServiceClient(data.organizationId);
   const { data: result, error } = await resend.emails.send({
     from: localizedFromEmail(locale),
     to: [to.trim().toLowerCase()],
+    ...(replyTo ? { replyTo } : {}),
     subject: emailContent.subject,
     html: emailContent.html,
   });

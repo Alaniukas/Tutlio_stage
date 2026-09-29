@@ -183,8 +183,79 @@ describe('POST /api/stripe-checkout', () => {
     expect(stripeCreate.mock.calls[0][0]?.payment_intent_data?.application_fee_amount)
       .toBe(directChargeApplicationFeeCents(25));
     expect(stripeCreate.mock.calls[0][0]?.customer_creation).toBe('always');
+    expect(stripeCreate.mock.calls[0][0]?.locale).toBe('lt');
     expect(stripeCreate.mock.calls[0][1]).toEqual({ stripeAccount: 'acct_individual' });
     expect(sessionsUpdateEq).toHaveBeenCalledWith('id', 'sess-1');
+  });
+
+  it('uses the selected Lithuanian UI locale for an organization checkout despite a Russian browser', async () => {
+    sessionsSingle.mockResolvedValue({
+      data: {
+        id: 'sess-proklase', price: 25, topic: 'Matematika', tutor_id: 'tutor-1', student_id: 'student-1',
+        students: { id: 'student-1', full_name: 'Mokinys', payment_model: 'per_lesson', credit_balance: 0 },
+        profiles: {
+          organization_id: '3422031d-6e21-424d-980b-35a9c6d7b8f1', full_name: 'Mokytojas',
+          enable_per_lesson: true, enable_monthly_billing: false,
+        },
+      },
+      error: null,
+    });
+    organizationsSingle.mockResolvedValue({
+      data: {
+        stripe_account_id: 'acct_proklase', stripe_onboarding_complete: true,
+        name: 'Pro Klasė', entity_type: 'company', slug: 'proklase', features: {},
+      },
+      error: null,
+    });
+    stripeCreate.mockResolvedValue({ id: 'cs_org', url: 'https://checkout.stripe.test/cs_org' });
+
+    const handler = (await import('../../api/stripe-checkout')).default;
+    const req = {
+      ...mockReq('POST', { sessionId: 'sess-proklase', ui_locale: 'lt' }),
+      headers: { 'content-type': 'application/json', 'accept-language': 'ru-RU' },
+    };
+    const res = mockRes();
+    await handler(req as any, res as any);
+
+    expect(res.getResult().statusCode).toBe(200);
+    expect(stripeCreate.mock.calls[0][0]?.locale).toBe('lt');
+    expect(stripeCreate.mock.calls[0][1]).toEqual({ stripeAccount: 'acct_proklase' });
+
+    const invalidLocaleRes = mockRes();
+    await handler(mockReq('POST', { sessionId: 'sess-proklase', ui_locale: 'ru-RU' }) as any, invalidLocaleRes as any);
+    expect(invalidLocaleRes.getResult().statusCode).toBe(200);
+    expect(stripeCreate.mock.calls[1][0]?.locale).toBe('lt');
+  });
+
+  it('sets Lithuanian Checkout locale when a school absorbs fees', async () => {
+    sessionsSingle.mockResolvedValue({
+      data: {
+        id: 'sess-school', price: 25, topic: 'Fizika', tutor_id: 'tutor-1', student_id: 'student-1',
+        students: { id: 'student-1', full_name: 'Mokinys', payment_model: 'per_lesson', credit_balance: 0 },
+        profiles: {
+          organization_id: 'school-1', full_name: 'Mokytojas',
+          enable_per_lesson: true, enable_monthly_billing: false,
+        },
+      },
+      error: null,
+    });
+    organizationsSingle.mockResolvedValue({
+      data: {
+        stripe_account_id: 'acct_school', stripe_onboarding_complete: true,
+        name: 'Mokykla', entity_type: 'school', slug: 'test-school', features: {},
+      },
+      error: null,
+    });
+    stripeCreate.mockResolvedValue({ id: 'cs_school', url: 'https://checkout.stripe.test/cs_school' });
+
+    const handler = (await import('../../api/stripe-checkout')).default;
+    const res = mockRes();
+    await handler(mockReq('POST', { sessionId: 'sess-school', ui_locale: 'lt' }) as any, res as any);
+
+    expect(res.getResult().statusCode).toBe(200);
+    expect(stripeCreate.mock.calls[0][0]?.locale).toBe('lt');
+    expect(stripeCreate.mock.calls[0][0]?.metadata?.tutlio_school_org_absorbed).toBe('true');
+    expect(stripeCreate.mock.calls[0][1]).toEqual({ stripeAccount: 'acct_school' });
   });
 
   it('rejects checkout for an empty student model under monthly billing', async () => {

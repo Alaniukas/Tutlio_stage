@@ -30,7 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: invite, error: inviteErr } = await supabase
       .from('tutor_invites')
-      .select('id, used, organization_id, invitee_email')
+      .select('id, used, organization_id, invitee_email, company_commission_percent')
       .eq('token', orgToken)
       .maybeSingle();
 
@@ -55,10 +55,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: authError?.message || 'Failed to create user' });
     }
 
-    await supabase
+    const { error: profileError } = await supabase.from('profiles').upsert({
+      id: authData.user.id,
+      email,
+      full_name: fullName,
+      phone: phone || '',
+      organization_id: invite.organization_id,
+      // The following login replays a fully claimed invite and returns early,
+      // so the agreed tutor pay must be saved during registration itself.
+      company_commission_percent: invite.company_commission_percent ?? 0,
+    }, { onConflict: 'id' });
+    if (profileError) {
+      return res.status(500).json({ error: 'Failed to save tutor profile' });
+    }
+
+    const { error: inviteUpdateError } = await supabase
       .from('tutor_invites')
       .update({ used: true, used_by_profile_id: authData.user.id })
       .eq('id', invite.id);
+    if (inviteUpdateError) {
+      return res.status(500).json({ error: 'Failed to complete tutor invitation' });
+    }
 
     const siblingEmail = String(invite.invitee_email || email).trim().toLowerCase();
     if (siblingEmail) {
@@ -70,14 +87,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('invitee_email', siblingEmail)
         .neq('id', invite.id);
     }
-
-    await supabase.from('profiles').upsert({
-      id: authData.user.id,
-      email,
-      full_name: fullName,
-      phone: phone || '',
-      organization_id: invite.organization_id,
-    }, { onConflict: 'id' });
 
     return res.status(200).json({ success: true, userId: authData.user.id });
   } catch (err: any) {

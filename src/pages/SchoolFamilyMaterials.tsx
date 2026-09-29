@@ -8,6 +8,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
 import { getParentActiveChildId, setParentActiveChildId } from '@/lib/parentActiveChild';
+import SchoolGroupMaterialLibrary from '@/components/school/SchoolGroupMaterialLibrary';
 
 type Child = { id: string; full_name: string };
 type MaterialFile = { name: string; folderId: string; url: string | null; submission: boolean; own: boolean };
@@ -136,6 +137,7 @@ export default function SchoolFamilyMaterials({ portal }: { portal: 'parent' | '
             <p className="text-sm">{video.name}</p><video key={video.id} controls preload="metadata" src={video.streamUrl} className="w-full rounded-xl bg-black" />
           </> : <p className="text-sm text-gray-500">{t('school.materials.noFiles')}</p>}
         </section>
+        <SchoolGroupMaterialLibrary studentId={childId} authenticated />
         <section className="space-y-3"><h2 className="flex items-center gap-2 text-lg font-semibold"><Paperclip className="h-5 w-5" />{t('school.materials.homework')}</h2>
           {!payload?.sessions.length && <p>{t('school.materials.noFiles')}</p>}
           {[...(payload?.sessions || [])].sort((a, b) => b.start.localeCompare(a.start)).map((session) => <article key={session.id} className="space-y-3 rounded-2xl border bg-white p-4">

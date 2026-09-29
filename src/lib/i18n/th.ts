@@ -6,6 +6,7 @@
 import { en } from './en.js';
 
 export const thOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'แจ้งนักเรียนทางอีเมล',
   "cal.deleteAllRemaining": "คาบเรียนที่เหลือทั้งหมดในชุดนี้",
   "cal.deleteAllRemainingHint": "ลบคาบเรียนในอนาคตที่วางแผนไว้และที่ยกเลิกแล้วในชุดนี้ โดยเก็บประวัติคาบเรียนที่เรียนเสร็จแล้วไว้",
   "cal.deleteConfirmAll": "ต้องการลบคาบเรียนที่วางแผนไว้และที่ยกเลิกแล้วทั้งหมดที่เหลือในชุดนี้หรือไม่? ประวัติคาบเรียนที่เรียนเสร็จแล้วจะยังคงอยู่",

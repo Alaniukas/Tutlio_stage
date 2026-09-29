@@ -54,6 +54,8 @@ import {
 import { checkSchoolSessionStudentAccess } from './_lib/schoolContractAccess.js';
 import { filterParentNotificationRecipients, shouldSkipParentNotification } from './_lib/parentNotificationPreferences.js';
 import { shouldSkipTutorNotification } from './_lib/tutorNotificationPreferences.js';
+import { allowsPerLessonBilling } from './_lib/perLessonBillingEligibility.js';
+import { resolveOrgEmailReplyTo } from './_lib/orgEmailReplyTo.js';
 
 
 function randomToken() {
@@ -416,6 +418,7 @@ function bookingConfirmation(d: any, locale: Locale) {
   const localizedPaymentStatus =
     d.paymentStatus === 'paid' ? t(locale, 'em.statusPaid') :
     d.paymentStatus === 'pending' ? t(locale, 'em.statusPending') :
+    d.paymentStatus === 'confirmed' ? t(locale, 'em.statusReserved') :
     d.paymentStatus || t(locale, 'em.statusReserved');
   const payerIntro = d.forPayer
     ? `<p class="greeting">${t(locale, 'em.hiPlain')}</p>
@@ -495,6 +498,7 @@ function bookingNotification(d: any, locale: Locale) {
   const localizedPaymentStatus =
     d.paymentStatus === 'paid' ? t(locale, 'em.statusPaid') :
     d.paymentStatus === 'pending' ? t(locale, 'em.statusPending') :
+    d.paymentStatus === 'confirmed' ? t(locale, 'em.statusReserved') :
     d.paymentStatus || t(locale, 'em.statusWaiting');
   /** Org-affiliated tutors: no Stripe/platform payment narrative (billing is organisational). */
   const isOrgSchoolTutorBooking = !!(d.organizationTutor || d.hidePaymentStatus);
@@ -2504,18 +2508,18 @@ function schoolContractExtraAccepted(d: any, locale: Locale) {
 
 function schoolStaffConsentChoicesRequest(d: any, _locale: Locale) {
   return {
-    subject: `${String(d.schoolName || 'Mokykla')}: pažymėkite asmens duomenų sutikimo punktus`,
+    subject: `${String(d.schoolName || 'Mokykla')}: užpildykite darbuotojo dokumentų formą`,
     html: wrap(
       `<div class="header" style="${headerInlineStyle('#6366f1', '#4f46e5')}">
-        <h2 style="color:#ffffff; font-size:24px; margin:0; font-weight:700;">Darbuotojo sutikimo forma</h2>
+        <h2 style="color:#ffffff; font-size:24px; margin:0; font-weight:700;">Darbuotojo dokumentų forma</h2>
       </div>
       <div class="body">
         <p class="greeting">Sveiki${d.employeeName ? `, ${esc(d.employeeName)}` : ''},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          ${esc(d.schoolName || 'Mokykla')} prašo peržiūrėti asmens duomenų tvarkymo sutikimą ir atskirai pažymėti kiekvieną iš 10 punktų. Po to dokumentą pasirašys mokykla, o jūs gausite atskirą nuorodą pasirašyti elektroniniu parašu.
+          ${esc(d.schoolName || 'Mokykla')} prašo peržiūrėti asmens duomenų tvarkymo sutikimą ir atskirai pažymėti kiekvieną iš 10 punktų. Jei formoje prašoma, taip pat įveskite savo adresą ir asmens kodą susitarimui su priedu. Po to dokumentus pasirašys mokykla, o jūs gausite atskiras nuorodas pasirašyti elektroniniu parašu.
         </p>
         <div style="text-align:center; margin-top:24px;">
-          ${outlookEmailButton(d.choicesUrl, 'Peržiūrėti ir pažymėti punktus', '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+          ${outlookEmailButton(d.choicesUrl, 'Atidaryti dokumentų formą', '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
         </div>
         <p style="color:#9ca3af; font-size:12px; margin-top:16px;">Ši nuoroda asmeninė – neperduokite jos kitiems.</p>
       </div>${footerFor('lt')}`,
@@ -3259,6 +3263,38 @@ const USER_TRIGGERABLE_EMAIL_TYPES = new Set([
   'school_contract_extra_offer',
 ]);
 
+/** Booking emails can arrive from an older open browser tab. Resolve current billing
+ * settings from the actual lesson before trusting any caller-supplied payment copy. */
+async function bookingEmailAllowsPerLessonPayment(data: Record<string, unknown>): Promise<boolean> {
+  const sessionId = typeof data.sessionId === 'string' ? data.sessionId.trim() : '';
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!sessionId || !url || !key) return false;
+
+  try {
+    const sb = createClient(url, key, supabaseServiceRoleClientOptions());
+    const { data: session, error: sessionError } = await sb.from('sessions')
+      .select('student_id, tutor_id').eq('id', sessionId).maybeSingle();
+    if (sessionError || !session?.student_id || !session?.tutor_id) return false;
+    const [{ data: student, error: studentError }, { data: tutor, error: tutorError }] = await Promise.all([
+      sb.from('students').select('payment_model').eq('id', session.student_id).maybeSingle(),
+      sb.from('profiles').select('organization_id, enable_per_lesson, enable_monthly_billing').eq('id', session.tutor_id).maybeSingle(),
+    ]);
+    if (studentError || tutorError || !student || !tutor) return false;
+    let ownerFlags: { enable_per_lesson?: boolean | null; enable_monthly_billing?: boolean | null } = tutor;
+    if (tutor.organization_id) {
+      const { data: org, error: orgError } = await sb.from('organizations')
+        .select('enable_per_lesson, enable_monthly_billing').eq('id', tutor.organization_id).maybeSingle();
+      if (orgError || !org) return false;
+      ownerFlags = org;
+    }
+    return allowsPerLessonBilling(student.payment_model, ownerFlags);
+  } catch (error) {
+    console.error('[send-email] booking billing policy lookup failed:', error);
+    return false;
+  }
+}
+
 async function getAuthenticatedUserId(req: VercelRequest): Promise<string | null> {
   const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
   if (!authHeader.startsWith('Bearer ')) return null;
@@ -3308,17 +3344,19 @@ async function canOrgSeatSendEmail(userId: string, type: string): Promise<boolea
 }
 
 /** When `organizationId` is omitted from the payload, infer org from the logged-in user (tutor / org admin / student / parent). */
-async function resolveOrganizationIdFromAuthBearer(req: VercelRequest): Promise<string | null> {
-  const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
-  if (!authHeader.startsWith('Bearer ')) return null;
-  const token = authHeader.slice(7);
+async function resolveOrganizationIdFromAuthBearer(req: VercelRequest, authenticatedUserId?: string | null): Promise<string | null> {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
   if (!supabaseUrl || !serviceKey) return null;
   const sb = createClient(supabaseUrl, serviceKey, supabaseServiceRoleClientOptions() as any) as any;
-  const { data: authData, error: authErr } = await sb.auth.getUser(token);
-  if (authErr || !authData?.user?.id) return null;
-  const userId = authData.user.id as string;
+  let userId = authenticatedUserId;
+  if (!userId) {
+    const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
+    if (!authHeader.startsWith('Bearer ')) return null;
+    const { data: authData, error: authErr } = await sb.auth.getUser(authHeader.slice(7));
+    if (authErr || !authData?.user?.id) return null;
+    userId = authData.user.id as string;
+  }
 
   const { data: profile } = await sb.from('profiles').select('organization_id').eq('id', userId).maybeSingle();
   if (profile?.organization_id) return profile.organization_id as string;
@@ -3471,6 +3509,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    if (type === 'booking_confirmation' || type === 'recurring_booking_confirmation') {
+      const perLessonAllowed = rawData && typeof rawData === 'object'
+        ? await bookingEmailAllowsPerLessonPayment(rawData)
+        : false;
+      if (!perLessonAllowed && rawData && typeof rawData === 'object') {
+        if (rawData.paymentStatus !== 'paid') rawData.paymentStatus = 'confirmed';
+        rawData.paymentReminderNote = false;
+        rawData.perlasEnabled = false;
+        delete rawData.paymentLink;
+      }
+    }
+
     // Before sanitize so the tracked URL gets the same HTML escaping as raw links.
     applyTrackedMeetingLink(type, rawData);
     const data = sanitizeEmailData(rawData);
@@ -3478,7 +3528,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       (typeof rawData?.organizationId === 'string' && rawData.organizationId.trim()) ||
       (typeof rawData?.organization_id === 'string' && rawData.organization_id.trim()) ||
       null;
-    const orgIdForBrandingLookup = orgIdFromPayload || (await resolveOrganizationIdFromAuthBearer(req));
+    const orgIdFromAuth = isPrivileged ? null : await resolveOrganizationIdFromAuthBearer(req, authenticatedUserId);
+    const orgIdForBrandingLookup = orgIdFromPayload || orgIdFromAuth;
+    // Browser payloads can name any organization. Only a server-verified org
+    // may supply a customer reply address; internal callers already authenticate.
+    const replyToOrgId = isPrivileged ? orgIdFromPayload : orgIdFromAuth;
 
     if (type === 'booking_notification' && isMoksloVaisiaiOrg(orgIdForBrandingLookup)) {
       return res.status(200).json({ success: true, skipped: true, reason: 'mv_no_booking_notification' });
@@ -3609,6 +3663,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Resolve org branding for whitelabel emails
     let orgBranding: EmailBranding | null = null;
+    let orgReplyTo: string[] | undefined;
     // School-type orgs get a neutral parent-facing subject for contract/payment emails.
     let isSchoolOrg = false;
     // Schools read "mokytojas" / "užsiėmimas" — applied to the finished subject + html below.
@@ -3621,10 +3676,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const sb = createClient(supabaseUrl, serviceKey, supabaseServiceRoleClientOptions() as any) as any;
           const { data: org } = await sb
             .from('organizations')
-            .select('name, logo_url, brand_color, brand_color_secondary, features, entity_type, preferred_locale')
+            .select('name, email, logo_url, brand_color, brand_color_secondary, features, entity_type, preferred_locale')
             .eq('id', orgIdForBrandingLookup)
             .maybeSingle();
           if (org) {
+            if (orgIdForBrandingLookup === replyToOrgId) {
+              orgReplyTo = await resolveOrgEmailReplyTo(sb, orgIdForBrandingLookup, org);
+            }
             organizationLocale = org.preferred_locale;
             isSchoolOrg = String((org as { entity_type?: string }).entity_type || '').trim().toLowerCase() === 'school';
             schoolEmailTerminology = schoolTerminologyForOrg(
@@ -3832,6 +3890,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         dryRun: true,
         subject: unescapeHtml(emailContent.subject),
         html: emailContent.html,
+        replyTo: orgReplyTo,
       });
     }
 
@@ -3872,6 +3931,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       to: Array.isArray(to) ? to : [to],
       subject: unescapeHtml(emailContent.subject),
       html: emailContent.html,
+      ...(orgReplyTo ? { replyTo: orgReplyTo } : {}),
     };
 
     const rawAttachments = (req.body as any)?.attachments;
@@ -3892,6 +3952,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           to: Array.isArray(emailPayload.to) ? emailPayload.to : [emailPayload.to],
           subject: emailPayload.subject,
           html: emailContent.html,
+          replyTo: orgReplyTo,
           attachments: Array.isArray(rawAttachments) ? rawAttachments : undefined,
         },
         send: async (payload, idempotencyKey) => {

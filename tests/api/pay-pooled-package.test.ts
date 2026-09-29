@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mock = vi.hoisted(() => ({ create: vi.fn(), from: vi.fn(), pkg: {} as any, checkoutClaim: {} as any }));
-vi.mock('stripe', () => ({ default: class { checkout = { sessions: { create: mock.create } }; } }));
+const mock = vi.hoisted(() => ({ create: vi.fn(), retrieve: vi.fn(), expire: vi.fn(), from: vi.fn(), pkg: {} as any, checkoutClaim: {} as any }));
+vi.mock('stripe', () => ({ default: class { checkout = { sessions: { create: mock.create, retrieve: mock.retrieve, expire: mock.expire } }; } }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ from: mock.from }) }));
 vi.mock('../../api/_lib/public-origin.js', () => ({ publicOriginFromRequest: () => 'https://tutlio.pl' }));
 import handler from '../../api/pay-package';
@@ -14,6 +14,7 @@ beforeEach(() => {
     profiles: { full_name: 'Tutor', organization_id: 'changed-org' } };
   mock.checkoutClaim = mock.pkg;
   mock.create.mockResolvedValue({ id: 'checkout', url: 'https://checkout.stripe.com/test' });
+  mock.expire.mockResolvedValue({ id: 'cs_old', status: 'expired' });
   mock.from.mockImplementation((table: string) => {
     const data = table === 'lesson_packages' ? mock.pkg : table === 'organizations'
       ? { stripe_account_id: 'org-account', stripe_onboarding_complete: true, name: 'Pro Klase', slug: 'proklase' }
@@ -24,10 +25,10 @@ beforeEach(() => {
     return q;
   });
 });
-async function pay() {
+async function pay(uiLocale?: string) {
   const res: any = { status: vi.fn(), send: vi.fn(), json: vi.fn(), redirect: vi.fn() };
   res.status.mockReturnValue(res);
-  await handler({ method: 'GET', query: { package: 'pool' }, headers: {} } as any, res);
+  await handler({ method: 'GET', query: { package: 'pool', ...(uiLocale ? { ui_locale: uiLocale } : {}) }, headers: { 'accept-language': 'ru-RU' } } as any, res);
   return res;
 }
 describe('pooled package payment', () => {
@@ -41,6 +42,7 @@ describe('pooled package payment', () => {
       directChargeApplicationFeeCents(243, 'default', orgFeeProfile('proklase')),
     );
     expect(checkout.customer_creation).toBe('always');
+    expect(checkout.locale).toBe('lt');
     expect(options.stripeAccount).toBe('org-account');
     expect(checkout.success_url).toBe('https://tutlio.pl/package-success?session_id={CHECKOUT_SESSION_ID}&stripe_account=org-account');
     expect(checkout.cancel_url).toBe('https://tutlio.pl/package-cancelled');
@@ -57,6 +59,31 @@ describe('pooled package payment', () => {
     mock.pkg.expires_at = '2000-01-01T00:00Z';
     expect((await pay()).status).toHaveBeenCalledWith(409);
     expect(mock.create).not.toHaveBeenCalled();
+  });
+  it('replaces a still-open auto-locale checkout before redirecting to payment', async () => {
+    mock.pkg.stripe_checkout_session_id = 'cs_old';
+    mock.retrieve.mockResolvedValue({ id: 'cs_old', status: 'open', url: 'https://checkout.stripe.com/old', locale: null });
+
+    const res = await pay();
+
+    expect(mock.retrieve).toHaveBeenCalledWith('cs_old', { stripeAccount: 'org-account' });
+    expect(mock.expire).toHaveBeenCalledWith('cs_old', { stripeAccount: 'org-account' });
+    expect(mock.create.mock.calls[0][0].locale).toBe('lt');
+    expect(res.redirect).toHaveBeenCalledWith(303, 'https://checkout.stripe.com/test');
+  });
+  it('reuses an open checkout when its locale matches the link', async () => {
+    mock.pkg.stripe_checkout_session_id = 'cs_old';
+    mock.retrieve.mockResolvedValue({ id: 'cs_old', status: 'open', url: 'https://checkout.stripe.com/old', locale: 'lt' });
+
+    const res = await pay();
+
+    expect(mock.expire).not.toHaveBeenCalled();
+    expect(mock.create).not.toHaveBeenCalled();
+    expect(res.redirect).toHaveBeenCalledWith(303, 'https://checkout.stripe.com/old');
+  });
+  it('uses an explicit supported UI locale on a direct package link', async () => {
+    await pay('pl');
+    expect(mock.create.mock.calls[0][0].locale).toBe('pl');
   });
   it('never creates a checkout for a cancelled package', async () => {
     mock.pkg.payment_status = 'cancelled';

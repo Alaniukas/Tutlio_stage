@@ -19,6 +19,7 @@ import { releaseSessionSlotAsAvailability } from './_lib/release-session-availab
 import { PRO_KLASE_TUTOR_NO_SHOW_PENALTY_EUR } from './_lib/proKlaseTutorPay.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { allowsPerLessonBilling, loadPerLessonBillingFlags } from './_lib/perLessonBillingEligibility.js';
 
 async function sendEmail(body: object) {
     const baseUrl = process.env.VERCEL_URL
@@ -599,7 +600,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         try {
             const { data: tutorProfile } = await supabase
                 .from('profiles')
-                .select('organization_id')
+                .select('organization_id, enable_per_lesson, enable_monthly_billing')
                 .eq('id', tutorId)
                 .maybeSingle();
             if (isWaitlistHiddenForOrg((tutorProfile as any)?.organization_id)) {
@@ -619,7 +620,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             // First try: exact session match
             let { data: waitlist } = await supabase
                 .from('waitlists')
-                .select(`id, student_id, session_id, preferred_day, preferred_time, student:students(full_name, email)`)
+                .select(`id, student_id, session_id, preferred_day, preferred_time, student:students(full_name, email, payment_model)`)
                 .eq('session_id', sessionId)
                 .order('created_at', { ascending: true })
                 .limit(1);
@@ -631,7 +632,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
                 const { data: genericQueue } = await supabase
                     .from('waitlists')
-                    .select(`id, student_id, session_id, preferred_day, preferred_time, student:students(full_name, email)`)
+                    .select(`id, student_id, session_id, preferred_day, preferred_time, student:students(full_name, email, payment_model)`)
                     .eq('tutor_id', tutorId)
                     .is('session_id', null)
                     .order('created_at', { ascending: true });
@@ -654,6 +655,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             const nextInLine = waitlist[0];
+            if (!tutorProfile) throw new Error('Tutor billing settings unavailable');
+            const billingFlags = await loadPerLessonBillingFlags(supabase, tutorProfile);
+            const sData = Array.isArray(nextInLine.student) ? nextInLine.student[0] : nextInLine.student;
 
             const newSessionData: Record<string, unknown> = {
                 tutor_id: tutorId,
@@ -663,7 +667,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 topic: session.topic,
                 status: 'active',
                 price: session.price,
-                payment_status: 'pending',
+                payment_status: allowsPerLessonBilling((sData as any)?.payment_model, billingFlags)
+                    ? 'pending'
+                    : 'confirmed',
                 paid: false,
             };
 
@@ -711,8 +717,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             // Remove from waitlist
             await supabase.from('waitlists').delete().eq('id', nextInLine.id);
-
-            const sData = Array.isArray(nextInLine.student) ? nextInLine.student[0] : nextInLine.student;
 
             // OPTIMIZED: Send waitlist matched emails in parallel fire-and-forget
             if (sData?.email) {

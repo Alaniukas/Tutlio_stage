@@ -1,6 +1,10 @@
-import { createContext, lazy, Suspense, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { IN_APP_SUPPORT_ENABLED } from '@/lib/inAppSupportAvailability';
+import { clearSupportDiagnostics, installSupportDiagnostics } from '@/lib/supportDiagnostics';
+import { supabase } from '@/lib/supabase';
+
+let diagnosticsUserId: string | null = null;
 
 export type SupportPopoverAnchor = {
   left: number;
@@ -31,6 +35,20 @@ export default function InAppSupportProvider({ children }: { children: ReactNode
   const [hasOpened, setHasOpened] = useState(false);
   const [sourcePath, setSourcePath] = useState('');
   const [anchor, setAnchor] = useState<SupportPopoverAnchor | null>(null);
+
+  useEffect(() => {
+    if (!IN_APP_SUPPORT_ENABLED) return;
+    const uninstall = installSupportDiagnostics();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const nextUserId = session?.user?.id || null;
+      if (diagnosticsUserId && diagnosticsUserId !== nextUserId) clearSupportDiagnostics();
+      diagnosticsUserId = nextUserId;
+    });
+    return () => {
+      subscription.unsubscribe();
+      uninstall();
+    };
+  }, []);
 
   const openSupportAgent = useCallback((element?: HTMLElement | null) => {
     if (!IN_APP_SUPPORT_ENABLED) return;

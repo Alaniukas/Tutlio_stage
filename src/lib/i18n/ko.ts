@@ -6,6 +6,7 @@ import { en } from './en.js';
  * See docs/KOREAN_LOCALIZATION_REVIEW.md before publishing this locale.
  */
 export const koOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': '학생에게 이메일로 알리기',
   "cal.deleteAllRemaining": "이 반복 일정에 남아 있는 모든 수업",
   "cal.deleteAllRemainingHint": "이 반복 일정의 앞으로 예정된 수업과 취소된 수업을 삭제합니다. 완료된 수업 기록은 유지됩니다.",
   "cal.deleteConfirmAll": "이 반복 일정에 남아 있는 예정된 수업과 취소된 수업을 모두 삭제할까요? 완료된 수업 기록은 유지됩니다.",

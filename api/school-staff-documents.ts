@@ -5,7 +5,7 @@ import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { ensureSignatureRow, fetchSignatureRows, inviteTeacherToSign, renewParentSignatureAccess, sendInternalEmail } from './_lib/schoolContractSigning.js';
-import { renderStaffDocumentPdf, staffDocumentStatus, STAFF_TEMPLATE_ORG_ID } from './_lib/schoolStaffDocuments.js';
+import { staffDocumentStatus, STAFF_TEMPLATE_ORG_ID } from './_lib/schoolStaffDocuments.js';
 import { schoolContractPdfStoragePath, SCHOOL_CONTRACTS_BUCKET } from './_lib/schoolContractPdfPath.js';
 import { cancelSigning } from './_lib/gosignClient.js';
 import { PDFDocument } from 'pdf-lib';
@@ -113,6 +113,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 400, { error: 'Neteisingi darbuotojo arba dokumento duomenys.' });
     }
     const preparedPath = String(req.body?.preparedPdfPath || '').trim();
+    if (preparedPath && req.body?.preparedDetailsConfirmed !== true) {
+      return json(res, 400, { error: 'Patvirtinkite, kad įkeltame PDF jau įrašytas darbuotojo adresas ir asmens kodas.' });
+    }
     if (employmentNumber.length > 100 || (employmentDate && !/^\d{4}-\d{2}-\d{2}$/.test(employmentDate))) {
       return json(res, 400, { error: 'Neteisingas darbo sutarties numeris arba data.' });
     }
@@ -167,14 +170,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           await removeUnclaimedPdf();
           return json(res, 400, { error: 'PDF failo nepavyko perskaityti.' });
         }
-      } else {
-        const bytes = await renderStaffDocumentPdf('confidentiality', {
-          name, employmentContractNumber: employmentNumber, employmentContractDate: employmentDate, date: new Date(),
-        });
-        const { error: uploadError } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).upload(path, bytes, {
-          contentType: 'application/pdf', upsert: false,
-        });
-        if (uploadError) throw uploadError;
       }
       const base = {
         organization_id: orgId,
@@ -191,8 +186,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
       // One PostgREST insert is one SQL statement: either both documents exist or neither does.
       const { data: contracts, error: insertError } = await supabase.from('school_contracts').insert([
-        { ...base, id: confidentialityId, contract_number: number, pdf_url: path,
-          signing_status: 'awaiting_school_signature', staff_document_type: 'confidentiality' },
+        { ...base, id: confidentialityId, contract_number: number, pdf_url: preparedPath || null,
+          signing_status: preparedPath ? 'awaiting_school_signature' : 'draft', staff_document_type: 'confidentiality' },
         { ...base, id: consentId, contract_number: consentNumber, pdf_url: null,
           signing_status: 'draft', staff_document_type: 'consent' },
       ]).select(SELECT);

@@ -6,6 +6,7 @@
 import { en } from './en.js';
 
 export const filOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Ipaalam sa mag-aaral sa pamamagitan ng email',
   "cal.deleteAllRemaining": "Lahat ng natitirang sesyon sa seryeng ito",
   "cal.deleteAllRemainingHint": "Binubura ang mga nakatakdang susunod na sesyon at mga nakanselang sesyon sa seryeng ito. Nananatili ang tala ng mga natapos na sesyon.",
   "cal.deleteConfirmAll": "Burahin ang lahat ng natitirang nakatakda at nakanselang sesyon sa seryeng ito? Nananatili ang tala ng mga natapos na sesyon.",

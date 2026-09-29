@@ -41,12 +41,14 @@ describe('school staff document upload form', () => {
     expect(screen.getByLabelText('Darbo sutarties Nr. (nebūtina)')).toBeTruthy();
     expect(screen.getByLabelText('Darbo sutarties data (nebūtina)')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('PDF yra ir susitarimas, ir konfidencialios informacijos sąrašo priedas'));
+    fireEvent.click(screen.getByLabelText(/Įkeltame PDF jau įrašyti darbuotojo adresas ir asmens kodas/));
     fireEvent.click(screen.getByRole('button', { name: 'Sukurti du dokumentus' }));
 
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(uploadMock).toHaveBeenCalledTimes(1);
     expect(posts[0].action).toBe('create-bundle');
     expect(posts[0].preparedPdfPath).toContain(`${ORG_ID}/contracts/`);
+    expect(posts[0].preparedDetailsConfirmed).toBe(true);
     expect(posts[0].confidentialityId).not.toBe(posts[0].consentId);
   });
 
@@ -109,6 +111,7 @@ describe('school staff document upload form', () => {
       target: { files: [new File(['%PDF-prepared'], 'agreement.pdf', { type: 'application/pdf' })] },
     });
     fireEvent.click(screen.getByLabelText('PDF yra ir susitarimas, ir konfidencialios informacijos sąrašo priedas'));
+    fireEvent.click(screen.getByLabelText(/Įkeltame PDF jau įrašyti darbuotojo adresas ir asmens kodas/));
     fireEvent.click(screen.getByRole('button', { name: 'Sukurti du dokumentus' }));
     await screen.findByRole('alert');
     fireEvent.click(screen.getByRole('button', { name: 'Sukurti du dokumentus' }));

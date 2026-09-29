@@ -6,6 +6,7 @@
 import { en } from './en.js';
 
 export const trOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Öğrenciyi e-postayla bilgilendir',
   "cal.deleteAllRemaining": "Bu seride kalan tüm dersler",
   "cal.deleteAllRemainingHint": "Bu serideki gelecekte planlanan ve iptal edilen dersleri siler. Tamamlanan derslerin geçmişi korunur.",
   "cal.deleteConfirmAll": "Bu seride kalan planlanmış ve iptal edilmiş tüm dersler silinsin mi? Tamamlanan derslerin geçmişi korunur.",

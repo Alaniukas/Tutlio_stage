@@ -20,6 +20,7 @@ import {
   sumProKlaseRealizedPaidTutorPayEur,
 } from '@/lib/proKlaseAdminFinance';
 import { dedupeParentChildren } from '@/lib/parentChildIdentity';
+import { allowsPerLessonPaymentForStudent } from '@/lib/studentPaymentModel';
 
 /** Columns the tutor Dashboard needs (avoid `*` + share one deduped round-trip with Layout preload). */
 const TUTOR_DASH_SESSIONS_SELECT =
@@ -739,7 +740,7 @@ export function parentFullNameForUserDeduped(userId: string) {
 }
 
 const PARENT_STUDENT_LINK_SELECT =
-  'id, full_name, email, tutor_id, linked_user_id, organization_id, profiles:tutor_id(full_name)';
+  'id, full_name, email, tutor_id, linked_user_id, organization_id, payment_model, profiles:tutor_id(full_name)';
 
 export function parentStudentLinksDeduped(userId: string) {
   return dedupeAsync(`parent_student_links:${userId}`, async () => {
@@ -808,6 +809,31 @@ export function parentStudentLinksDeduped(userId: string) {
   });
 }
 
+export function countParentUnpaidPastLessons(
+  lessons: Array<{
+    tutorId?: string | null;
+    paid?: boolean | null;
+    payment_status?: string | null;
+    status?: string | null;
+    end_time?: string | null;
+  }>,
+  studentPaymentModel: string | null | undefined,
+  paymentFlagsByTutorId: ReadonlyMap<string, { enable_per_lesson: boolean; enable_monthly_billing: boolean }>,
+  now: Date,
+): number {
+  return lessons.filter((lesson) => {
+    const paymentFlags = lesson.tutorId ? paymentFlagsByTutorId.get(lesson.tutorId) : null;
+    if (!paymentFlags || !allowsPerLessonPaymentForStudent(
+      studentPaymentModel,
+      paymentFlags.enable_per_lesson,
+      paymentFlags.enable_monthly_billing,
+    )) return false;
+    return !lesson.paid && lesson.payment_status !== 'paid_by_student' &&
+      (lesson.status === 'completed' ||
+        (lesson.status === 'active' && !!lesson.end_time && new Date(lesson.end_time).getTime() < now.getTime()));
+  }).length;
+}
+
 export async function preloadParentData() {
   if (parentPreloadRunning) return;
   if (getCached('parent_dashboard')) return;
@@ -839,34 +865,44 @@ export async function preloadParentData() {
     const past = subMonths(now, 6);
     const future = addMonths(now, 3);
 
-    const tutorIds = [
-      ...new Set(
-        studentsRaw
-          .map((s: any) => s.tutor_id as string | null | undefined)
-          .filter(Boolean) as string[],
-      ),
-    ];
-
-    const [sessionsRes, tutorProfilesRes] = await Promise.all([
-      supabase
+    const sessionsRes = await supabase
         .from('sessions')
         .select(
-          'id, student_id, start_time, end_time, status, cancelled_by, topic, paid, payment_status, price, meeting_link, tutor_comment, show_comment_to_student, show_comment_to_parent, subjects(name, is_group)',
+          'id, student_id, tutor_id, start_time, end_time, status, cancelled_by, topic, paid, payment_status, price, meeting_link, tutor_comment, show_comment_to_student, show_comment_to_parent, subjects(name, is_group)',
         )
         .in('student_id', studentIds)
         .gte('start_time', past.toISOString())
         .lte('start_time', future.toISOString())
         .order('start_time', { ascending: true })
-        .limit(2000),
-      tutorIds.length > 0
-        ? supabase
+        .limit(2000);
+    const tutorIds = [...new Set([
+      ...studentsRaw.map((s: any) => s.tutor_id as string | null | undefined),
+      ...(sessionsRes.data ?? []).map((session) => session.tutor_id),
+    ].filter((id): id is string => typeof id === 'string' && id.length > 0))];
+    const tutorProfilesRes = tutorIds.length > 0
+      ? await supabase
             .from('profiles')
             .select(
-              'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, payment_timing, payment_deadline_hours',
+              'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, payment_timing, payment_deadline_hours, organization_id, enable_per_lesson, enable_monthly_billing',
             )
             .in('id', tutorIds)
-        : Promise.resolve({ data: [], error: null } as any),
-    ]);
+      : { data: [], error: null };
+    const billingOrgIds = [...new Set((tutorProfilesRes.data ?? [])
+      .map((profile) => profile.organization_id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0))];
+    const billingOrgsRes = billingOrgIds.length > 0
+      ? await supabase.from('organizations').select('id, enable_per_lesson, enable_monthly_billing').in('id', billingOrgIds)
+      : { data: [], error: null };
+    const billingOrgsById = new Map((billingOrgsRes.data ?? []).map((org) => [org.id, org]));
+    const paymentFlagsByTutorId = new Map<string, { enable_per_lesson: boolean; enable_monthly_billing: boolean }>();
+    for (const profile of tutorProfilesRes.data ?? []) {
+      const flags = profile.organization_id ? billingOrgsById.get(profile.organization_id) : profile;
+      if (!flags) continue;
+      paymentFlagsByTutorId.set(profile.id, {
+        enable_per_lesson: flags.enable_per_lesson === true,
+        enable_monthly_billing: flags.enable_monthly_billing === true,
+      });
+    }
 
     const tutorPolicies: Record<string, any> = {};
     for (const tp of (tutorProfilesRes as any).data ?? []) {
@@ -887,6 +923,7 @@ export async function preloadParentData() {
       const arr = byStudent.get((s as any).student_id) ?? [];
       arr.push({
         id: (s as any).id,
+        tutorId: (s as any).tutor_id ?? null,
         start_time: (s as any).start_time,
         end_time: (s as any).end_time,
         status: (s as any).status,
@@ -913,13 +950,7 @@ export async function preloadParentData() {
       const completed = list.filter((x: any) => x.status === 'completed');
       const cancelled = list.filter((x: any) => x.status === 'cancelled');
       const noShow = list.filter((x: any) => x.status === 'no_show');
-      const unpaidPast = list.filter(
-        (x: any) =>
-          !x.paid &&
-          x.payment_status !== 'paid_by_student' &&
-          (x.status === 'completed' ||
-            (x.status === 'active' && new Date(x.end_time).getTime() < now.getTime())),
-      );
+      const unpaidPastCount = countParentUnpaidPastLessons(list, s.payment_model, paymentFlagsByTutorId, now);
 
       return {
         studentId: s.id,
@@ -932,7 +963,7 @@ export async function preloadParentData() {
         cancelledCount: cancelled.length,
         noShowCount: noShow.length,
         totalCount: list.length,
-        unpaidPastCount: unpaidPast.length,
+        unpaidPastCount,
         nextSession: upcoming[0] ?? null,
         otherUpcoming: upcoming.slice(1, 4),
         tutorPolicy: s.tutor_id ? tutorPolicies[s.tutor_id] ?? null : null,

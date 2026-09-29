@@ -4,6 +4,7 @@ import { Resend } from 'resend';
 import { findAuthUserByEmail } from './findAuthUserByEmail.js';
 import { provisionMvFamilyAccounts } from './mvProvisionFamilyAccounts.js';
 import { resolveEmailOrgBranding } from './emailOrgBranding.js';
+import { resolveOrgEmailReplyTo } from './orgEmailReplyTo.js';
 import { localizedFromEmail, t, type Locale } from './i18n.js';
 import { getResendApiKey } from './resendConfig.js';
 import { orgAwareOrigin } from './public-origin.js';
@@ -251,8 +252,10 @@ async function sendSchoolFamilyInvite(db: SupabaseClient, org: SchoolFamilyOrgan
   const color = brand.branding?.brand_color || '#4f46e5';
   const subject = t(locale, role === 'parent' ? 'em.mvActivationParentSub' : 'em.mvActivationStudentSub', { student: student.full_name });
   const body = t(locale, role === 'parent' ? 'em.mvActivationParentBody' : 'em.mvActivationStudentBody', { org: brandName, student: student.full_name });
+  const replyTo = await resolveOrgEmailReplyTo(db, org.id);
   const response = await new Resend(apiKey).emails.send({
     from: localizedFromEmail(locale, { senderName: brand.emailSenderName }), to: recipient, subject,
+    ...(replyTo ? { replyTo } : {}),
     html: `<!doctype html><html lang="${escapeHtml(locale)}"><body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif"><div style="max-width:560px;margin:24px auto;background:white;padding:28px"><div style="text-align:center;color:${escapeHtml(color)}">${brand.branding?.logo_url ? `<img src="${escapeHtml(brand.branding.logo_url)}" alt="${escapeHtml(brandName)}" style="max-width:200px;max-height:56px"/>` : `<h1>${escapeHtml(brandName)}</h1>`}</div><p>${escapeHtml(body)}</p><p>${escapeHtml(t(locale, login.includes('@') ? 'em.mvFamilyAccountsEmailLabel' : 'login.studentUsername'))}: <strong>${escapeHtml(login)}</strong></p><p><a href="${escapeHtml(invitationUrl)}" style="display:inline-block;padding:14px 24px;color:white;background:${escapeHtml(color)};border-radius:8px">${escapeHtml(t(locale, isReady ? 'mvActivate.goLogin' : 'em.mvActivationBtn'))}</a></p><p>${escapeHtml(brand.emailTeamSignature || brandName)}</p></div></body></html>`,
   });
   if (response.error) return { sent: false, code: 'email_send_failed', role };

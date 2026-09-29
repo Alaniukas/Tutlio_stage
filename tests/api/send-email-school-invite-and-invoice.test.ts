@@ -161,6 +161,7 @@ describe('school_monthly_invoice', () => {
       dueDate: '2026-10-07', payUrl: 'https://school.example.invalid/pay-qa-invoice',
     });
     expect(sendMock.mock.calls[0][0].to).toEqual(['parent@example.com']);
+    expect(sendMock.mock.calls[0][0].replyTo).toEqual(['school@example.invalid']);
     expect(html).toContain('QA Mokykla'); expect(html).toContain('school.example.invalid/logo.svg');
     expect(html).toContain('#0f766e'); expect(html).toContain('150,00');
     expect(html).not.toContain('#ef4444'); expect(html).not.toContain('#dc2626');

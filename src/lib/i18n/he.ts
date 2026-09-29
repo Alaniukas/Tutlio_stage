@@ -2,6 +2,7 @@ import { en } from './en.js';
 
 /** Hebrew for Israel: tutor/business draft; dedicated school/admin/legal sections fall back to English. */
 export const heOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'להודיע לתלמיד בדוא״ל',
   "cal.deleteAllRemaining": "כל השיעורים שנותרו בסדרה זו",
   "cal.deleteAllRemainingHint": "השיעורים המתוכננים העתידיים והשיעורים שבוטלו בסדרה זו יימחקו. היסטוריית השיעורים שהושלמו תישמר.",
   "cal.deleteConfirmAll": "למחוק את כל השיעורים המתוכננים והשיעורים שבוטלו שנותרו בסדרה זו? היסטוריית השיעורים שהושלמו תישמר.",

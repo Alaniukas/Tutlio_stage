@@ -4,6 +4,7 @@ import { en } from './en.js';
  * Keep unpublished until the release checks in docs/SLOVENIAN_LOCALIZATION_REVIEW.md are complete.
  */
 export const slOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Obvesti učenca po e-pošti',
   "cal.deleteAllRemaining": "Vse preostale ure v tem nizu",
   "cal.deleteAllRemainingHint": "Odstrani prihodnje načrtovane in odpovedane ure v tem nizu. Zgodovina zaključenih ur se ohrani.",
   "cal.deleteConfirmAll": "Želite izbrisati vse preostale načrtovane in odpovedane ure v tem nizu? Zgodovina zaključenih ur se ohrani.",

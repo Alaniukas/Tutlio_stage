@@ -4,6 +4,7 @@
  * Matches send-email.ts `tutor_invite` (Outlook-safe layout) + org white-label branding.
  */
 import { Resend } from 'resend';
+import { resolveOrgEmailReplyToWithServiceClient } from './orgEmailReplyTo.js';
 import { localeDirection } from '../../src/lib/i18n/locales.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { t, isValidLocale, localizedFromEmail, type Locale } from './i18n.js';
@@ -112,9 +113,11 @@ export async function sendTutorInviteEmail(
   });
 
   const resend = new Resend(apiKey);
+  const replyTo = await resolveOrgEmailReplyToWithServiceClient(data.organizationId);
   const { error } = await resend.emails.send({
     from: localizedFromEmail(locale, { senderName: resolved.emailSenderName }),
     to: [to],
+    ...(replyTo ? { replyTo } : {}),
     subject,
     html,
   });

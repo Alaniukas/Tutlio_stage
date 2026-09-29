@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
+import SchoolGroupMaterialLibrary from '@/components/school/SchoolGroupMaterialLibrary';
 import { Download, Loader2, Paperclip, Play, Trash2, Upload, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
@@ -701,6 +702,7 @@ export default function SchoolHomework() {
             )}
           </>
         ) : null}
+        {payload && !payload.loginRequiredForNewMaterials && <SchoolGroupMaterialLibrary studentId={studentId} token={token} />}
       </div>
     </div>
   );

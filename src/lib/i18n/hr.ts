@@ -6,6 +6,7 @@ import { en } from './en.js';
  * See docs/CROATIAN_LOCALIZATION_REVIEW.md before publishing this locale.
  */
 export const hrOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Obavijesti učenika e-poštom',
   "cal.deleteAllRemaining": "Svi preostali satovi u ovom nizu",
   "cal.deleteAllRemainingHint": "Uklanja buduće planirane i otkazane satove iz ovog niza. Povijest održanih satova ostaje sačuvana.",
   "cal.deleteConfirmAll": "Izbrisati sve preostale planirane i otkazane satove iz ovog niza? Povijest održanih satova ostaje sačuvana.",

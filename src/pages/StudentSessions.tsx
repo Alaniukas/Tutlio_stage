@@ -110,7 +110,7 @@ const STATUS_CONFIG = {
 type ModalStep = 'cancel-confirm' | 'cancel-reason' | 'penalty-choice' | 'picking' | 'confirming' | 'success' | 'cancel-success';
 
 export default function StudentSessions() {
-    const { t, tHtml, dateFnsLocale } = useTranslation();
+    const { t, tHtml, locale, dateFnsLocale } = useTranslation();
     const { fmt, formatLessonCharge, isPl } = useMarketMoney();
     const { user: ctxUser } = useUser();
     const location = useLocation();
@@ -179,6 +179,7 @@ export default function StudentSessions() {
     >(null);
     const [studentPaymentModel, setStudentPaymentModel] = useState<string | null>(null);
     const [studentPaymentOverrideActive, setStudentPaymentOverrideActive] = useState(false);
+    const [billingPolicyResolved, setBillingPolicyResolved] = useState(false);
     const [tutorPaymentFlags, setTutorPaymentFlags] = useState({
         enable_per_lesson: true,
         enable_monthly_billing: false,
@@ -471,7 +472,7 @@ export default function StudentSessions() {
         }
         setStripeLoading(true);
         try {
-            const body: any = { sessionId: session.id };
+            const body: any = { sessionId: session.id, ui_locale: locale };
             if (paymentPayer === 'parent' && payerEmail) {
                 body.payerEmail = payerEmail;
             }
@@ -621,6 +622,7 @@ export default function StudentSessions() {
         setTutorOrgFeeProfile(null);
         setStudentActionsDisabled(false);
         setStudentActionsResolved(false);
+        setBillingPolicyResolved(false);
         setSessionsFetchError(null);
         /** When fixing URL (?studentId=) we still fetch using this id in-flight; defer navigation until success. */
         let parentUrlSyncStudentId: string | null = null;
@@ -804,6 +806,7 @@ export default function StudentSessions() {
             | undefined;
         setManualPaymentsOnly(tutorUsesManualStudentPayments(tutorSub));
 
+        let billingPolicyLoaded = Boolean(tutorSub);
         let enablePerLesson = tutorSub?.enable_per_lesson ?? true;
         let enableMonthlyBilling = !!tutorSub?.enable_monthly_billing;
         if (tutorSub?.organization_id) {
@@ -819,6 +822,7 @@ export default function StudentSessions() {
                 setStudentActionsDisabled(orgFeatures?.disable_student_reschedule_cancel === true);
                 setOrgRescheduleDisabled(orgFeatures?.disable_student_reschedule === true);
             } else {
+                billingPolicyLoaded = false;
                 setOrgRescheduleDisabled(false);
             }
         } else {
@@ -829,6 +833,7 @@ export default function StudentSessions() {
             enable_per_lesson: enablePerLesson,
             enable_monthly_billing: enableMonthlyBilling,
         });
+        setBillingPolicyResolved(billingPolicyLoaded);
 
         let perlasFlag = !!tutorSub?.perlas_finance_enabled;
         if (!perlasFlag && tutorSub?.organization_id) {
@@ -1285,14 +1290,16 @@ export default function StudentSessions() {
         setSaving(false);
     };
 
-    const showPerLessonStripeButton = shouldShowPerLessonPaymentUi(
+    const showPerLessonStripeButton = billingPolicyResolved && shouldShowPerLessonPaymentUi(
         studentPaymentModel,
         studentPaymentOverrideActive,
         tutorPaymentFlags,
     );
     const perLessonPayAllowedForSession = (session: Session) =>
         showPerLessonStripeButton && !tutorOrgIsSchool && !isSchoolBilledSession(session);
-    const isMonthlyBillingOnly = isMonthlyBillingOnlyStudent(studentPaymentModel);
+    const isMonthlyBillingOnly = isMonthlyBillingOnlyStudent(studentPaymentModel) || (
+        billingPolicyResolved && !studentPaymentModel?.trim() && tutorPaymentFlags.enable_monthly_billing
+    );
 
     const getSessionPaymentType = (session: Session): 'package' | 'monthly' | 'per_lesson' => {
         if (session.lesson_package_id) return 'package';
@@ -1602,7 +1609,7 @@ export default function StudentSessions() {
 
                 {/* Filter pills */}
                 <div className="flex gap-2 mb-5 overflow-x-auto pb-1 scrollbar-hide">
-                    {(['all', 'upcoming', 'past', 'paid', 'unpaid', 'cancelled'] as const).map((f) => {
+                    {(['all', 'upcoming', 'past', 'paid', ...(showPerLessonStripeButton && !tutorOrgIsSchool ? ['unpaid'] as const : []), 'cancelled'] as const).map((f) => {
                         const labels: Record<string, string> = {
                             all: 'Visos',
                             upcoming: t('stuSess.upcoming'),
@@ -1796,8 +1803,10 @@ export default function StudentSessions() {
                                                 ) : s.price ? (
                                                     isMonthlyBillingOnly ? (
                                                         <span className="text-sm font-black text-blue-600">{fmt(s.price)} <span className="text-xs text-blue-500/80 font-semibold">{t('stuSess.invoiceShort')}</span></span>
-                                                    ) : (
+                                                    ) : perLessonPayAllowedForSession(s) ? (
                                                         <span className="text-sm font-black text-amber-600 whitespace-nowrap">{fmt(s.price)} <span className="text-xs text-amber-500/80 font-semibold">({t('stuSess.paymentPendingShort')})</span></span>
+                                                    ) : (
+                                                        <span className="text-sm font-black text-gray-700">{fmt(s.price)}</span>
                                                     )
                                                 ) : null}
                                             </div>

@@ -79,6 +79,7 @@ export default function OrgTutorFinanceSummary() {
   const [manoPayEur, setManoPayEur] = useState<number | null>(null);
   const [manoHasSubjectRates, setManoHasSubjectRates] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [summaryLoadError, setSummaryLoadError] = useState(false);
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [invoicesLoading, setInvoicesLoading] = useState(true);
@@ -115,6 +116,7 @@ export default function OrgTutorFinanceSummary() {
       setCurrentUserId(user.id);
 
       setLoading(true);
+      setSummaryLoadError(false);
 
       let startIso: string;
       let endIso: string;
@@ -153,6 +155,14 @@ export default function OrgTutorFinanceSummary() {
         endIso = b.toISOString();
       }
 
+      if (payPerLessonEur === null) {
+        if (!cancelled) {
+          setSummaryLoadError(true);
+          setLoading(false);
+        }
+        return;
+      }
+
       let breakdown: ProKlasePayBreakdown | null = null;
       let manoTotal: number | null = null;
       let manoHasSubjectRatesLocal = false;
@@ -169,14 +179,16 @@ export default function OrgTutorFinanceSummary() {
           .lte('start_time', endIso);
 
         let adjustmentsEur = 0;
+        let adjustmentsErr: unknown = null;
         if (profile?.organization_id) {
-          const { data: adjRows } = await supabase
+          const { data: adjRows, error: adjErr } = await supabase
             .from('tutor_adjustments')
             .select('amount_eur')
             .eq('tutor_id', user.id)
             .eq('organization_id', profile.organization_id)
             .gte('created_at', startIso)
             .lte('created_at', endIso);
+          adjustmentsErr = adjErr;
           adjustmentsEur = (adjRows || []).reduce(
             (sum, row) => sum + (Number((row as { amount_eur?: number }).amount_eur) || 0),
             0,
@@ -193,8 +205,9 @@ export default function OrgTutorFinanceSummary() {
             && Boolean((row as { status_confirmed_at?: string | null }).status_confirmed_at),
         ).length;
         if (cancelled) return;
-        if (sessionErr) {
-          console.error('[OrgTutorFinanceSummary]', sessionErr);
+        if (sessionErr || adjustmentsErr) {
+          console.error('[OrgTutorFinanceSummary]', sessionErr || adjustmentsErr);
+          setSummaryLoadError(true);
           setCompletedCount(0);
           setPayBreakdown(null);
           setManoPayEur(null);
@@ -218,7 +231,7 @@ export default function OrgTutorFinanceSummary() {
           .lte('end_time', new Date().toISOString())
           .gte('start_time', startIso)
           .lte('start_time', endIso);
-        const { data: payProfile } = await supabase
+        const { data: payProfile, error: payProfileErr } = await supabase
           .from('profiles')
           .select('company_commission_by_subject')
           .eq('id', user.id)
@@ -237,8 +250,9 @@ export default function OrgTutorFinanceSummary() {
         );
         conductedCount = (sessionRows || []).length;
         if (cancelled) return;
-        if (sessionErr) {
-          console.error('[OrgTutorFinanceSummary]', sessionErr);
+        if (sessionErr || payProfileErr || !payProfile) {
+          console.error('[OrgTutorFinanceSummary]', sessionErr || payProfileErr || 'Tutor pay profile missing');
+          setSummaryLoadError(true);
           setCompletedCount(0);
           setPayBreakdown(null);
           setManoPayEur(null);
@@ -265,6 +279,7 @@ export default function OrgTutorFinanceSummary() {
       if (cancelled) return;
       if (error) {
         console.error('[OrgTutorFinanceSummary]', error);
+        setSummaryLoadError(true);
         setCompletedCount(0);
         setPayBreakdown(null);
         setManoPayEur(null);
@@ -349,7 +364,7 @@ export default function OrgTutorFinanceSummary() {
     );
   };
 
-  const gross = payBreakdown?.totalEur ?? manoPayEur ?? completedCount * payPerLessonEur;
+  const gross = payBreakdown?.totalEur ?? manoPayEur ?? completedCount * (payPerLessonEur ?? 0);
 
   return (
     <div className="space-y-6">
@@ -362,7 +377,11 @@ export default function OrgTutorFinanceSummary() {
           <div>
             <h2 className="text-lg font-bold text-gray-900">{t('orgFinance.yourPay')}</h2>
             <p className="text-xs text-gray-500">
-              {manoHasSubjectRates
+              {policyLoading
+                ? t('common.loadingDots')
+                : payPerLessonEur === null
+                  ? t('common.error')
+                  : manoHasSubjectRates
                 ? t('orgFinance.payUsesSubjectRates', { amount: payPerLessonEur.toFixed(2) })
                 : t('orgFinance.fixedPayPerLesson', { amount: payPerLessonEur.toFixed(2) })}
             </p>
@@ -432,6 +451,10 @@ export default function OrgTutorFinanceSummary() {
 
         {loading || policyLoading ? (
           <p className="text-gray-500 text-sm mt-6">{t('common.loadingDots')}</p>
+        ) : summaryLoadError || payPerLessonEur === null ? (
+          <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-6">
+            {t('common.error')}
+          </p>
         ) : (
           <div className="mt-6 rounded-xl bg-gray-50 border border-gray-100 p-4">
             <p className="text-sm text-gray-600">
@@ -497,6 +520,7 @@ export default function OrgTutorFinanceSummary() {
             {tutorCanIssueInvoice && (
               <Button
                 onClick={() => setIsCreateOpen(true)}
+                disabled={manoPayMode && (policyLoading || summaryLoadError || payPerLessonEur === null)}
                 className="rounded-xl gap-2 bg-indigo-600 hover:bg-indigo-700"
                 size="sm"
               >

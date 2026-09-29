@@ -82,19 +82,31 @@ describe('local support preview submission', () => {
     mocks.verifyAttachments.mockResolvedValue([]);
     mocks.sendNotification.mockResolvedValue('email-preview-1');
 
+    let insertedRow: Record<string, unknown> = {};
     const chain: any = {};
     chain.select = vi.fn(() => chain);
     chain.eq = vi.fn(() => chain);
     chain.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
-    chain.single = vi.fn().mockResolvedValue({
+    chain.single = vi.fn(async () => ({
       data: {
+        ...insertedRow,
         id: '17ee7859-5c8a-4fba-9dbd-9259ccad28f4',
-        status: 'new',
+        status: 'registered',
+        target_date: null,
+        status_updated_at: '2026-09-16T10:01:00.000Z',
+        status_notified_signature: null,
+        trello_card_id: null,
+        trello_sync_error: null,
+        team_notified_at: null,
         created_at: '2026-09-16T10:01:00.000Z',
       },
       error: null,
+    }));
+    chain.then = (resolve: (value: { error: null }) => void) => resolve({ error: null });
+    mocks.insert.mockImplementation((row: Record<string, unknown>) => {
+      insertedRow = row;
+      return chain;
     });
-    mocks.insert.mockImplementation(() => chain);
     db.from.mockReturnValue({ ...chain, insert: mocks.insert, update: vi.fn(() => chain) });
   });
 
@@ -104,7 +116,7 @@ describe('local support preview submission', () => {
     const { res, result } = response();
     await handler({
       method: 'POST',
-      headers: { 'x-in-app-support-preview': '1' },
+      headers: { 'x-in-app-support-preview': '1', origin: 'https://tutlio.lt.attacker.example' },
       body: report,
     } as any, res as any);
 
@@ -121,6 +133,8 @@ describe('local support preview submission', () => {
       transcript: report.transcript,
       coding_agent_prompt: expect.stringContaining('Structured submission type: Feature request'),
     }));
+    expect((mocks.insert.mock.calls[0][0] as { environment: Record<string, unknown> }).environment)
+      .not.toHaveProperty('siteOrigin');
     expect(mocks.sendNotification).toHaveBeenCalledWith(expect.objectContaining({
       reporter: expect.objectContaining({ email: INTERNAL_NOTIFY_EMAILS[0] }),
       report: expect.objectContaining({ context: report.context, transcript: report.transcript }),

@@ -5,7 +5,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   Bug,
   CheckCircle2,
@@ -32,6 +32,7 @@ import {
   isInAppSupportDraftComplete,
   prepareInAppSupportDraftForSubmission,
   supportPortalForPath,
+  supportTicketsPageForPath,
   type InAppSupportAttachment,
   type InAppSupportCategory,
   type InAppSupportImpact,
@@ -39,6 +40,7 @@ import {
   type InAppSupportTranscriptMessage,
 } from '@/lib/inAppSupport';
 import { readInAppSupportConversationResponse } from '@/lib/inAppSupportStream';
+import { getSupportDiagnostics } from '@/lib/supportDiagnostics';
 import SupportRobotIcon from './SupportRobotIcon';
 import type { SupportPopoverAnchor } from './InAppSupportProvider';
 
@@ -107,6 +109,8 @@ type Copy = {
   privacyShort: string;
   successTitle: string;
   successBody: string;
+  trackStatus: string;
+  myTickets: string;
   reference: string;
   done: string;
   requiredError: string;
@@ -187,10 +191,12 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     sectionImages: 'Screenshots',
     automaticContext: 'Added automatically',
     page: 'Current page',
-    privacy: 'Your account, page, browser, and screen size are attached automatically. Never include passwords, login codes, or full payment-card details.',
-    privacyShort: 'Account and device details are added automatically. Never share passwords or login codes.',
-    successTitle: 'Thank you - your report is safely with our team',
-    successBody: 'The Tutlio team has been notified and will act on it as soon as possible. You will receive an email when the bug is fixed or the feature is implemented.',
+    privacy: 'Your account, page, browser, screen size, recent safe clicks and navigation, and failed request metadata are attached automatically. Support may inspect matching server errors. A short ticket summary goes to the private Trello board. Automatic diagnostics do not record form values or screen contents. Never include passwords, login codes, or full payment-card details.',
+    privacyShort: 'Account, device, recent safe actions, and failed requests are added automatically. Never share passwords or login codes.',
+    successTitle: 'Your ticket has been registered',
+    successBody: 'You can track its status here. We will email you when the status or deadline changes.',
+    trackStatus: 'Track ticket status',
+    myTickets: 'My tickets',
     reference: 'Reference',
     done: 'Done',
     requiredError: 'Please add a little more detail before continuing.',
@@ -214,7 +220,7 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     sendCommandPlaceholder: 'Type “send it” to confirm',
     sendCommandHint: 'A clear send command is required. “Yes” by itself will not submit the report.',
     sendCommandError: 'Please type “send it” or use the Send button when you want me to notify the team.',
-    emailNotice: 'Sending saves the report in /admin and emails the same Tutlio team that receives demo and enterprise enquiries.',
+    emailNotice: 'Sending registers your ticket, adds it to the team backlog, and emails you a link to track its status.',
     sendInfoLabel: 'How sending works',
     privacyInfoLabel: 'Privacy and automatic context',
     notificationError: 'Your report was saved, but I could not notify the team by email yet. Please send it again so I can retry the notification safely.',
@@ -269,10 +275,12 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     sectionImages: 'Ekrano nuotraukos',
     automaticContext: 'Pridedama automatiškai',
     page: 'Dabartinis puslapis',
-    privacy: 'Automatiškai pridedama paskyra, puslapis, naršyklė ir ekrano dydis. Nerašykite slaptažodžių, prisijungimo kodų ar visų kortelės duomenų.',
-    privacyShort: 'Paskyros ir įrenginio informacija pridedama automatiškai. Nesidalinkite slaptažodžiais ar prisijungimo kodais.',
-    successTitle: 'Ačiū - jūsų pranešimas saugiai perduotas komandai',
-    successBody: 'Tutlio komanda gavo jūsų pranešimą ir imsis darbo kaip įmanoma greičiau. Kai klaida bus ištaisyta arba funkcija įdiegta, gausite el. laišką.',
+    privacy: 'Automatiškai pridedama paskyra, puslapis, naršyklė, ekrano dydis, paskutiniai saugūs paspaudimai ir puslapių perėjimai bei nepavykusių užklausų duomenys. Komanda gali peržiūrėti susijusias serverio klaidas. Trumpa ticketo santrauka patenka į privačią Trello lentą. Automatinė diagnostika nerenka formų reikšmių ar ekrano turinio. Nerašykite slaptažodžių, prisijungimo kodų ar visų kortelės duomenų.',
+    privacyShort: 'Automatiškai pridedami paskyros, įrenginio, saugių veiksmų ir nepavykusių užklausų duomenys. Nesidalinkite slaptažodžiais ar prisijungimo kodais.',
+    successTitle: 'Jūsų ticketas užregistruotas',
+    successBody: 'Jo būseną galite stebėti čia. Pakeitus būseną ar terminą, informuosime el. paštu.',
+    trackStatus: 'Stebėti ticketo būseną',
+    myTickets: 'Mano ticketai',
     reference: 'Numeris',
     done: 'Baigti',
     requiredError: 'Prieš tęsdami pridėkite šiek tiek daugiau informacijos.',
@@ -296,7 +304,7 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     sendCommandPlaceholder: 'Patvirtinimui parašykite „siųsti“',
     sendCommandHint: 'Reikalinga aiški siuntimo komanda. Vien žodis „taip“ pranešimo neišsiųs.',
     sendCommandError: 'Kai norėsite informuoti komandą, parašykite „siųsti“ arba paspauskite siuntimo mygtuką.',
-    emailNotice: 'Išsiuntus pranešimas bus išsaugotas /admin skydelyje, o el. laišką gaus ta pati Tutlio komanda, kuri gauna demo ir įmonių užklausas.',
+    emailNotice: 'Išsiuntus ticketas užregistruojamas, patenka į komandos darbų sąrašą, o jūs gaunate el. laišką su būsenos nuoroda.',
     sendInfoLabel: 'Kaip veikia siuntimas',
     privacyInfoLabel: 'Privatumas ir automatinis kontekstas',
     notificationError: 'Pranešimas išsaugotas, bet komandos dar nepavyko informuoti el. paštu. Išsiųskite dar kartą, kad galėčiau saugiai pakartoti pranešimą.',
@@ -351,10 +359,12 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     sectionImages: 'Zrzuty ekranu',
     automaticContext: 'Dodawane automatycznie',
     page: 'Bieżąca strona',
-    privacy: 'Automatycznie dołączamy konto, stronę, przeglądarkę i rozmiar ekranu. Nie wpisuj haseł, kodów logowania ani pełnych danych karty.',
-    privacyShort: 'Konto i urządzenie są dodawane automatycznie. Nie udostępniaj haseł ani kodów logowania.',
-    successTitle: 'Dziękujemy - zgłoszenie bezpiecznie trafiło do zespołu',
-    successBody: 'Zespół Tutlio otrzymał zgłoszenie i zajmie się nim tak szybko, jak to możliwe. Otrzymasz e-mail, gdy błąd zostanie naprawiony lub funkcja wdrożona.',
+    privacy: 'Automatycznie dołączamy konto, stronę, przeglądarkę, rozmiar ekranu, ostatnie bezpieczne kliknięcia i przejścia oraz dane o nieudanych żądaniach. Zespół może sprawdzić powiązane błędy serwera. Krótkie podsumowanie zgłoszenia trafia na prywatną tablicę Trello. Automatyczna diagnostyka nie zapisuje wartości formularzy ani zawartości ekranu. Nie wpisuj haseł, kodów logowania ani pełnych danych karty.',
+    privacyShort: 'Automatycznie dodajemy dane konta, urządzenia, bezpiecznych działań i nieudanych żądań. Nie udostępniaj haseł ani kodów logowania.',
+    successTitle: 'Twoje zgłoszenie zostało zarejestrowane',
+    successBody: 'Możesz tu śledzić jego status. Wyślemy e-mail, gdy status lub termin się zmieni.',
+    trackStatus: 'Śledź status zgłoszenia',
+    myTickets: 'Moje zgłoszenia',
     reference: 'Numer',
     done: 'Gotowe',
     requiredError: 'Dodaj trochę więcej informacji przed przejściem dalej.',
@@ -378,7 +388,7 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     sendCommandPlaceholder: 'Wpisz „wyślij”, aby potwierdzić',
     sendCommandHint: 'Wymagane jest jednoznaczne polecenie wysłania. Samo „tak” nie wyśle zgłoszenia.',
     sendCommandError: 'Gdy zechcesz powiadomić zespół, wpisz „wyślij” albo użyj przycisku wysyłania.',
-    emailNotice: 'Wysłanie zapisze zgłoszenie w panelu /admin i powiadomi e-mailem ten sam zespół Tutlio, który otrzymuje zapytania o demo i ofertę dla firm.',
+    emailNotice: 'Wysłanie zarejestruje zgłoszenie, doda je do listy zadań zespołu i wyśle Ci e-mail z linkiem do śledzenia statusu.',
     sendInfoLabel: 'Jak działa wysyłanie',
     privacyInfoLabel: 'Prywatność i kontekst automatyczny',
     notificationError: 'Zgłoszenie zostało zapisane, ale nie udało się jeszcze powiadomić zespołu e-mailem. Wyślij je ponownie, abym mógł bezpiecznie ponowić powiadomienie.',
@@ -494,6 +504,7 @@ export function InAppSupportPageContent({
   const [streamingReply, setStreamingReply] = useState('');
   const [agentReady, setAgentReady] = useState(false);
   const [reference, setReference] = useState('');
+  const [ticketId, setTicketId] = useState('');
   const [requestId, setRequestId] = useState(id);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
@@ -537,6 +548,7 @@ export function InAppSupportPageContent({
     setStreamingReply('');
     setAgentReady(false);
     setReference('');
+    setTicketId('');
     setRequestId(id());
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -612,6 +624,7 @@ export function InAppSupportPageContent({
             impactDetails: draft.impactDetails,
           },
           attachmentNames: draft.files.map((file) => file.name),
+          diagnostics: getSupportDiagnostics(),
           page: reportPage,
           locale,
         }),
@@ -733,18 +746,20 @@ export function InAppSupportPageContent({
             language: navigator.language || '',
             occurredAt: new Date().toISOString(),
             reportCompleteness,
+            diagnostics: getSupportDiagnostics(),
           },
           transcript: submissionMessages,
           attachments,
         }),
       });
-      const result = await response.json().catch(() => null) as { reference?: string; error?: string; code?: string } | null;
+      const result = await response.json().catch(() => null) as { id?: string; reference?: string; error?: string; code?: string } | null;
       if (!response.ok || !result?.reference) {
         const submitFailure = new Error(result?.error || 'Could not save report.') as Error & { code?: string };
         submitFailure.code = result?.code;
         throw submitFailure;
       }
       setReference(result.reference);
+      setTicketId(result.id || '');
       setMessages(submissionMessages);
       setStage('success');
     } catch (submitError) {
@@ -770,7 +785,7 @@ export function InAppSupportPageContent({
     <section className={cn(
       'mx-auto flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-[#f8fafc] shadow-sm',
       compact ? 'h-full min-h-0 max-w-none rounded-none border-0 lg:rounded-2xl lg:border' : 'min-h-[calc(100dvh-8rem)] max-w-5xl',
-    )} aria-label={copy.title}>
+    )} aria-label={copy.title} data-support-diagnostics-ignore>
         <header className="relative overflow-hidden bg-gradient-to-br from-slate-950 via-indigo-950 to-indigo-800 px-3 pb-2.5 pt-[max(0.75rem,env(safe-area-inset-top))] text-white sm:px-6 sm:pb-4 sm:pt-[max(1rem,env(safe-area-inset-top))]">
           <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-cyan-300/15 blur-3xl" />
           <div className="relative flex items-center gap-3">
@@ -784,6 +799,7 @@ export function InAppSupportPageContent({
                 {copy.subtitle}
               </p>
             </div>
+            {!demoMode && <Link to={supportTicketsPageForPath(reportPage)} onClick={onClose} className="rounded-lg px-2 py-2 text-xs font-semibold text-indigo-100 hover:bg-white/10 hover:text-white">{copy.myTickets}</Link>}
             {onClose && (
               <button type="button" onClick={onClose} className="grid h-11 w-11 place-items-center rounded-full text-indigo-100 transition hover:bg-white/10 hover:text-white sm:h-10 sm:w-10" aria-label={copy.close}>
                 <X className="h-5 w-5" />
@@ -805,6 +821,11 @@ export function InAppSupportPageContent({
                   <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-indigo-500">{copy.reference}</p>
                   <p className="mt-1 font-mono text-lg font-black text-indigo-900">{reference}</p>
                 </div>
+                {!demoMode && ticketId && (
+                  <Link to={`${supportTicketsPageForPath(reportPage)}?ticket=${encodeURIComponent(ticketId)}`} onClick={onClose} className="mt-5 inline-flex rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-700">
+                    {copy.trackStatus}
+                  </Link>
+                )}
                 <div className="mt-7 flex gap-3">
                   <button type="button" onClick={reset} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                     <RotateCcw className="h-4 w-4" /> {copy.startOver}

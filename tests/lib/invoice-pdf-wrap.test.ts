@@ -22,6 +22,15 @@ describe('invoice font packaging', () => {
     expect(existsSync(resolveInvoiceFontPath('regular'))).toBe(true);
     expect(existsSync(resolveInvoiceFontPath('bold'))).toBe(true);
   });
+
+  it('bundles Noto Sans for both school discount PDF endpoints', () => {
+    const config = JSON.parse(readFileSync('vercel.json', 'utf8')) as {
+      functions: Record<string, { includeFiles?: string }>;
+    };
+    for (const endpoint of ['api/school-discount-offer.ts', 'api/school-discount-accept.ts']) {
+      expect(config.functions[endpoint]?.includeFiles, endpoint).toContain('api/_lib/fonts/**');
+    }
+  });
 });
 
 describe('wrapInvoiceDescription', () => {

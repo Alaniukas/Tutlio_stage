@@ -5,11 +5,37 @@ import {
   filterRowsAgainstBusyTutorSlots,
   insertSessionRowsInChunks,
   ORG_ADMIN_SESSION_INSERT_CHUNK,
+  regularEndDateForRecurringTrial,
   regularTopicForRecurringSeries,
   resolveOrCreateTrialSubject,
   SessionRowsInsertError,
 } from '@/pages/company/orgAdminSessionCreate';
 import { PRO_KLASE_QA_ORG_ID } from '@/lib/marketMoney';
+
+describe('first trial lesson in an org recurring series', () => {
+  const start = new Date('2026-10-08T14:00:00');
+  const trialEnd = new Date('2026-10-08T14:45:00');
+
+  it('uses the regular subject duration for the recurring template and later lessons', () => {
+    const regularEnd = regularEndDateForRecurringTrial(start, trialEnd, true, 60);
+    expect(regularEnd.getTime() - start.getTime()).toBe(60 * 60_000);
+    expect(trialEnd.getTime() - start.getTime()).toBe(45 * 60_000);
+  });
+
+  it('honors the tutor-specific regular duration when configured', () => {
+    const regularEnd = regularEndDateForRecurringTrial(start, trialEnd, true, 60, 75);
+    expect(regularEnd.getTime() - start.getTime()).toBe(75 * 60_000);
+  });
+
+  it('uses the default regular duration when the subject has none', () => {
+    const regularEnd = regularEndDateForRecurringTrial(start, trialEnd, true, null);
+    expect(regularEnd.getTime() - start.getTime()).toBe(60 * 60_000);
+  });
+
+  it('keeps the selected duration for a series without a trial', () => {
+    expect(regularEndDateForRecurringTrial(start, trialEnd, false, 60)).toBe(trialEnd);
+  });
+});
 
 function mockSupabaseForSlotCheck(busyRows: Array<{ id: string; start_time: string; end_time: string }>) {
   const from = vi.fn((table: string) => {

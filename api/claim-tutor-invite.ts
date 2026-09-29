@@ -74,11 +74,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(409).json({ error: 'Invite already used' });
     }
 
-    const { data: profile } = await supabase
+    const { data: profile, error: profileReadError } = await supabase
       .from('profiles')
       .select('id, organization_id, preferred_locale')
       .eq('id', user.id)
       .maybeSingle();
+    if (profileReadError) {
+      return res.status(500).json({ error: 'Failed to load tutor profile' });
+    }
 
     // Login can replay the saved org token. A fully claimed invite must not
     // reapply its old defaults over settings the tutor changed afterward.
@@ -99,6 +102,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .maybeSingle();
     const orgLocale = (orgRow?.preferred_locale || '').trim() || null;
     const inviteMeetingLink = String(invite.personal_meeting_link || '').trim() || null;
+    // Login may claim a pending or legacy invite for a tutor who already belongs
+    // to this org. Its old default (often €0) must not replace admin-set pay.
+    const joiningOrganization = profile?.organization_id !== invite.organization_id;
 
     const commonProfileFields = {
       email: user.email || null,
@@ -109,20 +115,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       reminder_tutor_hours: invite.reminder_tutor_hours ?? 2,
       break_between_lessons: invite.break_between_lessons ?? 0,
       min_booking_hours: invite.min_booking_hours ?? 1,
-      company_commission_percent: invite.company_commission_percent ?? 0,
+      ...(joiningOrganization
+        ? { company_commission_percent: invite.company_commission_percent ?? 0 }
+        : {}),
       teaching_notes: invite.teaching_notes || null,
     };
 
     if (profile) {
       const localePatch = orgLocale && !profile.preferred_locale ? { preferred_locale: orgLocale } : {};
-      await supabase.from('profiles').update({
+      const { error: profileWriteError } = await supabase.from('profiles').update({
         ...commonProfileFields,
         // An invite without a link must not erase a tutor's existing personal room.
         ...(inviteMeetingLink ? { personal_meeting_link: inviteMeetingLink } : {}),
         ...localePatch,
       }).eq('id', user.id);
+      if (profileWriteError) {
+        return res.status(500).json({ error: 'Failed to update tutor profile' });
+      }
     } else {
-      await supabase.from('profiles').insert({
+      const { error: profileWriteError } = await supabase.from('profiles').insert({
         id: user.id,
         full_name: String(user.user_metadata?.full_name || ''),
         phone: String(user.user_metadata?.phone || ''),
@@ -130,13 +141,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         personal_meeting_link: inviteMeetingLink,
         ...(orgLocale ? { preferred_locale: orgLocale } : {}),
       });
+      if (profileWriteError) {
+        return res.status(500).json({ error: 'Failed to create tutor profile' });
+      }
     }
 
     if (claim.shouldLink) {
-      await supabase
+      const { error: inviteUpdateError } = await supabase
         .from('tutor_invites')
         .update({ used: true, used_by_profile_id: user.id })
         .eq('id', invite.id);
+      if (inviteUpdateError) {
+        return res.status(500).json({ error: 'Failed to complete tutor invitation' });
+      }
     }
 
     const siblingEmail = String(invite.invitee_email || user.email || '').trim().toLowerCase();

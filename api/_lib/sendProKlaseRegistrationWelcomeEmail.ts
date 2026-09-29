@@ -5,6 +5,7 @@ import { Resend } from 'resend';
 import { localizedFromEmail } from './i18n.js';
 import { isProKlaseOrg } from './marketMoney.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
+import { resolveOrgEmailReplyToWithServiceClient } from './orgEmailReplyTo.js';
 
 const PARENT_GUIDE_FILE = 'tevu-atmintine.png';
 const PAYMENT_GUIDE_FILE = 'atsiskaitymo-tvarka.png';
@@ -102,9 +103,11 @@ export async function sendProKlaseRegistrationWelcomeEmail(input: {
 
   try {
     const email = buildProKlaseRegistrationWelcomeEmail(input.parentName);
+    const replyTo = await resolveOrgEmailReplyToWithServiceClient(input.organizationId);
     const { error } = await new Resend(apiKey).emails.send({
       from: localizedFromEmail('lt', { senderName: 'ProKlasė Sistema' }),
       to: [input.to.trim().toLowerCase()],
+      ...(replyTo ? { replyTo } : {}),
       subject: email.subject,
       html: email.html,
       attachments: email.attachments,

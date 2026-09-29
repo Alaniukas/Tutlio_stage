@@ -50,6 +50,7 @@ try {
   await db.exec(await readFile(new URL('../../supabase/migrations/20260910174000_org_student_pooled_packages.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20260916170000_atomic_package_cancellation.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20260929092902_proklase_pooled_package_item_prices.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../../supabase/migrations/20260929180153_pooled_package_identity_drift.sql', import.meta.url), 'utf8'));
   assert.deepEqual((await db.query(`SELECT preview_token,session_ids FROM pooled_package_quotes WHERE package_id=$1`, [id(998)])).rows[0],
     {preview_token:'legacy-preview',session_ids:[id(995)]}, 'legacy checkout state must move to the private quote table');
   assert.equal((await db.query(`SELECT count(*)::int AS count FROM pg_policies
@@ -171,7 +172,7 @@ try {
   await assert.rejects(db.query('UPDATE lesson_packages SET total_price=1 WHERE id=$1',[pkg]),/immutable/);
   const breakdown=(await db.query('SELECT total_lessons,available_lessons FROM lesson_package_items WHERE package_id=$1 ORDER BY position',[pkg])).rows;
   assert.deepEqual(breakdown,[{total_lessons:4,available_lessons:4},{total_lessons:5,available_lessons:5}]);
-  assert.equal((await db.query('SELECT price::text FROM sessions WHERE id=$1',[id(100)])).rows[0].price,'29','payment must not rewrite lesson/tutor remuneration');
+  assert.equal((await db.query('SELECT price::text FROM sessions WHERE id=$1',[id(100)])).rows[0].price,'27','payment must apply the frozen quoted item price');
   await db.query("UPDATE sessions SET status='no_show' WHERE id=$1", [id(200)]);
   assert.deepEqual(await counters(), {available_lessons:0,reserved_lessons:7,completed_lessons:2});
   await db.query("UPDATE sessions SET status='cancelled',is_late_cancelled=true WHERE id=$1", [id(200)]);

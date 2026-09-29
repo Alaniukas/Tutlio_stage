@@ -18,7 +18,7 @@ interface StatusBadgeProps {
     noShowDetail?: string | null;
     orgTutorCopy?: boolean;
     hidePaymentStatus?: boolean;
-    /** Unpaid active lessons show "Rezervuota" (e.g. monthly billing — no per-lesson payment). */
+    /** Lessons without per-lesson payment show "Rezervuota" before and "Įvyko" after the lesson. */
     treatUnpaidAsReserved?: boolean;
     /** When set, past `active` sessions are treated as occurred for display (until marked completed). */
     endTime?: string | Date | null;
@@ -137,6 +137,15 @@ function StatusBadgeBase({
         !paid &&
         paymentStatus !== 'paid_by_student' &&
         (status === 'completed' || (status === 'active' && ended));
+
+    if (showOccurredUnpaid && treatUnpaidAsReserved) {
+        return (
+            <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700 text-xs font-medium", className)}>
+                <CheckCircle className="w-3.5 h-3.5" />
+                {t('status.completed')}
+            </span>
+        );
+    }
 
     if (showOccurredUnpaid) {
         return (

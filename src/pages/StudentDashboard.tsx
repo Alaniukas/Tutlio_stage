@@ -79,7 +79,7 @@ interface InstallmentPayment {
 
 export default function StudentDashboard() {
     const navigate = useNavigate();
-    const { t, dateFnsLocale } = useTranslation();
+    const { t, locale, dateFnsLocale } = useTranslation();
     const market = currentMarket();
     const fmt = (amount: number | null | undefined) => formatMarketAmount(amount, market);
     const { user: ctxUser } = useUser();
@@ -104,6 +104,7 @@ export default function StudentDashboard() {
     const [perlasLoading, setPerlasLoading] = useState(false);
     const [studentPaymentModel, setStudentPaymentModel] = useState<string | null>(null);
     const [studentPaymentOverrideActive, setStudentPaymentOverrideActive] = useState(false);
+    const [billingPolicyResolved, setBillingPolicyResolved] = useState(false);
     const [tutorPaymentFlags, setTutorPaymentFlags] = useState({
         enable_per_lesson: true,
         enable_monthly_billing: false,
@@ -142,7 +143,7 @@ export default function StudentDashboard() {
             const res = await fetch('/api/stripe-checkout', {
                 method: 'POST',
                 headers: await authHeaders(),
-                body: JSON.stringify({ sessionId: session.id }),
+                body: JSON.stringify({ sessionId: session.id, ui_locale: locale }),
             });
             const json = await res.json().catch(() => ({ error: t('studentDash.connectionError') }));
             if (json.creditFullyCovered) {
@@ -201,6 +202,7 @@ export default function StudentDashboard() {
 
     const fetchData = async () => {
         if (!ctxUser) return;
+        setBillingPolicyResolved(false);
         if (!getCached('student_dashboard')) setLoading(true);
         const user = ctxUser;
 
@@ -311,6 +313,7 @@ export default function StudentDashboard() {
 
                 let enablePerLesson = (tutorProf as { enable_per_lesson?: boolean | null })?.enable_per_lesson ?? true;
                 let enableMonthlyBilling = !!(tutorProf as { enable_monthly_billing?: boolean | null })?.enable_monthly_billing;
+                let billingPolicyLoaded = Boolean(tutorProf);
                 if (oid) {
                     const { data: orgPay } = await supabase
                         .from('organizations')
@@ -325,6 +328,7 @@ export default function StudentDashboard() {
                         setOrgRescheduleDisabled(orgFeatures?.disable_student_reschedule === true);
                         setStudentBookingDisabled(orgFeatures?.disable_student_booking === true);
                     } else {
+                        billingPolicyLoaded = false;
                         setOrgRescheduleDisabled(false);
                     }
                 } else {
@@ -336,6 +340,7 @@ export default function StudentDashboard() {
                     enable_per_lesson: enablePerLesson,
                     enable_monthly_billing: enableMonthlyBilling,
                 });
+                setBillingPolicyResolved(billingPolicyLoaded);
             } else {
                 setTutorOrgIsSchool(false);
                 setTutorOrgFeeProfile(null);
@@ -457,12 +462,14 @@ export default function StudentDashboard() {
         return t('studentDash.inNDays', { n: Math.floor(diffH / 24) });
     };
 
-    const showPerLessonPayment = shouldShowPerLessonPaymentUi(
+    const showPerLessonPayment = billingPolicyResolved && shouldShowPerLessonPaymentUi(
         studentPaymentModel,
         studentPaymentOverrideActive,
         tutorPaymentFlags,
     );
-    const isMonthlyBillingOnly = isMonthlyBillingOnlyStudent(studentPaymentModel);
+    const isMonthlyBillingOnly = isMonthlyBillingOnlyStudent(studentPaymentModel) || (
+        billingPolicyResolved && !studentPaymentModel?.trim() && tutorPaymentFlags.enable_monthly_billing
+    );
 
     if (loading) return (
         <StudentLayout>

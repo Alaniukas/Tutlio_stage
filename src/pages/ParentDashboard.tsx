@@ -31,6 +31,7 @@ import ParentLayout from '@/components/ParentLayout';
 import ParentChildSwitcher from '@/components/parent/ParentChildSwitcher';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isMoksloVaisiaiOrg, orgFeeProfile } from '@/lib/marketMoney';
+import { allowsPerLessonPaymentForStudent } from '@/lib/studentPaymentModel';
 import {
   getParentActiveChildId,
   hideParentAddChildPrompt,
@@ -44,6 +45,7 @@ type ChildTutorPolicy = ParentTutorContactPolicy;
 
 interface ChildSession {
   id: string;
+  tutorId: string | null;
   start_time: string;
   end_time: string;
   status: string;
@@ -86,6 +88,7 @@ interface ChildInfo {
   nextSession: ChildSession | null;
   otherUpcoming: ChildSession[];
   tutorPolicy?: ChildTutorPolicy | null;
+  tutorPoliciesById: Record<string, ChildTutorPolicy>;
   installments: InstallmentPayment[];
 }
 
@@ -178,7 +181,7 @@ export default function ParentDashboard() {
         supabase
           .from('sessions')
           .select(
-            'id, student_id, start_time, end_time, status, cancelled_by, topic, paid, payment_status, price, meeting_link, whiteboard_room_id, tutor_comment, show_comment_to_student, show_comment_to_parent, subjects(name, is_group)',
+            'id, student_id, tutor_id, start_time, end_time, status, cancelled_by, topic, paid, payment_status, price, meeting_link, whiteboard_room_id, tutor_comment, show_comment_to_student, show_comment_to_parent, subjects(name, is_group)',
           )
           .in('student_id', studentIds)
           .gte('start_time', past.toISOString())
@@ -189,7 +192,7 @@ export default function ParentDashboard() {
           ? supabase
               .from('profiles')
               .select(
-                'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, payment_timing, payment_deadline_hours, perlas_finance_enabled, organization_id',
+                'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, payment_timing, payment_deadline_hours, perlas_finance_enabled, organization_id, enable_per_lesson, enable_monthly_billing',
               )
               .in('id', tutorIds)
           : Promise.resolve({ data: [], error: null } as any),
@@ -208,11 +211,29 @@ export default function ParentDashboard() {
         console.warn('[ParentDashboard] sessions load failed:', sessErr);
       }
 
+      const tutorProfiles = [...((tutorProfilesRes as any).data ?? [])] as any[];
+      const loadedTutorIds = new Set(tutorProfiles.map((row) => row.id));
+      const missingSessionTutorIds = [...new Set((sessions ?? [])
+        .map((row: any) => row.tutor_id as string | null)
+        .filter((id): id is string => !!id && !loadedTutorIds.has(id)))];
+      if (missingSessionTutorIds.length > 0) {
+        const { data: extraTutorProfiles } = await supabase.from('profiles')
+          .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, payment_timing, payment_deadline_hours, perlas_finance_enabled, organization_id, enable_per_lesson, enable_monthly_billing')
+          .in('id', missingSessionTutorIds);
+        tutorProfiles.push(...(extraTutorProfiles || []));
+      }
       const tutorById = new Map<string, ChildTutorPolicy>();
+      const paymentFlagsByTutorId = new Map<string, { enable_per_lesson: boolean; enable_monthly_billing: boolean }>();
       const orgIdsToCheck: string[] = [];
       const tutorProfilesList: any[] = [];
-      for (const tp of (tutorProfilesRes as any).data ?? []) {
+      for (const tp of tutorProfiles) {
         tutorProfilesList.push(tp);
+        if (!tp.organization_id) {
+          paymentFlagsByTutorId.set(tp.id, {
+            enable_per_lesson: tp.enable_per_lesson === true,
+            enable_monthly_billing: tp.enable_monthly_billing === true,
+          });
+        }
         tutorById.set(tp.id, {
           tutorId: tp.id,
           tutorName: tp.full_name ?? null,
@@ -233,13 +254,17 @@ export default function ParentDashboard() {
       if (orgIdsToCheck.length > 0) {
         const { data: orgs } = await supabase
           .from('organizations')
-          .select('id, perlas_finance_enabled, entity_type, name, slug, features')
+          .select('id, perlas_finance_enabled, entity_type, name, slug, features, enable_per_lesson, enable_monthly_billing')
           .in('id', [...new Set(orgIdsToCheck)]);
         const orgById = new Map((orgs ?? []).map((o: any) => [o.id, o]));
         for (const tp of tutorProfilesList) {
           if (!tp.organization_id) continue;
           const org = orgById.get(tp.organization_id);
           if (!org) continue;
+          paymentFlagsByTutorId.set(tp.id, {
+            enable_per_lesson: org.enable_per_lesson === true,
+            enable_monthly_billing: org.enable_monthly_billing === true,
+          });
           const existing = tutorById.get(tp.id);
           if (!existing) continue;
           if (PERLAS_FINANCE_ENABLED && !tp.perlas_finance_enabled && org.perlas_finance_enabled) {
@@ -259,6 +284,7 @@ export default function ParentDashboard() {
         const arr = byStudent.get((s as any).student_id) ?? [];
         arr.push({
           id: (s as any).id,
+          tutorId: (s as any).tutor_id ?? null,
           start_time: (s as any).start_time,
           end_time: (s as any).end_time,
           status: (s as any).status,
@@ -297,6 +323,21 @@ export default function ParentDashboard() {
 
       const kids: ChildInfo[] = studentsRaw.map((s: any) => {
         const list = byStudent.get(s.id) ?? [];
+        const tutorPoliciesById: Record<string, ChildTutorPolicy> = {};
+        for (const tutorId of new Set(list.map((lesson) => lesson.tutorId).filter((id): id is string => !!id))) {
+          const tutorPolicy = tutorById.get(tutorId);
+          const paymentFlags = paymentFlagsByTutorId.get(tutorId);
+          if (!tutorPolicy) continue;
+          tutorPoliciesById[tutorId] = {
+            ...tutorPolicy,
+            perLessonPaymentAllowed: !!paymentFlags && allowsPerLessonPaymentForStudent(
+              s.payment_model,
+              paymentFlags.enable_per_lesson,
+              paymentFlags.enable_monthly_billing,
+            ),
+          };
+        }
+        const primaryTutorPolicy = s.tutor_id ? tutorPoliciesById[s.tutor_id] ?? tutorById.get(s.tutor_id) : null;
         const upcoming = list.filter(
           (x) => x.status === 'active' && isAfter(new Date(x.end_time), now),
         );
@@ -305,6 +346,7 @@ export default function ParentDashboard() {
         const noShow = list.filter((x) => x.status === 'no_show');
         const unpaidPast = list.filter(
           (x) =>
+            !!(x.tutorId && tutorPoliciesById[x.tutorId]?.perLessonPaymentAllowed) &&
             !x.paid &&
             x.payment_status !== 'paid_by_student' &&
             (x.status === 'completed' ||
@@ -325,7 +367,8 @@ export default function ParentDashboard() {
           unpaidPastCount: unpaidPast.length,
           nextSession: upcoming[0] ?? null,
           otherUpcoming: upcoming.slice(1, 4),
-          tutorPolicy: s.tutor_id ? tutorById.get(s.tutor_id) ?? null : null,
+          tutorPolicy: primaryTutorPolicy ?? null,
+          tutorPoliciesById,
           installments: byStudentInstallments.get(s.id) ?? [],
         };
       });
@@ -664,7 +707,7 @@ function ChildBlock({
                 next,
                 child.fullName,
                 child.studentId,
-                child.tutorPolicy ?? null,
+                next.tutorId ? child.tutorPoliciesById?.[next.tutorId] ?? null : null,
               )
             }
             className="cursor-pointer"
@@ -711,6 +754,7 @@ function ChildBlock({
                           paymentStatus={next.payment_status}
                           paid={next.paid}
                           endTime={next.end_time}
+                          treatUnpaidAsReserved={!(next.tutorId && child.tutorPoliciesById?.[next.tutorId]?.perLessonPaymentAllowed)}
                         />
                       </div>
                     </div>
@@ -765,7 +809,7 @@ function ChildBlock({
                     s,
                     child.fullName,
                     child.studentId,
-                    child.tutorPolicy ?? null,
+                    s.tutorId ? child.tutorPoliciesById?.[s.tutorId] ?? null : null,
                   )
                 }
                 className="bg-white rounded-[1.5rem] p-4 flex items-center gap-4 border border-gray-100 shadow-sm cursor-pointer hover:shadow-md hover:border-gray-200 transition-all"
@@ -795,6 +839,7 @@ function ChildBlock({
                     paymentStatus={s.payment_status}
                     paid={s.paid}
                     endTime={s.end_time}
+                    treatUnpaidAsReserved={!(s.tutorId && child.tutorPoliciesById?.[s.tutorId]?.perLessonPaymentAllowed)}
                   />
                 </div>
               </div>

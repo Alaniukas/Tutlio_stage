@@ -2,6 +2,7 @@
  * Mokslo vaisiai — atskiras aktyvavimo laiškas tėvui arba mokiniui.
  */
 import { Resend } from 'resend';
+import { resolveOrgEmailReplyToWithServiceClient } from './orgEmailReplyTo.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { t, localizedFromEmail, type Locale } from './i18n.js';
 import { headerInlineStyle, outlookEmailButton } from './outlookEmail.js';
@@ -164,9 +165,11 @@ export async function sendMvAccountActivationEmail(
 
   const resend = new Resend(apiKey);
   const from = localizedFromEmail(locale, { senderName: resolved.emailSenderName });
+  const replyTo = await resolveOrgEmailReplyToWithServiceClient(data.organizationId);
   const { error } = await resend.emails.send({
     from,
     to: [to.trim()],
+    ...(replyTo ? { replyTo } : {}),
     subject,
     html,
   });

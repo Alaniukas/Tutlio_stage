@@ -10,9 +10,11 @@ import StatusBadge from '@/components/StatusBadge';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isSelfBookingDisabledForStudent } from '@/lib/studentBookingPolicy';
 import { isSessionCommentVisibleToParent } from '@/lib/sessionCommentDelivery';
+import { allowsPerLessonPaymentForStudent } from '@/lib/studentPaymentModel';
 
 interface Session {
   id: string;
+  tutor_id: string | null;
   start_time: string;
   end_time: string;
   status: string;
@@ -38,6 +40,7 @@ export default function ParentSessions() {
   const [studentName, setStudentName] = useState('');
   const [loading, setLoading] = useState(true);
   const [validChild, setValidChild] = useState(false);
+  const [perLessonPaymentByTutor, setPerLessonPaymentByTutor] = useState<Record<string, boolean>>({});
   /** Org feature disable_student_booking — null until resolved (hide waitlist meanwhile). */
   const [bookingDisabled, setBookingDisabled] = useState<boolean | null>(null);
 
@@ -63,20 +66,45 @@ export default function ParentSessions() {
       }
       setValidChild(true);
 
-      const { data: student } = await supabase.from('students').select('full_name').eq('id', studentId).single();
+      const { data: student } = await supabase.from('students').select('full_name, payment_model').eq('id', studentId).single();
 
       if (student) setStudentName(student.full_name);
-
       const { data } = await supabase
         .from('sessions')
         .select(
-          'id, start_time, end_time, status, topic, price, paid, payment_status, tutor_comment, show_comment_to_student, show_comment_to_parent, cancelled_by, no_show_when, subjects(name)',
+          'id, tutor_id, start_time, end_time, status, topic, price, paid, payment_status, tutor_comment, show_comment_to_student, show_comment_to_parent, cancelled_by, no_show_when, subjects(name)',
         )
         .eq('student_id', studentId)
         .order('start_time', { ascending: false })
         .limit(100);
 
-      setSessions((data ?? []) as unknown as Session[]);
+      const lessonRows = (data ?? []) as unknown as Session[];
+      const tutorIds = [...new Set(lessonRows.map((session) => session.tutor_id).filter((id): id is string => !!id))];
+      const { data: tutors, error: tutorError } = tutorIds.length
+        ? await supabase.from('profiles')
+            .select('id, organization_id, enable_per_lesson, enable_monthly_billing')
+            .in('id', tutorIds)
+        : { data: [], error: null };
+      const orgIds = [...new Set((tutors ?? []).map((tutor) => tutor.organization_id).filter((id): id is string => !!id))];
+      const { data: orgs, error: orgError } = orgIds.length
+        ? await supabase.from('organizations')
+            .select('id, enable_per_lesson, enable_monthly_billing')
+            .in('id', orgIds)
+        : { data: [], error: null };
+      const orgById = new Map((orgs ?? []).map((org) => [org.id, org]));
+      const paymentByTutor: Record<string, boolean> = {};
+      if (!tutorError && !orgError) {
+        for (const tutor of tutors ?? []) {
+          const owner = tutor.organization_id ? orgById.get(tutor.organization_id) : tutor;
+          paymentByTutor[tutor.id] = !!owner && allowsPerLessonPaymentForStudent(
+            student?.payment_model,
+            owner.enable_per_lesson === true,
+            owner.enable_monthly_billing === true,
+          );
+        }
+      }
+      setPerLessonPaymentByTutor(paymentByTutor);
+      setSessions(lessonRows);
       setLoading(false);
     })();
   }, [user?.id, studentId]);
@@ -171,11 +199,12 @@ export default function ParentSessions() {
                     paymentStatus={s.payment_status ?? undefined}
                     paid={s.paid}
                     endTime={s.end_time}
+                    treatUnpaidAsReserved={!(s.tutor_id && perLessonPaymentByTutor[s.tutor_id])}
                   />
                 </div>
               </div>
 
-              {s.status === 'active' && (
+              {s.status === 'active' && (s.paid || (s.tutor_id && perLessonPaymentByTutor[s.tutor_id])) && (
                 <p className="text-xs text-gray-600">
                   {s.paid ? (
                     <span className="text-green-700 font-medium">{t('stuSess.paid')}</span>

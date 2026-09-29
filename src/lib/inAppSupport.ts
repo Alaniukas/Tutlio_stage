@@ -1,11 +1,12 @@
 export const IN_APP_SUPPORT_MAX_ATTACHMENTS = 5;
 export const IN_APP_SUPPORT_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 export const IN_APP_SUPPORT_ATTACHMENT_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+import type { SupportDiagnostic } from './supportDiagnostics.js';
 
 export type InAppSupportCategory = 'bug' | 'feature';
 export type InAppSupportImpact = 'blocking' | 'high' | 'medium' | 'low';
 export type InAppSupportPortal = 'tutor' | 'organization' | 'student' | 'parent';
-export type InAppSupportStatus = 'new' | 'in_review' | 'planned' | 'resolved' | 'closed';
+export type InAppSupportStatus = 'registered' | 'in_progress' | 'resolved';
 export type InAppSupportPriority = 'untriaged' | 'low' | 'medium' | 'high' | 'urgent';
 export type InAppSupportReportCompleteness = 'complete' | 'user_confirmed_incomplete';
 
@@ -98,6 +99,8 @@ export interface InAppSupportEnvironment {
   language: string;
   occurredAt: string;
   reportCompleteness?: InAppSupportReportCompleteness;
+  diagnostics?: SupportDiagnostic[];
+  deploymentId?: string;
 }
 
 export interface InAppSupportSubmission {
@@ -124,6 +127,40 @@ function text(value: unknown, max: number): string {
 
 function isAttachmentType(value: string): value is InAppSupportAttachment['type'] {
   return IN_APP_SUPPORT_ATTACHMENT_TYPES.includes(value as InAppSupportAttachment['type']);
+}
+
+export function parseInAppSupportDiagnostics(value: unknown): SupportDiagnostic[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(-40).flatMap((item): SupportDiagnostic[] => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const event = item as Record<string, unknown>;
+    const at = text(event.at, 40);
+    const path = text(event.path, 120);
+    if (!Number.isFinite(Date.parse(at)) || !/^\/[a-zA-Z0-9/:_-]*$/.test(path)) return [];
+    if (event.type === 'navigation') return [{ type: 'navigation', at, path }];
+    if (event.type === 'click') {
+      const control = event.control === 'link' ? 'link' : event.control === 'button' ? 'button' : null;
+      const action = text(event.action, 64);
+      const targetPath = text(event.targetPath, 120);
+      if (!control) return [];
+      return [{ type: 'click', at, path, control,
+        ...(action && /^[a-z][a-z0-9_.:-]{0,63}$/.test(action) ? { action } : {}),
+        ...(targetPath && /^\/[a-zA-Z0-9/:_-]*$/.test(targetPath) ? { targetPath } : {}),
+      }];
+    }
+    if (event.type === 'api_failure') {
+      const endpoint = text(event.endpoint, 80);
+      const method = text(event.method, 12).toUpperCase();
+      const status = Number(event.status);
+      const vercelId = text(event.vercelId, 100);
+      if (!/^\/api\/[a-z0-9:-]+$/.test(endpoint) || !/^(GET|POST|PUT|PATCH|DELETE)$/.test(method)
+        || !Number.isInteger(status) || status < 0 || status > 599) return [];
+      return [{ type: 'api_failure', at, path, endpoint, method, status,
+        ...(vercelId && /^[a-zA-Z0-9:_-]{1,100}$/.test(vercelId) ? { vercelId } : {}),
+      }];
+    }
+    return [];
+  });
 }
 
 /** Keeps the agent's own copy aligned with Tutlio's punctuation style. */
@@ -406,6 +443,7 @@ export function parseInAppSupportSubmission(value: unknown): InAppSupportSubmiss
     reportCompleteness: rawEnvironment.reportCompleteness === 'user_confirmed_incomplete'
       ? 'user_confirmed_incomplete'
       : 'complete',
+    diagnostics: parseInAppSupportDiagnostics(rawEnvironment.diagnostics),
   };
 
   const transcript = Array.isArray(raw.transcript)
@@ -484,6 +522,10 @@ export function supportPageForPath(pathname: string): string {
   if (pathname === '/company' || pathname.startsWith('/company/')) return '/company/support';
   if (pathname === '/school' || pathname.startsWith('/school/')) return '/school/support';
   return '/support';
+}
+
+export function supportTicketsPageForPath(pathname: string): string {
+  return `${supportPageForPath(pathname)}/tickets`;
 }
 
 export function supportHomeForPath(pathname: string): string {

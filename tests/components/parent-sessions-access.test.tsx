@@ -15,9 +15,10 @@ import ParentSessions from '../../src/pages/ParentSessions';
 
 let allowed: boolean;
 let unavailable: boolean;
+let multiTutor: boolean;
 let requests: URL[];
 beforeEach(() => {
-  allowed = false; unavailable = false; requests = [];
+  allowed = false; unavailable = false; multiTutor = false; requests = [];
   state.client = createClient('https://parent-session-test.invalid', 'test-key', {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     global: { fetch: async (input, init) => {
@@ -28,7 +29,18 @@ beforeEach(() => {
         return new Response(JSON.stringify(unavailable ? { message: 'missing RPC' } : allowed ? [{ student_id: 'child' }] : []),
           { status: unavailable ? 500 : 200, headers: { 'Content-Type': 'application/json' } });
       }
-      if (url.pathname.endsWith('/students')) return new Response(JSON.stringify({ full_name: 'Verified child' }), { headers: { 'Content-Type': 'application/json' } });
+      if (url.pathname.endsWith('/students')) return new Response(JSON.stringify({ full_name: 'Verified child', payment_model: null }), { headers: { 'Content-Type': 'application/json' } });
+      if (url.pathname.endsWith('/profiles') && multiTutor) return new Response(JSON.stringify([
+        { id: 'monthly-tutor', organization_id: 'monthly-org', enable_per_lesson: true, enable_monthly_billing: false },
+        { id: 'direct-tutor', organization_id: null, enable_per_lesson: true, enable_monthly_billing: false },
+      ]), { headers: { 'Content-Type': 'application/json' } });
+      if (url.pathname.endsWith('/organizations') && multiTutor) return new Response(JSON.stringify([
+        { id: 'monthly-org', enable_per_lesson: true, enable_monthly_billing: true },
+      ]), { headers: { 'Content-Type': 'application/json' } });
+      if (url.pathname.endsWith('/sessions') && multiTutor) return new Response(JSON.stringify([
+        { id: 'monthly-lesson', tutor_id: 'monthly-tutor', start_time: '2030-10-01T12:00:00Z', end_time: '2030-10-01T13:00:00Z', status: 'active', paid: false, price: 25, topic: 'Mėnesinė pamoka' },
+        { id: 'direct-lesson', tutor_id: 'direct-tutor', start_time: '2030-10-02T12:00:00Z', end_time: '2030-10-02T13:00:00Z', status: 'active', paid: false, price: 25, topic: 'Atskira pamoka' },
+      ]), { headers: { 'Content-Type': 'application/json' } });
       if (url.pathname.endsWith('/sessions')) return new Response(JSON.stringify([{ id: 'lesson', student_id: 'child',
         start_time: '2026-09-28T12:00:00Z', end_time: '2026-09-28T12:45:00Z', status: 'completed', paid: true,
         price: 0, topic: 'Teacher activity', tutor_comment: 'Parent-only lesson note',
@@ -58,5 +70,11 @@ describe('direct parent session route', () => {
   it('fails closed when the strict parent scope cannot be resolved', async () => {
     unavailable = true; open(); await screen.findByText('parent.noAccessChild');
     expect(requests).toHaveLength(1); expect(screen.queryByText('Parent-only lesson note')).toBeNull();
+  });
+  it('uses each lesson tutor billing policy when the child has several tutors', async () => {
+    allowed = true; multiTutor = true; open();
+    await screen.findByText(/Mėnesinė pamoka/);
+    expect(screen.getByText(/Atskira pamoka/)).toBeTruthy();
+    expect(screen.getAllByText('stuSess.awaitingPayment')).toHaveLength(1);
   });
 });

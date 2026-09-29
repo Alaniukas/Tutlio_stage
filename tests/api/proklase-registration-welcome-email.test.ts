@@ -3,6 +3,7 @@ import { PRO_KLASE_ORG_ID } from '../../api/_lib/marketMoney';
 
 const mocks = vi.hoisted(() => ({
   send: vi.fn(),
+  replyTo: vi.fn(),
 }));
 
 vi.mock('resend', () => ({
@@ -11,12 +12,17 @@ vi.mock('resend', () => ({
   },
 }));
 
+vi.mock('../../api/_lib/orgEmailReplyTo.js', () => ({
+  resolveOrgEmailReplyToWithServiceClient: mocks.replyTo,
+}));
+
 import { sendProKlaseRegistrationWelcomeEmail } from '../../api/_lib/sendProKlaseRegistrationWelcomeEmail';
 
 describe('Pro Klasė registration welcome email', () => {
   beforeEach(() => {
     vi.stubEnv('RESEND_API_KEY', 'test-key');
     mocks.send.mockResolvedValue({ data: { id: 'email-1' }, error: null });
+    mocks.replyTo.mockResolvedValue(['info@proklase.lt']);
   });
 
   afterEach(() => {
@@ -35,6 +41,8 @@ describe('Pro Klasė registration welcome email', () => {
     const payload = mocks.send.mock.calls[0][0];
     expect(payload.from).toMatch(/^ProKlasė Sistema </);
     expect(payload.to).toEqual(['parent@example.test']);
+    expect(mocks.replyTo).toHaveBeenCalledWith(PRO_KLASE_ORG_ID);
+    expect(payload.replyTo).toEqual(['info@proklase.lt']);
     expect(payload.subject).toBe('Sėkmingai užsiregistravote ProKlasės sistemoje! 🎉');
     expect(payload.html).toContain('Savo paskyroje galėsite matyti suplanuotas pamokas');
     expect(payload.html).toContain('info@proklase.lt');

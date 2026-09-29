@@ -107,6 +107,20 @@ interface TutorDetail extends Tutor {
   earnings: number;
 }
 
+export function mergeEditedTutorSubjectPay(
+  persistedPay: unknown,
+  editedPay: Record<string, string>,
+  editedSubjectIds: Iterable<string>,
+): Record<string, number> {
+  const merged = parseTutorPayBySubject(persistedPay);
+  for (const subjectId of editedSubjectIds) {
+    const editedRate = compactTutorPayBySubject({ [subjectId]: editedPay[subjectId] })[subjectId];
+    if (editedRate == null) delete merged[subjectId];
+    else merged[subjectId] = editedRate;
+  }
+  return merged;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const COLORS = [
@@ -527,11 +541,12 @@ export default function CompanyTutors() {
   const [editReminderTutor, setEditReminderTutor] = useState(2);
   const [editBreakBetween, setEditBreakBetween] = useState(0);
   const [editMinBooking, setEditMinBooking] = useState(1);
-  const [editCommissionPercent, setEditCommissionPercent] = useState(0);
+  const [editCommissionPercent, setEditCommissionPercent] = useState<number | ''>(0);
   const [tutorSaveError, setTutorSaveError] = useState<string | null>(null);
   const [editSubjectPay, setEditSubjectPay] = useState<Record<string, string>>({});
   const baseTutorPayEditedRef = useRef(false);
   const subjectTutorPayEditedRef = useRef(false);
+  const editedSubjectPayIdsRef = useRef<Set<string>>(new Set());
   const [editMeetingLink, setEditMeetingLink] = useState('');
   /** False until the editor has a fresh (or confirmed cached) meeting-link value — avoids wiping DB on save. */
   const [meetingLinkHydrated, setMeetingLinkHydrated] = useState(false);
@@ -1033,6 +1048,7 @@ export default function CompanyTutors() {
     setMeetingLinkLoadError(false);
     baseTutorPayEditedRef.current = false;
     subjectTutorPayEditedRef.current = false;
+    editedSubjectPayIdsRef.current.clear();
     const [{ data: subjects }, { data: freshProfile, error: profileErr }] = await Promise.all([
       supabase.from('subjects').select('*').eq('tutor_id', tutor.id),
       supabase
@@ -1100,14 +1116,19 @@ export default function CompanyTutors() {
     setEditMinBooking(tutorRow.min_booking_hours ?? orgDefaults.min_booking_hours);
     setEditCommissionPercent(tutorRow.company_commission_percent ?? orgDefaults.company_commission_percent);
     const parsedPay = parseTutorPayBySubject(tutorRow.company_commission_by_subject);
-    const nextPay: Record<string, string> = {};
+    // Keep rates for subjects no longer shown in this editor. Saving one visible
+    // rate must not silently erase historical or temporarily hidden overrides.
+    const nextPay: Record<string, string> = Object.fromEntries(
+      Object.entries(parsedPay).map(([subjectId, rate]) => [subjectId, String(rate)]),
+    );
     for (const subj of (subjects || []) as Subject[]) {
       if (subj.is_trial) continue;
-      nextPay[subj.id] = parsedPay[subj.id] != null ? String(parsedPay[subj.id]) : '';
+      if (!(subj.id in nextPay)) nextPay[subj.id] = '';
     }
     setEditSubjectPay(nextPay);
     baseTutorPayEditedRef.current = false;
     subjectTutorPayEditedRef.current = false;
+    editedSubjectPayIdsRef.current.clear();
     setEditMeetingLink(hydratedMeetingLink);
     setMeetingLinkHydrated(Boolean(freshProfile && !profileErr));
     setMeetingLinkLoadError(!freshProfile || Boolean(profileErr));
@@ -1169,22 +1190,41 @@ export default function CompanyTutors() {
       setTutorSaveError(t('compTut.personalMeetingLinkLoadFailed'));
       return;
     }
+    const basePayEdited = baseTutorPayEditedRef.current;
+    const subjectPayEdited = subjectTutorPayEditedRef.current;
+    if (basePayEdited && (editCommissionPercent === '' || !Number.isFinite(editCommissionPercent) || editCommissionPercent < 0)) {
+      setTutorSaveError(t('common.saveFailed'));
+      return;
+    }
     setSavingTutor(true);
     setTutorSaveError(null);
     const personalLink = editMeetingLink.trim() || null;
     const meetingLinkPatch = tutorMeetingLinkUpdatePatch(selectedTutor.personal_meeting_link, personalLink);
     const meetingLinkChanged = 'personal_meeting_link' in meetingLinkPatch;
-    const basePayEdited = baseTutorPayEditedRef.current;
-    const subjectPayEdited = subjectTutorPayEditedRef.current;
-    const savedSubjectPay = compactTutorPayBySubject(editSubjectPay);
-    const tutorPayPatch = buildTutorPayUpdatePatch({
-      basePayEdited,
-      basePay: editCommissionPercent,
-      subjectPayEdited,
-      subjectPay: savedSubjectPay,
-      subjectPayEnabled: isManoKorepetitoriusAdmin,
-    });
     try {
+      let savedSubjectPay = compactTutorPayBySubject(editSubjectPay);
+      if (isManoKorepetitoriusAdmin && subjectPayEdited) {
+        const { data: freshPayRow, error: freshPayError } = await supabase
+          .from('profiles')
+          .select('company_commission_by_subject')
+          .eq('id', selectedTutor.id)
+          .maybeSingle();
+        if (freshPayError || !freshPayRow) throw freshPayError || new Error('Tutor pay rates could not be loaded');
+        // Apply only fields edited in this modal to the latest persisted map.
+        // Another admin's new subject rate must survive this save.
+        savedSubjectPay = mergeEditedTutorSubjectPay(
+          freshPayRow.company_commission_by_subject,
+          editSubjectPay,
+          editedSubjectPayIdsRef.current,
+        );
+      }
+      const tutorPayPatch = buildTutorPayUpdatePatch({
+        basePayEdited,
+        basePay: Number(editCommissionPercent),
+        subjectPayEdited,
+        subjectPay: savedSubjectPay,
+        subjectPayEnabled: isManoKorepetitoriusAdmin,
+      });
       const { data: updatedRows, error } = await supabase.from('profiles').update({
         full_name: editName,
         phone: editPhone,
@@ -1205,13 +1245,17 @@ export default function CompanyTutors() {
       const persistedSubjectPay = isManoKorepetitoriusAdmin
         ? (savedRow as { company_commission_by_subject?: Record<string, number> | null })?.company_commission_by_subject
         : null;
+      const persistedPayEntries = Object.entries(parseTutorPayBySubject(persistedSubjectPay))
+        .sort(([left], [right]) => left.localeCompare(right));
+      const savedPayEntries = Object.entries(savedSubjectPay)
+        .sort(([left], [right]) => left.localeCompare(right));
       if (
         error
         || !savedRow
-        || (basePayEdited && Number(savedRow.company_commission_percent) !== editCommissionPercent)
+        || (basePayEdited && Number(savedRow.company_commission_percent) !== Number(editCommissionPercent))
         || (meetingLinkChanged && !meetingLinkWasPersisted(personalLink, savedRow.personal_meeting_link))
         || (isManoKorepetitoriusAdmin && subjectPayEdited
-          && JSON.stringify(persistedSubjectPay ?? {}) !== JSON.stringify(savedSubjectPay ?? {}))
+          && JSON.stringify(persistedPayEntries) !== JSON.stringify(savedPayEntries))
       ) {
         throw error || new Error('Tutor profile update was not persisted');
       }
@@ -1229,7 +1273,7 @@ export default function CompanyTutors() {
         reminder_tutor_hours: editReminderTutor,
         break_between_lessons: editBreakBetween,
         min_booking_hours: editMinBooking,
-        ...(basePayEdited ? { company_commission_percent: editCommissionPercent } : {}),
+        ...(basePayEdited ? { company_commission_percent: Number(editCommissionPercent) } : {}),
         personal_meeting_link: savedRow.personal_meeting_link,
         teaching_notes: editTeachingNotes.trim() || null,
         ...(isManoKorepetitoriusAdmin && subjectPayEdited
@@ -1413,12 +1457,6 @@ export default function CompanyTutors() {
   const handleDeleteSubject = async (subjectId: string) => {
     await supabase.from('subjects').delete().eq('id', subjectId);
     if (selectedTutor) setSelectedTutor({ ...selectedTutor, subjects: selectedTutor.subjects.filter(s => s.id !== subjectId) });
-    setEditSubjectPay((prev) => {
-      if (!(subjectId in prev)) return prev;
-      const next = { ...prev };
-      delete next[subjectId];
-      return next;
-    });
   };
 
   if (loading) {
@@ -1967,7 +2005,7 @@ export default function CompanyTutors() {
                       value={editCommissionPercent}
                       onChange={(e) => {
                         baseTutorPayEditedRef.current = true;
-                        setEditCommissionPercent(Number(e.target.value) || 0);
+                        setEditCommissionPercent(e.target.value === '' ? '' : Number(e.target.value));
                       }}
                       className="rounded-xl w-28"
                     />
@@ -1992,6 +2030,7 @@ export default function CompanyTutors() {
                               value={editSubjectPay[subj.id] ?? ''}
                               onChange={(e) => {
                                 subjectTutorPayEditedRef.current = true;
+                                editedSubjectPayIdsRef.current.add(subj.id);
                                 setEditSubjectPay((prev) => ({ ...prev, [subj.id]: e.target.value }));
                               }}
                               className="rounded-xl w-24 h-9 bg-white"

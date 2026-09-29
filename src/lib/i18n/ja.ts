@@ -5,6 +5,7 @@ import { en } from './en.js';
  * Locale publication is controlled separately in locales.ts.
  */
 export const jaOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': '生徒にメールで通知',
   "cal.deleteAllRemaining": "このシリーズの残りのレッスンすべて",
   "cal.deleteAllRemainingHint": "このシリーズの今後の予定済み・キャンセル済みレッスンを削除します。終了済みレッスンの履歴は保持されます。",
   "cal.deleteConfirmAll": "このシリーズの残りの予定済み・キャンセル済みレッスンをすべて削除しますか？終了済みレッスンの履歴は保持されます。",

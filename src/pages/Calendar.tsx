@@ -139,6 +139,7 @@ import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isLaisviVaikaiOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { isProKlaseAwaitingOutcomeConfirmation } from '@/lib/proKlaseTutorPay';
 import { canChooseParentLessonComment } from '@/lib/parentLessonComment';
 import { resolveOrCreateTrialSubject } from '@/pages/company/orgAdminSessionCreate';
 import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
@@ -1885,6 +1886,19 @@ export default function CalendarPage() {
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setSaving(false); return; }
+    const { data: sessionBillingProfile } = await supabase.from('profiles')
+      .select('organization_id, enable_per_lesson, enable_monthly_billing')
+      .eq('id', user.id).maybeSingle();
+    const sessionBillingOrgId = sessionBillingProfile?.organization_id;
+    const { data: sessionBillingOwner } = sessionBillingOrgId
+      ? await supabase.from('organizations')
+          .select('enable_per_lesson, enable_monthly_billing')
+          .eq('id', sessionBillingOrgId).maybeSingle()
+      : { data: sessionBillingProfile };
+    const sessionBillingFlags = {
+      enable_per_lesson: sessionBillingOwner?.enable_per_lesson === true,
+      enable_monthly_billing: sessionBillingOwner?.enable_monthly_billing === true,
+    };
 
     let sessionSubjectId = selectedSubjectId;
     let sessionPrice = price;
@@ -2008,6 +2022,7 @@ export default function CalendarPage() {
           let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(recurStudent?.payment_model, {
             paid: isPaid,
             hasPackage: false,
+            billingFlags: sessionBillingFlags,
           });
           let lessonPackageId = null;
 
@@ -2026,12 +2041,14 @@ export default function CalendarPage() {
                 sessionPaymentStatus = defaultSessionPaymentStatusForStudent(recurStudent?.payment_model, {
                   paid: false,
                   hasPackage: false,
+                  billingFlags: sessionBillingFlags,
                 });
               }
             } else {
               sessionPaymentStatus = defaultSessionPaymentStatusForStudent(recurStudent?.payment_model, {
                 paid: false,
                 hasPackage: false,
+                billingFlags: sessionBillingFlags,
               });
             }
           }
@@ -2214,6 +2231,12 @@ export default function CalendarPage() {
             const normalizedPayer = String(studentData.payment_payer || '').trim().toLowerCase();
             const payerEmail = String(studentData.payer_email || '').trim();
             const hasPayer = normalizedPayer === 'parent' && payerEmail.length > 0;
+            const studentModel = (studentData as any)?.payment_model as string | null | undefined;
+            const allowsPerLessonNow = allowsPerLessonPaymentForStudent(
+              studentModel,
+              effectiveEnablePerLesson,
+              effectiveEnableMonthlyBilling,
+            );
             const recurringWeekday = getDay(firstStart);
             const recurringTime = format(firstStart, 'HH:mm');
             const schedule = Array.from(new Map(
@@ -2230,6 +2253,7 @@ export default function CalendarPage() {
                 type: 'recurring_booking_confirmation',
                 to: studentNotifyTo,
                 data: {
+                  sessionId: firstSession.id,
                   studentName: studentData.full_name,
                   tutorName: tutorProfile?.full_name || '',
                   subject: topic || null,
@@ -2250,6 +2274,7 @@ export default function CalendarPage() {
                 type: 'recurring_booking_confirmation',
                 to: payerEmail,
                 data: {
+                  sessionId: firstSession.id,
                   forPayer: true,
                   bookedBy: 'tutor',
                   studentName: studentData.full_name,
@@ -2263,20 +2288,13 @@ export default function CalendarPage() {
                   recurringTime,
                   ongoingSchedule: isRecurringEndDateOpen(recurringEndDate),
                   schedule,
-                  paymentReminderNote: true,
+                  paymentReminderNote: allowsPerLessonNow,
                   ...(orgIdBranding ? { organizationId: orgIdBranding } : {}),
                 },
               }).catch(err => console.error('Error sending payer recurring booking email:', err));
             }
 
             // 2) Payment email to parent (only if not paid via package)
-            const studentModel = (studentData as any)?.payment_model as string | null | undefined;
-            const allowsPerLessonNow = allowsPerLessonPaymentForStudent(
-              studentModel,
-              effectiveEnablePerLesson,
-              effectiveEnableMonthlyBilling,
-            );
-
             const shouldSendParentPaymentNow =
               !firstSession.paid &&
               !firstSession.lesson_package_id &&
@@ -2413,6 +2431,7 @@ export default function CalendarPage() {
         let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentRow?.payment_model, {
           paid: isPaid,
           hasPackage: false,
+          billingFlags: sessionBillingFlags,
         });
         let lessonPackageId = null;
 
@@ -2444,6 +2463,7 @@ export default function CalendarPage() {
             sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentRow?.payment_model, {
               paid: false,
               hasPackage: false,
+              billingFlags: sessionBillingFlags,
             });
           }
         }
@@ -2582,6 +2602,12 @@ export default function CalendarPage() {
           const normalizedPayer = String(studentData?.payment_payer || '').trim().toLowerCase();
           const payerEmail = String(studentData?.payer_email || '').trim();
           const hasPayer = normalizedPayer === 'parent' && payerEmail.length > 0;
+          const studentModel = (studentData as any)?.payment_model as string | null | undefined;
+          const allowsPerLessonNow = allowsPerLessonPaymentForStudent(
+            studentModel,
+            effectiveEnablePerLesson,
+            effectiveEnableMonthlyBilling,
+          );
 
           const studentBookingTo = await resolveStudentNotificationEmail(studentData);
           if (studentBookingTo) {
@@ -2599,7 +2625,7 @@ export default function CalendarPage() {
                 duration: Math.round(durationMs / 60000),
                 cancellationHours: hasPayer ? null : (tutorProfile?.cancellation_hours ?? 24),
                 cancellationFeePercent: hasPayer ? null : (tutorProfile?.cancellation_fee_percent ?? 0),
-                paymentStatus: hasPayer ? null : (session.paid ? 'paid' : 'pending'),
+                paymentStatus: hasPayer ? null : (session.paid ? 'paid' : allowsPerLessonNow ? 'pending' : null),
                 meetingLink: meetingLink || null,
                 hidePaymentInfo: hasPayer,
                 ...(orgIdNewSessions ? { organizationId: orgIdNewSessions } : {}),
@@ -2624,7 +2650,7 @@ export default function CalendarPage() {
                 duration: Math.round(durationMs / 60000),
                 cancellationHours: tutorProfile?.cancellation_hours ?? 24,
                 cancellationFeePercent: tutorProfile?.cancellation_fee_percent ?? 0,
-                paymentStatus: session.paid ? 'paid' : 'pending',
+                paymentStatus: session.paid ? 'paid' : allowsPerLessonNow ? 'pending' : null,
                 meetingLink: meetingLink || null,
                 ...(orgIdNewSessions ? { organizationId: orgIdNewSessions } : {}),
               },
@@ -2632,13 +2658,6 @@ export default function CalendarPage() {
           }
 
           // 2) Send payment email to parent if needed (only if not paid via package)
-          const studentModel = (studentData as any)?.payment_model as string | null | undefined;
-          const allowsPerLessonNow = allowsPerLessonPaymentForStudent(
-            studentModel,
-            effectiveEnablePerLesson,
-            effectiveEnableMonthlyBilling,
-          );
-
           const shouldSendParentPaymentNow =
             !session.paid &&
             !session.lesson_package_id &&
@@ -2851,6 +2870,19 @@ export default function CalendarPage() {
       setAssignSaving(false);
       return;
     }
+    const { data: assignBillingProfile } = await supabase.from('profiles')
+      .select('organization_id, enable_per_lesson, enable_monthly_billing')
+      .eq('id', user.id).maybeSingle();
+    const assignBillingOrgId = assignBillingProfile?.organization_id;
+    const { data: assignBillingOwner } = assignBillingOrgId
+      ? await supabase.from('organizations')
+          .select('enable_per_lesson, enable_monthly_billing')
+          .eq('id', assignBillingOrgId).maybeSingle()
+      : { data: assignBillingProfile };
+    const assignmentBillingFlags = {
+      enable_per_lesson: assignBillingOwner?.enable_per_lesson === true,
+      enable_monthly_billing: assignBillingOwner?.enable_monthly_billing === true,
+    };
 
     const subject = subjects.find(s => s.id === assignSubjectId);
     const studentIdsToProcess = assignStudentIds.length > 0 ? assignStudentIds : [assignStudentId];
@@ -2911,6 +2943,7 @@ export default function CalendarPage() {
         let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(student?.payment_model, {
           paid: false,
           hasPackage: false,
+          billingFlags: assignmentBillingFlags,
         });
         let lessonPackageId = null;
 
@@ -3028,6 +3061,11 @@ export default function CalendarPage() {
       for (const [studentId, studentSessionList] of createdSessionsByStudent) {
         const student = students.find((s) => s.id === studentId);
         if (!student) continue;
+        const allowsPerLessonNow = allowsPerLessonPaymentForStudent(
+          student.payment_model,
+          assignmentBillingFlags.enable_per_lesson,
+          assignmentBillingFlags.enable_monthly_billing,
+        );
         const sorted = [...studentSessionList].sort(
           (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
         );
@@ -3050,6 +3088,7 @@ export default function CalendarPage() {
               type: 'recurring_booking_confirmation',
               to: studentAssignTo,
               data: {
+                sessionId: first.id,
                 bookedBy: 'tutor',
                 studentName: student.full_name,
                 tutorName: tutorProfile?.full_name || '',
@@ -3068,6 +3107,7 @@ export default function CalendarPage() {
               type: 'recurring_booking_confirmation',
               to: payerEmail,
               data: {
+                sessionId: first.id,
                 forPayer: true,
                 bookedBy: 'tutor',
                 studentName: student.full_name,
@@ -3079,7 +3119,7 @@ export default function CalendarPage() {
                 sessions: sessionDates,
                 recurringWeekday: firstDow,
                 recurringTime: assignSelectedSlot,
-                paymentReminderNote: true,
+                paymentReminderNote: allowsPerLessonNow,
                 ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
               },
             }).catch((err) => console.error('Error sending assign recurring payer email:', err));
@@ -3093,6 +3133,7 @@ export default function CalendarPage() {
               type: 'booking_confirmation',
               to: studentAssignTo,
               data: {
+                sessionId: s.id,
                 studentName: student.full_name,
                 tutorName: tutorProfile?.full_name || '',
                 date: dateStr,
@@ -3102,7 +3143,7 @@ export default function CalendarPage() {
                 duration,
                 cancellationHours: hasPayer ? null : (tutorProfile?.cancellation_hours || 24),
                 cancellationFeePercent: hasPayer ? null : (tutorProfile?.cancellation_fee_percent || 0),
-                paymentStatus: hasPayer ? null : (s.paid ? 'paid' : 'pending'),
+                paymentStatus: hasPayer ? null : (s.paid ? 'paid' : allowsPerLessonNow ? 'pending' : null),
                 meetingLink: slotMeetingLink,
                 hidePaymentInfo: hasPayer,
                 ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
@@ -3114,6 +3155,7 @@ export default function CalendarPage() {
               type: 'booking_confirmation',
               to: payerEmail,
               data: {
+                sessionId: s.id,
                 forPayer: true,
                 bookedBy: 'tutor',
                 studentName: student.full_name,
@@ -3125,7 +3167,7 @@ export default function CalendarPage() {
                 duration,
                 cancellationHours: tutorProfile?.cancellation_hours ?? 24,
                 cancellationFeePercent: tutorProfile?.cancellation_fee_percent ?? 0,
-                paymentStatus: s.paid ? 'paid' : 'pending',
+                paymentStatus: s.paid ? 'paid' : allowsPerLessonNow ? 'pending' : null,
                 meetingLink: slotMeetingLink,
                 ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
               },
@@ -4311,10 +4353,19 @@ export default function CalendarPage() {
 
       const { data: tutorProfile } = await supabase
         .from('profiles')
-        .select('full_name, email, organization_id')
+        .select('full_name, email, organization_id, enable_per_lesson, enable_monthly_billing')
         .eq('id', user.id)
         .single();
       const orgIdGroupAdd = (tutorProfile as any)?.organization_id as string | undefined;
+      const { data: groupBillingOwner } = orgIdGroupAdd
+        ? await supabase.from('organizations')
+            .select('enable_per_lesson, enable_monthly_billing')
+            .eq('id', orgIdGroupAdd).maybeSingle()
+        : { data: tutorProfile };
+      const groupBillingFlags = {
+        enable_per_lesson: groupBillingOwner?.enable_per_lesson === true,
+        enable_monthly_billing: groupBillingOwner?.enable_monthly_billing === true,
+      };
 
       const subject = subjects.find(s => s.id === selectedEvent.subject_id);
       const durationMs = selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime();
@@ -4325,7 +4376,7 @@ export default function CalendarPage() {
       for (const studentId of addToGroupStudentIds) {
         const { data: loadedStudent } = await supabase
           .from('students')
-          .select('full_name, email, linked_user_id')
+          .select('full_name, email, linked_user_id, payment_model')
           .eq('id', studentId)
           .maybeSingle();
         const listedStudent = schoolLessonStudents.find((row) => row.id === studentId);
@@ -4333,7 +4384,19 @@ export default function CalendarPage() {
           full_name: listedStudent.full_name,
           email: listedStudent.email,
           linked_user_id: listedStudent.linked_user_id,
+          payment_model: listedStudent.payment_model,
         } : null);
+        const studentPaymentModel = studentData?.payment_model ?? null;
+        const groupPaymentStatus = defaultSessionPaymentStatusForStudent(studentPaymentModel, {
+          paid: false,
+          hasPackage: false,
+          billingFlags: groupBillingFlags,
+        });
+        const groupPerLessonPayment = allowsPerLessonPaymentForStudent(
+          studentPaymentModel,
+          groupBillingFlags.enable_per_lesson,
+          groupBillingFlags.enable_monthly_billing,
+        );
 
         if (addToGroupChoice === 'all_future') {
           // Add student to all future sessions in recurring group
@@ -4375,7 +4438,7 @@ export default function CalendarPage() {
                 topic: sessionTemplate.topic || null,
                 price: sessionTemplate.price,
                 paid: false,
-                payment_status: 'pending',
+                payment_status: groupPaymentStatus,
                 recurring_session_id: sessionTemplate.recurring_session_id || null,
                 available_spots: null,
               });
@@ -4429,7 +4492,7 @@ export default function CalendarPage() {
                   duration: Math.round(durationMs / 60000),
                   cancellationHours: 24,
                   cancellationFeePercent: 0,
-                  paymentStatus: 'pending',
+                  paymentStatus: groupPerLessonPayment ? 'pending' : null,
                   meetingLink: selectedEvent.meeting_link || null,
                   ...(orgIdGroupAdd ? { organizationId: orgIdGroupAdd } : {}),
                 },
@@ -4451,7 +4514,7 @@ export default function CalendarPage() {
               topic: selectedEvent.topic || null,
               price: selectedEvent.price,
               paid: false,
-              payment_status: 'pending',
+              payment_status: groupPaymentStatus,
               recurring_session_id: selectedEvent.recurring_session_id || null,
               available_spots: null,
             })
@@ -4498,7 +4561,7 @@ export default function CalendarPage() {
                 duration: Math.round(durationMs / 60000),
                 cancellationHours: 24,
                 cancellationFeePercent: 0,
-                paymentStatus: 'pending',
+                paymentStatus: groupPerLessonPayment ? 'pending' : null,
                 meetingLink: selectedEvent.meeting_link || null,
                 ...(orgIdGroupAdd ? { organizationId: orgIdGroupAdd } : {}),
               },
@@ -6207,7 +6270,10 @@ export default function CalendarPage() {
             )}
             {!isSchoolTutor && requiresStatusConfirmation &&
               !isGroupSession &&
-              selectedEvent?.status === 'active' &&
+              (selectedEvent?.status === 'active' ||
+                (hideProKlaseOrgTutorCancel && selectedEvent &&
+                  ['completed', 'no_show'].includes(selectedEvent.status) &&
+                  isProKlaseAwaitingOutcomeConfirmation(selectedEvent))) &&
               isAfter(new Date(), selectedEvent.end_time) && (
                 <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 space-y-2">
                   <p className="text-sm font-semibold text-amber-900">{t('cal.confirmStatusPrompt')}</p>

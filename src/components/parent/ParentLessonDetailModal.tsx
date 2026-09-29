@@ -32,6 +32,7 @@ import WhiteboardButton from '@/components/WhiteboardButton';
 import JoinLessonButton from '@/components/JoinLessonButton';
 import SessionFiles from '@/components/SessionFiles';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { useTranslation } from '@/lib/i18n';
 import type { OrgFeeProfile } from '@/lib/marketMoney';
 /** Tutor contact + payment / cancellation rules (from profiles). */
 export type ParentTutorContactPolicy = {
@@ -43,6 +44,8 @@ export type ParentTutorContactPolicy = {
   cancellationFeePercent: number;
   paymentTiming: 'before_lesson' | 'after_lesson';
   paymentDeadlineHours: number;
+  /** Current student and billing-owner policy allows an individual lesson charge. */
+  perLessonPaymentAllowed?: boolean;
   perlasEnabled?: boolean;
   /** School orgs absorb fees — parent pays the list price, no breakdown shown. */
   orgIsSchool?: boolean;
@@ -108,6 +111,7 @@ export function ParentLessonDetailModal({
   /** Cleanup action for a cancelled lesson, when supplied by the owning page. */
   onDelete?: () => void;
 }) {
+  const { locale } = useTranslation();
   const headline =
     session?.classGroupName ||
     session?.subjectName ||
@@ -152,7 +156,7 @@ export function ParentLessonDetailModal({
     if (!session) return;
     setStripeLoading(true);
     try {
-      const body: { sessionId: string; payerEmail?: string } = { sessionId: session.id };
+      const body: { sessionId: string; payerEmail?: string; ui_locale: string } = { sessionId: session.id, ui_locale: locale };
       const trimmed = stripePayerEmail?.trim();
       if (trimmed) body.payerEmail = trimmed;
       const res = await fetch('/api/stripe-checkout', {
@@ -285,6 +289,7 @@ export function ParentLessonDetailModal({
                 paymentStatus={session.payment_status}
                 paid={session.paid}
                 endTime={session.end_time}
+                treatUnpaidAsReserved={!tutorPolicy?.perLessonPaymentAllowed}
               />
             </div>
           </div>
@@ -348,7 +353,7 @@ export function ParentLessonDetailModal({
                   </p>
                 </div>
               </div>
-              <div className="flex items-start gap-2 pt-1 border-t border-amber-200/70">
+              {tutorPolicy.perLessonPaymentAllowed && <div className="flex items-start gap-2 pt-1 border-t border-amber-200/70">
                 <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-600" />
                 <div>
                   <p className="font-bold uppercase tracking-wider text-amber-700 text-[11px] mb-0.5">
@@ -368,12 +373,13 @@ export function ParentLessonDetailModal({
                         })}
                   </p>
                 </div>
-              </div>
+              </div>}
             </div>
           )}
 
           {session.status === 'active' &&
             !session.paid &&
+            tutorPolicy?.perLessonPaymentAllowed === true &&
             isAfter(new Date(session.end_time), now) && (
               <div className="space-y-2">
                 <button

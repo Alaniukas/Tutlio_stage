@@ -10,6 +10,7 @@ import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { returnPackageCounterToAvailable } from './_lib/sessionStatusConfirmation.js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
+import { allowsPerLessonBilling, loadPerLessonBillingFlags } from './_lib/perLessonBillingEligibility.js';
 
 function json(res: VercelResponse, status: number, body: Record<string, unknown>) {
   return res.status(status).json(body);
@@ -38,7 +39,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: session, error: sessErr } = await supabase
     .from('sessions')
-    .select('id, tutor_id, subject_id, lesson_package_id, status, is_complimentary')
+    .select('id, tutor_id, student_id, subject_id, lesson_package_id, status, is_complimentary')
     .eq('id', sessionId)
     .maybeSingle();
   if (sessErr) return json(res, 500, { error: sessErr.message });
@@ -49,7 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: tutor } = await supabase
     .from('profiles')
-    .select('organization_id')
+    .select('organization_id, enable_per_lesson, enable_monthly_billing')
     .eq('id', session.tutor_id)
     .maybeSingle();
   if (!tutor?.organization_id || tutor.organization_id !== access.organizationId) {
@@ -64,6 +65,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } as any);
   }
 
+  let unpaidPaymentStatus: 'pending' | 'confirmed' = 'pending';
+  if (!complimentary) {
+    const { data: student, error: studentError } = await supabase.from('students')
+      .select('payment_model')
+      .eq('id', session.student_id)
+      .maybeSingle();
+    if (studentError || !student) return json(res, 500, { error: 'Unable to load student billing model' });
+    try {
+      const billingFlags = await loadPerLessonBillingFlags(supabase, tutor);
+      unpaidPaymentStatus = allowsPerLessonBilling(student.payment_model, billingFlags)
+        ? 'pending'
+        : 'confirmed';
+    } catch {
+      return json(res, 500, { error: 'Unable to load organization billing settings' });
+    }
+  }
+
   const patch = complimentary
     ? {
         is_complimentary: true,
@@ -74,7 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     : {
         is_complimentary: false,
         paid: false,
-        payment_status: 'pending',
+        payment_status: unpaidPaymentStatus,
       };
 
   const { data: updated, error: updErr } = await supabase

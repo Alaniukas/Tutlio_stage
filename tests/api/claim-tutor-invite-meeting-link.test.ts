@@ -76,6 +76,7 @@ describe('claiming a tutor invite with a personal meeting link', () => {
       organization_id: 'org-1',
       preferred_locale: 'lt',
       personal_meeting_link: 'https://meet.google.com/existing-room',
+      company_commission_percent: 18,
     };
     state.profilePatch = null;
     state.insertedProfile = null;
@@ -88,6 +89,25 @@ describe('claiming a tutor invite with a personal meeting link', () => {
 
     expect(state.profilePatch).not.toHaveProperty('personal_meeting_link');
     expect(state.profile?.personal_meeting_link).toBe('https://meet.google.com/existing-room');
+  });
+
+  it('does not reset an existing org tutor pay to a pending invite default', async () => {
+    state.invite!.company_commission_percent = 0;
+
+    await claimInvite();
+
+    expect(state.profilePatch).not.toHaveProperty('company_commission_percent');
+    expect(state.profile?.company_commission_percent).toBe(18);
+  });
+
+  it('applies invite pay when a profile first joins the organization', async () => {
+    state.profile!.organization_id = null;
+    state.invite!.company_commission_percent = 16.5;
+
+    await claimInvite();
+
+    expect(state.profilePatch?.company_commission_percent).toBe(16.5);
+    expect(state.profilePatch?.organization_id).toBe('org-1');
   });
 
   it('does not update the profile when login replays an already claimed invite', async () => {

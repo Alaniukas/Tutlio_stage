@@ -52,6 +52,8 @@ import {
 import Toast from '@/components/Toast';
 import { consumeAvailabilityForCreatedSessions } from '@/lib/consumeSessionAvailability';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
+import { defaultSessionPaymentStatusForStudent } from '@/lib/studentPaymentModel';
+import { unpaidOrgSessionPaymentStatus } from '@/lib/orgSessionPaymentStatus';
 import { planRecurringSeriesPatches, sortSeriesPatchesForApply } from '@/lib/recurringSessions';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import {
@@ -400,6 +402,7 @@ interface Student {
   id: string;
   full_name: string;
   tutor_id: string | null;
+  payment_model?: string | null;
   email?: string;
   personal_meeting_link?: string | null;
   grade?: string | null;
@@ -846,7 +849,7 @@ export default function CompanyTvarkarastis() {
 
       // Visi org mokiniai (legacy rows may lack organization_id but have tutor_id in org)
       const studentSelect =
-        `${ORG_STUDENT_PICKER_SELECT}, personal_meeting_link, pricing_lessons_per_week`;
+        `${ORG_STUDENT_PICKER_SELECT}, payment_model, personal_meeting_link, pricing_lessons_per_week`;
       let studentsData: Student[] = [];
       if (organizationId && tutorIds.length > 0) {
         const [byTutorRes, byOrgRes] = await Promise.all([
@@ -2116,6 +2119,11 @@ export default function CompanyTvarkarastis() {
       }
 
       const paidChanged = editPaid !== selectedEvent.paid;
+      const editedStudentId = editStudentId || selectedEvent.student_id;
+      const paymentStatusShouldUpdate = paidChanged || (!editPaid && editedStudentId !== selectedEvent.student_id);
+      const editedPaymentStatus = paymentStatusShouldUpdate
+        ? editPaid ? 'paid' : await unpaidOrgSessionPaymentStatus(organizationId, editedStudentId)
+        : (selectedEvent as Session & { payment_status?: string | null }).payment_status;
       const classGroupIds = isClassGroupSession
         ? classGroupOccurrenceSessionIds(selectedGroupSessions)
         : [];
@@ -2138,7 +2146,7 @@ export default function CompanyTvarkarastis() {
             student_id: editStudentId || selectedEvent.student_id,
             tutor_id: editTutorId || selectedEvent.tutor_id,
             paid: editPaid,
-            ...(paidChanged ? { payment_status: editPaid ? 'paid' : 'pending' } : {}),
+            ...(paymentStatusShouldUpdate ? { payment_status: editedPaymentStatus } : {}),
             status: editStatus,
             tutor_comment: editTutorComment || null,
             show_comment_to_student: editShowCommentToStudent,
@@ -2613,11 +2621,14 @@ export default function CompanyTvarkarastis() {
     setSaving(true);
     try {
       const nextPaid = !selectedEvent.paid;
+      const paymentStatus = nextPaid
+        ? 'paid'
+        : await unpaidOrgSessionPaymentStatus(organizationId, selectedEvent.student_id);
       const { error } = await supabase
         .from('sessions')
         .update({
           paid: nextPaid,
-          payment_status: nextPaid ? 'paid' : 'pending',
+          payment_status: paymentStatus,
           ...(nextPaid ? {} : { is_complimentary: false }),
         })
         .eq('id', selectedEvent.id);
@@ -2625,7 +2636,7 @@ export default function CompanyTvarkarastis() {
       if (error) {
         alert(t('compSch.errorPayment', { msg: error.message }));
       } else {
-        setSelectedEvent((prev) => (prev ? { ...prev, paid: nextPaid, is_complimentary: nextPaid ? prev.is_complimentary : false } : prev));
+        setSelectedEvent((prev) => (prev ? { ...prev, paid: nextPaid, payment_status: paymentStatus, is_complimentary: nextPaid ? prev.is_complimentary : false } : prev));
         fetchData();
       }
     } catch (err: any) {
@@ -2649,7 +2660,7 @@ export default function CompanyTvarkarastis() {
                 ...prev,
                 is_complimentary: next,
                 paid: next,
-                payment_status: next ? 'paid' : 'pending',
+                payment_status: result.session.payment_status as string,
                 lesson_package_id: next ? null : (prev as any).lesson_package_id,
               }
             : prev,
@@ -2863,6 +2874,16 @@ export default function CompanyTvarkarastis() {
       const availTsp = availMatchedTpl ? tutorSubjectPrices.find(p => p.tutor_id === editingAvailability.tutor_id && p.org_subject_template_id === availMatchedTpl.id) : undefined;
       const meetingLinkVal = createFromAvailMeetingLink.trim() || null;
 
+      if (!organizationId) throw new Error('Organization not found');
+      const { data: billingFlags, error: billingError } = await supabase
+        .from('organizations')
+        .select('enable_per_lesson, enable_monthly_billing')
+        .eq('id', organizationId)
+        .maybeSingle();
+      if (billingError || !billingFlags) {
+        throw new Error(billingError?.message || 'Organization payment settings unavailable');
+      }
+
       const sessionRows = studentIds.map((studentId, index) => {
         const pricing = individualPricing.find(
           p => p.student_id === studentId && p.subject_id === createFromAvailSubjectId,
@@ -2886,7 +2907,11 @@ export default function CompanyTvarkarastis() {
           price: studentPrice,
           status: 'active',
           paid: createFromAvailIsPaid,
-          payment_status: createFromAvailIsPaid ? 'paid' : 'pending',
+          payment_status: defaultSessionPaymentStatusForStudent(student?.payment_model, {
+            paid: createFromAvailIsPaid,
+            hasPackage: false,
+            billingFlags,
+          }),
           created_by_role: 'org_admin',
           available_spots: isGroup ? Math.max(0, (subj?.max_students ?? 5) - (index + 1)) : null,
         };

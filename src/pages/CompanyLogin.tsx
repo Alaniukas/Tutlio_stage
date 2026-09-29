@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { supabase, setRememberMe } from '@/lib/supabase';
-import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
+import { getPasswordResetRedirectTo, supportTicketTrackingNextPath } from '@/lib/auth-redirects';
 import { resolveAuthEmailLocale } from '@/lib/auth-locale';
 import { Input } from '@/components/ui/input';
 import { PasswordInput } from '@/components/PasswordInput';
@@ -27,6 +27,7 @@ export default function CompanyLogin() {
   const [resetSent, setResetSent] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const supportTicketNextPath = supportTicketTrackingNextPath(new URLSearchParams(location.search).get('next'));
   const isSchoolLogin =
     platform === 'schools' ||
     platform === 'teachers' ||
@@ -70,6 +71,11 @@ export default function CompanyLogin() {
       const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
       if (authError || !data.user) {
         setError(t('auth.invalidCredentials'));
+        return;
+      }
+
+      if (supportTicketNextPath) {
+        navigate(supportTicketNextPath);
         return;
       }
 

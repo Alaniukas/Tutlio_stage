@@ -2,6 +2,7 @@ import { en } from './en.js';
 
 /** Ukrainian tutor/business draft. Dedicated school, admin and full legal copy retains English. */
 export const ukOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Сповістити учня електронною поштою',
   "cal.deleteAllRemaining": "Усі заняття, що залишилися в цій серії",
   "cal.deleteAllRemainingHint": "Видаляє майбутні заплановані та скасовані заняття в цій серії. Історія завершених занять зберігається.",
   "cal.deleteConfirmAll": "Видалити всі заплановані та скасовані заняття, що залишилися в цій серії? Історія завершених занять зберігається.",

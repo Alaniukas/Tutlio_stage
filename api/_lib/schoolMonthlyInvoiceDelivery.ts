@@ -7,6 +7,7 @@ export type SchoolInvoiceRenderedEmail = {
   to: string[];
   subject: string;
   html: string;
+  replyTo?: string[];
   attachments?: { filename: string; content: string }[];
 };
 export type SchoolInvoiceDeliveryResult = { sent: boolean; alreadySent?: boolean; id?: string; reason?: string };

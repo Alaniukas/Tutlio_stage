@@ -67,6 +67,18 @@ export interface StaffTemplateFields {
   employmentContractNumber: string;
   employmentContractDate: string;
   date: Date;
+  address?: string;
+  personalCode?: string;
+}
+
+export function validateStaffPersonalDetails(value: {
+  address?: unknown;
+  personalCode?: unknown;
+}): { address: string; personalCode: string } | null {
+  const address = typeof value.address === 'string' ? value.address.trim().replace(/\s+/g, ' ') : '';
+  const personalCode = typeof value.personalCode === 'string' ? value.personalCode.trim() : '';
+  if (address.length < 5 || address.length > 300 || !/^\d{11}$/.test(personalCode)) return null;
+  return { address, personalCode };
 }
 
 export function staffTemplatePayload(fields: StaffTemplateFields): Record<string, string> {
@@ -75,6 +87,8 @@ export function staffTemplatePayload(fields: StaffTemplateFields): Record<string
     .format(date).replace(/\s*d\.\s*$/i, '');
   return {
     darbuotojo_vardas_pavardė: fields.name,
+    darbuotojo_adresas: fields.address || '',
+    darbuotojo_asmens_kodas: fields.personalCode || '',
     'darbo_sutarties_nr.': fields.employmentContractNumber,
     darbo_sutarties_data: fields.employmentContractDate,
     metai: new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone: 'Europe/Vilnius' }).format(date),
@@ -106,11 +120,15 @@ export async function renderStaffDocumentPdf(
     });
   }
 
-  const parts = await Promise.all(staffTemplateNames(type).map((name) =>
-    renderDocxTemplateBufferToPdfBuffer({ templateBytes: templateBytes(name), payload }),
-  ));
+  if (!validateStaffPersonalDetails(fields)) {
+    throw new Error('Employee address and 11-digit personal code are required for the agreement and annex');
+  }
+
   const combined = await PDFDocument.create();
-  for (const part of parts) {
+  // The hosted converter can fail when multiple large staff templates arrive
+  // together. Convert the agreement and annex one at a time in PDF page order.
+  for (const name of staffTemplateNames(type)) {
+    const part = await renderDocxTemplateBufferToPdfBuffer({ templateBytes: templateBytes(name), payload });
     const source = await PDFDocument.load(part);
     const pages = await combined.copyPages(source, source.getPageIndices());
     pages.forEach((page) => combined.addPage(page));

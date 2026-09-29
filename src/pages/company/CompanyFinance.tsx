@@ -21,6 +21,8 @@ import { ORG_TUTOR_FILTER_SCROLL_CLASS } from '@/lib/orgUi';
 import { format } from 'date-fns';
 import OrgPayerFeeSplitSettings from '@/components/company/OrgPayerFeeSplitSettings';
 import { isInvoiceProfileComplete } from '@/lib/invoiceProfileReady';
+import { isManoKorepetitoriusOrg } from '@/lib/marketMoney';
+import { isMonthlyBillingOnlyStudent } from '@/lib/studentPaymentModel';
 
 type CompanyFinanceCache = {
   orgId: string;
@@ -256,10 +258,10 @@ export default function CompanyFinance() {
         .from('sessions')
         .select('*, students!inner(full_name, email), subjects(name)')
         .in('tutor_id', targetTutorIds)
-        .neq('status', 'cancelled')
+        .in('status', ['completed', 'no_show'])
         .gte('start_time', invoicePeriodStart + 'T00:00:00')
         .lte('start_time', invoicePeriodEnd + 'T23:59:59')
-        .lte('start_time', new Date().toISOString())
+        .lte('end_time', new Date().toISOString())
         .eq('paid', false)
         .eq('is_complimentary', false)
         .is('payment_batch_id', null)
@@ -267,6 +269,46 @@ export default function CompanyFinance() {
         .order('start_time', { ascending: false });
 
       if (error) throw error;
+      if (isManoKorepetitoriusOrg(orgId)) {
+        const { data: billingOwner, error: billingOwnerError } = await supabase
+          .from('organizations')
+          .select('enable_per_lesson, enable_monthly_billing')
+          .eq('id', orgId)
+          .maybeSingle();
+        if (billingOwnerError || !billingOwner) {
+          throw new Error('Nepavyko patikrinti organizacijos mokėjimo nustatymų.');
+        }
+        const reviewCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { data: unresolvedRows, error: unresolvedError } = await supabase
+          .from('sessions')
+          .select('id, students!inner(payment_model)')
+          .in('tutor_id', targetTutorIds)
+          .eq('status', 'active')
+          .eq('paid', false)
+          .eq('is_complimentary', false)
+          .is('payment_batch_id', null)
+          .is('lesson_package_id', null)
+          .gte('start_time', invoicePeriodStart + 'T00:00:00')
+          .lte('start_time', invoicePeriodEnd + 'T23:59:59')
+          .lt('end_time', reviewCutoff)
+          .limit(1000);
+        if (unresolvedError || !unresolvedRows || unresolvedRows.length === 1000) {
+          throw new Error('Nepavyko patikrinti nepatvirtintų pamokų.');
+        }
+        const unresolvedCount = (unresolvedRows || []).filter((row: any) => {
+          const student = Array.isArray(row.students) ? row.students[0] : row.students;
+          const model = student?.payment_model as string | null | undefined;
+          return isMonthlyBillingOnlyStudent(model)
+            || (!String(model || '').trim()
+              && billingOwner.enable_monthly_billing === true
+              && billingOwner.enable_per_lesson !== true);
+        }).length;
+        if (unresolvedCount > 0) {
+          setInvoiceUnpaidSessions([]);
+          setInvoicePreview(false);
+          throw new Error(`${unresolvedCount} seniau nei 24 val. pasibaigusios pamokos dar neturi patvirtintos baigties. Patikrinkite jas prieš siųsdami mėnesio sąskaitą.`);
+        }
+      }
       if (!data || data.length === 0) {
         setInvoiceError(t('companyFinance.noUnpaid'));
         setInvoiceUnpaidSessions([]);

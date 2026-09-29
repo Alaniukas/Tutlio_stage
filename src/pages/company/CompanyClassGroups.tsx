@@ -17,6 +17,7 @@ import ClassGroupFormDialog, {
 } from '@/components/company/ClassGroupFormDialog';
 import { usesLaisviStyleExtraLessonsPrefill } from '@/lib/laisviVaikaiExtraLessonsDefaults';
 import { isSchoolClassGroupSuspended, schoolGroupMinimumStudents } from '@/lib/schoolGroupMinimumPolicy';
+import SchoolGroupMaterialLibrary from '@/components/school/SchoolGroupMaterialLibrary';
 import {
   classGroupCalendarLabel,
   classGroupMatchesQuery,
@@ -324,9 +325,8 @@ export default function CompanyClassGroups() {
         )}
       </div>
     );
-    return canEditGroups ? (
+    return <div key={g.id} className="space-y-2">{canEditGroups ? (
       <button
-        key={g.id}
         type="button"
         className="w-full text-left rounded-xl border bg-white p-4 hover:border-emerald-300 hover:shadow-sm transition-colors"
         onClick={() => openEdit(g)}
@@ -334,10 +334,12 @@ export default function CompanyClassGroups() {
         {content}
       </button>
     ) : (
-      <div key={g.id} className="w-full rounded-xl border bg-white p-4">
+      <div className="w-full rounded-xl border bg-white p-4">
         {content}
       </div>
-    );
+    )}
+      {g.tutor_id === userId && <SchoolGroupMaterialLibrary groupId={g.id} authenticated />}
+    </div>;
   };
 
   return (

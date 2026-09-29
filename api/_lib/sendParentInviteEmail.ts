@@ -4,6 +4,7 @@
  */
 import { Resend } from 'resend';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
+import { resolveOrgEmailReplyToWithServiceClient } from './orgEmailReplyTo.js';
 import { t, localizedFromEmail, type Locale } from './i18n.js';
 import { headerInlineStyle } from './outlookEmail.js';
 import {
@@ -146,9 +147,11 @@ export async function sendParentInviteEmail(
   });
 
   const resend = new Resend(apiKey);
+  const replyTo = await resolveOrgEmailReplyToWithServiceClient(data.organizationId);
   const { error } = await resend.emails.send({
     from: localizedFromEmail(locale, { senderName: resolved.emailSenderName }),
     to: [to.trim().toLowerCase()],
+    ...(replyTo ? { replyTo } : {}),
     subject,
     html,
   });

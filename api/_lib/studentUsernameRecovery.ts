@@ -4,6 +4,7 @@ import { findAuthUserByEmail } from './findAuthUserByEmail.js';
 import { getResendApiKey } from './resendConfig.js';
 import { localizedFromEmail } from './i18n.js';
 import { resolveEmailOrgBranding } from './emailOrgBranding.js';
+import { resolveOrgEmailReplyTo } from './orgEmailReplyTo.js';
 import { managedFamilyAccountsEnabled } from '../../src/lib/managedFamilyAccounts.js';
 import { studentLoginNameFromEmail } from '../../src/lib/studentLoginIdentity.js';
 import { loadSchoolFamilyGuardianAccess } from './schoolFamilyGuardianAccess.js';
@@ -99,9 +100,11 @@ export async function sendStudentUsernameRecovery(
   });
   if (recoveryError || !recovery.properties?.action_link) return;
 
+  const replyTo = await resolveOrgEmailReplyTo(db, organizationId);
   await new Resend(apiKey).emails.send({
     from: localizedFromEmail('lt', { senderName: resolved.emailSenderName }),
     to: recipient.trim(),
+    ...(replyTo ? { replyTo } : {}),
     subject: `${brandName}: vaiko slaptažodžio atkūrimas`,
     html: `<!doctype html><html lang="lt"><body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif;">
       <div style="max-width:560px;margin:24px auto;background:#ffffff;">

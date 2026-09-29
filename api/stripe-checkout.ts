@@ -22,6 +22,7 @@ import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasAnyOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { directChargeOptions } from './_lib/stripeDirectCharge.js';
+import { stripeCheckoutLocale } from './_lib/stripeLocale.js';
 import {
     allowsPerLessonBilling,
     loadPerLessonBillingFlags,
@@ -38,10 +39,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const appOrigin = publicOriginFromRequest(req);
 
     try {
-        const body = (req.body || {}) as { sessionId?: string; payerEmail?: string; penaltyAmount?: number };
+        const body = (req.body || {}) as { sessionId?: string; payerEmail?: string; penaltyAmount?: number; ui_locale?: unknown };
         const sessionId = body.sessionId;
         const payerEmail = body.payerEmail;
         const penaltyAmountOverride = body.penaltyAmount;
+        const checkoutLocale = stripeCheckoutLocale(body.ui_locale);
         if (!sessionId) return res.status(400).json({ error: 'sessionId is required' });
 
         const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -204,6 +206,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
+                locale: checkoutLocale,
                 customer_email: customerEmail,
                 customer_creation: 'always',
                 payment_method_types: ['card'],
@@ -241,6 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const applicationFeeCents = directChargeApplicationFeeCents(basePriceEur, market, feeProfile, feeSplit);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
+                locale: checkoutLocale,
                 customer_email: customerEmail,
                 customer_creation: 'always',
                 payment_method_types: ['card'],

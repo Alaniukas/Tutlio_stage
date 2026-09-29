@@ -15,7 +15,7 @@ import {
 import { authHeaders } from '@/lib/apiHelpers';
 import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
 import { packageCoversLessonDate } from '@/lib/pooledPackageBookingWindow';
-import { defaultSessionPaymentStatusForStudent } from '@/lib/studentPaymentModel';
+import { allowsPerLessonPaymentForStudent, defaultSessionPaymentStatusForStudent } from '@/lib/studentPaymentModel';
 import { parseTrialLessonPricing, trialLessonPrice } from '@/lib/trialLessonPricing';
 import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
 import { consumeAvailabilityForCreatedSessions } from '@/lib/consumeSessionAvailability';
@@ -81,6 +81,25 @@ export function regularTopicForRecurringSeries(
     return subject || null;
   }
   return seriesTopic || null;
+}
+
+/** The first trial uses its own duration; the recurring template uses the regular subject duration. */
+export function regularEndDateForRecurringTrial(
+  startDate: Date,
+  selectedEndDate: Date,
+  firstLessonIsTrial: boolean,
+  subjectDurationMinutes: number | null | undefined,
+  tutorDurationMinutes?: number | null,
+): Date {
+  if (!firstLessonIsTrial) return selectedEndDate;
+  const validDuration = (value: number | null | undefined) =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0;
+  const regularDurationMinutes = validDuration(tutorDurationMinutes)
+    ? tutorDurationMinutes!
+    : validDuration(subjectDurationMinutes)
+      ? subjectDurationMinutes!
+      : 60;
+  return new Date(startDate.getTime() + regularDurationMinutes * 60_000);
 }
 
 export async function resolveOrCreateTrialSubject(
@@ -197,8 +216,8 @@ async function persistRecurringPlanFrequency(
   }
 }
 
-function rawPaymentStatusForEmail(paid: boolean, payment_status?: string | null): string {
-  if (!paid) return 'pending';
+function rawPaymentStatusForEmail(paid: boolean, payment_status: string | null | undefined, perLessonPaymentAllowed: boolean): string | null {
+  if (!paid) return perLessonPaymentAllowed ? 'pending' : null;
   if (payment_status === 'confirmed') return 'paid';
   return 'paid';
 }
@@ -381,14 +400,14 @@ export async function notifyAfterOrgAdminSessionsCreated(
 
   const { data: tutorProfile } = await supabase
     .from('profiles')
-    .select('full_name, email, stripe_account_id, cancellation_hours, cancellation_fee_percent, organization_id')
+    .select('full_name, email, stripe_account_id, cancellation_hours, cancellation_fee_percent, organization_id, enable_per_lesson, enable_monthly_billing')
     .eq('id', tutorId)
     .single();
 
   const studentIds = [...new Set(sessionsForNotify.map(s => s.student_id))];
   const { data: studentRows } = await supabase
     .from('students')
-    .select('id, full_name, email, payment_payer, payer_email, payer_name')
+    .select('id, full_name, email, payment_payer, payer_email, payer_name, payment_model')
     .in('id', studentIds);
 
   const studentById = new Map(studentRows?.map(s => [s.id, s]) ?? []);
@@ -406,6 +425,17 @@ export async function notifyAfterOrgAdminSessionsCreated(
   const tutorOrgId = (tutorProfile as any)?.organization_id as string | null | undefined;
   const orgIdPayload = tutorOrgId ? { organizationId: tutorOrgId } : {};
   const isMvOrg = isMoksloVaisiaiOrg(tutorOrgId);
+  const { data: paymentFlags } = tutorOrgId
+    ? await supabase.from('organizations')
+        .select('enable_per_lesson, enable_monthly_billing')
+        .eq('id', tutorOrgId).maybeSingle()
+    : { data: tutorProfile };
+  const perLessonAllowedForStudent = (model: string | null | undefined) =>
+    !!paymentFlags && allowsPerLessonPaymentForStudent(
+      model,
+      paymentFlags.enable_per_lesson === true,
+      paymentFlags.enable_monthly_billing === true,
+    );
 
   if (tutorProfile?.email) {
     if (isMvOrg) {
@@ -470,6 +500,7 @@ export async function notifyAfterOrgAdminSessionsCreated(
     for (const [studentId, studentSessions] of sessionsByStudent) {
       const st = studentById.get(studentId);
       if (!st) continue;
+      const perLessonPaymentAllowed = perLessonAllowedForStudent(st.payment_model);
       const firstSess = studentSessions[0];
       const sEnd = new Date(firstSess.end_time);
       const sStart = new Date(firstSess.start_time);
@@ -499,6 +530,7 @@ export async function notifyAfterOrgAdminSessionsCreated(
           type: 'recurring_booking_confirmation',
           to: st.email,
           data: {
+            sessionId: firstSess.id,
             bookedBy: 'org_admin',
             studentName: st.full_name,
             tutorName: tutorProfile?.full_name || '',
@@ -520,6 +552,7 @@ export async function notifyAfterOrgAdminSessionsCreated(
           type: 'recurring_booking_confirmation',
           to: payerRaw,
           data: {
+            sessionId: firstSess.id,
             forPayer: true,
             bookedBy: 'org_admin',
             studentName: st.full_name,
@@ -533,7 +566,7 @@ export async function notifyAfterOrgAdminSessionsCreated(
             recurringTime,
             ongoingSchedule: isOpenEnded,
             schedule,
-            paymentReminderNote: true,
+            paymentReminderNote: perLessonPaymentAllowed,
             ...orgIdPayload,
           },
         }).catch(err => console.error('[OrgSchedule] recurring payer email', err));
@@ -546,6 +579,7 @@ export async function notifyAfterOrgAdminSessionsCreated(
   for (const sess of sessionsForNotify) {
     const st = studentById.get(sess.student_id);
     if (!st) continue;
+    const perLessonPaymentAllowed = perLessonAllowedForStudent(st.payment_model);
     const sStart = new Date(sess.start_time);
     const sEnd = new Date(sess.end_time);
     const dur = Math.max(1, Math.round((sEnd.getTime() - sStart.getTime()) / 60000));
@@ -571,7 +605,7 @@ export async function notifyAfterOrgAdminSessionsCreated(
           duration: dur,
           cancellationHours: hasPayer ? null : (tutorProfile?.cancellation_hours ?? 24),
           cancellationFeePercent: hasPayer ? null : (tutorProfile?.cancellation_fee_percent ?? 0),
-          paymentStatus: hasPayer ? null : rawPaymentStatusForEmail(sess.paid, sess.payment_status),
+          paymentStatus: hasPayer ? null : rawPaymentStatusForEmail(sess.paid, sess.payment_status, perLessonPaymentAllowed),
           meetingLink: sessionMeetingLink,
           hidePaymentInfo: hasPayer,
           ...orgIdPayload,
@@ -596,7 +630,7 @@ export async function notifyAfterOrgAdminSessionsCreated(
           duration: dur,
           cancellationHours: tutorProfile?.cancellation_hours ?? 24,
           cancellationFeePercent: tutorProfile?.cancellation_fee_percent ?? 0,
-          paymentStatus: rawPaymentStatusForEmail(sess.paid, sess.payment_status),
+          paymentStatus: rawPaymentStatusForEmail(sess.paid, sess.payment_status, perLessonPaymentAllowed),
           meetingLink: sessionMeetingLink,
           ...orgIdPayload,
         },
@@ -618,7 +652,7 @@ export async function notifyAfterOrgAdminSessionsCreated(
           duration: dur,
           cancellationHours: tutorProfile?.cancellation_hours ?? 24,
           cancellationFeePercent: tutorProfile?.cancellation_fee_percent ?? 0,
-          paymentStatus: rawPaymentStatusForEmail(sess.paid, sess.payment_status),
+          paymentStatus: rawPaymentStatusForEmail(sess.paid, sess.payment_status, perLessonPaymentAllowed),
           meetingLink: sessionMeetingLink,
           ...orgIdPayload,
         },
@@ -794,7 +828,22 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     }
   }
 
-  const durationMs = endDate.getTime() - startDate.getTime();
+  const tutorSubjectDurationMinutes = p.tutorSubjectPrices?.find(
+    (row) => row.tutor_id === createTutorId && row.org_subject_template_id === p.orgSubjectTemplateId,
+  )?.duration_minutes;
+  const regularEndDate = createIsRecurring
+    ? regularEndDateForRecurringTrial(
+        startDate,
+        endDate,
+        createFirstLessonIsTrial,
+        subj.duration_minutes,
+        tutorSubjectDurationMinutes,
+      )
+    : endDate;
+  if (format(startDate, 'yyyy-MM-dd') !== format(regularEndDate, 'yyyy-MM-dd')) {
+    throw new Error('Lesson must start and end on the same day.');
+  }
+  const durationMs = regularEndDate.getTime() - startDate.getTime();
 
   const { data: studentPaymentRows } = await supabase
     .from('students')
@@ -806,6 +855,18 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       row.payment_model ?? null,
     ]),
   );
+  const { data: sessionBillingTutor } = await supabase.from('profiles')
+    .select('organization_id, enable_per_lesson, enable_monthly_billing')
+    .eq('id', createTutorId).maybeSingle();
+  const { data: sessionBillingOwner } = sessionBillingTutor?.organization_id
+    ? await supabase.from('organizations')
+        .select('enable_per_lesson, enable_monthly_billing')
+        .eq('id', sessionBillingTutor.organization_id).maybeSingle()
+    : { data: sessionBillingTutor };
+  const sessionBillingFlags = {
+    enable_per_lesson: sessionBillingOwner?.enable_per_lesson === true,
+    enable_monthly_billing: sessionBillingOwner?.enable_monthly_billing === true,
+  };
   const pricingStudentById = new Map(
     (studentPaymentRows ?? []).map((row: {
       id: string;
@@ -865,7 +926,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
         ? createRecurringWeekdays
         : [getDay(startDate)];
     const timeStr = format(startDate, 'HH:mm:ss');
-    const endTimeStr = format(endDate, 'HH:mm:ss');
+    const endTimeStr = format(regularEndDate, 'HH:mm:ss');
 
     type RecurringTpl = { id: string; student_id: string; firstOccurrence: Date };
     const recurringTemplates: RecurringTpl[] = [];
@@ -996,6 +1057,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
         let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentPaymentModel, {
           paid: createIsPaid,
           hasPackage: false,
+          billingFlags: sessionBillingFlags,
         });
         let lessonPackageId: string | null = null;
         if (!createIsPaid && !trialMetaForOccurrence) {
@@ -1012,12 +1074,14 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
               sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentPaymentModel, {
                 paid: false,
                 hasPackage: false,
+                billingFlags: sessionBillingFlags,
               });
             }
           } else {
             sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentPaymentModel, {
               paid: false,
               hasPackage: false,
+              billingFlags: sessionBillingFlags,
             });
           }
         }
@@ -1185,6 +1249,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentPaymentModel, {
       paid: createIsPaid,
       hasPackage: false,
+      billingFlags: sessionBillingFlags,
     });
     let lessonPackageId: string | null = null;
 
@@ -1214,6 +1279,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
         sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentPaymentModel, {
           paid: false,
           hasPackage: false,
+          billingFlags: sessionBillingFlags,
         });
       }
     }

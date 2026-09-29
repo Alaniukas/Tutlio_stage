@@ -217,29 +217,28 @@ export default function CreateInvoiceModal({
               return;
             }
           }
-        } else {
-          const precheckResp = await fetch('/api/generate-invoice', {
-            method: 'POST',
-            headers: await authHeaders(),
-            body: JSON.stringify({
-              tutorId,
-              periodStart,
-              periodEnd,
-              groupingType: 'single',
-              isOrgTutor: true,
-              precheckOnly: true,
-            }),
-          });
-          const precheckJson = await precheckResp.json().catch(() => ({}));
-          if (precheckResp.ok && precheckJson?.reason === 'duplicate') {
-            setError(
-              (precheckJson.error as string) ||
-                t('invoiceCreate.periodAlreadyIssued', { start: periodStart, end: periodEnd }),
-            );
-            setSessions([]);
-            setPreviewMode(false);
-            return;
-          }
+        }
+        const precheckResp = await fetch('/api/generate-invoice', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({
+            tutorId,
+            periodStart,
+            periodEnd,
+            groupingType: 'single',
+            isOrgTutor: true,
+            precheckOnly: true,
+          }),
+        });
+        const precheckJson = await precheckResp.json().catch(() => ({}));
+        if (!precheckResp.ok || precheckJson?.reason === 'duplicate') {
+          setError(
+            (precheckJson.error as string) ||
+              t('invoiceCreate.periodAlreadyIssued', { start: periodStart, end: periodEnd }),
+          );
+          setSessions([]);
+          setPreviewMode(false);
+          return;
         }
 
         const [{ data: prof }, { data: sessRows, error: sessErr }] = await Promise.all([
@@ -378,6 +377,7 @@ export default function CreateInvoiceModal({
 
       const effectiveGrouping = isOrgTutor ? 'single' : groupingType;
       let totalCount = 0;
+      const unrecoveredPdfIds: string[] = [];
 
       const groupedByTutor = sessions.reduce(
         (acc: Record<string, { sessionIds: string[]; packageIds: string[] }>, row: any) => {
@@ -446,13 +446,25 @@ export default function CreateInvoiceModal({
         const json = await res.json();
         if (!res.ok) throw new Error(invoiceApiErrorMessage(json, t));
         totalCount += json.count || 0;
+        for (const invoiceId of (json.pdfGenerationFailedIds || []) as string[]) {
+          try {
+            const pdfResponse = await fetch(`/api/invoice-pdf?id=${encodeURIComponent(invoiceId)}`, {
+              headers: await authHeaders(),
+            });
+            if (!pdfResponse.ok) unrecoveredPdfIds.push(invoiceId);
+          } catch {
+            unrecoveredPdfIds.push(invoiceId);
+          }
+        }
       }
       }
       if (totalCount === 0) throw new Error(t('invoiceCreate.noSessions'));
 
       onSuccess?.();
       onClose();
-      alert(t('invoiceCreate.success', { count: String(totalCount || 1) }));
+      alert(unrecoveredPdfIds.length > 0
+        ? `Sąskaita sukurta, bet nepavyko paruošti PDF (${unrecoveredPdfIds.join(', ')}). Atidarykite ją sąskaitų sąraše prieš siųsdami; naujos sąskaitos nekūrkite.`
+        : t('invoiceCreate.success', { count: String(totalCount || 1) }));
     } catch (err: any) {
       setError(err.message || t('common.error'));
     } finally {

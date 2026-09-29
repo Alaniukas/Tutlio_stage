@@ -4,6 +4,7 @@ import { en } from './en.js';
  * policies retain English. Publication is controlled by localeRelease.ts.
  * See docs/CZECH_LOCALIZATION_REVIEW.md for scope and review limits. */
 export const csOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Informovat studenta e-mailem',
   "cal.deleteAllRemaining": "Všechny zbývající lekce v této sérii",
   "cal.deleteAllRemainingHint": "Odstraní budoucí plánované a zrušené lekce v této sérii. Historie dokončených lekcí zůstane zachována.",
   "cal.deleteConfirmAll": "Odstranit všechny zbývající plánované a zrušené lekce v této sérii? Historie dokončených lekcí zůstane zachována.",

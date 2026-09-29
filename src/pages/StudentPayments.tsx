@@ -9,6 +9,7 @@ import { CreditCard, FileText, Loader2, Package, CheckCircle, Landmark, Calendar
 import { format } from 'date-fns';
 import { Link } from 'react-router-dom';
 import { viewerCanPayLessons } from '@/lib/lessonPayerView';
+import { allowsPerLessonPaymentForStudent } from '@/lib/studentPaymentModel';
 import { orderStudentPaymentLessons } from '@/lib/studentPaymentLessonOrder';
 
 type PackageRow = {
@@ -38,6 +39,8 @@ type InvoiceRow = {
 
 type LessonPaymentRow = {
   id: string;
+  student_id: string;
+  tutor_id: string;
   start_time: string;
   price: number | null;
   paid: boolean;
@@ -62,7 +65,7 @@ function packageLabel(pkg: PackageRow, fallback: string): string {
  * packages with a pay button + payment history + issued invoices.
  */
 export default function StudentPayments() {
-  const { t, dateFnsLocale } = useTranslation();
+  const { t, locale, dateFnsLocale } = useTranslation();
   const market = currentMarket();
   const fmt = (amount: number | null | undefined) => formatMarketAmount(amount, market);
   const [loading, setLoading] = useState(true);
@@ -82,6 +85,8 @@ export default function StudentPayments() {
         const { data: profileRows } = await rpcGetStudentProfilesDeduped(user.id, null);
         const profiles = (profileRows || []) as Array<{
           id: string;
+          tutor_id?: string | null;
+          payment_model?: string | null;
           email?: string | null;
           payer_email?: string | null;
           payment_payer?: string | null;
@@ -91,16 +96,6 @@ export default function StudentPayments() {
           if (!cancelled) setLoading(false);
           return;
         }
-
-        const primaryProfile = profiles[0];
-        setCanPayLessons(
-          viewerCanPayLessons(
-            primaryProfile.payment_payer ?? null,
-            user.email ?? null,
-            primaryProfile.email ?? null,
-            primaryProfile.payer_email ?? null,
-          ),
-        );
 
         const [
           { data: pkgRows },
@@ -121,7 +116,7 @@ export default function StudentPayments() {
             .limit(50),
           supabase
             .from('sessions')
-            .select('id, start_time, price, paid, topic, subject:subjects(name, is_trial)')
+            .select('id, student_id, tutor_id, start_time, price, paid, topic, subject:subjects(name, is_trial)')
             .in('student_id', studentIds)
             .eq('status', 'active')
             .not('price', 'is', null)
@@ -131,7 +126,7 @@ export default function StudentPayments() {
             .limit(50),
           supabase
             .from('sessions')
-            .select('id, start_time, price, paid, topic, subject:subjects(name, is_trial)')
+            .select('id, student_id, tutor_id, start_time, price, paid, topic, subject:subjects(name, is_trial)')
             .in('student_id', studentIds)
             .eq('status', 'active')
             .not('price', 'is', null)
@@ -141,6 +136,44 @@ export default function StudentPayments() {
             .limit(10),
         ]);
         if (cancelled) return;
+
+        // Use the tutor on each lesson: an organization student can have no
+        // primary tutor or lessons with several different tutors.
+        const lessonRows = [...(pendingSessionRows || []), ...(paidSessionRows || [])];
+        const tutorIds = [...new Set(lessonRows.map((row) => row.tutor_id).filter((id): id is string => !!id))];
+        const { data: tutors, error: tutorError } = tutorIds.length
+          ? await supabase.from('profiles')
+              .select('id, organization_id, enable_per_lesson, enable_monthly_billing')
+              .in('id', tutorIds)
+          : { data: [], error: null };
+        const orgIds = [...new Set((tutors || []).map((row) => row.organization_id).filter((id): id is string => !!id))];
+        const { data: organizations, error: orgError } = orgIds.length
+          ? await supabase.from('organizations')
+              .select('id, enable_per_lesson, enable_monthly_billing')
+              .in('id', orgIds)
+          : { data: [], error: null };
+        if (cancelled) return;
+        const tutorById = new Map((tutors || []).map((row) => [row.id, row]));
+        const orgById = new Map((organizations || []).map((row) => [row.id, row]));
+        const profileByStudentId = new Map(profiles.map((profile) => [profile.id, profile]));
+        const mayPayLesson = (lesson: LessonPaymentRow) => {
+          if (tutorError || orgError) return false;
+          const profile = profileByStudentId.get(lesson.student_id);
+          if (!profile || !viewerCanPayLessons(
+            profile.payment_payer ?? null,
+            user.email ?? null,
+            profile.email ?? null,
+            profile.payer_email ?? null,
+          )) return false;
+          const tutor = tutorById.get(lesson.tutor_id);
+          if (!tutor) return false;
+          const flags = tutor.organization_id ? orgById.get(tutor.organization_id) : tutor;
+          return !!flags && allowsPerLessonPaymentForStudent(
+            profile.payment_model,
+            flags.enable_per_lesson === true,
+            flags.enable_monthly_billing === true,
+          );
+        };
 
         const packages = ((pkgRows || []) as any[]).map((row) => ({
           ...row,
@@ -158,8 +191,20 @@ export default function StudentPayments() {
           ...row,
           subject: Array.isArray(row.subject) ? row.subject[0] ?? null : row.subject ?? null,
         })) as LessonPaymentRow[];
-        setPendingLessons(orderStudentPaymentLessons(pendingLessonRows));
-        setPaidLessons(paidLessonRows);
+        const payablePendingLessons = pendingLessonRows.filter(mayPayLesson);
+        // Past payments remain visible if the billing model changes later.
+        const payableHistory = paidLessonRows.filter((lesson) => {
+          const profile = profileByStudentId.get(lesson.student_id);
+          return !!profile && viewerCanPayLessons(
+            profile.payment_payer ?? null,
+            user.email ?? null,
+            profile.email ?? null,
+            profile.payer_email ?? null,
+          );
+        });
+        setCanPayLessons(payablePendingLessons.length > 0 || payableHistory.length > 0);
+        setPendingLessons(orderStudentPaymentLessons(payablePendingLessons));
+        setPaidLessons(payableHistory);
       } catch (err) {
         console.error('[StudentPayments] load failed:', err);
       } finally {
@@ -264,7 +309,7 @@ export default function StudentPayments() {
                       </span>
                     ) : (
                       <a
-                        href={`/api/pay-package?package=${pkg.id}`}
+                        href={`/api/pay-package?package=${pkg.id}&ui_locale=${encodeURIComponent(locale)}`}
                         className="inline-flex items-center rounded-xl bg-[var(--org-brand)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 shrink-0"
                       >
                         {t('stuPay.payNow')}

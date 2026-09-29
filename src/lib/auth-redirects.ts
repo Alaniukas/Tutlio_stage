@@ -27,6 +27,22 @@ export function loginHrefWithNext(nextPath: string): string {
   return `/login?next=${encodeURIComponent(safe)}`;
 }
 
+const SUPPORT_TICKET_TRACKING_PATHS = new Set([
+  '/support/tickets',
+  '/student/support/tickets',
+  '/parent/support/tickets',
+  '/company/support/tickets',
+  '/school/support/tickets',
+]);
+
+/** These links require only an authenticated account; a user's portal role may change. */
+export function supportTicketTrackingNextPath(raw: string | null | undefined): string | null {
+  const safe = safeInternalNextPath(raw);
+  if (!safe) return null;
+  const pathname = safe.split(/[?#]/, 1)[0].replace(/\/+$/, '') || '/';
+  return SUPPORT_TICKET_TRACKING_PATHS.has(pathname) ? safe : null;
+}
+
 /** redirect_to slaptažodžio atkūrimo el. laiške – per /auth/callback į /reset-password. */
 export function getPasswordResetRedirectTo(
   viteAppUrl: string | undefined,

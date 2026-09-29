@@ -6,6 +6,7 @@ import { en } from './en.js';
  * retain English. See docs/MEXICAN_SPANISH_LOCALIZATION_REVIEW.md before release.
  */
 export const esMxOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Notificar al estudiante por correo electrónico',
   "cal.deleteAllRemaining": "Todas las clases restantes de esta serie",
   "cal.deleteAllRemainingHint": "Elimina las clases futuras programadas y las clases canceladas de esta serie. Se conserva el historial de las clases realizadas.",
   "cal.deleteConfirmAll": "¿Eliminar todas las clases programadas y canceladas restantes de esta serie? Se conserva el historial de las clases realizadas.",

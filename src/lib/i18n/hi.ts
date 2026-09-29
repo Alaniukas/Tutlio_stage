@@ -2,6 +2,7 @@ import { en } from './en.js';
 
 /** Hindi tutor/business draft. Scope and release limits: docs/HINDI_LOCALIZATION_REVIEW.md. */
 export const hiOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'छात्र को ईमेल से सूचित करें',
   "cal.deleteAllRemaining": "इस श्रृंखला की बाकी सभी क्लास",
   "cal.deleteAllRemainingHint": "इस श्रृंखला की आगे की तय क्लास और रद्द की गई क्लास मिटा दी जाती हैं। पूरी हो चुकी क्लास का इतिहास सुरक्षित रहता है।",
   "cal.deleteConfirmAll": "इस श्रृंखला की बाकी सभी तय और रद्द की गई क्लास मिटाएँ? पूरी हो चुकी क्लास का इतिहास सुरक्षित रहता है।",

@@ -5,6 +5,7 @@ import { en } from './en.js';
  * Locale remains unpublished; see docs/BULGARIAN_LOCALIZATION_REVIEW.md.
  */
 export const bgOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Уведоми ученика по имейл',
   "cal.deleteAllRemaining": "Всички оставащи уроци в тази серия",
   "cal.deleteAllRemainingHint": "Премахва бъдещите планирани и отменени уроци в тази серия. Историята на проведените уроци се запазва.",
   "cal.deleteConfirmAll": "Да се изтрият ли всички оставащи планирани и отменени уроци в тази серия? Историята на проведените уроци се запазва.",

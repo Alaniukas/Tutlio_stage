@@ -155,7 +155,11 @@ export function shouldShowPerLessonPaymentUi(
   // turned per-lesson OFF (packages/monthly only, e.g. Pro Klasė) must not show
   // pay-per-lesson UI even without the per-student override feature.
   if (tutorFlags) {
-    return tutorFlags.enable_per_lesson !== false;
+    return allowsPerLessonPaymentForStudent(
+      null,
+      tutorFlags.enable_per_lesson,
+      tutorFlags.enable_monthly_billing,
+    );
   }
   return true;
 }
@@ -177,10 +181,21 @@ export function isMonthlyBillingOnlyStudent(studentPaymentModel: string | null |
 /** Initial `sessions.payment_status` when tutor/org creates a lesson (not yet on invoice). */
 export function defaultSessionPaymentStatusForStudent(
   studentPaymentModel: string | null | undefined,
-  opts: { paid: boolean; hasPackage: boolean },
+  opts: {
+    paid: boolean;
+    hasPackage: boolean;
+    billingFlags?: Pick<TutorPaymentFlags, 'enable_per_lesson' | 'enable_monthly_billing'>;
+  },
 ): 'paid' | 'confirmed' | 'pending' {
   if (opts.paid) return 'paid';
   if (opts.hasPackage) return 'confirmed';
+  if (opts.billingFlags) {
+    return allowsPerLessonPaymentForStudent(
+      studentPaymentModel,
+      opts.billingFlags.enable_per_lesson,
+      opts.billingFlags.enable_monthly_billing,
+    ) ? 'pending' : 'confirmed';
+  }
   if (isMonthlyBillingOnlyStudent(studentPaymentModel)) return 'confirmed';
   return 'pending';
 }

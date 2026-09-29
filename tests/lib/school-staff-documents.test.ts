@@ -10,6 +10,7 @@ import {
   staffTemplateNames,
   staffTemplatePayload,
   validateConsentAnswers,
+  validateStaffPersonalDetails,
 } from '../../api/_lib/schoolStaffDocuments';
 
 const folder = join(process.cwd(), 'api', '_lib', 'templates', 'staff');
@@ -21,12 +22,20 @@ describe('school staff document templates and lifecycle', () => {
     expect(validateConsentAnswers([...Array(9).fill('yes'), 'maybe'])).toBeNull();
   });
 
+  it('accepts complete employee details for a generated agreement', () => {
+    expect(validateStaffPersonalDetails({ address: '  Vilniaus g. 1,  Vilnius  ', personalCode: '39001010013' }))
+      .toEqual({ address: 'Vilniaus g. 1, Vilnius', personalCode: '39001010013' });
+    expect(validateStaffPersonalDetails({ address: 'Vilniaus g. 1', personalCode: '123' })).toBeNull();
+  });
+
   it('fills each of the three supplied DOCX templates without unresolved fields', () => {
     const fields = staffTemplatePayload({
       name: 'Vardas Pavardė',
       employmentContractNumber: 'DS-42',
       employmentContractDate: '2026-09-22',
       date: new Date('2026-09-22T12:00:00Z'),
+      address: 'Vilniaus g. 1, Vilnius',
+      personalCode: '39001010013',
     });
     for (const name of ['confidentiality-agreement.docx', 'confidentiality-annex.docx', 'staff-consent.docx']) {
       const payload = { ...fields, ...Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`choice_${index + 1}`, index % 2 ? 'NESUTINKU' : 'SUTINKU'])) };
@@ -35,6 +44,10 @@ describe('school staff document templates and lifecycle', () => {
       expect(xml).toContain('Vardas Pavardė');
       expect(xml).not.toContain('{{');
       expect(xml).not.toContain('}}');
+      if (name !== 'staff-consent.docx') {
+        expect(xml).toContain('Vilniaus g. 1, Vilnius');
+        expect(xml).toContain('39001010013');
+      }
       if (name === 'staff-consent.docx') {
         expect(xml).toContain('SUTINKU');
         expect(xml).toContain('NESUTINKU');

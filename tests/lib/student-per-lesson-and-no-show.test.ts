@@ -87,6 +87,31 @@ describe('allowsPerLessonPaymentForStudent', () => {
     expect(allowsPerLessonPaymentForStudent(null, true, true)).toBe(false);
   });
 
+  it('reserves an inherited monthly lesson even when the student has no explicit model', () => {
+    const billingFlags = { enable_per_lesson: true, enable_monthly_billing: true };
+    expect(defaultSessionPaymentStatusForStudent(null, {
+      paid: false,
+      hasPackage: false,
+      billingFlags,
+    })).toBe('confirmed');
+    expect(defaultSessionPaymentStatusForStudent('per_lesson', {
+      paid: false,
+      hasPackage: false,
+      billingFlags,
+    })).toBe('pending');
+    expect(defaultSessionPaymentStatusForStudent('prepaid_packages', {
+      paid: false,
+      hasPackage: false,
+      billingFlags,
+    })).toBe('confirmed');
+  });
+
+  it('hides per-lesson checkout when monthly billing is enabled for an unset student model', () => {
+    const flags = { enable_per_lesson: true, enable_monthly_billing: true };
+    expect(shouldShowPerLessonPaymentUi(null, false, flags)).toBe(false);
+    expect(shouldRequestPerLessonCheckout(null, false, flags)).toBe(false);
+  });
+
   it('respects explicit monthly_billing on student', () => {
     expect(allowsPerLessonPaymentForStudent('monthly_billing', true, false)).toBe(false);
     expect(allowsPerLessonPaymentForStudent('per_lesson', false, true)).toBe(true);

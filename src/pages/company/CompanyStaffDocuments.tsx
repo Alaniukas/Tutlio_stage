@@ -72,6 +72,7 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
   const [employmentContractDate, setEmploymentContractDate] = useState('');
   const [preparedFile, setPreparedFile] = useState<File | null>(null);
   const [preparedIncludesAnnex, setPreparedIncludesAnnex] = useState(false);
+  const [preparedDetailsConfirmed, setPreparedDetailsConfirmed] = useState(false);
   const [fileInputKey, setFileInputKey] = useState(0);
   const pendingBundle = useRef<{
     fingerprint: string; file: File | null; groupId: string; confidentialityId: string;
@@ -143,8 +144,8 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
       setError('PDF failas per didelis. Daugiausia 25 MB.');
       return;
     }
-    if (preparedFile && !preparedIncludesAnnex) {
-      setError('Patvirtinkite, kad PDF yra ir susitarimas, ir jo priedas.');
+    if (preparedFile && (!preparedIncludesAnnex || !preparedDetailsConfirmed)) {
+      setError('Patvirtinkite, kad PDF yra susitarimas su priedu ir jame jau įrašyti darbuotojo adresas bei asmens kodas.');
       return;
     }
     if (previewData) {
@@ -157,11 +158,11 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
         staff_files_deleted_at: null,
       };
       setDocuments((current) => [
-        { ...common, id: crypto.randomUUID(), staff_document_type: 'confidentiality', signing_status: 'awaiting_school_signature', status: 'draft', pdf_url: 'preview.pdf' },
+        { ...common, id: crypto.randomUUID(), staff_document_type: 'confidentiality', signing_status: preparedFile ? 'awaiting_school_signature' : 'draft', status: 'draft', pdf_url: preparedFile ? 'preview.pdf' : null },
         { ...common, id: crypto.randomUUID(), staff_document_type: 'consent', signing_status: 'draft', status: 'sent', pdf_url: null, sent_at: new Date().toISOString() },
         ...current,
       ]);
-      setName(''); setEmail(''); setEmploymentContractNumber(''); setEmploymentContractDate(''); setPreparedFile(null); setPreparedIncludesAnnex(false); setFileInputKey((key) => key + 1);
+      setName(''); setEmail(''); setEmploymentContractNumber(''); setEmploymentContractDate(''); setPreparedFile(null); setPreparedIncludesAnnex(false); setPreparedDetailsConfirmed(false); setFileInputKey((key) => key + 1);
       setError(''); setMessage('Peržiūros režimu sukurti du pavyzdiniai dokumentai.');
       return;
     }
@@ -185,17 +186,18 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
         name: name.trim(), email: email.trim(),
         employmentContractNumber: employmentContractNumber.trim(), employmentContractDate,
         preparedPdfPath: bundle.preparedPdfPath,
+        preparedDetailsConfirmed: preparedFile ? preparedDetailsConfirmed : false,
       });
       setMessage(result.emailed === true
-        ? 'Sukurti du atskirai pasirašomi PDF. Sutikimo punktų forma išsiųsta darbuotojui.'
+        ? preparedFile ? 'Sukurti du atskirai pasirašomi PDF. Sutikimo punktų forma išsiųsta darbuotojui.' : 'Sukurti du dokumentai. Darbuotojui išsiųsta nuoroda adresui, asmens kodui ir sutikimo punktams pateikti. Po to galėsite pasirašyti susitarimą su priedu.'
         : 'Sukurti du dokumentai, bet sutikimo laiškas neišsiųstas. Siųskite priminimą iš sąrašo.');
-      setName(''); setEmail(''); setEmploymentContractNumber(''); setEmploymentContractDate(''); setPreparedFile(null); setPreparedIncludesAnnex(false); setFileInputKey((key) => key + 1);
+      setName(''); setEmail(''); setEmploymentContractNumber(''); setEmploymentContractDate(''); setPreparedFile(null); setPreparedIncludesAnnex(false); setPreparedDetailsConfirmed(false); setFileInputKey((key) => key + 1);
       pendingBundle.current = null;
       await load();
     } catch (cause: any) {
       if ((cause?.status === 400 || cause?.status === 413) && preparedFile) {
         pendingBundle.current = null;
-        setPreparedFile(null); setPreparedIncludesAnnex(false); setFileInputKey((key) => key + 1);
+        setPreparedFile(null); setPreparedIncludesAnnex(false); setPreparedDetailsConfirmed(false); setFileInputKey((key) => key + 1);
         setError(`${cause?.message || 'PDF netinka.'} Pasirinkite pataisytą PDF.`);
       } else {
         setError(`${cause?.message || 'Nepavyko sukurti dokumentų.'} Jei bandysite dar kartą nekeisdami laukų, bus naudojamas tas pats įkėlimas.`);
@@ -282,6 +284,7 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
   const nextStep = (item: StaffDocument) => {
     if (item.status === 'revoked' || item.status === 'signed') return null;
     if (item.staff_document_type === 'consent' && !item.staff_consent_answers) return 'Laukiama 10 darbuotojo pasirinkimų';
+    if (item.staff_document_type === 'confidentiality' && !item.pdf_url) return 'Laukiama darbuotojo adreso ir asmens kodo';
     if (item.signing_status === 'awaiting_school_signature') return 'Laukia mokyklos el. parašo';
     if (item.signing_status === 'signed_by_school') return 'Laukia darbuotojo el. parašo';
     return 'Ruošiama';
@@ -316,14 +319,21 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
           <label className="text-sm">Darbo sutarties Nr. {preparedFile ? '(nebūtina)' : ''}<input className="mt-1 w-full rounded-md border p-2" value={employmentContractNumber} onChange={(event) => setEmploymentContractNumber(event.target.value)} /></label>
           <label className="text-sm">Darbo sutarties data {preparedFile ? '(nebūtina)' : ''}<input type="date" className="mt-1 w-full rounded-md border p-2" value={employmentContractDate} onChange={(event) => setEmploymentContractDate(event.target.value)} /></label>
           <label className="text-sm sm:col-span-2">Paruoštas konfidencialumo susitarimas su priedu viename PDF
-            <input key={`prepared-${fileInputKey}`} type="file" accept=".pdf,application/pdf" className="peer sr-only" onChange={(event) => setPreparedFile(event.target.files?.[0] || null)} />
+            <input key={`prepared-${fileInputKey}`} type="file" accept=".pdf,application/pdf" className="peer sr-only" onChange={(event) => {
+              setPreparedFile(event.target.files?.[0] || null);
+              setPreparedIncludesAnnex(false);
+              setPreparedDetailsConfirmed(false);
+            }} />
             <span className="mt-2 flex flex-wrap items-center gap-3 rounded-md peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-indigo-600">
               <span className="rounded-md border border-slate-300 bg-white px-3 py-2 font-medium text-slate-700">Pasirinkti PDF</span>
               <span className="break-all text-slate-600">{preparedFile?.name || 'PDF nepasirinktas'}</span>
             </span>
           </label>
-          <p className="text-xs text-slate-500 sm:col-span-2">Jei PDF neįkelsite, sistema sugeneruos susitarimą su priedu iš šablono. Tuomet darbo sutarties numeris ir data yra būtini.</p>
-          {preparedFile && <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={preparedIncludesAnnex} onChange={(event) => setPreparedIncludesAnnex(event.target.checked)} /> PDF yra ir susitarimas, ir konfidencialios informacijos sąrašo priedas</label>}
+          <p className="text-xs text-slate-500 sm:col-span-2">Jei PDF neįkelsite, darbuotojas iš el. pašto nuorodos pats įves adresą ir asmens kodą. Tada sistema sugeneruos vieną susitarimo ir priedo PDF. Darbo sutarties numeris ir data būtini.</p>
+          {preparedFile && <>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={preparedIncludesAnnex} onChange={(event) => setPreparedIncludesAnnex(event.target.checked)} /> PDF yra ir susitarimas, ir konfidencialios informacijos sąrašo priedas</label>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={preparedDetailsConfirmed} onChange={(event) => setPreparedDetailsConfirmed(event.target.checked)} /> Įkeltame PDF jau įrašyti darbuotojo adresas ir asmens kodas. Tutlio įkelto PDF papildomai nepildo.</label>
+          </>}
         </div>
         <button disabled={busy || loading || !organizationId} onClick={() => void create()} className="mt-4 rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? 'Kuriama…' : 'Sukurti du dokumentus'}</button>
       </section>}

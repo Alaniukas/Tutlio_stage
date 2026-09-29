@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase, setRememberMe } from '@/lib/supabase';
-import { getPasswordResetRedirectTo, safeInternalNextPath } from '@/lib/auth-redirects';
+import { getPasswordResetRedirectTo, safeInternalNextPath, supportTicketTrackingNextPath } from '@/lib/auth-redirects';
 import { resolveAuthEmailLocale } from '@/lib/auth-locale';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
@@ -180,6 +180,7 @@ export default function Login() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const nextPath = safeInternalNextPath(searchParams.get('next'));
+  const supportTicketNextPath = supportTicketTrackingNextPath(nextPath);
   const loginPortalParam = parseOrgLoginPortal(searchParams.get('portal'));
   const loginOnly = Boolean(orgSlug);
   const redirectOnceRef = useRef(false);
@@ -238,6 +239,11 @@ export default function Login() {
 
     if (!session?.user) return false;
     const user = session.user;
+
+    if (supportTicketNextPath) {
+      navigate(supportTicketNextPath);
+      return true;
+    }
 
     const portals = await withTimeout(
       resolveAccountPortals(user.id, { email: user.email, linkStudentByEmail: true }),
@@ -426,6 +432,11 @@ export default function Login() {
         if (data.session?.access_token) {
           void fetch('/api/school-family-account-session', { method: 'POST',
             headers: { Authorization: `Bearer ${data.session.access_token}` } }).catch(() => {});
+        }
+        if (supportTicketNextPath) {
+          setLoading(false);
+          navigate(supportTicketNextPath);
+          return;
         }
         const loginPortal: LoginPortal | null =
           role === 'tutor' ? 'tutor' : role === 'student' ? 'student' : role === 'parent' ? 'parent' : null;
@@ -801,7 +812,11 @@ export default function Login() {
                   } catch {
                     /* ignore */
                   }
-                  navigate(path);
+                  if (supportTicketNextPath) {
+                    const destination = new URL(safeInternalNextPath(path) || '/company/login', window.location.origin);
+                    destination.searchParams.set('next', supportTicketNextPath);
+                    navigate(`${destination.pathname}${destination.search}${destination.hash}`);
+                  } else navigate(path);
                 }}
                 className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-emerald-400/40 rounded-2xl p-5 text-start transition-all duration-200 flex items-center gap-5"
               >

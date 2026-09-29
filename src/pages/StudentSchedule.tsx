@@ -313,6 +313,7 @@ export default function StudentSchedule() {
         enable_per_lesson: true,
         enable_monthly_billing: false,
     });
+    const [billingPolicyResolved, setBillingPolicyResolved] = useState(false);
     const [tutorSoloManualPayments, setTutorSoloManualPayments] = useState(false);
     const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
     const [perlasLoading, setPerlasLoading] = useState(false);
@@ -329,13 +330,18 @@ export default function StudentSchedule() {
             cancellationFeePercent,
             paymentTiming,
             paymentDeadlineHours,
+            perLessonPaymentAllowed: billingPolicyResolved && shouldShowPerLessonPaymentUi(
+                studentPaymentModel,
+                studentPaymentOverrideActive,
+                tutorPaymentFlags,
+            ),
             perlasEnabled: tutorPerlasEnabled,
             orgIsSchool: tutorOrgIsSchool,
             orgFeeProfile: tutorOrgFeeProfile,
             studentActionsDisabled,
             rescheduleDisabled,
         };
-    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours, tutorPerlasEnabled, tutorOrgIsSchool, tutorOrgFeeProfile, studentActionsDisabled, rescheduleDisabled]);
+    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours, tutorPerlasEnabled, tutorOrgIsSchool, tutorOrgFeeProfile, studentActionsDisabled, rescheduleDisabled, studentPaymentModel, studentPaymentOverrideActive, tutorPaymentFlags, billingPolicyResolved]);
 
     const manualPaymentInBookingModal =
         tutorSoloManualPayments || pendingPaymentSession?.tutorSoloManual === true;
@@ -609,6 +615,7 @@ export default function StudentSchedule() {
     const fetchInitialData = async () => {
         if (!ctxUser) return;
         setLoadError(null);
+        setBillingPolicyResolved(false);
         setLoading(true);
         try {
         const user = ctxUser;
@@ -895,6 +902,7 @@ export default function StudentSchedule() {
             let bookingDisabledResolved = false;
             let enablePerLessonResolved = tutorProfileRow?.enable_per_lesson ?? true;
             let enableMonthlyBillingResolved = !!tutorProfileRow?.enable_monthly_billing;
+            let billingPolicyLoaded = Boolean(tutorProfileRow);
             if (orgId) {
                 const { data: oe } = await supabase
                     .from('organizations')
@@ -912,6 +920,9 @@ export default function StudentSchedule() {
                 if (oe) {
                     enablePerLessonResolved = (oe as { enable_per_lesson?: boolean | null }).enable_per_lesson ?? enablePerLessonResolved;
                     enableMonthlyBillingResolved = !!(oe as { enable_monthly_billing?: boolean | null }).enable_monthly_billing;
+                } else {
+                    billingPolicyLoaded = false;
+                    setLoadError(t('stuSched.calendarError'));
                 }
             }
             setTutorOrgIsSchool(tutorOrgSchoolResolved);
@@ -924,6 +935,7 @@ export default function StudentSchedule() {
                 enable_per_lesson: enablePerLessonResolved,
                 enable_monthly_billing: enableMonthlyBillingResolved,
             });
+            setBillingPolicyResolved(billingPolicyLoaded);
         }
 
         // Filter subjects by student grade
@@ -1443,6 +1455,10 @@ export default function StudentSchedule() {
 
     const handleBook = async () => {
         if (!selectedEvent || !selectedTime || studentBookingDisabled) return;
+        if (!billingPolicyResolved) {
+            alert(t('stuSched.calendarError'));
+            return;
+        }
         setSaving(true);
         const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
         // Find a package whose items include the selected subject with available lessons > 0.
@@ -1551,6 +1567,7 @@ export default function StudentSchedule() {
                 : defaultSessionPaymentStatusForStudent(studentPaymentModel, {
                       paid: false,
                       hasPackage: false,
+                      billingFlags: tutorPaymentFlags,
                   }),
             topic: selectedSubject?.name || null,
             price: selectedSubject?.price || null,
@@ -1657,7 +1674,7 @@ export default function StudentSchedule() {
                         sessionId: sessionData.id,
                         date: format(selectedTime, 'yyyy-MM-dd'),
                         time: format(selectedTime, 'HH:mm'),
-                        paymentStatus: usesPackage ? 'paid' : 'pending',
+                        paymentStatus: usesPackage ? 'paid' : requiresImmediatePayment ? 'pending' : 'confirmed',
                         organizationTutor,
                     }).catch((err) => console.error('[StudentSchedule] tutor notify', err));
                 }
@@ -1671,7 +1688,7 @@ export default function StudentSchedule() {
                             const chkRes = await fetch('/api/stripe-checkout', {
                                 method: 'POST',
                                 headers: await authHeaders(),
-                                body: JSON.stringify({ sessionId: sessionData.id }),
+                                body: JSON.stringify({ sessionId: sessionData.id, ui_locale: locale }),
                             });
                             const chkJson = await chkRes.json();
                             if (chkJson.creditFullyCovered) {
@@ -1695,11 +1712,11 @@ export default function StudentSchedule() {
                             duration: selectedSubject?.duration_minutes || 60,
                             cancellationHours: hasPayer ? null : cancellationHours,
                             cancellationFeePercent: hasPayer ? null : cancellationFeePercent,
-                            paymentStatus: hasPayer ? null : (usesPackage || creditFullyCovered ? 'paid' : 'pending'),
+                            paymentStatus: hasPayer ? null : (usesPackage || creditFullyCovered ? 'paid' : requiresImmediatePayment ? 'pending' : null),
                             meetingLink: studentPersonalMeetingLink || tutorPersonalMeetingLink || selectedSubject?.meeting_link || null,
                             hidePaymentInfo: hasPayer,
                             paymentLink: selfPayLink,
-                            perlasEnabled: tutorPerlasEnabled,
+                            perlasEnabled: tutorPerlasEnabled && requiresImmediatePayment,
                         },
                     });
                 }
@@ -1737,13 +1754,13 @@ export default function StudentSchedule() {
                             duration: selectedSubject?.duration_minutes || 60,
                             cancellationHours,
                             cancellationFeePercent,
-                            paymentStatus: usesPackage ? 'paid' : 'pending',
+                            paymentStatus: usesPackage ? 'paid' : requiresImmediatePayment ? 'pending' : null,
                             meetingLink:
                                 studentPersonalMeetingLink ||
                                 tutorPersonalMeetingLink ||
                                 selectedSubject?.meeting_link ||
                                 null,
-                            perlasEnabled: tutorPerlasEnabled,
+                            perlasEnabled: tutorPerlasEnabled && requiresImmediatePayment,
                             payerIsParent: true,
                         },
                     });
@@ -1763,7 +1780,7 @@ export default function StudentSchedule() {
                             const res = await fetch('/api/stripe-checkout', {
                                 method: 'POST',
                                 headers: await authHeaders(),
-                                body: JSON.stringify({ sessionId: sessionData.id, payerEmail }),
+                                body: JSON.stringify({ sessionId: sessionData.id, payerEmail, ui_locale: locale }),
                             });
                             const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
                             const checkoutUrl = typeof json.url === 'string' ? json.url : '';
@@ -1841,7 +1858,7 @@ export default function StudentSchedule() {
     };
 
     const handleGoToStripe = async (sessionId: string) => {
-        if (!shouldRequestPerLessonCheckout(studentPaymentModel, studentPaymentOverrideActive, tutorPaymentFlags)) {
+        if (!billingPolicyResolved || !shouldRequestPerLessonCheckout(studentPaymentModel, studentPaymentOverrideActive, tutorPaymentFlags)) {
             alert(t('stuSched.manualMonthlyAlert'));
             return;
         }
@@ -1849,7 +1866,7 @@ export default function StudentSchedule() {
         setRedirectingToStripe(true);
         try {
             const payerEmailTrim = studentPayerEmail?.trim() || '';
-            const body: { sessionId: string; payerEmail?: string } = { sessionId };
+            const body: { sessionId: string; payerEmail?: string; ui_locale: string } = { sessionId, ui_locale: locale };
             if (studentPaymentPayer === 'parent' && payerEmailTrim) {
                 body.payerEmail = payerEmailTrim;
             }
@@ -2014,7 +2031,7 @@ export default function StudentSchedule() {
 
     const RoleLayout = isParentRoute ? ParentLayout : StudentLayout;
 
-    const showPerLessonPayment = shouldShowPerLessonPaymentUi(
+    const showPerLessonPayment = billingPolicyResolved && shouldShowPerLessonPaymentUi(
         studentPaymentModel,
         studentPaymentOverrideActive,
         tutorPaymentFlags,
@@ -2065,7 +2082,7 @@ export default function StudentSchedule() {
                         </div>
                     ) : null}
 
-                    {bookingBlocked && !blockLoading && (
+                    {billingPolicyResolved && bookingBlocked && !blockLoading && (
                         <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="flex items-start gap-3">
                                 <Wallet className="w-5 h-5 text-amber-700 flex-shrink-0 mt-0.5" />
@@ -2430,7 +2447,7 @@ export default function StudentSchedule() {
                                 );
                             })()}
 
-                            {bookingBlocked && !blockLoading && (
+                            {billingPolicyResolved && bookingBlocked && !blockLoading && (
                                 <div className="mb-3 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800">
                                     {t('stuSched.mustPayOverdue')}
                                 </div>
@@ -2455,6 +2472,7 @@ export default function StudentSchedule() {
                                             disabled={
                                                 saving ||
                                                 bookingBlocked ||
+                                                (!selectedEvent?.occupied && !billingPolicyResolved) ||
                                                 (!selectedEvent?.occupied && (!selectedSubjectId || !selectedTime)) ||
                                                 (selectedEvent?.occupied && !selectedWaitlistSubjectId)
                                             }

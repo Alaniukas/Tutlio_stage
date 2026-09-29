@@ -559,6 +559,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const appBase = (process.env.APP_URL || process.env.VITE_APP_URL || 'https://www.tutlio.lt').replace(/\/$/, '');
     const pdfViewUrl = token ? schoolContractPdfApiUrl(appBase, token) : null;
     const emailResult = await sendSchoolContractEmail(parentEmail, {
+      organizationId: String((contract as any).organization_id || ''),
       schoolName: String((contract as any).organizations?.name || ''),
       schoolEmail: String((contract as any).organizations?.email || ''),
       studentName: String(st.full_name || ''),

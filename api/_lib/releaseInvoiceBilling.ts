@@ -73,9 +73,9 @@ export function billingBatchWasPaid(batch: Pick<BatchRow, 'paid' | 'payment_stat
 export function sessionReleaseUpdate(wasPaid: boolean): {
   payment_batch_id: null;
   paid?: false;
-  payment_status?: 'pending';
+  payment_status: 'confirmed';
 } {
   return wasPaid
-    ? { payment_batch_id: null, paid: false, payment_status: 'pending' }
-    : { payment_batch_id: null };
+    ? { payment_batch_id: null, paid: false, payment_status: 'confirmed' }
+    : { payment_batch_id: null, payment_status: 'confirmed' };
 }

@@ -18,12 +18,15 @@ const supabase = {
       single: async () => ({ data: {
         full_name: 'Teacher', email: 'teacher@example.com', organization_id: PRO_KLASE_QA_ORG_ID,
       } }),
+      maybeSingle: async () => ({ data: {
+        enable_per_lesson: false, enable_monthly_billing: true, features: {},
+      }, error: null }),
       in: async () => ({ data: [{
         id: 'student', full_name: 'Student', email: 'student@example.com',
         payer_email: 'parent@example.com', payment_payer: 'parent',
       }] }),
     };
-    if (!['profiles', 'students'].includes(table)) throw new Error(table);
+    if (!['profiles', 'students', 'organizations'].includes(table)) throw new Error(table);
     return chain;
   },
 } as unknown as SupabaseClient;

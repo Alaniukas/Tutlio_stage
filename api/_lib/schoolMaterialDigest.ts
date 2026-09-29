@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveEmailOrgBranding, type OrgRowForEmailBranding } from './emailOrgBranding.js';
+import { resolveOrgEmailReplyTo } from './orgEmailReplyTo.js';
 import { notificationLocale } from './notificationLocale.js';
 import { parseOrgParentNotificationOptOut, parseParentNotificationOptOut } from '../../src/lib/parentNotificationPreferences.js';
 import { schoolFamilyPortalEnabled } from './schoolFamilyGuardianAccess.js';
@@ -11,7 +12,7 @@ import type { Locale } from '../../src/lib/i18n/locales.js';
 
 type Student = { id: string; organization_id: string; full_name: string; email: string | null; linked_user_id: string | null };
 export type DigestItem = { publication_id: string; student_id: string; child: string; label: string; source: string; url: string };
-export type DigestPayload = { from: string; to: string[]; subject: string; html: string; items: DigestItem[] };
+export type DigestPayload = { from: string; to: string[]; replyTo?: string[]; subject: string; html: string; items: DigestItem[] };
 export const SCHOOL_DIGEST_PROVIDER_WINDOW_MS = 23 * 60 * 60_000;
 export const SCHOOL_DIGEST_LEASE_MS = 10 * 60_000;
 type Entry = { publication_id: string; student_id: string };
@@ -54,6 +55,7 @@ export function schoolDigestLocalDate(now: Date): string {
 
 export function renderSchoolMaterialDigest(input: {
   organizationId: string; org: OrgRowForEmailBranding; date: string; items: DigestItem[]; email: string; locale: Locale;
+  replyTo?: string[];
 }): DigestPayload {
   const copy = schoolFamilyMaterialTranslations[input.locale] || schoolFamilyMaterialTranslations.en;
   const resolved = resolveEmailOrgBranding(input.organizationId, input.org);
@@ -66,7 +68,7 @@ export function renderSchoolMaterialDigest(input: {
   const subject = copy['school.materials.digestSubject'].replace('{date}', input.date);
   const sender = (resolved.emailSenderName || name).replace(/[\r\n"<>]/g, '').slice(0, 100);
   const mailbox = (process.env.FROM_EMAIL || 'Tutlio <info@tutlio.lt>').match(/<([^>]+)>/)?.[1] || process.env.FROM_EMAIL || 'info@tutlio.lt';
-  return { from: `${sender} <${mailbox}>`, to: [input.email], subject, items: input.items,
+  return { from: `${sender} <${mailbox}>`, to: [input.email], ...(input.replyTo ? { replyTo: input.replyTo } : {}), subject, items: input.items,
     html: `<!doctype html><html lang="${input.locale}"><body style="font-family:Arial,sans-serif;background:#f8fafc;padding:24px"><main style="max-width:600px;margin:auto;background:white;border-radius:16px;overflow:hidden"><div style="background:${color};color:white;padding:24px"><h1 style="font-size:22px;margin:0">${escapeHtml(name)}</h1><p>${escapeHtml(subject)}</p></div><div style="padding:24px"><p>${escapeHtml(copy['school.materials.digestBody'])}</p>${sections}<p style="font-size:12px;color:#64748b">${escapeHtml(resolved.emailTeamSignature || name)}</p></div></main></body></html>` };
 }
 
@@ -164,14 +166,15 @@ export async function prepareSchoolMaterialDigests(db: SupabaseClient, input: { 
   await skipPendingEntries(db, skipped);
   const deliveryIds: string[] = [];
   for (const batch of batches.values()) {
-    const org = await db.from('organizations').select('name,logo_url,brand_color,brand_color_secondary,features,preferred_locale').eq('id', batch.orgId).single();
+    const org = await db.from('organizations').select('name,email,logo_url,brand_color,brand_color_secondary,features,preferred_locale').eq('id', batch.orgId).single();
     if (org.error) throw org.error;
     if (!schoolFamilyPortalEnabled(org.data.features) || await digestOptedOut(db, batch.email, org.data.features)) {
       await skipPendingEntries(db, batch.entries); continue;
     }
     const locale = await notificationLocale(db, batch.email, null, org.data.preferred_locale);
     const items = [...batch.items.values()].map(value => value.item);
-    const payload = renderSchoolMaterialDigest({ organizationId: batch.orgId, org: org.data, date: schoolDigestLocalDate(now), items, email: batch.email, locale });
+    const replyTo = await resolveOrgEmailReplyTo(db, batch.orgId, org.data);
+    const payload = renderSchoolMaterialDigest({ organizationId: batch.orgId, org: org.data, date: schoolDigestLocalDate(now), items, email: batch.email, locale, replyTo });
     const reserved = await db.rpc('school_reserve_material_digest', { p_org: batch.orgId, p_email: batch.email,
       p_date: schoolDigestLocalDate(now), p_payload: payload, p_entries: batch.entries });
     if (reserved.error) throw reserved.error;

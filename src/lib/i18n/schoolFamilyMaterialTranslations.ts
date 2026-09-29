@@ -28,6 +28,26 @@ const values: Partial<Record<Locale, string[]>> = {
   nl: ['Huiswerk en opnamen', 'Nieuw lesmateriaal · {date}', 'Nieuwe opnamen en huiswerk staan samen in één e-mail. Log in op je account om het materiaal te openen.', 'Materiaal openen', 'Kies een kind', 'Lesopnamen', 'Huiswerk', 'Nog geen nieuw materiaal.', 'Geen toegankelijke kinderen gevonden. Neem contact op met de school.', 'Log in bij Tutlio om nieuw materiaal te bekijken.', 'Materiaal voor gezinsaccounts', 'Bewaar de toegang van bestaande gedeelde links voordat gezinstoegang wordt ingeschakeld. Drive-bestanden blijven in hun mappen.', 'Toegang van oude links voorbereiden', 'Toegang van oude links is klaar.', 'Ga verder met voorbereiden.', 'De toegang kon niet worden voorbereid. Controleer de Drive-verbinding en probeer opnieuw.', 'Bereid eerst de toegang tot materiaal voor via het beheerdersaccount.', 'Toegang tot opnamen', 'Volgens de bijgewoonde groepstijden', 'Alle groepsopnamen inbegrepen', 'Zonder opnamen', 'Bestaande overeenkomsten behouden de afgesproken toegang tot opnamen.', 'Kies één groepsles per week en de afgesproken prijs. Opnamen zijn niet inbegrepen in dit plan.', 'Eén groepsles per week', 'Toegang tot opnamen'],
 };
 
+const libraryKeys = ['school.groupLibrary.title', 'school.groupLibrary.lead', 'school.groupLibrary.badFile'] as const;
+const libraryValues: Partial<Record<Locale, [string, string, string]>> = {
+  lt: ['Grupės medžiaga', 'Failai lieka prieinami, kol mokinys priklauso grupei.', 'Leidžiami PDF, nuotraukų, Word, Excel ir tekstiniai failai iki 10 MB.'],
+  en: ['Group materials', 'Files remain available while the student belongs to the group.', 'PDF, image, Word, Excel and text files up to 10 MB are allowed.'],
+  pl: ['Materiały grupy', 'Pliki są dostępne, dopóki uczeń należy do grupy.', 'Dozwolone są pliki PDF, obrazy, Word, Excel i tekstowe do 10 MB.'],
+  de: ['Gruppenmaterialien', 'Dateien bleiben verfügbar, solange das Kind Mitglied der Gruppe ist.', 'PDF-, Bild-, Word-, Excel- und Textdateien bis 10 MB sind erlaubt.'],
+  fr: ['Documents du groupe', 'Les fichiers restent accessibles tant que l’élève fait partie du groupe.', 'Fichiers PDF, image, Word, Excel et texte autorisés jusqu’à 10 Mo.'],
+  es: ['Materiales del grupo', 'Los archivos siguen disponibles mientras el alumno pertenezca al grupo.', 'Se admiten archivos PDF, imágenes, Word, Excel y texto de hasta 10 MB.'],
+  lv: ['Grupas materiāli', 'Faili ir pieejami, kamēr skolēns ir grupas dalībnieks.', 'Atļauti PDF, attēlu, Word, Excel un teksta faili līdz 10 MB.'],
+  ee: ['Rühma materjalid', 'Failid on kättesaadavad seni, kuni õpilane kuulub rühma.', 'Lubatud on kuni 10 MB PDF-, pildi-, Wordi, Exceli ja tekstifailid.'],
+  fi: ['Ryhmän materiaalit', 'Tiedostot ovat käytettävissä niin kauan kuin oppilas kuuluu ryhmään.', 'Sallitut PDF-, kuva-, Word-, Excel- ja tekstitiedostot, enintään 10 Mt.'],
+  se: ['Gruppmaterial', 'Filerna är tillgängliga så länge eleven tillhör gruppen.', 'PDF-, bild-, Word-, Excel- och textfiler upp till 10 MB är tillåtna.'],
+  no: ['Gruppemateriell', 'Filene er tilgjengelige så lenge eleven tilhører gruppen.', 'PDF-, bilde-, Word-, Excel- og tekstfiler opptil 10 MB er tillatt.'],
+  dk: ['Gruppemateriale', 'Filerne er tilgængelige, så længe eleven er i gruppen.', 'PDF-, billed-, Word-, Excel- og tekstfiler op til 10 MB er tilladt.'],
+  nl: ['Groepsmateriaal', 'Bestanden blijven beschikbaar zolang de leerling lid is van de groep.', 'PDF-, afbeeldings-, Word-, Excel- en tekstbestanden tot 10 MB zijn toegestaan.'],
+};
+
 export const schoolFamilyMaterialTranslations = Object.fromEntries(Object.entries(values).map(([locale, texts]) =>
-  [locale, Object.fromEntries(keys.map((key, index) => [key, texts[index]]))],
+  [locale, {
+    ...Object.fromEntries(keys.map((key, index) => [key, texts[index]])),
+    ...Object.fromEntries(libraryKeys.map((key, index) => [key, (libraryValues[locale as Locale] || libraryValues.en!)[index]])),
+  }],
 )) as Record<Locale, Record<string, string>>;

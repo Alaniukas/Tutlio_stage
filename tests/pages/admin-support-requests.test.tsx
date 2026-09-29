@@ -35,7 +35,7 @@ const request: SupportRequest = {
   coding_agent_prompt: 'You are an AI coding agent. Resolve support report SUP-17EE7859.',
   completion_notified_at: null,
   completion_notification_email_id: null,
-  status: 'new',
+  status: 'registered',
   priority: 'untriaged',
   internal_note: null,
   created_at: '2026-09-18T10:00:00.000Z',
@@ -54,14 +54,15 @@ describe('admin support requests', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /Nukopijuota/ })).toBeTruthy());
   });
 
-  it('sends a completion notice only after the request is resolved and confirms it in the panel', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    render(<AdminSupportRequestsPanel adminSecret="demo" demoRequests={[{ ...request, status: 'resolved' }]} />);
+  it('requires a deadline when moving a request into progress', async () => {
+    render(<AdminSupportRequestsPanel adminSecret="demo" demoRequests={[request]} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Pranešti, kad klaida ištaisyta' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Būsena' }), { target: { value: 'in_progress' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Išsaugoti' }));
+    expect(screen.getByText('Būsenai „Vykdoma“ būtina nurodyti terminą.')).toBeTruthy();
 
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('admin@example.com'));
-    await waitFor(() => expect(screen.getByText('Naudotojas informuotas')).toBeTruthy());
-    expect(screen.queryByRole('button', { name: 'Pranešti, kad klaida ištaisyta' })).toBeNull();
+    fireEvent.change(screen.getByLabelText(/Terminas/), { target: { value: '2026-10-01T12:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Išsaugoti' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Support popup loses the draft.*Vykdoma/ })).toBeTruthy());
   });
 });

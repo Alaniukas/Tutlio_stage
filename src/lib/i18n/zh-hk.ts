@@ -3,6 +3,7 @@ import { en } from './en.js';
 /** Hong Kong Traditional Chinese draft. School/admin/full legal copy stays English.
  * Scope and release limits: docs/HONG_KONG_LOCALIZATION_REVIEW.md. */
 export const zhHkOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': '透過電郵通知學生',
   "cal.deleteAllRemaining": "此系列所有剩餘課堂",
   "cal.deleteAllRemainingHint": "刪除此系列未來已安排及已取消的課堂。已完成課堂的紀錄會保留。",
   "cal.deleteConfirmAll": "要刪除此系列所有剩餘的已安排及已取消課堂嗎？已完成課堂的紀錄會保留。",

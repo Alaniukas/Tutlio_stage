@@ -58,6 +58,7 @@ const InvoicesPage = lazy(() => import('@/pages/Invoices'));
 const Instructions = lazy(() => import('@/pages/Instructions'));
 const Messages = lazy(() => import('@/pages/Messages'));
 const InAppSupport = lazy(() => import('@/pages/InAppSupport'));
+const SupportTickets = lazy(() => import('@/pages/SupportTickets'));
 const StudentOnboarding = lazy(() => import('@/pages/StudentOnboarding'));
 const StudentDashboard = lazy(() => import('@/pages/StudentDashboard'));
 const StudentSchedule = lazy(() => import('@/pages/StudentSchedule'));
@@ -483,6 +484,14 @@ export default function App({ basename }: { basename: string }) {
             </UserProvider>
           }
         />
+
+        {/* Ticket tracking is tied to the signed-in user, even if their portal role
+            or tutor subscription changed after they submitted the request. */}
+        <Route path="/support/tickets" element={<SupportTickets />} />
+        <Route path="/student/support/tickets" element={<SupportTickets />} />
+        <Route path="/parent/support/tickets" element={<SupportTickets />} />
+        <Route path="/company/support/tickets" element={<SupportTickets />} />
+        <Route path="/school/support/tickets" element={<SupportTickets />} />
 
         {/* Tutor routes - WITH UserProvider for caching */}
         <Route element={<ProtectedWithUser />}>

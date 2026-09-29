@@ -5,5 +5,7 @@ scripts/_last-*
 .codex-worktrees/
 artifacts/
 tmp/
+output/
+.tmp-*
 .env*
 !.env.example

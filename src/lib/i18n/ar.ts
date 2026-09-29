@@ -2,6 +2,7 @@ import { en } from './en.js';
 
 /** Modern Standard Arabic for individual tutors and tutoring businesses. */
 export const arOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'إخطار الطالب عبر البريد الإلكتروني',
   "cal.deleteAllRemaining": "كل الدروس المتبقية في هذه السلسلة",
   "cal.deleteAllRemainingHint": "يحذف الدروس المستقبلية المجدولة والدروس الملغاة في هذه السلسلة. يبقى سجل الدروس المكتملة محفوظًا.",
   "cal.deleteConfirmAll": "هل تريد حذف كل الدروس المجدولة والملغاة المتبقية في هذه السلسلة؟ يبقى سجل الدروس المكتملة محفوظًا.",

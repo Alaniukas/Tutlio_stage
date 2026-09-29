@@ -35,6 +35,49 @@ describe('per-group minimum policy', () => {
     expect(materialize).toHaveBeenCalledTimes(2);
   });
 
+  it('pauses later accepted contracts without restarting an already paused group, then resumes at three', async () => {
+    const seed = groupSeed();
+    seed.school_contracts[1].accepted_at = null;
+    seed.school_contracts[2].accepted_at = null;
+    const db = schoolGroupDatabase(seed);
+    const reconcile = (actorUserId: string) => reconcileSchoolGroupMinimum(
+      { headers: {} } as any, db.client,
+      { organizationId: 'school', groupId: 'group', actorUserId },
+    );
+
+    await reconcile('first-parent');
+    const firstPause = db.tables.school_contracts[0].suspension_started_at;
+    const groupPause = db.tables.school_class_groups[0].suspension_started_at;
+    const groupReason = db.tables.school_class_groups[0].suspension_reason;
+    expect(firstPause).toEqual(expect.any(String));
+    expect(groupPause).toEqual(expect.any(String));
+    expect(db.tables.school_contracts[0].suspension_scope).toBe('group_under_minimum');
+    const groupWrites = db.requests.filter(row => row.table === 'school_class_groups' && row.method === 'PATCH').length;
+    const notificationLookups = db.requests.filter(row => row.table === 'organizations' && row.method === 'GET').length;
+
+    db.tables.school_contracts[1].accepted_at = '2026-09-01T09:00:00.000Z';
+    await reconcile('second-parent');
+    const secondPause = db.tables.school_contracts[1].suspension_started_at;
+    expect(secondPause).toEqual(expect.any(String));
+    expect(db.tables.school_contracts[1].suspension_scope).toBe('group_under_minimum');
+    expect(db.tables.school_contracts[1].suspension_started_by).toBeNull();
+    expect(db.tables.school_contracts[0].suspension_started_at).toBe(firstPause);
+    expect(db.tables.school_class_groups[0].suspension_started_at).toBe(groupPause);
+    expect(db.tables.school_class_groups[0].suspension_reason).toBe(groupReason);
+    expect(db.requests.filter(row => row.table === 'school_class_groups' && row.method === 'PATCH')).toHaveLength(groupWrites);
+    expect(db.requests.filter(row => row.table === 'organizations' && row.method === 'GET')).toHaveLength(notificationLookups);
+
+    await reconcile('second-parent');
+    expect(db.tables.school_contracts[1].suspension_started_at).toBe(secondPause);
+    expect(db.requests.filter(row => row.table === 'organizations' && row.method === 'GET')).toHaveLength(notificationLookups);
+
+    db.tables.school_contracts[2].accepted_at = '2026-09-01T10:00:00.000Z';
+    await reconcile('third-parent');
+    expect(db.tables.school_class_groups[0].suspension_resumed_at).toEqual(expect.any(String));
+    expect(db.tables.school_contracts.slice(0, 2).every(row => row.suspension_resumed_at)).toBe(true);
+    expect(db.tables.school_contracts[2].suspension_started_at).toBeUndefined();
+  });
+
   it('ignores nonmembers, detached children and duplicate agreements in its impact preview', async () => {
     const seed = groupSeed();
     seed.school_contracts.push({ ...seed.school_contracts[1], id: 'duplicate' });

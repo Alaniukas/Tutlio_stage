@@ -14,6 +14,7 @@ import {
   orgTutorLessonPayEur,
   orgTutorSessionPayEur,
 } from '../src/lib/orgTutorLessonPay.js';
+import { findUnpricedManoTutorSessions } from './_lib/manoKorepetitoriusPayGuard.js';
 import { proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
@@ -189,6 +190,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const hasSessionIds = !!(body.sessionIds && body.sessionIds.length > 0);
     const hasPackageIds = resolvedPackageIds.length > 0;
+    const manoTutorInvoice = isManoKorepetitoriusTutorInvoice(!!isOrgTutor, profile.organization_id);
+    if (manoTutorInvoice && hasPackageIds) {
+      return res.status(400).json({ error: 'Korepetitoriaus atlygio sąskaitoje negalima įtraukti pamokų paketų.' });
+    }
+    if (manoTutorInvoice && groupingType !== 'single') {
+      return res.status(400).json({ error: 'Korepetitoriaus mėnesio atlygiui galima išrašyti tik vieną bendrą sąskaitą.' });
+    }
 
     if (hasSessionIds) {
       let sessionQuery = supabase
@@ -200,9 +208,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!(pvmEducationInvoice && !isOrgTutor)) {
         sessionQuery = sessionQuery.eq('tutor_id', tutorId);
       }
+      if (manoTutorInvoice) {
+        sessionQuery = sessionQuery
+          .in('status', ['completed', 'no_show'])
+          .gte('start_time', periodStart + 'T00:00:00')
+          .lte('start_time', periodEnd + 'T23:59:59')
+          .lte('end_time', new Date().toISOString());
+      }
       const result = await sessionQuery;
       sessions = result.data || [];
       sessErr = result.error;
+      if (!sessErr && manoTutorInvoice && sessions.length !== new Set(body.sessionIds).size) {
+        return res.status(409).json({ error: 'Selected tutor lessons changed; refresh the invoice preview' });
+      }
       if (pvmEducationInvoice && !isOrgTutor && profile.organization_id && sessions.length) {
         const { data: orgTutors } = await supabase
           .from('profiles')
@@ -232,6 +250,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (isOrgTutor && isProKlaseOrg(profile.organization_id)) {
         query = query.in('status', ['completed', 'no_show']);
+      }
+      if (manoTutorInvoice) {
+        query = query
+          .in('status', ['completed', 'no_show'])
+          .lte('end_time', new Date().toISOString());
       }
 
       const result = await query;
@@ -388,9 +411,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'No sessions found in the selected period' });
     }
 
-    // Server-side duplicate protection for org-tutor/company invoices:
-    // if any session in this candidate set is already included in a non-cancelled
-    // invoice for the same period/org, do not allow issuing again.
+    if (manoTutorInvoice) {
+      const unpriced = findUnpricedManoTutorSessions(
+        sessions,
+        profile.organization_id,
+        profile.company_commission_percent,
+        profile.company_commission_by_subject,
+      );
+      if (unpriced.length > 0) {
+        return res.status(422).json({
+          error: `${unpriced.length} pamokoms nenustatytas korepetitoriaus atlygis. Patikrinkite ir pataisykite atlygį prieš išrašydami sąskaitą.`,
+        });
+      }
+    }
+
+    // A tutor lesson must not be billed to the organization twice, even if the
+    // second request uses a different or overlapping date range. Customer sales
+    // invoices can legitimately contain the same lesson, so distinguish the
+    // tutor invoice by its stored PDF layout.
     if (profile.organization_id && (isOrgTutor || pvmEducationInvoice)) {
       const candidateSessionIds = new Set(
         sessions
@@ -399,44 +437,75 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .filter(Boolean),
       );
       if (candidateSessionIds.size > 0) {
-        const { data: existingInvoices } = await supabase
-          .from('invoices')
-          .select('id, invoice_number, total_amount')
-          .eq('organization_id', profile.organization_id)
-          .eq('period_start', periodStart)
-          .eq('period_end', periodEnd)
-          .neq('status', 'cancelled');
-
-        const existingInvoiceIds = (existingInvoices || []).map((inv: any) => inv.id);
-        if (existingInvoiceIds.length > 0) {
-          const { data: lineItems } = await supabase
+        let existingInvoices: any[] = [];
+        let lineItems: any[] = [];
+        if (manoTutorInvoice) {
+          const { data: matchingItems, error: itemsErr } = await supabase
             .from('invoice_line_items')
             .select('invoice_id, session_ids')
-            .in('invoice_id', existingInvoiceIds);
+            .overlaps('session_ids', [...candidateSessionIds]);
+          if (itemsErr) return res.status(500).json({ error: itemsErr.message });
+          lineItems = matchingItems || [];
+          const matchingInvoiceIds = [...new Set(lineItems.map((li: any) => li.invoice_id))];
+          if (matchingInvoiceIds.length > 0) {
+            const { data, error } = await supabase
+              .from('invoices')
+              .select('id, invoice_number, total_amount, pdf_meta')
+              .in('id', matchingInvoiceIds)
+              .eq('organization_id', profile.organization_id)
+              .neq('status', 'cancelled');
+            if (error) return res.status(500).json({ error: error.message });
+            existingInvoices = (data || []).filter((inv: any) => inv.pdf_meta?.layout === CLASSIC_LT_TUTOR_LAYOUT);
+          }
+        } else {
+          const { data, error } = await supabase
+            .from('invoices')
+            .select('id, invoice_number, total_amount')
+            .eq('organization_id', profile.organization_id)
+            .eq('period_start', periodStart)
+            .eq('period_end', periodEnd)
+            .neq('status', 'cancelled');
+          if (error) return res.status(500).json({ error: error.message });
+          existingInvoices = data || [];
+          const existingInvoiceIds = existingInvoices.map((inv: any) => inv.id);
+          if (existingInvoiceIds.length > 0) {
+            const { data: matchingItems, error: itemsErr } = await supabase
+              .from('invoice_line_items')
+              .select('invoice_id, session_ids')
+              .in('invoice_id', existingInvoiceIds);
+            if (itemsErr) return res.status(500).json({ error: itemsErr.message });
+            lineItems = matchingItems || [];
+          }
+        }
 
+        if (existingInvoices.length > 0) {
+          const existingInvoiceIds = new Set(existingInvoices.map((inv: any) => inv.id));
           const duplicateInvoiceIds = new Set<string>();
-          for (const li of lineItems || []) {
+          for (const li of lineItems) {
             const sessionIds = Array.isArray((li as any).session_ids) ? (li as any).session_ids : [];
-            if (sessionIds.some((sid: string) => candidateSessionIds.has(sid))) {
+            if (existingInvoiceIds.has((li as any).invoice_id) && sessionIds.some((sid: string) => candidateSessionIds.has(sid))) {
               duplicateInvoiceIds.add((li as any).invoice_id);
             }
           }
 
           if (duplicateInvoiceIds.size > 0) {
-            const dupInvoices = (existingInvoices || []).filter((inv: any) => duplicateInvoiceIds.has(inv.id));
+            const dupInvoices = existingInvoices.filter((inv: any) => duplicateInvoiceIds.has(inv.id));
             const nums = dupInvoices.map((inv: any) => inv.invoice_number).filter(Boolean).join(', ');
             const total = dupInvoices.reduce((sum: number, inv: any) => sum + Number(inv.total_amount || 0), 0);
+            const duplicateMessage = manoTutorInvoice
+              ? `Šios pamokos jau įtrauktos į korepetitoriaus sąskaitą (${nums || 'ankstesnė sąskaita'}), suma €${total.toFixed(2)}`
+              : `Invoice already issued for this tutor/period (${nums || 'existing invoice'}), total €${total.toFixed(2)}`;
             if (precheckOnly) {
               return res.status(200).json({
                 canGenerate: false,
                 reason: 'duplicate',
                 invoiceNumbers: dupInvoices.map((inv: any) => inv.invoice_number).filter(Boolean),
                 totalAmount: total,
-                error: `Invoice already issued for this tutor/period (${nums || 'existing invoice'}), total €${total.toFixed(2)}`,
+                error: duplicateMessage,
               });
             }
             return res.status(409).json({
-              error: `Invoice already issued for this tutor/period (${nums || 'existing invoice'}), total €${total.toFixed(2)}`,
+              error: duplicateMessage,
             });
           }
         }
@@ -491,6 +560,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? groupSessionsByStudent(sessions).map((sess, i) => ({ key: `student-${i}`, sessions: sess }))
       : groupSessions(sessions, groupingType);
     const createdInvoices: string[] = [];
+    const pdfGenerationFailedIds: string[] = [];
 
     for (const group of groups) {
       const orgTutorRateEur = isOrgTutor ? Number((profile as any)?.company_commission_percent) || 0 : null;
@@ -548,7 +618,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const buyer = organizationAsBuyer ?? buildBuyerFromSessions(group.sessions);
 
       const studentRow = group.sessions[0]?.students as { full_name?: string; grade?: string } | undefined;
-      const manoTutorInvoice = isManoKorepetitoriusTutorInvoice(isOrgTutor, profile.organization_id);
       const pdfMeta = pvmEducationInvoice && !isOrgTutor
         ? buildPvmPdfMeta(studentRow?.full_name || '', studentRow?.grade, group.sessions)
         : manoTutorInvoice
@@ -587,6 +656,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (invErr || !invoice) {
         console.error('[generate-invoice] Error creating invoice:', invErr);
+        if (manoTutorInvoice) {
+          return res.status(500).json({ error: 'Nepavyko sukurti korepetitoriaus sąskaitos. Bandykite dar kartą.' });
+        }
         continue;
       }
 
@@ -604,6 +676,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (liInsertErr) {
         console.error('[generate-invoice] line items insert failed:', liInsertErr);
         await supabase.from('invoices').delete().eq('id', invoice.id);
+        if (manoTutorInvoice) {
+          return res.status(500).json({ error: 'Nepavyko įrašyti korepetitoriaus sąskaitos pamokų. Patikrinkite sąskaitų sąrašą prieš kartodami.' });
+        }
         continue;
       }
 
@@ -667,15 +742,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
 
         if (!uploadErr) {
-          await supabase
+          const { error: pathErr } = await supabase
             .from('invoices')
             .update({ pdf_storage_path: storagePath })
             .eq('id', invoice.id);
+          if (pathErr) {
+            console.error('[generate-invoice] PDF path update error:', pathErr);
+            pdfGenerationFailedIds.push(invoice.id);
+          }
         } else {
           console.error('[generate-invoice] PDF upload error:', uploadErr);
+          pdfGenerationFailedIds.push(invoice.id);
         }
       } catch (pdfErr) {
         console.error('[generate-invoice] PDF generation error:', pdfErr);
+        pdfGenerationFailedIds.push(invoice.id);
       }
 
       const invoicedPkgIds = resolvedPackageIds.filter(id => lineItems.some(li => li.sessionIds.includes(id)));
@@ -704,6 +785,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       success: true,
       invoiceIds: createdInvoices,
       count: createdInvoices.length,
+      pdfGenerationFailedIds,
     });
   } catch (err: any) {
     console.error('[generate-invoice] Error:', err);

@@ -32,6 +32,7 @@ import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 import { orgDashboardMonthMetrics } from '@/lib/orgDashboardMetrics';
+import { allowsPerLessonPaymentForStudent } from '@/lib/studentPaymentModel';
 
 interface StatCard {
   label: string;
@@ -66,7 +67,7 @@ interface OrgSessionRow {
   student_joined_at?: string | null;
   status_confirmed_at?: string | null;
   tutor_comment?: string | null;
-  student?: { full_name: string } | null;
+  student?: { full_name: string; payment_model?: string | null } | null;
 }
 
 interface OrgAttentionRow extends OrgSessionRow {
@@ -188,7 +189,9 @@ export default function CompanyDashboard() {
         name?: string;
         tutor_license_count?: number;
         features?: Record<string, unknown>;
-      }>(supabase as any, adminRow.organization_id, 'name, tutor_license_count, features');
+        enable_per_lesson?: boolean | null;
+        enable_monthly_billing?: boolean | null;
+      }>(supabase as any, adminRow.organization_id, 'name, tutor_license_count, features, enable_per_lesson, enable_monthly_billing');
       const organizationId = adminRow.organization_id;
       const orgFeatures = org?.features && typeof org.features === 'object' && !Array.isArray(org.features)
         ? (org.features as Record<string, unknown>)
@@ -290,7 +293,7 @@ export default function CompanyDashboard() {
 
       const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, tutor_comment, student:students(full_name)')
+      .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, tutor_comment, student:students(full_name, payment_model)')
       .in('tutor_id', tutorIds)
       .order('start_time', { ascending: true })
       .limit(800);
@@ -303,12 +306,18 @@ export default function CompanyDashboard() {
       const past30 = subDays(now, 30);
       const nowMs = now.getTime();
       const attentionWindowMs = 6 * 3600000;
+      const allowsIndividualPayment = (session: OrgSessionRow) =>
+        !!session.student && allowsPerLessonPaymentForStudent(
+          session.student.payment_model,
+          org?.enable_per_lesson === true,
+          org?.enable_monthly_billing === true,
+        );
 
       const upcomingFiltered = rows
       .filter(
         (s) =>
           s.status === 'active' &&
-          s.paid &&
+          (s.paid || !allowsIndividualPayment(s)) &&
           isAfter(new Date(s.end_time), now) &&
           isBefore(new Date(s.start_time), next7days)
       )
@@ -328,7 +337,7 @@ export default function CompanyDashboard() {
 
       rows
         .filter((s) => {
-          if (s.paid || s.status === 'cancelled') return false;
+          if (s.paid || s.status === 'cancelled' || !allowsIndividualPayment(s)) return false;
           const tp = tutorMap.get(s.tutor_id);
           if (!tp) return false;
           const start = new Date(s.start_time);

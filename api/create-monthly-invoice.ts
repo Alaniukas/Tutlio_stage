@@ -8,7 +8,7 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { marketFromRequest } from './_lib/market.js';
-import { chargeCurrency, directChargeApplicationFeeCents, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
+import { chargeCurrency, directChargeApplicationFeeCents, isManoKorepetitoriusOrg, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { directChargeOptions } from './_lib/stripeDirectCharge.js';
@@ -20,6 +20,7 @@ import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 import { proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
+import { isMonthlyBillingOnlyStudent } from '../src/lib/studentPaymentModel.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -154,6 +155,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const endDate = new Date(periodEndDate);
     const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
 
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStartDate)
+        || !/^\d{4}-\d{2}-\d{2}$/.test(periodEndDate)
+        || !Number.isFinite(daysDiff)) {
+        return res.status(400).json({ error: 'Invalid invoice period' });
+    }
+
     if (daysDiff > 45) {
         return res.status(400).json({ error: 'Period cannot exceed 45 days' });
     }
@@ -207,15 +214,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             `)
             .in('id', sessionIds)
             .eq('tutor_id', tutorId)
-            .neq('status', 'cancelled')
+            .in('status', ['completed', 'no_show'])
             .eq('paid', false)
             .eq('is_complimentary', false)
             .is('payment_batch_id', null)
             .is('lesson_package_id', null)
-            .lte('start_time', new Date().toISOString());
+            .gte('start_time', periodStartDate + 'T00:00:00')
+            .lte('start_time', periodEndDate + 'T23:59:59')
+            .lte('end_time', new Date().toISOString());
 
         if (sessionsErr || !sessions || sessions.length === 0) {
             return res.status(400).json({ error: 'No eligible unpaid sessions found', details: sessionsErr?.message });
+        }
+        // The preview can become stale before sending. Never silently issue a
+        // smaller invoice after a selected lesson changes status or period.
+        if (sessions.length !== new Set(sessionIds).size) {
+            return res.status(409).json({ error: 'Selected lessons changed; refresh the invoice preview' });
         }
 
         // 3. Group sessions by payer email (one invoice per payer)
@@ -226,8 +240,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const payerEmail = student.payer_email || student.email;
 
             if (!payerEmail) {
-                console.warn(`[create-monthly-invoice] Skipping session ${session.id} - no payer email`);
-                continue;
+                return res.status(409).json({ error: 'A selected lesson has no payer email; refresh the invoice preview' });
             }
 
             if (!sessionsByPayer.has(payerEmail)) {
@@ -238,6 +251,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (sessionsByPayer.size === 0) {
             return res.status(400).json({ error: 'No sessions found with payer email' });
+        }
+
+        // The preview contains only final outcomes. An old active lesson for a
+        // payer in this request would otherwise disappear from their invoice.
+        // The auto-complete job only looks back seven days; after 24 hours the
+        // admin must review the outcome before an invoice is sent.
+        if (isManoKorepetitoriusOrg(tutor.organization_id)) {
+            const { data: billingOwner, error: billingOwnerError } = await supabase
+                .from('organizations')
+                .select('enable_per_lesson, enable_monthly_billing')
+                .eq('id', tutor.organization_id)
+                .single();
+            if (billingOwnerError || !billingOwner) {
+                return res.status(500).json({ error: 'Organization billing settings unavailable' });
+            }
+
+            const reviewCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+            const { data: unresolvedRows, error: unresolvedError } = await supabase
+                .from('sessions')
+                .select('id, students!inner(payment_model, payer_email, email)')
+                .eq('tutor_id', tutorId)
+                .eq('status', 'active')
+                .eq('paid', false)
+                .eq('is_complimentary', false)
+                .is('payment_batch_id', null)
+                .is('lesson_package_id', null)
+                .gte('start_time', periodStartDate + 'T00:00:00')
+                .lte('start_time', periodEndDate + 'T23:59:59')
+                .lt('end_time', reviewCutoff)
+                .limit(1000);
+            if (unresolvedError || !unresolvedRows || unresolvedRows.length === 1000) {
+                return res.status(500).json({ error: 'Unable to review unfinished lessons' });
+            }
+            const unresolvedIds = unresolvedRows
+                .filter((row: any) => {
+                    const student = Array.isArray(row.students) ? row.students[0] : row.students;
+                    const model = student?.payment_model as string | null | undefined;
+                    return sessionsByPayer.has(student?.payer_email || student?.email)
+                        && (isMonthlyBillingOnlyStudent(model)
+                            || (!String(model || '').trim()
+                                && billingOwner.enable_monthly_billing === true
+                                && billingOwner.enable_per_lesson !== true));
+                })
+                .map((row: any) => row.id as string);
+            if (unresolvedIds.length > 0) {
+                return res.status(409).json({
+                    error: `${unresolvedIds.length} seniau nei 24 val. pasibaigusios pamokos dar neturi patvirtintos baigties. Patikrinkite jas prieš siųsdami mėnesio sąskaitą.`,
+                    count: unresolvedIds.length,
+                    sessionIds: unresolvedIds,
+                });
+            }
         }
 
         // 4. Determine Stripe account or manual payment mode

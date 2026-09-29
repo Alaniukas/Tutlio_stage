@@ -79,6 +79,7 @@ import {
 } from '@/lib/schoolSessionMonitoring';
 import { isUnconfirmedAutomaticNoShow } from '@/lib/schoolJoinNoShow';
 import { sessionPaymentDisplayKind } from '@/lib/sessionPaymentDisplay';
+import { unpaidOrgSessionPaymentStatus } from '@/lib/orgSessionPaymentStatus';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 import { sendEmail } from '@/lib/email';
 import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
@@ -752,30 +753,32 @@ export default function CompanySessions() {
   const handleTogglePaid = async () => {
     if (!selectedSession) return;
     setTogglingPaid(true);
-    const newPaid = !selectedSession.paid;
-    const { error } = await supabase
-      .from('sessions')
-      .update({
-        paid: newPaid,
-        payment_status: newPaid ? 'paid' : 'pending',
-        ...(newPaid ? {} : { is_complimentary: false }),
-      })
-      .eq('id', selectedSession.id);
-    setTogglingPaid(false);
-    if (!error) {
-      setSelectedSession({
-        ...selectedSession,
-        paid: newPaid,
-        payment_status: newPaid ? 'paid' : 'pending',
-        is_complimentary: newPaid ? selectedSession.is_complimentary : false,
-      });
+    try {
+      const newPaid = !selectedSession.paid;
+      const paymentStatus = newPaid
+        ? 'paid'
+        : await unpaidOrgSessionPaymentStatus(organizationId, selectedSession.student_id);
+      const { error } = await supabase
+        .from('sessions')
+        .update({
+          paid: newPaid,
+          payment_status: paymentStatus,
+          ...(newPaid ? {} : { is_complimentary: false }),
+        })
+        .eq('id', selectedSession.id);
+      if (error) throw error;
       const paidPatch = {
         paid: newPaid,
-        payment_status: newPaid ? 'paid' : 'pending' as const,
+        payment_status: paymentStatus,
         is_complimentary: newPaid ? selectedSession.is_complimentary : false,
       };
+      setSelectedSession({ ...selectedSession, ...paidPatch });
       setSessions(prev => prev.map(s => s.id === selectedSession.id ? { ...s, ...paidPatch } : s));
       setStatsSessions(prev => prev.map(s => s.id === selectedSession.id ? { ...s, ...paidPatch } : s));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : t('compSch.errorGeneric', { msg: '' }));
+    } finally {
+      setTogglingPaid(false);
     }
   };
 
@@ -792,7 +795,7 @@ export default function CompanySessions() {
     const patch = {
       is_complimentary: next,
       paid: next,
-      payment_status: next ? 'paid' : 'pending',
+      payment_status: result.session.payment_status as string,
     };
     setSelectedSession({ ...selectedSession, ...patch });
     setSessions(prev => prev.map(s => s.id === selectedSession.id ? { ...s, ...patch } : s));
@@ -854,6 +857,11 @@ export default function CompanySessions() {
       const newEnd = new Date(newStart.getTime() + editDurationMinutes * 60 * 1000);
 
       const paidChanged = editPaid !== selectedSession.paid;
+      const editedStudentId = editStudentId || selectedSession.student_id;
+      const paymentStatusShouldUpdate = paidChanged || (!editPaid && editedStudentId !== selectedSession.student_id);
+      const editedPaymentStatus = paymentStatusShouldUpdate
+        ? editPaid ? 'paid' : await unpaidOrgSessionPaymentStatus(organizationId, editedStudentId)
+        : selectedSession.payment_status;
       const isClassGroupEdit = Boolean(selectedSession.class_group_id);
       const showCommentToParent = canChooseParentComment && editShowCommentToParent;
       const seriesFields: Record<string, any> = isClassGroupEdit
@@ -873,7 +881,7 @@ export default function CompanySessions() {
             student_id: editStudentId || selectedSession.student_id,
             tutor_id: editTutorId || selectedSession.tutor_id,
             paid: editPaid,
-            ...(paidChanged ? { payment_status: editPaid ? 'paid' : 'pending' } : {}),
+            ...(paymentStatusShouldUpdate ? { payment_status: editedPaymentStatus } : {}),
             status: editStatus,
             tutor_comment: editTutorComment || null,
             show_comment_to_student: editShowCommentToStudent,

@@ -2,6 +2,7 @@ import { en } from './en.js';
 
 /** Brazilian Portuguese tutor/business copy; deferred modules retain English. */
 export const ptBrOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Notificar aluno por e-mail',
   "cal.deleteAllRemaining": "Todas as aulas restantes desta série",
   "cal.deleteAllRemainingHint": "Remove as aulas futuras programadas e canceladas desta série. O histórico das aulas concluídas é mantido.",
   "cal.deleteConfirmAll": "Excluir todas as aulas programadas e canceladas restantes desta série? O histórico das aulas concluídas é mantido.",

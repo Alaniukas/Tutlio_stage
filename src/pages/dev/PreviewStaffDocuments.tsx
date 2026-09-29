@@ -21,14 +21,14 @@ function sample(
     staff_revoked_at: null, signing_status: signingStatus, status,
     sent_at: status === 'draft' ? null : '2026-09-19T10:00:00Z',
     signed_at: status === 'signed' ? '2026-09-20T10:00:00Z' : null,
-    pdf_url: type === 'consent' && signingStatus === 'draft' ? null : 'preview.pdf',
+    pdf_url: signingStatus === 'draft' ? null : 'preview.pdf',
     signed_contract_url: status === 'signed' ? 'preview-signed.pdf' : null,
     staff_files_deleted_at: null,
   };
 }
 
 const documents: StaffDocument[] = [
-  sample('a1', 'group-a', 'Austėja Kazlauskaitė', 'austeja@example.com', 'confidentiality', 'awaiting_school_signature', 'draft'),
+  sample('a1', 'group-a', 'Austėja Kazlauskaitė', 'austeja@example.com', 'confidentiality', 'draft', 'sent'),
   sample('a2', 'group-a', 'Austėja Kazlauskaitė', 'austeja@example.com', 'consent', 'draft', 'sent'),
   sample('b1', 'group-b', 'Mantas Žukauskas', 'mantas@example.com', 'confidentiality', 'signed_by_school', 'viewed'),
   sample('b2', 'group-b', 'Mantas Žukauskas', 'mantas@example.com', 'consent', 'awaiting_school_signature', 'viewed'),
@@ -46,7 +46,7 @@ export default function PreviewStaffDocuments() {
         <Link to="/preview/staff-documents?view=consent">Darbuotojo sutikimo forma</Link>
       </nav>
       {consent
-        ? <SchoolStaffConsent previewInfo={{ schoolName: 'VšĮ „Laisvi vaikai“', employeeName: 'Austėja Kazlauskaitė' }} />
+        ? <SchoolStaffConsent previewInfo={{ schoolName: 'VšĮ „Laisvi vaikai“', employeeName: 'Austėja Kazlauskaitė', needsPersonalDetails: true }} />
         : <CompanyStaffDocumentsContent canEdit previewData={{ organizationId: ORG_ID, documents }} />}
     </div>
   );

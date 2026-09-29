@@ -23,8 +23,12 @@ function mockRes() {
   return res;
 }
 
-function mockReq(method: string, session?: string) {
-  return { method, query: session ? { session } : {}, headers: {} };
+function mockReq(method: string, session?: string, uiLocale?: string) {
+  return {
+    method,
+    query: { ...(session ? { session } : {}), ...(uiLocale ? { ui_locale: uiLocale } : {}) },
+    headers: { 'accept-language': 'ru-RU' },
+  };
 }
 
 const stripeRetrieve = vi.fn();
@@ -140,6 +144,7 @@ describe('GET /api/pay-session', () => {
     // The fresh checkout must charge the up-to-date €50 amount.
     const createArgs = stripeCreate.mock.calls[0][0];
     expect(createArgs.line_items[0].price_data.unit_amount).toBe(Math.round(50 * 100));
+    expect(createArgs.locale).toBe('lt');
     expect(createArgs.payment_intent_data.application_fee_amount).toBe(expectedFeeCents(50));
     expect(createArgs.payment_intent_data.transfer_data).toBeUndefined();
     expect(stripeCreate.mock.calls[0][1]).toEqual({ stripeAccount: 'acct_individual' });
@@ -155,6 +160,7 @@ describe('GET /api/pay-session', () => {
       status: 'open',
       url: 'https://checkout.stripe.test/cs_old',
       amount_total: expectedTotalCents(25),
+      locale: 'lt',
     });
 
     const handler = (await import('../../api/pay-session')).default;
@@ -167,6 +173,39 @@ describe('GET /api/pay-session', () => {
     expect(stripeCreate).not.toHaveBeenCalled();
     expect(result.redirectStatus).toBe(303);
     expect(result.redirectedTo).toBe('https://checkout.stripe.test/cs_old');
+  });
+
+  it('replaces an open auto-locale checkout even when the lesson price is unchanged', async () => {
+    sessionsSingle.mockResolvedValue({ data: sessionRow({ price: 25 }), error: null });
+    stripeRetrieve.mockResolvedValue({
+      id: 'cs_old',
+      status: 'open',
+      url: 'https://checkout.stripe.test/cs_old',
+      amount_total: expectedTotalCents(25),
+      locale: null,
+    });
+    stripeCreate.mockResolvedValue({ id: 'cs_new', url: 'https://checkout.stripe.test/cs_new' });
+
+    const handler = (await import('../../api/pay-session')).default;
+    const res = mockRes();
+    await handler(mockReq('GET', 'sess-1') as any, res as any);
+
+    expect(stripeExpire).toHaveBeenCalledWith('cs_old', { stripeAccount: 'acct_individual' });
+    expect(stripeCreate.mock.calls[0][0].locale).toBe('lt');
+    expect((res as any).getResult().redirectedTo).toBe('https://checkout.stripe.test/cs_new');
+  });
+
+  it('uses a supported UI locale from a direct payment link', async () => {
+    sessionsSingle.mockResolvedValue({
+      data: sessionRow({ price: 25, stripe_checkout_session_id: null }),
+      error: null,
+    });
+    stripeCreate.mockResolvedValue({ id: 'cs_new', url: 'https://checkout.stripe.test/cs_new' });
+
+    const handler = (await import('../../api/pay-session')).default;
+    await handler(mockReq('GET', 'sess-1', 'pl') as any, mockRes() as any);
+
+    expect(stripeCreate.mock.calls[0][0].locale).toBe('pl');
   });
 
   it('rejects a legacy empty student model when the tutor uses monthly billing', async () => {

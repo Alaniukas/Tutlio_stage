@@ -17,7 +17,8 @@ export interface OrgTutorPolicy {
   editBreakBetweenLessons: boolean;
   editMinBookingHours: boolean;
   editReminders: boolean;
-  payPerLessonEur: number;
+  /** Null means that the tutor's configured rate could not be loaded. Zero is an actual configured value. */
+  payPerLessonEur: number | null;
   hideMoney: boolean;
   canEditLessonPricing: boolean;
   canToggleSessionPaid: boolean;
@@ -39,7 +40,7 @@ const defaultPolicy: OrgTutorPolicy = {
   editBreakBetweenLessons: false,
   editMinBookingHours: false,
   editReminders: false,
-  payPerLessonEur: 0,
+  payPerLessonEur: null,
   hideMoney: false,
   canEditLessonPricing: true,
   canToggleSessionPaid: true,
@@ -63,8 +64,9 @@ export function useOrgTutorPolicy(): OrgTutorPolicy {
         return;
       }
 
-      const { data: side } = await tutorSidebarProfileDeduped(user.id);
+      const { data: side, error: sideError } = await tutorSidebarProfileDeduped(user.id);
       if (cancelled) return;
+      if (sideError) console.warn('[useOrgTutorPolicy] tutor profile fetch:', sideError.message);
 
       let effectiveOrgId: string | null = profile?.organization_id ?? side?.organization_id ?? null;
       let effectiveCommissionPercent: number | null =
@@ -134,7 +136,11 @@ export function useOrgTutorPolicy(): OrgTutorPolicy {
       const legacy = org?.org_tutors_can_edit_lesson_settings === true;
       const raw = org?.org_tutor_lesson_edit as Record<string, unknown> | null | undefined;
       const scope = parseOrgLessonEditScope(raw, legacy);
-      const pay = Number(prof?.company_commission_percent) || 0;
+      const pay = typeof prof.company_commission_percent === 'number'
+        && Number.isFinite(prof.company_commission_percent)
+        && prof.company_commission_percent >= 0
+        ? prof.company_commission_percent
+        : null;
 
       const issuerMode = (org?.invoice_issuer_mode as 'company' | 'tutor' | 'both') || 'both';
       const licenseCount = Number(org?.tutor_license_count) || 0;

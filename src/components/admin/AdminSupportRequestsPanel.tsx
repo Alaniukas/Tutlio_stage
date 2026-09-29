@@ -9,7 +9,6 @@ import {
   Image as ImageIcon,
   Lightbulb,
   Loader2,
-  MailCheck,
   MessageSquareText,
   RefreshCw,
   Save,
@@ -18,6 +17,7 @@ import {
 } from 'lucide-react';
 import type {
   InAppSupportCategory,
+  InAppSupportEnvironment,
   InAppSupportImpact,
   InAppSupportPriority,
   InAppSupportStatus,
@@ -32,6 +32,16 @@ type AdminAttachment = {
   type: string;
   size: number;
   signedUrl: string | null;
+};
+
+type SupportLogEvent = {
+  log_id: string;
+  occurred_at: string;
+  level: string;
+  method: string | null;
+  path: string | null;
+  status_code: number | null;
+  message: string | null;
 };
 
 export type SupportRequest = {
@@ -53,7 +63,7 @@ export type SupportRequest = {
   impact_details: string;
   page: string;
   locale: string;
-  environment: Record<string, string>;
+  environment: InAppSupportEnvironment;
   transcript: InAppSupportTranscriptMessage[];
   attachments: AdminAttachment[];
   coding_agent_prompt: string | null;
@@ -61,17 +71,24 @@ export type SupportRequest = {
   completion_notification_email_id: string | null;
   status: InAppSupportStatus;
   priority: InAppSupportPriority;
+  target_date?: string | null;
+  status_updated_at?: string;
+  status_notified_at?: string | null;
+  status_notification_error?: string | null;
+  trello_card_id?: string | null;
+  trello_card_url?: string | null;
+  trello_synced_at?: string | null;
+  trello_sync_error?: string | null;
+  legacy_status?: string | null;
   internal_note: string | null;
   created_at: string;
   updated_at: string;
 };
 
 const STATUS: Record<InAppSupportStatus, { label: string; className: string }> = {
-  new: { label: 'Nauja', className: 'bg-sky-500/15 text-sky-300 border-sky-500/25' },
-  in_review: { label: 'Vertinama', className: 'bg-amber-500/15 text-amber-300 border-amber-500/25' },
-  planned: { label: 'Suplanuota', className: 'bg-violet-500/15 text-violet-300 border-violet-500/25' },
+  registered: { label: 'Užregistruota', className: 'bg-sky-500/15 text-sky-300 border-sky-500/25' },
+  in_progress: { label: 'Vykdoma', className: 'bg-violet-500/15 text-violet-300 border-violet-500/25' },
   resolved: { label: 'Išspręsta', className: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/25' },
-  closed: { label: 'Uždaryta', className: 'bg-slate-500/15 text-slate-300 border-slate-500/25' },
 };
 
 const PRIORITY: Record<InAppSupportPriority, string> = {
@@ -96,6 +113,14 @@ function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
+function dateTimeLocal(value: string | null): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const pad = (number: number) => String(number).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function reference(id: string): string {
   return `SUP-${id.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
 }
@@ -112,16 +137,19 @@ export default function AdminSupportRequestsPanel({
   const [selectedId, setSelectedId] = useState<string | null>(demoRequests?.[0]?.id || null);
   const [loading, setLoading] = useState(!demoRequests);
   const [saving, setSaving] = useState(false);
-  const [notifyingCompletion, setNotifyingCompletion] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | InAppSupportStatus>('all');
   const [categoryFilter, setCategoryFilter] = useState<'all' | InAppSupportCategory>('all');
-  const [editStatus, setEditStatus] = useState<InAppSupportStatus>('new');
+  const [editStatus, setEditStatus] = useState<InAppSupportStatus>('registered');
   const [editPriority, setEditPriority] = useState<InAppSupportPriority>('untriaged');
+  const [editTargetDate, setEditTargetDate] = useState('');
   const [internalNote, setInternalNote] = useState('');
   const [showTranscript, setShowTranscript] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
+  const [logEvents, setLogEvents] = useState<SupportLogEvent[] | null>(null);
+  const [loadingLogs, setLoadingLogs] = useState(false);
 
   const load = async () => {
     if (demoRequests) {
@@ -172,28 +200,41 @@ export default function AdminSupportRequestsPanel({
     if (!selected) return;
     setEditStatus(selected.status);
     setEditPriority(selected.priority);
+    setEditTargetDate(dateTimeLocal(selected.target_date));
     setInternalNote(selected.internal_note || '');
     setShowTranscript(false);
     setPromptCopied(false);
+    setLogEvents(null);
   }, [selected?.id]);
 
   const counts = useMemo(() => ({
-    open: requests.filter((item) => ['new', 'in_review'].includes(item.status)).length,
-    bugs: requests.filter((item) => item.category === 'bug' && !['resolved', 'closed'].includes(item.status)).length,
-    features: requests.filter((item) => item.category === 'feature' && !['resolved', 'closed'].includes(item.status)).length,
+    open: requests.filter((item) => item.status !== 'resolved').length,
+    bugs: requests.filter((item) => item.category === 'bug' && item.status !== 'resolved').length,
+    features: requests.filter((item) => item.category === 'feature' && item.status !== 'resolved').length,
     resolved: requests.filter((item) => item.status === 'resolved').length,
   }), [requests]);
 
   const save = async () => {
     if (!selected || saving) return;
+    if (editStatus === 'in_progress' && !editTargetDate) {
+      setError('Būsenai „Vykdoma“ būtina nurodyti terminą.');
+      return;
+    }
     setSaving(true);
     setError('');
+    setNotice('');
+    const targetDate = editStatus === 'registered' ? null
+      : editTargetDate === dateTimeLocal(selected.target_date || null)
+        ? selected.target_date || null
+        : editTargetDate ? new Date(editTargetDate).toISOString() : null;
     try {
       if (demoMode) {
         setRequests((current) => current.map((item) => item.id === selected.id ? {
           ...item,
           status: editStatus,
           priority: editPriority,
+          target_date: targetDate,
+          status_updated_at: new Date().toISOString(),
           internal_note: internalNote || null,
           updated_at: new Date().toISOString(),
         } : item));
@@ -206,14 +247,18 @@ export default function AdminSupportRequestsPanel({
           id: selected.id,
           status: editStatus,
           priority: editPriority,
+          expectedStatusUpdatedAt: selected.status_updated_at,
+          expectedPriority: selected.priority,
+          targetDate,
           internalNote,
         }),
       });
-      const result = await response.json().catch(() => null) as { request?: SupportRequest; error?: string } | null;
+      const result = await response.json().catch(() => null) as { request?: SupportRequest; error?: string; warnings?: string[] } | null;
       if (!response.ok || !result?.request) throw new Error(result?.error || 'Nepavyko išsaugoti');
       setRequests((current) => current.map((item) => (
         item.id === selected.id ? { ...item, ...result.request, attachments: item.attachments } : item
       )));
+      if (result.warnings?.length) setNotice('Išsaugota. ' + result.warnings.join(' '));
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Nepavyko išsaugoti');
     } finally {
@@ -221,47 +266,52 @@ export default function AdminSupportRequestsPanel({
     }
   };
 
-  const copyCodingAgentPrompt = async () => {
-    if (!selected?.coding_agent_prompt) return;
-    setPromptCopied(await copyTextToClipboard(selected.coding_agent_prompt));
-  };
-
-  const notifyCompletion = async () => {
-    if (!selected
-      || selected.status !== 'resolved'
-      || selected.completion_notified_at
-      || notifyingCompletion) return;
-    const action = selected.category === 'bug' ? 'klaida ištaisyta' : 'funkcija įdiegta';
-    if (!window.confirm(`Išsiųsti ${selected.reporter_email} laišką, kad ${action}?`)) return;
-
-    setNotifyingCompletion(true);
+  const retryDelivery = async (action: 'notify_status' | 'sync_trello') => {
+    if (!selected || demoMode) return;
+    setSaving(true);
     setError('');
+    setNotice('');
     try {
-      if (demoMode) {
-        const completionNotifiedAt = new Date().toISOString();
-        setRequests((current) => current.map((item) => item.id === selected.id ? {
-          ...item,
-          completion_notified_at: completionNotifiedAt,
-          completion_notification_email_id: 'demo-completion-email',
-          updated_at: completionNotifiedAt,
-        } : item));
-        return;
-      }
       const response = await fetch('/api/admin-support-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
-        body: JSON.stringify({ id: selected.id, action: 'notify_completion' }),
+        body: JSON.stringify({ id: selected.id, action }),
       });
       const result = await response.json().catch(() => null) as { request?: SupportRequest; error?: string } | null;
-      if (!response.ok || !result?.request) throw new Error(result?.error || 'Nepavyko išsiųsti užbaigimo laiško');
-      setRequests((current) => current.map((item) => (
-        item.id === selected.id ? { ...item, ...result.request, attachments: item.attachments } : item
-      )));
-    } catch (notifyError) {
-      setError(notifyError instanceof Error ? notifyError.message : 'Nepavyko išsiųsti užbaigimo laiško');
+      if (!response.ok || !result?.request) throw new Error(result?.error || 'Nepavyko pakartoti');
+      setRequests((current) => current.map((item) => item.id === selected.id
+        ? { ...item, ...result.request, attachments: item.attachments } : item));
+      setNotice(action === 'notify_status' ? 'Pranešimas naudotojui išsiųstas.' : 'Trello kortelė sinchronizuota.');
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : 'Nepavyko pakartoti');
     } finally {
-      setNotifyingCompletion(false);
+      setSaving(false);
     }
+  };
+
+  const loadLogs = async () => {
+    if (!selected || demoMode || loadingLogs) return;
+    setLoadingLogs(true);
+    setError('');
+    try {
+      const response = await fetch('/api/admin-support-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
+        body: JSON.stringify({ id: selected.id, action: 'get_logs' }),
+      });
+      const result = await response.json().catch(() => null) as { logs?: SupportLogEvent[]; error?: string } | null;
+      if (!response.ok) throw new Error(result?.error || 'Nepavyko įkelti Vercel logų');
+      setLogEvents(result?.logs || []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Nepavyko įkelti Vercel logų');
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
+
+  const copyCodingAgentPrompt = async () => {
+    if (!selected?.coding_agent_prompt) return;
+    setPromptCopied(await copyTextToClipboard(selected.coding_agent_prompt));
   };
 
   return (
@@ -304,6 +354,7 @@ export default function AdminSupportRequestsPanel({
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
         </div>
       )}
+      {notice && <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">{notice}</div>}
 
       <div className="grid min-h-[640px] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] lg:grid-cols-[330px_minmax(0,1fr)]">
         <div className="max-h-[720px] overflow-y-auto border-b border-white/10 lg:border-b-0 lg:border-r">
@@ -452,6 +503,9 @@ export default function AdminSupportRequestsPanel({
                         {Object.entries(PRIORITY).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                       </select>
                     </label>
+                    <label className="mt-3 block text-xs text-slate-400">Terminas {editStatus === 'in_progress' ? '(privalomas)' : ''}
+                      <input type="datetime-local" value={editTargetDate} onChange={(event) => setEditTargetDate(event.target.value)} disabled={editStatus === 'registered'} className="mt-1.5 h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-2.5 text-sm text-white outline-none focus:border-indigo-500 disabled:opacity-50" />
+                    </label>
                     <label className="mt-3 block text-xs text-slate-400">Vidinė pastaba
                       <textarea value={internalNote} onChange={(event) => setInternalNote(event.target.value.slice(0, 10_000))} rows={5} placeholder="Sprendimas, nuoroda į užduotį, atsakingas žmogus…" className="mt-1.5 w-full resize-none rounded-lg border border-white/10 bg-slate-900 px-2.5 py-2 text-sm leading-5 text-white outline-none placeholder:text-slate-600 focus:border-indigo-500" />
                     </label>
@@ -459,29 +513,18 @@ export default function AdminSupportRequestsPanel({
                       {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Išsaugoti
                     </button>
 
-                    <div className="mt-4 border-t border-white/10 pt-4">
-                      <p className="text-xs font-bold text-slate-200">Užbaigimo laiškas</p>
-                      {selected.completion_notified_at ? (
-                        <div className="mt-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2.5 text-xs leading-5 text-emerald-200">
-                          <span className="flex items-center gap-1.5 font-bold"><MailCheck className="h-4 w-4" /> Naudotojas informuotas</span>
-                          <span className="mt-1 block text-emerald-300/70">{formatDate(selected.completion_notified_at)}</span>
-                        </div>
-                      ) : (
-                        <>
-                          <p className="mt-1.5 text-[11px] leading-4 text-slate-500">
-                            Laišką galima siųsti tik išsaugojus būseną „Išspręsta“. Gavėjas bus {selected.reporter_email}.
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => void notifyCompletion()}
-                            disabled={selected.status !== 'resolved' || notifyingCompletion}
-                            className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            {notifyingCompletion ? <Loader2 className="h-4 w-4 animate-spin" /> : <MailCheck className="h-4 w-4" />}
-                            {selected.category === 'bug' ? 'Pranešti, kad klaida ištaisyta' : 'Pranešti, kad funkcija įdiegta'}
-                          </button>
-                        </>
-                      )}
+                    <div className="mt-4 border-t border-white/10 pt-4 text-xs text-slate-400">
+                      <p className="font-bold text-slate-200">Trello backlog</p>
+                      {selected.trello_card_url ? <a href={selected.trello_card_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-indigo-300 hover:underline">Atidaryti kortelę <ExternalLink className="h-3 w-3" /></a> : <p className="mt-2">Kortelė dar nesukurta.</p>}
+                      {selected.trello_sync_error && <p className="mt-2 text-amber-300">{selected.trello_sync_error}</p>}
+                      {!demoMode && (!selected.trello_card_id || selected.trello_sync_error) && <button type="button" onClick={() => void retryDelivery('sync_trello')} disabled={saving} className="mt-2 rounded-lg border border-white/10 px-3 py-2 font-semibold text-white hover:bg-white/10 disabled:opacity-50">Pakartoti sinchronizavimą</button>}
+                    </div>
+
+                    <div className="mt-4 border-t border-white/10 pt-4 text-xs text-slate-400">
+                      <p className="font-bold text-slate-200">Pranešimas naudotojui</p>
+                      {selected.status_notified_at && <p className="mt-2">Išsiųstas {formatDate(selected.status_notified_at)}</p>}
+                      {selected.status_notification_error && <p className="mt-2 text-amber-300">{selected.status_notification_error}</p>}
+                      {!demoMode && (selected.status_notification_error || !selected.status_notified_at) && <button type="button" onClick={() => void retryDelivery('notify_status')} disabled={saving} className="mt-2 rounded-lg border border-white/10 px-3 py-2 font-semibold text-white hover:bg-white/10 disabled:opacity-50">{selected.status_notification_error ? 'Pakartoti pranešimą' : 'Išsiųsti būseną'}</button>}
                     </div>
                   </div>
 
@@ -493,7 +536,34 @@ export default function AdminSupportRequestsPanel({
                       <div><dt className="text-slate-600">Kalba</dt><dd className="mt-0.5 text-slate-300">{selected.locale} / {selected.environment?.language || '—'}</dd></div>
                       <div><dt className="text-slate-600">Platforma</dt><dd className="mt-0.5 text-slate-300">{selected.environment?.platform || '—'}</dd></div>
                       <div><dt className="text-slate-600">Naršyklė</dt><dd className="mt-0.5 line-clamp-4 text-slate-300">{selected.environment?.userAgent || '—'}</dd></div>
+                      <div><dt className="text-slate-600">Vercel deployment</dt><dd className="mt-0.5 text-slate-300">{selected.environment?.deploymentId || '—'}</dd></div>
                     </dl>
+                    {Array.isArray(selected.environment?.diagnostics) && selected.environment.diagnostics.length > 0 && (
+                      <div className="mt-4 border-t border-white/10 pt-3">
+                        <p className="font-bold text-slate-300">Veiksmų eiga</p>
+                        <ol className="mt-2 space-y-1.5">
+                          {selected.environment.diagnostics.map((event, index) => (
+                            <li key={`${event.at}-${index}`} className="break-words text-slate-400">
+                              {event.at ? formatDate(event.at) : ''} · {event.type === 'api_failure'
+                                ? `${event.method} ${event.endpoint} → ${event.status}${event.vercelId ? ` · Vercel ${event.vercelId}` : ''}`
+                                : event.type === 'click'
+                                  ? `Paspausta ${event.action || event.control} · ${event.path}`
+                                  : `Atidaryta ${event.path}`}
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
+                    {!demoMode && (
+                      <div className="mt-4 border-t border-white/10 pt-3">
+                        <button type="button" onClick={() => void loadLogs()} disabled={loadingLogs} className="rounded-lg border border-white/10 px-3 py-2 font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-50">
+                          {loadingLogs ? 'Įkeliama…' : 'Peržiūrėti susietus Vercel logus'}
+                        </button>
+                        {logEvents && (logEvents.length === 0
+                          ? <p className="mt-2">Susietų klaidų logų nerasta.</p>
+                          : <ol className="mt-2 space-y-2">{logEvents.map((log) => <li key={log.log_id} className="rounded-lg bg-slate-950/60 p-2 text-slate-300"><strong>{formatDate(log.occurred_at)} · {log.level.toUpperCase()}</strong><br />{log.method} {log.path} · {log.status_code || '—'}{log.message && <p className="mt-1 text-slate-400">{log.message}</p>}</li>)}</ol>)}
+                      </div>
+                    )}
                   </div>
                 </aside>
               </div>
@@ -516,7 +586,7 @@ function Metric({ icon: Icon, label, value, color }: { icon: typeof Clock3; labe
 }
 
 function StatusBadge({ status }: { status: InAppSupportStatus }) {
-  const meta = STATUS[status] || STATUS.new;
+  const meta = STATUS[status] || STATUS.registered;
   return <span className={cn('inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold', meta.className)}>{meta.label}</span>;
 }
 

@@ -5,6 +5,7 @@ import { en } from './en.js';
  * Review scope and release gates: docs/GREEK_LOCALIZATION_REVIEW.md.
  */
 export const elOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Ειδοποίηση μαθητή μέσω email',
   "cal.deleteAllRemaining": "Όλα τα υπόλοιπα μαθήματα αυτής της σειράς",
   "cal.deleteAllRemainingHint": "Αφαιρεί τα μελλοντικά προγραμματισμένα και ακυρωμένα μαθήματα αυτής της σειράς. Το ιστορικό των ολοκληρωμένων μαθημάτων διατηρείται.",
   "cal.deleteConfirmAll": "Να διαγραφούν όλα τα υπόλοιπα προγραμματισμένα και ακυρωμένα μαθήματα αυτής της σειράς; Το ιστορικό των ολοκληρωμένων μαθημάτων διατηρείται.",

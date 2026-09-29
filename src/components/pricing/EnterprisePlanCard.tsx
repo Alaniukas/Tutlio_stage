@@ -269,7 +269,7 @@ export default function EnterprisePlanCard({ audience, onBookDemo, contactLabel,
               {pricing &&
                 t('enterpriseCheckout.companySummary', {
                   count,
-                  total: formatMoney(totalCents, pricing.currency),
+                  total: formatMoney(totalCents, pricing.currency, locale),
                 })}
             </p>
             <div>

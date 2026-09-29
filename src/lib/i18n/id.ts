@@ -6,6 +6,7 @@ import { en } from './en.js';
  * See docs/INDONESIAN_LOCALIZATION_REVIEW.md before publication.
  */
 export const idOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Beri tahu siswa melalui email',
   "cal.deleteAllRemaining": "Semua sesi les yang tersisa dalam rangkaian ini",
   "cal.deleteAllRemainingHint": "Menghapus sesi les mendatang yang dijadwalkan dan sesi les yang dibatalkan dalam rangkaian ini. Riwayat sesi les yang telah selesai tetap tersimpan.",
   "cal.deleteConfirmAll": "Hapus semua sesi les yang tersisa dalam rangkaian ini, baik yang dijadwalkan maupun dibatalkan? Riwayat sesi les yang telah selesai tetap tersimpan.",

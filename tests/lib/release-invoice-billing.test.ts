@@ -12,15 +12,15 @@ describe('releaseInvoiceBilling helpers', () => {
     expect(billingBatchWasPaid(null)).toBe(false);
   });
 
-  it('clears only batch link for unpaid monthly invoices', () => {
-    expect(sessionReleaseUpdate(false)).toEqual({ payment_batch_id: null });
+  it('returns unpaid monthly lessons to confirmed when an invoice is voided', () => {
+    expect(sessionReleaseUpdate(false)).toEqual({ payment_batch_id: null, payment_status: 'confirmed' });
   });
 
   it('clears paid flags when voiding a paid monthly invoice', () => {
     expect(sessionReleaseUpdate(true)).toEqual({
       payment_batch_id: null,
       paid: false,
-      payment_status: 'pending',
+      payment_status: 'confirmed',
     });
   });
 });

@@ -176,9 +176,10 @@ describe('production PLN tiers (volume — tutlio.pl)', () => {
 });
 describe('formatMoney', () => {
   it('formats euro cents with decimals only when needed', () => {
-    expect(formatMoney(280, 'eur')).toContain('2.80');
-    expect(formatMoney(4500, 'eur')).toContain('45');
-    expect(formatMoney(4500, 'eur')).not.toContain('45.00');
+    expect(formatMoney(280, 'eur', 'en')).toContain('2.80');
+    expect(formatMoney(4500, 'eur', 'en')).toContain('45');
+    expect(formatMoney(4500, 'eur', 'en')).not.toContain('45.00');
+    expect(formatMoney(280, 'eur', 'lt')).toContain('2,80');
   });
 
   it('includes the currency symbol', () => {

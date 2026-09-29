@@ -14,6 +14,7 @@ import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, directChargeApplicationFeeCents, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { stripeCheckoutLocale } from './_lib/stripeLocale.js';
 import {
     directChargeOptions,
     expireConnectCheckoutSession,
@@ -32,6 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let market = marketFromRequest(req);
     let currency = chargeCurrency(market);
     const appOrigin = publicOriginFromRequest(req);
+    const checkoutLocale = stripeCheckoutLocale(req.query.ui_locale);
 
     const packageId = typeof req.query.package === 'string' ? req.query.package.trim() : '';
     if (!packageId) return res.status(400).send(errorPage('Klaida', 'Trūksta paketo identifikatoriaus.'));
@@ -141,7 +143,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     stripeAccountId,
                 );
                 const existing = existingLookup.session;
-                if (existingLookup.stripeAccount === stripeAccountId && existing.status === 'open' && existing.url) {
+                if (existingLookup.stripeAccount === stripeAccountId
+                    && existing.status === 'open'
+                    && existing.url
+                    && existing.locale === checkoutLocale) {
                     return res.redirect(303, existing.url);
                 }
                 if (existing.status === 'open') {
@@ -186,6 +191,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const { applicationFeeCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
+                locale: checkoutLocale,
                 customer_email: customerEmail,
                 customer_creation: 'always',
                 payment_method_types: ['card'],
@@ -206,6 +212,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const applicationFeeCents = directChargeApplicationFeeCents(basePriceEur, market, feeProfile, feeSplit);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
+                locale: checkoutLocale,
                 customer_email: customerEmail,
                 customer_creation: 'always',
                 payment_method_types: ['card'],

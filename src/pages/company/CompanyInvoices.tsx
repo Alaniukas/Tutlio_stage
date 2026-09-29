@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { DateInput } from '@/components/ui/date-input';
 import { MonthFilterInput } from '@/components/ui/month-filter-input';
@@ -36,6 +36,7 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { orgTutorSessionPayEur } from '@/lib/orgTutorLessonPay';
+import { isManoKorepetitoriusOrg } from '@/lib/marketMoney';
 import { ORG_TUTOR_CARD_LIST_SCROLL_CLASS } from '@/lib/orgUi';
 import { isInvoiceProfileComplete } from '@/lib/invoiceProfileReady';
 
@@ -100,6 +101,8 @@ export default function CompanyInvoices() {
   const [alreadyIssuedTutors, setAlreadyIssuedTutors] = useState<string[]>([]);
   const [tutorSessions, setTutorSessions] = useState<Record<string, { count: number; total: number }>>({});
   const [loadingTutorSessions, setLoadingTutorSessions] = useState(false);
+  const [tutorSessionsError, setTutorSessionsError] = useState(false);
+  const tutorSessionsRequestId = useRef(0);
   const [invoiceIssuerMode, setInvoiceIssuerMode] = useState<string>('both');
   const [tutorInvoiceTarget, setTutorInvoiceTarget] = useState<{ id: string; full_name: string } | null>(null);
   const [checkingAlreadyIssued, setCheckingAlreadyIssued] = useState(false);
@@ -217,50 +220,81 @@ export default function CompanyInvoices() {
   }, [loadData]);
 
   const loadTutorSessions = useCallback(async () => {
-    if (!orgId || tutors.length === 0) return;
-    setLoadingTutorSessions(true);
-    const tutorIds = tutors.map(t => t.id);
-    const [{ data: sessions }, { data: tutorProfiles }] = await Promise.all([
-      supabase
-        .from('sessions')
-        .select('tutor_id, price, status, paid, payment_status, subject_id, tutor_pay_eur_snapshot')
-        .in('tutor_id', tutorIds)
-        .gte('start_time', tutorEffectiveRange.start)
-        .lte('start_time', tutorEffectiveRange.end + 'T23:59:59')
-        .neq('status', 'cancelled'),
-      supabase.from('profiles').select('id, company_commission_percent, company_commission_by_subject').in('id', tutorIds),
-    ]);
-    const payByTutor = new Map(
-      (tutorProfiles || []).map((p: {
-        id: string;
-        company_commission_percent?: number | null;
-        company_commission_by_subject?: unknown;
-      }) => [
-        p.id,
-        {
-          defaultRate: p.company_commission_percent,
-          bySubject: p.company_commission_by_subject,
-        },
-      ]),
-    );
-    const map: Record<string, { count: number; total: number }> = {};
-    for (const s of sessions || []) {
-      const isCountedAsPaid = s.status === 'completed' || s.paid === true || ['paid', 'confirmed'].includes(String(s.payment_status || ''));
-      if (!isCountedAsPaid) continue;
-      if (!map[s.tutor_id]) map[s.tutor_id] = { count: 0, total: 0 };
-      map[s.tutor_id].count++;
-      const pay = payByTutor.get(s.tutor_id);
-      map[s.tutor_id].total += orgTutorSessionPayEur({
-        organizationId: orgId,
-        defaultRate: pay?.defaultRate,
-        bySubject: pay?.bySubject,
-        subjectId: (s as { subject_id?: string | null }).subject_id,
-        sessionPrice: s.price,
-        tutorPaySnapshot: (s as { tutor_pay_eur_snapshot?: number | null }).tutor_pay_eur_snapshot,
-      });
+    const requestId = ++tutorSessionsRequestId.current;
+    if (!orgId || tutors.length === 0) {
+      setTutorSessions({});
+      setTutorSessionsError(false);
+      setLoadingTutorSessions(false);
+      return;
     }
-    setTutorSessions(map);
-    setLoadingTutorSessions(false);
+    setLoadingTutorSessions(true);
+    setTutorSessionsError(false);
+    const tutorIds = tutors.map(t => t.id);
+    const manoTutorInvoices = isManoKorepetitoriusOrg(orgId);
+    let sessionQuery = supabase
+      .from('sessions')
+      .select('tutor_id, price, status, paid, payment_status, subject_id, tutor_pay_eur_snapshot')
+      .in('tutor_id', tutorIds)
+      .gte('start_time', tutorEffectiveRange.start)
+      .lte('start_time', tutorEffectiveRange.end + 'T23:59:59')
+      .neq('status', 'cancelled');
+    if (manoTutorInvoices) {
+      sessionQuery = sessionQuery
+        .in('status', ['completed', 'no_show'])
+        .lte('end_time', new Date().toISOString());
+    }
+    try {
+      const [sessionResult, profileResult] = await Promise.all([
+        sessionQuery,
+        supabase.from('profiles').select('id, company_commission_percent, company_commission_by_subject').in('id', tutorIds),
+      ]);
+      if (sessionResult.error || profileResult.error || !sessionResult.data || !profileResult.data) {
+        throw sessionResult.error || profileResult.error || new Error('Tutor invoice preview data unavailable');
+      }
+      if (new Set(profileResult.data.map((profile) => profile.id)).size !== new Set(tutorIds).size) {
+        throw new Error('Tutor pay profiles missing from invoice preview');
+      }
+      const payByTutor = new Map(
+        profileResult.data.map((p: {
+          id: string;
+          company_commission_percent?: number | null;
+          company_commission_by_subject?: unknown;
+        }) => [
+          p.id,
+          {
+            defaultRate: p.company_commission_percent,
+            bySubject: p.company_commission_by_subject,
+          },
+        ]),
+      );
+      const map: Record<string, { count: number; total: number }> = {};
+      for (const s of sessionResult.data) {
+        const isCountedAsPaid = manoTutorInvoices
+          ? s.status === 'completed' || s.status === 'no_show'
+          : s.status === 'completed' || s.paid === true || ['paid', 'confirmed'].includes(String(s.payment_status || ''));
+        if (!isCountedAsPaid) continue;
+        if (!map[s.tutor_id]) map[s.tutor_id] = { count: 0, total: 0 };
+        map[s.tutor_id].count++;
+        const pay = payByTutor.get(s.tutor_id);
+        map[s.tutor_id].total += orgTutorSessionPayEur({
+          organizationId: orgId,
+          defaultRate: pay?.defaultRate,
+          bySubject: pay?.bySubject,
+          subjectId: (s as { subject_id?: string | null }).subject_id,
+          sessionPrice: s.price,
+          tutorPaySnapshot: (s as { tutor_pay_eur_snapshot?: number | null }).tutor_pay_eur_snapshot,
+        });
+      }
+      if (requestId === tutorSessionsRequestId.current) setTutorSessions(map);
+    } catch (error) {
+      console.error('[CompanyInvoices] tutor invoice preview:', error);
+      if (requestId === tutorSessionsRequestId.current) {
+        setTutorSessions({});
+        setTutorSessionsError(true);
+      }
+    } finally {
+      if (requestId === tutorSessionsRequestId.current) setLoadingTutorSessions(false);
+    }
   }, [orgId, tutors, tutorEffectiveRange.start, tutorEffectiveRange.end]);
 
   useEffect(() => {
@@ -748,6 +782,10 @@ export default function CompanyInvoices() {
 
             {loadingTutorSessions ? (
               <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-indigo-500" /></div>
+            ) : tutorSessionsError ? (
+              <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {t('common.error')}
+              </p>
             ) : tutors.length === 0 ? (
               <p className="text-gray-500 text-center py-8">{t('invoices.noTutors')}</p>
             ) : (
@@ -795,7 +833,7 @@ export default function CompanyInvoices() {
               </div>
             )}
 
-            {selectedTutorIds.size > 0 && (
+            {selectedTutorIds.size > 0 && !tutorSessionsError && !loadingTutorSessions && (
               <div className="flex gap-2 mt-2">
                 <Button
                   className="flex-1 rounded-xl bg-indigo-600 hover:bg-indigo-700"
@@ -811,6 +849,7 @@ export default function CompanyInvoices() {
 
                     // Pre-check duplicates for selected tutor set before generation.
                     for (const tutorId of selectedIds) {
+                      const tutorName = tutors.find((tutor) => tutor.id === tutorId)?.full_name || tutorId;
                       try {
                         const precheckResp = await fetch('/api/generate-invoice', {
                           method: 'POST',
@@ -826,14 +865,16 @@ export default function CompanyInvoices() {
                         });
                         const precheckJson = await precheckResp.json().catch(() => ({}));
                         if (!precheckResp.ok) {
-                          failedMsgs.push(precheckJson?.error || `${precheckResp.status} ${precheckResp.statusText}`);
+                          failedMsgs.push(`${tutorName}: ${precheckJson?.error || `${precheckResp.status} ${precheckResp.statusText}`}`);
                           continue;
                         }
                         if (precheckJson?.canGenerate) {
                           eligibleTutorIds.push(tutorId);
+                        } else if (precheckJson?.reason !== 'no_sessions') {
+                          failedMsgs.push(`${tutorName}: ${precheckJson?.error || t('common.error')}`);
                         }
                       } catch (err) {
-                        failedMsgs.push(err instanceof Error ? err.message : 'Unknown error');
+                        failedMsgs.push(`${tutorName}: ${err instanceof Error ? err.message : t('common.error')}`);
                       }
                     }
 
@@ -858,7 +899,25 @@ export default function CompanyInvoices() {
                           continue;
                         }
                         const result = await resp.json();
-                        if (result.invoiceIds) generatedIds.push(...result.invoiceIds);
+                        if (Array.isArray(result.invoiceIds)) generatedIds.push(...result.invoiceIds);
+                        const failedPdfIds = Array.isArray(result.pdfGenerationFailedIds)
+                          ? result.pdfGenerationFailedIds.filter((id: unknown): id is string => typeof id === 'string')
+                          : [];
+                        for (const invoiceId of failedPdfIds) {
+                          try {
+                            const pdfResponse = await fetch(`/api/invoice-pdf?id=${encodeURIComponent(invoiceId)}`, {
+                              headers: await authHeaders(),
+                            });
+                            if (!pdfResponse.ok || !pdfResponse.headers.get('content-type')?.includes('application/pdf')) {
+                              throw new Error('PDF is unavailable');
+                            }
+                            const pdf = await pdfResponse.blob();
+                            if (pdf.size === 0) throw new Error('PDF is empty');
+                          } catch (pdfError) {
+                            console.error('[CompanyInvoices] invoice PDF retry failed:', invoiceId, pdfError);
+                            failedMsgs.push(`${t('common.error')} PDF: ${invoiceId}`);
+                          }
+                        }
                       } catch (err) {
                         console.error(`Invoice generation for tutor ${tutorId} failed:`, err);
                         failedMsgs.push(err instanceof Error ? err.message : 'Unknown error');
@@ -866,7 +925,7 @@ export default function CompanyInvoices() {
                     }
                     setGeneratingForTutors(false);
                     setLastGeneratedInvoiceIds(generatedIds);
-                    if (failedMsgs.length > 0) setTutorGenerationError(failedMsgs[0]);
+                    if (failedMsgs.length > 0) setTutorGenerationError(Array.from(new Set(failedMsgs)).join('\n'));
                     void loadData();
                   }}
                 >
@@ -880,7 +939,7 @@ export default function CompanyInvoices() {
             )}
             {tutorGenerationError && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-3 mt-2">
-                <p className="text-sm text-red-700">{tutorGenerationError}</p>
+                <p className="text-sm text-red-700 whitespace-pre-line">{tutorGenerationError}</p>
               </div>
             )}
             {alreadyIssuedTutors.length > 0 && (
@@ -906,19 +965,32 @@ export default function CompanyInvoices() {
                 onClick={async () => {
                   setDownloadingBundle(true);
                   try {
+                    const failedPdfIds: string[] = [];
                     for (const invId of lastGeneratedInvoiceIds) {
-                      const resp = await fetch(`/api/invoice-pdf?id=${invId}`, { headers: await authHeaders() });
-                      if (!resp.ok) continue;
-                      const blob = await resp.blob();
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `invoice-${invId}.pdf`;
-                      a.click();
-                      URL.revokeObjectURL(url);
+                      try {
+                        const resp = await fetch(`/api/invoice-pdf?id=${encodeURIComponent(invId)}`, { headers: await authHeaders() });
+                        if (!resp.ok || !resp.headers.get('content-type')?.includes('application/pdf')) {
+                          throw new Error('PDF is unavailable');
+                        }
+                        const blob = await resp.blob();
+                        if (blob.size === 0) throw new Error('PDF is empty');
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `invoice-${invId}.pdf`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      } catch (error) {
+                        console.error('[CompanyInvoices] invoice PDF download failed:', invId, error);
+                        failedPdfIds.push(invId);
+                      }
+                    }
+                    if (failedPdfIds.length > 0) {
+                      setTutorGenerationError(`${t('common.error')} PDF: ${failedPdfIds.join(', ')}`);
                     }
                   } catch (err) {
                     console.error('[CompanyInvoices] bundle download error:', err);
+                    setTutorGenerationError(t('common.error'));
                   } finally {
                     setDownloadingBundle(false);
                   }

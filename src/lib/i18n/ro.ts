@@ -5,6 +5,7 @@ import { en } from './en.js';
  * Review scope and release limits: docs/ROMANIAN_LOCALIZATION_REVIEW.md.
  */
 export const roOverrides: Record<string, string> = {
+  'compSch.notifyStudentEmail': 'Notifică elevul prin e-mail',
   "cal.deleteAllRemaining": "Toate lecțiile rămase din această serie",
   "cal.deleteAllRemainingHint": "Șterge lecțiile viitoare programate și anulate din această serie. Istoricul lecțiilor finalizate se păstrează.",
   "cal.deleteConfirmAll": "Ștergi toate lecțiile programate și anulate rămase din această serie? Istoricul lecțiilor finalizate se păstrează.",
