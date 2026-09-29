@@ -219,12 +219,13 @@ npm run vercel:deploy-prod
 - Cron job'ai: `vercel.json` → `crons` (sessions, reminders, contract reconcile, blog, `school-join-no-show` kas 5 min, `bill-school-extra-lessons` 1 d. 04:00 UTC)
 
 **Git taisyklės (iš vartotojo preferencijų):**
-- **Nedeployink ir necommitink be aiškaus leidimo**
-- Nenaudok `git push --force` į main
+- **Produkcijos deployas tik su vartotojo leidimu. Prieš kiekvieną deployą visus jam skirtus pakeitimus pirma commitink būtent `simo-local` šakoje, patikrink švarų darbinį aplanką ir pushink į `origin/simo-local`; tik tada deployink.** Leidimas deployui apima šį būtiną išankstinį commitą ir push. Atskirų commitų be vartotojo leidimo nedaryk.
+- Jei darbas vyko kitoje šakoje, prieš deployą perkelk numatytus pakeitimus į `simo-local` ir patikrink, kad deployinamas kodas atitinka jos commitą.
+- Nenaudok `git push --force` į `main` ar `simo-local`
 - Nenaudok `--no-verify`
 - Commit message — pilni sakiniai, fokusas į „kodėl“
 
-**Aktyvi šaka:** dažnai `Simo-local` arba `alano-local` (ne `main`).
+**Produkcijos release šaka:** `simo-local` (tikslus mažųjų raidžių pavadinimas; ne `main`).
 
 ---
 
