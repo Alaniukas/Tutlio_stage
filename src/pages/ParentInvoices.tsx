@@ -26,6 +26,15 @@ interface Invoice {
   invoice_total_amount?: number;
 }
 
+interface PendingPackage {
+  id: string;
+  totalLessons: number;
+  totalPrice: number | null;
+  paymentMethod: string | null;
+  studentName: string;
+  subjects: string;
+}
+
 export default function ParentInvoices() {
   const { user } = useUser();
   const { t } = useTranslation();
@@ -33,79 +42,22 @@ export default function ParentInvoices() {
   const [searchParams] = useSearchParams();
   const filterStudentId = searchParams.get('studentId')?.trim() || null;
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [pendingPackages, setPendingPackages] = useState<Array<{
-    id: string;
-    totalLessons: number;
-    totalPrice: number | null;
-    paymentMethod: string | null;
-    studentName: string;
-    subjects: string;
-  }>>([]);
+  const [pendingPackages, setPendingPackages] = useState<PendingPackage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
+    setInvoices([]);
+    setPendingPackages([]);
+    setLoadError(null);
     if (!user) {
       setLoading(false);
       return;
     }
-    (async () => {
-      setLoading(true);
-      setLoadError(null);
-
-      const { data: parentProfile, error: parentErr } = await supabase
-        .rpc('get_parent_profile_id_by_user_id', { p_user_id: user.id });
-      if (parentErr) {
-        console.warn('[ParentInvoices] parent profile rpc failed:', parentErr);
-        setLoadError(parentErr.message);
-        setInvoices([]);
-        setLoading(false);
-        return;
-      }
-
-      if (!parentProfile) {
-        setLoading(false);
-        return;
-      }
-
-      const { data: links } = await supabase
-        .from('parent_students')
-        .select('student_id')
-        .eq('parent_id', parentProfile);
-
-      const allStudentIds = (links ?? []).map((l) => l.student_id);
-      const studentIds =
-        filterStudentId && allStudentIds.includes(filterStudentId) ? [filterStudentId] : allStudentIds;
-      if (!studentIds.length) {
-        setInvoices([]);
-        setLoading(false);
-        return;
-      }
-
-      // "Laukia apmokėjimo": unpaid packages of the linked children (pay via the stable link).
-      const { data: pendingRows } = await supabase
-        .from('lesson_packages')
-        .select('id, total_lessons, total_price, payment_status, payment_method, paid, students!inner(full_name), lesson_package_items(subjects(name))')
-        .in('student_id', studentIds)
-        .eq('paid', false)
-        .eq('payment_status', 'pending')
-        .order('created_at', { ascending: false })
-        .limit(20);
-      setPendingPackages(
-        ((pendingRows ?? []) as any[]).map((row) => ({
-          id: row.id as string,
-          totalLessons: Number(row.total_lessons) || 0,
-          totalPrice: row.total_price == null ? null : Number(row.total_price),
-          paymentMethod: (row.payment_method as string | null) ?? null,
-          studentName: (Array.isArray(row.students) ? row.students[0]?.full_name : row.students?.full_name) || '',
-          subjects: (Array.isArray(row.lesson_package_items) ? row.lesson_package_items : [])
-            .map((it: any) => (Array.isArray(it.subjects) ? it.subjects[0]?.name : it.subjects?.name))
-            .filter(Boolean)
-            .join(', '),
-        })),
-      );
-
+    setLoading(true);
+    const loadInvoices = async (studentIds: string[]): Promise<Invoice[]> => {
       /**
        * Jei filtro nėra — skaitome sąskaitas tiesiai (RLS `invoices_parent_select` meta tik susijusias).
        * Filtrą ?studentId=… — paliekame konkrečių vaikų S.F.: paketai pagal manual_sales_invoice_id + eilutės su session_ids (overlap).
@@ -118,15 +70,9 @@ export default function ParentInvoices() {
           .limit(150);
 
         if (openErr) {
-          console.warn('[ParentInvoices] invoices list:', openErr);
-          setLoadError(openErr.message);
-          setInvoices([]);
-          setLoading(false);
-          return;
+          throw openErr;
         }
-        setInvoices(invsOpen ?? []);
-        setLoading(false);
-        return;
+        return invsOpen ?? [];
       }
 
       const invoiceIdSet = new Set<string>();
@@ -152,9 +98,7 @@ export default function ParentInvoices() {
 
       const invoiceIds = [...invoiceIdSet];
       if (!invoiceIds.length) {
-        setInvoices([]);
-        setLoading(false);
-        return;
+        return [];
       }
 
       const { data: invs, error: invListErr } = await supabase
@@ -165,11 +109,7 @@ export default function ParentInvoices() {
         .limit(150);
 
       if (invListErr) {
-        console.warn('[ParentInvoices] invoices by id:', invListErr);
-        setLoadError(invListErr.message);
-        setInvoices([]);
-        setLoading(false);
-        return;
+        throw invListErr;
       }
 
       const { data: lineItems } = await supabase
@@ -200,10 +140,60 @@ export default function ParentInvoices() {
         };
       });
 
-      setInvoices(enriched);
-      setLoading(false);
+      return enriched;
+    };
+
+    void (async () => {
+      try {
+        const { data: parentProfile, error: parentErr } = await supabase
+          .rpc('get_parent_profile_id_by_user_id', { p_user_id: user.id });
+        if (controller.signal.aborted) return;
+        if (parentErr) throw parentErr;
+        if (!parentProfile) return;
+
+        const { data: links, error: linksError } = await supabase
+          .from('parent_students')
+          .select('student_id')
+          .eq('parent_id', parentProfile);
+        if (controller.signal.aborted) return;
+        if (linksError) throw linksError;
+
+        const allStudentIds = (links ?? []).map((link) => link.student_id);
+        if (filterStudentId && !allStudentIds.includes(filterStudentId)) return;
+        const studentIds = filterStudentId ? [filterStudentId] : allStudentIds;
+        if (!studentIds.length) return;
+
+        // Pooled packages need a server-authorized summary; direct RLS reads hide them.
+        try {
+          const query = filterStudentId ? `?studentId=${encodeURIComponent(filterStudentId)}` : '';
+          const response = await fetch(`/api/parent-pending-packages${query}`, {
+            headers: await authHeaders(),
+            signal: controller.signal,
+          });
+          if (!response.ok) throw new Error(`Pending packages: HTTP ${response.status}`);
+          const result = await response.json() as { packages: PendingPackage[] };
+          if (!Array.isArray(result.packages)) throw new Error('Invalid pending packages response');
+          if (controller.signal.aborted) return;
+          setPendingPackages(result.packages);
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          console.warn('[ParentInvoices] pending packages:', error);
+          setLoadError(t('common.error'));
+        }
+
+        const loadedInvoices = await loadInvoices(studentIds);
+        if (!controller.signal.aborted) setInvoices(loadedInvoices);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.warn('[ParentInvoices] load failed:', error);
+          setLoadError(t('common.error'));
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
     })();
-  }, [user?.id, filterStudentId]);
+    return () => controller.abort();
+  }, [user?.id, filterStudentId, t]);
 
   const downloadPdf = async (inv: Invoice) => {
     setDownloadingId(inv.id);

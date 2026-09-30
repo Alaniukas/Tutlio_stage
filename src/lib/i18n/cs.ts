@@ -4,6 +4,18 @@ import { en } from './en.js';
  * policies retain English. Publication is controlled by localeRelease.ts.
  * See docs/CZECH_LOCALIZATION_REVIEW.md for scope and review limits. */
 export const csOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Podívejte se, jak by Tutlio mohlo fungovat ve vaší agentuře",
+  "landing.agencyCta.desc": "Během ukázky můžeme probrat váš tým, studenty a spolupráci s rodiči a najít vhodný tarif.",
+  "landing.agencyFaq.whatIsQ": "Co je Tutlio pro doučovací agentury?",
+  "landing.agencyFaq.whatIsA": "Tutlio propojuje rozvrhy lektorů, studenty, rodičovské účty, platby a přehledy v jednom systému pro správu agentury.",
+  "landing.agencyFaq.teamQ": "Můžeme spravovat více lektorů a rodičovských účtů?",
+  "landing.agencyFaq.teamA": "Ano. Administrátoři vidí lekce a volné termíny celého týmu, zatímco rodiče mohou ve svém účtu sledovat rozvrh a platby svého dítěte.",
+  "landing.agencyFaq.customizationQ": "Může se Tutlio přizpůsobit našemu způsobu práce?",
+  "landing.agencyFaq.customizationA": "Můžeme projít váš postup rezervací, smluv a plateb a probrat, jak jej nastavit v Tutlio.",
+  "landing.agencyFaq.pricingQ": "Jak se stanovuje cena pro agentury?",
+  "landing.agencyFaq.pricingA": "Cena pro agenturu závisí na velikosti týmu a zvoleném tarifu. Možnosti si můžete prohlédnout na stránce s cenami a prodiskutovat konkrétní nabídku.",
+  "landing.agencyFaq.demoQ": "Můžeme si před rozhodnutím prohlédnout ukázku?",
+  "landing.agencyFaq.demoA": "Ano. Na stránce s cenami si můžete domluvit hovor a podívat se na postupy, které jsou pro váš tým důležité.",
   'compSch.notifyStudentEmail': 'Informovat studenta e-mailem',
   "cal.deleteAllRemaining": "Všechny zbývající lekce v této sérii",
   "cal.deleteAllRemainingHint": "Odstraní budoucí plánované a zrušené lekce v této sérii. Historie dokončených lekcí zůstane zachována.",

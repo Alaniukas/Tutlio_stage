@@ -19,6 +19,8 @@ import { useTranslation } from '@/lib/i18n';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import { isProKlaseOrg, orgFeeProfile } from '@/lib/marketMoney';
 import { sumOrgTutorLessonsPayEur } from '@/lib/orgTutorLessonPay';
 import {
@@ -100,6 +102,8 @@ export default function CompanyStats() {
       return t('stats.cancellationPartAdmin', { count });
     });
   const { fmt } = useMarketMoney();
+  const { hasFeature } = useOrgFeatures();
+  const confirmationFeatureEnabled = hasFeature('tutor_lesson_status_confirmation');
   const { can } = useOrgAdminAccess();
   const showFinanceTotals = can('finance.totals');
   const initialOrgId = getCached<any>('company_dashboard')?.organizationId as string | undefined;
@@ -127,7 +131,7 @@ export default function CompanyStats() {
 
   useEffect(() => {
     loadData(effectiveRange, !appliedRange);
-  }, [rangeKey, showFinanceTotals, appliedRange, isSchool]);
+  }, [rangeKey, showFinanceTotals, appliedRange, isSchool, confirmationFeatureEnabled]);
 
   const loadData = async (range: { start: Date; end: Date }, cacheResult: boolean) => {
     const request = ++loadRequest.current;
@@ -151,6 +155,9 @@ export default function CompanyStats() {
       .eq('user_id', user.id)
       .maybeSingle();
     if (!adminRow) return;
+    const schoolOutcomeOptions = {
+      requireConfirmation: orgRequiresTutorStatusConfirmation(adminRow.organization_id) || confirmationFeatureEnabled,
+    };
 
     const tutorList = await getOrgVisibleTutors(
       supabase as any,
@@ -207,7 +214,7 @@ export default function CompanyStats() {
     const stats: TutorStat[] = tutorList.map(tutor => {
       const tutorSessions = allSessions.filter(s => s.tutor_id === tutor.id);
       if (isSchool) {
-        const activity = schoolActivitySummary(tutorSessions);
+        const activity = schoolActivitySummary(tutorSessions, new Date(), schoolOutcomeOptions);
         return {
           id: tutor.id,
           full_name: tutor.full_name,
@@ -309,7 +316,7 @@ export default function CompanyStats() {
     const sorted = showFinanceTotals && !isSchool
       ? stats.sort((a, b) => b.earnings - a.earnings)
       : stats.sort((a, b) => b.completedSessions - a.completedSessions);
-    const schoolSummary = isSchool ? schoolActivitySummary(allSessions) : EMPTY_SCHOOL_ACTIVITY;
+    const schoolSummary = isSchool ? schoolActivitySummary(allSessions, new Date(), schoolOutcomeOptions) : EMPTY_SCHOOL_ACTIVITY;
     const te = stats.reduce((sum, s) => sum + s.earnings, 0);
     const tcc = stats.reduce((sum, s) => sum + s.companyCommission, 0);
     const tne = stats.reduce((sum, s) => sum + s.netEarnings, 0);

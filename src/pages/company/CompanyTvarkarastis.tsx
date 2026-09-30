@@ -185,6 +185,7 @@ import {
   Repeat,
 } from 'lucide-react';
 import StatusBadge from '@/components/StatusBadge';
+import { effectiveSessionOutcome, orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import FindTutorModal from '@/components/FindTutorModal';
 import RecurrenceFields from '@/components/RecurrenceFields';
@@ -424,6 +425,9 @@ export default function CompanyTvarkarastis() {
   const isSchoolOrgView = isSchoolOrg(orgEntityType);
   const isProKlase = isProKlaseOrg(organizationId);
   const supportsManualAttendance = isSchoolOrgView || isProKlase;
+  const requiresStatusConfirmation = orgRequiresTutorStatusConfirmation(organizationId, {
+    tutor_lesson_status_confirmation: hasFeature('tutor_lesson_status_confirmation'),
+  });
   const isMvOrg = isMoksloVaisiaiOrg(organizationId);
   const isLaisviVaikai = isLaisviVaikaiOrg(organizationId);
   const proKlaseAdminUi = proKlaseOrgAdminContext(organizationId, isSchoolOrgView ? 'school' : 'company', featuresLoading);
@@ -1100,12 +1104,13 @@ export default function CompanyTvarkarastis() {
   const mergedCalendarSessions = useMemo(() => {
     const classGroupSessions = mergeSchoolClassGroupSessions(filteredSessions, classGroupMeta, {
       preferCancelledOccurrence: isLaisviVaikai,
+      requireConfirmation: requiresStatusConfirmation,
     }) as Session[];
     return mergeGroupSubjectSessions(classGroupSessions, subjects, {
       groupLesson: t('cal.groupLesson'),
       seats: t('cal.seatsMany'),
     }) as Session[];
-  }, [filteredSessions, classGroupMeta, isLaisviVaikai, subjects, t]);
+  }, [filteredSessions, classGroupMeta, isLaisviVaikai, requiresStatusConfirmation, subjects, t]);
 
   const recurringSessionCounts = useMemo(
     () => buildRecurringSessionCounts(mergedCalendarSessions),
@@ -1796,7 +1801,7 @@ export default function CompanyTvarkarastis() {
       });
 
     const eventStyle = getCalendarSessionEventStyle({
-      status: session.status,
+      status: effectiveSessionOutcome(session, requiresStatusConfirmation),
       paid: session.paid,
       payment_status: session.payment_status,
       endAt,
@@ -1890,7 +1895,7 @@ export default function CompanyTvarkarastis() {
         setClassGroupParticipants(classGroupParticipantsForModal(base as MergedClassGroupSession<Session>));
         const siblings = base._classGroupSessions || [];
         const displayRow = (isLaisviVaikai
-          ? pickClassGroupOccurrenceSession(siblings)
+          ? pickClassGroupOccurrenceSession(siblings, { requireConfirmation: requiresStatusConfirmation })
           : siblings.find((row) => row.status === base.status)) ?? siblings[0] ?? base;
         setSelectedEvent({
           ...displayRow,
@@ -1904,7 +1909,7 @@ export default function CompanyTvarkarastis() {
         setSelectedGroupSessions(base._groupSessions);
         const displayRow = (
           isLaisviVaikai
-            ? pickClassGroupOccurrenceSession(base._groupSessions)
+            ? pickClassGroupOccurrenceSession(base._groupSessions, { requireConfirmation: requiresStatusConfirmation })
             : base._groupSessions.find((row) => row.status === base.status)
         ) ?? base._groupSessions[0];
         setSelectedEvent({
@@ -4415,7 +4420,7 @@ export default function CompanyTvarkarastis() {
                         .filter((status): status is NonNullable<typeof status> => Boolean(status));
                       return participantRows.map((participant) => {
                       const displayStatus = classGroupParticipantStatusForDisplay(
-                        participant.session?.status,
+                        effectiveSessionOutcome(participant.session || {}, requiresStatusConfirmation),
                         siblingStatuses,
                         { coerceCompletedAfterGroupCancel: isLaisviVaikai },
                       );
@@ -4457,10 +4462,10 @@ export default function CompanyTvarkarastis() {
                               type="button"
                               variant="outline"
                               size="sm"
-                              aria-pressed={participantSession.status === 'completed'}
+                              aria-pressed={effectiveSessionOutcome(participantSession, requiresStatusConfirmation) === 'completed'}
                               className={cn(
                                 'h-8 px-2 text-xs',
-                                participantSession.status === 'completed'
+                                effectiveSessionOutcome(participantSession, requiresStatusConfirmation) === 'completed'
                                   ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
                                   : 'border-gray-200 text-gray-700',
                               )}
@@ -4474,10 +4479,10 @@ export default function CompanyTvarkarastis() {
                               type="button"
                               variant="outline"
                               size="sm"
-                              aria-pressed={participantSession.status === 'no_show'}
+                              aria-pressed={effectiveSessionOutcome(participantSession, requiresStatusConfirmation) === 'no_show'}
                               className={cn(
                                 'h-8 px-2 text-xs',
-                                participantSession.status === 'no_show'
+                                effectiveSessionOutcome(participantSession, requiresStatusConfirmation) === 'no_show'
                                   ? 'border-rose-300 bg-rose-50 text-rose-800'
                                   : 'border-gray-200 text-gray-700',
                               )}
@@ -4545,14 +4550,12 @@ export default function CompanyTvarkarastis() {
                   <Label className="text-xs text-gray-500">{t('compSess.labelStatus')}</Label>
                   <div className="mt-1 flex flex-wrap items-center gap-1.5">
                     <StatusBadge
-                      status={selectedEvent.status}
+                      status={effectiveSessionOutcome(selectedEvent, requiresStatusConfirmation) || ''}
                       paymentStatus={selectedEvent.payment_status ?? undefined}
                       paid={selectedEvent.paid}
                       isComplimentary={selectedEvent.is_complimentary === true}
                       endTime={selectedEvent.end_time}
-                      pendingConfirmation={
-                        hasFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(organizationId)
-                      }
+                      pendingConfirmation={requiresStatusConfirmation}
                       moved={pkFeat('monthly_packages') && !!(selectedEvent as any).original_start_time && !!(selectedEvent as any).lesson_package_id}
                     />
                     {!!selectedEvent.subject_id && trialSubjectIds.has(selectedEvent.subject_id) && (
@@ -4781,6 +4784,34 @@ export default function CompanyTvarkarastis() {
                   <Pencil className="w-4 h-4 mr-2" />
                   {t('compSess.editLesson')}
                 </Button>
+              )}
+
+              {canEditSessions && canView && isSchoolOrgView && !isGroupSession && selectedEventEnded
+                && ['active', 'completed', 'no_show'].includes(selectedEvent.status) && !cancelConfirmOpen && (
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    aria-pressed={effectiveSessionOutcome(selectedEvent, requiresStatusConfirmation) === 'completed'}
+                    className="rounded-xl border-emerald-200 text-emerald-800 hover:bg-emerald-50"
+                    onClick={() => void handleMarkStudentAttended()}
+                    disabled={saving || noShowSaving}
+                  >
+                    <CheckCircle className="mr-1 h-4 w-4" />
+                    {t('compSess.markAttended')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    aria-pressed={effectiveSessionOutcome(selectedEvent, requiresStatusConfirmation) === 'no_show'}
+                    className="rounded-xl border-rose-200 text-rose-800 hover:bg-rose-50"
+                    onClick={() => setNoShowDialogOpen(true)}
+                    disabled={saving || noShowSaving}
+                  >
+                    <UserX className="mr-1 h-4 w-4" />
+                    {t('compSess.markNoShow')}
+                  </Button>
+                </div>
               )}
 
               {canEditSessions && canView && selectedEvent.status !== 'cancelled' && !cancelConfirmOpen && !isSchoolOrgView && !isSchoolBilledSession(selectedEvent) && (

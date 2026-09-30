@@ -1,3 +1,4 @@
+import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
@@ -8,6 +9,7 @@ import { schoolTeacherContractTranslationsEe } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const ee: Record<string, string> = {
+  ...studentNotesTranslations.ee,
   ...schoolFamilyMaterialTranslations.ee,
   ...schoolInvoiceReviewTranslations.ee,
   'school.recordings.access.title': "Juurdepääs salvestistele",
@@ -35,6 +37,18 @@ export const ee: Record<string, string> = {
   'common.reloadPageWarning': "Lehe uuesti laadimisel lähevad salvestamata muudatused kaotsi. Kas jätkata?",
   ...familyCatalogTrialCopy.ee,
   ...sharedOrganizationWorkflowTranslations,
+  "landing.agencyCta.title": "Vaadake, kuidas Tutlio võiks teie eraõppeettevõttes toimida",
+  "landing.agencyCta.desc": "Demo käigus saame arutada teie meeskonna, õpilaste ja lapsevanematega koostöö vajadusi ning leida sobiva paketi.",
+  "landing.agencyFaq.whatIsQ": "Mis on Tutlio eraõppeettevõtetele?",
+  "landing.agencyFaq.whatIsA": "Tutlio koondab õpetajate tunniplaanid, õpilased, lapsevanemate kontod, maksed ja aruanded ühte ettevõtte haldussüsteemi.",
+  "landing.agencyFaq.teamQ": "Kas saame hallata mitut õpetajat ja lapsevanemate kontot?",
+  "landing.agencyFaq.teamA": "Jah. Administraatorid näevad meeskonna tunde ja vabu aegu, lapsevanemad aga saavad oma kontol vaadata lapse tunniplaani ja makseid.",
+  "landing.agencyFaq.customizationQ": "Kas Tutlio saab kohanduda meie töökorraldusega?",
+  "landing.agencyFaq.customizationA": "Saame üle vaadata teie broneerimis-, lepingu- ja makseprotsessid ning arutada, kuidas need Tutlios seadistada.",
+  "landing.agencyFaq.pricingQ": "Kuidas määratakse ettevõtete hind?",
+  "landing.agencyFaq.pricingA": "Hind sõltub meeskonna suurusest ja valitud paketist. Võite tutvuda valikutega hinnalehel ning arutada konkreetset pakkumist.",
+  "landing.agencyFaq.demoQ": "Kas saame enne otsustamist demot näha?",
+  "landing.agencyFaq.demoA": "Jah. Hinnalehel saate broneerida kõne, et näha oma meeskonnale olulisi tööprotsesse.",
   ...schoolConsultationsTranslations.ee,
   'compSess.markAttended': 'Õpilane osales',
   'att.confirmedManually': 'Osalemine kinnitatud',
@@ -5184,6 +5198,9 @@ export const ee: Record<string, string> = {
   'em.stripePaySub': '💳 Makse tunni eest – {student}, {date}',
   'em.stripeRedirect': 'Link suunab teid turvalisele Stripe\'i makseleheküljele.',
   'em.studentContacts': 'Õpilase kontaktandmed:',
+  "em.orgStudentInviteSub": "Teie registreerimislink organisatsioonilt {org}",
+  "em.orgStudentInviteHeaderSub": "{org} kutsub teid platvormile",
+  "em.orgStudentInviteBody": "<strong>{org}</strong> lisas teid süsteemi. Ajakava vaatamiseks ja tundide broneerimiseks lõpetage registreerimine.",
   'em.studentInviteBody': 'Teie õpetaja <strong>{tutor}</strong> lisas teid süsteemi. Ajakava vaatamiseks ja tundide broneerimiseks lõpetage registreerimine.',
   'em.studentInviteCodeLabel': 'Teie kutsekood:',
   'em.schoolStudentInviteCodeLabel': 'Teie lapse registreerimiskood:',
@@ -5963,6 +5980,20 @@ export const ee: Record<string, string> = {
   'school.groups.deleteConfirm': "Kustutada rühm „{name}”? Kustutatakse ka kõik selle rühma tulevased tunnid.",
   'school.groups.deleteFailed': "Rühma kustutamine ebaõnnestus.",
   'school.groups.noMatches': "Filtrile ei vasta ükski rühm.",
+  'school.groups.noSessionForOccurrence': "Seda tundi ei ole sellele õpilasele planeeritud.",
+  'school.groups.contractUnconfirmed': "Leping kinnitamata",
+  'schoolDash.attendedWithoutContractTitle': "Osales kinnitamata lepinguga",
+  'schoolDash.attendedWithoutContractDescription': "Õpilane osales tunnis ajal, mil lisatundide leping oli veel kinnitamata.",
+  'schoolDash.contractAttendanceLoadFailed': "Kinnitamata lepinguga osalemise teavitusi ei õnnestunud laadida.",
+  'schoolDash.contractAttendanceShownCount': "Kuvatakse {shown} teavitust {total}-st.",
+  'orgFinance.schoolCurrentPayRate': "Praegu määratud baastasu: {amount} € tunni eest.",
+  'orgFinance.schoolSummaryNote': "Rühmatund läheb arvesse ühe korra. Tasu arvutatakse salvestatud tunnitasu järgi või selle puudumisel praeguse baastasu järgi. Arveldusi korraldab kool.",
+  'orgFinance.schoolFinalizedLessons': "Lõpliku tulemusega tunnid",
+  'orgFinance.schoolUnresolvedPay': "Puuduva või vastuolulise tasumääraga tunnid: {count}. Kool peab need üle vaatama.",
+  'orgFinance.schoolKnownPayTotal': "Summa teadaolevate tasumäärade järgi",
+  'orgFinance.schoolRateSettingsHint': "Määrake baastasu: Õpetajad → valige õpetaja → Tasu (€/tund).",
+  'orgFinance.schoolPayPriceIndependence': "Õpilaste lepingute hinnad ei määra õpetaja tasu.",
+  'orgFinance.schoolPayPending': "Tasumäär on ootel",
   'lesson.joinOpensAt': "Liitumine avaneb kell {time}",
   'em.reminderPayerSchoolLead': "Meeldetuletus: teie lapse <strong>{student}</strong> tund algab peagi. Liitumislink on allpool.",
   'em.reminderPayerJoinBtn': "Liitu tunniga",
@@ -6224,4 +6255,7 @@ export const ee: Record<string, string> = {
   'em.schoolJoinSubject': 'Liitu tunniga {date} kell {time}',
   'em.schoolJoinHeader': 'Liitu tunniga',
   'em.schoolJoinBody': 'Sinu tund algab {date} kell {time}. Liitumislink on allpool.',
+  'chat.registrationPending': 'Registreerimine on ootel',
+  'chat.registrationPendingHint': 'Sõnumeid saab saata pärast õpilase konto sidumist. Paluge organisatsiooni administraatoril kontrollida õpilase e-posti aadressi ja kontot või paluge õpilasel registreerimine lõpule viia.',
+  'chat.startConversationFailed': 'Vestlust ei õnnestunud alustada. Proovige uuesti või võtke ühendust organisatsiooni administraatoriga.',
 };

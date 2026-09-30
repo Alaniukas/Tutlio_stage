@@ -5,6 +5,18 @@ import { en } from './en.js';
  * Review scope and source exceptions: docs/SLOVAK_LOCALIZATION_REVIEW.md.
  */
 export const skOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Pozrite sa, ako by Tutlio mohlo fungovať vo vašej agentúre",
+  "landing.agencyCta.desc": "Počas ukážky môžeme prebrať váš tím, študentov a spoluprácu s rodičmi a nájsť vhodný program.",
+  "landing.agencyFaq.whatIsQ": "Čo je Tutlio pre doučovacie agentúry?",
+  "landing.agencyFaq.whatIsA": "Tutlio spája rozvrhy lektorov, študentov, rodičovské účty, platby a prehľady v jednom systéme na správu agentúry.",
+  "landing.agencyFaq.teamQ": "Môžeme spravovať viacerých lektorov a rodičovské účty?",
+  "landing.agencyFaq.teamA": "Áno. Administrátori môžu vidieť hodiny a voľné termíny tímu, zatiaľ čo rodičia si vo vlastnom účte môžu pozrieť rozvrh a platby svojho dieťaťa.",
+  "landing.agencyFaq.customizationQ": "Môže sa Tutlio prispôsobiť nášmu spôsobu práce?",
+  "landing.agencyFaq.customizationA": "Môžeme preskúmať váš postup rezervácií, zmlúv a platieb a prebrať, ako ho nastaviť v Tutlio.",
+  "landing.agencyFaq.pricingQ": "Ako sa určuje cena pre agentúry?",
+  "landing.agencyFaq.pricingA": "Cena pre agentúru závisí od veľkosti tímu a zvoleného programu. Možnosti si môžete pozrieť na stránke s cenami a prediskutovať konkrétnu ponuku.",
+  "landing.agencyFaq.demoQ": "Môžeme si pred rozhodnutím pozrieť ukážku?",
+  "landing.agencyFaq.demoA": "Áno. Na stránke s cenami si môžete dohodnúť hovor a pozrieť si postupy, ktoré sú pre váš tím dôležité.",
   'compSch.notifyStudentEmail': 'Upozorniť študenta e-mailom',
   "cal.deleteAllRemaining": "Všetky zostávajúce hodiny v tejto sérii",
   "cal.deleteAllRemainingHint": "Odstráni budúce naplánované a zrušené hodiny v tejto sérii. História dokončených hodín zostane zachovaná.",

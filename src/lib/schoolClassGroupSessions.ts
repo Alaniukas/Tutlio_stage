@@ -1,6 +1,10 @@
 import type { SchoolClassGroupRecord } from './schoolClassGroups';
 import { classGroupCalendarLabel } from './schoolClassGroups.js';
 import { isUnconfirmedAutomaticNoShow } from './schoolJoinNoShow.js';
+import { effectiveSessionOutcome } from './sessionStatusConfirmation.js';
+import { pickSchoolMeetingOutcome } from './schoolSessionMonitoring.js';
+
+export type ClassGroupOutcomeOptions = { requireConfirmation?: boolean };
 
 export type ClassGroupMemberDisplay = {
   student_id: string;
@@ -99,7 +103,7 @@ function enrichSessionStudent<T extends ClassGroupSessionRow>(
 export function mergeSchoolClassGroupSessions<T extends ClassGroupSessionRow>(
   sessions: T[],
   groupMeta: Map<string, ClassGroupMeta>,
-  opts?: { preferCancelledOccurrence?: boolean },
+  opts?: ClassGroupOutcomeOptions & { preferCancelledOccurrence?: boolean },
 ): Array<T | MergedClassGroupSession<T>> {
   const grouped = new Map<string, T[]>();
   const individual: T[] = [];
@@ -124,19 +128,21 @@ export function mergeSchoolClassGroupSessions<T extends ClassGroupSessionRow>(
     const first = rows[0];
     const meta = groupMeta.get(first.class_group_id!)!;
     const enrichedRows = rows.map((row) => enrichSessionStudent(row, meta.members));
-    const display = opts?.preferCancelledOccurrence
-      ? (pickClassGroupOccurrenceSession(enrichedRows) ?? first)
+    const display = opts?.preferCancelledOccurrence || opts?.requireConfirmation
+      ? (pickClassGroupOccurrenceSession(enrichedRows, opts) ?? first)
       : (
-          enrichedRows.find((row) => effectiveClassGroupStatus(row) === 'completed')
-          ?? enrichedRows.find((row) => effectiveClassGroupStatus(row) === 'active')
-          ?? enrichedRows.find((row) => effectiveClassGroupStatus(row) === 'no_show')
+          enrichedRows.find((row) => effectiveClassGroupStatus(row, opts) === 'completed')
+          ?? enrichedRows.find((row) => effectiveClassGroupStatus(row, opts) === 'active')
+          ?? enrichedRows.find((row) => effectiveClassGroupStatus(row, opts) === 'no_show')
           ?? first
         );
 
     merged.push({
       ...display,
       id: `classgroup_${key}`,
-      status: isUnconfirmedAutomaticNoShow(display) ? 'active' : display.status,
+      status: isUnconfirmedAutomaticNoShow(display)
+        ? 'active'
+        : opts?.requireConfirmation ? effectiveSessionOutcome(display, true) : display.status,
       topic: first.topic && first.topic !== meta.calendarName && first.topic !== meta.name
         ? first.topic
         : null,
@@ -261,8 +267,10 @@ function effectiveClassGroupStatus(row: {
   status: string;
   status_confirmed_at?: string | null;
   no_show_reason?: string | null;
-}): string {
-  return isUnconfirmedAutomaticNoShow(row) ? 'active' : normalizeSessionStatus(row.status);
+}, options: ClassGroupOutcomeOptions = {}): string {
+  return isUnconfirmedAutomaticNoShow(row)
+    ? 'active'
+    : normalizeSessionStatus(options.requireConfirmation ? effectiveSessionOutcome(row, true) : row.status);
 }
 
 /**
@@ -277,15 +285,17 @@ export function pickClassGroupOccurrenceSession<T extends {
   no_show_reason?: string | null;
 }>(
   rows: T[],
+  options: ClassGroupOutcomeOptions = {},
 ): T | undefined {
   if (!rows.length) return undefined;
-  const active = rows.find((row) => effectiveClassGroupStatus(row) === 'active');
-  const cancelled = rows.filter((row) => effectiveClassGroupStatus(row) === 'cancelled');
+  if (options.requireConfirmation) return pickSchoolMeetingOutcome(rows, options);
+  const active = rows.find((row) => effectiveClassGroupStatus(row, options) === 'active');
+  const cancelled = rows.filter((row) => effectiveClassGroupStatus(row, options) === 'cancelled');
   const occurred = rows.filter((row) => {
-    const status = effectiveClassGroupStatus(row);
+    const status = effectiveClassGroupStatus(row, options);
     return status === 'completed' || status === 'no_show';
   });
-  const completed = occurred.find((row) => effectiveClassGroupStatus(row) === 'completed');
+  const completed = occurred.find((row) => effectiveClassGroupStatus(row, options) === 'completed');
   if (active && !completed) return active;
   if (cancelled.length > 0 && cancelled.length * 2 >= occurred.length) return cancelled[0];
   // A class happened when at least one child attended. A per-child no-show must
@@ -336,12 +346,19 @@ export function sessionStatusI18nKey(status: string): string {
   }
 }
 
-export function classGroupParticipantsForModal<T extends ClassGroupSessionRow>(
-  merged: MergedClassGroupSession<T>,
+export function classGroupParticipantsWithSessions<T extends ClassGroupSessionRow>(
+  members: ClassGroupMemberDisplay[],
+  sessions: T[],
 ): Array<ClassGroupMemberDisplay & { session: T | null }> {
-  const sessionByStudent = new Map(merged._classGroupSessions.map((row) => [row.student_id, row]));
-  return merged._classGroupMembers.map((member) => ({
+  const sessionByStudent = new Map(sessions.map((row) => [row.student_id, row]));
+  return members.map((member) => ({
     ...member,
     session: sessionByStudent.get(member.student_id) ?? null,
   }));
+}
+
+export function classGroupParticipantsForModal<T extends ClassGroupSessionRow>(
+  merged: MergedClassGroupSession<T>,
+): Array<ClassGroupMemberDisplay & { session: T | null }> {
+  return classGroupParticipantsWithSessions(merged._classGroupMembers, merged._classGroupSessions);
 }

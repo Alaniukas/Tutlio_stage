@@ -8,6 +8,9 @@ const ENV_NAMES = [
   'TRELLO_LIST_NEW_ID',
   'TRELLO_LIST_IN_PROGRESS_ID',
   'TRELLO_LIST_RESOLVED_ID',
+  'TRELLO_FEATURE_LIST_NEW_ID',
+  'TRELLO_FEATURE_LIST_IN_PROGRESS_ID',
+  'TRELLO_FEATURE_LIST_RESOLVED_ID',
 ] as const;
 const originalEnv = Object.fromEntries(ENV_NAMES.map((name) => [name, process.env[name]]));
 
@@ -21,6 +24,16 @@ const baseInput = {
   dueAt: null,
 };
 
+const featureLists = {
+  registered: '1'.repeat(24), inProgress: '2'.repeat(24), resolved: '3'.repeat(24),
+};
+
+function configureFeatureLists() {
+  process.env.TRELLO_FEATURE_LIST_NEW_ID = featureLists.registered;
+  process.env.TRELLO_FEATURE_LIST_IN_PROGRESS_ID = featureLists.inProgress;
+  process.env.TRELLO_FEATURE_LIST_RESOLVED_ID = featureLists.resolved;
+}
+
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -32,6 +45,9 @@ beforeEach(() => {
   process.env.TRELLO_LIST_NEW_ID = 'registered-list';
   process.env.TRELLO_LIST_IN_PROGRESS_ID = 'progress-list';
   process.env.TRELLO_LIST_RESOLVED_ID = 'resolved-list';
+  delete process.env.TRELLO_FEATURE_LIST_NEW_ID;
+  delete process.env.TRELLO_FEATURE_LIST_IN_PROGRESS_ID;
+  delete process.env.TRELLO_FEATURE_LIST_RESOLVED_ID;
 });
 
 afterEach(() => {
@@ -150,5 +166,88 @@ describe('in-app support Trello sync', () => {
 
     await expect(syncInAppSupportTrelloCard(baseInput)).rejects.toThrow('Trello support card lookup failed (503).');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['registered', featureLists.registered, 'registered-list'],
+    ['in_progress', featureLists.inProgress, 'progress-list'],
+    ['resolved', featureLists.resolved, 'resolved-list'],
+  ] as const)('routes %s features separately while preserving the bug pipeline', async (status, featureList, bugList) => {
+    configureFeatureLists();
+    const fetchMock = vi.fn().mockImplementation(async () => response({ id: 'abcdef123456abcdef123456' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const input = {
+      ...baseInput, status, cardId: 'abcdef123456abcdef123456',
+      dueAt: status === 'in_progress' ? '2026-10-03T12:00:00Z' : null,
+    };
+
+    await syncInAppSupportTrelloCard({ ...input, category: 'feature' });
+    await syncInAppSupportTrelloCard(input);
+
+    const featureBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    const bugBody = JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body));
+    expect(featureBody.idList).toBe(featureList);
+    expect(featureBody.name).toContain('[P1] Feature');
+    expect(featureBody.desc).toContain('Type: Feature request');
+    expect(featureBody.desc).not.toContain('pupil@example.com');
+    expect(bugBody.idList).toBe(bugList);
+    expect(bugBody.name).toContain('[P1] Bug');
+    if (status === 'in_progress') expect(featureBody.due).toBe('2026-10-03T12:00:00.000Z');
+  });
+
+  it('keeps feature cards in the shared pipeline until all feature settings are introduced', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ cards: [] }))
+      .mockResolvedValueOnce(response({ id: 'abcdef123456abcdef123456' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await syncInAppSupportTrelloCard({ ...baseInput, category: 'feature' });
+
+    expect(JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body)))
+      .toMatchObject({ idList: 'registered-list', pos: 'top' });
+  });
+
+  it('moves a legacy feature card into the feature pipeline by its original reference without creating a duplicate', async () => {
+    configureFeatureLists();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ cards: [{
+        id: 'existing-feature', idBoard: 'board-id', name: 'SUP-17EE7859 · [P1] Feature /finance',
+        desc: 'Tutlio support reference: SUP-17EE7859\nType: Feature request',
+        url: 'https://trello.com/c/original-feature',
+      }] }))
+      .mockResolvedValueOnce(response({ id: 'existing-feature' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await syncInAppSupportTrelloCard({ ...baseInput, category: 'feature' });
+
+    expect(result).toMatchObject({ cardId: 'existing-feature', created: false });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]).toEqual([
+      'https://api.trello.com/1/cards/existing-feature',
+      expect.objectContaining({ method: 'PUT', body: expect.any(String) }),
+    ]);
+    expect(JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body)).idList)
+      .toBe(featureLists.registered);
+  });
+
+  it.each([
+    ['partial', () => { delete process.env.TRELLO_FEATURE_LIST_RESOLVED_ID; }],
+    ['malformed', () => { process.env.TRELLO_FEATURE_LIST_NEW_ID = 'not-a-list-id'; }],
+    ['duplicate', () => { process.env.TRELLO_FEATURE_LIST_RESOLVED_ID = featureLists.registered; }],
+    ['overlapping support', () => { process.env.TRELLO_LIST_NEW_ID = featureLists.registered; }],
+  ] as const)('rejects %s feature settings without interrupting bug sync', async (_name, invalidate) => {
+    configureFeatureLists();
+    invalidate();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ cards: [] }))
+      .mockResolvedValueOnce(response({ id: 'abcdef123456abcdef123456' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(syncInAppSupportTrelloCard({ ...baseInput, category: 'feature' }))
+      .rejects.toThrow('TRELLO_FEATURE_LIST_*_ID');
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(syncInAppSupportTrelloCard(baseInput)).resolves.toMatchObject({ synced: true });
+    expect(JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body)).idList)
+      .toBe(process.env.TRELLO_LIST_NEW_ID);
   });
 });

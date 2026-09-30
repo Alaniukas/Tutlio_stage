@@ -1,3 +1,4 @@
+import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
@@ -17,6 +18,7 @@ const seLegalTranslations: Record<string, string> = {
 };
 
 export const se: Record<string, string> = {
+  ...studentNotesTranslations.se,
   ...schoolFamilyMaterialTranslations.se,
   ...schoolInvoiceReviewTranslations.se,
   'school.recordings.access.title': "Åtkomst till inspelningar",
@@ -3166,6 +3168,9 @@ export const se: Record<string, string> = {
   'em.stripePaySub': '💳 Betalning för lektion – {student}, {date}',
   'em.stripeRedirect': 'Länken leder till en säker betalningssida hos Stripe.',
   'em.studentContacts': 'Elevens kontaktuppgifter:',
+  "em.orgStudentInviteSub": "Din registreringslänk från {org}",
+  "em.orgStudentInviteHeaderSub": "{org} bjuder in dig till plattformen",
+  "em.orgStudentInviteBody": "<strong>{org}</strong> har lagt till dig i systemet. Slutför registreringen för att se schemat och boka lektioner.",
   'em.studentInviteBody': 'Din lärare <strong>{tutor}</strong> har lagt till dig i systemet. Slutför registreringen för att se schemat och boka lektioner.',
   'em.studentInviteCodeLabel': 'Din inbjudningskod:',
   'em.schoolStudentInviteCodeLabel': 'Ditt barns registreringskod:',
@@ -5568,6 +5573,20 @@ export const se: Record<string, string> = {
   'school.groups.deleteConfirm': "Ta bort gruppen ”{name}”? Alla kommande lektioner i gruppen tas också bort.",
   'school.groups.deleteFailed': "Det gick inte att ta bort gruppen.",
   'school.groups.noMatches': "Inga grupper matchar filtret.",
+  'school.groups.noSessionForOccurrence': "Den här lektionen är inte schemalagd för den här eleven.",
+  'school.groups.contractUnconfirmed': "Avtalet är inte bekräftat",
+  'schoolDash.attendedWithoutContractTitle': "Deltog innan avtalet bekräftades",
+  'schoolDash.attendedWithoutContractDescription': "Eleven deltog i en lektion medan avtalet om extra lektioner ännu inte var bekräftat.",
+  'schoolDash.contractAttendanceLoadFailed': "Det gick inte att läsa in meddelanden om närvaro utan bekräftat avtal.",
+  'schoolDash.contractAttendanceShownCount': "Visar {shown} av {total} meddelanden.",
+  'orgFinance.schoolCurrentPayRate': "Nuvarande grundersättning: {amount} € per lektion.",
+  'orgFinance.schoolSummaryNote': "Grupplektioner räknas en gång. Ersättningen följer det sparade lektionspriset eller, om det saknas, den nuvarande grundersättningen. Skolan hanterar betalningarna.",
+  'orgFinance.schoolFinalizedLessons': "Lektioner med slutligt resultat",
+  'orgFinance.schoolUnresolvedPay': "Lektioner med saknade eller motstridiga ersättningsnivåer: {count}. Skolan behöver granska dem.",
+  'orgFinance.schoolKnownPayTotal': "Summa enligt kända ersättningsnivåer",
+  'orgFinance.schoolRateSettingsHint': "Ange grundersättningen: Lärare → välj en lärare → Ersättning (€/lektion).",
+  'orgFinance.schoolPayPriceIndependence': "Priserna i elevernas avtal avgör inte lärarens ersättning.",
+  'orgFinance.schoolPayPending': "Ersättningsnivå inväntas",
   'lesson.joinOpensAt': "Du kan ansluta från {time}",
   'em.reminderPayerSchoolLead': "Påminnelse: ditt barns <strong>{student}</strong> lektion börjar snart. Anslutningslänken finns nedan.",
   'em.reminderPayerJoinBtn': "Anslut till lektionen",
@@ -5832,4 +5851,19 @@ export const se: Record<string, string> = {
   "compare.customChip2": "Ersättningsregler",
   "compare.customChip3": "Godkännandelänkar för föräldrar",
   "compare.customChip4": "Portaler i ditt varumärke",
+  'chat.registrationPending': 'Registrering väntar',
+  'chat.registrationPendingHint': 'Meddelanden blir tillgängliga när elevkontot har kopplats. Be organisationens administratör att kontrollera elevens e-postadress och konto, eller be eleven att slutföra registreringen.',
+  'chat.startConversationFailed': 'Det gick inte att starta konversationen. Försök igen eller kontakta organisationens administratör.',
+  'landing.agencyCta.title': 'Se hur Tutlio passar din läxhjälpsbyrå',
+  'landing.agencyCta.desc': 'Under en demo kan vi gå igenom ditt team, eleverna och arbetet med föräldrarna och hitta rätt abonnemang.',
+  'landing.agencyFaq.whatIsQ': 'Vad är Tutlio för läxhjälpsbyråer?',
+  'landing.agencyFaq.whatIsA': 'Tutlio samlar lärarnas scheman, elever, föräldrakonton, betalningar och rapporter i ett gemensamt system för att hantera byrån.',
+  'landing.agencyFaq.teamQ': 'Kan vi hantera flera lärare och föräldrakonton?',
+  'landing.agencyFaq.teamA': 'Ja. Administratörer ser teamets lektioner och tillgänglighet, medan föräldrar ser sitt barns schema och betalningar i sitt eget konto.',
+  'landing.agencyFaq.customizationQ': 'Kan Tutlio anpassas till vårt arbetssätt?',
+  'landing.agencyFaq.customizationA': 'Vi kan gå igenom hur ni hanterar bokningar, avtal och betalningar och diskutera hur det kan ställas in i Tutlio.',
+  'landing.agencyFaq.pricingQ': 'Hur bestäms priset för en byrå?',
+  'landing.agencyFaq.pricingA': 'Priset beror på teamets storlek och vilket abonnemang ni väljer. Ni kan se alternativen på prissidan och diskutera ett konkret förslag.',
+  'landing.agencyFaq.demoQ': 'Kan vi se en demo innan vi bestämmer oss?',
+  'landing.agencyFaq.demoA': 'Ja. Ni kan boka ett samtal via prissidan för att se de arbetsflöden som är viktiga för ert team.',
 };

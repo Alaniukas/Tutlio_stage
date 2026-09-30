@@ -2,6 +2,18 @@ import { en } from './en.js';
 
 /** Modern Standard Arabic for individual tutors and tutoring businesses. */
 export const arOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "اكتشف كيف يمكن أن يناسب Tutlio وكالتك",
+  "landing.agencyCta.desc": "خلال العرض التوضيحي، يمكننا مناقشة احتياجات فريقك وطلابك وآلية تعامل أولياء الأمور مع الوكالة واختيار الخطة المناسبة.",
+  "landing.agencyFaq.whatIsQ": "ما هو Tutlio لوكالات الدروس الخصوصية؟",
+  "landing.agencyFaq.whatIsA": "يجمع Tutlio جداول المدرّسين والطلاب وحسابات أولياء الأمور والمدفوعات والتقارير في نظام واحد لإدارة وكالة الدروس الخصوصية.",
+  "landing.agencyFaq.teamQ": "هل يمكننا إدارة عدة مدرّسين وحسابات أولياء الأمور؟",
+  "landing.agencyFaq.teamA": "نعم. يمكن للمسؤولين الاطلاع على دروس الفريق والأوقات المتاحة، بينما يمكن لأولياء الأمور الاطلاع على جدول طفلهم ومدفوعاته من حسابهم الخاص.",
+  "landing.agencyFaq.customizationQ": "هل يمكن تكييف Tutlio مع طريقة عملنا؟",
+  "landing.agencyFaq.customizationA": "يمكننا مراجعة إجراءات الحجز والعقود والمدفوعات لديك ومناقشة كيفية إعدادها في Tutlio.",
+  "landing.agencyFaq.pricingQ": "كيف تُحدَّد أسعار وكالات الدروس الخصوصية؟",
+  "landing.agencyFaq.pricingA": "تعتمد أسعار الوكالة على حجم الفريق والخطة المختارة. يمكنك الاطلاع على الخيارات في صفحة الأسعار ومناقشة عرض يناسب احتياجاتك.",
+  "landing.agencyFaq.demoQ": "هل يمكننا مشاهدة عرض توضيحي قبل اتخاذ القرار؟",
+  "landing.agencyFaq.demoA": "نعم. يمكنك حجز مكالمة من صفحة الأسعار للاطلاع على إجراءات العمل التي تهم فريقك.",
   'compSch.notifyStudentEmail': 'إخطار الطالب عبر البريد الإلكتروني',
   "cal.deleteAllRemaining": "كل الدروس المتبقية في هذه السلسلة",
   "cal.deleteAllRemainingHint": "يحذف الدروس المستقبلية المجدولة والدروس الملغاة في هذه السلسلة. يبقى سجل الدروس المكتملة محفوظًا.",

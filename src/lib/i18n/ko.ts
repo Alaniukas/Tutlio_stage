@@ -6,6 +6,18 @@ import { en } from './en.js';
  * See docs/KOREAN_LOCALIZATION_REVIEW.md before publishing this locale.
  */
 export const koOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Tutlio를 귀사의 과외 사업에 어떻게 활용할 수 있는지 확인해 보세요",
+  "landing.agencyCta.desc": "데모에서 강사진, 학생, 학부모와의 업무 흐름을 살펴보고 적합한 요금제를 함께 찾을 수 있습니다.",
+  "landing.agencyFaq.whatIsQ": "과외 업체를 위한 Tutlio는 무엇인가요?",
+  "landing.agencyFaq.whatIsA": "Tutlio는 강사의 일정, 학생, 학부모 계정, 결제, 보고서를 하나의 업체 관리 시스템으로 통합합니다.",
+  "landing.agencyFaq.teamQ": "여러 강사와 학부모 계정을 관리할 수 있나요?",
+  "landing.agencyFaq.teamA": "네. 관리자는 강사진의 수업과 가능한 시간을 볼 수 있고, 학부모는 자신의 계정에서 자녀의 일정과 결제 내역을 확인할 수 있습니다.",
+  "landing.agencyFaq.customizationQ": "Tutlio를 우리 업무 방식에 맞출 수 있나요?",
+  "landing.agencyFaq.customizationA": "예약, 계약, 결제 절차를 검토하고 Tutlio에서 어떻게 설정할지 논의할 수 있습니다.",
+  "landing.agencyFaq.pricingQ": "업체 요금은 어떻게 결정되나요?",
+  "landing.agencyFaq.pricingA": "업체 요금은 강사진 규모와 선택한 요금제에 따라 달라집니다. 요금 페이지에서 옵션을 살펴보고 구체적인 제안을 상담할 수 있습니다.",
+  "landing.agencyFaq.demoQ": "결정하기 전에 데모를 볼 수 있나요?",
+  "landing.agencyFaq.demoA": "네. 요금 페이지에서 상담을 예약하여 강사진에 중요한 업무 흐름을 확인할 수 있습니다.",
   'compSch.notifyStudentEmail': '학생에게 이메일로 알리기',
   "cal.deleteAllRemaining": "이 반복 일정에 남아 있는 모든 수업",
   "cal.deleteAllRemainingHint": "이 반복 일정의 앞으로 예정된 수업과 취소된 수업을 삭제합니다. 완료된 수업 기록은 유지됩니다.",

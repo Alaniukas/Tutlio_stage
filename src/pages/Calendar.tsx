@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Calendar as BigCalendar, dateFnsLocalizer, Views } from 'react-big-calendar';
 import type { View } from 'react-big-calendar';
 import {
@@ -153,11 +153,13 @@ import {
   MOKSLO_VAISIAI_CALENDAR_COLORS,
 } from '@/lib/calendarSessionEventStyle';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { effectiveSessionOutcome, orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import {
   buildClassGroupMetaMap,
   calendarSessionTopicSuffix,
   calendarTitleForSession,
   classGroupParticipantsForModal,
+  classGroupParticipantsWithSessions,
   classGroupCancelTargets,
   classGroupOccurrenceSessionIds,
   isMergedClassGroupSession,
@@ -168,7 +170,16 @@ import {
   type MergedClassGroupSession,
 } from '@/lib/schoolClassGroupSessions';
 import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeFields';
+import { SchoolGroupRosterAttendanceControls } from '@/components/SchoolGroupRosterAttendanceControls';
 import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
+import {
+  attendanceOnlyGroupOccurrences,
+  confirmSchoolGroupRosterAttendance,
+  schoolGroupAttendanceQuery,
+  type AttendanceOnlyGroupOccurrence,
+  type SchoolGroupAttendanceParticipant,
+  type SchoolGroupAttendanceTarget,
+} from '@/lib/schoolGroupAttendance';
 import { groupToWriteDraft, type SchoolClassGroupRecord } from '@/lib/schoolClassGroups';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
@@ -258,6 +269,7 @@ interface Session {
   _groupSessions?: Session[];
   _isGroup?: boolean;
   _isSharedIndividual?: boolean;
+  _attendanceOnly?: boolean;
   student?: {
     full_name: string;
     email?: string;
@@ -352,7 +364,9 @@ export default function CalendarPage() {
   const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, orgEntityType, hasOrgFeature, 'monthly_packages', orgFeaturesLoading);
   // Org feature: ended lessons are not auto-completed — the tutor must confirm the outcome.
   const requiresStatusConfirmation =
-    hasOrgFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(ctxProfile?.organization_id);
+    orgRequiresTutorStatusConfirmation(organizationId || ctxProfile?.organization_id, {
+      tutor_lesson_status_confirmation: hasOrgFeature('tutor_lesson_status_confirmation'),
+    });
   const isMoksloVaisiaiCalendar =
     orgPolicy.isOrgTutor &&
     !orgFeaturesLoading &&
@@ -458,7 +472,59 @@ export default function CalendarPage() {
   const [classGroupParticipants, setClassGroupParticipants] = useState<
     Array<{ student_id: string; full_name: string; grade?: string | null; session: Session | null }>
   >([]);
+  const currentClassGroupParticipants = useMemo(
+    () => classGroupParticipantsWithSessions(classGroupParticipants, selectedGroupSessions),
+    [classGroupParticipants, selectedGroupSessions],
+  );
   const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
+  const [attendanceOnlyOccurrence, setAttendanceOnlyOccurrence] = useState<AttendanceOnlyGroupOccurrence | null>(null);
+  const [groupAttendanceParticipants, setGroupAttendanceParticipants] = useState<SchoolGroupAttendanceParticipant[]>([]);
+  const [groupAttendanceLoading, setGroupAttendanceLoading] = useState(false);
+  const [groupAttendanceError, setGroupAttendanceError] = useState<string | null>(null);
+  const groupAttendanceTarget = useMemo((): SchoolGroupAttendanceTarget | null => {
+    if (!isSchoolTutor) return null;
+    if (attendanceOnlyOccurrence) return {
+      groupId: attendanceOnlyOccurrence.class_group_id,
+      startTime: attendanceOnlyOccurrence.start_time.toISOString(),
+    };
+    if (isEventModalOpen && isClassGroupSession && selectedGroupSessions[0]) return {
+      anchorSessionId: selectedGroupSessions[0].id,
+    };
+    return null;
+  }, [isSchoolTutor, attendanceOnlyOccurrence, isEventModalOpen, isClassGroupSession, selectedGroupSessions[0]?.id]);
+  const groupAttendanceQuery = groupAttendanceTarget ? schoolGroupAttendanceQuery(groupAttendanceTarget) : '';
+  const groupAttendanceQueryRef = useRef(groupAttendanceQuery);
+  groupAttendanceQueryRef.current = groupAttendanceQuery;
+  const groupAttendanceByStudent = useMemo(
+    () => new Map(groupAttendanceParticipants.map((participant) => [participant.studentId, participant])),
+    [groupAttendanceParticipants],
+  );
+
+  useEffect(() => {
+    setGroupAttendanceParticipants([]);
+    setGroupAttendanceError(null);
+    if (!groupAttendanceQuery) { setGroupAttendanceLoading(false); return; }
+    const controller = new AbortController();
+    setGroupAttendanceLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/school-group-attendance?${groupAttendanceQuery}`, {
+          headers: await authHeaders(), signal: controller.signal,
+        });
+        const data = await response.json().catch(() => ({}));
+        if (controller.signal.aborted) return;
+        if (!response.ok) throw new Error(String(data.error || response.status));
+        setGroupAttendanceParticipants(Array.isArray(data.participants) ? data.participants : []);
+      } catch (error) {
+        if (!controller.signal.aborted) setGroupAttendanceError(
+          t('cal.confirmStatusError', { msg: (error as Error).message }),
+        );
+      } finally {
+        if (!controller.signal.aborted) setGroupAttendanceLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [groupAttendanceQuery, t]);
   const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null);
 
   // Deep-link from lesson reminder emails: /calendar?sessionId=…
@@ -1060,8 +1126,9 @@ export default function CalendarPage() {
   const sessionsAfterClassGroups = useMemo(
     () => mergeSchoolClassGroupSessions(sessions, classGroupMeta, {
       preferCancelledOccurrence: isLaisviVaikai,
+      requireConfirmation: requiresStatusConfirmation,
     }) as Session[],
-    [sessions, classGroupMeta, isLaisviVaikai],
+    [sessions, classGroupMeta, isLaisviVaikai, requiresStatusConfirmation],
   );
 
   const mergeGroupSessions = useCallback((sessionsToMerge: Session[]) => {
@@ -1138,11 +1205,23 @@ export default function CalendarPage() {
     [sessionsAfterClassGroups, mergeGroupSessions],
   );
 
+  const attendanceOnlyCalendarEvents = useMemo<Session[]>(() => {
+    if (!isSchoolTutor || !showClassGroups) return [];
+    const weekOpts = { weekStartsOn: locale === 'he' ? 0 as const : 1 as const };
+    const start = currentView === Views.DAY ? startOfDay(currentDate)
+      : currentView === Views.MONTH ? startOfWeek(startOfMonth(currentDate), weekOpts)
+        : startOfWeek(currentDate, weekOpts);
+    const end = currentView === Views.DAY ? endOfDay(currentDate)
+      : currentView === Views.MONTH ? endOfWeek(endOfMonth(currentDate), weekOpts)
+        : endOfWeek(currentDate, weekOpts);
+    return attendanceOnlyGroupOccurrences(classGroups, sessions, { start, end, tutorId: ctxUser?.id || '' });
+  }, [isSchoolTutor, showClassGroups, classGroups, sessions, currentDate, currentView, locale, ctxUser?.id]);
+
   const calendarGridSessions = useMemo(
-    () => mergedSessions.filter((session) =>
+    () => [...mergedSessions, ...attendanceOnlyCalendarEvents].filter((session) =>
       isUsableCalendarDateRange(session.start_time, session.end_time),
     ),
-    [mergedSessions],
+    [mergedSessions, attendanceOnlyCalendarEvents],
   );
 
   const allEvents = useMemo(() => {
@@ -1302,7 +1381,7 @@ export default function CalendarPage() {
   }, [students, tutorMeetingLink]);
 
   const handleSelectSlot = useCallback(({ start, end }: { start: Date; end: Date }, opts?: { forceCreate?: boolean }) => {
-    if (isAvailabilityModalOpen || isEventModalOpen || isCreateModalOpen || isUpcomingListModalOpen) return;
+    if (isAvailabilityModalOpen || isEventModalOpen || attendanceOnlyOccurrence || isCreateModalOpen || isUpcomingListModalOpen) return;
     // Header "Create lesson" uses forceCreate and bypasses slot popup — block here when frozen.
     if (opts?.forceCreate && licenseFrozen) {
       setToastMessage({ message: t('cal.licenseFrozenDesc'), type: 'warning' });
@@ -1390,7 +1469,7 @@ export default function CalendarPage() {
     setFreeTimeDays([dow]);
     setFreeTimeDayTimes({ [dow]: { start: startHm, end: endHm } });
     setSlotChoiceOpen(true);
-  }, [isAvailabilityModalOpen, isEventModalOpen, isCreateModalOpen, isUpcomingListModalOpen, backgroundEvents, stripeConnected, subjects.length, isOrgTutor, licenseFrozen, canCreateSessions, t]);
+  }, [isAvailabilityModalOpen, isEventModalOpen, attendanceOnlyOccurrence, isCreateModalOpen, isUpcomingListModalOpen, backgroundEvents, stripeConnected, subjects.length, isOrgTutor, licenseFrozen, canCreateSessions, t]);
 
   useEffect(() => {
     if (!canCreateSessions) {
@@ -1588,6 +1667,13 @@ export default function CalendarPage() {
   };
 
   const handleSelectEvent = useCallback((event: any) => {
+    // These entries have no sessions.id. Their dialog exposes only roster attestations.
+    if (event._attendanceOnly) {
+      setIsEventModalOpen(false);
+      setAttendanceOnlyOccurrence(event as AttendanceOnlyGroupOccurrence);
+      return;
+    }
+    setAttendanceOnlyOccurrence(null);
     if (event.isBackground) {
       // Open availability slot edit modal
       setEditingSlot({
@@ -1617,8 +1703,8 @@ export default function CalendarPage() {
       setIsClassGroupSession(true);
       setSelectedGroupSessions(event._classGroupSessions);
       setClassGroupParticipants(classGroupParticipantsForModal(event as MergedClassGroupSession<Session>));
-      const displayRow = (isLaisviVaikai
-        ? pickClassGroupOccurrenceSession(event._classGroupSessions)
+      const displayRow = (isLaisviVaikai || requiresStatusConfirmation
+        ? pickClassGroupOccurrenceSession(event._classGroupSessions, { requireConfirmation: requiresStatusConfirmation })
         : event._classGroupSessions.find((row: Session) => row.status === event.status))
         ?? event._classGroupSessions[0]
         ?? event;
@@ -1643,7 +1729,7 @@ export default function CalendarPage() {
       setSelectedEvent(event);
     }
     setIsEventModalOpen(true);
-  }, [isLaisviVaikai]);
+  }, [isLaisviVaikai, requiresStatusConfirmation]);
 
   // When student changes, check for individual pricing to auto-fill
   const handleStudentChange = (studentId: string) => {
@@ -4312,6 +4398,37 @@ export default function CalendarPage() {
     }
   };
 
+  const handleConfirmRosterAttendance = async (studentId: string, status: 'completed' | 'no_show') => {
+    if (!groupAttendanceTarget || !groupAttendanceByStudent.get(studentId)?.canConfirmAttendance) return;
+    if (status === 'no_show' && !window.confirm(t('dash.confirmNoShowPrompt'))) return;
+    const requestQuery = groupAttendanceQuery;
+    setNoShowSavingId(`roster:${studentId}`);
+    setGroupAttendanceError(null);
+    try {
+      const attendance = await confirmSchoolGroupRosterAttendance(
+        groupAttendanceTarget, studentId, status, await authHeaders(),
+      );
+      if (groupAttendanceQueryRef.current !== requestQuery) return;
+      setGroupAttendanceParticipants((previous) => previous.map((participant) => participant.studentId === studentId
+        ? { ...participant, attendance } : participant));
+    } catch (error) {
+      if (groupAttendanceQueryRef.current === requestQuery) setGroupAttendanceError(
+        t('cal.confirmStatusError', { msg: (error as Error).message }),
+      );
+    } finally {
+      setNoShowSavingId(null);
+    }
+  };
+
+  const renderRosterAttendanceControls = (studentId: string) => {
+    if (!isSchoolTutor) return null;
+    return <SchoolGroupRosterAttendanceControls
+      participant={groupAttendanceByStudent.get(studentId)}
+      disabled={Boolean(noShowSavingId) || saving}
+      onConfirm={(id, status) => void handleConfirmRosterAttendance(id, status)}
+    />;
+  };
+
   const handleAddStudentToGroup = async () => {
     if (!selectedEvent || addToGroupStudentIds.length === 0) return;
     setSaving(true);
@@ -4675,6 +4792,11 @@ export default function CalendarPage() {
   };
 
   const eventStyleGetter = (event: any) => {
+    if (event._attendanceOnly) return {
+      style: {
+        backgroundColor: '#fffbeb', border: '1px dashed #d97706', borderRadius: '8px', color: '#92400e',
+      },
+    };
     if (event.isBackground) {
       return {
         style: {
@@ -4703,7 +4825,7 @@ export default function CalendarPage() {
       });
 
     const eventStyle = getCalendarSessionEventStyle({
-      status: event.status,
+      status: effectiveSessionOutcome(event, requiresStatusConfirmation),
       paid: event.paid,
       payment_status: event.payment_status,
       endAt,
@@ -4727,11 +4849,11 @@ export default function CalendarPage() {
   };
 
   // Stats
-  const activeSessions = sessions.filter((s) => s.status === 'active').length;
+  const activeSessions = sessions.filter((s) => effectiveSessionOutcome(s, requiresStatusConfirmation) === 'active').length;
   // Org tutors don't toggle payment — a lesson is "confirmed" (Patvirtinta) once it's
   // marked occurred (status=completed). Solo tutors still count paid lessons here.
   const paidSessions = orgPolicy.isOrgTutor
-    ? sessions.filter((s) => s.status === 'completed').length
+    ? sessions.filter((s) => effectiveSessionOutcome(s, requiresStatusConfirmation) === 'completed').length
     : sessions.filter((s) => s.paid).length;
   const cancelledSessions = sessions.filter((s) => s.status === 'cancelled').length;
 
@@ -5036,7 +5158,7 @@ export default function CalendarPage() {
             'p-1.5 sm:p-3',
             // No outer scroll: the calendar scrolls internally (rbc-time-content) so the
             // sticky weekday header stays visible instead of scrolling away.
-            (isAvailabilityModalOpen || isEventModalOpen || isCreateModalOpen || isSlotEditOpen) && 'pointer-events-none',
+            (isAvailabilityModalOpen || isEventModalOpen || attendanceOnlyOccurrence || isCreateModalOpen || isSlotEditOpen) && 'pointer-events-none',
           )}
         >
           {loading ? (
@@ -5095,6 +5217,7 @@ export default function CalendarPage() {
                 : { scrollToTime: timeRangeBounds.scrollToTime })}
               titleAccessor={(event) => {
                 if (event.isBackground) return t('cal.freeSlot');
+                if (event._attendanceOnly) return `${event._classGroupName} · ${t('schoolDash.attendance')}`;
 
                 const name = calendarTitleForSession(event, t('cal.unknown'));
                 const topic = calendarSessionTopicSuffix(name, event.topic);
@@ -5556,6 +5679,41 @@ export default function CalendarPage() {
       </Dialog>
 
       {/* === EVENT DETAILS MODAL === */}
+      <Dialog open={Boolean(attendanceOnlyOccurrence)} onOpenChange={(open) => {
+        if (!open) setAttendanceOnlyOccurrence(null);
+      }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{attendanceOnlyOccurrence?._classGroupName} · {t('schoolDash.attendance')}</DialogTitle>
+            <DialogDescription>
+              {attendanceOnlyOccurrence && `${format(attendanceOnlyOccurrence.start_time, 'yyyy-MM-dd HH:mm')} - ${format(attendanceOnlyOccurrence.end_time, 'HH:mm')}`}
+            </DialogDescription>
+          </DialogHeader>
+          {groupAttendanceLoading && <p role="status" className="text-sm text-gray-500">{t('common.loading')}</p>}
+          {groupAttendanceError && <p role="alert" className="text-sm text-red-600">{groupAttendanceError}</p>}
+          <div className="max-h-[60vh] space-y-2 overflow-y-auto">
+            {(classGroupMeta.get(attendanceOnlyOccurrence?.class_group_id || '')?.members || []).map((member) => (
+              <div key={member.student_id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gray-50 p-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900">{member.full_name}</p>
+                  {groupAttendanceByStudent.get(member.student_id)?.contractConfirmed === false && (
+                    <span className="text-xs font-semibold text-amber-700">{t('school.groups.contractUnconfirmed')}</span>
+                  )}
+                  {!groupAttendanceLoading && !groupAttendanceError
+                    && !groupAttendanceByStudent.get(member.student_id)?.canConfirmAttendance && (
+                    <p className="text-xs text-gray-500">{t('school.groups.noSessionForOccurrence')}</p>
+                  )}
+                </div>
+                {renderRosterAttendanceControls(member.student_id)}
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAttendanceOnlyOccurrence(null)}>{t('common.close')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isEventModalOpen} onOpenChange={handleEventModalOpenChange}>
         <DialogContent className="w-[min(96vw,40rem)] max-w-[40rem] max-h-[90vh] min-w-0 overflow-y-auto overflow-x-hidden">
           <DialogHeader className="min-w-0 pr-8">
@@ -5743,8 +5901,10 @@ export default function CalendarPage() {
                       </div>
                     </div>
                   </div>
+                  {isClassGroupSession && groupAttendanceLoading && <p role="status" className="text-xs text-gray-500">{t('common.loading')}</p>}
+                  {isClassGroupSession && groupAttendanceError && <p role="alert" className="text-sm text-red-600">{groupAttendanceError}</p>}
                   <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                    {(isClassGroupSession ? classGroupParticipants : selectedGroupSessions.map((session) => ({
+                    {(isClassGroupSession ? currentClassGroupParticipants : selectedGroupSessions.map((session) => ({
                       student_id: session.student_id,
                       full_name: session.student?.full_name || '—',
                       grade: session.student?.grade,
@@ -5753,7 +5913,7 @@ export default function CalendarPage() {
                       const session = participant.session;
                       if (!session && isClassGroupSession) {
                         return (
-                          <div key={participant.student_id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg opacity-80">
+                          <div key={participant.student_id} className="flex flex-wrap items-center gap-3 p-3 bg-gray-50 rounded-lg">
                             <div className="w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
                               {String(participant.full_name || '?').split(/\s+/).filter(Boolean).map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
                             </div>
@@ -5762,7 +5922,15 @@ export default function CalendarPage() {
                               {participant.grade && (
                                 <p className="text-xs text-emerald-600">🎓 {participant.grade}</p>
                               )}
+                              {groupAttendanceByStudent.get(participant.student_id)?.contractConfirmed === false && (
+                                <span className="text-xs font-semibold text-amber-700">{t('school.groups.contractUnconfirmed')}</span>
+                              )}
+                              {!groupAttendanceLoading && !groupAttendanceError
+                                && !groupAttendanceByStudent.get(participant.student_id)?.canConfirmAttendance && (
+                                <p className="text-xs text-gray-500">{t('school.groups.noSessionForOccurrence')}</p>
+                              )}
                             </div>
+                            {renderRosterAttendanceControls(participant.student_id)}
                           </div>
                         );
                       }
@@ -5776,6 +5944,9 @@ export default function CalendarPage() {
                           <p className="text-sm font-semibold text-gray-900">{session.student?.full_name}</p>
                           {session.student?.grade && (
                             <p className="text-xs text-emerald-600">🎓 {session.student.grade}</p>
+                          )}
+                          {isClassGroupSession && groupAttendanceByStudent.get(participant.student_id)?.contractConfirmed === false && (
+                            <span className="text-xs font-semibold text-amber-700">{t('school.groups.contractUnconfirmed')}</span>
                           )}
                         </div>
                         {!orgPolicy.hideMoney && (
@@ -5802,10 +5973,10 @@ export default function CalendarPage() {
                                     type="button"
                                     variant="outline"
                                     size="sm"
-                                    aria-pressed={session.status === 'completed'}
+                                    aria-pressed={effectiveSessionOutcome(session, requiresStatusConfirmation) === 'completed'}
                                     className={cn(
                                       'h-8 px-2 text-xs',
-                                      session.status === 'completed'
+                                      effectiveSessionOutcome(session, requiresStatusConfirmation) === 'completed'
                                         ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
                                         : 'border-gray-200 text-gray-700',
                                     )}
@@ -5824,10 +5995,10 @@ export default function CalendarPage() {
                                     type="button"
                                     variant="outline"
                                     size="sm"
-                                    aria-pressed={session.status === 'no_show'}
+                                    aria-pressed={effectiveSessionOutcome(session, requiresStatusConfirmation) === 'no_show'}
                                     className={cn(
                                       'h-8 px-2 text-xs',
-                                      session.status === 'no_show'
+                                      effectiveSessionOutcome(session, requiresStatusConfirmation) === 'no_show'
                                         ? 'border-rose-300 bg-rose-50 text-rose-800'
                                         : 'border-gray-200 text-gray-700',
                                     )}
@@ -6039,7 +6210,7 @@ export default function CalendarPage() {
                 <div className="bg-gray-50 rounded-xl p-2 sm:p-3 text-center flex flex-col items-center justify-center">
                   <p className="text-xs text-gray-400 mb-1">{t('dash.statusLabel')}</p>
                   <StatusBadge
-                    status={selectedEvent?.status || ''}
+                    status={effectiveSessionOutcome(selectedEvent || {}, requiresStatusConfirmation) || ''}
                     paymentStatus={selectedEvent?.payment_status}
                     paid={selectedEvent?.paid}
                     isTrial={(selectedEvent as any)?.subjects?.is_trial === true}
@@ -6336,12 +6507,12 @@ export default function CalendarPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      aria-pressed={selectedEvent.status === 'completed'}
+                      aria-pressed={effectiveSessionOutcome(selectedEvent, requiresStatusConfirmation) === 'completed'}
                       onClick={() => void handleConfirmSessionStatus(selectedEvent, 'completed')}
                       disabled={noShowSavingId === selectedEvent.id}
                       className={cn(
                         'rounded-xl',
-                        selectedEvent.status === 'completed'
+                        effectiveSessionOutcome(selectedEvent, requiresStatusConfirmation) === 'completed'
                           ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
                           : 'border-gray-200 text-gray-700',
                       )}
@@ -6352,12 +6523,12 @@ export default function CalendarPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      aria-pressed={selectedEvent.status === 'no_show'}
+                      aria-pressed={effectiveSessionOutcome(selectedEvent, requiresStatusConfirmation) === 'no_show'}
                       onClick={() => void handleConfirmSessionStatus(selectedEvent, 'no_show')}
                       disabled={noShowSavingId === selectedEvent.id}
                       className={cn(
                         'rounded-xl',
-                        selectedEvent.status === 'no_show'
+                        effectiveSessionOutcome(selectedEvent, requiresStatusConfirmation) === 'no_show'
                           ? 'border-rose-300 bg-rose-50 text-rose-800'
                           : 'border-gray-200 text-gray-700',
                       )}

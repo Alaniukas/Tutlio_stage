@@ -18,6 +18,30 @@ import { reconcileSchoolGroupMinimum } from './_lib/schoolGroupMinimumPolicy.js'
 
 const GROUP_SELECT = '*, tutor:profiles!school_class_groups_tutor_id_fkey(full_name), slots:school_class_group_slots(*), members:school_class_group_members(student_id, enrolled_at, schedule_slots, recording_access, student:students(full_name, email, grade))';
 
+async function attachAttendanceExclusions<T extends { id: string }>(
+  supabase: ReturnType<typeof serviceSupabase>, groups: T[],
+) {
+  type Exclusion = { class_group_id: string; student_id: string | null; scope: 'single' | 'future' | 'all'; start_time: string | null };
+  const exclusions: Exclusion[] = [];
+  if (groups.length) {
+    for (let offset = 0; ; offset += 500) {
+      const { data, error } = await supabase.from('session_recurrence_exclusions')
+        .select('class_group_id,student_id,scope,start_time')
+        .in('class_group_id', groups.map(group => group.id))
+        .order('id', { ascending: true }).range(offset, offset + 499);
+      // Before deletion exclusions exist, the deletion RPC cannot have recorded any.
+      if (error?.code === '42P01' || error?.code === 'PGRST205') break;
+      if (error) throw error;
+      exclusions.push(...((data || []) as Exclusion[]));
+      if (!data || data.length < 500) break;
+    }
+  }
+  return groups.map(group => ({ ...group,
+    recurrence_exclusions: exclusions.filter(row => row.class_group_id === group.id)
+      .map(({ student_id, scope, start_time }) => ({ student_id, scope, start_time })),
+  }));
+}
+
 async function ownedMembers(
   supabase: ReturnType<typeof serviceSupabase>,
   orgId: string,
@@ -186,11 +210,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (studentsResult.error) return res.status(500).json({ error: studentsResult.error.message });
     const students = studentsResult.data || [];
     if (admin.ok) {
-      return res.status(200).json({ groups: data || [], students });
+      try {
+        return res.status(200).json({ groups: await attachAttendanceExclusions(supabase, data || []), students });
+      } catch {
+        return res.status(503).json({ error: 'Could not load group attendance exclusions' });
+      }
     }
     if (profile?.organization_id === orgId) {
       const tutorGroups = (data || []).filter((g) => g.tutor_id === auth.userId);
-      return res.status(200).json({ groups: tutorGroups, students });
+      try {
+        return res.status(200).json({ groups: await attachAttendanceExclusions(supabase, tutorGroups), students });
+      } catch {
+        return res.status(503).json({ error: 'Could not load group attendance exclusions' });
+      }
     }
     if (portalStudentIds.length) {
       const { data: memberships } = await supabase

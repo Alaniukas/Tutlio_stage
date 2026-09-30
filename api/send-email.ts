@@ -783,20 +783,27 @@ function moksloVaisiaiStudentArchiveRequest(d: any, locale: Locale) {
   };
 }
 
-function inviteEmail(d: any, locale: Locale) {
+function inviteEmail(d: any, locale: Locale, organizationName?: string) {
   const isSchoolInvite = d?.context === 'school';
+  const isOrganizationInvite = !isSchoolInvite && !!organizationName;
   const inviteSubject = isSchoolInvite
     ? t(locale, 'em.schoolInviteSub')
-    : t(locale, 'em.studentInviteSub');
+    : isOrganizationInvite
+      ? t(locale, 'em.orgStudentInviteSub', { org: organizationName! })
+      : t(locale, 'em.studentInviteSub');
   const inviteHeader = isSchoolInvite
     ? t(locale, 'em.schoolInviteHeader')
     : t(locale, 'em.studentInviteHeader');
   const inviteHeaderSub = isSchoolInvite
     ? t(locale, 'em.schoolInviteHeaderSub')
-    : t(locale, 'em.studentInviteHeaderSub');
+    : isOrganizationInvite
+      ? t(locale, 'em.orgStudentInviteHeaderSub', { org: esc(organizationName!) })
+      : t(locale, 'em.studentInviteHeaderSub');
   const inviteBody = isSchoolInvite
     ? t(locale, 'em.schoolInviteBody', { student: esc(d.studentName || ''), school: esc(d.tutorName || 'School') })
-    : t(locale, 'em.studentInviteBody', { tutor: d.tutorName });
+    : isOrganizationInvite
+      ? t(locale, 'em.orgStudentInviteBody', { org: esc(organizationName!) })
+      : t(locale, 'em.studentInviteBody', { tutor: d.tutorName });
   const inviteCodeLabel = isSchoolInvite
     ? t(locale, 'em.schoolStudentInviteCodeLabel')
     : t(locale, 'em.studentInviteCodeLabel');
@@ -3663,6 +3670,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Resolve org branding for whitelabel emails
     let orgBranding: EmailBranding | null = null;
+    let studentInviteOrganizationName: string | undefined;
     let orgReplyTo: string[] | undefined;
     // School-type orgs get a neutral parent-facing subject for contract/payment emails.
     let isSchoolOrg = false;
@@ -3733,6 +3741,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             // ({{school_name}}) keep the legal name. esc() to match sanitizeEmailData,
             // which already escaped the caller-provided value being replaced.
             const orgPublicName = String((features.public_name as string) || '').trim();
+            // Invitation copy names the target organization, independently of
+            // whether it enables custom logos/colors. Never trust a caller's name.
+            studentInviteOrganizationName = orgPublicName || String(org.name || '').trim() || undefined;
             if (orgPublicName) {
               (data as any).schoolName = esc(orgPublicName);
               if ((data as any).context === 'school' && (data as any).tutorName) (data as any).tutorName = esc(orgPublicName);
@@ -3815,7 +3826,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'session_reminder': emailContent = sessionReminder(data, locale); break;
       case 'session_reminder_payer': emailContent = sessionReminderPayer(data, locale); break;
       case 'payment_rejection_reminder': emailContent = paymentRejectionReminder(data, locale); break;
-      case 'invite_email': emailContent = inviteEmail(data, locale); break;
+      case 'invite_email': emailContent = inviteEmail(data, locale, studentInviteOrganizationName); break;
       case 'recurring_booking_confirmation': emailContent = recurringBookingConfirmation(data, locale); break;
       case 'tutor_invite': emailContent = tutorInvite(data, locale); break;
       case 'mokslo_vaisiai_student_archive': emailContent = moksloVaisiaiStudentArchiveRequest(data, locale); break;

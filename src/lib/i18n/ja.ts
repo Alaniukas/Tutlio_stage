@@ -5,6 +5,18 @@ import { en } from './en.js';
  * Locale publication is controlled separately in locales.ts.
  */
 export const jaOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Tutlioを貴社の学習支援サービスでどう活用できるかご覧ください",
+  "landing.agencyCta.desc": "デモでは、講師チーム、生徒、保護者とのやり取りについて伺い、適したプランをご提案できます。",
+  "landing.agencyFaq.whatIsQ": "学習支援事業者向けのTutlioとは何ですか？",
+  "landing.agencyFaq.whatIsA": "Tutlioは、講師のスケジュール、生徒、保護者アカウント、支払い、レポートを一つの事業管理システムにまとめます。",
+  "landing.agencyFaq.teamQ": "複数の講師や保護者アカウントを管理できますか？",
+  "landing.agencyFaq.teamA": "はい。管理者はチームのレッスンと空き時間を確認でき、保護者は自分のアカウントでお子さまの予定や支払いを確認できます。",
+  "landing.agencyFaq.customizationQ": "Tutlioを自社の業務の流れに合わせられますか？",
+  "landing.agencyFaq.customizationA": "予約、契約、支払いの手順を確認し、Tutlioでどのように設定するかご相談いただけます。",
+  "landing.agencyFaq.pricingQ": "事業者向けの料金はどのように決まりますか？",
+  "landing.agencyFaq.pricingA": "料金はチームの規模と選択したプランによって決まります。料金ページで選択肢を確認し、具体的なご提案についてご相談いただけます。",
+  "landing.agencyFaq.demoQ": "決める前にデモを見ることはできますか？",
+  "landing.agencyFaq.demoA": "はい。料金ページからご相談の予約をして、チームにとって重要な業務の流れをご覧いただけます。",
   'compSch.notifyStudentEmail': '生徒にメールで通知',
   "cal.deleteAllRemaining": "このシリーズの残りのレッスンすべて",
   "cal.deleteAllRemainingHint": "このシリーズの今後の予定済み・キャンセル済みレッスンを削除します。終了済みレッスンの履歴は保持されます。",

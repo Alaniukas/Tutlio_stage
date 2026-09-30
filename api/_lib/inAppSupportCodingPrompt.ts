@@ -10,6 +10,7 @@ export interface InAppSupportCodingPromptReporter {
 }
 
 export interface InAppSupportCodingPromptInput {
+  ticketId: string;
   reference: string;
   reporter: InAppSupportCodingPromptReporter;
   report: InAppSupportSubmission;
@@ -55,6 +56,8 @@ Operating rules:
 - Do not claim a cause, fix, migration, or deployment that you have not verified. Call out missing evidence and any remaining risk.
 
 Support reference: ${input.reference}
+Ticket UUID for release selection: ${input.ticketId}
+Use this ticket UUID for support:prepare-release when preparing its verified release. The client request UUID below is a separate intake identifier.
 Structured submission type: ${categoryLabel(report.category)}
 Title: ${report.title}
 Report completeness: ${incomplete ? 'User requested submission before all structured details were collected; use the full transcript and verify assumptions.' : 'Complete structured intake.'}

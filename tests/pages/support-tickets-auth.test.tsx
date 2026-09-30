@@ -27,6 +27,9 @@ function renderRoute(path: string) {
       <Routes>
         <Route path="/support/tickets" element={<SupportTickets />} />
         <Route path="/student/support/tickets" element={<SupportTickets />} />
+        <Route path="/parent/support/tickets" element={<SupportTickets />} />
+        <Route path="/company/support/tickets" element={<SupportTickets />} />
+        <Route path="/school/support/tickets" element={<SupportTickets />} />
         <Route path="/login" element={<LoginDestination />} />
       </Routes>
     </MemoryRouter>,
@@ -56,11 +59,11 @@ describe('auth-only support ticket tracking', () => {
     expect(destination.textContent).toContain('next=%2Fstudent%2Fsupport%2Ftickets%3Fticket%3D17ee7859');
   });
 
-  it('loads an owner-filtered API view for a signed-in reader without a portal guard', async () => {
+  it.each(['/support/tickets', '/student/support/tickets', '/parent/support/tickets', '/company/support/tickets', '/school/support/tickets'])('loads the authenticated tracking API from %s without a portal guard', async (path) => {
     mocks.getSession.mockResolvedValue({ data: { session: { access_token: 'user-token' } } });
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ requests: [] }) });
     vi.stubGlobal('fetch', fetchMock);
-    renderRoute('/support/tickets?ticket=17ee7859-5c8a-4fba-9dbd-9259ccad28f4');
+    renderRoute(`${path}?ticket=17ee7859-5c8a-4fba-9dbd-9259ccad28f4`);
 
     await screen.findByRole('heading', { name: 'Mano pagalbos užklausos' });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(

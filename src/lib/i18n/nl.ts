@@ -1,3 +1,4 @@
+import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
@@ -9,6 +10,7 @@ import { supportTranslations } from './supportTranslations.js';
 import { nlQuiz } from './nlQuiz.js';
 
 export const nl: Record<string, string> = {
+  ...studentNotesTranslations.nl,
   ...schoolFamilyMaterialTranslations.nl,
   ...schoolInvoiceReviewTranslations.nl,
   'school.recordings.access.title': "Toegang tot opnames",
@@ -2769,6 +2771,9 @@ export const nl: Record<string, string> = {
   "em.stripePaySub": "💳 Betaling voor les – {student}, {date}",
   "em.stripeRedirect": "De link verwijst naar een beveiligde Stripe betaalpagina.",
   "em.studentContacts": "Leerlingencontacten:",
+  "em.orgStudentInviteSub": "Je registratielink van {org}",
+  "em.orgStudentInviteHeaderSub": "{org} nodigt je uit op het platform",
+  "em.orgStudentInviteBody": "<strong>{org}</strong> heeft je aan het systeem toegevoegd. Voltooi de registratie om je rooster te bekijken en lessen te boeken.",
   "em.studentInviteBody": "Je docent <strong>{tutor}</strong> heeft je aan het systeem toegevoegd. Voltooi de registratie om je rooster te bekijken en lessen te boeken.",
   "em.studentInviteCodeLabel": "Je uitnodigingscode:",
   "em.schoolStudentInviteCodeLabel": "De registratiecode van je kind:",
@@ -5550,6 +5555,20 @@ export const nl: Record<string, string> = {
   'school.groups.deleteConfirm': "Groep “{name}” verwijderen? Alle komende lessen van deze groep worden ook verwijderd.",
   'school.groups.deleteFailed': "De groep kon niet worden verwijderd.",
   'school.groups.noMatches': "Geen groepen gevonden voor dit filter.",
+  'school.groups.noSessionForOccurrence': "Deze les is niet gepland voor deze leerling.",
+  'school.groups.contractUnconfirmed': "Overeenkomst niet bevestigd",
+  'schoolDash.attendedWithoutContractTitle': "Deelgenomen vóór bevestiging van de overeenkomst",
+  'schoolDash.attendedWithoutContractDescription': "De leerling woonde een les bij toen de overeenkomst voor extra lessen nog niet was bevestigd.",
+  'schoolDash.contractAttendanceLoadFailed': "Meldingen over deelname zonder bevestigde overeenkomst konden niet worden geladen.",
+  'schoolDash.contractAttendanceShownCount': "{shown} van {total} meldingen worden getoond.",
+  'orgFinance.schoolCurrentPayRate': "Huidig ingesteld basistarief: {amount} € per les.",
+  'orgFinance.schoolSummaryNote': "Groepslessen tellen één keer mee. De vergoeding gebruikt het opgeslagen lestarief of, als dat ontbreekt, het huidige basistarief. De school beheert de betalingen.",
+  'orgFinance.schoolFinalizedLessons': "Lessen met een definitief resultaat",
+  'orgFinance.schoolUnresolvedPay': "Lessen met ontbrekende of tegenstrijdige vergoedingstarieven: {count}. De school moet deze controleren.",
+  'orgFinance.schoolKnownPayTotal': "Totaal volgens bekende tarieven",
+  'orgFinance.schoolRateSettingsHint': "Stel het basistarief in: Leraren → selecteer een leraar → Vergoeding (€/les).",
+  'orgFinance.schoolPayPriceIndependence': "De prijzen in leerlingencontracten bepalen niet de vergoeding van de leraar.",
+  'orgFinance.schoolPayPending': "Vergoedingstarief in afwachting",
   'lesson.joinOpensAt': "Deelnemen kan vanaf {time}",
   'em.reminderPayerSchoolLead': "Herinnering: de les van uw kind <strong>{student}</strong> begint binnenkort. De deelnamelink staat hieronder.",
   'em.reminderPayerJoinBtn': "Deelnemen aan de les",
@@ -5817,4 +5836,19 @@ export const nl: Record<string, string> = {
   'em.schoolJoinSubject': 'Neem deel aan je les op {date} om {time}',
   'em.schoolJoinHeader': 'Neem deel aan je les',
   'em.schoolJoinBody': 'Je les begint op {date} om {time}. Gebruik de link hieronder.',
+  'chat.registrationPending': 'Registratie in behandeling',
+  'chat.registrationPendingHint': 'Berichten zijn beschikbaar zodra het leerlingaccount is gekoppeld. Vraag de beheerder van de organisatie om het e-mailadres en het account te controleren, of vraag de leerling om de registratie af te ronden.',
+  'chat.startConversationFailed': 'Het gesprek kon niet worden gestart. Probeer het opnieuw of neem contact op met de beheerder van uw organisatie.',
+  'landing.agencyCta.title': 'Ontdek hoe Tutlio bij uw bijlesbureau past',
+  'landing.agencyCta.desc': 'Tijdens een demo bespreken we uw team, leerlingen en de werkwijze voor ouders en zoeken we een passend abonnement.',
+  'landing.agencyFaq.whatIsQ': 'Wat is Tutlio voor bijlesbureaus?',
+  'landing.agencyFaq.whatIsA': 'Tutlio brengt de roosters van docenten, leerlingen, ouderaccounts, betalingen en rapportages samen in één beheersysteem voor uw bureau.',
+  'landing.agencyFaq.teamQ': 'Kunnen we meerdere docenten en ouderaccounts beheren?',
+  'landing.agencyFaq.teamA': 'Ja. Beheerders zien de lessen en beschikbaarheid van het team. Ouders bekijken het rooster en de betalingen van hun kind in hun eigen account.',
+  'landing.agencyFaq.customizationQ': 'Kan Tutlio aansluiten op onze werkwijze?',
+  'landing.agencyFaq.customizationA': 'We kunnen uw boekingsproces, contracten en betalingen bespreken en bekijken hoe u die in Tutlio instelt.',
+  'landing.agencyFaq.pricingQ': 'Hoe wordt de prijs voor een bureau bepaald?',
+  'landing.agencyFaq.pricingA': 'De prijs hangt af van de teamgrootte en het gekozen abonnement. Bekijk de mogelijkheden op de prijzenpagina en bespreek een voorstel voor uw bureau.',
+  'landing.agencyFaq.demoQ': 'Kunnen we een demo bekijken voordat we beslissen?',
+  'landing.agencyFaq.demoA': 'Ja. Via de prijzenpagina kunt u een gesprek plannen om de functies te bekijken die voor uw team belangrijk zijn.',
 };

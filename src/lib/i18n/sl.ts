@@ -4,6 +4,18 @@ import { en } from './en.js';
  * Keep unpublished until the release checks in docs/SLOVENIAN_LOCALIZATION_REVIEW.md are complete.
  */
 export const slOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Oglejte si, kako bi Tutlio lahko deloval v vaši agenciji",
+  "landing.agencyCta.desc": "Med predstavitvijo lahko govorimo o vaši ekipi, učencih in sodelovanju s starši ter poiščemo ustrezen paket.",
+  "landing.agencyFaq.whatIsQ": "Kaj je Tutlio za agencije za inštrukcije?",
+  "landing.agencyFaq.whatIsA": "Tutlio združuje urnike inštruktorjev, učence, račune staršev, plačila in poročila v en sistem za upravljanje agencije.",
+  "landing.agencyFaq.teamQ": "Ali lahko upravljamo več inštruktorjev in računov staršev?",
+  "landing.agencyFaq.teamA": "Da. Skrbniki lahko vidijo učne ure in razpoložljivost ekipe, starši pa lahko v svojem računu pregledajo urnik in plačila svojega otroka.",
+  "landing.agencyFaq.customizationQ": "Ali se lahko Tutlio prilagodi našemu načinu dela?",
+  "landing.agencyFaq.customizationA": "Pregledamo lahko vaše postopke rezervacij, pogodb in plačil ter se pogovorimo, kako jih nastaviti v Tutliu.",
+  "landing.agencyFaq.pricingQ": "Kako se določi cena za agencije?",
+  "landing.agencyFaq.pricingA": "Cena za agencijo je odvisna od velikosti ekipe in izbranega paketa. Možnosti si lahko ogledate na strani s cenami in se pogovorite o konkretni ponudbi.",
+  "landing.agencyFaq.demoQ": "Ali si lahko pred odločitvijo ogledamo predstavitev?",
+  "landing.agencyFaq.demoA": "Da. Na strani s cenami lahko rezervirate klic in si ogledate postopke, ki so pomembni za vašo ekipo.",
   'compSch.notifyStudentEmail': 'Obvesti učenca po e-pošti',
   "cal.deleteAllRemaining": "Vse preostale ure v tem nizu",
   "cal.deleteAllRemainingHint": "Odstrani prihodnje načrtovane in odpovedane ure v tem nizu. Zgodovina zaključenih ur se ohrani.",

@@ -2,6 +2,18 @@ import { en } from './en.js';
 
 /** European Portuguese tutor/business draft; release review: docs/PORTUGUESE_LOCALIZATION_REVIEW.md. */
 export const ptOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Veja como o Tutlio pode funcionar no seu centro de explicações",
+  "landing.agencyCta.desc": "Numa demonstração, podemos conversar sobre a sua equipa, os alunos e a colaboração com os pais para encontrar o plano adequado.",
+  "landing.agencyFaq.whatIsQ": "O que é o Tutlio para centros de explicações?",
+  "landing.agencyFaq.whatIsA": "O Tutlio reúne os horários dos explicadores, os alunos, as contas dos pais, os pagamentos e os relatórios num único sistema de gestão do centro.",
+  "landing.agencyFaq.teamQ": "Podemos gerir vários explicadores e contas dos pais?",
+  "landing.agencyFaq.teamA": "Sim. Os administradores podem consultar as aulas e a disponibilidade da equipa, enquanto os pais podem ver o horário e os pagamentos do seu filho na própria conta.",
+  "landing.agencyFaq.customizationQ": "O Tutlio pode adaptar-se à nossa forma de trabalhar?",
+  "landing.agencyFaq.customizationA": "Podemos analisar os seus processos de marcação, contratos e pagamentos e discutir como configurá-los no Tutlio.",
+  "landing.agencyFaq.pricingQ": "Como é definido o preço para centros de explicações?",
+  "landing.agencyFaq.pricingA": "O preço depende da dimensão da equipa e do plano escolhido. Pode consultar as opções na página de preços e discutir uma proposta concreta.",
+  "landing.agencyFaq.demoQ": "Podemos ver uma demonstração antes de decidir?",
+  "landing.agencyFaq.demoA": "Sim. Pode marcar uma chamada na página de preços para conhecer os processos mais importantes para a sua equipa.",
   'compSch.notifyStudentEmail': 'Notificar aluno por e-mail',
   "cal.deleteAllRemaining": "Todas as aulas restantes desta série",
   "cal.deleteAllRemainingHint": "Remove as aulas futuras planeadas e canceladas desta série. O histórico das aulas concluídas é mantido.",

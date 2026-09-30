@@ -546,20 +546,49 @@ export interface MessageableStudent {
   child_names?: string[];
 }
 
-let msgStudentsCache: { data: MessageableStudent[]; ts: number } | null = null;
+export interface UnregisteredChatStudent {
+  student_id: string;
+  full_name: string;
+  email: string | null;
+}
+
+let msgStudentsCache: {
+  userId: string;
+  data: MessageableStudent[];
+  unregistered: UnregisteredChatStudent[];
+  ts: number;
+} | null = null;
 
 export function useMessageableStudents() {
-  const [students, setStudents] = useState<MessageableStudent[]>(msgStudentsCache?.data ?? []);
+  const { user } = useUser();
+  const userId = user?.id;
+  const activeUserId = useRef(userId);
+  activeUserId.current = userId;
+  const cached = msgStudentsCache?.userId === userId ? msgStudentsCache : null;
+  const [students, setStudents] = useState<MessageableStudent[]>(cached?.data ?? []);
+  const [unregisteredStudents, setUnregisteredStudents] = useState<UnregisteredChatStudent[]>(cached?.unregistered ?? []);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    const current = msgStudentsCache?.userId === userId ? msgStudentsCache : null;
+    setStudents(current?.data ?? []);
+    setUnregisteredStudents(current?.unregistered ?? []);
+  }, [userId]);
+
   const fetch = useCallback(async (force?: boolean) => {
-    if (!force && msgStudentsCache && Date.now() - msgStudentsCache.ts < CONV_CACHE_TTL) {
+    if (!user) { setLoading(false); return; }
+    if (!force && msgStudentsCache?.userId === user.id && Date.now() - msgStudentsCache.ts < CONV_CACHE_TTL) {
       setStudents(msgStudentsCache.data);
+      setUnregisteredStudents(msgStudentsCache.unregistered);
       return;
     }
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    const publish = (list: MessageableStudent[], unregistered: UnregisteredChatStudent[] = []) => {
+      if (activeUserId.current !== user.id) return;
+      setStudents(list);
+      setUnregisteredStudents(unregistered);
+      msgStudentsCache = { userId: user.id, data: list, unregistered, ts: Date.now() };
+    };
 
     // Detect if the caller is actually a parent. Otherwise, do NOT take the parent path,
     // because tutors/admins also have RLS access to parent_students rows for students they
@@ -601,8 +630,7 @@ export function useMessageableStudents() {
                   ? 'student'
                   : 'tutor',
           }));
-          setStudents(list);
-          msgStudentsCache = { data: list, ts: Date.now() };
+          publish(list);
           setLoading(false);
           return;
         }
@@ -660,8 +688,7 @@ export function useMessageableStudents() {
           });
         }
       });
-      setStudents(list);
-      msgStudentsCache = { data: list, ts: Date.now() };
+      publish(list);
       setLoading(false);
       return;
     }
@@ -683,9 +710,10 @@ export function useMessageableStudents() {
         .from('students')
         .select('id, linked_user_id, full_name, email')
         .eq('organization_id', adminRow.organization_id)
-        .not('linked_user_id', 'is', null);
+        .is('detached_at', null);
 
       const result: MessageableStudent[] = [];
+      const unregistered: UnregisteredChatStudent[] = [];
 
       for (const t of orgTutors) {
         if (t.id !== user.id) {
@@ -701,6 +729,10 @@ export function useMessageableStudents() {
 
       const seen = new Set<string>();
       for (const s of (studentData ?? [])) {
+        if (!s.linked_user_id) {
+          unregistered.push({ student_id: s.id, full_name: s.full_name ?? '', email: s.email ?? null });
+          continue;
+        }
         if (s.linked_user_id !== user.id && !seen.has(s.linked_user_id)) {
           seen.add(s.linked_user_id);
           result.push({
@@ -756,8 +788,7 @@ export function useMessageableStudents() {
         console.warn('[useChat] get_org_admin_messageable_parents threw:', err);
       }
 
-      setStudents(result);
-      msgStudentsCache = { data: result, ts: Date.now() };
+      publish(result, unregistered);
     } else {
       // Decide between STUDENT branch (linked_user_id = user.id) and TUTOR branch.
       const { data: studentSelfRows } = await supabase
@@ -822,17 +853,19 @@ export function useMessageableStudents() {
           }
         }
 
-        setStudents(list);
-        msgStudentsCache = { data: list, ts: Date.now() };
+        publish(list);
       } else {
         // ── TUTOR branch (individual tutor or org tutor) ──
         const { data } = await supabase
           .from('students')
           .select('id, linked_user_id, full_name, email')
           .eq('tutor_id', user.id)
-          .not('linked_user_id', 'is', null);
+          .is('detached_at', null);
 
-        const list: MessageableStudent[] = (data ?? []).map((s: any) => ({
+        const unregistered: UnregisteredChatStudent[] = (data ?? [])
+          .filter((s: any) => !s.linked_user_id)
+          .map((s: any) => ({ student_id: s.id, full_name: s.full_name ?? '', email: s.email ?? null }));
+        const list: MessageableStudent[] = (data ?? []).filter((s: any) => s.linked_user_id).map((s: any) => ({
           student_id: s.id,
           linked_user_id: s.linked_user_id,
           full_name: s.full_name,
@@ -901,15 +934,14 @@ export function useMessageableStudents() {
           console.warn('[useChat] get_tutor_messageable_admins failed:', err);
         }
 
-        setStudents(list);
-        msgStudentsCache = { data: list, ts: Date.now() };
+        publish(list, unregistered);
       }
     }
 
     setLoading(false);
-  }, []);
+  }, [userId]);
 
-  return { students, loading, fetch };
+  return { students, unregisteredStudents, loading, fetch };
 }
 
 export async function downloadChatFile(storagePath: string): Promise<string | null> {

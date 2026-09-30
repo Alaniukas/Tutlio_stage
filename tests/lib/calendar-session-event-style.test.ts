@@ -5,6 +5,25 @@ import {
   isMvRecurringScheduledLesson,
   MOKSLO_VAISIAI_CALENDAR_COLORS,
 } from '@/lib/calendarSessionEventStyle';
+import { effectiveSessionOutcome } from '@/lib/sessionStatusConfirmation';
+
+describe('calendar colors for manually confirmed organization outcomes', () => {
+  const past = new Date(Date.now() - 60 * 60 * 1000);
+  const styleFor = (status: string, confirmedAt: string | null) => getCalendarSessionEventStyle({
+    status: effectiveSessionOutcome({ status, status_confirmed_at: confirmedAt }, true),
+    endAt: past, paid: true, isOrgTutor: true,
+  });
+
+  it('keeps an ended paid lesson pending until a teacher or administrator confirms it', () => {
+    expect(styleFor('completed', null).backgroundColor).toBe('#ca8a04');
+    expect(styleFor('completed', past.toISOString()).backgroundColor).toBe('#10b981');
+  });
+
+  it('shows an unstamped no-show as pending and retains the confirmed no-show color', () => {
+    expect(styleFor('no_show', null).backgroundColor).toBe('#ca8a04');
+    expect(styleFor('no_show', past.toISOString()).backgroundColor).toBe('#fda4af');
+  });
+});
 
 describe('getCalendarSessionEventStyle (Mokslo vaisiai)', () => {
   const future = new Date(Date.now() + 60 * 60 * 1000);

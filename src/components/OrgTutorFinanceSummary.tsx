@@ -17,9 +17,15 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { fmtMoney, isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMoney';
 import { sumProKlasePayBreakdown, type ProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
 import { parseTutorPayBySubject, sumOrgTutorLessonsPayEur } from '@/lib/orgTutorLessonPay';
+import { schoolTutorPayOccurrences } from '@/lib/schoolTutorLessonPay';
+import { fetchSchoolTutorAttendancePayRows } from '@/lib/schoolTutorAttendancePay';
+import { orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
+import { fetchAllRows } from '@/lib/fetchAllRows';
+import { schoolDate } from '@/lib/schoolTime';
 import { useUser } from '@/contexts/UserContext';
 import InvoiceSettingsForm from '@/components/InvoiceSettingsForm';
 import CreateInvoiceModal from '@/components/CreateInvoiceModal';
@@ -67,6 +73,11 @@ export default function OrgTutorFinanceSummary() {
   const proKlasePayMode = isProKlaseOrg(profile?.organization_id);
   const manoPayMode = isManoKorepetitoriusOrg(profile?.organization_id);
   const { payPerLessonEur, loading: policyLoading, invoiceIssuerMode } = useOrgTutorPolicy();
+  const { entityType, organizationId: policyOrganizationId, hasFeature, loading: orgLoading, error: orgLoadError } = useOrgFeatures();
+  const schoolPayMode = entityType === 'school';
+  const requiresSchoolConfirmation = orgRequiresTutorStatusConfirmation(policyOrganizationId || profile?.organization_id, {
+    tutor_lesson_status_confirmation: hasFeature('tutor_lesson_status_confirmation'),
+  });
   const tutorCanIssueInvoice = invoiceIssuerMode !== 'company';
 
   const [periodMode, setPeriodMode] = useState<'month' | 'range'>('month');
@@ -78,6 +89,9 @@ export default function OrgTutorFinanceSummary() {
   const [payBreakdown, setPayBreakdown] = useState<ProKlasePayBreakdown | null>(null);
   const [manoPayEur, setManoPayEur] = useState<number | null>(null);
   const [manoHasSubjectRates, setManoHasSubjectRates] = useState(false);
+  const [schoolKnownPayEur, setSchoolKnownPayEur] = useState<number | null>(null);
+  const [schoolUnresolvedCount, setSchoolUnresolvedCount] = useState(0);
+  const [schoolKnownCount, setSchoolKnownCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [summaryLoadError, setSummaryLoadError] = useState(false);
 
@@ -117,12 +131,21 @@ export default function OrgTutorFinanceSummary() {
 
       setLoading(true);
       setSummaryLoadError(false);
+      setSchoolKnownPayEur(null);
+      setSchoolUnresolvedCount(0);
+      setSchoolKnownCount(0);
+
+      if (orgLoadError || !entityType) {
+        setSummaryLoadError(true);
+        setLoading(false);
+        return;
+      }
 
       let startIso: string;
       let endIso: string;
 
       if (periodMode === 'month') {
-        const monthAnchor = new Date(month + '-01');
+        const monthAnchor = schoolPayMode ? schoolDate(month + '-01') : new Date(month + '-01');
         if (!Number.isFinite(monthAnchor.getTime())) {
           setRangeError(null);
           setCompletedCount(0);
@@ -135,8 +158,8 @@ export default function OrgTutorFinanceSummary() {
         endIso = end.toISOString();
         setRangeError(null);
       } else {
-        const a = startOfDay(parseISO(rangeStart));
-        const b = endOfDay(parseISO(rangeEnd));
+        const a = startOfDay(schoolPayMode ? schoolDate(rangeStart) : parseISO(rangeStart));
+        const b = endOfDay(schoolPayMode ? schoolDate(rangeEnd) : parseISO(rangeEnd));
         if (a > b) {
           setRangeError(t('orgFinance.startDateAfterEnd'));
           setCompletedCount(0);
@@ -155,7 +178,7 @@ export default function OrgTutorFinanceSummary() {
         endIso = b.toISOString();
       }
 
-      if (payPerLessonEur === null) {
+      if (payPerLessonEur === null && !schoolPayMode) {
         if (!cancelled) {
           setSummaryLoadError(true);
           setLoading(false);
@@ -167,6 +190,47 @@ export default function OrgTutorFinanceSummary() {
       let manoTotal: number | null = null;
       let manoHasSubjectRatesLocal = false;
       let conductedCount = 0;
+
+      if (schoolPayMode) {
+        try {
+          const organizationId = policyOrganizationId || profile?.organization_id;
+          if (!organizationId) throw new Error('School organization required');
+          const [rows, attendanceRows] = await Promise.all([fetchAllRows<any>((from, to) => supabase
+            .from('sessions')
+            .select('id, tutor_id, student_id, class_group_id, start_time, end_time, status, subject_id, tutor_pay_eur_snapshot, no_show_reason, status_confirmed_at, subjects(is_group), students!inner(organization_id)')
+            .eq('tutor_id', user.id)
+            .eq('students.organization_id', organizationId)
+            .lte('end_time', new Date().toISOString())
+            .gte('start_time', startIso)
+            .lte('start_time', endIso)
+            .order('start_time')
+            .order('id')
+            .range(from, to)), fetchSchoolTutorAttendancePayRows({
+              tutorId: user.id,
+              periodStart: format(schoolDate(startIso), 'yyyy-MM-dd'),
+              periodEnd: format(schoolDate(endIso), 'yyyy-MM-dd'),
+            })]);
+          if (cancelled) return;
+          const occurrences = schoolTutorPayOccurrences([...rows, ...attendanceRows], payPerLessonEur, new Date(), {
+            requireConfirmation: requiresSchoolConfirmation,
+          });
+          const priced = occurrences.filter((occurrence) => occurrence.payEur !== null);
+          setCompletedCount(occurrences.length);
+          setSchoolKnownPayEur(Math.round(priced.reduce((sum, occurrence) => sum + occurrence.payEur!, 0) * 100) / 100);
+          setSchoolKnownCount(priced.length);
+          setSchoolUnresolvedCount(occurrences.length - priced.length);
+          setPayBreakdown(null);
+          setManoPayEur(null);
+          setManoHasSubjectRates(false);
+        } catch (error) {
+          if (cancelled) return;
+          console.error('[OrgTutorFinanceSummary]', error);
+          setSummaryLoadError(true);
+          setCompletedCount(0);
+        }
+        setLoading(false);
+        return;
+      }
 
       if (proKlasePayMode) {
         const { data: sessionRows, error: sessionErr } = await supabase
@@ -293,12 +357,12 @@ export default function OrgTutorFinanceSummary() {
       setLoading(false);
     };
 
-    if (!policyLoading) void load();
+    if (!policyLoading && !orgLoading) void load();
 
     return () => {
       cancelled = true;
     };
-  }, [month, periodMode, rangeStart, rangeEnd, policyLoading, proKlasePayMode, manoPayMode, payPerLessonEur, profile?.organization_id, t]);
+  }, [month, periodMode, rangeStart, rangeEnd, policyLoading, orgLoading, orgLoadError, entityType, schoolPayMode, policyOrganizationId, requiresSchoolConfirmation, proKlasePayMode, manoPayMode, payPerLessonEur, profile?.organization_id, t]);
 
   const fetchInvoices = useCallback(async () => {
     const user = await dedupeAuthGetUser();
@@ -364,7 +428,7 @@ export default function OrgTutorFinanceSummary() {
     );
   };
 
-  const gross = payBreakdown?.totalEur ?? manoPayEur ?? completedCount * (payPerLessonEur ?? 0);
+  const gross = schoolKnownPayEur ?? payBreakdown?.totalEur ?? manoPayEur ?? completedCount * (payPerLessonEur ?? 0);
 
   return (
     <div className="space-y-6">
@@ -377,16 +441,21 @@ export default function OrgTutorFinanceSummary() {
           <div>
             <h2 className="text-lg font-bold text-gray-900">{t('orgFinance.yourPay')}</h2>
             <p className="text-xs text-gray-500">
-              {policyLoading
+              {policyLoading || orgLoading
                 ? t('common.loadingDots')
-                : payPerLessonEur === null
+                : orgLoadError
                   ? t('common.error')
+                : payPerLessonEur === null
+                  ? t(schoolPayMode ? 'orgFinance.schoolPayPending' : 'common.error')
+                  : schoolPayMode
+                    ? t('orgFinance.schoolCurrentPayRate', { amount: payPerLessonEur.toFixed(2) })
                   : manoHasSubjectRates
                 ? t('orgFinance.payUsesSubjectRates', { amount: payPerLessonEur.toFixed(2) })
                 : t('orgFinance.fixedPayPerLesson', { amount: payPerLessonEur.toFixed(2) })}
             </p>
           </div>
         </div>
+        {schoolPayMode && <p className="text-xs text-gray-500 mt-2">{t('orgFinance.schoolPayPriceIndependence')}</p>}
 
         <div className="mt-4 space-y-3">
           <p className="text-sm font-medium text-gray-700">{t('common.period')}</p>
@@ -449,27 +518,33 @@ export default function OrgTutorFinanceSummary() {
           )}
         </div>
 
-        {loading || policyLoading ? (
+        {loading || policyLoading || orgLoading ? (
           <p className="text-gray-500 text-sm mt-6">{t('common.loadingDots')}</p>
-        ) : summaryLoadError || payPerLessonEur === null ? (
+        ) : summaryLoadError || (payPerLessonEur === null && !schoolPayMode) ? (
           <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-6">
             {t('common.error')}
           </p>
         ) : (
           <div className="mt-6 rounded-xl bg-gray-50 border border-gray-100 p-4">
             <p className="text-sm text-gray-600">
-              {t('orgFinance.completedLessons', { range: rangeLabel })}
+              {schoolPayMode ? `${t('orgFinance.schoolFinalizedLessons')} (${rangeLabel}):` : t('orgFinance.completedLessons', { range: rangeLabel })}
             </p>
             <p className="text-2xl font-bold text-gray-900 mt-1">{completedCount}</p>
             <div className="flex items-center gap-2 mt-4 pt-4 border-t border-gray-200">
               <Euro className="w-5 h-5 text-emerald-600" />
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wide">
-                  {proKlasePayMode ? t('orgFinance.payableTotal') : t('orgFinance.approxInvoiceAmount')}
+                  {schoolPayMode && schoolUnresolvedCount > 0 ? t('orgFinance.schoolKnownPayTotal') : proKlasePayMode ? t('orgFinance.payableTotal') : t('orgFinance.approxInvoiceAmount')}
                 </p>
-                <p className="text-xl font-bold text-emerald-700">{fmtMoney(gross)}</p>
+                <p className="text-xl font-bold text-emerald-700">{schoolPayMode && schoolUnresolvedCount > 0 && schoolKnownCount === 0 ? t('orgFinance.schoolPayPending') : fmtMoney(gross)}</p>
               </div>
             </div>
+            {schoolPayMode && schoolUnresolvedCount > 0 && (
+              <p role="alert" className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
+                {t('orgFinance.schoolUnresolvedPay', { count: schoolUnresolvedCount })}
+                <span className="block text-xs mt-1">{t('orgFinance.schoolRateSettingsHint')}</span>
+              </p>
+            )}
             {proKlasePayMode && payBreakdown && (
               <div className="mt-4 space-y-2 text-sm">
                 <p className="font-medium text-gray-700">{t('orgFinance.payBreakdown')}</p>
@@ -494,7 +569,7 @@ export default function OrgTutorFinanceSummary() {
               </div>
             )}
             <p className="text-xs text-gray-400 mt-3">
-              {t('orgFinance.summaryNote')}
+              {schoolPayMode ? t('orgFinance.schoolSummaryNote') : t('orgFinance.summaryNote')}
             </p>
           </div>
         )}

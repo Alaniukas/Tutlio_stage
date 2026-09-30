@@ -91,6 +91,12 @@ const STATUS: Record<InAppSupportStatus, { label: string; className: string }> =
   resolved: { label: 'Išspręsta', className: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/25' },
 };
 
+function statusLabel(status: InAppSupportStatus, category: 'all' | InAppSupportCategory): string {
+  if (status === 'resolved' && category === 'feature') return 'Įgyvendinta';
+  if (status === 'resolved' && category === 'all') return 'Išspręsta / įgyvendinta';
+  return STATUS[status].label;
+}
+
 const PRIORITY: Record<InAppSupportPriority, string> = {
   untriaged: 'Neįvertintas',
   low: 'Žemas',
@@ -194,7 +200,14 @@ export default function AdminSupportRequestsPanel({
     });
   }, [requests, query, statusFilter, categoryFilter]);
 
-  const selected = requests.find((item) => item.id === selectedId) || null;
+  const selected = filtered.find((item) => item.id === selectedId) || filtered[0] || null;
+
+  useEffect(() => {
+    setSelectedId(selected?.id || null);
+    setShowTranscript(false);
+    setPromptCopied(false);
+    setLogEvents(null);
+  }, [selected?.id]);
 
   useEffect(() => {
     if (!selected) return;
@@ -202,10 +215,7 @@ export default function AdminSupportRequestsPanel({
     setEditPriority(selected.priority);
     setEditTargetDate(dateTimeLocal(selected.target_date));
     setInternalNote(selected.internal_note || '');
-    setShowTranscript(false);
-    setPromptCopied(false);
-    setLogEvents(null);
-  }, [selected?.id]);
+  }, [selected?.id, selected?.status, selected?.priority, selected?.target_date, selected?.internal_note, selected?.status_updated_at]);
 
   const counts = useMemo(() => ({
     open: requests.filter((item) => item.status !== 'resolved').length,
@@ -223,7 +233,7 @@ export default function AdminSupportRequestsPanel({
     setSaving(true);
     setError('');
     setNotice('');
-    const targetDate = editStatus === 'registered' ? null
+    const targetDate = editStatus !== 'in_progress' ? null
       : editTargetDate === dateTimeLocal(selected.target_date || null)
         ? selected.target_date || null
         : editTargetDate ? new Date(editTargetDate).toISOString() : null;
@@ -330,22 +340,37 @@ export default function AdminSupportRequestsPanel({
         <Metric icon={Clock3} label="Atviros" value={counts.open} color="text-sky-300 bg-sky-500/10" />
         <Metric icon={Bug} label="Aktyvios klaidos" value={counts.bugs} color="text-rose-300 bg-rose-500/10" />
         <Metric icon={Lightbulb} label="Funkcijų idėjos" value={counts.features} color="text-amber-300 bg-amber-500/10" />
-        <Metric icon={CheckCircle2} label="Išspręsta" value={counts.resolved} color="text-emerald-300 bg-emerald-500/10" />
+        <Metric icon={CheckCircle2} label="Užbaigtos" value={counts.resolved} color="text-emerald-300 bg-emerald-500/10" />
       </div>
 
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_170px_170px]">
+      <div role="group" aria-label="Užklausų tipas" className="flex flex-wrap gap-2">
+        {([
+          ['all', 'Visos užklausos'],
+          ['bug', 'Klaidos'],
+          ['feature', 'Funkcijos'],
+        ] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={categoryFilter === value}
+            onClick={() => setCategoryFilter(value)}
+            className={cn('min-h-11 rounded-xl border px-4 text-sm font-semibold transition-colors', categoryFilter === value
+              ? 'border-indigo-500 bg-indigo-600 text-white'
+              : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10')}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_200px]">
         <label className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ieškoti pagal pavadinimą, žmogų, įmonę…" className="h-11 w-full rounded-xl border border-white/10 bg-white/5 pl-10 pr-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-indigo-500" />
+          <input aria-label="Ieškoti užklausų" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ieškoti pagal pavadinimą, žmogų, įmonę…" className="h-11 w-full rounded-xl border border-white/10 bg-white/5 pl-10 pr-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-indigo-500" />
         </label>
-        <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value as typeof categoryFilter)} className="h-11 rounded-xl border border-white/10 bg-slate-900 px-3 text-sm text-slate-200 outline-none focus:border-indigo-500">
-          <option value="all">Visi tipai</option>
-          <option value="bug">Klaidos</option>
-          <option value="feature">Funkcijos</option>
-        </select>
-        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} className="h-11 rounded-xl border border-white/10 bg-slate-900 px-3 text-sm text-slate-200 outline-none focus:border-indigo-500">
+        <select aria-label="Filtruoti pagal būseną" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} className="h-11 rounded-xl border border-white/10 bg-slate-900 px-3 text-sm text-slate-200 outline-none focus:border-indigo-500">
           <option value="all">Visos būsenos</option>
-          {Object.entries(STATUS).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
+          {Object.keys(STATUS).map((value) => <option key={value} value={value}>{statusLabel(value as InAppSupportStatus, categoryFilter)}</option>)}
         </select>
       </div>
 
@@ -357,7 +382,7 @@ export default function AdminSupportRequestsPanel({
       {notice && <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">{notice}</div>}
 
       <div className="grid min-h-[640px] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] lg:grid-cols-[330px_minmax(0,1fr)]">
-        <div className="max-h-[720px] overflow-y-auto border-b border-white/10 lg:border-b-0 lg:border-r">
+        <div role="region" aria-label="Užklausų sąrašas" className="max-h-[720px] overflow-y-auto border-b border-white/10 lg:border-b-0 lg:border-r">
           {loading ? (
             <div className="flex h-64 items-center justify-center gap-2 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> Kraunama…</div>
           ) : filtered.length === 0 ? (
@@ -371,7 +396,7 @@ export default function AdminSupportRequestsPanel({
               onClick={() => setSelectedId(item.id)}
               className={cn(
                 'w-full border-b border-white/5 px-4 py-4 text-left transition hover:bg-white/5',
-                selectedId === item.id && 'bg-indigo-500/10 ring-1 ring-inset ring-indigo-500/25',
+                selected?.id === item.id && 'bg-indigo-500/10 ring-1 ring-inset ring-indigo-500/25',
               )}
             >
               <div className="flex items-start gap-3">
@@ -382,7 +407,7 @@ export default function AdminSupportRequestsPanel({
                   <span className="line-clamp-2 text-sm font-bold leading-5 text-white">{item.title}</span>
                   <span className="mt-1.5 block truncate text-xs text-slate-400">{item.reporter_name || item.reporter_email}</span>
                   <span className="mt-2 flex items-center justify-between gap-2">
-                    <StatusBadge status={item.status} />
+                    <StatusBadge status={item.status} category={item.category} />
                     <span className="text-[10px] text-slate-500">{formatDate(item.created_at)}</span>
                   </span>
                 </span>
@@ -403,7 +428,7 @@ export default function AdminSupportRequestsPanel({
                       {selected.category === 'bug' ? <Bug className="h-3.5 w-3.5" /> : <Lightbulb className="h-3.5 w-3.5" />}
                       {selected.category === 'bug' ? 'Klaida' : 'Funkcijos pasiūlymas'}
                     </span>
-                    <StatusBadge status={selected.status} />
+                    <StatusBadge status={selected.status} category={selected.category} />
                     <span className="font-mono text-[11px] text-slate-500">{reference(selected.id)}</span>
                   </div>
                   <h3 className="mt-3 text-xl font-black leading-tight text-white">{selected.title}</h3>
@@ -495,7 +520,7 @@ export default function AdminSupportRequestsPanel({
                     <DetailLabel>Tvarkymas</DetailLabel>
                     <label className="mt-3 block text-xs text-slate-400">Būsena
                       <select value={editStatus} onChange={(event) => setEditStatus(event.target.value as InAppSupportStatus)} className="mt-1.5 h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-2.5 text-sm text-white outline-none focus:border-indigo-500">
-                        {Object.entries(STATUS).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
+                        {Object.keys(STATUS).map((value) => <option key={value} value={value}>{statusLabel(value as InAppSupportStatus, selected.category)}</option>)}
                       </select>
                     </label>
                     <label className="mt-3 block text-xs text-slate-400">Prioritetas
@@ -504,7 +529,7 @@ export default function AdminSupportRequestsPanel({
                       </select>
                     </label>
                     <label className="mt-3 block text-xs text-slate-400">Terminas {editStatus === 'in_progress' ? '(privalomas)' : ''}
-                      <input type="datetime-local" value={editTargetDate} onChange={(event) => setEditTargetDate(event.target.value)} disabled={editStatus === 'registered'} className="mt-1.5 h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-2.5 text-sm text-white outline-none focus:border-indigo-500 disabled:opacity-50" />
+                      <input type="datetime-local" value={editStatus === 'in_progress' ? editTargetDate : ''} onChange={(event) => setEditTargetDate(event.target.value)} disabled={editStatus !== 'in_progress'} className="mt-1.5 h-10 w-full rounded-lg border border-white/10 bg-slate-900 px-2.5 text-sm text-white outline-none focus:border-indigo-500 disabled:opacity-50" />
                     </label>
                     <label className="mt-3 block text-xs text-slate-400">Vidinė pastaba
                       <textarea value={internalNote} onChange={(event) => setInternalNote(event.target.value.slice(0, 10_000))} rows={5} placeholder="Sprendimas, nuoroda į užduotį, atsakingas žmogus…" className="mt-1.5 w-full resize-none rounded-lg border border-white/10 bg-slate-900 px-2.5 py-2 text-sm leading-5 text-white outline-none placeholder:text-slate-600 focus:border-indigo-500" />
@@ -585,9 +610,9 @@ function Metric({ icon: Icon, label, value, color }: { icon: typeof Clock3; labe
   );
 }
 
-function StatusBadge({ status }: { status: InAppSupportStatus }) {
+function StatusBadge({ status, category }: { status: InAppSupportStatus; category: InAppSupportCategory }) {
   const meta = STATUS[status] || STATUS.registered;
-  return <span className={cn('inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold', meta.className)}>{meta.label}</span>;
+  return <span className={cn('inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold', meta.className)}>{statusLabel(status, category)}</span>;
 }
 
 function DetailLabel({ children }: { children: React.ReactNode }) {

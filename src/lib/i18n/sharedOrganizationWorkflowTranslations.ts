@@ -4,6 +4,23 @@
  * can override individual strings without blocking a release.
  */
 export const sharedOrganizationWorkflowTranslations: Record<string, string> = {
+  'chat.registrationPending': 'Registration pending',
+  'chat.registrationPendingHint': 'Messaging is available after the student account is linked. Ask the organization administrator to confirm the student email and account, or ask the student to finish registration.',
+  'chat.startConversationFailed': 'Could not start the conversation. Please try again or contact your organization administrator.',
+  'school.groups.noSessionForOccurrence': 'This student is not scheduled for this lesson.',
+  'school.groups.contractUnconfirmed': "Contract not confirmed",
+  'schoolDash.attendedWithoutContractTitle': "Attended while contract was unconfirmed",
+  'schoolDash.attendedWithoutContractDescription': "The student attended a lesson before the extra lesson contract was confirmed.",
+  'schoolDash.contractAttendanceLoadFailed': "Could not load attendance notifications about unconfirmed contracts.",
+  'schoolDash.contractAttendanceShownCount': "Showing {shown} of {total} notifications.",
+  'orgFinance.schoolCurrentPayRate': "Current base rate: €{amount} per lesson.",
+  'orgFinance.schoolSummaryNote': "Group lessons count once. Pay uses the stored lesson rate, or the current base rate when no stored rate exists. Payments are managed by your school.",
+  'orgFinance.schoolFinalizedLessons': "Lessons with a final outcome",
+  'orgFinance.schoolUnresolvedPay': "Lessons with missing or conflicting pay rates: {count}. Your school needs to review them.",
+  'orgFinance.schoolKnownPayTotal': "Total at known rates",
+  'orgFinance.schoolRateSettingsHint': "Set the base rate in Teachers → select a teacher → Pay (€/lesson).",
+  'orgFinance.schoolPayPriceIndependence': "Student contract prices do not determine teacher pay.",
+  'orgFinance.schoolPayPending': "Pay rate pending",
   'lessonSet.emailAvailabilityChanges': 'Availability changes made by an organization administrator',
   'att.confirmedManually': 'Attendance confirmed',
   'att.unconfirmed': 'Attendance not confirmed',

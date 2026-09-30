@@ -6,6 +6,18 @@ import { en } from './en.js';
  * See docs/ITALIAN_LOCALIZATION_REVIEW.md before publishing this locale.
  */
 export const itOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Scopri come Tutlio potrebbe funzionare per la tua agenzia",
+  "landing.agencyCta.desc": "Durante una demo possiamo parlare del tuo team, degli studenti e della collaborazione con i genitori per trovare il piano più adatto.",
+  "landing.agencyFaq.whatIsQ": "Che cos’è Tutlio per le agenzie di ripetizioni?",
+  "landing.agencyFaq.whatIsA": "Tutlio riunisce gli orari dei tutor, gli studenti, gli account dei genitori, i pagamenti e i report in un unico sistema di gestione dell’agenzia.",
+  "landing.agencyFaq.teamQ": "Possiamo gestire più tutor e account dei genitori?",
+  "landing.agencyFaq.teamA": "Sì. Gli amministratori possono vedere le lezioni e la disponibilità del team, mentre i genitori possono consultare gli orari e i pagamenti del proprio figlio dal loro account.",
+  "landing.agencyFaq.customizationQ": "Tutlio può adattarsi al nostro modo di lavorare?",
+  "landing.agencyFaq.customizationA": "Possiamo esaminare i vostri processi di prenotazione, contratto e pagamento e discutere come configurarli in Tutlio.",
+  "landing.agencyFaq.pricingQ": "Come viene stabilito il prezzo per le agenzie?",
+  "landing.agencyFaq.pricingA": "Il prezzo per l’agenzia dipende dalle dimensioni del team e dal piano scelto. Puoi consultare le opzioni nella pagina dei prezzi e discutere una proposta specifica.",
+  "landing.agencyFaq.demoQ": "Possiamo vedere una demo prima di decidere?",
+  "landing.agencyFaq.demoA": "Sì. Puoi prenotare una chiamata dalla pagina dei prezzi per vedere i flussi di lavoro che contano per il tuo team.",
   'compSch.notifyStudentEmail': 'Avvisa lo studente via email',
   "cal.deleteAllRemaining": "Tutte le lezioni rimanenti di questa serie",
   "cal.deleteAllRemainingHint": "Elimina le future lezioni programmate e le lezioni annullate di questa serie. La cronologia delle lezioni svolte viene conservata.",

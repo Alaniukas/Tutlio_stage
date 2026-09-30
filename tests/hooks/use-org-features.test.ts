@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { useOrgFeature, useOrgFeatures } from '@/hooks/useOrgFeatures';
 
 const tutorSidebarProfileDeduped = vi.fn();
 const orgAdminRowByUserDeduped = vi.fn();
@@ -43,6 +43,19 @@ describe('useOrgFeatures', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.organizationId).toBe('org-from-admin');
     expect(orgAdminRowByUserDeduped).toHaveBeenCalledWith('user-1');
+  });
+
+  it('requires Laisvi vaikai teacher confirmation without changing stored features', async () => {
+    const organizationId = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
+    tutorSidebarProfileDeduped.mockResolvedValue({ data: { organization_id: organizationId } });
+    orgSuspensionRowDeduped.mockResolvedValue({ data: { entity_type: 'school', features: {} } });
+    const { result } = renderHook(() => useOrgFeatures());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.hasFeature('tutor_lesson_status_confirmation')).toBe(true);
+
+    const { result: singleFeature } = renderHook(() => useOrgFeature(organizationId, 'tutor_lesson_status_confirmation'));
+    await waitFor(() => expect(singleFeature.current.loading).toBe(false));
+    expect(singleFeature.current.enabled).toBe(true);
   });
 
   it('reports a failed organization lookup separately from a disabled feature', async () => {

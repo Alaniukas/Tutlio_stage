@@ -7,6 +7,18 @@ import { en } from './en.js';
  * Dictionary coverage does not publish the locale or certify market readiness.
  */
 export const huOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Nézze meg, hogyan működhet a Tutlio az Ön oktatóközpontjában",
+  "landing.agencyCta.desc": "Egy bemutatón átbeszélhetjük csapata, diákjai és a szülőkkel való együttműködés igényeit, és megtalálhatjuk a megfelelő csomagot.",
+  "landing.agencyFaq.whatIsQ": "Mi a Tutlio a magánoktatással foglalkozó vállalkozások számára?",
+  "landing.agencyFaq.whatIsA": "A Tutlio egyetlen vállalkozásirányítási rendszerben fogja össze az oktatók órarendjét, a diákokat, a szülői fiókokat, a fizetéseket és a jelentéseket.",
+  "landing.agencyFaq.teamQ": "Kezelhetünk több oktatót és szülői fiókot?",
+  "landing.agencyFaq.teamA": "Igen. Az adminisztrátorok láthatják a csapat óráit és szabad időpontjait, a szülők pedig saját fiókjukban tekinthetik meg gyermekük órarendjét és fizetéseit.",
+  "landing.agencyFaq.customizationQ": "A Tutlio alkalmazkodhat a munkafolyamatainkhoz?",
+  "landing.agencyFaq.customizationA": "Áttekinthetjük az Önök foglalási, szerződéskötési és fizetési folyamatait, és megbeszélhetjük, hogyan állíthatók be a Tutlióban.",
+  "landing.agencyFaq.pricingQ": "Hogyan határozzák meg az oktatóközpontok árait?",
+  "landing.agencyFaq.pricingA": "Az ár a csapat méretétől és a választott csomagtól függ. Az árakat bemutató oldalon áttekintheti a lehetőségeket, és egyeztethet egy konkrét ajánlatról.",
+  "landing.agencyFaq.demoQ": "Megnézhetünk egy bemutatót, mielőtt döntünk?",
+  "landing.agencyFaq.demoA": "Igen. Az árakat bemutató oldalon időpontot foglalhat egy hívásra, ahol megismerheti a csapata számára fontos munkafolyamatokat.",
   'compSch.notifyStudentEmail': 'Tanuló értesítése e-mailben',
   "cal.deleteAllRemaining": "A sorozat összes hátralévő órája",
   "cal.deleteAllRemainingHint": "Törli a sorozat jövőbeli tervezett és lemondott óráit. A megtartott órák előzményei megmaradnak.",

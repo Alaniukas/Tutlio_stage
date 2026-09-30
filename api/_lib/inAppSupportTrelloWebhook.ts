@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { InAppSupportPriority, InAppSupportStatus } from '../../src/lib/inAppSupport.js';
+import type { InAppSupportCategory, InAppSupportPriority, InAppSupportStatus } from '../../src/lib/inAppSupport.js';
+import { getTrelloFeatureListSettings, type TrelloSupportLists } from './inAppSupportTrelloConfig.js';
 
 export const TRELLO_SUPPORT_CLIENT_IDENTIFIER = 'tutlio-support-sync';
 
@@ -10,7 +11,9 @@ export interface TrelloWebhookSettings {
   callbackUrl: string;
   boardId: string;
   webhookId: string | null;
-  lists: { registered: string; inProgress: string; resolved: string };
+  lists: TrelloSupportLists;
+  featureLists?: TrelloSupportLists | null;
+  featureListConfigurationError?: string | null;
 }
 
 export interface TrelloSupportCard {
@@ -50,10 +53,14 @@ export function getTrelloWebhookSettings(): TrelloWebhookSettings | null {
   if (!/^https:\/\//.test(callbackUrl) || !CARD_ID.test(boardId)
     || ![registered, inProgress, resolved].every((id) => CARD_ID.test(id))
     || new Set([registered, inProgress, resolved]).size !== 3) return null;
+  const lists = { registered, inProgress, resolved };
+  const featureListSettings = getTrelloFeatureListSettings(lists);
   return {
     apiKey, token, applicationSecret, callbackUrl, boardId,
     webhookId: process.env.TRELLO_WEBHOOK_ID?.trim() || null,
-    lists: { registered, inProgress, resolved },
+    lists,
+    featureLists: featureListSettings.state === 'configured' ? featureListSettings.lists : null,
+    featureListConfigurationError: featureListSettings.state === 'invalid' ? featureListSettings.error : null,
   };
 }
 
@@ -171,24 +178,35 @@ export async function normalizeTrelloPriorityTitle(
 
 export function deriveTrelloTicketState(
   card: TrelloSupportCard,
-  current: Pick<TrelloTicketState, 'status' | 'target_date' | 'priority'>,
+  current: Pick<TrelloTicketState, 'status' | 'target_date' | 'priority'> & { category?: InAppSupportCategory },
   settings: TrelloWebhookSettings,
 ): TrelloTicketState {
   const priority = cardPriority(card)?.priority || current.priority;
-  if (card.closed) return { ...current, priority, trello_sync_error: 'Unarchive the Trello support card before changing its status.' };
-  if (card.idList === settings.lists.inProgress) {
+  const previous = { status: current.status, target_date: current.target_date, priority };
+  if (card.closed) return { ...previous, trello_sync_error: 'Unarchive the Trello support card before changing its status.' };
+  if (current.category === 'feature' && settings.featureListConfigurationError) {
+    return { ...previous, trello_sync_error: settings.featureListConfigurationError };
+  }
+  // Existing feature cards can stay in the shared lists during rollout. Their
+  // stored category, rather than editable Trello text, controls the new pipeline.
+  const pipelines = current.category === 'feature' && settings.featureLists
+    ? [settings.featureLists, settings.lists] : [settings.lists];
+  if (pipelines.some((lists) => card.idList === lists.inProgress)) {
     const due = card.due && Date.parse(card.due);
     if (!due || !Number.isFinite(due)) return {
-      ...current, priority,
+      ...previous,
       trello_sync_error: 'Set a Trello due date before moving this card to the In Progress list.',
     };
     return { status: 'in_progress', target_date: new Date(due).toISOString(), priority, trello_sync_error: null };
   }
-  if (card.idList === settings.lists.registered) {
+  if (pipelines.some((lists) => card.idList === lists.registered)) {
     return { status: 'registered', target_date: null, priority, trello_sync_error: null };
   }
-  if (card.idList === settings.lists.resolved) {
+  if (pipelines.some((lists) => card.idList === lists.resolved)) {
     return { status: 'resolved', target_date: null, priority, trello_sync_error: null };
   }
-  return { ...current, priority, trello_sync_error: 'Move the Trello support card to one of the three configured support lists.' };
+  const featureCard = current.category === 'feature' && settings.featureLists;
+  return { ...previous, trello_sync_error: featureCard
+    ? 'Move the Trello feature card to one of the configured feature or legacy support lists.'
+    : 'Move the Trello support card to one of the three configured support lists.' };
 }

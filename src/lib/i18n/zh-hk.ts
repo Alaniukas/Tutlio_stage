@@ -3,6 +3,18 @@ import { en } from './en.js';
 /** Hong Kong Traditional Chinese draft. School/admin/full legal copy stays English.
  * Scope and release limits: docs/HONG_KONG_LOCALIZATION_REVIEW.md. */
 export const zhHkOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "了解 Tutlio 如何配合您的補習機構",
+  "landing.agencyCta.desc": "在示範中，我們可以了解您的導師團隊、學生及與家長協作的流程，找出合適的方案。",
+  "landing.agencyFaq.whatIsQ": "供補習機構使用的 Tutlio 是甚麼？",
+  "landing.agencyFaq.whatIsA": "Tutlio 將導師時間表、學生、家長帳戶、付款及報告整合在同一個機構管理系統中。",
+  "landing.agencyFaq.teamQ": "我們可以管理多位導師和家長帳戶嗎？",
+  "landing.agencyFaq.teamA": "可以。管理員可查看團隊的課堂及空閒時段，而家長可在自己的帳戶查看子女的時間表及付款。",
+  "landing.agencyFaq.customizationQ": "Tutlio 可以配合我們的工作流程嗎？",
+  "landing.agencyFaq.customizationA": "我們可以檢視您的預約、合約及付款流程，並討論如何在 Tutlio 設定。",
+  "landing.agencyFaq.pricingQ": "補習機構的收費如何釐定？",
+  "landing.agencyFaq.pricingA": "機構的收費取決於團隊規模及所選方案。您可以在收費頁面查看選項，並討論具體建議。",
+  "landing.agencyFaq.demoQ": "我們可以在決定前先看示範嗎？",
+  "landing.agencyFaq.demoA": "可以。您可在收費頁面預約通話，了解對團隊重要的工作流程。",
   'compSch.notifyStudentEmail': '透過電郵通知學生',
   "cal.deleteAllRemaining": "此系列所有剩餘課堂",
   "cal.deleteAllRemainingHint": "刪除此系列未來已安排及已取消的課堂。已完成課堂的紀錄會保留。",

@@ -102,6 +102,19 @@ it('duplicate submissions return the saved job without changing its snapshot', a
   expect(state.rpc).not.toHaveBeenCalled();
 });
 
+it('queues a text-only group schedule when an older parent form submits empty schedule fields', async () => {
+  state.contract.order_snapshot = buildExtraLessonsOrderSnapshot({
+    ...state.contract.order_snapshot, service_type: 'group', schedule_slots: [],
+    schedule_label: 'Antradieniais ir ketvirtadieniais 16:00',
+  });
+  const result = await request('POST', {
+    accepted_terms: true, order_patch: { schedule_slots: [], schedule_label: '' },
+  });
+  expect(result.pending).toBe(true);
+  expect(state.rpc.mock.calls[0][1].p_payload.acceptance.order_snapshot.schedule_label)
+    .toBe('Antradieniais ir ketvirtadieniais 16:00');
+});
+
 it('does not claim success when the durable write fails', async () => {
   state.rpc.mockResolvedValue({ data: null, error: { message: 'DB offline' } });
   expect((await request('POST', { accepted_terms: true })).code).toBe('acceptance_not_saved');

@@ -2,6 +2,18 @@ import { en } from './en.js';
 
 /** Hindi tutor/business draft. Scope and release limits: docs/HINDI_LOCALIZATION_REVIEW.md. */
 export const hiOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "देखें कि Tutlio आपकी एजेंसी के लिए कैसे काम कर सकता है",
+  "landing.agencyCta.desc": "डेमो में हम आपकी टीम, विद्यार्थियों और अभिभावकों के साथ काम करने की प्रक्रियाओं पर चर्चा करके उपयुक्त प्लान चुन सकते हैं।",
+  "landing.agencyFaq.whatIsQ": "ट्यूशन एजेंसियों के लिए Tutlio क्या है?",
+  "landing.agencyFaq.whatIsA": "Tutlio शिक्षकों की समय-सारणी, विद्यार्थियों, अभिभावकों के खातों, भुगतानों और रिपोर्ट को एजेंसी प्रबंधन की एक ही प्रणाली में जोड़ता है।",
+  "landing.agencyFaq.teamQ": "क्या हम कई शिक्षकों और अभिभावकों के खातों का प्रबंधन कर सकते हैं?",
+  "landing.agencyFaq.teamA": "हाँ। प्रशासक टीम की कक्षाएँ और उपलब्ध समय देख सकते हैं, जबकि अभिभावक अपने खाते में अपने बच्चे की समय-सारणी और भुगतान देख सकते हैं।",
+  "landing.agencyFaq.customizationQ": "क्या Tutlio हमारी कार्यप्रक्रिया के अनुसार ढल सकता है?",
+  "landing.agencyFaq.customizationA": "हम आपकी बुकिंग, अनुबंध और भुगतान प्रक्रियाओं की समीक्षा करके चर्चा कर सकते हैं कि उन्हें Tutlio में कैसे सेट किया जाए।",
+  "landing.agencyFaq.pricingQ": "एजेंसियों के लिए कीमत कैसे तय होती है?",
+  "landing.agencyFaq.pricingA": "एजेंसी की कीमत टीम के आकार और चुने गए प्लान पर निर्भर करती है। आप कीमतों वाले पृष्ठ पर विकल्प देख सकते हैं और किसी खास प्रस्ताव पर चर्चा कर सकते हैं।",
+  "landing.agencyFaq.demoQ": "क्या निर्णय लेने से पहले हम डेमो देख सकते हैं?",
+  "landing.agencyFaq.demoA": "हाँ। आप कीमतों वाले पृष्ठ से कॉल तय करके अपनी टीम के लिए महत्त्वपूर्ण कार्यप्रक्रियाएँ देख सकते हैं।",
   'compSch.notifyStudentEmail': 'छात्र को ईमेल से सूचित करें',
   "cal.deleteAllRemaining": "इस श्रृंखला की बाकी सभी क्लास",
   "cal.deleteAllRemainingHint": "इस श्रृंखला की आगे की तय क्लास और रद्द की गई क्लास मिटा दी जाती हैं। पूरी हो चुकी क्लास का इतिहास सुरक्षित रहता है।",

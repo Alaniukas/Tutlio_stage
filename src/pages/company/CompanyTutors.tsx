@@ -39,7 +39,9 @@ import {
 } from '@/lib/orgTutorConductedSessions';
 import { schoolDate } from '@/lib/schoolTime';
 import { fetchAllRows } from '@/lib/fetchAllRows';
-import { schoolMeetingCounts, schoolMeetings } from '@/lib/schoolSessionMonitoring';
+import { schoolTutorPayOccurrences } from '@/lib/schoolTutorLessonPay';
+import { fetchSchoolTutorAttendancePayRows } from '@/lib/schoolTutorAttendancePay';
+import { orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import { sumProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
 import { authHeaders } from '@/lib/apiHelpers';
 import { isPlMarket } from '@/lib/market';
@@ -60,7 +62,7 @@ interface Tutor {
   reminder_tutor_hours: number;
   break_between_lessons: number;
   min_booking_hours: number;
-  company_commission_percent?: number;
+  company_commission_percent?: number | null;
   company_commission_by_subject?: Record<string, number> | null;
   personal_meeting_link?: string | null;
   /** Free-text subjects/grades note, e.g. "MAT 2-6 kls, LT 1-8 kls". */
@@ -105,6 +107,9 @@ interface TutorDetail extends Tutor {
   subjects: Subject[];
   sessionCount: number;
   earnings: number;
+  schoolKnownPayCount?: number;
+  schoolUnresolvedPayCount?: number;
+  schoolStatsPeriod?: { start: string; end: string };
 }
 
 export function mergeEditedTutorSubjectPay(
@@ -449,7 +454,7 @@ function TutorSubjectPriceRow({ template, existing, onSave, onDelete }: {
 export default function CompanyTutors() {
   const { t, locale, dateFnsLocale } = useTranslation();
   const orgEntityType = useOrgEntityType();
-  const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
+  const { loading: orgFeaturesLoading, error: orgFeaturesError, hasFeature } = useOrgFeatures();
   const isSchoolView = orgEntityType === 'school';
   const tc = getCached<any>(COMPANY_TUTORS_CACHE_KEY);
   const [loading, setLoading] = useState(!tc);
@@ -543,6 +548,7 @@ export default function CompanyTutors() {
   const [editMinBooking, setEditMinBooking] = useState(1);
   const [editCommissionPercent, setEditCommissionPercent] = useState<number | ''>(0);
   const [tutorSaveError, setTutorSaveError] = useState<string | null>(null);
+  const [tutorDetailsLoadError, setTutorDetailsLoadError] = useState(false);
   const [editSubjectPay, setEditSubjectPay] = useState<Record<string, string>>({});
   const baseTutorPayEditedRef = useRef(false);
   const subjectTutorPayEditedRef = useRef(false);
@@ -1044,6 +1050,7 @@ export default function CompanyTutors() {
   // ── Tutor detail modal helpers ──
 
   const openTutor = async (tutor: Tutor) => {
+    setTutorDetailsLoadError(false);
     setMeetingLinkHydrated(false);
     setMeetingLinkLoadError(false);
     baseTutorPayEditedRef.current = false;
@@ -1063,30 +1070,58 @@ export default function CompanyTutors() {
     const hydratedMeetingLink = meetingLinkFromTutorRows(freshProfile, tutor);
 
     // OPTIMIZED: Limit sessions query to last year for stats
-    const oneYearAgo = isSchoolView ? schoolDate() : new Date();
+    const statsNow = new Date();
+    const oneYearAgo = isSchoolView ? schoolDate(statsNow) : new Date(statsNow);
     oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
     if (isSchoolView) oneYearAgo.setHours(0, 0, 0, 0);
 
-    const sessions = await fetchAllRows<any>((from, to) => supabase
-      .from('sessions')
-      .select('id, tutor_id, class_group_id, start_time, price, status, subject_id, tutor_pay_eur_snapshot, is_complimentary, exclude_from_lesson_count, subjects(is_trial, is_group)')
-      .eq('tutor_id', tutor.id)
-      .in('status', ['completed', 'no_show'])
-      .gte('start_time', oneYearAgo.toISOString())
-      .lte('end_time', new Date().toISOString())
-      .order('start_time')
-      .order('id')
-      .range(from, to));
+    let sessions: any[];
+    let attendanceRows: Awaited<ReturnType<typeof fetchSchoolTutorAttendancePayRows>>;
+    try {
+      if (isSchoolView && !orgId) throw new Error('School organization required');
+      [sessions, attendanceRows] = await Promise.all([fetchAllRows<any>((from, to) => {
+        let query = supabase
+          .from('sessions')
+          .select('id, tutor_id, student_id, class_group_id, start_time, end_time, price, status, status_confirmed_at, no_show_reason, subject_id, tutor_pay_eur_snapshot, is_complimentary, exclude_from_lesson_count, subjects(is_trial, is_group)'
+            + (isSchoolView ? ', students!inner(organization_id)' : ''))
+          .eq('tutor_id', tutor.id);
+        if (isSchoolView) query = query.eq('students.organization_id', orgId);
+        else query = query.in('status', ['completed', 'no_show']);
+        return query
+          .gte('start_time', oneYearAgo.toISOString())
+          .lte('end_time', statsNow.toISOString())
+          .order('start_time')
+          .order('id')
+          .range(from, to);
+      }), isSchoolView ? fetchSchoolTutorAttendancePayRows({
+        tutorId: tutor.id,
+        periodStart: format(oneYearAgo, 'yyyy-MM-dd'),
+        periodEnd: format(schoolDate(statsNow), 'yyyy-MM-dd'),
+      }) : Promise.resolve([])]);
+    } catch (error) {
+      console.error('[CompanyTutors] tutor statistics load failed:', error);
+      setTutorDetailsLoadError(true);
+      return;
+    }
 
     const { data: tspData } = await supabase
       .from('tutor_subject_prices')
       .select('*')
       .eq('tutor_id', tutor.id);
 
-    const conducted = filterConductedOrgSessions(isSchoolView ? schoolMeetings(sessions) : sessions);
-    const sessionCount = isSchoolView ? schoolMeetingCounts(sessions).completed : countConductedOrgSessions(conducted);
+    const conducted = filterConductedOrgSessions(sessions);
     const tutorRate = tutorRow.company_commission_percent ?? orgDefaults.company_commission_percent;
-    const earnings = isProKlaseAdmin
+    const schoolPay = isSchoolView ? schoolTutorPayOccurrences([...sessions, ...attendanceRows], tutorRow.company_commission_percent, statsNow, {
+      requireConfirmation: orgRequiresTutorStatusConfirmation(orgId, {
+        tutor_lesson_status_confirmation: hasFeature('tutor_lesson_status_confirmation'),
+      }),
+    }) : null;
+    const schoolKnownPay = schoolPay?.filter((occurrence) => occurrence.payEur !== null);
+    const schoolUnresolvedPayCount = schoolPay?.filter((occurrence) => occurrence.payIssue).length;
+    const sessionCount = schoolPay ? schoolPay.length : countConductedOrgSessions(conducted);
+    const earnings = schoolKnownPay
+      ? Math.round(schoolKnownPay.reduce((sum, occurrence) => sum + (occurrence.payEur ?? 0), 0) * 100) / 100
+      : isProKlaseAdmin
       ? sumProKlasePayBreakdown(conducted as any[], tutorRate).totalEur
       : sumOrgTutorLessonsPayEur(
           conducted,
@@ -1098,7 +1133,11 @@ export default function CompanyTutors() {
       id: r.id, tutor_id: r.tutor_id, org_subject_template_id: r.org_subject_template_id,
       price: Number(r.price), duration_minutes: r.duration_minutes,
     })));
-    setSelectedTutor({ ...tutorRow, subjects: subjects || [], sessionCount, earnings });
+    setSelectedTutor({ ...tutorRow, subjects: subjects || [], sessionCount, earnings,
+      schoolKnownPayCount: schoolKnownPay?.length, schoolUnresolvedPayCount,
+      schoolStatsPeriod: isSchoolView ? {
+        start: format(oneYearAgo, 'yyyy-MM-dd'), end: format(schoolDate(statsNow), 'yyyy-MM-dd'),
+      } : undefined });
     setEditName(tutorRow.full_name);
     setEditPhone(tutorRow.phone || '');
     setEditTeachingNotes(tutorRow.teaching_notes || '');
@@ -1114,7 +1153,9 @@ export default function CompanyTutors() {
     setEditReminderTutor(tutorRow.reminder_tutor_hours ?? orgDefaults.reminder_tutor_hours);
     setEditBreakBetween(tutorRow.break_between_lessons ?? orgDefaults.break_between_lessons);
     setEditMinBooking(tutorRow.min_booking_hours ?? orgDefaults.min_booking_hours);
-    setEditCommissionPercent(tutorRow.company_commission_percent ?? orgDefaults.company_commission_percent);
+    setEditCommissionPercent(isSchoolView
+      ? tutorRow.company_commission_percent ?? ''
+      : tutorRow.company_commission_percent ?? orgDefaults.company_commission_percent);
     const parsedPay = parseTutorPayBySubject(tutorRow.company_commission_by_subject);
     // Keep rates for subjects no longer shown in this editor. Saving one visible
     // rate must not silently erase historical or temporarily hidden overrides.
@@ -1568,8 +1609,11 @@ export default function CompanyTutors() {
             <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-8 text-center text-gray-400 text-sm">{t('compTut.noTutors')}</div>
           ) : (
             <div className="space-y-2">
+              {isSchoolView && orgFeaturesError && <p role="alert" className="text-sm text-red-700">{t('common.error')}</p>}
+              {tutorDetailsLoadError && <p role="alert" className="text-sm text-red-700">{t('common.error')}</p>}
               {sortedTutors.map(tutor => (
                 <button key={tutor.id} onClick={() => openTutor(tutor)}
+                  disabled={isSchoolView && (orgFeaturesLoading || orgFeaturesError)}
                   className="w-full bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3.5 flex items-center gap-3 hover:border-indigo-200 hover:shadow-md transition-all text-left hover:bg-indigo-50/40"
                 >
                   <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
@@ -1872,13 +1916,24 @@ export default function CompanyTutors() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-gray-50 rounded-xl p-3 text-center">
                   <p className="text-xl font-bold text-gray-900">{selectedTutor.sessionCount}</p>
-                  <p className="text-xs text-gray-500">{t('compTut.lessonsTaught')}</p>
+                  <p className="text-xs text-gray-500">{t(isSchoolView ? 'orgFinance.schoolFinalizedLessons' : 'compTut.lessonsTaught')}</p>
                 </div>
                 <div className="bg-gray-50 rounded-xl p-3 text-center">
-                  <p className="text-xl font-bold text-gray-900">{fmtMoney(selectedTutor.earnings)}</p>
-                  <p className="text-xs text-gray-500">{t('compTut.totalEarned')}</p>
+                  <p className="text-xl font-bold text-gray-900">{isSchoolView && selectedTutor.schoolUnresolvedPayCount && selectedTutor.schoolKnownPayCount === 0
+                    ? t('orgFinance.schoolPayPending') : fmtMoney(selectedTutor.earnings)}</p>
+                  <p className="text-xs text-gray-500">{t(isSchoolView && selectedTutor.schoolUnresolvedPayCount ? 'orgFinance.schoolKnownPayTotal' : 'compTut.totalEarned')}</p>
                 </div>
               </div>
+              {isSchoolView && selectedTutor.schoolStatsPeriod && (
+                <p className="text-xs text-gray-500">
+                  {t('orgFinance.dateRange')}: {selectedTutor.schoolStatsPeriod.start} – {selectedTutor.schoolStatsPeriod.end}
+                </p>
+              )}
+              {isSchoolView && Boolean(selectedTutor.schoolUnresolvedPayCount) && (
+                <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  {t('orgFinance.schoolUnresolvedPay', { count: selectedTutor.schoolUnresolvedPayCount ?? 0 })}
+                </p>
+              )}
 
               <div className="space-y-3">
                 <div className="space-y-1.5">

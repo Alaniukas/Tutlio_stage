@@ -31,7 +31,8 @@ export default function ConversationList({
   const [showPicker, setShowPicker] = useState(false);
   const [pickerSearch, setPickerSearch] = useState('');
   const [creating, setCreating] = useState(false);
-  const { students, loading: studentsLoading, fetch: fetchStudents } = useMessageableStudents();
+  const [creationFailed, setCreationFailed] = useState(false);
+  const { students, unregisteredStudents, loading: studentsLoading, fetch: fetchStudents } = useMessageableStudents();
 
   useEffect(() => {
     if (showPicker) fetchStudents(true);
@@ -68,15 +69,26 @@ export default function ConversationList({
         s.full_name.toLowerCase().includes(pickerSearch.toLowerCase()),
       )
     : availableStudents;
+  const filteredUnregistered = pickerSearch.trim()
+    ? unregisteredStudents.filter((s) => s.full_name.toLowerCase().includes(pickerSearch.toLowerCase()))
+    : unregisteredStudents;
 
   const handleStartConversation = async (student: MessageableStudent) => {
+    setCreationFailed(false);
     setCreating(true);
-    const convId = await getOrCreateConversation(student.linked_user_id);
-    setCreating(false);
-    if (convId) {
-      setShowPicker(false);
-      setPickerSearch('');
-      onConversationCreated?.(convId, student);
+    try {
+      const convId = await getOrCreateConversation(student.linked_user_id);
+      if (convId) {
+        setShowPicker(false);
+        setPickerSearch('');
+        onConversationCreated?.(convId, student);
+      } else {
+        setCreationFailed(true);
+      }
+    } catch {
+      setCreationFailed(true);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -151,7 +163,7 @@ export default function ConversationList({
           </div>
           {!readOnly ? (
             <button
-              onClick={() => setShowPicker((v) => !v)}
+              onClick={() => { setCreationFailed(false); setShowPicker((v) => !v); }}
               title={t('chat.newConversation')}
               className={cn(
                 'p-2 rounded-xl border transition-colors flex-shrink-0',
@@ -183,7 +195,7 @@ export default function ConversationList({
                     ? t('chat.selectContact')
                     : t('chat.selectStudent')}
               </p>
-              {availableStudents.length > 5 && (
+              {availableStudents.length + unregisteredStudents.length > 5 && (
                 <div className="relative mb-2">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                   <input
@@ -195,6 +207,9 @@ export default function ConversationList({
                   />
                 </div>
               )}
+              {creationFailed && (
+                <p role="alert" className="text-xs text-red-700 mt-2">{t('chat.startConversationFailed')}</p>
+              )}
             </div>
             <div className="max-h-52 overflow-y-auto px-2 pb-2">
               {studentsLoading || creating ? (
@@ -202,7 +217,7 @@ export default function ConversationList({
                   <div className="w-5 h-5 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
                   {creating && <span className="ml-2 text-xs text-indigo-600">{t('chat.startingConversation')}</span>}
                 </div>
-              ) : filteredStudents.length === 0 ? (
+              ) : filteredStudents.length === 0 && filteredUnregistered.length === 0 ? (
                 <div className="text-center py-4 px-3">
                   <UserPlus className="w-8 h-8 text-gray-300 mx-auto mb-2" />
                   <p className="text-xs font-medium text-gray-500 leading-snug">
@@ -221,7 +236,8 @@ export default function ConversationList({
                   )}
                 </div>
               ) : (
-                filteredStudents.map((student) => {
+                <>
+                {filteredStudents.map((student) => {
                   const avatarClass =
                     student.role === 'tutor'
                       ? 'bg-violet-100 text-violet-700'
@@ -289,7 +305,20 @@ export default function ConversationList({
                       </div>
                     </button>
                   );
-                })
+                })}
+                {filteredUnregistered.length > 0 && (
+                  <div className="px-2 py-2">
+                    <p className="text-xs font-semibold text-gray-600">{t('chat.registrationPending')}</p>
+                    <p className="text-[11px] text-gray-500 mt-1 mb-2 leading-snug">{t('chat.registrationPendingHint')}</p>
+                    {filteredUnregistered.map((student) => (
+                      <button key={student.student_id} disabled className="w-full text-left px-2 py-2 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed">
+                        <p className="text-sm font-medium">{student.full_name || t('chat.roleStudent')}</p>
+                        <p className="text-[11px] mt-0.5">{t('chat.registrationPending')}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                </>
               )}
             </div>
           </div>

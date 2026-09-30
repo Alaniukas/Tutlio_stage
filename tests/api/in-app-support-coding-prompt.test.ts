@@ -4,6 +4,7 @@ import { buildInAppSupportCodingAgentPrompt } from '../../api/_lib/inAppSupportC
 describe('in-app support coding-agent prompt', () => {
   it('combines structured category, account context, environment, attachments, and the full transcript', () => {
     const prompt = buildInAppSupportCodingAgentPrompt({
+      ticketId: '17ee7859-5c8a-4fba-9dbd-9259ccad28f4',
       reference: 'SUP-17EE7859',
       reporter: {
         userId: 'user-1',
@@ -48,6 +49,9 @@ describe('in-app support coding-agent prompt', () => {
     });
 
     expect(prompt).toContain('Support reference: SUP-17EE7859');
+    expect(prompt).toContain('Ticket UUID for release selection: 17ee7859-5c8a-4fba-9dbd-9259ccad28f4');
+    expect(prompt).toContain('Client request UUID: 8cb31cd5-7c88-43ea-b850-a337c92099c1');
+    expect(prompt).toContain('a separate intake identifier');
     expect(prompt).toContain('Structured submission type: Bug report');
     expect(prompt).toContain('Organization: Demo School');
     expect(prompt).toContain('Page: /company');

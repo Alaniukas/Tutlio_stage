@@ -19,6 +19,7 @@ import { isProKlaseOrg } from './_lib/marketMoney.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { removeGeneratedNoShowTutorComment } from '../src/lib/noShowWhen.js';
+import { recordExistingSchoolAttendance } from './_lib/schoolGroupAttendance.js';
 
 const NO_SHOW_WHEN = new Set(['before_lesson', 'during_lesson', 'after_lesson']);
 
@@ -67,7 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: session } = await supabase
       .from('sessions')
-      .select('id, tutor_id, student_id, status, start_time, end_time, lesson_package_id, subject_id, status_confirmed_at, tutor_comment')
+      .select('id, tutor_id, student_id, class_group_id, status, start_time, end_time, lesson_package_id, subject_id, status_confirmed_at, status_confirmed_by, tutor_comment')
       .eq('id', sessionId)
       .maybeSingle();
     if (!session) return json(res, 404, { error: 'Session not found' });
@@ -152,7 +153,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 409, { error: 'already_finalized', currentStatus: session.status });
     }
     if (evidenceOnly) {
-      if (session.status_confirmed_at) return json(res, 200, { success: true, sessionId, status, alreadyConfirmed: true, statusConfirmedAt: session.status_confirmed_at });
+      if (session.status_confirmed_at) {
+        const attendanceAlert = await recordExistingSchoolAttendance(supabase, session, session.status_confirmed_by || userId, session.status_confirmed_at);
+        return json(res, 200, { success: true, sessionId, status, alreadyConfirmed: true, statusConfirmedAt: session.status_confirmed_at,
+          ...(attendanceAlert?.pending ? { attendanceAlertPending: true } : {}) });
+      }
     }
 
     const nowIso = new Date().toISOString();
@@ -220,6 +225,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       syncSessionToGoogle(sessionId, session.tutor_id).catch(() => {});
     }
 
+    const attendanceAlert = await recordExistingSchoolAttendance(supabase, { ...session, status }, userId, nowIso);
+
     return json(res, 200, {
       success: true,
       sessionId,
@@ -227,6 +234,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       completedLate: status === 'completed' ? late : false,
       corrected: correction,
       statusConfirmedAt: nowIso,
+      ...(attendanceAlert?.pending ? { attendanceAlertPending: true } : {}),
     });
   } catch (err: any) {
     console.error('[confirm-session-status] error:', err?.message || err);

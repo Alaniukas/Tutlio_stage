@@ -1,3 +1,4 @@
+import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
@@ -8,6 +9,7 @@ import { schoolTeacherContractTranslationsDe } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const de: Record<string, string> = {
+  ...studentNotesTranslations.de,
   ...schoolFamilyMaterialTranslations.de,
   ...schoolInvoiceReviewTranslations.de,
   'school.recordings.access.title': "Zugriff auf Aufzeichnungen",
@@ -35,6 +37,18 @@ export const de: Record<string, string> = {
   'common.reloadPageWarning': "Beim Neuladen gehen ungespeicherte Änderungen verloren. Fortfahren?",
   ...familyCatalogTrialCopy.de,
   ...sharedOrganizationWorkflowTranslations,
+  "landing.agencyCta.title": "Sieh dir an, wie Tutlio in deiner Agentur funktionieren könnte",
+  "landing.agencyCta.desc": "In einer Demo können wir über dein Team, deine Schüler und die Zusammenarbeit mit Eltern sprechen und den passenden Tarif finden.",
+  "landing.agencyFaq.whatIsQ": "Was ist Tutlio für Nachhilfeagenturen?",
+  "landing.agencyFaq.whatIsA": "Tutlio vereint Stundenpläne der Lehrkräfte, Schüler, Elternkonten, Zahlungen und Berichte in einem Verwaltungssystem für deine Agentur.",
+  "landing.agencyFaq.teamQ": "Können wir mehrere Lehrkräfte und Elternkonten verwalten?",
+  "landing.agencyFaq.teamA": "Ja. Administratoren sehen die Unterrichtsstunden und Verfügbarkeit des Teams, während Eltern im eigenen Konto den Stundenplan und die Zahlungen ihres Kindes einsehen können.",
+  "landing.agencyFaq.customizationQ": "Kann sich Tutlio an unsere Arbeitsabläufe anpassen?",
+  "landing.agencyFaq.customizationA": "Wir können eure Buchungs-, Vertrags- und Zahlungsprozesse durchgehen und besprechen, wie ihr sie in Tutlio einrichtet.",
+  "landing.agencyFaq.pricingQ": "Wie wird der Preis für Agenturen bestimmt?",
+  "landing.agencyFaq.pricingA": "Der Preis für deine Agentur hängt von der Teamgröße und dem gewählten Tarif ab. Auf der Preisseite kannst du die Optionen ansehen und ein konkretes Angebot besprechen.",
+  "landing.agencyFaq.demoQ": "Können wir vor der Entscheidung eine Demo sehen?",
+  "landing.agencyFaq.demoA": "Ja. Auf der Preisseite kannst du ein Gespräch buchen, um die für dein Team wichtigen Arbeitsabläufe kennenzulernen.",
   ...schoolConsultationsTranslations.de,
   'compSess.markAttended': 'Schüler war anwesend',
   'att.confirmedManually': 'Anwesenheit bestätigt',
@@ -4556,6 +4570,9 @@ export const de: Record<string, string> = {
   'em.stripePaySub': '💳 Zahlung für Stunde – {student}, {date}',
   'em.stripeRedirect': 'Der Link leitet zu einer sicheren Stripe-Bezahlseite weiter.',
   'em.studentContacts': 'Kontaktdaten des Schülers:',
+  "em.orgStudentInviteSub": "Ihr Registrierungslink von {org}",
+  "em.orgStudentInviteHeaderSub": "{org} lädt Sie zur Plattform ein",
+  "em.orgStudentInviteBody": "<strong>{org}</strong> hat Sie zum System hinzugefügt. Schließen Sie die Registrierung ab, um den Zeitplan einzusehen und Stunden zu buchen.",
   'em.studentInviteBody': 'Ihr Nachhilfelehrer <strong>{tutor}</strong> hat Sie zum System hinzugefügt. Um den Zeitplan einzusehen und Stunden zu buchen, schließen Sie die Registrierung ab.',
   'em.studentInviteCodeLabel': 'Ihr Einladungscode:',
   'em.schoolStudentInviteCodeLabel': 'Registrierungscode Ihres Kindes:',
@@ -5382,6 +5399,20 @@ export const de: Record<string, string> = {
   'school.groups.deleteConfirm': "Gruppe „{name}“ löschen? Alle kommenden Stunden dieser Gruppe werden ebenfalls entfernt.",
   'school.groups.deleteFailed': "Die Gruppe konnte nicht gelöscht werden.",
   'school.groups.noMatches': "Keine Gruppe entspricht dem Filter.",
+  'school.groups.noSessionForOccurrence': "Dieser Unterrichtstermin ist für diesen Schüler nicht geplant.",
+  'school.groups.contractUnconfirmed': "Vertrag nicht bestätigt",
+  'schoolDash.attendedWithoutContractTitle': "Teilnahme vor Vertragsbestätigung",
+  'schoolDash.attendedWithoutContractDescription': "Der Schüler nahm an einer Unterrichtsstunde teil, als der Vertrag für Zusatzunterricht noch nicht bestätigt war.",
+  'schoolDash.contractAttendanceLoadFailed': "Benachrichtigungen über die Teilnahme ohne bestätigten Vertrag konnten nicht geladen werden.",
+  'schoolDash.contractAttendanceShownCount': "{shown} von {total} Benachrichtigungen werden angezeigt.",
+  'orgFinance.schoolCurrentPayRate': "Aktuell festgelegter Basissatz: {amount} € pro Unterrichtsstunde.",
+  'orgFinance.schoolSummaryNote': "Gruppenunterricht zählt einmal. Die Vergütung wird nach dem gespeicherten Unterrichtssatz oder, wenn keiner vorliegt, nach dem aktuellen Basissatz berechnet. Die Schule verwaltet die Zahlungen.",
+  'orgFinance.schoolFinalizedLessons': "Unterrichtsstunden mit endgültigem Ergebnis",
+  'orgFinance.schoolUnresolvedPay': "Unterrichtsstunden mit fehlenden oder widersprüchlichen Vergütungssätzen: {count}. Die Schule muss diese prüfen.",
+  'orgFinance.schoolKnownPayTotal': "Summe nach bekannten Sätzen",
+  'orgFinance.schoolRateSettingsHint': "Legen Sie den Basissatz fest: Lehrkräfte → Lehrkraft auswählen → Vergütung (€/Unterrichtsstunde).",
+  'orgFinance.schoolPayPriceIndependence': "Die Preise in den Schülerverträgen bestimmen nicht die Vergütung der Lehrkraft.",
+  'orgFinance.schoolPayPending': "Vergütungssatz ausstehend",
   'lesson.joinOpensAt': "Beitritt möglich ab {time}",
   'em.reminderPayerSchoolLead': "Erinnerung: Die Stunde Ihres Kindes <strong>{student}</strong> beginnt bald. Den Beitrittslink finden Sie unten.",
   'em.reminderPayerJoinBtn': "Der Stunde beitreten",
@@ -5694,4 +5725,7 @@ export const de: Record<string, string> = {
   'em.schoolJoinSubject': 'Am {date} um {time} am Unterricht teilnehmen',
   'em.schoolJoinHeader': 'Am Unterricht teilnehmen',
   'em.schoolJoinBody': 'Ihr Unterricht beginnt am {date} um {time}. Den Teilnahmelink finden Sie unten.',
+  'chat.registrationPending': 'Registrierung ausstehend',
+  'chat.registrationPendingHint': 'Nachrichten sind verfügbar, sobald das Schülerkonto verknüpft ist. Bitten Sie die Organisationsverwaltung, die E-Mail-Adresse und das Konto zu prüfen, oder den Schüler, die Registrierung abzuschließen.',
+  'chat.startConversationFailed': 'Das Gespräch konnte nicht gestartet werden. Versuchen Sie es erneut oder wenden Sie sich an Ihre Organisationsverwaltung.',
 };

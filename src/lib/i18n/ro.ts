@@ -5,6 +5,18 @@ import { en } from './en.js';
  * Review scope and release limits: docs/ROMANIAN_LOCALIZATION_REVIEW.md.
  */
 export const roOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Descoperă cum ar putea funcționa Tutlio pentru agenția ta",
+  "landing.agencyCta.desc": "În cadrul unei demonstrații, putem discuta despre echipa ta, elevi și colaborarea cu părinții pentru a găsi planul potrivit.",
+  "landing.agencyFaq.whatIsQ": "Ce este Tutlio pentru agențiile de meditații?",
+  "landing.agencyFaq.whatIsA": "Tutlio reunește programul profesorilor, elevii, conturile părinților, plățile și rapoartele într-un singur sistem de administrare a agenției.",
+  "landing.agencyFaq.teamQ": "Putem administra mai mulți profesori și conturi ale părinților?",
+  "landing.agencyFaq.teamA": "Da. Administratorii pot vedea lecțiile și disponibilitatea echipei, iar părinții pot consulta programul și plățile copilului în propriul cont.",
+  "landing.agencyFaq.customizationQ": "Se poate adapta Tutlio la modul nostru de lucru?",
+  "landing.agencyFaq.customizationA": "Putem analiza procesele tale de rezervare, contractare și plată și putem discuta cum să le configurăm în Tutlio.",
+  "landing.agencyFaq.pricingQ": "Cum se stabilește prețul pentru agenții?",
+  "landing.agencyFaq.pricingA": "Prețul pentru agenție depinde de mărimea echipei și de planul ales. Poți consulta opțiunile pe pagina de prețuri și discuta o ofertă concretă.",
+  "landing.agencyFaq.demoQ": "Putem vedea o demonstrație înainte de a decide?",
+  "landing.agencyFaq.demoA": "Da. Poți programa un apel de pe pagina de prețuri pentru a vedea procesele importante pentru echipa ta.",
   'compSch.notifyStudentEmail': 'Notifică elevul prin e-mail',
   "cal.deleteAllRemaining": "Toate lecțiile rămase din această serie",
   "cal.deleteAllRemainingHint": "Șterge lecțiile viitoare programate și anulate din această serie. Istoricul lecțiilor finalizate se păstrează.",

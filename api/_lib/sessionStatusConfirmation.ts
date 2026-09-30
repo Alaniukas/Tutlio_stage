@@ -3,7 +3,7 @@
 // finalized explicitly via /api/confirm-session-status.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isProKlaseOrg } from './marketMoney.js';
+import { orgRequiresTutorStatusConfirmation } from '../../src/lib/sessionStatusConfirmation.js';
 
 export type SessionForCompletion = {
   id: string;
@@ -17,16 +17,17 @@ export async function orgsRequiringStatusConfirmation(
   supabase: SupabaseClient,
   orgIds: string[],
 ): Promise<Set<string>> {
-  const flagged = new Set<string>();
   const unique = [...new Set(orgIds.filter(Boolean))];
+  const flagged = new Set(unique.filter((orgId) => orgRequiresTutorStatusConfirmation(orgId)));
   if (unique.length === 0) return flagged;
-  const { data: orgs } = await supabase
+  const { data: orgs, error } = await supabase
     .from('organizations')
     .select('id, features')
     .in('id', unique);
+  if (error) throw new Error(`[session-status-confirmation] organization lookup failed: ${error.message}`);
   for (const org of (orgs ?? []) as Array<{ id: string; features?: Record<string, unknown> | null }>) {
     const features = (org.features || {}) as Record<string, unknown>;
-    if (isProKlaseOrg(org.id) || features.tutor_lesson_status_confirmation === true) {
+    if (orgRequiresTutorStatusConfirmation(org.id, features)) {
       flagged.add(org.id);
     }
   }
@@ -44,10 +45,11 @@ export async function partitionByStatusConfirmation<T extends SessionForCompleti
   const tutorIds = [...new Set(sessions.map((s) => s.tutor_id).filter(Boolean))] as string[];
   if (tutorIds.length === 0) return { autoCompletable: sessions, awaitingConfirmation: [] };
 
-  const { data: tutors } = await supabase
+  const { data: tutors, error } = await supabase
     .from('profiles')
     .select('id, organization_id')
     .in('id', tutorIds);
+  if (error) throw new Error(`[session-status-confirmation] tutor lookup failed: ${error.message}`);
   const orgByTutor = new Map(
     ((tutors ?? []) as Array<{ id: string; organization_id: string | null }>).map((t) => [t.id, t.organization_id]),
   );
@@ -59,8 +61,14 @@ export async function partitionByStatusConfirmation<T extends SessionForCompleti
   const autoCompletable: T[] = [];
   const awaitingConfirmation: T[] = [];
   for (const s of sessions) {
+    // Missing profiles leave the organization policy unknown. A returned solo
+    // tutor with organization_id=null is known and keeps normal auto-completion.
+    if (s.tutor_id && !orgByTutor.has(s.tutor_id)) {
+      awaitingConfirmation.push(s);
+      continue;
+    }
     const orgId = s.tutor_id ? orgByTutor.get(s.tutor_id) : null;
-    if ((orgId && flaggedOrgs.has(orgId)) || isProKlaseOrg(orgId)) awaitingConfirmation.push(s);
+    if ((orgId && flaggedOrgs.has(orgId)) || orgRequiresTutorStatusConfirmation(orgId)) awaitingConfirmation.push(s);
     else autoCompletable.push(s);
   }
   return { autoCompletable, awaitingConfirmation };

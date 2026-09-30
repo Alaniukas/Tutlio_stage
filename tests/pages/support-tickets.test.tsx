@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { SupportTicketsList, type SupportTicketSummary } from '@/components/support/SupportTicketsList';
@@ -37,6 +37,31 @@ const tickets: SupportTicketSummary[] = [
 ];
 
 describe('support ticket status view', () => {
+  it.each([
+    ['lt', 'Įgyvendinta', 'Išspręsta'],
+    ['en', 'Implemented', 'Resolved'],
+    ['pl', 'Wdrożono', 'Rozwiązano'],
+  ] as const)('labels completed features and bugs appropriately in %s', (language, featureLabel, bugLabel) => {
+    const { container } = render(
+      <MemoryRouter>
+        <SupportTicketsList
+          tickets={[{ ...tickets[1], status: 'resolved', target_date: null }, tickets[2]]}
+          language={language}
+          supportPath="/support"
+          loading={false}
+          error={false}
+          onRefresh={() => {}}
+        />
+      </MemoryRouter>,
+    );
+    const feature = within(container.querySelector('[data-ticket-reference="SUP-27EE7859"]') as HTMLElement);
+    const bug = within(container.querySelector('[data-ticket-reference="SUP-37EE7859"]') as HTMLElement);
+    expect(feature.getAllByText(featureLabel)).toHaveLength(2);
+    expect(feature.queryByText(bugLabel)).toBeNull();
+    expect(bug.getAllByText(bugLabel)).toHaveLength(2);
+    expect(bug.queryByText(featureLabel)).toBeNull();
+  });
+
   it('shows the three user statuses and an in-progress deadline', () => {
     const { container } = render(
       <MemoryRouter>
@@ -70,5 +95,28 @@ describe('support ticket status view', () => {
     expect(supportTicketsPageForPath('/parent/lessons')).toBe('/parent/support/tickets');
     expect(supportTicketsPageForPath('/company/sessions')).toBe('/company/support/tickets');
     expect(supportTicketsPageForPath('/school/sessions')).toBe('/school/support/tickets');
+  });
+
+  it('moves a feature from progress with an exact deadline to implemented without a stale deadline', () => {
+    const renderTicket = (ticket: SupportTicketSummary) => (
+      <MemoryRouter>
+        <SupportTicketsList tickets={[ticket]} language="lt" supportPath="/school/support" loading={false} error={false} onRefresh={() => {}} />
+      </MemoryRouter>
+    );
+    const { container, rerender } = render(renderTicket(tickets[1]));
+    const article = container.querySelector('[data-ticket-reference="SUP-27EE7859"]') as HTMLElement;
+    const deadline = new Intl.DateTimeFormat('lt-LT', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(tickets[1].target_date!));
+
+    expect(article.querySelector('[aria-current="step"]')?.textContent).toBe('Vykdoma');
+    expect(within(article).getByText(deadline)).toBeTruthy();
+    expect(within(article).getByText('Numatomas terminas:')).toBeTruthy();
+
+    rerender(renderTicket({ ...tickets[1], status: 'resolved', status_updated_at: '2026-09-30T12:00:00.000Z' }));
+
+    expect(article.querySelector('[aria-current="step"]')?.textContent).toBe('Įgyvendinta');
+    expect(within(article).getAllByText('Įgyvendinta')).toHaveLength(2);
+    expect(within(article).queryByText('Numatomas terminas:')).toBeNull();
+    expect(within(article).queryByText(deadline)).toBeNull();
+    expect(within(article).getByText('Būsena pakeista:')).toBeTruthy();
   });
 });

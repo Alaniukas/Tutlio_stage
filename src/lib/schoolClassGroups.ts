@@ -65,14 +65,23 @@ export type SchoolClassGroupDraft = {
 
 export type SchoolClassGroupMember = {
   student_id: string;
+  enrolled_at?: string | null;
   schedule_slots?: SchoolMemberSlot[] | null;
   recording_access?: SchoolRecordingAccessMode;
   student?: { full_name: string; grade?: string | null; email?: string | null } | null;
 };
 
+export type SchoolClassGroupRecurrenceExclusion = {
+  student_id: string | null;
+  scope: 'single' | 'future' | 'all';
+  start_time: string | null;
+};
+
 export type SchoolClassGroupRecord = SchoolClassGroupDraft & {
   id: string;
   members?: SchoolClassGroupMember[];
+  /** Deleted occurrences returned for authorized staff, never parent/student portals. */
+  recurrence_exclusions?: SchoolClassGroupRecurrenceExclusion[];
   suspension_started_at?: string | null;
   suspension_until?: string | null;
   suspension_reason?: string | null;

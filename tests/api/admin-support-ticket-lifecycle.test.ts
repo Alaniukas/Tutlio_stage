@@ -18,7 +18,7 @@ import handler from '../../api/admin-support-requests';
 
 const id = '17ee7859-5c8a-4fba-9dbd-9259ccad28f4';
 
-function database() {
+function database(initial: Record<string, unknown> = {}) {
   let row = {
     id,
     status: 'registered',
@@ -27,6 +27,7 @@ function database() {
     trello_card_id: 'trello-card',
     status_notified_signature: 'registered-email-sent',
     status_updated_at: '2026-09-29T10:00:00Z',
+    ...initial,
   };
   const update = vi.fn((changes: Record<string, unknown>) => {
     row = { ...row, ...changes } as typeof row;
@@ -88,6 +89,60 @@ describe('admin support ticket lifecycle', () => {
     expect(result.statusCode).toBe(200);
     expect(mocks.notifyStatus).not.toHaveBeenCalled();
     expect(mocks.syncTrello).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a retryable response when an explicit Trello retry remains pending', async () => {
+    const db = database();
+    mocks.getClient.mockReturnValue(db);
+    mocks.syncTrello.mockResolvedValue(false);
+    const { result, res } = response();
+
+    await handler({ method: 'POST', headers: { 'x-admin-secret': 'admin-secret' }, body: {
+      id, action: 'sync_trello',
+    } } as any, res);
+
+    expect(result.statusCode).toBe(503);
+    expect(res.setHeader).toHaveBeenCalledWith('Retry-After', '30');
+    expect(result.body.error).toMatch(/Trello/i);
+    expect(result.body.error).toMatch(/retry|pending/i);
+    expect(result.body).not.toHaveProperty('request');
+    expect(db.update).not.toHaveBeenCalled();
+    expect(mocks.syncTrello).toHaveBeenCalledTimes(1);
+    expect(mocks.notifyStatus).not.toHaveBeenCalled();
+  });
+
+  it('preserves a saved status and warns when Trello synchronization remains pending', async () => {
+    mocks.syncTrello.mockResolvedValue(false);
+    const { result, res } = response();
+
+    await handler({ method: 'PATCH', headers: { 'x-admin-secret': 'admin-secret' }, body: {
+      id, status: 'in_progress', priority: 'high', targetDate: '2026-10-05T12:00:00Z',
+    } } as any, res);
+
+    expect(result.statusCode).toBe(200);
+    expect(result.body.request).toMatchObject({
+      status: 'in_progress', priority: 'high', target_date: '2026-10-05T12:00:00.000Z',
+    });
+    expect(result.body.warnings).toHaveLength(1);
+    expect(result.body.warnings[0]).toMatch(/Trello/i);
+    expect(result.body.warnings[0]).toMatch(/retry|pending|could not/i);
+    expect(mocks.notifyStatus).toHaveBeenCalledTimes(1);
+    expect(mocks.syncTrello).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([null, '2026-10-05T12:00:00Z'])('clears the implementation deadline when resolving despite submitted targetDate %s', async (targetDate) => {
+    const db = database({ status: 'in_progress', target_date: '2026-10-05T12:00:00.000Z' });
+    mocks.getClient.mockReturnValue(db);
+    const { result, res } = response();
+    await handler({ method: 'PATCH', headers: { 'x-admin-secret': 'admin-secret' }, body: {
+      id, status: 'resolved', priority: 'medium', targetDate,
+    } } as any, res);
+
+    expect(result.statusCode).toBe(200);
+    expect(result.body.request).toMatchObject({ status: 'resolved', target_date: null });
+    expect(db.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'resolved', target_date: null }));
+    expect(mocks.notifyStatus).toHaveBeenCalledWith(db, expect.objectContaining({ status: 'resolved', target_date: null }));
+    expect(mocks.syncTrello).toHaveBeenCalledWith(db, expect.objectContaining({ status: 'resolved', target_date: null }));
   });
 
   it('rejects a stale admin edit after Trello changed the priority', async () => {

@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
 import { Loader2, FileText, Calendar, Receipt, CalendarDays, FileStack, Building2, User } from 'lucide-react';
-import { format, subDays } from 'date-fns';
+import { endOfDay, format, subDays } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { fetchPaidSalesInvoiceCandidates } from '@/lib/manualSalesInvoicePreview';
 import { fetchOrgTutorInvoicesDeduped } from '@/lib/fetchOrgTutorInvoicesDeduped';
@@ -17,6 +17,11 @@ import { isProKlaseOrg } from '@/lib/marketMoney';
 import { proKlaseSessionPayEur } from '@/lib/proKlaseTutorPay';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isInvoiceProfileComplete, ORG_INVOICE_PROFILE_INCOMPLETE } from '@/lib/invoiceProfileReady';
+import { schoolTutorPayOccurrences } from '@/lib/schoolTutorLessonPay';
+import { fetchSchoolTutorAttendancePayRows } from '@/lib/schoolTutorAttendancePay';
+import { orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
+import { fetchAllRows } from '@/lib/fetchAllRows';
+import { schoolDate } from '@/lib/schoolTime';
 
 function invoiceApiErrorMessage(
   json: { code?: string; error?: string } | null | undefined,
@@ -67,7 +72,8 @@ export default function CreateInvoiceModal({
   orgTutors,
 }: CreateInvoiceModalProps) {
   const { t } = useTranslation();
-  const { hasFeature } = useOrgFeatures();
+  const { hasFeature, entityType, organizationId: schoolOrganizationId, loading: orgFeaturesLoading, error: orgFeaturesError } = useOrgFeatures();
+  const schoolPayMode = isOrgTutor && entityType === 'school';
   const pvmEducationInvoice = hasFeature('pvm_education_invoice');
   const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
@@ -197,6 +203,7 @@ export default function CreateInvoiceModal({
       }
 
       if (isOrgTutor) {
+        if (orgFeaturesLoading || orgFeaturesError || !entityType) throw new Error(t('common.error'));
         // Org tutor → invoice to organization: show occurred lessons (not student/payer sales invoices).
         const tutorId = tutorScopeId;
         if (!tutorId) throw new Error(t('invoiceCreate.noSessions'));
@@ -231,7 +238,7 @@ export default function CreateInvoiceModal({
           }),
         });
         const precheckJson = await precheckResp.json().catch(() => ({}));
-        if (!precheckResp.ok || precheckJson?.reason === 'duplicate') {
+        if ((!precheckResp.ok && !(schoolPayMode && precheckJson?.code === 'SCHOOL_TUTOR_PAY_UNRESOLVED')) || precheckJson?.reason === 'duplicate') {
           setError(
             (precheckJson.error as string) ||
               t('invoiceCreate.periodAlreadyIssued', { start: periodStart, end: periodEnd }),
@@ -241,23 +248,49 @@ export default function CreateInvoiceModal({
           return;
         }
 
-        const [{ data: prof }, { data: sessRows, error: sessErr }] = await Promise.all([
-          supabase.from('profiles').select('organization_id, company_commission_percent, company_commission_by_subject').eq('id', tutorId).maybeSingle(),
-          supabase
+        const startIso = schoolPayMode ? schoolDate(periodStart).toISOString() : periodStart + 'T00:00:00';
+        const endIso = schoolPayMode ? endOfDay(schoolDate(periodEnd)).toISOString() : periodEnd + 'T23:59:59';
+        if (schoolPayMode && !schoolOrganizationId) throw new Error(t('common.error'));
+        const sessionQuery = () => {
+          const studentJoin = schoolPayMode ? 'students!inner(full_name, organization_id)' : 'students(full_name, email)';
+          const query = supabase
             .from('sessions')
-            .select('id, tutor_id, start_time, end_time, status, subject_id, price, tutor_pay_eur_snapshot, is_complimentary, status_confirmed_at, students(full_name, email), subjects(name, is_trial)')
+            .select(`id, tutor_id, student_id, class_group_id, start_time, end_time, status, subject_id, price, tutor_pay_eur_snapshot, is_complimentary, no_show_reason, status_confirmed_at, ${studentJoin}, subjects(name, is_trial, is_group), class_group:school_class_groups!sessions_class_group_id_fkey(name, calendar_name)`)
             .eq('tutor_id', tutorId)
-            .in('status', ['completed', 'no_show'])
-            .gte('start_time', periodStart + 'T00:00:00')
-            .lte('start_time', periodEnd + 'T23:59:59')
-            .lte('end_time', new Date().toISOString()),
+            .gte('start_time', startIso)
+            .lte('start_time', endIso)
+            .lte('end_time', new Date().toISOString());
+          return schoolPayMode ? query.eq('students.organization_id', schoolOrganizationId) : query.in('status', ['completed', 'no_show']);
+        };
+        const [{ data: prof, error: profErr }, { data: sessRows, error: sessErr }, attendanceRows] = await Promise.all([
+          supabase.from('profiles').select('organization_id, company_commission_percent, company_commission_by_subject').eq('id', tutorId).maybeSingle(),
+          schoolPayMode
+            ? fetchAllRows<any>((from, to) => sessionQuery().order('start_time').order('id').range(from, to))
+              .then(data => ({ data, error: null }))
+            : sessionQuery(),
+          schoolPayMode ? fetchSchoolTutorAttendancePayRows({ tutorId, periodStart, periodEnd })
+            .catch(() => { throw new Error(t('common.error')); }) : Promise.resolve([]),
         ]);
 
         if (sessErr) throw sessErr;
+        if (schoolPayMode && (profErr || !prof)) throw profErr || new Error(t('common.error'));
         const orgId = (prof as any)?.organization_id as string | undefined;
         const tutorPayRate = Number((prof as any)?.company_commission_percent) || 0;
         const proKlasePay = isProKlaseOrg(orgId);
-        const rows = (sessRows || [])
+        const rows = schoolPayMode
+          ? schoolTutorPayOccurrences([...(sessRows || []), ...attendanceRows] as any[], tutorPayRate, new Date(), {
+            requireConfirmation: orgRequiresTutorStatusConfirmation(orgId, {
+              tutor_lesson_status_confirmation: hasFeature('tutor_lesson_status_confirmation'),
+            }),
+          }).map((occurrence) => ({
+            ...occurrence.row,
+            price: occurrence.payEur,
+            _schoolMeeting: true,
+            _schoolSessionIds: occurrence.sessionIds,
+            _schoolAttendanceIds: occurrence.attendanceIds,
+            _schoolPayIssue: occurrence.payIssue,
+          }))
+          : (sessRows || [])
           .filter((s: any) => !proKlasePay || Boolean(s.status_confirmed_at))
           .map((s: any) => ({
           ...s,
@@ -287,6 +320,8 @@ export default function CreateInvoiceModal({
           setPreviewMode(false);
         } else {
           setSessions(rows as any[]);
+          const unresolved = rows.filter((row: any) => row._schoolPayIssue).length;
+          if (unresolved > 0) setError(t('orgFinance.schoolUnresolvedPay', { count: unresolved }));
           setPreviewMode(true);
         }
       } else if (pvmEducationInvoice) {
@@ -363,6 +398,10 @@ export default function CreateInvoiceModal({
 
   const handleGenerate = async () => {
     if (sessions.length === 0) return;
+    if (schoolUnresolvedCount > 0) {
+      setError(t('orgFinance.schoolUnresolvedPay', { count: schoolUnresolvedCount }));
+      return;
+    }
     if (!isOrgTutor && hasInvoiceProfile === false) {
       setError(t('invoices.orgProfileIncompleteError'));
       return;
@@ -380,12 +419,15 @@ export default function CreateInvoiceModal({
       const unrecoveredPdfIds: string[] = [];
 
       const groupedByTutor = sessions.reduce(
-        (acc: Record<string, { sessionIds: string[]; packageIds: string[] }>, row: any) => {
+        (acc: Record<string, { sessionIds: string[]; attendanceIds: string[]; packageIds: string[] }>, row: any) => {
           const tid = row.tutor_id;
           if (!tid) return acc;
-          if (!acc[tid]) acc[tid] = { sessionIds: [], packageIds: [] };
+          if (!acc[tid]) acc[tid] = { sessionIds: [], attendanceIds: [], packageIds: [] };
           if (row.invoice_row_kind === 'package') acc[tid].packageIds.push(row.id);
-          else acc[tid].sessionIds.push(row.id);
+          else {
+            acc[tid].sessionIds.push(...(row._schoolSessionIds || [row.id]));
+            acc[tid].attendanceIds.push(...(row._schoolAttendanceIds || []));
+          }
           return acc;
         },
         {}
@@ -425,8 +467,8 @@ export default function CreateInvoiceModal({
         totalCount += json.count || 0;
       } else {
       for (const tid of tutorKeys) {
-        const { sessionIds, packageIds } = groupedByTutor[tid];
-        if (sessionIds.length === 0 && packageIds.length === 0) continue;
+        const { sessionIds, attendanceIds, packageIds } = groupedByTutor[tid];
+        if (sessionIds.length === 0 && attendanceIds.length === 0 && packageIds.length === 0) continue;
 
         const res = await fetch('/api/generate-invoice', {
           method: 'POST',
@@ -440,6 +482,7 @@ export default function CreateInvoiceModal({
             isOrgTutor: isOrgTutor || false,
             onlyPaid: true,
             sessionIds: sessionIds.length > 0 ? sessionIds : undefined,
+            attendanceIds: attendanceIds.length > 0 ? attendanceIds : undefined,
             packageIds: packageIds.length > 0 ? packageIds : undefined,
           }),
         });
@@ -473,6 +516,8 @@ export default function CreateInvoiceModal({
   };
 
   const totalAmount = sessions.reduce((sum, s) => sum + (s.price || 0), 0);
+  const schoolUnresolvedCount = sessions.filter(row => row._schoolPayIssue).length;
+  const schoolKnownCount = sessions.filter(row => row._schoolMeeting && row.price !== null).length;
 
   const buyerInfo = useMemo(() => {
     if (isOrgTutor && orgBuyerInfo) return orgBuyerInfo;
@@ -549,6 +594,7 @@ export default function CreateInvoiceModal({
                       ? t('invoiceCreate.orgAdminInfo')
                       : t('invoiceCreate.selectPeriodInfo')}
                 </p>
+                {schoolPayMode && <p className="text-xs text-blue-800 mt-2">{t('orgFinance.schoolPayPriceIndependence')}</p>}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -609,10 +655,11 @@ export default function CreateInvoiceModal({
               )}
 
               {error && (
-                <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+                <div role="alert" className="bg-red-50 border border-red-200 rounded-xl p-3">
                   <p className="text-sm text-red-700">{error}</p>
                 </div>
               )}
+              {isOrgTutor && orgFeaturesError && <p role="alert" className="text-sm text-red-700">{t('common.error')}</p>}
 
               <div className="flex gap-2">
                 <Button variant="outline" onClick={onClose} disabled={loading} className="flex-1 rounded-lg">
@@ -620,7 +667,7 @@ export default function CreateInvoiceModal({
                 </Button>
                 <Button
                   onClick={handlePreview}
-                  disabled={loading || !periodStart || !periodEnd || hasInvoiceProfile === false}
+                  disabled={loading || !periodStart || !periodEnd || hasInvoiceProfile === false || (isOrgTutor && (orgFeaturesLoading || orgFeaturesError))}
                   className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-700"
                 >
                   {loading ? (
@@ -641,7 +688,7 @@ export default function CreateInvoiceModal({
                     </p>
                     <p className="text-xs text-indigo-700 mt-1">
                       {t('invoiceCreate.sessionsCount', { count: sessions.length })} |{' '}
-                      {t('common.total')}: {'\u20AC'}{totalAmount.toFixed(2)}
+                      {schoolUnresolvedCount > 0 ? t('orgFinance.schoolKnownPayTotal') : t('common.total')}: {schoolUnresolvedCount > 0 && schoolKnownCount === 0 ? t('orgFinance.schoolPayPending') : `€${totalAmount.toFixed(2)}`}
                     </p>
                     {!isOrgTutor && (
                       <p className="text-xs text-indigo-600 mt-1">
@@ -753,7 +800,9 @@ export default function CreateInvoiceModal({
                         {tutorLabel && (
                           <p className="text-xs text-indigo-600 font-medium truncate">{tutorLabel}</p>
                         )}
-                        <span className="font-medium text-gray-900">{student?.full_name || '-'}</span>
+                        <span className="font-medium text-gray-900">{session._schoolMeeting && (session.class_group_id || subject?.is_group)
+                          ? session.class_group?.calendar_name || session.class_group?.name || t('cal.groupLesson')
+                          : student?.full_name || '-'}</span>
                         <span className="text-gray-500 ml-2">{lineTitle}</span>
                         <span className="text-gray-400 ml-2 text-xs">
                           {format(sessionDate, 'yyyy-MM-dd')}
@@ -761,7 +810,7 @@ export default function CreateInvoiceModal({
                         </span>
                       </div>
                       <span className="font-semibold text-indigo-600 shrink-0 ml-2">
-                        {'\u20AC'}{Number(session.price || 0).toFixed(2)}
+                        {session._schoolPayIssue ? t('orgFinance.schoolPayPending') : `€${Number(session.price || 0).toFixed(2)}`}
                       </span>
                     </div>
                   );
@@ -769,8 +818,9 @@ export default function CreateInvoiceModal({
               </div>
 
               {error && (
-                <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+                <div role="alert" className="bg-red-50 border border-red-200 rounded-xl p-3">
                   <p className="text-sm text-red-700">{error}</p>
+                  {schoolUnresolvedCount > 0 && <p className="text-xs text-red-700 mt-1">{t('orgFinance.schoolRateSettingsHint')}</p>}
                 </div>
               )}
 
@@ -780,7 +830,7 @@ export default function CreateInvoiceModal({
                 </Button>
                 <Button
                   onClick={handleGenerate}
-                  disabled={generating}
+                  disabled={generating || schoolUnresolvedCount > 0}
                   className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-700"
                 >
                   {generating ? (

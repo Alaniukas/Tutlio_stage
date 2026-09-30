@@ -291,6 +291,7 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
                     'text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 uppercase tracking-wide',
                     conversation.other_party_kind === 'student' && 'bg-emerald-100 text-emerald-700',
                     conversation.other_party_kind === 'org_admin' && 'bg-amber-100 text-amber-800',
+                    conversation.other_party_kind === 'parent' && 'bg-rose-100 text-rose-700',
                     conversation.other_party_kind === 'tutor' && 'bg-violet-100 text-violet-700',
                   )}
                 >
@@ -298,7 +299,9 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
                     ? t('chat.roleStudent')
                     : conversation.other_party_kind === 'org_admin'
                       ? t('chat.roleAdmin')
-                      : t('chat.roleTutor')}
+                      : conversation.other_party_kind === 'parent'
+                        ? t('chat.roleParent')
+                        : t('chat.roleTutor')}
                 </span>
               )}
             </div>

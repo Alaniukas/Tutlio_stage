@@ -2,6 +2,18 @@ import { en } from './en.js';
 
 /** Hebrew for Israel: tutor/business draft; dedicated school/admin/legal sections fall back to English. */
 export const heOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "גלו איך Tutlio יכול להתאים לסוכנות שלכם",
+  "landing.agencyCta.desc": "בהדגמה נוכל לדון בצוות, בתלמידים ובתהליכי העבודה עם ההורים ולמצוא את המסלול המתאים.",
+  "landing.agencyFaq.whatIsQ": "מהו Tutlio עבור סוכנויות לשיעורים פרטיים?",
+  "landing.agencyFaq.whatIsA": "Tutlio מרכז את לוחות הזמנים של המורים, התלמידים, חשבונות ההורים, התשלומים והדוחות במערכת אחת לניהול הסוכנות.",
+  "landing.agencyFaq.teamQ": "האם אפשר לנהל כמה מורים וחשבונות הורים?",
+  "landing.agencyFaq.teamA": "כן. מנהלי המערכת יכולים לראות את שיעורי הצוות ואת הזמינות שלו, והורים יכולים לצפות בלוח הזמנים ובתשלומים של ילדם דרך החשבון שלהם.",
+  "landing.agencyFaq.customizationQ": "האם Tutlio יכול להתאים לתהליכי העבודה שלנו?",
+  "landing.agencyFaq.customizationA": "נוכל לבחון את תהליכי ההזמנות, החוזים והתשלומים שלכם ולדון באופן הגדרתם ב-Tutlio.",
+  "landing.agencyFaq.pricingQ": "איך נקבע המחיר לסוכנויות?",
+  "landing.agencyFaq.pricingA": "המחיר לסוכנות תלוי בגודל הצוות ובמסלול שנבחר. אפשר לעיין באפשרויות בעמוד המחירים ולדון בהצעה מסוימת.",
+  "landing.agencyFaq.demoQ": "האם אפשר לראות הדגמה לפני שמחליטים?",
+  "landing.agencyFaq.demoA": "כן. אפשר לקבוע שיחה דרך עמוד המחירים כדי לראות את תהליכי העבודה שחשובים לצוות שלכם.",
   'compSch.notifyStudentEmail': 'להודיע לתלמיד בדוא״ל',
   "cal.deleteAllRemaining": "כל השיעורים שנותרו בסדרה זו",
   "cal.deleteAllRemainingHint": "השיעורים המתוכננים העתידיים והשיעורים שבוטלו בסדרה זו יימחקו. היסטוריית השיעורים שהושלמו תישמר.",

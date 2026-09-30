@@ -262,6 +262,27 @@ describe('extraLessonsContract', () => {
     expect(finished.individual_cancel_terms).toBe('netaikoma');
   });
 
+  it('preserves a legacy text-only group schedule when an older form sends empty schedule fields', () => {
+    const base = buildExtraLessonsOrderSnapshot({
+      service_name: 'Matematika', service_type: 'group', duration_minutes: 45,
+      start_date: '2026-09-01', end_date: '2027-06-15', unit_price_eur: 18,
+      base_lessons_per_month: 8, schedule_label: 'Antradieniais ir ketvirtadieniais 16:00',
+    });
+    const merged = mergeExtraLessonsOrderPatch(base, { schedule_slots: [], schedule_label: '' });
+    expect(merged.schedule_label).toBe(base.schedule_label);
+    expect(validateExtraLessonsOrder(merged)).toEqual([]);
+
+    const rescheduled = mergeExtraLessonsOrderPatch(base, {
+      schedule_slots: [{ weekday: 3, start_time: '17:00', end_time: '17:45' }], schedule_label: '',
+    });
+    expect(rescheduled.schedule_label).toBe('trečiadienis 17:00–17:45');
+    expect(rescheduled.schedule_label).not.toBe(base.schedule_label);
+
+    const sparse = { ...base, schedule_label: '' };
+    expect(validateExtraLessonsOrder(mergeExtraLessonsOrderPatch(sparse, { schedule_slots: [], schedule_label: '' })))
+      .toContain('schedule_label');
+  });
+
   it('keeps the taught subject on an individual extra-lessons snapshot', () => {
     const order = buildExtraLessonsOrderSnapshot({
       service_name: 'Lietuviu',

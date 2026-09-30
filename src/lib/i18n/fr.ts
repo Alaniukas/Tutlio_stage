@@ -1,3 +1,4 @@
+import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
@@ -8,6 +9,7 @@ import { schoolTeacherContractTranslationsFr } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const fr: Record<string, string> = {
+  ...studentNotesTranslations.fr,
   ...schoolFamilyMaterialTranslations.fr,
   ...schoolInvoiceReviewTranslations.fr,
   'school.recordings.access.title': "Accès aux enregistrements",
@@ -35,6 +37,18 @@ export const fr: Record<string, string> = {
   'common.reloadPageWarning': "Le rechargement entraînera la perte des modifications non enregistrées. Continuer ?",
   ...familyCatalogTrialCopy.fr,
   ...sharedOrganizationWorkflowTranslations,
+  "landing.agencyCta.title": "Découvrez comment Tutlio pourrait fonctionner pour votre agence",
+  "landing.agencyCta.desc": "Lors d’une démonstration, nous pouvons discuter de votre équipe, de vos élèves et de la collaboration avec les parents afin de trouver la formule adaptée.",
+  "landing.agencyFaq.whatIsQ": "Qu’est-ce que Tutlio pour les agences de soutien scolaire ?",
+  "landing.agencyFaq.whatIsA": "Tutlio réunit les plannings des enseignants, les élèves, les comptes parents, les paiements et les rapports dans un seul système de gestion d’agence.",
+  "landing.agencyFaq.teamQ": "Pouvons-nous gérer plusieurs enseignants et comptes parents ?",
+  "landing.agencyFaq.teamA": "Oui. Les administrateurs peuvent consulter les cours et les disponibilités de l’équipe, tandis que les parents peuvent voir le planning et les paiements de leur enfant depuis leur propre compte.",
+  "landing.agencyFaq.customizationQ": "Tutlio peut-il s’adapter à notre façon de travailler ?",
+  "landing.agencyFaq.customizationA": "Nous pouvons examiner vos processus de réservation, de contrat et de paiement et discuter de leur configuration dans Tutlio.",
+  "landing.agencyFaq.pricingQ": "Comment le tarif des agences est-il déterminé ?",
+  "landing.agencyFaq.pricingA": "Le tarif de votre agence dépend de la taille de l’équipe et de la formule choisie. Vous pouvez consulter les options sur la page des tarifs et discuter d’une proposition précise.",
+  "landing.agencyFaq.demoQ": "Pouvons-nous voir une démonstration avant de décider ?",
+  "landing.agencyFaq.demoA": "Oui. Vous pouvez réserver un appel depuis la page des tarifs pour découvrir les processus importants pour votre équipe.",
   ...schoolConsultationsTranslations.fr,
   'compSess.markAttended': "L'élève était présent",
   'att.confirmedManually': 'Présence confirmée',
@@ -4496,6 +4510,9 @@ export const fr: Record<string, string> = {
   'em.stripePaySub': '💳 Paiement du cours – {student}, {date}',
   'em.stripeRedirect': 'Le lien vous redirigera vers une page de paiement Stripe sécurisée.',
   'em.studentContacts': 'Contacts de l\'élève :',
+  "em.orgStudentInviteSub": "Votre lien d’inscription de {org}",
+  "em.orgStudentInviteHeaderSub": "{org} vous invite sur la plateforme",
+  "em.orgStudentInviteBody": "<strong>{org}</strong> vous a ajouté au système. Pour consulter le planning et réserver des cours, terminez votre inscription.",
   'em.studentInviteBody': 'Votre tuteur <strong>{tutor}</strong> vous a ajouté au système. Pour consulter le planning et réserver des cours, terminez votre inscription.',
   'em.studentInviteCodeLabel': 'Votre code d\'invitation :',
   'em.schoolStudentInviteCodeLabel': 'Le code d\'inscription de votre enfant :',
@@ -5323,6 +5340,20 @@ export const fr: Record<string, string> = {
   'school.groups.deleteConfirm': "Supprimer le groupe « {name} » ? Tous les cours à venir de ce groupe seront également supprimés.",
   'school.groups.deleteFailed': "Impossible de supprimer le groupe.",
   'school.groups.noMatches': "Aucun groupe ne correspond au filtre.",
+  'school.groups.noSessionForOccurrence': "Ce cours n’est pas prévu pour cet élève.",
+  'school.groups.contractUnconfirmed': "Contrat non confirmé",
+  'schoolDash.attendedWithoutContractTitle': "Participation avant confirmation du contrat",
+  'schoolDash.attendedWithoutContractDescription': "L’élève a assisté à un cours alors que le contrat de cours supplémentaires n’était pas encore confirmé.",
+  'schoolDash.contractAttendanceLoadFailed': "Impossible de charger les notifications de présence sans contrat confirmé.",
+  'schoolDash.contractAttendanceShownCount': "{shown} notifications affichées sur {total}.",
+  'orgFinance.schoolCurrentPayRate': "Tarif de base actuellement défini : {amount} € par cours.",
+  'orgFinance.schoolSummaryNote': "Chaque cours en groupe compte une seule fois. La rémunération utilise le tarif enregistré du cours ou, à défaut, le tarif de base actuel. L’école gère les paiements.",
+  'orgFinance.schoolFinalizedLessons': "Cours avec un résultat définitif",
+  'orgFinance.schoolUnresolvedPay': "Cours dont le tarif de rémunération manque ou présente des incohérences : {count}. L’école doit les vérifier.",
+  'orgFinance.schoolKnownPayTotal': "Total selon les tarifs connus",
+  'orgFinance.schoolRateSettingsHint': "Définissez le tarif de base : Enseignants → sélectionnez un enseignant → Rémunération (€/cours).",
+  'orgFinance.schoolPayPriceIndependence': "Les prix des contrats des élèves ne déterminent pas la rémunération de l’enseignant.",
+  'orgFinance.schoolPayPending': "Tarif de rémunération en attente",
   'lesson.joinOpensAt': "Connexion possible à partir de {time}",
   'em.reminderPayerSchoolLead': "Rappel : le cours de votre enfant <strong>{student}</strong> commence bientôt. Le lien de connexion se trouve ci-dessous.",
   'em.reminderPayerJoinBtn': "Rejoindre le cours",
@@ -5635,4 +5666,7 @@ export const fr: Record<string, string> = {
   'em.schoolJoinSubject': 'Rejoignez votre cours le {date} à {time}',
   'em.schoolJoinHeader': 'Rejoignez votre cours',
   'em.schoolJoinBody': 'Votre cours commence le {date} à {time}. Utilisez le lien ci-dessous.',
+  'chat.registrationPending': 'Inscription en attente',
+  'chat.registrationPendingHint': 'La messagerie est disponible une fois le compte de l’élève associé. Demandez à l’administrateur de l’organisation de vérifier l’adresse e-mail et le compte, ou à l’élève de terminer son inscription.',
+  'chat.startConversationFailed': 'Impossible de démarrer la conversation. Réessayez ou contactez l’administrateur de votre organisation.',
 };

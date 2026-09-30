@@ -1,3 +1,4 @@
+import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
@@ -7,6 +8,7 @@ import { schoolTeacherContractTranslationsPl } from './schoolTeacherContractTran
 import { schoolConsultationsPl } from './schoolConsultationsTranslations.js';
 
 export const pl: Record<string, string> = {
+  ...studentNotesTranslations.pl,
   ...schoolFamilyMaterialTranslations.pl,
   ...schoolInvoiceReviewTranslations.pl,
   'school.recordings.access.title': "Dostęp do nagrań",
@@ -4794,6 +4796,9 @@ export const pl: Record<string, string> = {
   'em.stripePaySub': '💳 Płatność za lekcję – {student}, {date}',
   'em.stripeRedirect': 'Link przekieruje do bezpiecznej strony płatności Stripe.',
   'em.studentContacts': 'Kontakt do ucznia:',
+  "em.orgStudentInviteSub": "Link do rejestracji od {org}",
+  "em.orgStudentInviteHeaderSub": "{org} zaprasza Cię na platformę",
+  "em.orgStudentInviteBody": "<strong>{org}</strong> dodała Cię do systemu. Aby przeglądać harmonogram i rezerwować lekcje, dokończ rejestrację.",
   'em.studentInviteBody': 'Twój korepetytor <strong>{tutor}</strong> dodał Cię do systemu. Aby zobaczyć grafik i rezerwować lekcje, dokończ rejestrację.',
   'em.studentInviteCodeLabel': 'Twój kod zaproszenia:',
   'em.schoolStudentInviteCodeLabel': 'Kod rejestracyjny Twojego dziecka:',
@@ -5551,6 +5556,20 @@ export const pl: Record<string, string> = {
   'school.groups.deleteConfirm': "Usunąć grupę „{name}”? Wszystkie nadchodzące lekcje tej grupy również zostaną usunięte.",
   'school.groups.deleteFailed': "Nie udało się usunąć grupy.",
   'school.groups.noMatches': "Brak grup pasujących do filtra.",
+  'school.groups.noSessionForOccurrence': "Dla tego ucznia nie zaplanowano tej lekcji.",
+  'school.groups.contractUnconfirmed': "Umowa niepotwierdzona",
+  'schoolDash.attendedWithoutContractTitle': "Udział przed potwierdzeniem umowy",
+  'schoolDash.attendedWithoutContractDescription': "Uczeń uczestniczył w lekcji, gdy umowa o dodatkowe lekcje nie była jeszcze potwierdzona.",
+  'schoolDash.contractAttendanceLoadFailed': "Nie udało się wczytać powiadomień o udziale bez potwierdzonej umowy.",
+  'schoolDash.contractAttendanceShownCount': "Wyświetlono {shown} z {total} powiadomień.",
+  'orgFinance.schoolCurrentPayRate': "Obecnie ustawiona stawka podstawowa: {amount} € za lekcję.",
+  'orgFinance.schoolSummaryNote': "Lekcje grupowe liczą się raz. Wynagrodzenie jest obliczane według zapisanej stawki lekcji, a jeśli jej nie ma - według obecnej stawki podstawowej. Rozliczenia prowadzi szkoła.",
+  'orgFinance.schoolFinalizedLessons': "Lekcje z końcowym wynikiem",
+  'orgFinance.schoolUnresolvedPay': "Lekcje z brakującymi lub sprzecznymi stawkami wynagrodzenia: {count}. Szkoła musi je sprawdzić.",
+  'orgFinance.schoolKnownPayTotal': "Suma według znanych stawek",
+  'orgFinance.schoolRateSettingsHint': "Ustaw stawkę podstawową: Nauczyciele → wybierz nauczyciela → Wynagrodzenie (€/lekcję).",
+  'orgFinance.schoolPayPriceIndependence': "Ceny w umowach uczniów nie określają wynagrodzenia nauczyciela.",
+  'orgFinance.schoolPayPending': "Oczekiwanie na stawkę wynagrodzenia",
   'lesson.joinOpensAt': "Dołączenie możliwe od {time}",
   'em.reminderPayerSchoolLead': "Przypominamy, że lekcja Twojego dziecka <strong>{student}</strong> wkrótce się rozpocznie. Link do dołączenia znajduje się poniżej.",
   'em.reminderPayerJoinBtn': "Dołącz do lekcji",

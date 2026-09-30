@@ -14,6 +14,7 @@ import { inAppSupportStatusSignature } from '../../api/_lib/inAppSupportStatusEm
 import {
   cardIdFromTrelloWebhook,
   deriveTrelloTicketState,
+  getTrelloWebhookSettings,
   normalizedTrelloPriorityTitle,
   validTrelloWebhookSignature,
   type TrelloSupportCard,
@@ -27,7 +28,17 @@ const settings: TrelloWebhookSettings = {
   callbackUrl: 'https://tutlio.lt/api/trello-support-webhook', boardId, webhookId: 'f'.repeat(24),
   lists: { registered: 'c'.repeat(24), inProgress: 'd'.repeat(24), resolved: 'e'.repeat(24) },
 };
+const featureLists = {
+  registered: '1'.repeat(24), inProgress: '2'.repeat(24), resolved: '3'.repeat(24),
+};
+const featureSettings: TrelloWebhookSettings = { ...settings, featureLists };
 const id = '17ee7859-5c8a-4fba-9dbd-9259ccad28f4';
+
+function configureFeatureLists() {
+  process.env.TRELLO_FEATURE_LIST_NEW_ID = featureLists.registered;
+  process.env.TRELLO_FEATURE_LIST_IN_PROGRESS_ID = featureLists.inProgress;
+  process.env.TRELLO_FEATURE_LIST_RESOLVED_ID = featureLists.resolved;
+}
 
 function card(overrides: Partial<TrelloSupportCard> = {}): TrelloSupportCard {
   return {
@@ -115,6 +126,7 @@ const envNames = [
   'TRELLO_API_KEY', 'TRELLO_TOKEN', 'TRELLO_APPLICATION_SECRET',
   'TRELLO_WEBHOOK_CALLBACK_URL', 'TRELLO_BOARD_ID', 'TRELLO_WEBHOOK_ID',
   'TRELLO_LIST_NEW_ID', 'TRELLO_LIST_IN_PROGRESS_ID', 'TRELLO_LIST_RESOLVED_ID',
+  'TRELLO_FEATURE_LIST_NEW_ID', 'TRELLO_FEATURE_LIST_IN_PROGRESS_ID', 'TRELLO_FEATURE_LIST_RESOLVED_ID',
 ];
 
 beforeEach(() => {
@@ -128,6 +140,9 @@ beforeEach(() => {
   process.env.TRELLO_LIST_NEW_ID = settings.lists.registered;
   process.env.TRELLO_LIST_IN_PROGRESS_ID = settings.lists.inProgress;
   process.env.TRELLO_LIST_RESOLVED_ID = settings.lists.resolved;
+  delete process.env.TRELLO_FEATURE_LIST_NEW_ID;
+  delete process.env.TRELLO_FEATURE_LIST_IN_PROGRESS_ID;
+  delete process.env.TRELLO_FEATURE_LIST_RESOLVED_ID;
   mocks.getClient.mockReset();
   mocks.notify.mockReset().mockResolvedValue(true);
 });
@@ -291,5 +306,127 @@ describe('Trello support webhook', () => {
       due: '2026-10-05T12:00:00.000Z' }), settings)).toBe('updated');
     expect(store.current()).toMatchObject({ status: 'resolved', target_date: null });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['registered', 'registered'], ['inProgress', 'in_progress'], ['resolved', 'resolved'],
+  ] as const)('tracks feature %s lists and legacy shared lists during rollout', (stage, status) => {
+    const current = {
+      category: 'feature' as const, status: 'registered' as const, target_date: null, priority: 'untriaged' as const,
+    };
+    for (const idList of [featureLists[stage], settings.lists[stage]]) {
+      expect(deriveTrelloTicketState(card({
+        idList, due: stage === 'inProgress' ? '2026-10-05T12:00:00.000Z' : null,
+      }), current, featureSettings)).toEqual({
+        status, target_date: stage === 'inProgress' ? '2026-10-05T12:00:00.000Z' : null,
+        priority: 'medium', trello_sync_error: null,
+      });
+    }
+  });
+
+  it('retains legacy feature tracking when the separate pipeline is not configured', () => {
+    expect(deriveTrelloTicketState(card({ idList: settings.lists.resolved }), {
+      category: 'feature', status: 'registered', target_date: null, priority: 'low',
+    }, settings)).toMatchObject({ status: 'resolved', trello_sync_error: null });
+  });
+
+  it('requires a feature deadline and preserves label priority before starting work', () => {
+    expect(deriveTrelloTicketState(card({
+      idList: featureLists.inProgress, labels: [{ name: 'P0' }],
+    }), {
+      category: 'feature', status: 'registered', target_date: null, priority: 'untriaged',
+    }, featureSettings)).toEqual({
+      status: 'registered', target_date: null, priority: 'urgent',
+      trello_sync_error: 'Set a Trello due date before moving this card to the In Progress list.',
+    });
+  });
+
+  it('does not mark a bug complete or send a completion email when moved into a feature list', async () => {
+    const row = {
+      id, category: 'bug', trello_card_id: cardId, status: 'registered', target_date: null, priority: 'medium',
+      trello_sync_error: null, updated_at: '2026-09-29T12:00:00Z',
+      status_updated_at: '2026-09-29T12:00:00Z', status_notified_signature: '',
+    };
+    row.status_notified_signature = inAppSupportStatusSignature(row as any);
+    const store = fakeDb(row);
+    const moved = card({
+      idList: featureLists.resolved,
+      name: 'SUP-17EE7859 · [P2] Feature /calendar',
+      desc: 'Tutlio support reference: SUP-17EE7859\nType: Feature request',
+    });
+
+    expect(await applyTrelloSupportCard(store.db, moved, featureSettings)).toBe('updated');
+    expect(await applyTrelloSupportCard(store.db, moved, featureSettings)).toBe('unchanged');
+
+    expect(store.current()).toMatchObject({ status: 'registered', target_date: null });
+    expect(String(store.current().trello_sync_error)).toContain('configured support lists');
+    expect(mocks.notify).not.toHaveBeenCalled();
+  });
+
+  it('uses the saved feature category for signed completion webhooks and notifies once on redelivery', async () => {
+    configureFeatureLists();
+    const row = {
+      id, category: 'feature', trello_card_id: cardId, status: 'in_progress',
+      target_date: '2026-10-05T12:00:00.000Z', priority: 'medium',
+      trello_sync_error: null, updated_at: '2026-09-29T12:00:00Z',
+      status_updated_at: '2026-09-29T12:00:00Z', status_notified_signature: '',
+    };
+    row.status_notified_signature = inAppSupportStatusSignature(row as any);
+    const store = fakeDb(row);
+    mocks.getClient.mockReturnValue(store.db);
+    mocks.notify.mockImplementation(async (_db, updated) => {
+      store.markNotified(inAppSupportStatusSignature(updated));
+      return true;
+    });
+    // Editable card text cannot change the category stored in Tutlio.
+    const completed = card({ idList: featureLists.resolved });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => completed }));
+    const first = response();
+    const repeated = response();
+
+    await handler(signedRequest(event()), first.res);
+    await handler(signedRequest(event()), repeated.res);
+
+    expect(first.result()).toEqual({ code: 200, body: { ok: true, result: 'updated' } });
+    expect(repeated.result()).toEqual({ code: 200, body: { ok: true, result: 'unchanged' } });
+    expect(store.current()).toMatchObject({ category: 'feature', status: 'resolved', target_date: null });
+    expect(store.updates()).toBe(1);
+    expect(mocks.notify).toHaveBeenCalledTimes(1);
+    expect(mocks.notify).toHaveBeenCalledWith(store.db, expect.objectContaining({ category: 'feature', status: 'resolved' }));
+  });
+
+  it('keeps feature status unchanged when its Trello reference was altered', async () => {
+    const store = fakeDb({
+      id, category: 'feature', trello_card_id: cardId, status: 'registered', target_date: null, priority: 'medium',
+      trello_sync_error: null, updated_at: '2026-09-29T12:00:00Z',
+      status_updated_at: '2026-09-29T12:00:00Z', status_notified_signature: 'already-sent',
+    });
+
+    expect(await applyTrelloSupportCard(store.db, card({
+      idList: featureLists.resolved, desc: 'Tutlio support reference: SUP-DEADBEEF',
+    }), featureSettings)).toBe('reference_mismatch');
+
+    expect(store.current()).toMatchObject({ status: 'registered', target_date: null });
+    expect(mocks.notify).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['partial', () => { delete process.env.TRELLO_FEATURE_LIST_RESOLVED_ID; }],
+    ['malformed', () => { process.env.TRELLO_FEATURE_LIST_NEW_ID = 'not-a-list-id'; }],
+    ['duplicate', () => { process.env.TRELLO_FEATURE_LIST_RESOLVED_ID = featureLists.registered; }],
+    ['overlapping support', () => { process.env.TRELLO_FEATURE_LIST_NEW_ID = settings.lists.registered; }],
+  ] as const)('isolates %s feature configuration errors from the bug webhook', (_name, invalidate) => {
+    configureFeatureLists();
+    invalidate();
+    const configured = getTrelloWebhookSettings();
+    expect(configured).not.toBeNull();
+    expect(configured?.featureListConfigurationError).toContain('TRELLO_FEATURE_LIST_*_ID');
+    const moved = card({ idList: settings.lists.inProgress, due: '2026-10-05T12:00:00.000Z' });
+    const current = { status: 'registered' as const, target_date: null, priority: 'untriaged' as const };
+
+    expect(deriveTrelloTicketState(moved, { ...current, category: 'bug' }, configured!))
+      .toMatchObject({ status: 'in_progress', trello_sync_error: null });
+    expect(deriveTrelloTicketState(moved, { ...current, category: 'feature' }, configured!))
+      .toMatchObject({ status: 'registered', target_date: null, trello_sync_error: configured?.featureListConfigurationError });
   });
 });

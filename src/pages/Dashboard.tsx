@@ -59,7 +59,7 @@ import {
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isProKlaseOrg } from '@/lib/marketMoney';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
-import { isProKlaseAwaitingOutcomeConfirmation } from '@/lib/proKlaseTutorPay';
+import { effectiveSessionOutcome, orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import { canChooseParentLessonComment } from '@/lib/parentLessonComment';
 import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
 import { fetchStudentTrialHistory } from '@/lib/studentTrialHistory';
@@ -184,7 +184,9 @@ export default function DashboardPage() {
     );
     // Org feature: ended lessons are not auto-completed — the tutor must confirm each outcome.
     const requiresStatusConfirmation =
-      hasOrgFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(ctxProfile?.organization_id);
+      orgRequiresTutorStatusConfirmation(organizationId || ctxProfile?.organization_id, {
+        tutor_lesson_status_confirmation: hasOrgFeature('tutor_lesson_status_confirmation'),
+      });
     const [confirmingStatusId, setConfirmingStatusId] = useState<string | null>(null);
     const [searchParams, setSearchParams] = useSearchParams();
     const dc = getCached<any>('tutor_dashboard');
@@ -403,7 +405,7 @@ export default function DashboardPage() {
             const orgFeat = orgFeatRes.data?.features;
             const orgFeatObj = orgFeat && typeof orgFeat === 'object' && !Array.isArray(orgFeat) ? (orgFeat as Record<string, unknown>) : {};
             const trialPolicy = parseOrgTrialPolicy(orgFeatObj);
-            const isProKlase = isProKlaseOrg(organizationId);
+            const requireOutcomeConfirmation = orgRequiresTutorStatusConfirmation(organizationId, orgFeatObj);
 
             const trialsByStudent = new Map<string, Array<{ id: string; start_time?: string | null; status?: string | null }>>();
             if (trialPolicy.commentRequired) {
@@ -430,9 +432,8 @@ export default function DashboardPage() {
 
             const missingComments = (sessionsData || [])
                 .filter((s: any) => {
-                    const needsComment = ['completed', 'no_show'].includes(String(s.status));
+                    const needsComment = ['completed', 'no_show'].includes(effectiveSessionOutcome(s, requireOutcomeConfirmation));
                     if (!needsComment || String(s.tutor_comment || '').trim()) return false;
-                    if (isProKlase && !s.status_confirmed_at) return false;
                     return sessionNeedsOrgTrialComment({
                         policy: trialPolicy,
                         isTrial: s.subjects?.is_trial === true,
@@ -978,7 +979,7 @@ export default function DashboardPage() {
             }
             setSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, status, status_confirmed_at: s.status_confirmed_at || new Date().toISOString() } : s)));
             if (selectedSession?.id === session.id) {
-                setSelectedSession({ ...selectedSession, status });
+                setSelectedSession({ ...selectedSession, status, status_confirmed_at: selectedSession.status_confirmed_at || new Date().toISOString() });
                 setIsModalOpen(false);
             }
             fetchData();
@@ -1148,7 +1149,7 @@ export default function DashboardPage() {
     const upcomingSessionsAll = sessions
         .filter((s) => {
             const inWindow =
-                s.status === 'active' &&
+                effectiveSessionOutcome(s, requiresStatusConfirmation) === 'active' &&
                 isAfter(new Date(s.end_time), now) &&
                 isBefore(new Date(s.start_time), next7days);
             if (!inWindow) return false;
@@ -1161,14 +1162,18 @@ export default function DashboardPage() {
     // Today's sessions
     const todaySessions = sessions.filter((s) => {
         const d = new Date(s.start_time);
-        return s.status === 'active' && d.toDateString() === now.toDateString();
+        return effectiveSessionOutcome(s, requiresStatusConfirmation) === 'active' && d.toDateString() === now.toDateString();
     });
 
     // Must-do queue (tutor_lesson_status_confirmation): ended lessons whose outcome
     // the tutor has not confirmed yet. Newest first; not dismissible by design.
     const pendingStatusSessions = requiresStatusConfirmation
         ? sessions
-              .filter((s) => isProKlaseAwaitingOutcomeConfirmation(s, now))
+              .filter((s) => {
+                  const end = Date.parse(s.end_time);
+                  return effectiveSessionOutcome(s, true) === 'active'
+                    && Number.isFinite(end) && end <= now.getTime();
+              })
               .sort((a, b) => new Date(b.end_time).getTime() - new Date(a.end_time).getTime())
         : [];
 
@@ -1467,7 +1472,7 @@ export default function DashboardPage() {
                                           {isToday ? `${t('stuSched.today')}, ${format(start, 'HH:mm')}` : format(start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}
                                           {s.topic && <span className="ml-1">· {s.topic}</span>}
                                         </span>
-                                        <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} pendingConfirmation={requiresStatusConfirmation} /><AttendanceBadge session={s} manualConfirmationRequired={requiresStatusConfirmation} /></div>
+                                        <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={effectiveSessionOutcome(s, requiresStatusConfirmation)} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} pendingConfirmation={requiresStatusConfirmation} /><AttendanceBadge session={s} manualConfirmationRequired={requiresStatusConfirmation} /></div>
                                       </div>
                                     </div>
                                     {isOrgTutor !== true && s.price && <span className="text-sm font-semibold text-gray-700 flex-shrink-0">{fmt(s.price)}</span>}
@@ -1509,7 +1514,7 @@ export default function DashboardPage() {
                                   <div key={s.id} onClick={() => { setSelectedSession(s); setIsModalOpen(true); }} className="flex flex-col gap-2 p-3 rounded-xl cursor-pointer border border-red-100 hover:shadow-md transition-all bg-red-50/50">
                                     <div className="flex items-center justify-between">
                                       <p className="text-sm font-semibold text-gray-900 truncate">{s.student?.full_name}</p>
-                                      <div className="scale-90 origin-right"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} pendingConfirmation={requiresStatusConfirmation} /></div>
+                                      <div className="scale-90 origin-right"><StatusBadge status={effectiveSessionOutcome(s, requiresStatusConfirmation)} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} pendingConfirmation={requiresStatusConfirmation} /></div>
                                     </div>
                                     <p className="text-xs text-gray-500">
                                       {format(start, "EEE d MMM yyyy, HH:mm", { locale: dateFnsLocale })}
@@ -1690,7 +1695,7 @@ export default function DashboardPage() {
                                                                 {isToday ? `${t('stuSched.today')}, ${format(start, 'HH:mm')}` : format(start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}
                                                                 {s.topic && <span className="ml-1">· {s.topic}</span>}
                                                             </span>
-                                                            <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} /><AttendanceBadge session={s} manualConfirmationRequired={requiresStatusConfirmation} /></div>
+                                                            <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={effectiveSessionOutcome(s, requiresStatusConfirmation)} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} pendingConfirmation={requiresStatusConfirmation} /><AttendanceBadge session={s} manualConfirmationRequired={requiresStatusConfirmation} /></div>
                                                         </div>
                                                     </div>
                                                     {s.price ? <span className="text-sm font-semibold text-gray-700 flex-shrink-0">{fmt(s.price)}</span> : null}
@@ -1727,7 +1732,7 @@ export default function DashboardPage() {
                                                 <div key={s.id} onClick={() => { setSelectedSession(s); setIsModalOpen(true); }} className="flex flex-col gap-2 p-3 rounded-xl cursor-pointer border border-red-100 hover:shadow-md transition-all bg-red-50/50">
                                                     <div className="flex items-center justify-between">
                                                         <p className="text-sm font-semibold text-gray-900 truncate">{s.student?.full_name}</p>
-                                                        <div className="scale-90 origin-right"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} /></div>
+                                                        <div className="scale-90 origin-right"><StatusBadge status={effectiveSessionOutcome(s, requiresStatusConfirmation)} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} pendingConfirmation={requiresStatusConfirmation} /></div>
                                                     </div>
                                                     <p className="text-xs text-gray-500">
                                                         {format(start, "EEE d MMM yyyy, HH:mm", { locale: dateFnsLocale })}
@@ -2269,7 +2274,7 @@ export default function DashboardPage() {
                                 <p className="text-xs text-gray-500 font-medium shrink-0">{t('dash.statusLabel')}</p>
                                 <div className="min-w-0 flex justify-end">
                                     <StatusBadge
-                                        status={selectedSession?.status || ''}
+                                        status={effectiveSessionOutcome(selectedSession || {}, requiresStatusConfirmation)}
                                         paymentStatus={selectedSession?.payment_status}
                                         paid={selectedSession?.paid}
                                         isTrial={selectedSession?.subjects?.is_trial === true}
@@ -2292,7 +2297,7 @@ export default function DashboardPage() {
                                 <div className="bg-gray-50 rounded-xl p-3 text-center flex flex-col items-center justify-center">
                                     <p className="text-xs text-gray-400 mb-1">{t('dash.statusLabel')}</p>
                                     <StatusBadge
-                                        status={selectedSession?.status || ''}
+                                        status={effectiveSessionOutcome(selectedSession || {}, requiresStatusConfirmation)}
                                         paymentStatus={selectedSession?.payment_status}
                                         paid={selectedSession?.paid}
                                         isTrial={selectedSession?.subjects?.is_trial === true}
@@ -2465,7 +2470,7 @@ export default function DashboardPage() {
                         {cancelConfirmId !== selectedSession?.id && (
                         <>
                         {isOrgTutor === true && requiresStatusConfirmation &&
-                            selectedSession?.status === 'active' &&
+                            selectedSession && effectiveSessionOutcome(selectedSession, true) === 'active' &&
                             isAfter(new Date(), new Date(selectedSession.end_time)) && (
                             <div className="w-full rounded-xl border border-amber-300 bg-amber-50 p-3 space-y-2">
                                 <p className="text-sm font-semibold text-amber-900">{t('cal.confirmStatusPrompt')}</p>

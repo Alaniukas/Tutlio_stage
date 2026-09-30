@@ -5,8 +5,8 @@ const source = readFileSync('src/pages/company/CompanySessions.tsx', 'utf8');
 
 describe('school session monitoring completeness', () => {
   it('uses the full stats query rather than the first paginated list page', () => {
-    expect(source).toContain('<SchoolSessionMonitoring sessions={schoolMonitoringSessions} />');
-    expect(source).not.toContain('<SchoolSessionMonitoring sessions={filtered} />');
+    expect(source).toContain('<SchoolSessionMonitoring sessions={schoolMonitoringSessions} requireConfirmation={requireOutcomeConfirmation} />');
+    expect(source).not.toContain('<SchoolSessionMonitoring sessions={filtered}');
   });
 
   it('loads the group and pupil identity fields needed by the monitoring aggregate', () => {

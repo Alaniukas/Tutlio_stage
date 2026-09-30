@@ -2146,7 +2146,7 @@ export default function StudentsPage() {
               {orgPolicy.isOrgTutor && selectedStudent.admin_comment_visible_to_tutor && String(selectedStudent.admin_comment || '').trim().length > 0 && (
                 <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
                   <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700 mb-1.5">
-                    {t('stu.adminCommentTitle')}
+                    {t('compStu.tutorComment')}
                   </p>
                   <p className="text-sm text-indigo-900 whitespace-pre-wrap">
                     {selectedStudent.admin_comment}

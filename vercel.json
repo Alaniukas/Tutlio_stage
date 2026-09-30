@@ -252,6 +252,10 @@
     ],
     "crons": [
         {
+            "path": "/api/retry-support-releases",
+            "schedule": "*/15 * * * *"
+        },
+        {
             "path": "/api/auto-complete-sessions",
             "schedule": "*/5 * * * *"
         },

@@ -6,6 +6,18 @@ import { en } from './en.js';
  * retain English. See docs/MEXICAN_SPANISH_LOCALIZATION_REVIEW.md before release.
  */
 export const esMxOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Descubre cómo podría funcionar Tutlio para tu agencia",
+  "landing.agencyCta.desc": "En una demostración podemos hablar de tu equipo, tus alumnos y la colaboración con madres y padres para encontrar el plan adecuado.",
+  "landing.agencyFaq.whatIsQ": "¿Qué es Tutlio para las agencias de clases particulares?",
+  "landing.agencyFaq.whatIsA": "Tutlio reúne los horarios de los tutores, los alumnos, las cuentas de madres y padres, los pagos y los reportes en un solo sistema de gestión para la agencia.",
+  "landing.agencyFaq.teamQ": "¿Podemos administrar varios tutores y cuentas de madres y padres?",
+  "landing.agencyFaq.teamA": "Sí. Los administradores pueden ver las clases y la disponibilidad del equipo, mientras que madres y padres pueden consultar los horarios y pagos de sus hijos desde su propia cuenta.",
+  "landing.agencyFaq.customizationQ": "¿Tutlio puede adaptarse a nuestra forma de trabajar?",
+  "landing.agencyFaq.customizationA": "Podemos revisar tus procesos de reservas, contratos y pagos, y conversar sobre cómo configurarlos en Tutlio.",
+  "landing.agencyFaq.pricingQ": "¿Cómo se determina el precio para las agencias?",
+  "landing.agencyFaq.pricingA": "El precio para la agencia depende del tamaño del equipo y del plan elegido. Puedes revisar las opciones en la página de precios y conversar sobre una propuesta específica.",
+  "landing.agencyFaq.demoQ": "¿Podemos ver una demostración antes de decidir?",
+  "landing.agencyFaq.demoA": "Sí. Puedes agendar una llamada desde la página de precios para conocer los procesos que son importantes para tu equipo.",
   'compSch.notifyStudentEmail': 'Notificar al estudiante por correo electrónico',
   "cal.deleteAllRemaining": "Todas las clases restantes de esta serie",
   "cal.deleteAllRemainingHint": "Elimina las clases futuras programadas y las clases canceladas de esta serie. Se conserva el historial de las clases realizadas.",

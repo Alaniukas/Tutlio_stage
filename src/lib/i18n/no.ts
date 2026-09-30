@@ -1,3 +1,4 @@
+import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
@@ -8,6 +9,7 @@ import { schoolTeacherContractTranslationsNo } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const no: Record<string, string> = {
+  ...studentNotesTranslations.no,
   ...schoolFamilyMaterialTranslations.no,
   ...schoolInvoiceReviewTranslations.no,
   'school.recordings.access.title': "Tilgang til opptak",
@@ -35,6 +37,18 @@ export const no: Record<string, string> = {
   'common.reloadPageWarning': "Hvis du laster siden på nytt, går ulagrede endringer tapt. Vil du fortsette?",
   ...familyCatalogTrialCopy.no,
   ...sharedOrganizationWorkflowTranslations,
+  "landing.agencyCta.title": "Se hvordan Tutlio kan fungere i byrået ditt",
+  "landing.agencyCta.desc": "I en demo kan vi snakke om teamet ditt, elevene og samarbeidet med foreldrene og finne den rette planen.",
+  "landing.agencyFaq.whatIsQ": "Hva er Tutlio for byråer som tilbyr privatundervisning?",
+  "landing.agencyFaq.whatIsA": "Tutlio samler lærernes timeplaner, elever, foreldrekontoer, betalinger og rapporter i ett administrasjonssystem for byrået.",
+  "landing.agencyFaq.teamQ": "Kan vi administrere flere lærere og foreldrekontoer?",
+  "landing.agencyFaq.teamA": "Ja. Administratorer kan se teamets undervisning og ledige tider, mens foreldre kan se barnets timeplan og betalinger i sin egen konto.",
+  "landing.agencyFaq.customizationQ": "Kan Tutlio tilpasses arbeidsprosessene våre?",
+  "landing.agencyFaq.customizationA": "Vi kan gjennomgå prosessene deres for bestilling, kontrakter og betaling og snakke om hvordan de kan settes opp i Tutlio.",
+  "landing.agencyFaq.pricingQ": "Hvordan fastsettes prisen for byråer?",
+  "landing.agencyFaq.pricingA": "Prisen for byrået avhenger av teamets størrelse og den valgte planen. Du kan se alternativene på prissiden og diskutere et konkret tilbud.",
+  "landing.agencyFaq.demoQ": "Kan vi se en demo før vi bestemmer oss?",
+  "landing.agencyFaq.demoA": "Ja. Du kan bestille en samtale fra prissiden for å se arbeidsprosessene som er viktige for teamet ditt.",
   ...schoolConsultationsTranslations.no,
   'compSess.markAttended': 'Eleven deltok',
   'att.confirmedManually': 'Oppmøte bekreftet',
@@ -2827,6 +2841,9 @@ export const no: Record<string, string> = {
   'em.stripePaySub': '💳 Betaling for time – {student}, {date}',
   'em.stripeRedirect': 'Lenken videresender til en sikker Stripe-betalingsside.',
   'em.studentContacts': 'Elevens kontakter:',
+  "em.orgStudentInviteSub": "Registreringslenken din fra {org}",
+  "em.orgStudentInviteHeaderSub": "{org} inviterer deg til plattformen",
+  "em.orgStudentInviteBody": "<strong>{org}</strong> har lagt deg til i systemet. Fullfør registreringen for å se timeplanen og bestille timer.",
   'em.studentInviteBody': 'Privatlæreren din <strong>{tutor}</strong> la deg til i systemet. For å se timeplanen og bestille timer, fullfør registreringen.',
   'em.studentInviteCodeLabel': 'Din invitasjonskode:',
   'em.schoolStudentInviteCodeLabel': 'Barnets registreringskode:',
@@ -5323,6 +5340,20 @@ export const no: Record<string, string> = {
   'school.groups.deleteConfirm': "Slette gruppen «{name}»? Alle kommende timer i gruppen fjernes også.",
   'school.groups.deleteFailed': "Kunne ikke slette gruppen.",
   'school.groups.noMatches': "Ingen grupper samsvarer med filteret.",
+  'school.groups.noSessionForOccurrence': "Denne timen er ikke planlagt for denne eleven.",
+  'school.groups.contractUnconfirmed': "Avtalen er ikke bekreftet",
+  'schoolDash.attendedWithoutContractTitle': "Deltok før avtalen ble bekreftet",
+  'schoolDash.attendedWithoutContractDescription': "Eleven deltok i en time mens avtalen om ekstratimer ennå ikke var bekreftet.",
+  'schoolDash.contractAttendanceLoadFailed': "Kunne ikke laste varsler om oppmøte uten bekreftet avtale.",
+  'schoolDash.contractAttendanceShownCount': "Viser {shown} av {total} varsler.",
+  'orgFinance.schoolCurrentPayRate': "Gjeldende grunnsats: {amount} € per time.",
+  'orgFinance.schoolSummaryNote': "Gruppetimer telles én gang. Godtgjørelsen følger den lagrede timesatsen eller den gjeldende grunnsatsen dersom det ikke finnes en lagret sats. Skolen håndterer betalingene.",
+  'orgFinance.schoolFinalizedLessons': "Timer med endelig resultat",
+  'orgFinance.schoolUnresolvedPay': "Timer med manglende eller motstridende godtgjørelsessatser: {count}. Skolen må gjennomgå dem.",
+  'orgFinance.schoolKnownPayTotal': "Sum etter kjente satser",
+  'orgFinance.schoolRateSettingsHint': "Angi grunnsatsen: Lærere → velg en lærer → Godtgjørelse (€/time).",
+  'orgFinance.schoolPayPriceIndependence': "Prisene i elevenes avtaler bestemmer ikke lærerens godtgjørelse.",
+  'orgFinance.schoolPayPending': "Venter på godtgjørelsessats",
   'lesson.joinOpensAt': "Du kan bli med fra {time}",
   'em.reminderPayerSchoolLead': "Påminnelse: barnet ditt <strong>{student}</strong> har en time som starter snart. Lenken for å bli med finner du nedenfor.",
   'em.reminderPayerJoinBtn': "Bli med i timen",
@@ -5635,4 +5666,7 @@ export const no: Record<string, string> = {
   'em.schoolJoinSubject': 'Bli med på timen {date} kl. {time}',
   'em.schoolJoinHeader': 'Bli med på timen',
   'em.schoolJoinBody': 'Timen din begynner {date} kl. {time}. Bruk lenken nedenfor.',
+  'chat.registrationPending': 'Registrering venter',
+  'chat.registrationPendingHint': 'Meldinger er tilgjengelige når elevkontoen er koblet til. Be organisasjonens administrator kontrollere elevens e-postadresse og konto, eller be eleven fullføre registreringen.',
+  'chat.startConversationFailed': 'Samtalen kunne ikke startes. Prøv igjen eller kontakt organisasjonens administrator.',
 };

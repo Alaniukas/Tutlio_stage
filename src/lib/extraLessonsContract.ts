@@ -251,13 +251,17 @@ export function mergeExtraLessonsOrderPatch(
   base: ExtraLessonsOrderSnapshot,
   patch: Partial<ExtraLessonsOrderSnapshot>,
 ): ExtraLessonsOrderSnapshot {
+  // Older public forms sent an empty slot-derived label for offers with a text-only schedule.
+  const preserveLegacySchedule = !base.schedule_slots.length && Boolean(base.schedule_label)
+    && !patch.schedule_slots?.length && !String(patch.schedule_label || '').trim();
   return buildExtraLessonsOrderSnapshot({
     ...base,
     ...patch,
     schedule_slots: base.recording_access === undefined ? patch.schedule_slots ?? base.schedule_slots : base.schedule_slots,
     // The offered access plan belongs to the school, not the public form.
     recording_access: base.recording_access,
-    schedule_label: base.recording_access === undefined ? patch.schedule_label ?? base.schedule_label : base.schedule_label,
+    schedule_label: base.recording_access === undefined && !preserveLegacySchedule
+      ? patch.schedule_label ?? base.schedule_label : base.schedule_label,
     service_name: patch.service_name ?? base.service_name,
     service_type: base.recording_access === undefined ? patch.service_type ?? base.service_type : base.service_type,
     platform: patch.platform ?? base.platform,

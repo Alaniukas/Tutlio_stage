@@ -105,11 +105,12 @@ async function deliverStoredRequest(
   const reference = inAppSupportReference(row.id);
   const report = reportFromStored(row);
   const reporter = reporterFromStored(row, viewerUserId);
-  const codingAgentPrompt = row.coding_agent_prompt || buildInAppSupportCodingAgentPrompt({ reference, reporter, report });
+  const codingAgentPrompt = row.coding_agent_prompt || buildInAppSupportCodingAgentPrompt({ ticketId: row.id, reference, reporter, report });
   const statusRow = {
     id: row.id,
     reporter_name: row.reporter_name,
     reporter_email: row.reporter_email,
+    category: row.category,
     title: row.title,
     page: row.page,
     locale: row.locale,
@@ -163,7 +164,7 @@ async function deliverStoredRequest(
         page: row.page,
         target_date: row.target_date,
         trello_card_id: row.trello_card_id,
-      }),
+      }, { onlyIfUnlinked: true }),
   ]);
   if (delivery[0].status === 'rejected') console.error('[in-app-support] Team notification failed');
   if (delivery[1].status === 'rejected') console.error('[in-app-support] Reporter confirmation failed');
@@ -237,6 +238,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const submittedReport = { ...input, attachments };
     const notificationReporter = { userId: auth.userId, ...reporter };
     const codingAgentPrompt = buildInAppSupportCodingAgentPrompt({
+      ticketId: requestRecordId,
       reference,
       reporter: notificationReporter,
       report: submittedReport,

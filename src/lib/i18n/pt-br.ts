@@ -2,6 +2,18 @@ import { en } from './en.js';
 
 /** Brazilian Portuguese tutor/business copy; deferred modules retain English. */
 export const ptBrOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Veja como o Tutlio pode funcionar na sua agência de aulas particulares",
+  "landing.agencyCta.desc": "Em uma demonstração, podemos conversar sobre sua equipe, os alunos e a colaboração com os pais para encontrar o plano ideal.",
+  "landing.agencyFaq.whatIsQ": "O que é o Tutlio para agências de aulas particulares?",
+  "landing.agencyFaq.whatIsA": "O Tutlio reúne os horários dos professores, os alunos, as contas dos pais, os pagamentos e os relatórios em um único sistema de gestão da agência.",
+  "landing.agencyFaq.teamQ": "Podemos gerenciar vários professores e contas dos pais?",
+  "landing.agencyFaq.teamA": "Sim. Os administradores podem visualizar as aulas e a disponibilidade da equipe, enquanto os pais podem consultar os horários e pagamentos do filho na própria conta.",
+  "landing.agencyFaq.customizationQ": "O Tutlio pode se adaptar à nossa forma de trabalhar?",
+  "landing.agencyFaq.customizationA": "Podemos analisar seus processos de agendamento, contratos e pagamentos e conversar sobre como configurá-los no Tutlio.",
+  "landing.agencyFaq.pricingQ": "Como é definido o preço para as agências?",
+  "landing.agencyFaq.pricingA": "O preço depende do tamanho da equipe e do plano escolhido. Você pode consultar as opções na página de preços e conversar sobre uma proposta específica.",
+  "landing.agencyFaq.demoQ": "Podemos ver uma demonstração antes de decidir?",
+  "landing.agencyFaq.demoA": "Sim. Você pode agendar uma chamada na página de preços para conhecer os processos mais importantes para sua equipe.",
   'compSch.notifyStudentEmail': 'Notificar aluno por e-mail',
   "cal.deleteAllRemaining": "Todas as aulas restantes desta série",
   "cal.deleteAllRemainingHint": "Remove as aulas futuras programadas e canceladas desta série. O histórico das aulas concluídas é mantido.",

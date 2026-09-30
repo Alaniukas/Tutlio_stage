@@ -7,6 +7,35 @@
  * an unrelated missing key still fails the locale quality tests.
  */
 export const DRAFT_LOCALE_ALANO_FALLBACK_KEYS = new Set<string>([
+  // New organization workflows retain the existing draft-locale English
+  // baseline. Published legacy locales provide native copies. Marketing keys
+  // remain in the required tutor/business translation scope.
+  'compStu.adminNotesTitle',
+  'compStu.lastContactedAt',
+  'compStu.clearContactDate',
+  'compStu.tutorComment',
+  'compStu.tutorCommentPlaceholder',
+  'compStu.tutorCommentHint',
+  'compStu.notesLoadFailed',
+  'compStu.notesCreatedSaveFailed',
+  'chat.registrationPending',
+  'chat.registrationPendingHint',
+  'chat.startConversationFailed',
+  'em.orgStudentInviteSub',
+  'em.orgStudentInviteHeaderSub',
+  'em.orgStudentInviteBody',
+  'schoolDash.attendedWithoutContractTitle',
+  'schoolDash.attendedWithoutContractDescription',
+  'schoolDash.contractAttendanceLoadFailed',
+  'schoolDash.contractAttendanceShownCount',
+  'orgFinance.schoolCurrentPayRate',
+  'orgFinance.schoolSummaryNote',
+  'orgFinance.schoolFinalizedLessons',
+  'orgFinance.schoolUnresolvedPay',
+  'orgFinance.schoolKnownPayTotal',
+  'orgFinance.schoolRateSettingsHint',
+  'orgFinance.schoolPayPriceIndependence',
+  'orgFinance.schoolPayPending',
   'schoolConsult.nav',
   'schoolConsult.title',
   'schoolConsult.usSection',

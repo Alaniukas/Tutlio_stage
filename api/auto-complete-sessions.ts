@@ -105,18 +105,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         awaitingAttendanceReview: awaitingAttendanceReview.length,
       });
     }
-    const completableSessions = autoCompletable as any[];
+    const candidateIds = autoCompletable.map((s) => s.id);
 
-    const idsToComplete = completableSessions.map((s: any) => s.id);
-
-    const { error: updateErr } = await supabase
+    // A cancellation or manual confirmation may have happened after the read.
+    // Only rows still active are ours to complete, including downstream effects.
+    const { data: completedSessions, error: updateErr } = await supabase
       .from('sessions')
       .update({ status: 'completed' })
-      .in('id', idsToComplete);
+      .in('id', candidateIds)
+      .eq('status', 'active')
+      .select('id, tutor_id, lesson_package_id, subject_id');
 
     if (updateErr) {
       console.error('[auto-complete-sessions] update error:', updateErr);
       return res.status(500).json({ error: 'Update error', details: updateErr.message });
+    }
+    const completableSessions = completedSessions || [];
+    const idsToComplete = completableSessions.map((session) => session.id);
+    if (!idsToComplete.length) {
+      return res.status(200).json({
+        success: true,
+        updated: 0,
+        awaitingTutorConfirmation: awaitingConfirmation.length,
+        awaitingAttendanceReview: awaitingAttendanceReview.length,
+      });
     }
 
     // Sync completed sessions to Google Calendar (background, best-effort)

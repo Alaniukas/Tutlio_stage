@@ -14,8 +14,10 @@ import {
   extraLessonsStandaloneWithdrawalFormBody,
   extraLessonsWithdrawalFormHref,
   formatScheduleLabel,
+  mergeExtraLessonsOrderPatch,
   parseExtraLessonsServiceType,
   resolveStartWithin14Status,
+  validateExtraLessonsOrder,
   type ExtraLessonsOrderSnapshot,
   type ExtraLessonsScheduleSlot,
   type ExtraLessonsServiceTypeOrUnset,
@@ -50,6 +52,28 @@ type Preview = {
   acceptedAt?: string;
   discountAgreements?: SchoolDiscountContractPreview[];
 };
+
+const orderFieldLabels: Record<string, string> = {
+  service_name: 'Paslaugos pavadinimas',
+  service_type: 'Paslaugos tipas',
+  platform: 'Platforma',
+  duration_minutes: 'Užsiėmimo trukmė (min)',
+  schedule_label: 'Grafikas',
+  schedule_slots: 'Grafikas',
+  start_date: 'Pradžios data',
+  end_date: 'Pabaigos data',
+  base_lessons_per_month: 'Bazinis užsiėmimų kiekis / mėn.',
+  unit_price_eur: 'Kaina',
+  recording_access: 'Užsiėmimų įrašai',
+};
+const parentEditableOrderFields = new Set([
+  'service_name', 'service_type', 'platform', 'duration_minutes',
+  'schedule_label', 'schedule_slots', 'start_date', 'end_date', 'base_lessons_per_month',
+]);
+
+function missingOrderFieldsMessage(fields: string[]) {
+  return `Trūksta: ${fields.map((field) => orderFieldLabels[field] || field).join(', ')}`;
+}
 
 function PageShell({ children, centered = false }: { children: ReactNode; centered?: boolean }) {
   return (
@@ -125,6 +149,7 @@ export default function SchoolExtraLessonsAccept() {
   const token = (params.get('token') || '').trim();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [missingOrderFields, setMissingOrderFields] = useState<string[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [startWithin14, setStartWithin14] = useState(true);
@@ -137,6 +162,12 @@ export default function SchoolExtraLessonsAccept() {
   const [endKind, setEndKind] = useState<string | null>(null);
   const [pdfRefreshing, setPdfRefreshing] = useState(false);
   const skipNextPreviewRefresh = useRef(true);
+  const submitErrorRef = useRef<HTMLDivElement>(null);
+  const requiredFieldsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (error) submitErrorRef.current?.focus();
+  }, [error, missingOrderFields]);
 
   const [serviceName, setServiceName] = useState('');
   const [serviceType, setServiceType] = useState<ExtraLessonsServiceTypeOrUnset>('');
@@ -146,6 +177,7 @@ export default function SchoolExtraLessonsAccept() {
   const [endDate, setEndDate] = useState('');
   const [baseLessons, setBaseLessons] = useState('');
   const [slots, setSlots] = useState<ExtraLessonsScheduleSlot[]>([]);
+  const [originalTextSchedule, setOriginalTextSchedule] = useState('');
 
   const applyPreview = (data: Preview) => {
     setPending(Boolean(data.pending));
@@ -160,6 +192,7 @@ export default function SchoolExtraLessonsAccept() {
     setEndDate(o?.end_date || '');
     setBaseLessons(o?.base_lessons_per_month ? String(o.base_lessons_per_month) : '');
     setSlots(Array.isArray(o?.schedule_slots) ? o.schedule_slots : []);
+    setOriginalTextSchedule(!o?.schedule_slots?.length ? o?.schedule_label || '' : '');
     if (!data.alreadyAccepted) {
       setStartWithin14(data.startWithin14Default !== false);
       setRecordingConsent(data.recordingsEnabled ? true : null);
@@ -255,10 +288,10 @@ export default function SchoolExtraLessonsAccept() {
       start_date: startDate || preview.order.start_date,
       end_date: endDate || preview.order.end_date,
       schedule_slots: slots,
-      schedule_label: formatScheduleLabel(slots) || preview.order.schedule_label,
+      schedule_label: formatScheduleLabel(slots) || originalTextSchedule,
       base_lessons_per_month: Number(baseLessons) || preview.order.base_lessons_per_month,
     };
-  }, [preview, serviceName, serviceType, platform, duration, startDate, endDate, slots, baseLessons]);
+  }, [preview, serviceName, serviceType, platform, duration, startDate, endDate, slots, baseLessons, originalTextSchedule]);
 
   const start14 = useMemo(() => {
     if (!liveOrder) return { applies: false, shownText: START_WITHIN_14_CHECKBOX_TEXT };
@@ -266,19 +299,20 @@ export default function SchoolExtraLessonsAccept() {
   }, [liveOrder, startWithin14]);
 
   const needsParentFields = useMemo(() => {
-    const fields = new Set(preview?.parentEditableFields || []);
+    const fields = new Set([...(preview?.parentEditableFields || []), ...missingOrderFields]
+      .filter((field) => parentEditableOrderFields.has(field)));
     return {
       service: fields.has('service_name'),
       type: fields.has('service_type'),
       platform: fields.has('platform'),
       duration: fields.has('duration_minutes'),
-      schedule: fields.has('schedule_label'),
+      schedule: fields.has('schedule_label') || fields.has('schedule_slots'),
       start: fields.has('start_date'),
       end: fields.has('end_date'),
       base: fields.has('base_lessons_per_month'),
       any: fields.size > 0,
     };
-  }, [preview]);
+  }, [preview, missingOrderFields]);
 
   const orderPatch = useMemo((): Partial<ExtraLessonsOrderSnapshot> => ({
     service_name: serviceName,
@@ -289,8 +323,9 @@ export default function SchoolExtraLessonsAccept() {
     end_date: endDate,
     base_lessons_per_month: Number(baseLessons) || 0,
     schedule_slots: slots,
-    schedule_label: formatScheduleLabel(slots),
-  }), [serviceName, serviceType, platform, duration, startDate, endDate, baseLessons, slots]);
+    // Older offers may contain a valid schedule label without structured slots.
+    schedule_label: formatScheduleLabel(slots) || originalTextSchedule,
+  }), [serviceName, serviceType, platform, duration, startDate, endDate, baseLessons, slots, originalTextSchedule]);
 
   useEffect(() => {
     if (!token || !preview || done || pending) return;
@@ -299,6 +334,7 @@ export default function SchoolExtraLessonsAccept() {
       skipNextPreviewRefresh.current = false;
       return;
     }
+    const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setPdfRefreshing(true);
       try {
@@ -306,8 +342,10 @@ export default function SchoolExtraLessonsAccept() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token, preview: true, order_patch: orderPatch }),
+          signal: controller.signal,
         });
         const data = await res.json().catch(() => ({}));
+        if (controller.signal.aborted) return;
         if (res.ok && data?.ok) {
           setPreview((prev) => prev ? {
             ...prev,
@@ -322,15 +360,24 @@ export default function SchoolExtraLessonsAccept() {
       } catch {
         /* keep last preview */
       } finally {
-        setPdfRefreshing(false);
+        if (!controller.signal.aborted) setPdfRefreshing(false);
       }
     }, 900);
-    return () => window.clearTimeout(timer);
-  }, [token, pending, orderPatch.service_name, orderPatch.service_type, orderPatch.platform, orderPatch.duration_minutes, orderPatch.start_date, orderPatch.end_date, orderPatch.schedule_label, orderPatch.base_lessons_per_month]);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [token, done, pending, orderPatch.service_name, orderPatch.service_type, orderPatch.platform, orderPatch.duration_minutes, orderPatch.start_date, orderPatch.end_date, orderPatch.schedule_label, orderPatch.base_lessons_per_month]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!acceptedTerms || pending || submitting) return;
+    setMissingOrderFields([]);
+    if (preview) {
+      const incomplete = validateExtraLessonsOrder(mergeExtraLessonsOrderPatch(preview.order, orderPatch));
+      if (incomplete.length) {
+        setMissingOrderFields(incomplete);
+        setError(missingOrderFieldsMessage(incomplete));
+        return;
+      }
+    }
     if (preview?.recordingsEnabled && recordingConsent === null) {
       setError('Pasirinkite, ar sutinkate su užsiėmimų įrašymu.');
       return;
@@ -355,8 +402,12 @@ export default function SchoolExtraLessonsAccept() {
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error || (data.fields ? `Trūksta: ${data.fields.join(', ')}` : 'Nepavyko pateikti užsakymo.'));
+      if (!res.ok || data?.ok !== true) {
+        const fields = Array.isArray(data?.fields)
+          ? data.fields.filter((field: unknown): field is string => typeof field === 'string')
+          : [];
+        setMissingOrderFields(fields);
+        setError(fields.length ? missingOrderFieldsMessage(fields) : data?.error || 'Nepavyko pateikti užsakymo.');
         setSubmitting(false);
         return;
       }
@@ -513,8 +564,6 @@ export default function SchoolExtraLessonsAccept() {
           {preview.studentName && <p><span className="font-semibold">Mokinys:</span> {preview.studentName}</p>}
           {preview.contractNumber && <p><span className="font-semibold">Sutarties Nr.:</span> {preview.contractNumber}</p>}
         </div>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
         <DiscountAddenda agreements={preview.discountAgreements} />
 
         <div className="overflow-hidden rounded-xl border border-gray-200">
@@ -557,13 +606,13 @@ export default function SchoolExtraLessonsAccept() {
         )}
 
         {needsParentFields.any && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3 text-amber-950">
+          <div ref={requiredFieldsRef} tabIndex={-1} className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3 text-amber-950">
             <p className="font-bold text-sm">Prašome papildyti trūkstamus užsakymo duomenis:</p>
             <p className="text-xs text-amber-900/80">PDF atsinaujins automatiškai, kai užpildysite laukus.</p>
             {(needsParentFields.service || !serviceName) && (
               <div>
                 <Label>Paslaugos pavadinimas</Label>
-                <Input className="mt-1 rounded-xl" value={serviceName} onChange={(e) => setServiceName(e.target.value)} />
+                <Input aria-label="Paslaugos pavadinimas" className="mt-1 rounded-xl" value={serviceName} onChange={(e) => setServiceName(e.target.value)} />
               </div>
             )}
             {(needsParentFields.type || !serviceType) && (
@@ -584,13 +633,13 @@ export default function SchoolExtraLessonsAccept() {
             {(needsParentFields.platform || !platform) && (
               <div>
                 <Label>Platforma</Label>
-                <Input className="mt-1 rounded-xl" value={platform} onChange={(e) => setPlatform(e.target.value)} placeholder="Google Meet" />
+                <Input aria-label="Platforma" className="mt-1 rounded-xl" value={platform} onChange={(e) => setPlatform(e.target.value)} placeholder="Google Meet" />
               </div>
             )}
             {(needsParentFields.duration || !duration) && (
               <div>
                 <Label>Užsiėmimo trukmė (min)</Label>
-                <Input className="mt-1 rounded-xl" value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="45" />
+                <Input aria-label="Užsiėmimo trukmė (min)" className="mt-1 rounded-xl" value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="45" />
               </div>
             )}
             {(needsParentFields.schedule || slots.length === 0) && (
@@ -605,7 +654,7 @@ export default function SchoolExtraLessonsAccept() {
             {(needsParentFields.base || !baseLessons) && (
               <div>
                 <Label>Bazinis užsiėmimų kiekis / mėn.</Label>
-                <Input className="mt-1 rounded-xl" value={baseLessons} onChange={(e) => setBaseLessons(e.target.value)} />
+                <Input aria-label="Bazinis užsiėmimų kiekis / mėn." className="mt-1 rounded-xl" value={baseLessons} onChange={(e) => setBaseLessons(e.target.value)} />
               </div>
             )}
           </div>
@@ -617,7 +666,7 @@ export default function SchoolExtraLessonsAccept() {
           <div><span className="font-semibold">Tipas:</span> {serviceType === 'individual' || o.service_type === 'individual' ? 'individuali' : serviceType === 'group' || o.service_type === 'group' ? 'grupinė' : '—'}</div>
           <div><span className="font-semibold">Platforma:</span> {platform || o.platform || '—'}</div>
           <div><span className="font-semibold">Trukmė:</span> {duration || o.duration_minutes || '—'} min.</div>
-          <div><span className="font-semibold">Grafikas:</span> {formatScheduleLabel(slots) || o.schedule_label || '—'}</div>
+          <div><span className="font-semibold">Grafikas:</span> {formatScheduleLabel(slots) || originalTextSchedule || '—'}</div>
           <div><span className="font-semibold">Laikotarpis:</span> {startDate || o.start_date || '—'} – {endDate || o.end_date || '—'}</div>
           <div><span className="font-semibold">Kaina:</span> {Number(o.unit_price_eur).toFixed(2)} € / užsiėmimas</div>
           <div><span className="font-semibold">Orientacinė / mėn.:</span> {Number(o.indicative_monthly_eur).toFixed(2)} €</div>
@@ -705,6 +754,24 @@ export default function SchoolExtraLessonsAccept() {
                   <span>Nesutinku</span>
                 </label>
               </div>
+            </div>
+          )}
+          {error && (
+            <div ref={submitErrorRef} role="alert" tabIndex={-1} className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <p>{error}</p>
+              {missingOrderFields.some((field) => parentEditableOrderFields.has(field)) && (
+                <button
+                  type="button"
+                  className="mt-2 font-semibold underline"
+                  onClick={() => {
+                    const section = requiredFieldsRef.current;
+                    const input = section?.querySelector<HTMLElement>('input:not([disabled]), select:not([disabled]), button:not([disabled])');
+                    (input || section)?.focus();
+                  }}
+                >
+                  Papildyti trūkstamus užsakymo duomenis
+                </button>
+              )}
             </div>
           )}
           <Button

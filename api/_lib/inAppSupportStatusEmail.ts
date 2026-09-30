@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Resend } from 'resend';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { supportTicketsPageForPath, type InAppSupportStatus } from '../../src/lib/inAppSupport.js';
+import { supportTicketsPageForPath, type InAppSupportCategory, type InAppSupportStatus } from '../../src/lib/inAppSupport.js';
 import { escapeSupportHtml } from './supportContact.js';
 import { getFromEmail, getResendApiKey, INTERNAL_NOTIFY_EMAILS } from './resendConfig.js';
 
@@ -9,6 +9,8 @@ export type InAppSupportStatusRow = {
   id: string;
   reporter_name: string | null;
   reporter_email: string;
+  // Legacy callers without a category retain the existing ticket wording.
+  category?: InAppSupportCategory;
   title: string;
   page: string;
   locale: string;
@@ -41,6 +43,12 @@ const COPY = {
     deadline: 'Planuojamas terminas',
     track: 'Stebėti būseną',
     reference: 'Užklausos numeris',
+    feature: {
+      subject: 'Jūsų Tutlio funkcijos pasiūlymas',
+      registered: 'Gavome jūsų funkcijos pasiūlymą.',
+      in_progress: 'Pradėjome įgyvendinti jūsų pasiūlytą funkciją.',
+      resolved: 'Jūsų pasiūlyta funkcija įdiegta ir jau prieinama Tutlio.',
+    },
   },
   en: {
     subject: 'Your Tutlio ticket',
@@ -51,6 +59,12 @@ const COPY = {
     deadline: 'Expected deadline',
     track: 'Track status',
     reference: 'Ticket reference',
+    feature: {
+      subject: 'Your Tutlio feature request',
+      registered: 'Your feature request has been received.',
+      in_progress: 'We are implementing your requested feature.',
+      resolved: 'Your requested feature has been implemented and is now available in Tutlio.',
+    },
   },
   pl: {
     subject: 'Twoje zgłoszenie Tutlio',
@@ -61,6 +75,12 @@ const COPY = {
     deadline: 'Planowany termin',
     track: 'Śledź status',
     reference: 'Numer zgłoszenia',
+    feature: {
+      subject: 'Twoja propozycja funkcji Tutlio',
+      registered: 'Otrzymaliśmy Twoją propozycję funkcji.',
+      in_progress: 'Pracujemy nad wdrożeniem zaproponowanej przez Ciebie funkcji.',
+      resolved: 'Zaproponowana przez Ciebie funkcja została wdrożona i jest już dostępna w Tutlio.',
+    },
   },
   nl: {
     subject: 'Je Tutlio-ticket',
@@ -71,6 +91,12 @@ const COPY = {
     deadline: 'Verwachte deadline',
     track: 'Status bekijken',
     reference: 'Ticketnummer',
+    feature: {
+      subject: 'Je Tutlio-functieverzoek',
+      registered: 'Je functieverzoek is ontvangen.',
+      in_progress: 'We werken aan de implementatie van de door jou voorgestelde functie.',
+      resolved: 'De door jou voorgestelde functie is geïmplementeerd en nu beschikbaar in Tutlio.',
+    },
   },
 } as const;
 
@@ -95,12 +121,13 @@ export function buildInAppSupportStatusEmail(row: InAppSupportStatusRow, appUrl:
   const origin = appUrl.trim().replace(/\/$/, '') || 'https://tutlio.lt';
   const trackingUrl = `${origin}${supportTicketsPageForPath(row.page)}?ticket=${encodeURIComponent(row.id)}`;
   const reference = inAppSupportReference(row.id);
-  const statusText = copy[row.status];
+  const statusCopy = row.category === 'feature' ? copy.feature : copy;
+  const statusText = statusCopy[row.status];
   const due = row.status === 'in_progress' && row.target_date
     ? new Intl.DateTimeFormat(locale, { dateStyle: 'long', timeZone: 'Europe/Vilnius' }).format(new Date(row.target_date))
     : null;
   return {
-    subject: `${copy.subject} ${reference}: ${statusText}`,
+    subject: `${statusCopy.subject} ${reference}: ${statusText}`,
     html: `<div style="margin:0;padding:32px 12px;background:#f8fafc;font-family:Arial,sans-serif;color:#0f172a">
       <div style="max-width:600px;margin:0 auto;padding:30px;border:1px solid #e2e8f0;border-radius:18px;background:white">
         <p style="font-size:15px">${escapeSupportHtml(copy.greeting)}${row.reporter_name ? `, ${escapeSupportHtml(row.reporter_name)}` : ''},</p>

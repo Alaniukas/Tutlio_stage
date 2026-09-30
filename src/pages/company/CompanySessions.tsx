@@ -53,6 +53,7 @@ import {
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { useHideWaitlist } from '@/hooks/useHideWaitlist';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isWaitlistHiddenForOrg, isProKlaseOrg, isLaisviVaikaiOrg, isManoKorepetitoriusOrg } from '@/lib/marketMoney';
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
 import {
@@ -81,6 +82,7 @@ import { isUnconfirmedAutomaticNoShow } from '@/lib/schoolJoinNoShow';
 import { sessionPaymentDisplayKind } from '@/lib/sessionPaymentDisplay';
 import { unpaidOrgSessionPaymentStatus } from '@/lib/orgSessionPaymentStatus';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
+import { effectiveSessionOutcome, orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import { sendEmail } from '@/lib/email';
 import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
 import {
@@ -218,13 +220,32 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
   };
 }
 
-function sessionStatusForDisplay(session: Session, isSchool: boolean): string {
-  return isSchool && isUnconfirmedAutomaticNoShow(session) ? 'active' : session.status;
+function sessionStatusForDisplay(session: Session, isSchool: boolean, requireConfirmation: boolean): string {
+  return isSchool && isUnconfirmedAutomaticNoShow(session)
+    ? 'active'
+    : effectiveSessionOutcome(session, requireConfirmation) || session.status;
+}
+
+function applySessionOutcomeFilter<T extends {
+  eq: (column: string, value: string) => T;
+  not: (column: string, operator: string, value: null) => T;
+  or: (filters: string) => T;
+}>(query: T, status: string, requireConfirmation: boolean): T {
+  if (!status) return query;
+  if (!requireConfirmation) return query.eq('status', status);
+  if (status === 'active') {
+    return query.or('status.eq.active,and(status.in.(completed,no_show),status_confirmed_at.is.null)');
+  }
+  if (status === 'completed' || status === 'no_show') {
+    return query.eq('status', status).not('status_confirmed_at', 'is', null);
+  }
+  return query.eq('status', status);
 }
 
 export default function CompanySessions() {
   const { t, locale, dateFnsLocale } = useTranslation();
   const { fmt } = useMarketMoney();
+  const { hasFeature } = useOrgFeatures();
   const { can: canOrgAdmin } = useOrgAdminAccess();
   const canEditSessions = canOrgAdmin('sessions.edit');
   const entityType = useOrgEntityType();
@@ -296,6 +317,8 @@ export default function CompanySessions() {
   const canChooseParentComment = isManoKorepetitoriusOrg(organizationId);
   const isProKlase = isProKlaseOrg(organizationId);
   const isLaisviVaikai = isLaisviVaikaiOrg(organizationId);
+  const requireOutcomeConfirmation = orgRequiresTutorStatusConfirmation(organizationId)
+    || hasFeature('tutor_lesson_status_confirmation');
   const supportsManualAttendance = isSchoolOrgView || isProKlase;
   const [deletingSession, setDeletingSession] = useState(false);
   const [deleteRecurringOpen, setDeleteRecurringOpen] = useState(false);
@@ -335,7 +358,7 @@ export default function CompanySessions() {
   useEffect(() => {
     if (!initialListLoadDone.current) return;
     void loadData({ reset: true });
-  }, [filterTutor, filterStatus, filterStudent]);
+  }, [filterTutor, filterStatus, filterStudent, requireOutcomeConfirmation]);
 
   useEffect(() => {
     const refreshWhenVisible = () => {
@@ -447,7 +470,8 @@ export default function CompanySessions() {
       .in('tutor_id', tutorIds);
     query = applySessionListRange(query, range, isSchoolOrgView);
     if (listFilters.tutorId) query = query.eq('tutor_id', listFilters.tutorId);
-    if (listFilters.status) query = query.eq('status', listFilters.status);
+    query = applySessionOutcomeFilter(query, listFilters.status,
+      orgRequiresTutorStatusConfirmation(orgId) || hasFeature('tutor_lesson_status_confirmation'));
     if (listFilters.studentIds?.length) query = query.in('student_id', listFilters.studentIds);
     return query.order('start_time', { ascending: false }).order('id');
   };
@@ -567,7 +591,9 @@ export default function CompanySessions() {
         .in('tutor_id', tutorIds);
       countQuery = applySessionListRange(countQuery, range, isSchoolOrgView);
       if (listFilters.tutorId) countQuery = countQuery.eq('tutor_id', listFilters.tutorId);
-      if (listFilters.status) countQuery = countQuery.eq('status', listFilters.status);
+      const requireConfirmation = orgRequiresTutorStatusConfirmation(adminRow.organization_id)
+        || hasFeature('tutor_lesson_status_confirmation');
+      countQuery = applySessionOutcomeFilter(countQuery, listFilters.status, requireConfirmation);
       if (listFilters.studentIds?.length) countQuery = countQuery.in('student_id', listFilters.studentIds);
 
       const [pageResult, countResult, statsData] = await Promise.all([
@@ -580,7 +606,7 @@ export default function CompanySessions() {
             .in('tutor_id', tutorIds);
           statsQuery = applySessionListRange(statsQuery, range, isSchoolOrgView);
           if (listFilters.tutorId) statsQuery = statsQuery.eq('tutor_id', listFilters.tutorId);
-          if (listFilters.status) statsQuery = statsQuery.eq('status', listFilters.status);
+          statsQuery = applySessionOutcomeFilter(statsQuery, listFilters.status, requireConfirmation);
           if (listFilters.studentIds?.length) statsQuery = statsQuery.in('student_id', listFilters.studentIds);
           return statsQuery.order('start_time', { ascending: false }).order('id').range(statsFrom, statsTo);
         }),
@@ -1149,7 +1175,7 @@ export default function CompanySessions() {
 
   const filtered = useMemo(() => {
     const source = statChip ? statsSessions : sessions;
-    const statsOptions = { requireExplicitNoShow: isProKlase };
+    const statsOptions = { requireExplicitNoShow: isProKlase || requireOutcomeConfirmation };
     const list = source.filter(s => {
       if (isFilterActive) {
         const when = new Date(s.start_time);
@@ -1165,7 +1191,8 @@ export default function CompanySessions() {
         }
       }
       if (filterTutor && s.tutor_id !== filterTutor) return false;
-      if (filterStatus && statChip !== 'unpaid_past' && s.status !== filterStatus) return false;
+      if (filterStatus && statChip !== 'unpaid_past'
+        && sessionStatusForDisplay(s, isSchoolOrgView, requireOutcomeConfirmation) !== filterStatus) return false;
       if (studentIdSetForFilter && !studentIdSetForFilter.has(s.student_id)) return false;
       if (search) {
         const q = search.toLowerCase();
@@ -1175,13 +1202,17 @@ export default function CompanySessions() {
           !(s.topic || '').toLowerCase().includes(q)
         ) return false;
       }
-      if (!matchesOrgSessionStatChip(s as any, statChip, new Date(), statsOptions)) return false;
+      const outcome = sessionStatusForDisplay(s, isSchoolOrgView, requireOutcomeConfirmation);
+      if (requireOutcomeConfirmation && statChip === 'occurred') return outcome === 'completed';
+      if (requireOutcomeConfirmation && statChip === 'no_show') return outcome === 'no_show';
+      if (requireOutcomeConfirmation && statChip === 'unpaid_past' && outcome === 'active') return false;
+      if (!matchesOrgSessionStatChip({ ...s, status: outcome } as any, statChip, new Date(), statsOptions)) return false;
       return true;
     });
     return sortNewest
       ? list.sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
       : list.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
-  }, [sessions, statsSessions, statChip, isProKlase, filterTutor, filterStatus, studentIdSetForFilter, search, isFilterActive, filterStartDate, filterEndDate, sortNewest, isSchoolOrgView]);
+  }, [sessions, statsSessions, statChip, isProKlase, filterTutor, filterStatus, studentIdSetForFilter, search, isFilterActive, filterStartDate, filterEndDate, sortNewest, isSchoolOrgView, requireOutcomeConfirmation]);
 
   const schoolMonitoringSessions = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1330,14 +1361,20 @@ export default function CompanySessions() {
           </div>
         ) : null}
 
-        {isSchoolOrgView && !loadError ? <SchoolSessionMonitoring sessions={schoolMonitoringSessions} /> : null}
+        {isSchoolOrgView && !loadError ? <SchoolSessionMonitoring sessions={schoolMonitoringSessions} requireConfirmation={requireOutcomeConfirmation} /> : null}
 
         {/* Stats */}
         {!isSchoolOrgView && statsSessions.length > 0 && (() => {
-          const statsOptions = { requireExplicitNoShow: isProKlase };
+          const statsOptions = { requireExplicitNoShow: isProKlase || requireOutcomeConfirmation };
+          const statsRows = requireOutcomeConfirmation
+            ? statsSessions.map(session => ({
+                ...session,
+                status: effectiveSessionOutcome(session, true),
+              })).filter(session => session.status !== 'active' || Date.parse(session.end_time) >= Date.now())
+            : statsSessions;
           const stats = isLaisviVaikai
-            ? calculateOrgSessionListStats(statsSessions as any, statsOptions)
-            : calculateSessionStats(statsSessions as any, null, null, statsOptions);
+            ? calculateOrgSessionListStats(statsRows as any, statsOptions)
+            : calculateSessionStats(statsRows as any, null, null, statsOptions);
           return (
             <SessionStatCards
               totalUpcoming={isLaisviVaikai ? (stats as { totalUpcoming?: number }).totalUpcoming : undefined}
@@ -1348,7 +1385,7 @@ export default function CompanySessions() {
               cancelledByTutor={stats.cancelledByTutor}
               cancelledByStudent={stats.cancelledByStudent}
               showUnpaidPast={isProKlase}
-              totalUnpaidPast={isProKlase ? countPastUnpaidSessions(statsSessions) : 0}
+              totalUnpaidPast={isProKlase ? countPastUnpaidSessions(statsRows) : 0}
               activeFilter={statChip}
               onFilterClick={(chip) => {
                 setStatChip((current) => {
@@ -1402,7 +1439,7 @@ export default function CompanySessions() {
                     <div className="flex flex-col items-end gap-2 flex-shrink-0">
                       <div className="scale-90 origin-top-right">
                         <StatusBadge
-                          status={sessionStatusForDisplay(session, isSchoolOrgView)}
+                          status={sessionStatusForDisplay(session, isSchoolOrgView, requireOutcomeConfirmation)}
                           paymentStatus={session.payment_status ?? undefined}
                           paid={session.paid}
                           isComplimentary={session.is_complimentary === true}
@@ -1482,7 +1519,7 @@ export default function CompanySessions() {
                     <td className="px-4 py-3">
                       <div className="flex flex-col items-start gap-1">
                         <StatusBadge
-                          status={sessionStatusForDisplay(session, isSchoolOrgView)}
+                          status={sessionStatusForDisplay(session, isSchoolOrgView, requireOutcomeConfirmation)}
                           paymentStatus={session.payment_status ?? undefined}
                           paid={session.paid}
                           isComplimentary={session.is_complimentary === true}
@@ -1752,7 +1789,7 @@ export default function CompanySessions() {
                       <Label className="text-xs text-gray-500">{t('compSess.labelStatus')}</Label>
                       <div className="mt-1 flex flex-col items-start gap-1">
                         <StatusBadge
-                          status={sessionStatusForDisplay(selectedSession, isSchoolOrgView)}
+                          status={sessionStatusForDisplay(selectedSession, isSchoolOrgView, requireOutcomeConfirmation)}
                           paymentStatus={selectedSession.payment_status ?? undefined}
                           paid={selectedSession.paid}
                           isComplimentary={selectedSession.is_complimentary === true}
@@ -1980,7 +2017,8 @@ export default function CompanySessions() {
                       )}
 
                       {(
-                        (supportsManualAttendance && selectedSessionEnded && selectedSession.status !== 'no_show')
+                        (supportsManualAttendance && selectedSessionEnded
+                          && effectiveSessionOutcome(selectedSession, requireOutcomeConfirmation) !== 'no_show')
                         || (!supportsManualAttendance && selectedSessionAttendanceFlagged
                           && (selectedSession.status === 'active' || selectedSession.status === 'completed'))
                       ) && (
@@ -2041,10 +2079,11 @@ export default function CompanySessions() {
   );
 }
 
-function SchoolSessionMonitoring({ sessions }: { sessions: Session[] }) {
+function SchoolSessionMonitoring({ sessions, requireConfirmation }: { sessions: Session[]; requireConfirmation: boolean }) {
   const { t } = useTranslation();
-  const activity = schoolActivitySummary(sessions);
-  const students = schoolStudentAttendance(sessions);
+  const options = { requireConfirmation };
+  const activity = schoolActivitySummary(sessions, new Date(), options);
+  const students = schoolStudentAttendance(sessions, new Date(), options);
   const attendanceRows = students.map(student => {
     const confirmed = student.joined + student.noShow;
     return {
@@ -2055,13 +2094,13 @@ function SchoolSessionMonitoring({ sessions }: { sessions: Session[] }) {
   });
   const reasons = new Map<string, number>();
 
-  for (const occurrence of schoolMeetingOccurrences(sessions)) {
+  for (const occurrence of schoolMeetingOccurrences(sessions, options)) {
     if (occurrence.row.status === 'cancelled') {
       const reason = occurrence.row.cancellation_reason || t('schoolDash.cancelledWithoutReason');
       reasons.set(reason, (reasons.get(reason) || 0) + 1);
     }
     for (const session of occurrence.rows) {
-      if (session.status !== 'no_show' || isUnconfirmedAutomaticNoShow(session)) continue;
+      if (effectiveSessionOutcome(session, requireConfirmation) !== 'no_show' || isUnconfirmedAutomaticNoShow(session)) continue;
       const reason = session.no_show_reason === 'missed_join'
         ? t('schoolDash.missedJoinReason')
         : session.no_show_reason || t('schoolDash.markedNoShowReason');

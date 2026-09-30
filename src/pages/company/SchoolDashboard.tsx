@@ -16,9 +16,11 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
+import SchoolContractAttendanceAlerts from '@/components/company/SchoolContractAttendanceAlerts';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { useDismissibleDashboardItemIds } from '@/hooks/useDismissibleDashboardItemIds';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { authHeaders } from '@/lib/apiHelpers';
 import { deriveAttendance, isAttendanceFlagged } from '@/lib/attendance';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
@@ -38,6 +40,7 @@ import {
   type SchoolMeetingRow,
 } from '@/lib/schoolSessionMonitoring';
 import { schoolDate } from '@/lib/schoolTime';
+import { effectiveSessionOutcome, orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import { supabase } from '@/lib/supabase';
 
 type SchoolDashboardSession = SchoolMeetingRow & {
@@ -154,6 +157,9 @@ export default function SchoolDashboard() {
   const { t, dateFnsLocale } = useTranslation();
   const { fmt } = useMarketMoney();
   const { loading: accessLoading, membership, can } = useOrgAdminAccess();
+  const { hasFeature } = useOrgFeatures();
+  const requireOutcomeConfirmation = orgRequiresTutorStatusConfirmation(membership?.organizationId)
+    || hasFeature('tutor_lesson_status_confirmation');
   const navigate = useNavigate();
   const requestId = useRef(0);
   const [loading, setLoading] = useState(true);
@@ -292,8 +298,9 @@ export default function SchoolDashboard() {
       const instant = Date.parse(row.start_time);
       return instant >= monthStart.getTime() && instant <= now.getTime();
     });
-    const monthSummary = schoolActivitySummary(monthRows, now);
-    const occurrences = schoolMeetingOccurrences(data.sessions);
+    const outcomeOptions = { requireConfirmation: requireOutcomeConfirmation };
+    const monthSummary = schoolActivitySummary(monthRows, now, outcomeOptions);
+    const occurrences = schoolMeetingOccurrences(data.sessions, outcomeOptions);
     const todayAll = occurrences
       .filter(({ row }) => {
         const instant = Date.parse(row.start_time || '');
@@ -306,7 +313,7 @@ export default function SchoolDashboard() {
         return row.status === 'active' && instant > todayEnd;
       })
       .sort((a, b) => Date.parse(a.row.start_time || '') - Date.parse(b.row.start_time || ''));
-    const notHeld = schoolMeetingOccurrences(monthRows)
+    const notHeld = schoolMeetingOccurrences(monthRows, outcomeOptions)
       .filter(({ row }) => row.status === 'cancelled' || row.status === 'no_show'
         || (row.status === 'active' && Date.parse(row.end_time || row.start_time || '') < now.getTime()))
       .sort((a, b) => Date.parse(b.row.start_time || '') - Date.parse(a.row.start_time || ''))
@@ -323,14 +330,21 @@ export default function SchoolDashboard() {
       notHeld,
       attention,
     };
-  }, [data.sessions]);
+  }, [data.sessions, requireOutcomeConfirmation]);
 
   const pendingContracts = useMemo(
     () => data.contracts.filter(isSchoolParentConfirmationPending),
     [data.contracts],
   );
-  const adminActions = useMemo(() => buildSchoolAdminActionQueue(data), [data]);
-  const activityFeed = useMemo(() => buildSchoolActivityFeed(data), [data]);
+  const outcomeData = useMemo(() => ({
+    ...data,
+    sessions: data.sessions.map(session => ({
+      ...session,
+      status: effectiveSessionOutcome(session, requireOutcomeConfirmation) || session.status,
+    })),
+  }), [data, requireOutcomeConfirmation]);
+  const adminActions = useMemo(() => buildSchoolAdminActionQueue(outcomeData), [outcomeData]);
+  const activityFeed = useMemo(() => buildSchoolActivityFeed(outcomeData), [outcomeData]);
   const visibleAttention = derived.attention.filter(row => !dismissedIds.has(row.id)).slice(0, 8);
   const pendingInvoiceTotal = sumPendingSchoolInvoices(data.invoices);
 
@@ -341,7 +355,7 @@ export default function SchoolDashboard() {
     try {
       await confirmSessionOutcome({
         sessionId,
-        currentStatus: noShowTarget.status,
+        currentStatus: data.sessions.find(session => session.id === noShowTarget.id)?.status || noShowTarget.status,
         status: 'no_show',
         startTime: noShowTarget.start_time,
         endTime: noShowTarget.end_time,
@@ -436,6 +450,10 @@ export default function SchoolDashboard() {
             {format(schoolDate(), 'cccc, d MMMM yyyy', { locale: dateFnsLocale })}
           </p>
         </header>
+
+        {can('sessions.view') && membership?.organizationId ? (
+          <SchoolContractAttendanceAlerts organizationId={membership.organizationId} canReviewContracts={can('contracts.view')} />
+        ) : null}
 
         <section className="overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-sm" aria-labelledby="school-admin-work-title">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-100 bg-amber-50/70 px-4 py-3 sm:px-5">

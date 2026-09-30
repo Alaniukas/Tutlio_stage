@@ -32,6 +32,7 @@ const COPY = {
     registered: 'Užregistruota',
     in_progress: 'Vykdoma',
     resolved: 'Išspręsta',
+    featureResolved: 'Įgyvendinta',
     received: 'Gauta',
     lastChange: 'Būsena pakeista',
     deadline: 'Numatomas terminas',
@@ -50,6 +51,7 @@ const COPY = {
     registered: 'Registered',
     in_progress: 'In progress',
     resolved: 'Resolved',
+    featureResolved: 'Implemented',
     received: 'Received',
     lastChange: 'Status changed',
     deadline: 'Estimated deadline',
@@ -68,6 +70,7 @@ const COPY = {
     registered: 'Zarejestrowano',
     in_progress: 'W trakcie',
     resolved: 'Rozwiązano',
+    featureResolved: 'Wdrożono',
     received: 'Otrzymano',
     lastChange: 'Zmiana statusu',
     deadline: 'Planowany termin',
@@ -146,6 +149,8 @@ export function SupportTicketsList({
           const changed = formatDate(ticket.status_updated_at, language);
           const deadline = formatDate(ticket.target_date, language);
           const selected = selectedReference?.toLowerCase() === ticket.id.toLowerCase() || selectedReference?.toUpperCase() === reference;
+          const statusLabel = (status: SupportTicketStatus) => ticket.category === 'feature' && status === 'resolved'
+            ? copy.featureResolved : copy[status];
           return (
             <article
               key={ticket.id}
@@ -160,7 +165,7 @@ export function SupportTicketsList({
                   <h2 className="mt-1 break-words text-base font-bold text-slate-950">{ticket.title}</h2>
                 </div>
                 <span className={cn('rounded-full px-3 py-1 text-xs font-bold', ticket.status === 'resolved' ? 'bg-emerald-100 text-emerald-800' : ticket.status === 'in_progress' ? 'bg-amber-100 text-amber-800' : 'bg-sky-100 text-sky-800')}>
-                  {copy[ticket.status]}
+                  {statusLabel(ticket.status)}
                 </span>
               </div>
 
@@ -169,7 +174,7 @@ export function SupportTicketsList({
                   const Icon = step === 'resolved' ? CheckCircle2 : step === 'in_progress' ? Clock3 : CircleDot;
                   return (
                     <li key={step} aria-current={ticket.status === step ? 'step' : undefined} className={cn('flex items-center gap-1.5 border-t-2 pt-2 text-xs font-semibold', index <= statusIndex ? 'border-indigo-500 text-indigo-800' : 'border-slate-200 text-slate-400')}>
-                      <Icon className="h-3.5 w-3.5 shrink-0" />{copy[step]}
+                      <Icon className="h-3.5 w-3.5 shrink-0" />{statusLabel(step)}
                     </li>
                   );
                 })}

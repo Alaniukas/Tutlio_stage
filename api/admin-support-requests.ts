@@ -87,7 +87,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!request) return res.status(404).json({ error: 'Support request not found' });
       try {
         if (body.action === 'notify_status') await notifyInAppSupportStatus(db, request);
-        else await syncInAppSupportTicket(db, request);
+        else if (!await syncInAppSupportTicket(db, request)) {
+          res.setHeader('Retry-After', '30');
+          return res.status(503).json({ error: 'Trello synchronization is pending. Check the connection and retry.' });
+        }
       } catch (error) {
         console.error('[admin-support-requests] Retry failed:', error);
         return res.status(502).json({ error: body.action === 'notify_status'
@@ -180,8 +183,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       || (body.expectedPriority && body.expectedPriority !== before.priority)) {
       return res.status(409).json({ error: 'This ticket changed in Trello. Refresh before saving.' });
     }
-    const normalizedTargetDate = status === 'registered' ? null
-      : targetDate ? new Date(targetDate).toISOString() : before.target_date || null;
+    const normalizedTargetDate = status === 'in_progress' && targetDate
+      ? new Date(targetDate).toISOString() : null;
     const previousTargetDate = before.target_date ? new Date(before.target_date).toISOString() : null;
     const visibleChange = before.status !== status || previousTargetDate !== normalizedTargetDate;
     const trelloChange = visibleChange || before.priority !== priority || !before.trello_card_id;
@@ -207,7 +210,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }));
     }
     if (trelloChange) {
-      work.push(syncInAppSupportTicket(db, data).catch((trelloError) => {
+      work.push(syncInAppSupportTicket(db, data).then((synced) => {
+        if (!synced) warnings.push('The status was saved, but Trello synchronization is pending. Retry synchronization.');
+      }).catch((trelloError) => {
         console.error('[admin-support-requests] Trello sync failed:', trelloError);
         warnings.push('The status was saved, but Trello could not be synchronized.');
       }));

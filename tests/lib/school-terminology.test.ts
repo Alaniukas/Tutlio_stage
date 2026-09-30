@@ -32,6 +32,8 @@ describe('ltLessonToActivity — pamoka → užsiėmimas with agreement', () => 
     ['Pamokos', 'Užsiėmimai'],
     ['Pamoka', 'Užsiėmimas'],
     ['Ši pamoka buvo perkelta', 'Šis užsiėmimas buvo perkeltas'],
+    ['Šiam mokiniui ši pamoka nesuplanuota.', 'Šiam mokiniui šis užsiėmimas nesuplanuotas.'],
+    ['Mokinys dalyvavo pamokoje, kai papildomų pamokų sutartis dar nebuvo patvirtinta.', 'Mokinys dalyvavo užsiėmime, kai papildomų užsiėmimų sutartis dar nebuvo patvirtinta.'],
     ['Pamoka atšaukta', 'Užsiėmimas atšauktas'],
     ['📚 Pamoka patvirtinta!', '📚 Užsiėmimas patvirtintas!'],
     ['Bandomoji pamoka', 'Bandomasis užsiėmimas'],
@@ -109,6 +111,9 @@ describe('applySchoolTerminology', () => {
 
   it.each([
     ['cal.deleteRecurringTitle', 'Ištrinti pasikartojantį užsiėmimą'],
+    ['orgFinance.schoolCurrentPayRate', 'Dabar nustatytas bazinis atlygis: {amount} € už užsiėmimą.'],
+    ['orgFinance.schoolSummaryNote', 'Vienas atlygis už grupinį užsiėmimą. Taikomas išsaugotas užsiėmimo tarifas, o jei jo nėra - dabar nustatytas bazinis atlygis. Atsiskaitymus tvarko mokykla.'],
+    ['orgFinance.schoolFinalizedLessons', 'Užsiėmimai su galutiniu rezultatu'],
     ['cal.deleteOnlyThis', 'Tik šį užsiėmimą'],
     ['cal.deleteThisAndFuture', 'Šį ir visus ateinančius užsiėmimus'],
     ['cal.deleteAllRemaining', 'Visus likusius serijos užsiėmimus'],

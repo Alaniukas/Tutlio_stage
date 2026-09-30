@@ -83,6 +83,9 @@ import FindTutorModal from '@/components/FindTutorModal';
 import FindLessonBookDialog, { type FindLessonBookPick } from '@/components/FindLessonBookDialog';
 import StudentAvailabilityEditor from '@/components/company/StudentAvailabilityEditor';
 import StudentScheduleSummary from '@/components/company/StudentScheduleSummary';
+import StudentNotesFields from '@/components/company/StudentNotesFields';
+import StudentNotesCard from '@/components/company/StudentNotesCard';
+import { saveStudentNotes, type StudentNotesDraft } from '@/lib/studentNotes';
 import {
   pickGroupPreferredAvailability,
   preferredWindowFromDateRange,
@@ -262,7 +265,8 @@ type MvAdditionalChildDraft = {
   grade: string;
   tutor_ids: string[];
   admin_comment: string;
-  admin_comment_visible_to_tutor: boolean;
+  last_contacted_at: string;
+  tutor_comment: string;
   pickedLessons: AddStudentLessonPick[];
   firstLessonIsTrial: boolean;
 };
@@ -285,7 +289,8 @@ function createMvAdditionalChildDraft(tutorIds: string[] = []): MvAdditionalChil
     grade: '',
     tutor_ids: [...tutorIds],
     admin_comment: '',
-    admin_comment_visible_to_tutor: false,
+    last_contacted_at: '',
+    tutor_comment: '',
     pickedLessons: [],
     firstLessonIsTrial: false,
   };
@@ -517,7 +522,8 @@ export default function CompanyStudents() {
     child_birth_date: '',
     tutor_ids: [] as string[],
     admin_comment: '',
-    admin_comment_visible_to_tutor: false,
+    last_contacted_at: '',
+    tutor_comment: '',
     // Flexible invitations (req 7): who to invite on create when enabled.
     invite_target: (
       isMoksloVaisiaiOrg(membership?.organizationId) || isProKlaseOrg(membership?.organizationId)
@@ -618,11 +624,8 @@ export default function CompanyStudents() {
   // Trash bin state
   const [showTrashBin, setShowTrashBin] = useState(false);
 
-  // Admin comment state
-  const [editingComment, setEditingComment] = useState(false);
-  const [commentDraft, setCommentDraft] = useState('');
-  const [commentVisibleToTutor, setCommentVisibleToTutor] = useState(false);
-  const [savingComment, setSavingComment] = useState(false);
+  const [pendingNotes, setPendingNotes] = useState<Array<{ studentIds: string[]; draft: StudentNotesDraft }>>([]);
+  const [retryingNotes, setRetryingNotes] = useState(false);
 
   // Package state (student modal)
   const [studentPackages, setStudentPackages] = useState<any[]>([]);
@@ -2210,8 +2213,8 @@ export default function CompanyStudents() {
           child_birth_date: showSchoolContractFields ? (newStudent.child_birth_date?.trim() || null) : null,
           ...(proKlaseAdminUi
             ? {
-                admin_comment: newStudent.admin_comment.trim() || null,
-                admin_comment_visible_to_tutor: newStudent.admin_comment_visible_to_tutor,
+                admin_comment: newStudent.tutor_comment.trim() || null,
+                admin_comment_visible_to_tutor: true,
               }
             : {}),
           invite_code: inviteCode,
@@ -2266,8 +2269,8 @@ export default function CompanyStudents() {
               payment_payer: provisionPaymentPayer,
               ...(proKlaseAdminUi
                 ? {
-                    admin_comment: child.admin_comment.trim() || null,
-                    admin_comment_visible_to_tutor: child.admin_comment_visible_to_tutor,
+                    admin_comment: child.tutor_comment.trim() || null,
+                    admin_comment_visible_to_tutor: true,
                   }
                 : {}),
               ...(() => {
@@ -2297,6 +2300,11 @@ export default function CompanyStudents() {
         additionalInsertedChildren.push({ child, rows });
       }
     }
+
+    const notesSaveFailed = proKlaseAdminUi && await persistCreatedStudentNotes([
+      { studentIds: inserted.map((row) => row.id), draft: newStudent },
+      ...additionalInsertedChildren.map(({ child, rows }) => ({ studentIds: rows.map((row) => row.id), draft: child })),
+    ]);
 
     const plannedLessonGroups = [
       {
@@ -2631,6 +2639,7 @@ export default function CompanyStudents() {
 
     const provisionFlow = shouldProvisionAccountsOnCreate(newStudent.invite_target) && !isSchoolView;
     const toastType: 'success' | 'error' =
+      notesSaveFailed ||
       (shouldSendInviteOnCreate && !emailOk) ||
       parentInviteProblems.length > 0 ||
       lessonCreateFailed ||
@@ -2638,7 +2647,9 @@ export default function CompanyStudents() {
         ? 'error'
         : 'success';
     const toastMessage =
-      provisionFlow && !provisionOk
+      notesSaveFailed
+        ? t('compStu.notesCreatedSaveFailed')
+        : provisionFlow && !provisionOk
         ? t('compStu.provisionFailed')
         : shouldSendInviteOnCreate && !emailOk
           ? t('compStu.emailSendFailed')
@@ -2702,7 +2713,8 @@ export default function CompanyStudents() {
       child_birth_date: '',
       tutor_ids: [],
       admin_comment: '',
-      admin_comment_visible_to_tutor: false,
+      last_contacted_at: '',
+      tutor_comment: '',
       invite_target: supportsManagedFamilyAccounts ? 'provision' : 'student',
       payment_payer: supportsManagedFamilyAccounts ? 'parent' : 'self',
     });
@@ -2802,8 +2814,8 @@ export default function CompanyStudents() {
           payment_payer: managedFamilyPaymentPayer(studentEmail, parentEmail),
           ...(proKlaseAdminUi
             ? {
-                admin_comment: siblingDraft.admin_comment.trim() || null,
-                admin_comment_visible_to_tutor: siblingDraft.admin_comment_visible_to_tutor,
+                admin_comment: siblingDraft.tutor_comment.trim() || null,
+                admin_comment_visible_to_tutor: true,
               }
             : {}),
           ...(matchWindows.length > 0
@@ -2828,6 +2840,10 @@ export default function CompanyStudents() {
       }
       rows.push(row as InsertedStudentRow);
     }
+
+    const notesSaveFailed = proKlaseAdminUi && await persistCreatedStudentNotes([
+      { studentIds: rows.map((row) => row.id), draft: siblingDraft },
+    ]);
 
     const lessons = markFirstChronologicalLessonAsTrial(
       siblingDraft.pickedLessons,
@@ -3003,34 +3019,34 @@ export default function CompanyStudents() {
     setSavingSibling(false);
     void lessonWork.then((lessonCreateFailed) => {
       setToastMessage({
-        message: lessonCreateFailed ? t('compStu.studentAddedLessonFailed') : t('compStu.provisionFamilySuccess'),
-        type: lessonCreateFailed ? 'error' : 'success',
+        message: notesSaveFailed ? t('compStu.notesCreatedSaveFailed') : lessonCreateFailed ? t('compStu.studentAddedLessonFailed') : t('compStu.provisionFamilySuccess'),
+        type: notesSaveFailed || lessonCreateFailed ? 'error' : 'success',
       });
       if (!lessonCreateFailed) fetchData();
     });
   };
 
-  const handleSaveComment = async () => {
-    if (!selectedStudent) return;
-    setSavingComment(true);
-    const { error } = await supabase
-      .from('students')
-      .update({
-        admin_comment: commentDraft.trim() || null,
-        admin_comment_visible_to_tutor: commentVisibleToTutor,
-      })
-      .eq('id', selectedStudent.id);
-    if (error) {
-      setToastMessage({ message: t('compStu.commentSaveFailed'), type: 'error' });
-    } else {
-      setSelectedStudent((s) =>
-        s ? { ...s, admin_comment: commentDraft.trim() || null, admin_comment_visible_to_tutor: commentVisibleToTutor } : null,
-      );
-      setToastMessage({ message: t('compStu.commentSaved'), type: 'success' });
-      setEditingComment(false);
-      fetchData();
+  const persistCreatedStudentNotes = async (groups: Array<{ studentIds: string[]; draft: StudentNotesDraft }>) => {
+    const failed: typeof groups = [];
+    for (const group of groups) {
+      if (!group.draft.admin_comment.trim() && !group.draft.last_contacted_at) continue;
+      try { await saveStudentNotes(group.studentIds, group.draft); }
+      catch { failed.push(group); }
     }
-    setSavingComment(false);
+    setPendingNotes((current) => [...current, ...failed]);
+    return failed.length > 0;
+  };
+
+  const retryPendingNotes = async () => {
+    setRetryingNotes(true);
+    const failed: typeof pendingNotes = [];
+    for (const group of pendingNotes) {
+      try { await saveStudentNotes(group.studentIds, group.draft); }
+      catch { failed.push(group); }
+    }
+    setPendingNotes(failed);
+    setRetryingNotes(false);
+    if (failed.length === 0) setToastMessage({ message: t('compStu.commentSaved'), type: 'success' });
   };
 
   const handleSaveStudentInfo = async () => {
@@ -3883,29 +3899,8 @@ export default function CompanyStudents() {
                     </Select>
                   </div>
                   {proKlaseAdminUi && (
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label>{t('compStu.adminComment')}</Label>
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-                        <textarea
-                          value={newStudent.admin_comment}
-                          onChange={(e) => setNewStudent({ ...newStudent, admin_comment: e.target.value })}
-                          rows={2}
-                          className="min-h-[2.75rem] flex-1 rounded-xl border border-gray-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 resize-y"
-                          placeholder={t('compStu.commentPlaceholder')}
-                        />
-                        <label className="flex shrink-0 items-center gap-2 text-xs text-gray-600 cursor-pointer sm:pt-3">
-                          <input
-                            type="checkbox"
-                            checked={newStudent.admin_comment_visible_to_tutor}
-                            onChange={(e) => setNewStudent({
-                              ...newStudent,
-                              admin_comment_visible_to_tutor: e.target.checked,
-                            })}
-                            className="rounded border-gray-300"
-                          />
-                          <span className="max-w-[11rem] leading-snug">{t('compStu.commentVisibleToTutor')}</span>
-                        </label>
-                      </div>
+                    <div className="sm:col-span-2">
+                      <StudentNotesFields value={newStudent} onChange={(notes) => setNewStudent((current) => ({ ...current, ...notes }))} />
                     </div>
                   )}
                   {isSchoolView && (
@@ -4135,33 +4130,9 @@ export default function CompanyStudents() {
                             </div>
                           </div>
                           {proKlaseAdminUi && (
-                            <div className="space-y-2">
-                              <Label>{t('compStu.adminComment')}</Label>
-                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-                                <textarea
-                                  value={child.admin_comment}
-                                  onChange={(e) => setMvAdditionalChildren((current) =>
-                                    current.map((item) => item.id === child.id ? { ...item, admin_comment: e.target.value } : item),
-                                  )}
-                                  rows={2}
-                                  className="min-h-[2.75rem] flex-1 rounded-xl border border-gray-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 resize-y"
-                                  placeholder={t('compStu.commentPlaceholder')}
-                                />
-                                <label className="flex shrink-0 items-center gap-2 text-xs text-gray-600 cursor-pointer sm:pt-3">
-                                  <input
-                                    type="checkbox"
-                                    checked={child.admin_comment_visible_to_tutor}
-                                    onChange={(e) => setMvAdditionalChildren((current) =>
-                                      current.map((item) => item.id === child.id
-                                        ? { ...item, admin_comment_visible_to_tutor: e.target.checked }
-                                        : item),
-                                    )}
-                                    className="rounded border-gray-300"
-                                  />
-                                  {t('compStu.commentVisibleToTutor')}
-                                </label>
-                              </div>
-                            </div>
+                            <StudentNotesFields value={child} onChange={(notes) => setMvAdditionalChildren((current) =>
+                              current.map((item) => item.id === child.id ? { ...item, ...notes } : item),
+                            )} />
                           )}
                           {proKlaseAvailabilitySearchUi && (
                             <div className="space-y-3 border-t border-gray-100 pt-3">
@@ -5068,6 +5039,15 @@ export default function CompanyStudents() {
             )}
           </div>
         </div>
+
+        {pendingNotes.length > 0 && (
+          <div role="alert" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <p>{t('compStu.notesCreatedSaveFailed')}</p>
+            <Button type="button" size="sm" variant="outline" className="mt-2" disabled={retryingNotes} onClick={() => void retryPendingNotes()}>
+              {retryingNotes ? <Loader2 className="h-4 w-4 animate-spin" /> : t('stuSess.retry')}
+            </Button>
+          </div>
+        )}
 
         {students.length === 0 && !loading ? (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
@@ -6160,6 +6140,9 @@ export default function CompanyStudents() {
                             </div>
                           </div>
                         </div>
+                        {proKlaseAdminUi && (
+                          <StudentNotesFields value={siblingDraft} onChange={(notes) => setSiblingDraft((current) => current ? { ...current, ...notes } : current)} />
+                        )}
                         {proKlaseAvailabilitySearchUi && (
                           <div className="space-y-2">
                             <Button
@@ -6457,68 +6440,20 @@ export default function CompanyStudents() {
                     </div>
                 </div>
 
-                {/* Admin comment */}
                 {selectedStudent && (
-                  <div className="rounded-2xl border border-gray-100 bg-white p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <h4 className="font-semibold text-gray-900 flex items-center gap-2">
-                        <MessageSquare className="w-4 h-4 text-blue-500" />
-                        {t('compStu.adminComment')}
-                      </h4>
-                      {!editingComment && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="text-xs rounded-lg"
-                          onClick={() => {
-                            setCommentDraft(selectedStudent.admin_comment || '');
-                            setCommentVisibleToTutor(selectedStudent.admin_comment_visible_to_tutor ?? false);
-                            setEditingComment(true);
-                          }}
-                        >
-                          {selectedStudent.admin_comment ? t('compStu.editBtn') : t('compStu.addBtn')}
-                        </Button>
-                      )}
-                    </div>
-                    {editingComment ? (
-                      <div className="space-y-2">
-                        <textarea
-                          value={commentDraft}
-                          onChange={(e) => setCommentDraft(e.target.value)}
-                          rows={3}
-                          className="w-full rounded-xl border border-gray-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 resize-none"
-                          placeholder={t('compStu.commentPlaceholder')}
-                        />
-                        <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={commentVisibleToTutor}
-                            onChange={(e) => setCommentVisibleToTutor(e.target.checked)}
-                            className="rounded border-gray-300"
-                          />
-                          {t('compStu.commentVisibleToTutor')}
-                        </label>
-                        <div className="flex gap-2">
-                          <Button type="button" variant="outline" className="flex-1 rounded-lg text-xs" disabled={savingComment} onClick={() => setEditingComment(false)}>
-                            {t('compStu.cancelBtn')}
-                          </Button>
-                          <Button type="button" className="flex-1 rounded-lg text-xs" disabled={savingComment} onClick={() => void handleSaveComment()}>
-                            {savingComment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('compStu.saveBtn')}
-                          </Button>
-                        </div>
-                      </div>
-                    ) : selectedStudent.admin_comment ? (
-                      <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm text-gray-800 whitespace-pre-wrap">
-                        {selectedStudent.admin_comment}
-                        <p className="text-[11px] text-gray-500 mt-1">
-                          {selectedStudent.admin_comment_visible_to_tutor ? t('compStu.commentVisibleBoth') : t('compStu.commentVisibleAdmin')}
-                        </p>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-400 text-center py-2">{t('compStu.noComment')}</p>
-                    )}
-                  </div>
+                  <StudentNotesCard key={selectedStudent.id} studentId={selectedStudent.id}
+                    studentIds={selectedStudentGroupIds.length > 0 ? selectedStudentGroupIds : [selectedStudent.id]}
+                    tutorComment={[...new Set((selectedStudentGroup.length > 0 ? selectedStudentGroup : [selectedStudent])
+                      .filter((row) => row.admin_comment_visible_to_tutor).map((row) => row.admin_comment?.trim()).filter(Boolean))].join('\n\n')}
+                    canEdit={can('students.edit')}
+                    onSaved={(notes) => {
+                      const patch = { admin_comment: notes.tutor_comment || null, admin_comment_visible_to_tutor: true };
+                      setSelectedStudent((current) => current?.id === selectedStudent.id ? { ...current, ...patch } : current);
+                      setSelectedStudentGroup((current) => current.map((row) => selectedStudentGroupIds.includes(row.id) ? { ...row, ...patch } : row));
+                      setToastMessage({ message: t('compStu.commentSaved'), type: 'success' });
+                      invalidateCache('company_students');
+                      void fetchData();
+                    }} />
                 )}
 
                 {/* Student meeting link */}

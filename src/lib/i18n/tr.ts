@@ -6,6 +6,18 @@
 import { en } from './en.js';
 
 export const trOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Tutlio’nun özel ders kurumunuzda nasıl kullanılabileceğini görün",
+  "landing.agencyCta.desc": "Bir demoda ekibinizi, öğrencilerinizi ve velilerle yürüttüğünüz süreçleri konuşarak uygun planı bulabiliriz.",
+  "landing.agencyFaq.whatIsQ": "Özel ders kurumları için Tutlio nedir?",
+  "landing.agencyFaq.whatIsA": "Tutlio, eğitmenlerin programlarını, öğrencileri, veli hesaplarını, ödemeleri ve raporları tek bir kurum yönetim sisteminde bir araya getirir.",
+  "landing.agencyFaq.teamQ": "Birden fazla eğitmeni ve veli hesabını yönetebilir miyiz?",
+  "landing.agencyFaq.teamA": "Evet. Yöneticiler ekibin derslerini ve müsaitlik durumunu görebilir; veliler ise kendi hesaplarından çocuklarının programını ve ödemelerini inceleyebilir.",
+  "landing.agencyFaq.customizationQ": "Tutlio çalışma şeklimize uyum sağlayabilir mi?",
+  "landing.agencyFaq.customizationA": "Rezervasyon, sözleşme ve ödeme süreçlerinizi inceleyerek bunları Tutlio’da nasıl yapılandırabileceğimizi konuşabiliriz.",
+  "landing.agencyFaq.pricingQ": "Kurumlar için fiyat nasıl belirlenir?",
+  "landing.agencyFaq.pricingA": "Kurumun fiyatı ekip büyüklüğüne ve seçilen plana bağlıdır. Fiyatlandırma sayfasındaki seçenekleri inceleyebilir ve size özel bir teklif hakkında görüşebilirsiniz.",
+  "landing.agencyFaq.demoQ": "Karar vermeden önce bir demo görebilir miyiz?",
+  "landing.agencyFaq.demoA": "Evet. Fiyatlandırma sayfasından bir görüşme planlayarak ekibiniz için önemli iş akışlarını görebilirsiniz.",
   'compSch.notifyStudentEmail': 'Öğrenciyi e-postayla bilgilendir',
   "cal.deleteAllRemaining": "Bu seride kalan tüm dersler",
   "cal.deleteAllRemainingHint": "Bu serideki gelecekte planlanan ve iptal edilen dersleri siler. Tamamlanan derslerin geçmişi korunur.",

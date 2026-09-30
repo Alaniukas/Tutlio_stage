@@ -1,3 +1,4 @@
+import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
@@ -8,6 +9,7 @@ import { schoolTeacherContractTranslationsFi } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const fi: Record<string, string> = {
+  ...studentNotesTranslations.fi,
   ...schoolFamilyMaterialTranslations.fi,
   ...schoolInvoiceReviewTranslations.fi,
   'school.recordings.access.title': "Tallenteiden käyttöoikeus",
@@ -35,6 +37,18 @@ export const fi: Record<string, string> = {
   'common.reloadPageWarning': "Sivun lataaminen uudelleen poistaa tallentamattomat muutokset. Jatketaanko?",
   ...familyCatalogTrialCopy.fi,
   ...sharedOrganizationWorkflowTranslations,
+  "landing.agencyCta.title": "Katso, miten Tutlio voisi toimia yrityksessäsi",
+  "landing.agencyCta.desc": "Esittelyssä voimme keskustella tiimistäsi, oppilaista ja yhteistyöstä vanhempien kanssa sekä löytää sopivan paketin.",
+  "landing.agencyFaq.whatIsQ": "Mikä on Tutlio tukiopetusyrityksille?",
+  "landing.agencyFaq.whatIsA": "Tutlio yhdistää opettajien aikataulut, oppilaat, vanhempien tilit, maksut ja raportit yhteen yrityksen hallintajärjestelmään.",
+  "landing.agencyFaq.teamQ": "Voimmeko hallita useita opettajia ja vanhempien tilejä?",
+  "landing.agencyFaq.teamA": "Kyllä. Ylläpitäjät näkevät tiimin oppitunnit ja vapaat ajat, ja vanhemmat voivat tarkastella lapsensa aikataulua ja maksuja omalta tililtään.",
+  "landing.agencyFaq.customizationQ": "Voiko Tutlio mukautua työprosesseihimme?",
+  "landing.agencyFaq.customizationA": "Voimme käydä läpi varaus-, sopimus- ja maksuprosessinne ja keskustella niiden määrittämisestä Tutlioon.",
+  "landing.agencyFaq.pricingQ": "Miten yritysten hinnoittelu määräytyy?",
+  "landing.agencyFaq.pricingA": "Hinta riippuu tiimin koosta ja valitusta paketista. Voit tutustua vaihtoehtoihin hinnoittelusivulla ja keskustella yksilöllisestä tarjouksesta.",
+  "landing.agencyFaq.demoQ": "Voimmeko nähdä esittelyn ennen päätöstä?",
+  "landing.agencyFaq.demoA": "Kyllä. Voit varata puhelun hinnoittelusivulta ja tutustua tiimillesi tärkeisiin työprosesseihin.",
   ...schoolConsultationsTranslations.fi,
   'compSess.markAttended': 'Oppilas osallistui',
   'att.confirmedManually': 'Läsnäolo vahvistettu',
@@ -2993,6 +3007,9 @@ export const fi: Record<string, string> = {
   'em.stripePaySub': '💳 Tunnin maksu – {student}, {date}',
   'em.stripeRedirect': 'Linkki ohjaa turvalliselle Stripe-kassasivulle.',
   'em.studentContacts': 'Oppilaan yhteystiedot:',
+  "em.orgStudentInviteSub": "Rekisteröitymislinkkisi organisaatiolta {org}",
+  "em.orgStudentInviteHeaderSub": "{org} kutsuu sinut alustalle",
+  "em.orgStudentInviteBody": "<strong>{org}</strong> lisäsi sinut järjestelmään. Viimeistele rekisteröityminen nähdäksesi aikataulun ja varataksesi oppitunteja.",
   'em.studentInviteBody': 'Tutorisi <strong>{tutor}</strong> lisäsi sinut järjestelmään. Nähdäksesi aikataulun ja varataksesi tunteja, suorita rekisteröinti.',
   'em.studentInviteCodeLabel': 'Kutsukoodisi:',
   'em.schoolStudentInviteCodeLabel': 'Lapsesi rekisteröintikoodi:',
@@ -5382,6 +5399,20 @@ export const fi: Record<string, string> = {
   'school.groups.deleteConfirm': "Poistetaanko ryhmä ”{name}”? Myös kaikki ryhmän tulevat tunnit poistetaan.",
   'school.groups.deleteFailed': "Ryhmän poistaminen epäonnistui.",
   'school.groups.noMatches': "Yksikään ryhmä ei vastaa suodatinta.",
+  'school.groups.noSessionForOccurrence': "Tätä oppituntia ei ole suunniteltu tälle oppilaalle.",
+  'school.groups.contractUnconfirmed': "Sopimusta ei ole vahvistettu",
+  'schoolDash.attendedWithoutContractTitle': "Osallistui ennen sopimuksen vahvistamista",
+  'schoolDash.attendedWithoutContractDescription': "Oppilas osallistui oppitunnille, kun lisäoppituntien sopimusta ei ollut vielä vahvistettu.",
+  'schoolDash.contractAttendanceLoadFailed': "Ilmoituksia osallistumisesta ilman vahvistettua sopimusta ei voitu ladata.",
+  'schoolDash.contractAttendanceShownCount': "Näytetään {shown}/{total} ilmoitusta.",
+  'orgFinance.schoolCurrentPayRate': "Nykyinen peruspalkkio: {amount} € oppitunnilta.",
+  'orgFinance.schoolSummaryNote': "Ryhmäoppitunti lasketaan kerran. Palkkio lasketaan tallennetun oppituntikohtaisen hinnan mukaan tai sen puuttuessa nykyisen peruspalkkion mukaan. Koulu hoitaa maksut.",
+  'orgFinance.schoolFinalizedLessons': "Oppitunnit, joilla on lopullinen tulos",
+  'orgFinance.schoolUnresolvedPay': "Oppitunnit, joiden palkkio puuttuu tai on ristiriitainen: {count}. Koulun on tarkistettava ne.",
+  'orgFinance.schoolKnownPayTotal': "Summa tunnettujen palkkioiden mukaan",
+  'orgFinance.schoolRateSettingsHint': "Määritä peruspalkkio: Opettajat → valitse opettaja → Palkkio (€/oppitunti).",
+  'orgFinance.schoolPayPriceIndependence': "Oppilaiden sopimushinnat eivät määritä opettajan palkkiota.",
+  'orgFinance.schoolPayPending': "Palkkio odottaa määritystä",
   'lesson.joinOpensAt': "Liittyminen avautuu klo {time}",
   'em.reminderPayerSchoolLead': "Muistutus: lapsesi <strong>{student}</strong> tunti alkaa pian. Liittymislinkki on alla.",
   'em.reminderPayerJoinBtn': "Liity tunnille",
@@ -5695,4 +5726,7 @@ export const fi: Record<string, string> = {
   'em.schoolJoinSubject': 'Liity oppitunnille {date} klo {time}',
   'em.schoolJoinHeader': 'Liity oppitunnille',
   'em.schoolJoinBody': 'Oppituntisi alkaa {date} klo {time}. Liittymislinkki on alla.',
+  'chat.registrationPending': 'Rekisteröinti kesken',
+  'chat.registrationPendingHint': 'Viestit ovat käytettävissä, kun oppilaan tili on yhdistetty. Pyydä organisaation ylläpitäjää tarkistamaan oppilaan sähköpostiosoite ja tili tai pyydä oppilasta viimeistelemään rekisteröinti.',
+  'chat.startConversationFailed': 'Keskustelua ei voitu aloittaa. Yritä uudelleen tai ota yhteyttä organisaatiosi ylläpitäjään.',
 };

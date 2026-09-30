@@ -1,9 +1,14 @@
+import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolConsultationsLt } from './schoolConsultationsTranslations.js';
 import { schoolInvoiceReviewLt } from './schoolInvoiceReviewTranslations.js';
 
 export const lt: Record<string, string> = {
+  ...studentNotesTranslations.lt,
+  'chat.registrationPending': 'Laukiama registracijos',
+  'chat.registrationPendingHint': 'Žinutės galimos susiejus mokinio paskyrą. Paprašykite organizacijos administratoriaus patikrinti mokinio el. paštą ir paskyrą arba mokinio užbaigti registraciją.',
+  'chat.startConversationFailed': 'Nepavyko pradėti pokalbio. Bandykite dar kartą arba kreipkitės į organizacijos administratorių.',
   ...schoolFamilyMaterialTranslations.lt,
   ...schoolInvoiceReviewLt,
   'school.recordings.access.title': 'Prieigos prie įrašų valdymas',
@@ -2773,6 +2778,9 @@ export const lt: Record<string, string> = {
   'em.stripePaySub': '💳 Apmokėjimas už pamoką – {student}, {date}',
   'em.stripeRedirect': 'Nuoroda nukreips į saugų Stripe atsiskaitymo puslapį.',
   'em.studentContacts': 'Mokinio kontaktai:',
+  "em.orgStudentInviteSub": "{org} registracijos nuoroda",
+  "em.orgStudentInviteHeaderSub": "{org} kviečia į platformą",
+  "em.orgStudentInviteBody": "<strong>{org}</strong> pridėjo Jus į sistemą. Kad galėtumėte matyti tvarkaraštį ir rezervuoti pamokas, prašome užbaigti registraciją.",
   'em.studentInviteBody': 'Jūsų korepetitorius <strong>{tutor}</strong> pridėjo Jus į sistemą. Kad galėtumėte matyti tvarkaraštį ir rezervuoti pamokas, prašome užbaigti registraciją.',
   'em.studentInviteCodeLabel': 'Jūsų pakvietimo kodas:',
   'em.schoolStudentInviteCodeLabel': 'Jūsų vaiko registracijos kodas:',
@@ -6224,6 +6232,20 @@ export const lt: Record<string, string> = {
   'school.groups.deleteConfirm': "Ištrinti grupę „{name}“? Visos būsimos pamokos taip pat bus pašalintos.",
   'school.groups.deleteFailed': "Nepavyko ištrinti grupės.",
   'school.groups.noMatches': "Pagal filtrą grupių nerasta.",
+  'school.groups.noSessionForOccurrence': "Šiam mokiniui ši pamoka nesuplanuota.",
+  'school.groups.contractUnconfirmed': "Sutartis nepatvirtinta",
+  'schoolDash.attendedWithoutContractTitle': "Dalyvavo be patvirtintos sutarties",
+  'schoolDash.attendedWithoutContractDescription': "Mokinys dalyvavo pamokoje, kai papildomų pamokų sutartis dar nebuvo patvirtinta.",
+  'schoolDash.contractAttendanceLoadFailed': "Nepavyko įkelti pranešimų apie dalyvavimą be sutarties.",
+  'schoolDash.contractAttendanceShownCount': "Rodoma {shown} iš {total} pranešimų.",
+  'orgFinance.schoolCurrentPayRate': "Dabar nustatytas bazinis atlygis: {amount} € už pamoką.",
+  'orgFinance.schoolSummaryNote': "Vienas atlygis už grupinę pamoką. Taikomas išsaugotas pamokos tarifas, o jei jo nėra - dabar nustatytas bazinis atlygis. Atsiskaitymus tvarko mokykla.",
+  'orgFinance.schoolFinalizedLessons': "Pamokos su galutiniu rezultatu",
+  'orgFinance.schoolUnresolvedPay': "Pamokos, kurių atlygio tarifas nenustatytas arba nesutampa: {count}. Reikalinga mokyklos peržiūra.",
+  'orgFinance.schoolKnownPayTotal': "Suma pagal žinomus tarifus",
+  'orgFinance.schoolRateSettingsHint': "Bazinį atlygį nustatykite: Korepetitoriai → pasirinkite korepetitorių → Atlygis (€/pam.).",
+  'orgFinance.schoolPayPriceIndependence': "Mokinių sutarčių kainos nenustato korepetitoriaus atlygio.",
+  'orgFinance.schoolPayPending': "Laukia atlygio tarifo",
   'lesson.joinOpensAt': "Prisijungti bus galima nuo {time}",
   'em.reminderPayerSchoolLead': "Primename, kad Jūsų vaiko <strong>{student}</strong> pamoka netrukus prasidės. Prisijungimo nuoroda žemiau.",
   'em.reminderPayerJoinBtn': "Prisijungti prie pamokos",

@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SchoolExtraLessonsAccept from '../../src/pages/SchoolExtraLessonsAccept';
+import { mergeExtraLessonsOrderPatch, validateExtraLessonsOrder, type ExtraLessonsOrderSnapshot } from '../../src/lib/extraLessonsContract';
 
 const fetchMock = vi.fn();
 
@@ -14,8 +15,24 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 vi.mock('@/components/company/ScheduleSlotPicker', () => ({
-  DateRangeFields: () => <div>datos</div>,
-  ScheduleSlotPicker: () => <div>grafikas</div>,
+  DateRangeFields: ({ startDate, endDate, onStart, onEnd }: {
+    startDate: string; endDate: string; onStart: (value: string) => void; onEnd: (value: string) => void;
+  }) => (
+    <div>
+      <label>Pradžios data<input type="date" value={startDate} onChange={(event) => onStart(event.target.value)} /></label>
+      <label>Pabaigos data<input type="date" value={endDate} onChange={(event) => onEnd(event.target.value)} /></label>
+    </div>
+  ),
+  ScheduleSlotPicker: ({ slots, onChange }: {
+    slots: ExtraLessonsOrderSnapshot['schedule_slots'];
+    onChange: (value: ExtraLessonsOrderSnapshot['schedule_slots']) => void;
+  }) => (
+    <div>
+      grafikas
+      <button type="button" onClick={() => onChange([{ weekday: 2, start_time: '16:00', end_time: '16:45' }])}>Pridėti dieną</button>
+      {slots.length > 0 && <button type="button" onClick={() => onChange([])}>Pašalinti dieną</button>}
+    </div>
+  ),
 }));
 
 const preview = {
@@ -57,6 +74,263 @@ describe('SchoolExtraLessonsAccept', () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('accepts a legacy offer with a schedule label and no structured slots without changing its order', async () => {
+    const legacyOrder = { ...preview.order, schedule_slots: [] } as ExtraLessonsOrderSnapshot;
+    let submittedOrder: ExtraLessonsOrderSnapshot | undefined;
+    let submittedScheduleLabel: string | undefined;
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        submittedScheduleLabel = body.order_patch.schedule_label;
+        submittedOrder = mergeExtraLessonsOrderPatch(legacyOrder, body.order_patch);
+        const fields = validateExtraLessonsOrder(submittedOrder);
+        return fields.length
+          ? { ok: false, json: async () => ({ error: 'Incomplete order', fields }) }
+          : { ok: true, json: async () => ({ ok: true, accepted_at: '2026-09-30T10:00:00Z' }) };
+      }
+      return { ok: true, text: async () => JSON.stringify({ ...preview, order: legacyOrder }) };
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=legacy']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+
+    await screen.findByRole('checkbox');
+    expect(screen.queryByText('Prašome papildyti trūkstamus užsakymo duomenis:')).toBeNull();
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+
+    await screen.findByRole('heading', { name: 'Sutartis sudaryta' });
+    expect(submittedScheduleLabel).toBe(legacyOrder.schedule_label);
+    expect(submittedOrder).toMatchObject(legacyOrder);
+  });
+
+  it('identifies missing order fields before sending and lets the parent fill them and submit', async () => {
+    const incompleteOrder = {
+      ...preview.order, platform: '', duration_minutes: 0, end_date: '', base_lessons_per_month: 0,
+    } as ExtraLessonsOrderSnapshot;
+    let submittedOrder: ExtraLessonsOrderSnapshot | undefined;
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        const merged = mergeExtraLessonsOrderPatch(incompleteOrder, body.order_patch);
+        if (body.preview) return { ok: true, json: async () => ({ ...preview, order: merged, parentEditableFields: validateExtraLessonsOrder(merged) }) };
+        submittedOrder = merged;
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      return {
+        ok: true,
+        // A prior auto-preview may have cleared the list while a field was
+        // subsequently emptied. Submission validation must restore the inputs.
+        text: async () => JSON.stringify({ ...preview, order: incompleteOrder, parentEditableFields: [] }),
+      };
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=incomplete']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+
+    await screen.findByRole('checkbox');
+    expect(screen.queryByRole('textbox', { name: 'Bazinis užsiėmimų kiekis / mėn.' })).toBeNull();
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Trūksta: Platforma, Pabaigos data, Bazinis užsiėmimų kiekis / mėn., Užsiėmimo trukmė (min)');
+    expect(document.activeElement).toBe(alert);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+    expect(screen.getByRole('textbox', { name: 'Bazinis užsiėmimų kiekis / mėn.' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Papildyti trūkstamus užsakymo duomenis' }));
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Platforma' }));
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Platforma' }), { target: { value: 'Google Meet' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Užsiėmimo trukmė (min)' }), { target: { value: '45' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Bazinis užsiėmimų kiekis / mėn.' }), { target: { value: '8' } });
+    fireEvent.change(screen.getByLabelText('Pabaigos data'), { target: { value: '2027-06-13' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+
+    await screen.findByRole('heading', { name: 'Sutartis sudaryta' });
+    expect(validateExtraLessonsOrder(submittedOrder!)).toEqual([]);
+  });
+
+  it('requires a schedule again after the parent removes newly entered slots from a refreshed preview', async () => {
+    const order = { ...preview.order, schedule_slots: [], schedule_label: '' } as ExtraLessonsOrderSnapshot;
+    let previewRequests = 0;
+    let acceptanceRequests = 0;
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        if (body.preview) {
+          previewRequests += 1;
+          const refreshedOrder = mergeExtraLessonsOrderPatch(order, body.order_patch);
+          return { ok: true, json: async () => ({ ...preview, order: refreshedOrder, parentEditableFields: [] }) };
+        }
+        acceptanceRequests += 1;
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      return { ok: true, text: async () => JSON.stringify({ ...preview, order, parentEditableFields: ['schedule_label'] }) };
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=schedule']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+
+    await screen.findByRole('checkbox');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti dieną' }));
+    await waitFor(() => expect(previewRequests).toBe(1), { timeout: 2000 });
+    await waitFor(() => expect(screen.queryByText('Atnaujinama peržiūra pagal jūsų įvestus duomenis…')).toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pašalinti dieną' }));
+    expect(screen.getByText('Grafikas:', { selector: 'span' }).parentElement?.textContent).toBe('Grafikas: —');
+    fireEvent.click(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+    expect(screen.getByRole('alert').querySelector('p')?.textContent).toBe('Trūksta: Grafikas');
+    expect(acceptanceRequests).toBe(0);
+  });
+
+  it('keeps the final accepted PDF when an older auto-preview finishes after submission', async () => {
+    let finishPreview: (response: unknown) => void = () => {};
+    let previewSignal: AbortSignal | undefined;
+    const openPdf = vi.spyOn(window, 'open').mockImplementation(() => null);
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        if (body.preview) {
+          previewSignal = init.signal as AbortSignal;
+          return new Promise(resolve => { finishPreview = resolve; });
+        }
+        return { ok: true, json: async () => ({ ok: true, pdfUrl: 'https://example.com/final-accepted.pdf' }) };
+      }
+      return { ok: true, text: async () => JSON.stringify({ ...preview, parentEditableFields: ['platform'] }) };
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=preview-race']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+    await screen.findByRole('textbox', { name: 'Platforma' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Platforma' }), { target: { value: 'Zoom' } });
+    await waitFor(() => expect(previewSignal).toBeTruthy(), { timeout: 2000 });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+    await screen.findByRole('heading', { name: 'Sutartis sudaryta' });
+    expect(previewSignal?.aborted).toBe(true);
+    // The mock ignores AbortSignal, so the stale-response guard also gets tested.
+    await act(async () => finishPreview({ ok: true, json: async () => ({ ...preview, pdfUrl: 'https://example.com/old-draft.pdf' }) }));
+    fireEvent.click(screen.getByRole('button', { name: 'Atidaryti sutarties PDF' }));
+    expect(openPdf).toHaveBeenCalledWith('https://example.com/final-accepted.pdf', '_blank', 'noopener,noreferrer');
+    openPdf.mockRestore();
+  });
+
+  it('keeps the newest PDF when an earlier field preview returns out of order', async () => {
+    let finishOldPreview: (response: unknown) => void = () => {};
+    let oldSignal: AbortSignal | undefined;
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        if (body.order_patch.platform === 'Older platform') {
+          oldSignal = init.signal as AbortSignal;
+          return new Promise(resolve => { finishOldPreview = resolve; });
+        }
+        return { ok: true, json: async () => ({ ...preview, parentEditableFields: ['platform'], pdfUrl: 'https://example.com/newest-preview.pdf' }) };
+      }
+      return { ok: true, text: async () => JSON.stringify({ ...preview, parentEditableFields: ['platform'] }) };
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=field-preview-race']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+    await screen.findByRole('textbox', { name: 'Platforma' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Platforma' }), { target: { value: 'Older platform' } });
+    await waitFor(() => expect(oldSignal).toBeTruthy(), { timeout: 2000 });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Platforma' }), { target: { value: 'Newest platform' } });
+    await waitFor(() => expect(screen.getByTitle('Sutarties PDF').getAttribute('src')).toBe('https://example.com/newest-preview.pdf'), { timeout: 2000 });
+    expect(oldSignal?.aborted).toBe(true);
+    await act(async () => finishOldPreview({ ok: true, json: async () => ({ ...preview, pdfUrl: 'https://example.com/older-preview.pdf' }) }));
+    expect(screen.getByTitle('Sutarties PDF').getAttribute('src')).toBe('https://example.com/newest-preview.pdf');
+    expect((screen.getByRole('textbox', { name: 'Platforma' }) as HTMLInputElement).value).toBe('Newest platform');
+  });
+
+  it.each([
+    {
+      failure: 'a server failure',
+      payload: { error: 'Nepavyko išsaugoti patvirtinimo. Bandykite dar kartą.' },
+      message: 'Nepavyko išsaugoti patvirtinimo. Bandykite dar kartą.',
+    },
+    {
+      failure: 'missing order fields',
+      payload: { error: 'Incomplete order', fields: ['schedule_label', 'base_lessons_per_month'] },
+      message: 'Trūksta: Grafikas, Bazinis užsiėmimų kiekis / mėn.',
+    },
+    {
+      failure: 'missing school-owned fields',
+      payload: { error: 'Incomplete order', fields: ['unit_price_eur', 'recording_access'] },
+      message: 'Trūksta: Kaina, Užsiėmimų įrašai',
+    },
+  ])('shows $failure beside the submit button and preserves choices for retry', async ({ payload, message }) => {
+    let attempts = 0;
+    let retryBody: any;
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        attempts += 1;
+        if (attempts === 1) return { ok: false, json: async () => payload };
+        retryBody = JSON.parse(String(init.body));
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      return { ok: true, text: async () => JSON.stringify(preview) };
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=test']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+
+    await screen.findByRole('checkbox');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('radio', { name: 'Palaukti' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Nesutinku' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.querySelector('p')?.textContent).toBe(message);
+    expect(alert.nextElementSibling).toBe(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+    expect(document.activeElement).toBe(alert);
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('radio', { name: 'Palaukti' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('radio', { name: 'Nesutinku' }) as HTMLInputElement).checked).toBe(true);
+    if ('fields' in payload && payload.fields.includes('base_lessons_per_month')) {
+      expect(screen.getByRole('button', { name: 'Papildyti trūkstamus užsakymo duomenis' })).toBeTruthy();
+      expect(screen.getByRole('textbox', { name: 'Bazinis užsiėmimų kiekis / mėn.' })).toBeTruthy();
+    } else {
+      expect(screen.queryByRole('button', { name: 'Papildyti trūkstamus užsakymo duomenis' })).toBeNull();
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+    await screen.findByRole('heading', { name: 'Sutartis sudaryta' });
+    expect(retryBody).toMatchObject({ accepted_terms: true, start_within_14_days: false, recording_consent: false });
+  });
+
+  it.each(['empty JSON', 'non-JSON'])('keeps the form retryable after an HTTP 200 %s response without success confirmation', async (responseKind) => {
+    let attempts = 0;
+    let retryBody: Record<string, unknown> | undefined;
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        attempts += 1;
+        if (attempts === 1) return {
+          ok: true,
+          json: async () => {
+            if (responseKind === 'non-JSON') throw new SyntaxError('Unexpected response');
+            return {};
+          },
+        };
+        retryBody = JSON.parse(String(init.body));
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      return { ok: true, text: async () => JSON.stringify(preview) };
+    });
+    render(<MemoryRouter initialEntries={['/school-extra-lessons-accept?token=unexpected-response']}><SchoolExtraLessonsAccept /></MemoryRouter>);
+    await screen.findByRole('checkbox');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('radio', { name: 'Palaukti' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Nesutinku' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.querySelector('p')?.textContent).toBe('Nepavyko pateikti užsakymo.');
+    expect(screen.queryByRole('heading', { name: 'Sutartis sudaryta' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Patvirtinimas išsaugotas' })).toBeNull();
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('radio', { name: 'Palaukti' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('radio', { name: 'Nesutinku' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
+    await screen.findByRole('heading', { name: 'Sutartis sudaryta' });
+    expect(retryBody).toMatchObject({ accepted_terms: true, start_within_14_days: false, recording_consent: false });
   });
 
   it('shows durable pending state after submit and finishes when the worker finalizes', async () => {

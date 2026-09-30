@@ -6,6 +6,18 @@ import { en } from './en.js';
  * See docs/CROATIAN_LOCALIZATION_REVIEW.md before publishing this locale.
  */
 export const hrOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Pogledajte kako bi Tutlio mogao funkcionirati u vašoj agenciji",
+  "landing.agencyCta.desc": "Tijekom demonstracije možemo razgovarati o vašem timu, učenicima i suradnji s roditeljima te pronaći odgovarajući plan.",
+  "landing.agencyFaq.whatIsQ": "Što je Tutlio za agencije za instrukcije?",
+  "landing.agencyFaq.whatIsA": "Tutlio objedinjuje rasporede instruktora, učenike, roditeljske račune, plaćanja i izvještaje u jedan sustav za upravljanje agencijom.",
+  "landing.agencyFaq.teamQ": "Možemo li upravljati većim brojem instruktora i roditeljskih računa?",
+  "landing.agencyFaq.teamA": "Da. Administratori mogu vidjeti nastavu i dostupnost tima, a roditelji u vlastitom računu mogu pregledati raspored i plaćanja svojeg djeteta.",
+  "landing.agencyFaq.customizationQ": "Može li se Tutlio prilagoditi našem načinu rada?",
+  "landing.agencyFaq.customizationA": "Možemo pregledati vaše postupke rezervacija, ugovora i plaćanja te razgovarati o tome kako ih postaviti u Tutliu.",
+  "landing.agencyFaq.pricingQ": "Kako se određuje cijena za agencije?",
+  "landing.agencyFaq.pricingA": "Cijena za agenciju ovisi o veličini tima i odabranom planu. Opcije možete pregledati na stranici s cijenama i razgovarati o konkretnoj ponudi.",
+  "landing.agencyFaq.demoQ": "Možemo li vidjeti demonstraciju prije odluke?",
+  "landing.agencyFaq.demoA": "Da. Na stranici s cijenama možete zakazati poziv kako biste vidjeli postupke važne za vaš tim.",
   'compSch.notifyStudentEmail': 'Obavijesti učenika e-poštom',
   "cal.deleteAllRemaining": "Svi preostali satovi u ovom nizu",
   "cal.deleteAllRemainingHint": "Uklanja buduće planirane i otkazane satove iz ovog niza. Povijest održanih satova ostaje sačuvana.",

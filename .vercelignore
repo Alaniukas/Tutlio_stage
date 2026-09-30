@@ -4,6 +4,7 @@ scripts/_*.mjs
 scripts/_last-*
 .codex-worktrees/
 artifacts/
+docs/audits/
 tmp/
 output/
 .tmp-*

@@ -1,4 +1,9 @@
-import { isUnconfirmedAutomaticNoShow } from './schoolJoinNoShow';
+import { isUnconfirmedAutomaticNoShow } from './schoolJoinNoShow.js';
+import { effectiveSessionOutcome } from './sessionStatusConfirmation.js';
+
+export type SchoolOutcomeOptions = {
+  requireConfirmation?: boolean;
+};
 
 type Row = {
   id?: string;
@@ -62,11 +67,37 @@ function meetingKey(row: SchoolMeetingRow, index: number): string {
     : `individual|${row.id || index}`;
 }
 
+/** Canonical outcome for sibling attendance rows from one school meeting. */
+export function pickSchoolMeetingOutcome<T extends Pick<SchoolMeetingRow,
+  'status' | 'status_confirmed_at' | 'no_show_reason' | 'cancelled_by'
+>>(
+  rows: T[],
+  options: SchoolOutcomeOptions = {},
+): T | undefined {
+  if (!rows.length) return undefined;
+  const effectiveRows = rows.map((item) => {
+    const status = isUnconfirmedAutomaticNoShow(item)
+      ? 'active'
+      : options.requireConfirmation
+        ? effectiveSessionOutcome(item, true)
+        : item.status;
+    return status === item.status ? item : ({ ...item, status } as T);
+  });
+  const representative = ['completed', 'active', 'no_show', 'cancelled']
+    .map(status => effectiveRows.find(item => item.status === status)).find(Boolean) || effectiveRows[0];
+  if (representative.status !== 'cancelled') return representative;
+  const roles = new Set(rows.map(item => item.cancelled_by || null));
+  return roles.size === 1 ? representative : { ...representative, cancelled_by: null };
+}
+
 /**
  * Materialized class-group lessons have one session row per child. This is the
  * canonical occurrence grouping used by school dashboard, lists and stats.
  */
-export function schoolMeetingOccurrences<T extends SchoolMeetingRow>(rows: T[]): SchoolMeetingOccurrence<T>[] {
+export function schoolMeetingOccurrences<T extends SchoolMeetingRow>(
+  rows: T[],
+  options: SchoolOutcomeOptions = {},
+): SchoolMeetingOccurrence<T>[] {
   const groups = new Map<string, T[]>();
   rows.forEach((row, index) => {
     const key = meetingKey(row, index);
@@ -76,19 +107,7 @@ export function schoolMeetingOccurrences<T extends SchoolMeetingRow>(rows: T[]):
   });
 
   return [...groups].map(([key, group]) => {
-    const effectiveGroup = group.map((item) => (
-      isUnconfirmedAutomaticNoShow(item)
-        ? ({ ...item, status: 'active' } as T)
-        : item
-    ));
-    const representative = ['completed', 'active', 'no_show', 'cancelled']
-      .map(status => effectiveGroup.find(item => item.status === status)).find(Boolean) || effectiveGroup[0];
-    const row = representative.status !== 'cancelled'
-      ? representative
-      : (() => {
-          const roles = new Set(group.map(item => item.cancelled_by || null));
-          return roles.size === 1 ? representative : { ...representative, cancelled_by: null };
-        })();
+    const row = pickSchoolMeetingOutcome(group, options)!;
     return {
       key,
       row,
@@ -99,25 +118,32 @@ export function schoolMeetingOccurrences<T extends SchoolMeetingRow>(rows: T[]):
 }
 
 /** Group before filtering outcomes: an absent child does not create a second paid lesson. */
-export function schoolMeetings<T extends SchoolMeetingRow>(rows: T[]): T[] {
-  return schoolMeetingOccurrences(rows).map(occurrence => occurrence.row);
+export function schoolMeetings<T extends SchoolMeetingRow>(rows: T[], options: SchoolOutcomeOptions = {}): T[] {
+  return schoolMeetingOccurrences(rows, options).map(occurrence => occurrence.row);
 }
-export function schoolMeetingCounts(rows: SchoolMeetingRow[]) {
+export function schoolMeetingCounts(rows: SchoolMeetingRow[], options: SchoolOutcomeOptions = {}) {
   const result = { completed: 0, no_show: 0, cancelled: 0, active: 0 };
-  for (const row of schoolMeetings(rows)) {
+  for (const row of schoolMeetings(rows, options)) {
     if (row.status && row.status in result) result[row.status as keyof typeof result]++;
   }
   return result;
 }
 
-export function schoolStudentAttendance(rows: Row[], now: Date = new Date()): SchoolStudentAttendanceRow[] {
+export function schoolStudentAttendance(
+  rows: Row[],
+  now: Date = new Date(),
+  options: SchoolOutcomeOptions = {},
+): SchoolStudentAttendanceRow[] {
   const students = new Map<string, SchoolStudentAttendanceRow>();
   for (const row of rows) {
     if (!row.student_id) continue;
     const student = students.get(row.student_id) || { id: row.student_id, name: row.student_name || '–', joined: 0, noShow: 0, cancelled: 0, unconfirmed: 0 };
-    if (row.status === 'cancelled') student.cancelled++;
-    else if (row.status === 'no_show' && !isUnconfirmedAutomaticNoShow(row)) student.noShow++;
-    else if (row.student_joined_at || (row.status === 'completed' && row.status_confirmed_at)) student.joined++;
+    const status = options.requireConfirmation ? effectiveSessionOutcome(row, true) : row.status;
+    if (status === 'cancelled') student.cancelled++;
+    else if (status === 'no_show' && !isUnconfirmedAutomaticNoShow(row)) student.noShow++;
+    else if (options.requireConfirmation
+      ? status === 'completed' && Boolean(row.status_confirmed_at)
+      : row.student_joined_at || (status === 'completed' && row.status_confirmed_at)) student.joined++;
     else {
       const attendanceCutoff = Date.parse(row.end_time || row.start_time || '');
       if (Number.isFinite(attendanceCutoff) && attendanceCutoff < now.getTime()) student.unconfirmed++;
@@ -131,9 +157,10 @@ export function schoolStudentAttendance(rows: Row[], now: Date = new Date()): Sc
 export function schoolActivitySummary(
   rows: SchoolMeetingRow[],
   now: Date = new Date(),
+  options: SchoolOutcomeOptions = {},
 ): SchoolActivitySummary {
-  const occurrences = schoolMeetingOccurrences(rows);
-  const attendance = schoolStudentAttendance(rows, now);
+  const occurrences = schoolMeetingOccurrences(rows, options);
+  const attendance = schoolStudentAttendance(rows, now, options);
   const summary: SchoolActivitySummary = {
     scheduled: 0,
     completed: 0,

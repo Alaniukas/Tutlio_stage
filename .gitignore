@@ -22,3 +22,5 @@ scripts/load/users.staging.json
 load-results/
 .codex-worktrees/
 artifacts/
+# Local production audit exports contain personal data.
+docs/audits/

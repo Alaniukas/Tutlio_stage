@@ -3,6 +3,7 @@ import {
   schoolActivitySummary,
   schoolMeetingCounts,
   schoolMeetingOccurrences,
+  schoolMeetings,
   schoolStudentAttendance,
 } from '../../src/lib/schoolSessionMonitoring';
 import { fetchAllRows } from '../../src/lib/fetchAllRows';
@@ -131,6 +132,80 @@ describe('school monitoring', () => {
       start_time: '2026-09-10T09:00:00Z',
       end_time: '2026-09-10T10:00:00Z',
     }], now)[0]).toMatchObject({ unconfirmed: 0 });
+  });
+  it('keeps elapsed automatic outcomes pending when manual confirmation is required, even after join clicks', () => {
+    const now = new Date('2026-09-10T12:00:00Z');
+    const rows = [{
+      ...group,
+      id: 'automatic-completed',
+      student_id: 'a',
+      status: 'completed',
+      start_time: '2026-09-10T09:00:00Z',
+      end_time: '2026-09-10T10:00:00Z',
+      status_confirmed_at: null,
+      student_joined_at: '2026-09-10T09:01:00Z',
+    }, {
+      id: 'automatic-no-show',
+      student_id: 'b',
+      status: 'no_show',
+      start_time: '2026-09-10T09:00:00Z',
+      end_time: '2026-09-10T10:00:00Z',
+      status_confirmed_at: null,
+    }];
+    const options = { requireConfirmation: true };
+
+    expect(schoolMeetings(rows, options).map(row => row.status)).toEqual(['active', 'active']);
+    expect(schoolMeetingCounts(rows, options)).toEqual({ completed: 0, no_show: 0, cancelled: 0, active: 2 });
+    expect(schoolActivitySummary(rows, now, options)).toMatchObject({
+      completed: 0,
+      noShowMeetings: 0,
+      awaitingOutcome: 2,
+      attendedStudents: 0,
+      absentStudents: 0,
+      unconfirmedStudents: 2,
+      attendanceRate: null,
+    });
+    expect(rows.map(row => row.status)).toEqual(['completed', 'no_show']);
+  });
+  it('counts stamped tutor and administrator outcomes once per group, keeping other children pending or cancelled', () => {
+    const now = new Date('2026-09-10T12:00:00Z');
+    const occurrence = { ...group, start_time: '2026-09-10T09:00:00Z', end_time: '2026-09-10T10:00:00Z' };
+    const rows = [
+      { ...occurrence, id: 'tutor-confirmed', student_id: 'a', status: 'completed', status_confirmed_at: '2026-09-10T10:01:00Z' },
+      { ...occurrence, id: 'admin-confirmed', student_id: 'b', status: 'completed', status_confirmed_at: '2026-09-10T10:02:00Z' },
+      { ...occurrence, id: 'cancelled-child', student_id: 'c', status: 'cancelled' },
+      { ...occurrence, id: 'unstamped-child', student_id: 'd', status: 'completed', status_confirmed_at: null },
+      { id: 'confirmed-absence', student_id: 'e', status: 'no_show', status_confirmed_at: '2026-09-10T10:03:00Z', start_time: occurrence.start_time, end_time: occurrence.end_time },
+      { id: 'cancelled-meeting', student_id: 'f', status: 'cancelled', start_time: occurrence.start_time, end_time: occurrence.end_time },
+    ];
+    const options = { requireConfirmation: true };
+
+    expect(schoolMeetingCounts(rows, options)).toEqual({ completed: 1, no_show: 1, cancelled: 1, active: 0 });
+    expect(schoolActivitySummary(rows, now, options)).toMatchObject({
+      completed: 1,
+      noShowMeetings: 1,
+      cancelled: 1,
+      attendedStudents: 2,
+      absentStudents: 1,
+      unconfirmedStudents: 1,
+      confirmedAttendance: 3,
+      attendanceRate: 67,
+    });
+    expect(schoolStudentAttendance(rows, now, options).find(student => student.id === 'c')).toMatchObject({ cancelled: 1 });
+  });
+  it('preserves other organizations automatic outcome counting unless the confirmation option is enabled', () => {
+    const now = new Date('2026-09-10T12:00:00Z');
+    const row = {
+      id: 'automatic-other-org',
+      student_id: 'a',
+      status: 'completed',
+      start_time: '2026-09-10T09:00:00Z',
+      end_time: '2026-09-10T10:00:00Z',
+      student_joined_at: '2026-09-10T09:01:00Z',
+    };
+    expect(schoolActivitySummary([row], now)).toMatchObject({ completed: 1, attendedStudents: 1, awaitingOutcome: 0 });
+    expect(schoolActivitySummary([row], now, { requireConfirmation: false })).toEqual(schoolActivitySummary([row], now));
+    expect(schoolActivitySummary([row], now, { requireConfirmation: true })).toMatchObject({ completed: 0, attendedStudents: 0, awaitingOutcome: 1 });
   });
   it('reads beyond server page caps and does not silently swallow errors', async () => {
     const source = Array.from({ length: 1307 }, (_, id) => ({ id }));

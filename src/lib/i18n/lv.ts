@@ -1,3 +1,4 @@
+import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
@@ -8,6 +9,7 @@ import { supportTranslations } from './supportTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 
 export const lv: Record<string, string> = {
+  ...studentNotesTranslations.lv,
   ...schoolFamilyMaterialTranslations.lv,
   ...schoolInvoiceReviewTranslations.lv,
   'school.recordings.access.title': "Piekļuve ierakstiem",
@@ -35,6 +37,18 @@ export const lv: Record<string, string> = {
   'common.reloadPageWarning': "Pārlādējot lapu, nesaglabātās izmaiņas tiks zaudētas. Vai turpināt?",
   ...familyCatalogTrialCopy.lv,
   ...sharedOrganizationWorkflowTranslations,
+  "landing.agencyCta.title": "Apskatiet, kā Tutlio varētu darboties jūsu aģentūrā",
+  "landing.agencyCta.desc": "Demonstrācijas laikā varam pārrunāt jūsu komandas, skolēnu un sadarbības ar vecākiem vajadzības un atrast piemērotu plānu.",
+  "landing.agencyFaq.whatIsQ": "Kas ir Tutlio privātstundu aģentūrām?",
+  "landing.agencyFaq.whatIsA": "Tutlio apvieno pasniedzēju grafikus, skolēnus, vecāku kontus, maksājumus un pārskatus vienā aģentūras pārvaldības sistēmā.",
+  "landing.agencyFaq.teamQ": "Vai varam pārvaldīt vairākus pasniedzējus un vecāku kontus?",
+  "landing.agencyFaq.teamA": "Jā. Administratori var redzēt komandas nodarbības un brīvos laikus, savukārt vecāki savā kontā var apskatīt bērna grafiku un maksājumus.",
+  "landing.agencyFaq.customizationQ": "Vai Tutlio var pielāgoties mūsu darba procesiem?",
+  "landing.agencyFaq.customizationA": "Varam pārskatīt jūsu rezervāciju, līgumu un maksājumu procesus un pārrunāt, kā tos iestatīt Tutlio.",
+  "landing.agencyFaq.pricingQ": "Kā tiek noteikta cena aģentūrām?",
+  "landing.agencyFaq.pricingA": "Aģentūras cena ir atkarīga no komandas lieluma un izvēlētā plāna. Varat apskatīt iespējas cenu lapā un pārrunāt konkrētu piedāvājumu.",
+  "landing.agencyFaq.demoQ": "Vai pirms lēmuma pieņemšanas varam apskatīt demonstrāciju?",
+  "landing.agencyFaq.demoA": "Jā. Cenu lapā varat pieteikt sarunu, lai apskatītu jūsu komandai svarīgos darba procesus.",
   ...schoolConsultationsTranslations.lv,
   'compSess.markAttended': 'Skolēns piedalījās',
   'att.confirmedManually': 'Dalība apstiprināta',
@@ -5207,6 +5221,9 @@ export const lv: Record<string, string> = {
   'em.stripePaySub': '💳 Maksājums par nodarbību – {student}, {date}',
   'em.stripeRedirect': 'Saite pāradresēs uz drošu Stripe maksājumu lapu.',
   'em.studentContacts': 'Skolēna kontakti:',
+  "em.orgStudentInviteSub": "Jūsu reģistrācijas saite no {org}",
+  "em.orgStudentInviteHeaderSub": "{org} aicina jūs uz platformu",
+  "em.orgStudentInviteBody": "<strong>{org}</strong> pievienoja jūs sistēmai. Lai skatītu grafiku un rezervētu nodarbības, pabeidziet reģistrāciju.",
   'em.studentInviteBody': 'Jūsu pasniedzējs <strong>{tutor}</strong> pievienoja jūs sistēmai. Lai apskatītu grafiku un rezervētu nodarbības, pabeidziet reģistrāciju.',
   'em.studentInviteCodeLabel': 'Jūsu uzaicinājuma kods:',
   'em.schoolStudentInviteCodeLabel': 'Jūsu bērna reģistrācijas kods:',
@@ -5983,6 +6000,20 @@ export const lv: Record<string, string> = {
   'school.groups.deleteConfirm': "Dzēst grupu „{name}”? Tiks dzēstas arī visas šīs grupas gaidāmās nodarbības.",
   'school.groups.deleteFailed': "Neizdevās dzēst grupu.",
   'school.groups.noMatches': "Filtram neatbilst neviena grupa.",
+  'school.groups.noSessionForOccurrence': "Šī nodarbība šim skolēnam nav ieplānota.",
+  'school.groups.contractUnconfirmed': "Līgums nav apstiprināts",
+  'schoolDash.attendedWithoutContractTitle': "Piedalījās, pirms līgums bija apstiprināts",
+  'schoolDash.attendedWithoutContractDescription': "Skolēns piedalījās nodarbībā, kad papildu nodarbību līgums vēl nebija apstiprināts.",
+  'schoolDash.contractAttendanceLoadFailed': "Neizdevās ielādēt paziņojumus par dalību bez apstiprināta līguma.",
+  'schoolDash.contractAttendanceShownCount': "Tiek rādīti {shown} no {total} paziņojumiem.",
+  'orgFinance.schoolCurrentPayRate': "Pašlaik iestatītā pamatlikme: {amount} € par nodarbību.",
+  'orgFinance.schoolSummaryNote': "Grupas nodarbība tiek skaitīta vienreiz. Atlīdzībai piemēro saglabāto nodarbības likmi vai pašreizējo pamatlikmi, ja saglabātās likmes nav. Norēķinus pārvalda skola.",
+  'orgFinance.schoolFinalizedLessons': "Nodarbības ar galīgo rezultātu",
+  'orgFinance.schoolUnresolvedPay': "Nodarbības ar nenorādītām vai atšķirīgām atlīdzības likmēm: {count}. Skolai tās jāpārbauda.",
+  'orgFinance.schoolKnownPayTotal': "Summa pēc zināmajām likmēm",
+  'orgFinance.schoolRateSettingsHint': "Iestatiet pamatlikmi: Skolotāji → izvēlieties skolotāju → Atlīdzība (€/nodarbību).",
+  'orgFinance.schoolPayPriceIndependence': "Skolēnu līgumu cenas nenosaka skolotāja atlīdzību.",
+  'orgFinance.schoolPayPending': "Gaida atlīdzības likmi",
   'lesson.joinOpensAt': "Pievienoties varēs no {time}",
   'em.reminderPayerSchoolLead': "Atgādinām, ka jūsu bērna <strong>{student}</strong> nodarbība drīz sāksies. Pievienošanās saite ir zemāk.",
   'em.reminderPayerJoinBtn': "Pievienoties nodarbībai",
@@ -6244,4 +6275,7 @@ export const lv: Record<string, string> = {
   'em.schoolJoinSubject': 'Pievienojieties nodarbībai {date}, {time}',
   'em.schoolJoinHeader': 'Pievienojieties nodarbībai',
   'em.schoolJoinBody': 'Jūsu nodarbība sākas {date} plkst. {time}. Pievienošanās saite ir zemāk.',
+  'chat.registrationPending': 'Reģistrācija nav pabeigta',
+  'chat.registrationPendingHint': 'Ziņojumi ir pieejami pēc skolēna konta piesaistīšanas. Lūdziet organizācijas administratoram pārbaudīt skolēna e-pastu un kontu vai lūdziet skolēnam pabeigt reģistrāciju.',
+  'chat.startConversationFailed': 'Neizdevās sākt sarunu. Mēģiniet vēlreiz vai sazinieties ar savas organizācijas administratoru.',
 };

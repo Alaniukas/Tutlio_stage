@@ -1,3 +1,4 @@
+import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
@@ -8,6 +9,7 @@ import { schoolTeacherContractTranslationsEs } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const es: Record<string, string> = {
+  ...studentNotesTranslations.es,
   ...schoolFamilyMaterialTranslations.es,
   ...schoolInvoiceReviewTranslations.es,
   'school.recordings.access.title': "Acceso a las grabaciones",
@@ -35,6 +37,18 @@ export const es: Record<string, string> = {
   'common.reloadPageWarning': "Al recargar se perderán los cambios sin guardar. ¿Continuar?",
   ...familyCatalogTrialCopy.es,
   ...sharedOrganizationWorkflowTranslations,
+  "landing.agencyCta.title": "Descubre cómo podría funcionar Tutlio para tu agencia",
+  "landing.agencyCta.desc": "En una demostración podemos hablar de tu equipo, tus alumnos y la colaboración con los padres para encontrar el plan adecuado.",
+  "landing.agencyFaq.whatIsQ": "¿Qué es Tutlio para las agencias de clases particulares?",
+  "landing.agencyFaq.whatIsA": "Tutlio reúne los horarios de los profesores, los alumnos, las cuentas de los padres, los pagos y los informes en un único sistema de gestión para la agencia.",
+  "landing.agencyFaq.teamQ": "¿Podemos gestionar varios profesores y cuentas de padres?",
+  "landing.agencyFaq.teamA": "Sí. Los administradores pueden ver las clases y la disponibilidad del equipo, mientras que los padres pueden consultar el horario y los pagos de sus hijos desde su propia cuenta.",
+  "landing.agencyFaq.customizationQ": "¿Puede Tutlio adaptarse a nuestra forma de trabajar?",
+  "landing.agencyFaq.customizationA": "Podemos revisar vuestros procesos de reservas, contratos y pagos, y hablar sobre cómo configurarlos en Tutlio.",
+  "landing.agencyFaq.pricingQ": "¿Cómo se determina el precio para las agencias?",
+  "landing.agencyFaq.pricingA": "El precio para la agencia depende del tamaño del equipo y del plan elegido. Puedes consultar las opciones en la página de precios y hablar sobre una propuesta concreta.",
+  "landing.agencyFaq.demoQ": "¿Podemos ver una demostración antes de decidir?",
+  "landing.agencyFaq.demoA": "Sí. Puedes reservar una llamada desde la página de precios para conocer los procesos importantes para tu equipo.",
   ...schoolConsultationsTranslations.es,
   'compSess.markAttended': 'El alumno asistió',
   'att.confirmedManually': 'Asistencia confirmada',
@@ -4581,6 +4595,9 @@ export const es: Record<string, string> = {
   'em.stripePaySub': '💳 Pago de clase – {student}, {date}',
   'em.stripeRedirect': 'El enlace le redirigirá a una página de pago segura de Stripe.',
   'em.studentContacts': 'Contactos del alumno:',
+  "em.orgStudentInviteSub": "Tu enlace de registro de {org}",
+  "em.orgStudentInviteHeaderSub": "{org} te invita a la plataforma",
+  "em.orgStudentInviteBody": "<strong>{org}</strong> te ha añadido al sistema. Para ver el horario y reservar clases, completa el registro.",
   'em.studentInviteBody': 'Su tutor <strong>{tutor}</strong> le añadió al sistema. Para ver el horario y reservar clases, complete el registro.',
   'em.studentInviteCodeLabel': 'Su código de invitación:',
   'em.schoolStudentInviteCodeLabel': 'Código de registro de su hijo/a:',
@@ -5461,6 +5478,20 @@ export const es: Record<string, string> = {
   'school.groups.deleteConfirm': "¿Eliminar el grupo «{name}»? También se eliminarán todas las clases futuras de este grupo.",
   'school.groups.deleteFailed': "No se pudo eliminar el grupo.",
   'school.groups.noMatches': "Ningún grupo coincide con el filtro.",
+  'school.groups.noSessionForOccurrence': "Esta clase no está programada para este alumno.",
+  'school.groups.contractUnconfirmed': "Contrato sin confirmar",
+  'schoolDash.attendedWithoutContractTitle': "Asistencia antes de confirmar el contrato",
+  'schoolDash.attendedWithoutContractDescription': "El alumno asistió a una clase cuando el contrato de clases adicionales aún no estaba confirmado.",
+  'schoolDash.contractAttendanceLoadFailed': "No se pudieron cargar las notificaciones de asistencia sin contrato confirmado.",
+  'schoolDash.contractAttendanceShownCount': "Se muestran {shown} de {total} notificaciones.",
+  'orgFinance.schoolCurrentPayRate': "Tarifa base configurada actualmente: {amount} € por clase.",
+  'orgFinance.schoolSummaryNote': "Cada clase en grupo se cuenta una vez. La remuneración usa la tarifa guardada de la clase o, si no existe, la tarifa base actual. La escuela gestiona los pagos.",
+  'orgFinance.schoolFinalizedLessons': "Clases con resultado definitivo",
+  'orgFinance.schoolUnresolvedPay': "Clases con tarifas de remuneración ausentes o contradictorias: {count}. La escuela debe revisarlas.",
+  'orgFinance.schoolKnownPayTotal': "Total según las tarifas conocidas",
+  'orgFinance.schoolRateSettingsHint': "Configure la tarifa base: Profesores → seleccione un profesor → Remuneración (€/clase).",
+  'orgFinance.schoolPayPriceIndependence': "Los precios de los contratos de los alumnos no determinan la remuneración del profesor.",
+  'orgFinance.schoolPayPending': "Tarifa de remuneración pendiente",
   'lesson.joinOpensAt': "Podrás unirte a partir de las {time}",
   'em.reminderPayerSchoolLead': "Recordatorio: la clase de su hijo/a <strong>{student}</strong> empieza pronto. El enlace para unirse está abajo.",
   'em.reminderPayerJoinBtn': "Unirse a la clase",
@@ -5722,4 +5753,7 @@ export const es: Record<string, string> = {
   'em.schoolJoinSubject': 'Únete a tu clase el {date} a las {time}',
   'em.schoolJoinHeader': 'Únete a tu clase',
   'em.schoolJoinBody': 'Tu clase empieza el {date} a las {time}. Usa el enlace de abajo.',
+  'chat.registrationPending': 'Registro pendiente',
+  'chat.registrationPendingHint': 'Los mensajes estarán disponibles cuando se vincule la cuenta del alumno. Pide al administrador de la organización que compruebe el correo y la cuenta del alumno, o pide al alumno que termine el registro.',
+  'chat.startConversationFailed': 'No se pudo iniciar la conversación. Inténtalo de nuevo o contacta con el administrador de tu organización.',
 };

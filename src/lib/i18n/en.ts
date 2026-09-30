@@ -1,9 +1,14 @@
+import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolConsultationsEn } from './schoolConsultationsTranslations.js';
 import { schoolInvoiceReviewEn } from './schoolInvoiceReviewTranslations.js';
 
 export const en: Record<string, string> = {
+  ...studentNotesTranslations.en,
+  'chat.registrationPending': 'Registration pending',
+  'chat.registrationPendingHint': 'Messaging is available after the student account is linked. Ask the organization administrator to confirm the student email and account, or ask the student to finish registration.',
+  'chat.startConversationFailed': 'Could not start the conversation. Please try again or contact your organization administrator.',
   ...schoolFamilyMaterialTranslations.en,
   ...schoolInvoiceReviewEn,
   'school.recordings.access.title': 'Recording access',
@@ -2767,6 +2772,9 @@ export const en: Record<string, string> = {
   'em.stripePaySub': '💳 Payment for lesson – {student}, {date}',
   'em.stripeRedirect': 'The link will redirect to a secure Stripe checkout page.',
   'em.studentContacts': 'Student contacts:',
+  "em.orgStudentInviteSub": "Your registration link from {org}",
+  "em.orgStudentInviteHeaderSub": "{org} invites you to the platform",
+  "em.orgStudentInviteBody": "<strong>{org}</strong> added you to the system. To view the schedule and book lessons, complete the registration.",
   'em.studentInviteBody': 'Your tutor <strong>{tutor}</strong> added you to the system. To view the schedule and book lessons, complete the registration.',
   'em.studentInviteCodeLabel': 'Your invitation code:',
   'em.schoolStudentInviteCodeLabel': 'Your child\'s registration code:',
@@ -6216,6 +6224,20 @@ export const en: Record<string, string> = {
   'school.groups.deleteConfirm': "Delete group “{name}”? All upcoming lessons of this group will be removed as well.",
   'school.groups.deleteFailed': "Could not delete the group.",
   'school.groups.noMatches': "No groups match the filter.",
+  'school.groups.noSessionForOccurrence': "This student is not scheduled for this lesson.",
+  'school.groups.contractUnconfirmed': "Contract not confirmed",
+  'schoolDash.attendedWithoutContractTitle': "Attended while contract was unconfirmed",
+  'schoolDash.attendedWithoutContractDescription': "The student attended a lesson before the extra lesson contract was confirmed.",
+  'schoolDash.contractAttendanceLoadFailed': "Could not load attendance notifications about unconfirmed contracts.",
+  'schoolDash.contractAttendanceShownCount': "Showing {shown} of {total} notifications.",
+  'orgFinance.schoolCurrentPayRate': "Current base rate: €{amount} per lesson.",
+  'orgFinance.schoolSummaryNote': "Group lessons count once. Pay uses the stored lesson rate, or the current base rate when no stored rate exists. Payments are managed by your school.",
+  'orgFinance.schoolFinalizedLessons': "Lessons with a final outcome",
+  'orgFinance.schoolUnresolvedPay': "Lessons with missing or conflicting pay rates: {count}. Your school needs to review them.",
+  'orgFinance.schoolKnownPayTotal': "Total at known rates",
+  'orgFinance.schoolRateSettingsHint': "Set the base rate in Teachers → select a teacher → Pay (€/lesson).",
+  'orgFinance.schoolPayPriceIndependence': "Student contract prices do not determine teacher pay.",
+  'orgFinance.schoolPayPending': "Pay rate pending",
   'lesson.joinOpensAt': "Join opens at {time}",
   'em.reminderPayerSchoolLead': "Reminder: your child <strong>{student}</strong> has a lesson starting soon. The join link is below.",
   'em.reminderPayerJoinBtn': "Join the lesson",

@@ -6,6 +6,18 @@ import { en } from './en.js';
  * See docs/INDONESIAN_LOCALIZATION_REVIEW.md before publication.
  */
 export const idOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Lihat bagaimana Tutlio dapat digunakan di lembaga Anda",
+  "landing.agencyCta.desc": "Dalam demo, kita dapat membahas tim, siswa, dan alur kerja dengan orang tua untuk menemukan paket yang tepat.",
+  "landing.agencyFaq.whatIsQ": "Apa itu Tutlio untuk lembaga bimbingan belajar?",
+  "landing.agencyFaq.whatIsA": "Tutlio menyatukan jadwal tutor, siswa, akun orang tua, pembayaran, dan laporan dalam satu sistem pengelolaan lembaga.",
+  "landing.agencyFaq.teamQ": "Bisakah kami mengelola beberapa tutor dan akun orang tua?",
+  "landing.agencyFaq.teamA": "Ya. Administrator dapat melihat pelajaran dan waktu tersedia seluruh tim, sementara orang tua dapat melihat jadwal dan pembayaran anak mereka melalui akun sendiri.",
+  "landing.agencyFaq.customizationQ": "Bisakah Tutlio menyesuaikan dengan alur kerja kami?",
+  "landing.agencyFaq.customizationA": "Kita dapat meninjau proses pemesanan, kontrak, dan pembayaran Anda serta membahas cara mengaturnya di Tutlio.",
+  "landing.agencyFaq.pricingQ": "Bagaimana harga untuk lembaga ditentukan?",
+  "landing.agencyFaq.pricingA": "Harga untuk lembaga bergantung pada jumlah anggota tim dan paket yang dipilih. Anda dapat melihat pilihan di halaman harga dan membahas penawaran khusus.",
+  "landing.agencyFaq.demoQ": "Bisakah kami melihat demo sebelum memutuskan?",
+  "landing.agencyFaq.demoA": "Ya. Anda dapat menjadwalkan panggilan melalui halaman harga untuk melihat alur kerja yang penting bagi tim Anda.",
   'compSch.notifyStudentEmail': 'Beri tahu siswa melalui email',
   "cal.deleteAllRemaining": "Semua sesi les yang tersisa dalam rangkaian ini",
   "cal.deleteAllRemainingHint": "Menghapus sesi les mendatang yang dijadwalkan dan sesi les yang dibatalkan dalam rangkaian ini. Riwayat sesi les yang telah selesai tetap tersimpan.",

@@ -91,7 +91,11 @@ function storedRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function database(rows: Array<Record<string, unknown> | null>, insertError?: { code: string }) {
+function database(
+  rows: Array<Record<string, unknown> | null>,
+  insertError?: { code: string },
+  insertedRow: Record<string, unknown> | null = null,
+) {
   const updates: Record<string, unknown>[] = [];
   const insert = vi.fn(() => query);
   const query: any = {
@@ -99,7 +103,7 @@ function database(rows: Array<Record<string, unknown> | null>, insertError?: { c
     eq: vi.fn(() => query),
     maybeSingle: vi.fn(async () => ({ data: rows.shift() ?? null, error: null })),
     insert,
-    single: vi.fn(async () => ({ data: null, error: insertError || null })),
+    single: vi.fn(async () => ({ data: insertedRow, error: insertError || null })),
     update: vi.fn((patch: Record<string, unknown>) => { updates.push(patch); return query; }),
     then: (resolve: (value: { error: null }) => void) => resolve({ error: null }),
   };
@@ -130,6 +134,37 @@ beforeEach(() => {
 });
 
 describe('in-app support request ID retries', () => {
+  it('passes the saved feature category to the initial requester confirmation', async () => {
+    const db = database([null], undefined, storedRow({
+      category: 'feature', title: input.title, reporter_name: 'New Reporter', reporter_email: 'new@example.com',
+      team_notified_at: null, status_notified_signature: null, trello_card_id: null,
+    }));
+    mocks.getClient.mockReturnValue(db.client);
+    const { res, result } = response();
+
+    await handler({ method: 'POST', headers: {}, body: { ...input, category: 'feature' } } as any, res);
+
+    expect(result.statusCode).toBe(200);
+    expect(db.insert).toHaveBeenCalledWith(expect.objectContaining({ category: 'feature' }));
+    expect(mocks.notifyStatus).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      category: 'feature', reporter_email: 'new@example.com',
+    }));
+  });
+
+  it('keeps the stored feature category when retrying a changed submission', async () => {
+    const db = database([storedRow({ category: 'feature', status_notified_signature: null })]);
+    mocks.getClient.mockReturnValue(db.client);
+    const { res, result } = response();
+
+    await handler({ method: 'POST', headers: {}, body: input } as any, res);
+
+    expect(result.statusCode).toBe(200);
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(mocks.notifyStatus).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      category: 'feature', reporter_email: 'original@example.com',
+    }));
+  });
+
   it('returns the original ticket without rewriting it or repeating completed deliveries', async () => {
     const db = database([storedRow()]);
     mocks.getClient.mockReturnValue(db.client);
@@ -175,7 +210,7 @@ describe('in-app support request ID retries', () => {
     }));
     expect(mocks.syncTicket).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       title: 'Original saved title', page: '/students', trello_card_id: null,
-    }));
+    }), { onlyIfUnlinked: true });
     expect(db.updates).toEqual([expect.objectContaining({
       team_notification_email_id: 'team-email-1', team_notification_error: null,
     })]);

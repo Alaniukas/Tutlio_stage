@@ -6,7 +6,12 @@ import { PRO_KLASE_ORG_ID } from '@/lib/marketMoney';
 
 const testState = vi.hoisted(() => ({
   from: vi.fn(),
+  rpc: vi.fn(),
   studentInserts: [] as Array<Record<string, unknown>>,
+  selectedSlots: null as Array<{
+    tutorId: string; tutorName: string; subjectId: string; subjectName: string;
+    start: Date; end: Date; durationMinutes: number;
+  }> | null,
   sendEmailDetailed: vi.fn(),
   createSession: vi.fn(),
   cache: {
@@ -56,7 +61,7 @@ vi.mock('@/lib/supabase', () => ({
       getSession: vi.fn(async () => ({ data: { session: { access_token: 'tok' } } })),
     },
     from: testState.from,
-    rpc: vi.fn(async () => ({ data: [], error: null })),
+    rpc: testState.rpc,
   },
 }));
 
@@ -124,7 +129,7 @@ vi.mock('@/components/FindTutorModal', () => ({
       data-frequency={String(Boolean(frequencyEnabled))}
       data-confirm-selection={String(Boolean(confirmSelection))}
     >
-      <button type="button" onClick={() => onConfirmSlots?.([{
+      <button type="button" onClick={() => onConfirmSlots?.(testState.selectedSlots ?? [{
         tutorId: 'tutor-second-child',
         tutorName: 'Antras Mokytojas',
         subjectId: 'math-second-child',
@@ -137,6 +142,13 @@ vi.mock('@/components/FindTutorModal', () => ({
       </button>
     </div>
   ) : null,
+}));
+
+vi.mock('@/components/ui/date-input', () => ({
+  DateInput: ({ id, value, disabled, onChange }: {
+    id: string; value: string; disabled?: boolean;
+    onChange: (event: { target: { value: string } }) => void;
+  }) => <input id={id} type="date" value={value} disabled={disabled} onChange={onChange} />,
 }));
 
 vi.mock('@/components/company/PickedAvailabilityTimeEditor', () => ({
@@ -201,6 +213,8 @@ describe('CompanyStudents Pro Klasė list', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     testState.studentInserts.length = 0;
+    testState.selectedSlots = null;
+    testState.rpc.mockResolvedValue({ data: [], error: null });
     testState.sendEmailDetailed.mockResolvedValue({ ok: true, skipped: false });
     testState.createSession.mockResolvedValue({ createdSessionIds: ['created-lesson'] });
     testState.from.mockImplementation(() => {
@@ -249,7 +263,7 @@ describe('CompanyStudents Pro Klasė list', () => {
     expect(screen.queryByPlaceholderText(/adresas/i)).toBeNull();
   });
 
-  it('shows admin comment field and tutor visibility checkbox in the add-student dialog', () => {
+  it('shows separate private notes, contact date and tutor comment in the add-student dialog', () => {
     render(
       <MemoryRouter initialEntries={['/company/students']}>
         <CompanyStudents />
@@ -259,8 +273,10 @@ describe('CompanyStudents Pro Klasė list', () => {
     fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
 
     expect(screen.getByText('Pridėti naują mokinį')).toBeTruthy();
-    expect(screen.getByText('Administratoriaus komentaras')).toBeTruthy();
-    expect(screen.getByRole('checkbox', { name: /Rodyti komentarą korepetitoriui/i })).toBeTruthy();
+    expect(screen.getByLabelText('Administracijos komentarai')).toBeTruthy();
+    expect(screen.getByLabelText('Paskutinį kartą kontaktuota')).toBeTruthy();
+    expect(screen.getByLabelText('Komentaras korepetitoriui')).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: /Rodyti komentarą korepetitoriui/i })).toBeNull();
     expect(screen.getByPlaceholderText('Parašykite komentarą apie šį mokinį...')).toBeTruthy();
   });
 
@@ -573,5 +589,117 @@ describe('CompanyStudents Pro Klasė list', () => {
     fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
 
     expect(screen.queryByRole('button', { name: 'Sukurti mokinio paskyrą' })).toBeNull();
+  });
+
+  it('saves private notes through the RPC for every assigned tutor row and inserts only the shared comment', async () => {
+    mockStudentSaveQueries();
+    testState.selectedSlots = ['first', 'second'].map((suffix) => ({
+      tutorId: `tutor-${suffix}`, tutorName: `Mokytojas ${suffix}`,
+      subjectId: 'math-second-child', subjectName: 'Matematika',
+      start: new Date('2026-10-01T15:00:00.000Z'), end: new Date('2026-10-01T16:00:00.000Z'), durationMinutes: 60,
+    }));
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+    fireEvent.change(screen.getByPlaceholderText('Jonas Jonaitis'), { target: { value: 'Ieva' } });
+    fireEvent.change(screen.getByPlaceholderText('jonas@example.com'), { target: { value: 'ieva@example.test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Tik mokinį' }));
+    fireEvent.change(screen.getByLabelText('Administracijos komentarai'), { target: { value: '  Privati administracijos informacija  ' } });
+    fireEvent.change(screen.getByLabelText('Paskutinį kartą kontaktuota'), { target: { value: '2026-09-29' } });
+    fireEvent.change(screen.getByLabelText('Komentaras korepetitoriui'), { target: { value: '  Sutelkti dėmesį į trupmenas  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ieškoti pagal laisvą laiką' }));
+    fireEvent.click(screen.getByText('Pasirinkti laisvą laiką'));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti', exact: true }));
+
+    await waitFor(() => expect(testState.rpc).toHaveBeenCalledWith('save_student_notes', {
+      p_student_ids: ['created-child-1', 'created-child-2'],
+      p_admin_comment: 'Privati administracijos informacija', p_last_contacted_at: '2026-09-29',
+      p_tutor_comment: 'Sutelkti dėmesį į trupmenas',
+    }));
+    expect(testState.studentInserts).toHaveLength(2);
+    expect(testState.studentInserts.map((row) => row.tutor_id)).toEqual(['tutor-first', 'tutor-second']);
+    for (const row of testState.studentInserts) {
+      expect(row).toMatchObject({ admin_comment: 'Sutelkti dėmesį į trupmenas', admin_comment_visible_to_tutor: true });
+      expect(row).not.toHaveProperty('last_contacted_at');
+      expect(JSON.stringify(row)).not.toContain('Privati administracijos informacija');
+    }
+  });
+
+  it('keeps notes and last-contact dates separate for children created together', async () => {
+    mockStudentSaveQueries();
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
+    const names = screen.getAllByPlaceholderText('Jonas Jonaitis');
+    const emails = screen.getAllByPlaceholderText('jonas@example.com');
+    for (const [index, name] of ['Pirmas', 'Antras'].entries()) {
+      fireEvent.change(names[index], { target: { value: name } });
+      fireEvent.change(emails[index], { target: { value: `${name.toLowerCase()}@example.test` } });
+      fireEvent.change(screen.getAllByLabelText('Administracijos komentarai')[index], { target: { value: `${name} privatus` } });
+      fireEvent.change(screen.getAllByLabelText('Paskutinį kartą kontaktuota')[index], { target: { value: `2026-09-${28 + index}` } });
+      fireEvent.change(screen.getAllByLabelText('Komentaras korepetitoriui')[index], { target: { value: `${name} mokytojui` } });
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Tik mokinį' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti', exact: true }));
+
+    await waitFor(() => expect(testState.rpc).toHaveBeenCalledTimes(2));
+    expect(testState.rpc.mock.calls).toEqual([
+      ['save_student_notes', { p_student_ids: ['created-child-1'], p_admin_comment: 'Pirmas privatus', p_last_contacted_at: '2026-09-28', p_tutor_comment: 'Pirmas mokytojui' }],
+      ['save_student_notes', { p_student_ids: ['created-child-2'], p_admin_comment: 'Antras privatus', p_last_contacted_at: '2026-09-29', p_tutor_comment: 'Antras mokytojui' }],
+    ]);
+    expect(testState.studentInserts.map((row) => row.admin_comment)).toEqual(['Pirmas mokytojui', 'Antras mokytojui']);
+    expect(testState.studentInserts.every((row) => !JSON.stringify(row).includes('privatus'))).toBe(true);
+  });
+
+  it('saves a sibling’s private notes separately when adding them from an existing student card', async () => {
+    const existing = testState.cache.students[0] as Record<string, unknown>;
+    Object.assign(existing, { payer_name: 'Renata', payer_email: 'renata@example.test', parent_user_id: 'parent-1' });
+    mockStudentSaveQueries();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ success: true }) })));
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
+    fireEvent.change(screen.getByTestId('sibling-child-name'), { target: { value: 'Toma' } });
+    fireEvent.change(screen.getByPlaceholderText('jonas@example.com'), { target: { value: 'toma@example.test' } });
+    const sibling = screen.getByTestId('sibling-child-name').closest('[role="dialog"]') as HTMLElement;
+    fireEvent.change(within(sibling).getByLabelText('Administracijos komentarai'), { target: { value: 'Tik Tomos administracijai' } });
+    fireEvent.change(within(sibling).getByLabelText('Paskutinį kartą kontaktuota'), { target: { value: '2026-09-27' } });
+    fireEvent.change(within(sibling).getByLabelText('Komentaras korepetitoriui'), { target: { value: 'Tomai reikia kartojimo' } });
+    fireEvent.click(screen.getByTestId('save-existing-sibling'));
+
+    await waitFor(() => expect(testState.rpc).toHaveBeenCalledWith('save_student_notes', {
+      p_student_ids: ['created-child-1'], p_admin_comment: 'Tik Tomos administracijai',
+      p_last_contacted_at: '2026-09-27', p_tutor_comment: 'Tomai reikia kartojimo',
+    }));
+    expect(testState.studentInserts[0]).toMatchObject({ admin_comment: 'Tomai reikia kartojimo', admin_comment_visible_to_tutor: true });
+    expect(JSON.stringify(testState.studentInserts[0])).not.toContain('Tik Tomos administracijai');
+    expect(testState.rpc.mock.calls.every(([, payload]) => !payload.p_student_ids?.includes('pk-1'))).toBe(true);
+  });
+
+  it('preserves the failed notes draft for retry without creating another student or sending duplicate invitations', async () => {
+    mockStudentSaveQueries();
+    testState.rpc.mockResolvedValueOnce({ data: null, error: { message: 'notes unavailable' } });
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+    fireEvent.change(screen.getByPlaceholderText('Jonas Jonaitis'), { target: { value: 'Ieva' } });
+    fireEvent.change(screen.getByPlaceholderText('jonas@example.com'), { target: { value: 'ieva@example.test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Tik mokinį' }));
+    fireEvent.change(screen.getByLabelText('Administracijos komentarai'), { target: { value: 'Išsaugoti šį privatų juodraštį' } });
+    fireEvent.change(screen.getByLabelText('Paskutinį kartą kontaktuota'), { target: { value: '2026-09-29' } });
+    fireEvent.change(screen.getByLabelText('Komentaras korepetitoriui'), { target: { value: 'Kartoti prieš testą' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti', exact: true }));
+
+    const retry = await screen.findByRole('button', { name: 'Bandyti dar kartą' });
+    await waitFor(() => expect(testState.sendEmailDetailed).toHaveBeenCalledOnce());
+    expect(testState.studentInserts).toHaveLength(1);
+    fireEvent.click(retry);
+    await waitFor(() => expect(testState.rpc).toHaveBeenCalledTimes(2));
+    expect(testState.rpc.mock.calls[1]).toEqual(testState.rpc.mock.calls[0]);
+    expect(testState.rpc.mock.calls[1][1]).toMatchObject({
+      p_student_ids: ['created-child-1'], p_admin_comment: 'Išsaugoti šį privatų juodraštį',
+      p_last_contacted_at: '2026-09-29', p_tutor_comment: 'Kartoti prieš testą',
+    });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Bandyti dar kartą' })).toBeNull());
+    expect(testState.studentInserts).toHaveLength(1);
+    expect(testState.sendEmailDetailed).toHaveBeenCalledOnce();
   });
 });

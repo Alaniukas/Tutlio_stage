@@ -18,6 +18,7 @@ vi.mock('../../api/_lib/auth.js', () => ({
 import handler from '../../api/generate-invoice';
 
 function query(table: string) {
+  let from = 0, to = Infinity;
   const q = {
     select() { return q; },
     eq(column: string, value: unknown) { mocks.filters.push(['eq', column, value]); return q; },
@@ -27,12 +28,13 @@ function query(table: string) {
     lte(column: string, value: unknown) { mocks.filters.push(['lte', column, value]); return q; },
     neq(column: string, value: unknown) { mocks.filters.push(['neq', column, value]); return q; },
     order() { return q; },
+    range(first: number, last: number) { from = first; to = last + 1; return q; },
     single: async () => ({
       data: { id: 'tutor-1', full_name: 'Tutor', organization_id: MANO_KOREPETITORIUS_ORG_ID,
         company_commission_percent: mocks.profileRate, company_commission_by_subject: {} },
       error: null,
     }),
-    maybeSingle: async () => ({ data: null, error: null }),
+    maybeSingle: async () => ({ data: table === 'organizations' ? { entity_type: 'company' } : null, error: null }),
     then(resolve: (value: unknown) => unknown) {
       const sessions = [{ id: 'lesson-1', tutor_id: 'tutor-1', status: 'completed',
         start_time: '2026-09-15T10:00:00Z', end_time: '2026-09-15T11:00:00Z',
@@ -41,7 +43,7 @@ function query(table: string) {
         : table === 'invoices' ? mocks.invoiceRows
           : table === 'invoice_line_items' ? mocks.itemRows : [];
       const error = table === 'invoice_line_items' ? mocks.itemError : null;
-      return Promise.resolve({ data, error }).then(resolve);
+      return Promise.resolve({ data: data.slice(from, to), error }).then(resolve);
     },
   };
   return q;

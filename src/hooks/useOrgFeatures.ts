@@ -9,6 +9,7 @@ import { useUser } from '@/contexts/UserContext';
 import { isAuthLockAbort } from '@/lib/authSession';
 import { FEATURE_REGISTRY } from '@/lib/featureRegistry';
 import { parseOrgContactVisibility, type OrgContactVisibility } from '@/lib/orgContactVisibility';
+import { orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 
 interface OrgFeaturesState {
   loading: boolean;
@@ -95,7 +96,9 @@ export function useOrgFeatures(): OrgFeaturesState {
           if (featureId === 'perlas_finance' && v === undefined) {
             v = (org as { perlas_finance_enabled?: boolean }).perlas_finance_enabled;
           }
-          mergedFeatures[featureId] = v ?? definition.defaultValue;
+          mergedFeatures[featureId] = featureId === 'tutor_lesson_status_confirmation'
+            ? orgRequiresTutorStatusConfirmation(orgId, org.features)
+            : v ?? definition.defaultValue;
         });
 
         setFeatures(mergedFeatures);
@@ -164,7 +167,9 @@ export function useOrgFeature(organizationId: string | null, featureId: string) 
         if (featureId === 'manual_payments' && raw === undefined) {
           raw = org.features?.enable_manual_student_payments as boolean | undefined;
         }
-        const isEnabled = raw ?? featureDef?.defaultValue ?? false;
+        const isEnabled = featureId === 'tutor_lesson_status_confirmation'
+          ? orgRequiresTutorStatusConfirmation(organizationId, org.features)
+          : raw ?? featureDef?.defaultValue ?? false;
 
         setEnabled(isEnabled);
       } catch (error) {

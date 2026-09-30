@@ -15,7 +15,9 @@ import {
   orgTutorSessionPayEur,
 } from '../src/lib/orgTutorLessonPay.js';
 import { findUnpricedManoTutorSessions } from './_lib/manoKorepetitoriusPayGuard.js';
-import { proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
+import { invoicePartyMatches, proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
+import { findSchoolAttendanceDuplicateInvoices, loadSchoolTutorInvoiceRows, SCHOOL_TUTOR_INVOICE_LAYOUT, SchoolTutorInvoiceSelectionError } from './_lib/schoolTutorInvoice.js';
+import { SchoolTutorAttendancePayPeriodError } from './_lib/schoolTutorAttendancePay.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { allocateInvoiceNumber, formatInvoiceSeriesHeading } from './_lib/invoiceNumber.js';
@@ -25,6 +27,7 @@ import {
   orgHasPvmEducationInvoice,
 } from './_lib/pvmEducationInvoice.js';
 import { isInvoiceProfileComplete, ORG_INVOICE_PROFILE_INCOMPLETE } from './_lib/invoiceProfileReady.js';
+import { fetchAllRows } from '../src/lib/fetchAllRows.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -42,6 +45,8 @@ interface GenerateInvoiceBody {
   isOrgTutor?: boolean;
   onlyPaid?: boolean;
   sessionIds?: string[];
+  /** Teacher-only attendance sources; never treated as child billable sessions. */
+  attendanceIds?: string[];
   /** Manual org payment: prepaid packages invoiced as one line (paid_at), not per session */
   packageIds?: string[];
   /** Validate only, do not create invoice */
@@ -91,6 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const end = new Date(periodEnd);
   const daysDiff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
 
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return res.status(400).json({ error: 'Invalid invoice period' });
   if (daysDiff < 0) return res.status(400).json({ error: 'End date must be after start date' });
   if (daysDiff > 90) return res.status(400).json({ error: 'Period cannot exceed 90 days' });
 
@@ -125,6 +131,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (tutorId !== issuingUserId) {
           return res.status(403).json({ error: 'Tutors can only generate their own invoices' });
         }
+      }
+    }
+
+    let schoolTutorInvoice = false;
+    let schoolOrg: any = null;
+    let schoolOrgInvoiceProfile: any = null;
+    if (isOrgTutor && profile.organization_id) {
+      const { data, error } = await supabase.from('organizations').select('entity_type,name,email,features')
+        .eq('id', profile.organization_id).maybeSingle();
+      if (error || !data?.entity_type) return res.status(503).json({ error: 'Organization invoice policy unavailable' });
+      schoolTutorInvoice = data.entity_type === 'school';
+      if (schoolTutorInvoice) {
+        schoolOrg = data;
+        const result = await supabase.from('invoice_profiles').select('*').eq('organization_id', profile.organization_id).maybeSingle();
+        if (result.error) return res.status(503).json({ error: 'Organization invoice identity unavailable' });
+        schoolOrgInvoiceProfile = result.data;
       }
     }
 
@@ -180,25 +202,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const sessionSelect = `
-        id, tutor_id, price, start_time, subject_id, student_id, status, is_complimentary, status_confirmed_at, tutor_pay_eur_snapshot,
+        id, tutor_id, class_group_id, price, start_time, end_time, subject_id, student_id, status, no_show_reason, is_complimentary, status_confirmed_at, tutor_pay_eur_snapshot,
         students!inner(id, full_name, email, payer_email, payer_name, payer_phone, grade),
-        subjects(name, is_trial)
+        subjects(name, is_trial, is_group)
       `;
 
     let sessions: any[] = [];
     let sessErr: any = null;
 
     const hasSessionIds = !!(body.sessionIds && body.sessionIds.length > 0);
+    if (body.attendanceIds !== undefined && (!Array.isArray(body.attendanceIds)
+      || body.attendanceIds.length > 5000
+      || body.attendanceIds.some(id => typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)))) {
+      return res.status(400).json({ error: 'Invalid school attendance selection' });
+    }
+    if (body.attendanceIds?.length && !schoolTutorInvoice) {
+      return res.status(400).json({ error: 'Attendance sources are only available for school teacher invoices' });
+    }
     const hasPackageIds = resolvedPackageIds.length > 0;
     const manoTutorInvoice = isManoKorepetitoriusTutorInvoice(!!isOrgTutor, profile.organization_id);
-    if (manoTutorInvoice && hasPackageIds) {
+    if ((manoTutorInvoice || schoolTutorInvoice) && hasPackageIds) {
       return res.status(400).json({ error: 'Korepetitoriaus atlygio sąskaitoje negalima įtraukti pamokų paketų.' });
     }
     if (manoTutorInvoice && groupingType !== 'single') {
       return res.status(400).json({ error: 'Korepetitoriaus mėnesio atlygiui galima išrašyti tik vieną bendrą sąskaitą.' });
     }
 
-    if (hasSessionIds) {
+    if (schoolTutorInvoice) {
+      let occurrences;
+      try {
+        occurrences = await loadSchoolTutorInvoiceRows(supabase, sessionSelect, { tutorId, periodStart, periodEnd,
+          sessionIds: body.sessionIds, attendanceIds: body.attendanceIds, studentId, defaultRate: profile.company_commission_percent, now: new Date(),
+          organizationId: profile.organization_id, features: schoolOrg?.features });
+      } catch (error) {
+        if (error instanceof SchoolTutorInvoiceSelectionError) return res.status(409).json({ error: error.message });
+        if (error instanceof SchoolTutorAttendancePayPeriodError) return res.status(400).json({ error: error.message });
+        throw error;
+      }
+      const missingCount = occurrences.filter(occurrence => occurrence.payIssue === 'missing_rate').length;
+      const conflictCount = occurrences.filter(occurrence => occurrence.payIssue === 'conflicting_snapshot').length;
+      if (missingCount || conflictCount) return res.status(422).json({ code: 'SCHOOL_TUTOR_PAY_UNRESOLVED', missingCount, conflictCount,
+        error: 'Užsiėmimų mokytojo atlygis nenustatytas arba nesutampa. Administracija turi patikrinti mokytojo atlygį prieš išrašant sąskaitą.' });
+      sessions = occurrences.map(occurrence => ({ ...occurrence.row, __schoolPayEur: occurrence.payEur,
+        __schoolSessionIds: occurrence.sessionIds, __schoolAttendanceIds: occurrence.attendanceIds, __schoolMeetingKey: occurrence.key }));
+    } else if (hasSessionIds) {
       let sessionQuery = supabase
         .from('sessions')
         .select(sessionSelect)
@@ -429,33 +476,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // second request uses a different or overlapping date range. Customer sales
     // invoices can legitimately contain the same lesson, so distinguish the
     // tutor invoice by its stored PDF layout.
+    if (schoolTutorInvoice && profile.organization_id) {
+      const duplicates = await findSchoolAttendanceDuplicateInvoices(supabase, {
+        organizationId: profile.organization_id, tutorId,
+        meetingKeys: sessions.map(row => row.__schoolMeetingKey),
+        attendanceIds: [...new Set<string>(sessions.flatMap(row => row.__schoolAttendanceIds || []))],
+      });
+      if (duplicates.length) {
+        const invoiceNumbers = duplicates.map(invoice => invoice.invoice_number).filter(Boolean);
+        const totalAmount = duplicates.reduce((sum, invoice) => sum + Number(invoice.total_amount || 0), 0);
+        const error = `Invoice already issued for these teacher meetings (${invoiceNumbers.join(', ') || 'existing invoice'}), total €${totalAmount.toFixed(2)}`;
+        return res.status(precheckOnly ? 200 : 400).json(precheckOnly
+          ? { canGenerate: false, reason: 'duplicate', invoiceNumbers, totalAmount, error } : { error });
+      }
+    }
     if (profile.organization_id && (isOrgTutor || pvmEducationInvoice)) {
       const candidateSessionIds = new Set(
         sessions
           .filter((s: any) => !s.__fromPackage)
-          .map((s: any) => s.id)
+          .flatMap((s: any) => s.__schoolSessionIds || [s.id])
           .filter(Boolean),
       );
       if (candidateSessionIds.size > 0) {
         let existingInvoices: any[] = [];
         let lineItems: any[] = [];
-        if (manoTutorInvoice) {
-          const { data: matchingItems, error: itemsErr } = await supabase
-            .from('invoice_line_items')
-            .select('invoice_id, session_ids')
-            .overlaps('session_ids', [...candidateSessionIds]);
-          if (itemsErr) return res.status(500).json({ error: itemsErr.message });
-          lineItems = matchingItems || [];
+        if (manoTutorInvoice || schoolTutorInvoice) {
+          const candidateIds = [...candidateSessionIds];
+          for (let offset = 0; offset < candidateIds.length; offset += 200) {
+            lineItems.push(...await fetchAllRows<any>((from, to) => supabase
+              .from('invoice_line_items').select('id,invoice_id,session_ids')
+              .overlaps('session_ids', candidateIds.slice(offset, offset + 200)).order('id').range(from, to)));
+          }
           const matchingInvoiceIds = [...new Set(lineItems.map((li: any) => li.invoice_id))];
           if (matchingInvoiceIds.length > 0) {
-            const { data, error } = await supabase
-              .from('invoices')
-              .select('id, invoice_number, total_amount, pdf_meta')
-              .in('id', matchingInvoiceIds)
-              .eq('organization_id', profile.organization_id)
-              .neq('status', 'cancelled');
-            if (error) return res.status(500).json({ error: error.message });
-            existingInvoices = (data || []).filter((inv: any) => inv.pdf_meta?.layout === CLASSIC_LT_TUTOR_LAYOUT);
+            const data: any[] = [];
+            for (let offset = 0; offset < matchingInvoiceIds.length; offset += 200) {
+              data.push(...await fetchAllRows<any>((from, to) => supabase.from('invoices')
+                .select('id, invoice_number, total_amount, pdf_meta, seller_snapshot, buyer_snapshot, issued_by_user_id')
+                .in('id', matchingInvoiceIds.slice(offset, offset + 200))
+                .eq('organization_id', profile.organization_id).neq('status', 'cancelled')
+                .order('id').range(from, to)));
+            }
+            const schoolBuyer = { name: schoolOrgInvoiceProfile?.business_name || schoolOrg?.name,
+              companyCode: schoolOrgInvoiceProfile?.company_code };
+            existingInvoices = (data || []).filter((inv: any) => schoolTutorInvoice
+              ? (inv.pdf_meta?.layout === SCHOOL_TUTOR_INVOICE_LAYOUT && inv.pdf_meta?.tutorId === tutorId)
+                || (!inv.pdf_meta?.layout && invoicePartyMatches(inv.buyer_snapshot, schoolBuyer)
+                  && invoicePartyMatches(inv.seller_snapshot, buildSellerSnapshot(sellerProfile, profile)))
+              : inv.pdf_meta?.layout === CLASSIC_LT_TUTOR_LAYOUT);
           }
         } else {
           const { data, error } = await supabase
@@ -521,17 +589,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 2) Org tutor → company (hourly/commission): seller = tutor invoice profile, buyer = org — isOrgTutor true.
     let organizationAsBuyer: InvoicePdfData['buyer'] | null = null;
     if (isOrgTutor && profile.organization_id) {
-      const { data: org } = await supabase
+      const org = schoolOrg || (await supabase
         .from('organizations')
         .select('name, email')
         .eq('id', profile.organization_id)
-        .single();
+        .single()).data;
 
-      const { data: orgInvProfile } = await supabase
+      const orgInvProfile = schoolTutorInvoice ? schoolOrgInvoiceProfile : (await supabase
         .from('invoice_profiles')
         .select('*')
         .eq('organization_id', profile.organization_id)
-        .maybeSingle();
+        .maybeSingle()).data;
 
       organizationAsBuyer = {
         name: orgInvProfile?.business_name || org?.name || 'Organization',
@@ -566,7 +634,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const orgTutorRateEur = isOrgTutor ? Number((profile as any)?.company_commission_percent) || 0 : null;
       const proKlasePay = isOrgTutor && isProKlaseOrg(profile.organization_id);
       const lessonPayEur = (s: { status?: string; price?: number | null; subject_id?: string | null; subjects?: unknown }) =>
-        proKlasePay
+        schoolTutorInvoice ? Number((s as any).__schoolPayEur) : proKlasePay
           ? proKlaseSessionPayEur(
               { status: String(s.status || ''), price: s.price, subjects: s.subjects as { is_trial?: boolean | null } | null, status_confirmed_at: (s as any).status_confirmed_at },
               orgTutorRateEur,
@@ -626,7 +694,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               issuedByName: sellerSnapshot.name,
               lessonPayEur: (s) => lessonPayEur(s as any),
             })
-          : null;
+          : schoolTutorInvoice ? { layout: SCHOOL_TUTOR_INVOICE_LAYOUT, tutorId,
+              schoolMeetingKeys: [...new Set<string>(group.sessions.map(session => session.__schoolMeetingKey))] } as const : null;
 
       const invoiceNumber = await allocateInvoiceNumber(supabase, sellerProfile.id);
 
@@ -670,6 +739,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         unit_price: li.unitPrice,
         total_price: li.totalPrice,
         session_ids: li.sessionIds,
+        ...(schoolTutorInvoice ? { school_attendance_ids: li.attendanceIds || [] } : {}),
       }));
 
       const { error: liInsertErr } = await supabase.from('invoice_line_items').insert(lineItemInserts);
@@ -710,7 +780,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           totalAmount,
           branding: branding ?? undefined,
           isVatInvoice: !!sellerSnapshot.vatCode || !!pvmMeta,
-          invoiceNumberLabel: pdfMeta
+          invoiceNumberLabel: pvmMeta || classicTutorMeta
             ? formatInvoiceSeriesHeading(invoiceNumber)
             : `Nr. ${invoiceNumber}`,
           ...(pvmMeta
@@ -767,7 +837,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .in('id', invoicedPkgIds);
       }
 
-      if (onlyPaid) {
+      if (onlyPaid && !schoolTutorInvoice) {
         const pkgSet = new Set(resolvedPackageIds);
         const invoicedSessionIds = lineItems.flatMap(li => li.sessionIds).filter(id => !pkgSet.has(id));
         if (invoicedSessionIds.length > 0) {
@@ -896,6 +966,7 @@ interface LineItemData {
   unitPrice: number;
   totalPrice: number;
   sessionIds: string[];
+  attendanceIds?: string[];
 }
 
 function buildLineItems(
@@ -937,7 +1008,8 @@ function buildLineItems(
           quantity: 1,
           unitPrice: amount,
           totalPrice: amount,
-          sessionIds: [s.id],
+          sessionIds: s.__schoolSessionIds || [s.id],
+          ...(s.__schoolAttendanceIds ? { attendanceIds: s.__schoolAttendanceIds } : {}),
         };
       });
     }
@@ -957,7 +1029,8 @@ function buildLineItems(
         quantity: qty,
         unitPrice,
         totalPrice: Math.round(totalPrice * 100) / 100,
-        sessionIds: group.sessions.map((s: any) => s.id),
+        sessionIds: [...new Set(group.sessions.flatMap((s: any) => s.__schoolSessionIds || [s.id]))] as string[],
+        attendanceIds: [...new Set<string>(group.sessions.flatMap((s: any) => s.__schoolAttendanceIds || []))],
       };
     });
   }

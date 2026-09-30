@@ -6,6 +6,18 @@
 import { en } from './en.js';
 
 export const filOverrides: Record<string, string> = {
+  "landing.agencyCta.title": "Tingnan kung paano magagamit ang Tutlio sa iyong ahensiya",
+  "landing.agencyCta.desc": "Sa isang demo, maaari nating talakayin ang iyong team, mga mag-aaral at pakikipag-ugnayan sa mga magulang upang mahanap ang angkop na plano.",
+  "landing.agencyFaq.whatIsQ": "Ano ang Tutlio para sa mga ahensiya ng tutoring?",
+  "landing.agencyFaq.whatIsA": "Pinagsasama ng Tutlio ang mga iskedyul ng tutor, mga mag-aaral, account ng magulang, bayad at ulat sa iisang sistema para sa pamamahala ng ahensiya.",
+  "landing.agencyFaq.teamQ": "Maaari ba kaming mamahala ng maraming tutor at account ng magulang?",
+  "landing.agencyFaq.teamA": "Oo. Nakikita ng mga administrator ang mga klase at bakanteng oras ng team, habang maaaring tingnan ng mga magulang ang iskedyul at mga bayad ng kanilang anak sa sarili nilang account.",
+  "landing.agencyFaq.customizationQ": "Maaari bang iangkop ang Tutlio sa aming paraan ng pagtatrabaho?",
+  "landing.agencyFaq.customizationA": "Maaari nating suriin ang iyong proseso ng booking, kontrata at pagbabayad at talakayin kung paano ito ise-set up sa Tutlio.",
+  "landing.agencyFaq.pricingQ": "Paano tinutukoy ang presyo para sa mga ahensiya?",
+  "landing.agencyFaq.pricingA": "Nakabatay ang presyo sa laki ng team at sa napiling plano. Maaari mong tingnan ang mga opsiyon sa pahina ng pagpepresyo at talakayin ang isang tiyak na alok.",
+  "landing.agencyFaq.demoQ": "Maaari ba kaming makakita ng demo bago magpasya?",
+  "landing.agencyFaq.demoA": "Oo. Maaari kang mag-iskedyul ng tawag mula sa pahina ng pagpepresyo upang makita ang mga prosesong mahalaga sa iyong team.",
   'compSch.notifyStudentEmail': 'Ipaalam sa mag-aaral sa pamamagitan ng email',
   "cal.deleteAllRemaining": "Lahat ng natitirang sesyon sa seryeng ito",
   "cal.deleteAllRemainingHint": "Binubura ang mga nakatakdang susunod na sesyon at mga nakanselang sesyon sa seryeng ito. Nananatili ang tala ng mga natapos na sesyon.",

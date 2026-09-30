@@ -57,6 +57,7 @@ function localDatabase(members = existingMembers()) {
     school_class_groups: [{ id: GROUP_ID, organization_id: ORG_ID, tutor_id: 'teacher-user' }],
     school_class_group_slots: SLOTS.map((slot) => ({ group_id: GROUP_ID, ...slot })),
     school_class_group_members: structuredClone(members),
+    session_recurrence_exclusions: [],
   };
   const memberWrites: Array<{ headers: Headers; rows: Row[] }> = [];
   const deletedMembers: Row[] = [];
@@ -69,8 +70,9 @@ function localDatabase(members = existingMembers()) {
     const headers = new Headers(init?.headers);
     const prefer = headers.get('Prefer') || '';
     const matches = (row: Row) => [...url.searchParams].every(([field, expression]) => {
-      if (['select', 'columns', 'on_conflict'].includes(field)) return true;
+      if (['select', 'columns', 'on_conflict', 'order', 'offset', 'limit'].includes(field)) return true;
       if (expression.startsWith('eq.')) return row[field] === expression.slice(3);
+      if (expression === 'is.null') return row[field] == null;
       if (expression.startsWith('in.(')) {
         const values = expression.slice(4, -1).split(',').map((value) => value.replace(/^"|"$/g, ''));
         return values.includes(String(row[field]));
@@ -81,7 +83,12 @@ function localDatabase(members = existingMembers()) {
       headers.get('Accept')?.includes('vnd.pgrst.object') ? rows[0] : rows,
     ), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
-    if (method === 'GET') return response(tables[table].filter(matches));
+    if (method === 'GET') {
+      const rows = tables[table].filter(matches);
+      const offset = Number(url.searchParams.get('offset') || 0);
+      const limit = Number(url.searchParams.get('limit') || rows.length);
+      return response(rows.slice(offset, offset + limit));
+    }
     if (method === 'DELETE') {
       if (table === 'school_class_group_members') deletedMembers.push(...tables[table].filter(matches));
       tables[table] = tables[table].filter((row) => !matches(row));
@@ -148,7 +155,7 @@ function writeBody(studentIds: string[]) {
   };
 }
 
-async function request(method: 'POST' | 'PATCH', body: Row) {
+async function request(method: 'GET' | 'POST' | 'PATCH', body: Row) {
   const result = { status: 0, body: null as Row | null };
   const res = {
     status(status: number) { result.status = status; return this; },
@@ -165,6 +172,27 @@ describe('/api/school-class-groups membership writes', () => {
     mocks.serviceSupabase.mockReset();
     mocks.materialize.mockReset().mockResolvedValue({ created: 7, deleted: 0, updated: 0, adopted: 0 });
     mocks.reconcileMinimum.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('gives teachers deletion exclusions only for their own visible groups', async () => {
+    const db = localDatabase();
+    db.tables.school_class_groups.push({ id: 'other-teacher-group', organization_id: ORG_ID, tutor_id: 'other-teacher' });
+    db.tables.session_recurrence_exclusions.push(
+      { id: 'own-exclusion', class_group_id: GROUP_ID, student_id: null, scope: 'single', start_time: '2026-09-30T06:00:00Z' },
+      { id: 'other-exclusion', class_group_id: 'other-teacher-group', student_id: 'private-student', scope: 'all', start_time: null },
+    );
+    mocks.serviceSupabase.mockReturnValue(db.client);
+    mocks.verifyAuth.mockResolvedValue({ userId: 'teacher-user', isInternal: false });
+    mocks.requireAdmin.mockResolvedValue({ ok: false, status: 403, error: 'Forbidden' });
+
+    const result = await request('GET', {});
+
+    expect(result.status).toBe(200);
+    expect(result.body?.groups).toEqual([expect.objectContaining({
+      id: GROUP_ID,
+      recurrence_exclusions: [{ student_id: null, scope: 'single', start_time: '2026-09-30T06:00:00Z' }],
+    })]);
+    expect(JSON.stringify(result.body)).not.toContain('private-student');
   });
 
   it('adds a seventh member to six existing members without resetting enrollment dates', async () => {

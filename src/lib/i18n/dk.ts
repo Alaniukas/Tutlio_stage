@@ -1,3 +1,4 @@
+import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
@@ -123,6 +124,7 @@ const DK_DPA_HTML = [
 ].join('');
 
 export const dk: Record<string, string> = {
+  ...studentNotesTranslations.dk,
   ...schoolFamilyMaterialTranslations.dk,
   ...schoolInvoiceReviewTranslations.dk,
   'school.recordings.access.title': "Adgang til optagelser",
@@ -150,6 +152,18 @@ export const dk: Record<string, string> = {
   'common.reloadPageWarning': "Hvis du genindlæser siden, går ændringer, der ikke er gemt, tabt. Vil du fortsætte?",
   ...familyCatalogTrialCopy.dk,
   ...sharedOrganizationWorkflowTranslations,
+  "landing.agencyCta.title": "Se, hvordan Tutlio kan fungere i dit bureau",
+  "landing.agencyCta.desc": "I en demo kan vi tale om dit team, eleverne og samarbejdet med forældrene og finde den rette plan.",
+  "landing.agencyFaq.whatIsQ": "Hvad er Tutlio til lektiehjælpsbureauer?",
+  "landing.agencyFaq.whatIsA": "Tutlio samler undervisernes skemaer, elever, forældrekonti, betalinger og rapporter i ét administrationssystem til bureauet.",
+  "landing.agencyFaq.teamQ": "Kan vi administrere flere undervisere og forældrekonti?",
+  "landing.agencyFaq.teamA": "Ja. Administratorer kan se teamets undervisning og ledige tider, mens forældre kan se deres barns skema og betalinger på deres egen konto.",
+  "landing.agencyFaq.customizationQ": "Kan Tutlio tilpasses vores arbejdsgange?",
+  "landing.agencyFaq.customizationA": "Vi kan gennemgå jeres booking-, kontrakt- og betalingsprocesser og tale om, hvordan de sættes op i Tutlio.",
+  "landing.agencyFaq.pricingQ": "Hvordan fastsættes prisen for bureauer?",
+  "landing.agencyFaq.pricingA": "Prisen for bureauet afhænger af teamets størrelse og den valgte plan. Du kan se mulighederne på prissiden og tale med os om et konkret tilbud.",
+  "landing.agencyFaq.demoQ": "Kan vi se en demo, før vi beslutter os?",
+  "landing.agencyFaq.demoA": "Ja. Du kan booke en samtale på prissiden for at se de arbejdsgange, der er vigtige for dit team.",
   ...schoolConsultationsTranslations.dk,
   'compSess.markAttended': 'Eleven deltog',
   'att.confirmedManually': 'Fremmøde bekræftet',
@@ -2997,6 +3011,9 @@ export const dk: Record<string, string> = {
   'em.stripePaySub': '💳 Betaling for lektion – {student}, {date}',
   'em.stripeRedirect': 'Linket videresender til en sikker Stripe-betalingsside.',
   'em.studentContacts': 'Elevkontakter:',
+  "em.orgStudentInviteSub": "Dit registreringslink fra {org}",
+  "em.orgStudentInviteHeaderSub": "{org} inviterer dig til platformen",
+  "em.orgStudentInviteBody": "<strong>{org}</strong> har tilføjet dig til systemet. Fuldfør registreringen for at se skemaet og booke lektioner.",
   'em.studentInviteBody': 'Din tutor <strong>{tutor}</strong> tilføjede dig til systemet. For at se skemaet og booke lektioner, fuldfør registreringen.',
   'em.studentInviteCodeLabel': 'Din invitationskode:',
   'em.schoolStudentInviteCodeLabel': 'Dit barns registreringskode:',
@@ -5434,6 +5451,20 @@ export const dk: Record<string, string> = {
   'school.groups.deleteConfirm': "Slet gruppen \"{name}\"? Alle kommende lektioner i gruppen slettes også.",
   'school.groups.deleteFailed': "Gruppen kunne ikke slettes.",
   'school.groups.noMatches': "Ingen grupper matcher filteret.",
+  'school.groups.noSessionForOccurrence': "Denne lektion er ikke planlagt for denne elev.",
+  'school.groups.contractUnconfirmed': "Aftalen er ikke bekræftet",
+  'schoolDash.attendedWithoutContractTitle': "Deltog før aftalen blev bekræftet",
+  'schoolDash.attendedWithoutContractDescription': "Eleven deltog i en lektion, mens aftalen om ekstra lektioner endnu ikke var bekræftet.",
+  'schoolDash.contractAttendanceLoadFailed': "Meddelelser om deltagelse uden en bekræftet aftale kunne ikke indlæses.",
+  'schoolDash.contractAttendanceShownCount': "Viser {shown} af {total} meddelelser.",
+  'orgFinance.schoolCurrentPayRate': "Aktuelt fastsat grundtakst: {amount} € pr. lektion.",
+  'orgFinance.schoolSummaryNote': "Gruppelektioner tælles én gang. Vederlaget beregnes efter den gemte lektionstakst eller den aktuelle grundtakst, hvis der ikke er en gemt takst. Skolen håndterer betalingerne.",
+  'orgFinance.schoolFinalizedLessons': "Lektioner med endeligt resultat",
+  'orgFinance.schoolUnresolvedPay': "Lektioner med manglende eller modstridende vederlagstakster: {count}. Skolen skal gennemgå dem.",
+  'orgFinance.schoolKnownPayTotal': "Beløb efter kendte takster",
+  'orgFinance.schoolRateSettingsHint': "Indstil grundtaksten: Lærere → vælg en lærer → Vederlag (€/lektion).",
+  'orgFinance.schoolPayPriceIndependence': "Priserne i elevernes aftaler bestemmer ikke lærerens vederlag.",
+  'orgFinance.schoolPayPending': "Afventer vederlagstakst",
   'lesson.joinOpensAt': "Du kan deltage fra {time}",
   'em.reminderPayerSchoolLead': "Påmindelse: dit barns <strong>{student}</strong> lektion starter snart. Linket til at deltage er nedenfor.",
   'em.reminderPayerJoinBtn': "Deltag i lektionen",
@@ -5746,4 +5777,7 @@ export const dk: Record<string, string> = {
   'em.schoolJoinSubject': 'Deltag i lektionen {date} kl. {time}',
   'em.schoolJoinHeader': 'Deltag i lektionen',
   'em.schoolJoinBody': 'Din lektion starter {date} kl. {time}. Brug linket nedenfor.',
+  'chat.registrationPending': 'Afventer registrering',
+  'chat.registrationPendingHint': 'Beskeder er tilgængelige, når elevkontoen er tilknyttet. Bed organisationens administrator om at kontrollere elevens e-mailadresse og konto, eller bed eleven om at færdiggøre registreringen.',
+  'chat.startConversationFailed': 'Samtalen kunne ikke startes. Prøv igen, eller kontakt organisationens administrator.',
 };

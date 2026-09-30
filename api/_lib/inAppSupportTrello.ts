@@ -1,4 +1,9 @@
 import type { InAppSupportPriority } from '../../src/lib/inAppSupport.js';
+import {
+  getTrelloFeatureListSettings,
+  type TrelloFeatureListSettings,
+  type TrelloSupportLists,
+} from './inAppSupportTrelloConfig.js';
 
 export type TrelloSupportStatus =
   | 'registered'
@@ -25,11 +30,18 @@ export type InAppSupportTrelloResult =
   | { synced: false; reason: 'not_configured' }
   | { synced: true; cardId: string; cardUrl: string | null; created: boolean };
 
+export type InAppSupportTrelloSyncOptions = {
+  allowCreate?: boolean;
+  beforeWrite?: () => Promise<InAppSupportTrelloInput>;
+  beforeCreate?: () => Promise<void>;
+};
+
 interface TrelloConfig {
   key: string;
   token: string;
   boardId: string;
-  lists: { registered: string; inProgress: string; resolved: string };
+  lists: TrelloSupportLists;
+  featureListSettings: TrelloFeatureListSettings;
 }
 
 function config(): TrelloConfig | null {
@@ -40,7 +52,8 @@ function config(): TrelloConfig | null {
   const inProgress = process.env.TRELLO_LIST_IN_PROGRESS_ID?.trim();
   const resolved = process.env.TRELLO_LIST_RESOLVED_ID?.trim();
   if (!key || !token || !boardId || !registered || !inProgress || !resolved) return null;
-  return { key, token, boardId, lists: { registered, inProgress, resolved } };
+  const lists = { registered, inProgress, resolved };
+  return { key, token, boardId, lists, featureListSettings: getTrelloFeatureListSettings(lists) };
 }
 
 function stage(status: TrelloSupportStatus): keyof TrelloConfig['lists'] {
@@ -123,10 +136,12 @@ async function findCardByReference(trello: TrelloConfig, reference: string): Pro
   const result = await response.json() as { cards?: unknown } | TrelloCard[];
   const cards = Array.isArray(result) ? result : result.cards;
   if (!Array.isArray(cards)) throw new Error('Trello card lookup returned an invalid response.');
-  return cards.find((card) => card && typeof card === 'object' && card.idBoard === trello.boardId && (
+  const matching = cards.filter((card) => card && typeof card === 'object' && card.idBoard === trello.boardId && (
     String(card.name || '').startsWith(`${reference} · `)
     || String(card.desc || '').split('\n', 1)[0] === `Tutlio support reference: ${reference}`
-  )) || null;
+  ));
+  if (matching.length > 1) throw new Error('Multiple Trello cards match this support reference. Review the cards before retrying.');
+  return matching[0] || null;
 }
 
 function cardUrl(card: TrelloCard): string | null {
@@ -140,27 +155,50 @@ function cardUrl(card: TrelloCard): string | null {
  * attachments stay in Tutlio. Persist the returned cardId before the next sync;
  * passing it back turns subsequent calls into idempotent updates.
  */
-export async function syncInAppSupportTrelloCard(input: InAppSupportTrelloInput): Promise<InAppSupportTrelloResult> {
+export async function syncInAppSupportTrelloCard(
+  input: InAppSupportTrelloInput,
+  options: InAppSupportTrelloSyncOptions = {},
+): Promise<InAppSupportTrelloResult> {
   const trello = config();
   if (!trello) return { synced: false, reason: 'not_configured' };
+  if (input.category === 'feature' && trello.featureListSettings.state === 'invalid') {
+    throw new Error(trello.featureListSettings.error);
+  }
 
   // Search before creating to recover a card when an earlier POST succeeded but
   // the database write of its ID failed. Match the exact reference on this board.
   const existingCard = input.cardId?.trim() ? null : await findCardByReference(trello, input.reference);
-  const existingId = input.cardId?.trim() || (typeof existingCard?.id === 'string' ? existingCard.id : null);
+  // The lookup can take several seconds. Re-read the claimed ticket before an
+  // outbound write so an earlier caller snapshot cannot restore its old status.
+  const current = options.beforeWrite ? await options.beforeWrite() : input;
+  if (current.reference !== input.reference) throw new Error('The support reference changed during synchronization.');
+  if (current.category === 'feature' && trello.featureListSettings.state === 'invalid') {
+    throw new Error(trello.featureListSettings.error);
+  }
+  const lists = current.category === 'feature' && trello.featureListSettings.state === 'configured'
+    ? trello.featureListSettings.lists : trello.lists;
+  const existingId = current.cardId?.trim() || input.cardId?.trim()
+    || (typeof existingCard?.id === 'string' ? existingCard.id : null);
+  if (!existingId && options.allowCreate === false) {
+    throw new Error('A previous Trello card creation may have succeeded. No matching card was found; review the board before retrying.');
+  }
   const url = existingId
     ? `https://api.trello.com/1/cards/${encodeURIComponent(existingId)}`
     : 'https://api.trello.com/1/cards';
-  const due = dueValue(input.dueAt);
+  const due = dueValue(current.dueAt);
   const body: Record<string, string | null> = {
-    idList: trello.lists[stage(input.status)],
+    idList: lists[stage(current.status)],
     // Ticket titles may contain student names or other free-form personal data.
     // The team can open the full report in Tutlio using the reference below.
-    name: `${input.reference} · [${priorityLabel(input.priority)}] ${input.category === 'bug' ? 'Bug' : 'Feature'} ${safePage(input.page)}`,
-    desc: cardDescription(input),
+    name: `${current.reference} · [${priorityLabel(current.priority)}] ${current.category === 'bug' ? 'Bug' : 'Feature'} ${safePage(current.page)}`,
+    desc: cardDescription(current),
   };
-  if (!existingId && (input.priority === 'urgent' || input.priority === 'high')) body.pos = 'top';
+  if (!existingId && (current.priority === 'urgent' || current.priority === 'high')) body.pos = 'top';
   if (due !== undefined && (existingId || due !== null)) body.due = due;
+
+  // Persist uncertainty before POST, including crashes and response timeouts.
+  // Recovery may search and update a found card, but must not create another.
+  if (!existingId && options.beforeCreate) await options.beforeCreate();
 
   const response = await fetch(url, {
     method: existingId ? 'PUT' : 'POST',
