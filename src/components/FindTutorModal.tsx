@@ -25,6 +25,7 @@ import { availabilitySlotKey } from '@/lib/pickedAvailabilityTime';
 import { expandBusyByBreak } from '@/lib/sessionBreakConflict';
 import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 
 export type TutorSlotPick = MatchSlot;
 
@@ -298,66 +299,78 @@ export default function FindTutorModal({
     const to = new Date(effectiveDateTo);
     to.setHours(23, 59, 59, 999);
 
-    const { data: availability } = await supabase
-      .from('availability')
-      .select('tutor_id, day_of_week, start_time, end_time, is_recurring, specific_date, end_date, created_at, subject_ids')
-      .in('tutor_id', tutorIdList);
+    try {
+      const [availability, sessions] = await Promise.all([
+        fetchAllRows<AvailabilityRule>((pageFrom, pageTo) => supabase
+          .from('availability')
+          .select('tutor_id, day_of_week, start_time, end_time, is_recurring, specific_date, start_date, end_date, created_at, subject_ids')
+          .in('tutor_id', tutorIdList)
+          .order('id', { ascending: true })
+          .range(pageFrom, pageTo)),
+        fetchAllRows<{ tutor_id: string; start_time: string; end_time: string }>((pageFrom, pageTo) => supabase
+          .from('sessions')
+          .select('tutor_id, start_time, end_time')
+          .in('tutor_id', tutorIdList)
+          .lt('start_time', to.toISOString())
+          .gt('end_time', from.toISOString())
+          .neq('status', 'cancelled')
+          .order('id', { ascending: true })
+          .range(pageFrom, pageTo)),
+      ]);
 
-    const { data: sessions } = await supabase
-      .from('sessions')
-      .select('tutor_id, start_time, end_time')
-      .in('tutor_id', tutorIdList)
-      .lt('start_time', to.toISOString())
-      .gt('end_time', from.toISOString())
-      .neq('status', 'cancelled');
-
-    const breakMinutesByTutor = Object.fromEntries(
-      Object.entries(tutors).map(([id, tutor]) => [id, tutor.breakMinutes]),
-    );
-    const busy: BusyInterval[] = expandBusyByBreak(
-      (sessions || []).map((s: any) => ({
-        tutor_id: s.tutor_id,
-        start: new Date(s.start_time),
-        end: new Date(s.end_time),
-      })).concat(busyIntervals),
-      breakMinutesByTutor,
-    );
-
-    const windowsForSearch = preferredWindows.length > 0
-      ? preferredWindows.map((w) => ({ dayOfWeek: w.dayOfWeek, startTime: w.startTime, endTime: w.endTime }))
-      : undefined;
-    const timeFrom = windowsForSearch ? '00:00' : globalTimeFrom;
-    const timeTo = windowsForSearch ? '23:59' : globalTimeTo;
-
-    const criteria: SubjectCriterion[] = orgAdminMode
-      ? [{ id: 'org-admin', subjectName: filterSubjectName === '__all__' ? '' : filterSubjectName, frequency: 1 }]
-      : subjectCriteria;
-
-    const slotsByKey = new Map<string, MatchSlot>();
-    for (const criterion of criteria) {
-      const criterionSlots = computeTutorSlots(
-        (availability as AvailabilityRule[]) || [],
-        busy,
-        subjects,
-        tutorNames,
-        {
-          dateFrom,
-          dateTo: effectiveDateTo,
-          timeFrom,
-          timeTo,
-          subjectName: criterion.subjectName,
-          preferredWindows: windowsForSearch,
-        },
+      const breakMinutesByTutor = Object.fromEntries(
+        Object.entries(tutors).map(([id, tutor]) => [id, tutor.breakMinutes]),
       );
-      for (const slot of criterionSlots) {
-        slotsByKey.set(`${slot.tutorId}-${slot.subjectId}-${slot.start.getTime()}-${slot.end.getTime()}`, slot);
-      }
-    }
+      const busy: BusyInterval[] = expandBusyByBreak(
+        sessions.map((s) => ({
+          tutor_id: s.tutor_id,
+          start: new Date(s.start_time),
+          end: new Date(s.end_time),
+        })).concat(busyIntervals),
+        breakMinutesByTutor,
+      );
 
-    setResults(
-      dedupeMatchSlots(Array.from(slotsByKey.values())).sort((a, b) => a.start.getTime() - b.start.getTime()),
-    );
-    setLoading(false);
+      const windowsForSearch = preferredWindows.length > 0
+        ? preferredWindows.map((w) => ({ dayOfWeek: w.dayOfWeek, startTime: w.startTime, endTime: w.endTime }))
+        : undefined;
+      const timeFrom = windowsForSearch ? '00:00' : globalTimeFrom;
+      const timeTo = windowsForSearch ? '23:59' : globalTimeTo;
+
+      const criteria: SubjectCriterion[] = orgAdminMode
+        ? [{ id: 'org-admin', subjectName: filterSubjectName === '__all__' ? '' : filterSubjectName, frequency: 1 }]
+        : subjectCriteria;
+
+      const slotsByKey = new Map<string, MatchSlot>();
+      for (const criterion of criteria) {
+        const criterionSlots = computeTutorSlots(
+          availability,
+          busy,
+          subjects,
+          tutorNames,
+          {
+            dateFrom,
+            dateTo: effectiveDateTo,
+            timeFrom,
+            timeTo,
+            subjectName: criterion.subjectName,
+            preferredWindows: windowsForSearch,
+          },
+        );
+        for (const slot of criterionSlots) {
+          slotsByKey.set(`${slot.tutorId}-${slot.subjectId}-${slot.start.getTime()}-${slot.end.getTime()}`, slot);
+        }
+      }
+
+      setResults(
+        dedupeMatchSlots(Array.from(slotsByKey.values())).sort((a, b) => a.start.getTime() - b.start.getTime()),
+      );
+    } catch (error) {
+      console.error('Failed to search tutor availability:', error);
+      setResults([]);
+      setSearched(false);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const groups = useMemo(

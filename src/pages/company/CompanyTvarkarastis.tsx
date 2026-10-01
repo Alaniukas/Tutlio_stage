@@ -832,10 +832,14 @@ export default function CompanyTvarkarastis() {
 
       // Fetch availability for org tutors
       const tutorNameById = new Map(filteredTutors.map((t: any) => [t.id, t.full_name || '']));
-      const { data: availabilityData } = await supabase
-        .from('availability')
-        .select('*')
-        .in('tutor_id', tutorIds);
+      const availabilityData = tutorIds.length > 0
+        ? await fetchAllRows<any>((from, to) => supabase
+            .from('availability')
+            .select('*')
+            .in('tutor_id', tutorIds)
+            .order('id', { ascending: true })
+            .range(from, to))
+        : [];
 
       const mappedAvailability = (availabilityData || []).map((row: any) => ({
         ...row,
@@ -997,10 +1001,12 @@ export default function CompanyTvarkarastis() {
       }));
 
       const tutorNameById = new Map(orgTutors.map((t) => [t.id, t.full_name || '']));
-      const { data: availabilityData } = await supabase
+      const availabilityData = await fetchAllRows<any>((from, to) => supabase
         .from('availability')
         .select('*')
-        .in('tutor_id', tutorIds);
+        .in('tutor_id', tutorIds)
+        .order('id', { ascending: true })
+        .range(from, to));
 
       const mappedAvailability = (availabilityData || []).map((row: any) => ({
         ...row,
