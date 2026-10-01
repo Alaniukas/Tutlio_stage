@@ -1300,7 +1300,7 @@ export default function CompanyStudents() {
       setLoadingModalSessions(false);
       return;
     }
-    const studentId = selectedStudent.id;
+    const studentIds = selectedStudentGroupIds;
     let cancelled = false;
     (async () => {
       setLoadingModalSessions(true);
@@ -1309,7 +1309,7 @@ export default function CompanyStudents() {
       const { data, error } = await supabase
         .from('sessions')
         .select('*, student:students(full_name), tutor:profiles!sessions_tutor_id_fkey(full_name), subject:subjects(name)')
-        .eq('student_id', studentId)
+        .in('student_id', studentIds)
         .gte('start_time', sixMonthsAgo.toISOString())
         .order('start_time', { ascending: false })
         .limit(200);
@@ -1319,7 +1319,7 @@ export default function CompanyStudents() {
         setModalRecentSessions([]);
       } else {
         setModalRecentSessions(
-          getStudentRecentPastSessions((data || []) as Session[], studentId, 3)
+          getStudentRecentPastSessions((data || []) as Session[], studentIds, 3)
         );
       }
       if (!cancelled) setLoadingModalSessions(false);
@@ -1328,7 +1328,7 @@ export default function CompanyStudents() {
       cancelled = true;
       setLoadingModalSessions(false);
     };
-  }, [selectedStudent?.id, isStudentModalOpen, modalSessionsRefreshKey]);
+  }, [selectedStudent?.id, selectedStudentGroupIds, isStudentModalOpen, modalSessionsRefreshKey]);
 
   const fetchData = async (isCancelled?: () => boolean) => {
     const cancelled = () => Boolean(isCancelled?.());
@@ -7190,6 +7190,7 @@ export default function CompanyStudents() {
                       groupBy="none"
                       showStudent={false}
                       showTutor={true}
+                      showPaymentStatus={true}
                     />
                   )}
                 </div>

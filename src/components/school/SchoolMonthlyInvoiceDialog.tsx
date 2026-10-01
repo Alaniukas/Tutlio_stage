@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { addDays, endOfMonth, format, subMonths } from 'date-fns';
-import { Check, ExternalLink, FileCheck2, FileText, Loader2, Send, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Check, ExternalLink, FileCheck2, FileText, Loader2, Send, ShieldCheck, X } from 'lucide-react';
 import { authHeaders } from '@/lib/apiHelpers';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 import { useTranslation } from '@/lib/i18n';
@@ -9,7 +9,7 @@ import type { SchoolInvoiceReviewSession } from '@/lib/schoolInvoiceSessionRevie
 import type { SchoolPayerInvoiceGroup } from '@/lib/schoolPayerInvoiceGroups';
 import { Button } from '@/components/ui/button';
 import { DateInput } from '@/components/ui/date-input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { MonthFilterInput } from '@/components/ui/month-filter-input';
@@ -162,6 +162,9 @@ export default function SchoolMonthlyInvoiceDialog({
   const [batchPayers, setBatchPayers] = useState<SchoolPayerInvoiceGroup[] | null>(null);
   const [sendingKey, setSendingKey] = useState<string | null>(null);
   const [singleChild, setSingleChild] = useState(!batch);
+  const batchNeedsRefresh = useRef(false);
+  const batchScrollTop = useRef(0);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   const payload = (action: 'review' | 'billing-decision' | 'preview' | 'send' | 'batch-preview' | 'send-batch') => {
     const range = monthRange(month);
@@ -201,6 +204,7 @@ export default function SchoolMonthlyInvoiceDialog({
     setLoading(true);
     setError('');
     setPreview(null);
+    batchNeedsRefresh.current = true;
     try {
       await confirmSessionOutcome({ sessionId: session.id, currentStatus: session.status, status,
         startTime: session.startTime, endTime: session.endTime });
@@ -217,6 +221,7 @@ export default function SchoolMonthlyInvoiceDialog({
     setLoading(true);
     setError('');
     setPreview(null);
+    batchNeedsRefresh.current = true;
     try {
       const response = await fetch('/api/school-monthly-invoice-admin', {
         method: 'POST', headers: await authHeaders(),
@@ -257,7 +262,14 @@ export default function SchoolMonthlyInvoiceDialog({
     setPreview(null);
     setReview(null);
     setError('');
+    setDecisionEditor(null);
+    batchNeedsRefresh.current = false;
+    batchScrollTop.current = 0;
   }, [open, batch, previewFixture]);
+
+  useEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = singleChild ? 0 : batchScrollTop.current;
+  }, [singleChild, batchPayers]);
 
   const requestPreview = async () => {
     setLoading(true);
@@ -280,6 +292,7 @@ export default function SchoolMonthlyInvoiceDialog({
   const requestBatchPreview = async () => {
     setLoading(true);
     setError('');
+    setBatchPayers(null);
     try {
       const response = await fetch('/api/school-monthly-invoice-admin', {
         method: 'POST', headers: await authHeaders(), body: JSON.stringify(payload('batch-preview')),
@@ -287,10 +300,25 @@ export default function SchoolMonthlyInvoiceDialog({
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json.error || t('school.invoice.review.loadError'));
       setBatchPayers(json.payers || []);
+      batchNeedsRefresh.current = false;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('school.invoice.review.loadError'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const returnToBatch = async () => {
+    setSingleChild(false);
+    setPreview(null);
+    setReview(null);
+    setDecisionEditor(null);
+    setDecisionReason('');
+    setError('');
+    if (batchNeedsRefresh.current || !batchPayers) {
+      // Old totals and preview tokens must not remain sendable after a correction.
+      setBatchPayers(null);
+      await requestBatchPreview();
     }
   };
 
@@ -303,6 +331,7 @@ export default function SchoolMonthlyInvoiceDialog({
     const previewTokens = Object.fromEntries(payers.flatMap((group) => group.students.map((row) => [row.studentId, row.previewToken])));
     setSendingKey(payerKey || 'all');
     setError('');
+    batchNeedsRefresh.current = true;
     try {
       const response = await fetch('/api/school-monthly-invoice-admin', {
         method: 'POST', headers: await authHeaders(),
@@ -311,18 +340,17 @@ export default function SchoolMonthlyInvoiceDialog({
           payerKey,
           studentIds: payerKey
             ? payers.find((group) => group.payerKey === payerKey)?.sendableStudentIds
-            : undefined,
+            : payers.flatMap((group) => group.sendableStudentIds),
           previewTokens,
         }),
       });
       const json = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(json.error || 'Nepavyko išsiųsti sąskaitos.');
-      onSent?.(t('school.invoice.batch.sent', { count: String(json.sentCount || 0) }));
       const skipped = json.skippedCount
-        ? (json.skipped || []).map((row: { error?: string }) => row.error).filter(Boolean).join(' ')
+        ? (json.skipped || []).map((row: { error?: string }) => row.error).filter(Boolean).join(' ') || t('common.error')
         : '';
-      if (payerKey) {
-        setSendingKey(null);
+      if (!response.ok) throw new Error(skipped || json.error || 'Nepavyko išsiųsti sąskaitos.');
+      if (json.sentCount) onSent?.(t('school.invoice.batch.sent', { count: String(json.sentCount) }));
+      if (payerKey || skipped) {
         await requestBatchPreview();
         if (skipped) setError(skipped);
       } else {
@@ -330,6 +358,7 @@ export default function SchoolMonthlyInvoiceDialog({
         setBatchPayers(null);
       }
     } catch (cause) {
+      setBatchPayers(null);
       setError(cause instanceof Error ? cause.message : 'Nepavyko išsiųsti sąskaitos.');
     } finally {
       setSendingKey(null);
@@ -343,6 +372,7 @@ export default function SchoolMonthlyInvoiceDialog({
     }
     setLoading(true);
     setError('');
+    batchNeedsRefresh.current = true;
     try {
       const response = await fetch('/api/school-monthly-invoice-admin', {
         method: 'POST', headers: await authHeaders(), body: JSON.stringify(payload('send')),
@@ -352,8 +382,13 @@ export default function SchoolMonthlyInvoiceDialog({
       onSent?.(json.emailSent
         ? `Sąskaita ${json.invoiceNumber} suformuota ir išsiųsta.`
         : `Sąskaita ${json.invoiceNumber} suformuota. Siuntimas bus pakartotas automatiškai.`);
-      onOpenChange(false);
-      setPreview(null);
+      if (batch) {
+        batchNeedsRefresh.current = true;
+        await returnToBatch();
+      } else {
+        onOpenChange(false);
+        setPreview(null);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Nepavyko išsiųsti sąskaitos.');
     } finally {
@@ -361,10 +396,23 @@ export default function SchoolMonthlyInvoiceDialog({
     }
   };
 
+  const previewReviewReasons = [...new Set((preview?.reviewSessionIds || []).map((id) =>
+    (preview?.sessions || review?.sessions || []).find((session) => session.id === id)?.reason || 'unconfirmed'))];
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[94vh] w-[96vw] max-w-6xl overflow-y-auto rounded-2xl p-0">
-        <DialogHeader className="border-b border-slate-200 px-6 py-5">
+      <DialogContent ref={contentRef} hideClose className="max-h-[94vh] w-[96vw] max-w-6xl grid-cols-[minmax(0,1fr)] gap-0 overflow-y-auto rounded-2xl p-0 sm:p-0 [&>*]:min-w-0">
+        <DialogHeader className="sticky top-0 z-10 border-b border-slate-200 bg-white py-5 pl-6 pr-16">
+          <DialogClose asChild>
+            <Button type="button" variant="ghost" size="icon" aria-label={t('common.close')} className="absolute right-2 top-2 h-11 w-11 rounded-full sm:right-3 sm:top-3 sm:h-8 sm:w-8">
+              <X className="h-4 w-4" />
+            </Button>
+          </DialogClose>
+          {batch && singleChild && (
+            <Button type="button" variant="outline" className="mb-2 h-auto min-h-10 w-fit max-w-full justify-start gap-2 whitespace-normal py-2 text-left" disabled={loading || !!sendingKey} onClick={() => void returnToBatch()}>
+              <ArrowLeft className="h-4 w-4 shrink-0" /> <span>{t('common.back')}: {t('school.invoice.batch.title')}</span>
+            </Button>
+          )}
           <DialogTitle className="flex items-center gap-2 text-xl">
             <FileText className="h-5 w-5 text-emerald-700" />
             {batch && !singleChild ? t('school.invoice.batch.title') : 'Formuoti mėnesinę sąskaitą'}
@@ -381,7 +429,7 @@ export default function SchoolMonthlyInvoiceDialog({
             <h3 id="invoice-attendance-title" className="text-base font-semibold text-slate-900">{t('school.invoice.review.title')}</h3>
             <p className="text-xs leading-5 text-slate-600">{t('school.invoice.review.help')}</p>
             {review.payerEmail ? (
-              <p className="text-sm text-slate-600">{t('school.invoice.review.payer', { email: review.payerEmail })}</p>
+              <p className="break-words text-sm text-slate-600 [overflow-wrap:anywhere]">{t('school.invoice.review.payer', { email: review.payerEmail })}</p>
             ) : (
               <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{t('school.invoice.review.noPayer')}</p>
             )}
@@ -400,7 +448,7 @@ export default function SchoolMonthlyInvoiceDialog({
                     </td>
                     <td className="p-3">
                       <p>{t(`school.invoice.review.status.${session.status}`)}</p>
-                      {!session.statusConfirmedAt && <p className="mt-1 text-amber-700">{t('school.invoice.review.unconfirmed')}</p>}
+                      {session.reason === 'unconfirmed' && <p className="mt-1 text-amber-700">{t('school.invoice.review.unconfirmed')}</p>}
                       {session.canConfirm && review.canEditAttendance && !previewFixture && (
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           <Button size="sm" variant="outline" disabled={loading} onClick={() => void confirmAttendance(session, 'completed')}>{t('school.invoice.review.attended')}</Button>
@@ -457,7 +505,7 @@ export default function SchoolMonthlyInvoiceDialog({
             <SchoolMonthlyInvoicePreviewCard preview={preview} />
             {!!preview.reviewSessionIds?.length && (
               <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                {preview.reviewSessionIds.length} užsiėm. neįtraukti, nes dar nėra patvirtinto įvykimo arba apmokėjimo statuso.
+                {previewReviewReasons.map((reason) => t(`school.invoice.review.reason.${reason}`)).join(' · ')}
               </p>
             )}
             {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -474,16 +522,17 @@ export default function SchoolMonthlyInvoiceDialog({
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Sąskaitos mėnuo</Label>
-                <MonthFilterInput value={month} onChange={(value) => {
+                <MonthFilterInput value={month} disabled={loading || !!sendingKey} onChange={(value) => {
                   setMonth(value);
                   setBatchPayers(null);
                   setPreview(null);
                   setReview(null);
+                  batchScrollTop.current = 0;
                 }} />
               </div>
               <div className="space-y-2">
                 <Label>Apmokėti iki</Label>
-                <DateInput value={dueDate} onChange={(event) => {
+                <DateInput value={dueDate} disabled={loading || !!sendingKey} onChange={(event) => {
                   setDueDate(event.target.value);
                   setBatchPayers(null);
                   setPreview(null);
@@ -495,15 +544,15 @@ export default function SchoolMonthlyInvoiceDialog({
                 {!batchPayers.length && <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{t('school.invoice.batch.empty')}</p>}
                 {batchPayers.map((group) => (
                   <div key={group.payerKey} className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold text-slate-900">{group.payerName}</p>
-                        <p className="text-xs text-slate-500">{group.payerEmail || t('school.invoice.review.noPayer')}</p>
+                    <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:flex-wrap">
+                      <div className="w-full min-w-0 sm:w-auto sm:flex-1">
+                        <p className="break-words font-semibold text-slate-900">{group.payerName}</p>
+                        <p className="break-all text-xs text-slate-500">{group.payerEmail || t('school.invoice.review.noPayer')}</p>
                         <p className="mt-1 text-sm font-medium text-emerald-800">{money(group.totalEur)}</p>
                       </div>
                       <Button
                         type="button"
-                        className="gap-2 bg-emerald-700 hover:bg-emerald-800"
+                        className="shrink-0 self-start gap-2 bg-emerald-700 hover:bg-emerald-800"
                         disabled={loading || !!sendingKey || !group.sendableStudentIds.length}
                         onClick={() => void sendBatch(group.payerKey)}
                       >
@@ -514,19 +563,26 @@ export default function SchoolMonthlyInvoiceDialog({
                     <ul className="mt-3 space-y-2">
                       {group.students.map((child) => (
                         <li key={child.studentId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                          <span>
+                          <span className="min-w-0 break-words [overflow-wrap:anywhere]">
                             {t('school.invoice.batch.childLine', {
                               name: child.fullName,
                               count: String(child.lessonCount),
                               amount: money(child.totalEur),
                             })}
-                            {child.reviewSessionIds.length ? <span className="ml-2 text-amber-700">{t('school.invoice.batch.blocked')}</span> : null}
+                            {child.reviewSessionIds.length ? <span className="ml-2 text-amber-700">{child.reviewReasons?.length
+                              ? child.reviewReasons.map((reason) => t(`school.invoice.review.reason.${reason}`)).join(' · ')
+                              : t('school.invoice.batch.blocked')}</span> : null}
+                            {child.alreadyIssued ? <span className="ml-2 text-slate-500">{t('school.invoice.review.reason.already_invoiced')}</span>
+                              : !child.lessonCount && !child.reviewSessionIds.length ? <span className="ml-2 text-slate-500">{t('school.invoice.batch.empty')}</span> : null}
                           </span>
-                          <Button type="button" size="sm" variant="outline" onClick={() => {
+                          <Button type="button" size="sm" variant="outline" disabled={loading || !!sendingKey} onClick={() => {
+                            batchScrollTop.current = contentRef.current?.scrollTop || 0;
                             setStudentId(child.studentId);
                             setSingleChild(true);
                             setPreview(null);
                             setReview(null);
+                            setDecisionEditor(null);
+                            setDecisionReason('');
                             void requestReview(child.studentId);
                           }}>{t('school.invoice.batch.reviewChild')}</Button>
                         </li>
@@ -538,8 +594,8 @@ export default function SchoolMonthlyInvoiceDialog({
             )}
             {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Atšaukti</Button>
-              <Button type="button" variant="outline" onClick={() => void requestBatchPreview()} disabled={loading || !month}>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading || !!sendingKey}>Atšaukti</Button>
+              <Button type="button" variant="outline" onClick={() => void requestBatchPreview()} disabled={loading || !!sendingKey || !month}>
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
                 {t('school.invoice.batch.preview')}
               </Button>
@@ -560,14 +616,14 @@ export default function SchoolMonthlyInvoiceDialog({
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Mokinys</Label>
-                  <Select value={studentId} onValueChange={(value) => { setStudentId(value); setPreview(null); setReview(null); setDecisionEditor(null); }}>
+                  <Select value={studentId} disabled={loading || !!sendingKey} onValueChange={(value) => { setStudentId(value); setPreview(null); setReview(null); setDecisionEditor(null); }}>
                     <SelectTrigger><SelectValue placeholder="Pasirinkite mokinį" /></SelectTrigger>
                     <SelectContent>{students.map((student) => <SelectItem key={student.id} value={student.id}>{student.fullName}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
                   <Label>Sąskaitos mėnuo</Label>
-                  <MonthFilterInput value={month} onChange={(value) => {
+                  <MonthFilterInput value={month} disabled={loading || !!sendingKey} onChange={(value) => {
                     setMonth(value);
                     setPreview(null);
                     setReview(null);
@@ -577,7 +633,10 @@ export default function SchoolMonthlyInvoiceDialog({
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label>Apmokėti iki</Label>
-                  <DateInput value={dueDate} onChange={(event) => setDueDate(event.target.value)} className="max-w-xs rounded-xl" />
+                  <DateInput value={dueDate} disabled={loading || !!sendingKey} onChange={(event) => {
+                    setDueDate(event.target.value);
+                    if (batch) setBatchPayers(null);
+                  }} className="max-w-xs rounded-xl" />
                 </div>
               </div>
 
@@ -609,11 +668,6 @@ export default function SchoolMonthlyInvoiceDialog({
               {error && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Atšaukti</Button>
-                {batch && (
-                  <Button type="button" variant="outline" onClick={() => { setSingleChild(false); setPreview(null); setReview(null); }} disabled={loading}>
-                    {t('school.invoice.batch.title')}
-                  </Button>
-                )}
                 {review && <Button type="button" variant="outline" onClick={() => void requestReview()} disabled={loading}>{t('school.invoice.review.refresh')}</Button>}
                 <Button type="button" className="gap-2 bg-emerald-700 hover:bg-emerald-800" onClick={() => void (review ? requestPreview() : requestReview())} disabled={loading || !studentId || !month}>
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}

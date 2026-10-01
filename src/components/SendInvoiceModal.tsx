@@ -11,6 +11,7 @@ import { format, subDays } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { cn } from '@/lib/utils';
+import { requireMonthlyInvoiceDelivery } from '@/lib/monthlyInvoiceDelivery';
 
 interface SendInvoiceModalProps {
   isOpen: boolean;
@@ -103,12 +104,13 @@ export default function SendInvoiceModal({
           .from('sessions')
           .select('*, students!inner(full_name, email, payer_email, payer_name), subjects(name)')
           .eq('tutor_id', tutorScopeId)
-          .neq('status', 'cancelled')
+          .in('status', ['completed', 'no_show'])
           .is('lesson_package_id', null)
           .gte('start_time', periodStartDate + 'T00:00:00')
           .lte('start_time', periodEndDate + 'T23:59:59')
-          .lte('start_time', new Date().toISOString())
+          .lte('end_time', new Date().toISOString())
           .eq('paid', false)
+          .eq('is_complimentary', false)
           .is('payment_batch_id', null)
           .order('start_time', { ascending: false });
 
@@ -170,12 +172,11 @@ export default function SendInvoiceModal({
       let result: any;
       try { result = await response.json(); } catch { throw new Error(t('invoice.failedToCreateInvoice')); }
       if (!response.ok) throw new Error(result?.error || t('invoice.failedToCreateInvoice'));
-
+      const batchCount = requireMonthlyInvoiceDelivery(result, t('invoice.failedToCreateInvoice'));
 
       if (onSuccess) onSuccess();
       onClose();
 
-      const batchCount = result.totalBatches || 1;
       const invoiceWord = batchCount === 1 ? t('invoice.invoiceSingular') : t('invoice.invoicePlural');
       const lessonWord = unpaidSessions.length === 1 ? t('invoice.lessonSingular') : t('invoice.lessonPlural');
       alert(t('invoice.invoicesSent', { batchCount, invoiceWord, sessionCount: unpaidSessions.length, lessonWord }));
@@ -185,6 +186,8 @@ export default function SendInvoiceModal({
     } catch (err: any) {
       console.error('Error sending invoice:', err);
       setError(err.message || t('invoice.errorOccurred'));
+      setPreviewMode(false);
+      setUnpaidSessions([]);
     } finally {
       setLoading(false);
     }

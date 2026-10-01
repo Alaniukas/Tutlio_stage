@@ -23,6 +23,9 @@ import OrgPayerFeeSplitSettings from '@/components/company/OrgPayerFeeSplitSetti
 import { isInvoiceProfileComplete } from '@/lib/invoiceProfileReady';
 import { isManoKorepetitoriusOrg } from '@/lib/marketMoney';
 import { isMonthlyBillingOnlyStudent } from '@/lib/studentPaymentModel';
+import { requireMonthlyInvoiceDelivery } from '@/lib/monthlyInvoiceDelivery';
+import SchoolMonthlyInvoiceDialog, { type SchoolMonthlyInvoiceStudentOption } from '@/components/school/SchoolMonthlyInvoiceDialog';
+import { schoolMonthlyInvoicesEnabled } from '@/lib/schoolConsultationsOrg';
 
 type CompanyFinanceCache = {
   orgId: string;
@@ -42,7 +45,7 @@ export default function CompanyFinance() {
   const { t, dateFnsLocale } = useTranslation();
   const { fmt } = useMarketMoney();
   const fc = getCached<CompanyFinanceCache>('company_finance');
-  const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
+  const { loading: orgFeaturesLoading, hasFeature, features: orgFeatures, entityType } = useOrgFeatures();
   const perlasFeatureOn = PERLAS_FINANCE_ENABLED && hasFeature('perlas_finance');
   const location = useLocation();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
@@ -72,6 +75,10 @@ export default function CompanyFinance() {
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
 
   const [isSendInvoiceOpen, setIsSendInvoiceOpen] = useState(false);
+  const [schoolInvoiceOpen, setSchoolInvoiceOpen] = useState(false);
+  const [schoolInvoiceStudents, setSchoolInvoiceStudents] = useState<SchoolMonthlyInvoiceStudentOption[]>([]);
+  const [schoolInvoiceStudentsLoading, setSchoolInvoiceStudentsLoading] = useState(false);
+  const schoolPayerInvoices = schoolMonthlyInvoicesEnabled(orgId, orgFeatures, entityType);
   const [invoiceScope, setInvoiceScope] = useState<'all_tutors' | 'selected_tutors'>('all_tutors');
   const [invoiceTutorIds, setInvoiceTutorIds] = useState<string[]>([]);
   const [orgTutors, setOrgTutors] = useState<{ id: string; full_name: string }[]>(fc?.orgTutors ?? []);
@@ -321,8 +328,53 @@ export default function CompanyFinance() {
       }
     } catch (err: any) {
       setInvoiceError(err.message);
+      setInvoicePreview(false);
+      setInvoiceUnpaidSessions([]);
     }
     setInvoiceLoading(false);
+  };
+
+  const handleOpenInvoices = async () => {
+    if (schoolPayerInvoices && orgId) {
+      setSchoolInvoiceStudentsLoading(true);
+      try {
+        const students: SchoolMonthlyInvoiceStudentOption[] = [];
+        const pageSize = 500;
+        for (let offset = 0; ; offset += pageSize) {
+          const { data, error } = await supabase
+            .from('students')
+            .select('id, full_name, payer_email')
+            .eq('organization_id', orgId)
+            .order('full_name')
+            .order('id')
+            .range(offset, offset + pageSize - 1);
+          if (error) throw new Error(error.message);
+          students.push(...(data || []).map((row) => ({
+            id: row.id,
+            fullName: row.full_name || t('companyFinance.studentSingular'),
+            payerEmail: row.payer_email || null,
+          })));
+          if (!data || data.length < pageSize) break;
+        }
+        setSchoolInvoiceStudents(students);
+        setSchoolInvoiceOpen(true);
+      } catch (error) {
+        setToastMessage({ message: error instanceof Error ? error.message : t('common.error'), type: 'error' });
+      } finally {
+        setSchoolInvoiceStudentsLoading(false);
+      }
+      return;
+    }
+    setIsSendInvoiceOpen(true);
+    setInvoiceScope('all_tutors');
+    setInvoiceTutorIds([]);
+    setInvoicePreview(false);
+    setInvoiceUnpaidSessions([]);
+    setInvoiceError(null);
+    const today = new Date();
+    const thirtyAgo = new Date(); thirtyAgo.setDate(today.getDate() - 30);
+    setInvoicePeriodStart(thirtyAgo.toISOString().slice(0, 10));
+    setInvoicePeriodEnd(today.toISOString().slice(0, 10));
   };
 
   const handleSendOrgInvoice = async () => {
@@ -354,6 +406,7 @@ export default function CompanyFinance() {
       );
 
       const tutorIds = Object.keys(groupedByTutor);
+      let sentBatchCount = 0;
 
       for (const tutorId of tutorIds) {
         const response = await fetch('/api/create-monthly-invoice', {
@@ -370,14 +423,24 @@ export default function CompanyFinance() {
         });
         const json = await response.json();
         if (!response.ok) throw new Error(json.error || t('common.error'));
+        sentBatchCount += requireMonthlyInvoiceDelivery(json, t('common.error'));
       }
 
-      setToastMessage({ message: t('companyFinance.invoicesSent', { count: String(tutorIds.length) }), type: 'success' });
+      setToastMessage({ message: t('invoice.invoicesSent', {
+        batchCount: sentBatchCount,
+        invoiceWord: t(sentBatchCount === 1 ? 'invoice.invoiceSingular' : 'invoice.invoicePlural'),
+        sessionCount: invoiceUnpaidSessions.length,
+        lessonWord: t(invoiceUnpaidSessions.length === 1 ? 'invoice.lessonSingular' : 'invoice.lessonPlural'),
+      }), type: 'success' });
       setIsSendInvoiceOpen(false);
       setInvoicePreview(false);
       setInvoiceUnpaidSessions([]);
     } catch (err: any) {
       setInvoiceError(err.message);
+      // Earlier tutor/payer requests may already have been sent. Require a
+      // fresh selection before retrying so linked lessons cannot be resent.
+      setInvoicePreview(false);
+      setInvoiceUnpaidSessions([]);
     }
     setInvoiceSending(false);
   };
@@ -606,23 +669,12 @@ export default function CompanyFinance() {
                   <div className="flex items-start gap-2">
                     <FileText className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
                     <p className="text-xs text-blue-800">
-                      {t('companyFinance.monthlyInvoiceNote')}
+                      {t(schoolPayerInvoices ? 'school.invoice.batch.help' : 'companyFinance.monthlyInvoiceNote')}
                     </p>
                   </div>
-                  <Button size="sm" className="gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs" onClick={() => {
-                    setIsSendInvoiceOpen(true);
-                    setInvoiceScope('all_tutors');
-                    setInvoiceTutorIds([]);
-                    setInvoicePreview(false);
-                    setInvoiceUnpaidSessions([]);
-                    setInvoiceError(null);
-                    const today = new Date();
-                    const thirtyAgo = new Date(); thirtyAgo.setDate(today.getDate() - 30);
-                    setInvoicePeriodStart(thirtyAgo.toISOString().slice(0, 10));
-                    setInvoicePeriodEnd(today.toISOString().slice(0, 10));
-                  }}>
-                    <FileText className="w-3.5 h-3.5" />
-                    {t('companyFinance.sendInvoices')}
+                  <Button size="sm" className="gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs" disabled={schoolInvoiceStudentsLoading} onClick={() => void handleOpenInvoices()}>
+                    {schoolInvoiceStudentsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                    {t(schoolPayerInvoices ? 'school.invoice.batch.preview' : 'companyFinance.sendInvoices')}
                   </Button>
                 </div>
               )}
@@ -746,6 +798,16 @@ export default function CompanyFinance() {
           <PerlasFinanceSection entityType="org" entityId={orgId} />
         )}
       </div>
+      {schoolPayerInvoices && orgId && (
+        <SchoolMonthlyInvoiceDialog
+          batch
+          open={schoolInvoiceOpen}
+          onOpenChange={setSchoolInvoiceOpen}
+          organizationId={orgId}
+          students={schoolInvoiceStudents}
+          onSent={(message) => setToastMessage({ message, type: 'success' })}
+        />
+      )}
       {/* Org Invoice Dialog */}
       <Dialog
         open={isSendInvoiceOpen}

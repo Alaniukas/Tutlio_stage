@@ -52,4 +52,31 @@ describe('SchoolDiscountOfferDialog combined delivery', () => {
     expect(screen.getByRole('button', { name: 'Išsaugoti ir siųsti' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Išsaugoti ir siųsti sutartį su priedu' })).toBeNull();
   });
+
+  it('lets an accepted individual contract submit its addendum without subject metadata', async () => {
+    const requests: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      requests.push(body);
+      return {
+        ok: true,
+        json: async () => body.action === 'options'
+          ? { contractAccepted: true, activities: [{ subjectId: null, tutorId: null,
+            label: 'Rusų kalba Testinis mokinys' }], agreements: [] }
+          : { contractAccepted: true, emailSent: true, agreementNumber: 'NPR-124', emailTo: 'parent@example.test' },
+      };
+    }));
+    const onSaved = vi.fn();
+    render(<SchoolDiscountOfferDialog open onOpenChange={() => {}} organizationId="school-id"
+      students={[{ id: 'student-id', fullName: 'Testinis mokinys' }]}
+      initialStudentId="student-id" contractId="individual-contract" lockStudent onSaved={onSaved} />);
+
+    await screen.findByText('Rusų kalba Testinis mokinys');
+    expect(screen.queryByText('Mokiniui nerasta priskirtų užsiėmimų.')).toBeNull();
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '25' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Išsaugoti ir siųsti' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(requests[1]).toMatchObject({ action: 'create', contractId: 'individual-contract',
+      studentId: 'student-id', subjectId: null, tutorId: null, discountValue: 25 });
+  });
 });

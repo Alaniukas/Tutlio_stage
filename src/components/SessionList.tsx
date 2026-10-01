@@ -4,12 +4,14 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Clock, User, Users, AlertCircle } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import type { Session } from '@/lib/session-stats';
+import { sessionPaymentDisplayKind } from '@/lib/sessionPaymentDisplay';
 
 interface SessionListProps {
   sessions: Session[];
   groupBy?: 'status' | 'none';
   showStudent?: boolean;
   showTutor?: boolean;
+  showPaymentStatus?: boolean;
   onSessionClick?: (session: Session) => void;
 }
 
@@ -18,6 +20,7 @@ export function SessionList({
   groupBy = 'status',
   showStudent = false,
   showTutor = false,
+  showPaymentStatus = false,
   onSessionClick,
 }: SessionListProps) {
   const { t, dateFnsLocale } = useTranslation();
@@ -39,6 +42,7 @@ export function SessionList({
     const isNoShow = session.status === 'no_show';
     const isPast = endTime.getTime() < now.getTime();
     const isCompleted = !isCancelled && !isNoShow && isPast;
+    const paymentKind = sessionPaymentDisplayKind(session);
 
     return (
       <Card
@@ -105,12 +109,32 @@ export function SessionList({
               )}
             </div>
 
-            <div>
+            <div className="flex flex-col items-end gap-2">
               {isCompleted && (
                 <Badge className="bg-green-600">{t('status.occurred')}</Badge>
               )}
               {isCancelled && (
                 <Badge variant="destructive">{t('status.cancelled')}</Badge>
+              )}
+              {showPaymentStatus && (
+                <Badge
+                  variant="outline"
+                  className={paymentKind === 'complimentary'
+                    ? 'bg-sky-50 text-sky-800 border-sky-200'
+                    : paymentKind === 'paid'
+                      ? 'bg-green-50 text-green-700 border-green-200'
+                      : paymentKind === 'reserved'
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'}
+                >
+                  {paymentKind === 'complimentary'
+                    ? t('status.complimentary')
+                    : paymentKind === 'paid'
+                      ? t('compSess.paid')
+                      : paymentKind === 'reserved'
+                        ? t('status.reserved')
+                        : t('compSch.pending')}
+                </Badge>
               )}
             </div>
           </div>

@@ -5,6 +5,7 @@ export type SchoolPayerInvoiceStudentPreview = {
   totalEur: number;
   lessonCount: number;
   reviewSessionIds: string[];
+  reviewReasons?: Array<'unconfirmed' | 'contract_review'>;
   alreadyIssued: boolean;
   payerEmail: string;
   payerName: string;

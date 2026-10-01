@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   calculateSessionStats,
   calculateOrgSessionListStats,
@@ -6,6 +6,7 @@ import {
   countUserInitiatedCancellations,
   countPastUnpaidSessions,
   formatCancellationBreakdown,
+  getStudentRecentPastSessions,
   isStudentNoShowSession,
   matchesOrgSessionStatChip,
   toggleOrgSessionStatChip,
@@ -61,6 +62,51 @@ describe('isStudentNoShowSession', () => {
       end_time: '2026-08-31T08:45:00.000Z',
       status: 'completed',
     }, now, { requireExplicitNoShow: true })).toBe(false);
+  });
+});
+
+describe('getStudentRecentPastSessions across tutor assignments', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T12:00:00.000Z'));
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  const trial: Session = {
+    ...base,
+    id: 'old-tutor-trial',
+    student_id: 'old-tutor-student',
+    tutor_id: 'vakare',
+    tutor: { full_name: 'Vakarė' },
+    start_time: '2026-09-25T14:00:00.000Z',
+    end_time: '2026-09-25T15:00:00.000Z',
+    status: 'completed',
+    topic: 'Bandomoji',
+    paid: true,
+    payment_status: 'paid',
+  };
+  const rows: Session[] = [
+    trial,
+    { ...trial, id: 'current-tutor-lesson', student_id: 'new-tutor-student', tutor_id: 'liepa', tutor: { full_name: 'Liepa' }, start_time: '2026-09-26T14:00:00.000Z', end_time: '2026-09-26T15:00:00.000Z' },
+    { ...trial, id: 'recent-cancellation', status: 'cancelled', start_time: '2026-09-28T14:00:00.000Z', end_time: '2026-09-28T15:00:00.000Z' },
+    { ...trial, id: 'older-lesson', start_time: '2026-09-20T14:00:00.000Z', end_time: '2026-09-20T15:00:00.000Z' },
+    { ...trial, id: 'other-child', student_id: 'sibling-student', start_time: '2026-09-30T14:00:00.000Z', end_time: '2026-09-30T15:00:00.000Z' },
+    { ...trial, id: 'future-lesson', status: 'active', start_time: '2026-10-02T14:00:00.000Z', end_time: '2026-10-02T15:00:00.000Z' },
+    { ...trial, id: 'in-progress', status: 'active', start_time: '2026-10-01T11:00:00.000Z', end_time: '2026-10-01T13:00:00.000Z' },
+    trial,
+  ];
+
+  it('returns the newest three from the child identity group and preserves the historical tutor/payment fields', () => {
+    const result = getStudentRecentPastSessions(rows, ['new-tutor-student', 'old-tutor-student']);
+    expect(result.map((row) => row.id)).toEqual(['recent-cancellation', 'current-tutor-lesson', 'old-tutor-trial']);
+    expect(result[2]).toEqual(trial);
+  });
+
+  it('preserves single-student callers and does not include a sibling or duplicate history rows', () => {
+    expect(getStudentRecentPastSessions(rows, 'old-tutor-student').map((row) => row.id))
+      .toEqual(['recent-cancellation', 'old-tutor-trial', 'older-lesson']);
+    expect(getStudentRecentPastSessions(rows, [])).toEqual([]);
   });
 });
 

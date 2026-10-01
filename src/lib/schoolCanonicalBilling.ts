@@ -35,8 +35,9 @@ export function groupOccurrenceKey(session: Pick<CanonicalBillableSession, 'clas
 }
 
 export function hasSchoolOccurrenceEvidence(session: CanonicalBillableSession): boolean {
-  return ['completed', 'no_show'].includes(session.status)
-    && Boolean(session.tutor_joined_at || session.status_confirmed_at);
+  if (!['completed', 'no_show'].includes(session.status)) return false;
+  if (session.tutor_joined_at || session.status_confirmed_at) return true;
+  return session.status === 'completed' && Boolean(session.student_joined_at);
 }
 
 /** Canonical DOCX §§4.3–4.5: distinguish absent child from a service not supplied. */

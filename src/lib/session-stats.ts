@@ -387,16 +387,17 @@ export function countStudentSessionStats(rows: SessionAttributionRow[]): Student
 }
 
 /**
- * Org admin student modal: past "occurred" (incl. no_show) + cancelled sessions,
- * newest by end_time first, capped for a short history list.
+ * Org admin student modal: past "occurred" (incl. no_show) + cancelled sessions
+ * across the same child's tutor assignments, newest by end_time first.
  */
 export function getStudentRecentPastSessions(
   sessions: Session[],
-  studentId: string,
+  studentIds: string | readonly string[],
   limit = 3
 ): Session[] {
+  const allowedStudentIds = new Set(typeof studentIds === 'string' ? [studentIds] : studentIds);
   const base = filterSessionsByDateRange(
-    sessions.filter((s) => s.student_id === studentId),
+    sessions.filter((s) => allowedStudentIds.has(s.student_id)),
     null,
     null
   );

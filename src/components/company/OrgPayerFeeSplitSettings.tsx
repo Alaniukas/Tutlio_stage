@@ -5,7 +5,6 @@ import { useTranslation } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import { isMoksloVaisiaiOrg } from '@/lib/marketMoney';
 import { customerTotal, MARKET_FEES } from '@/lib/marketMoney';
 import {
   DEFAULT_ORG_PAYER_FEE_SPLIT,
@@ -60,7 +59,7 @@ function SplitSlider({
 export default function OrgPayerFeeSplitSettings({ orgId }: Props) {
   const { t } = useTranslation();
   const { hasFeature, loading: featuresLoading } = useOrgFeatures();
-  const enabled = hasFeature('org_payer_fee_split') && isMoksloVaisiaiOrg(orgId);
+  const enabled = hasFeature('org_payer_fee_split');
 
   const [split, setSplit] = useState<OrgPayerFeeSplit>(DEFAULT_ORG_PAYER_FEE_SPLIT);
   const [loading, setLoading] = useState(true);

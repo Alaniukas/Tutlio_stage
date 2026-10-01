@@ -1,0 +1,134 @@
+[
+  {
+    "url": "/api/school-monthly-invoice-admin",
+    "body": {
+      "action": "batch-preview",
+      "organizationId": "visual-org",
+      "studentId": "visual-child-01",
+      "periodStart": "2026-09-01",
+      "periodEnd": "2026-09-30",
+      "dueDate": "2026-10-08"
+    }
+  },
+  {
+    "url": "/api/school-monthly-invoice-admin",
+    "body": {
+      "action": "review",
+      "organizationId": "visual-org",
+      "studentId": "visual-child-05",
+      "periodStart": "2026-09-01",
+      "periodEnd": "2026-09-30",
+      "dueDate": "2026-10-08"
+    }
+  },
+  {
+    "url": "/api/school-monthly-invoice-admin",
+    "body": {
+      "action": "preview",
+      "organizationId": "visual-org",
+      "studentId": "visual-child-05",
+      "periodStart": "2026-09-01",
+      "periodEnd": "2026-09-30",
+      "dueDate": "2026-10-08"
+    }
+  },
+  {
+    "url": "/api/school-monthly-invoice-admin",
+    "body": {
+      "action": "review",
+      "organizationId": "visual-org",
+      "studentId": "visual-child-02",
+      "periodStart": "2026-09-01",
+      "periodEnd": "2026-09-30",
+      "dueDate": "2026-10-08"
+    }
+  },
+  {
+    "url": "/api/school-monthly-invoice-admin",
+    "body": {
+      "action": "preview",
+      "organizationId": "visual-org",
+      "studentId": "visual-child-02",
+      "periodStart": "2026-09-01",
+      "periodEnd": "2026-09-30",
+      "dueDate": "2026-10-08"
+    }
+  },
+  {
+    "url": "/api/school-monthly-invoice-admin",
+    "body": {
+      "action": "review",
+      "organizationId": "visual-org",
+      "studentId": "visual-child-04",
+      "periodStart": "2026-09-01",
+      "periodEnd": "2026-09-30",
+      "dueDate": "2026-10-08"
+    }
+  },
+  {
+    "url": "/api/confirm-session-status",
+    "body": {
+      "sessionId": "visual-child-04-14",
+      "status": "completed",
+      "confirmExisting": true
+    }
+  },
+  {
+    "url": "/api/school-monthly-invoice-admin",
+    "body": {
+      "action": "review",
+      "organizationId": "visual-org",
+      "studentId": "visual-child-04",
+      "periodStart": "2026-09-01",
+      "periodEnd": "2026-09-30",
+      "dueDate": "2026-10-08"
+    }
+  },
+  {
+    "url": "/api/school-monthly-invoice-admin",
+    "body": {
+      "action": "batch-preview",
+      "organizationId": "visual-org",
+      "studentId": "visual-child-04",
+      "periodStart": "2026-09-01",
+      "periodEnd": "2026-09-30",
+      "dueDate": "2026-10-08"
+    }
+  },
+  {
+    "url": "/api/school-monthly-invoice-admin",
+    "body": {
+      "action": "review",
+      "organizationId": "visual-org",
+      "studentId": "visual-child-02",
+      "periodStart": "2026-09-01",
+      "periodEnd": "2026-09-30",
+      "dueDate": "2026-10-08"
+    }
+  },
+  {
+    "url": "/api/school-monthly-invoice-admin",
+    "body": {
+      "action": "billing-decision",
+      "organizationId": "visual-org",
+      "studentId": "visual-child-02",
+      "periodStart": "2026-09-01",
+      "periodEnd": "2026-09-30",
+      "dueDate": "2026-10-08",
+      "sessionId": "visual-child-02-7",
+      "excluded": true,
+      "reason": "Vizualinis testas: užsiėmimas neapmokestinamas."
+    }
+  },
+  {
+    "url": "/api/school-monthly-invoice-admin",
+    "body": {
+      "action": "batch-preview",
+      "organizationId": "visual-org",
+      "studentId": "visual-child-02",
+      "periodStart": "2026-09-01",
+      "periodEnd": "2026-09-30",
+      "dueDate": "2026-10-08"
+    }
+  }
+]

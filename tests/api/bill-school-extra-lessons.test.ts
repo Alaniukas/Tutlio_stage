@@ -67,11 +67,13 @@ describe('monthly school billing allocation', () => {
     ]) expect((await run(query)).status).toHaveBeenCalledWith(400);
     expect(state.inserts).toHaveLength(0); expect(state.emails).toBe(0);
   });
-  it('uses canonical actual group charges per child and caches the shared group read', async () => {
+  it.each(['tutor join', 'student join'])('uses %s evidence for canonical actual group charges per child and caches the shared group read', async (evidence) => {
     const canonical = { ...contract('first', 'group', 'g1', 'math'), organization_id: '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17', filled_body: EXTRA_LESSONS_LEGAL_BODY };
     state.contracts = [canonical, { ...canonical, id: 'second', student_id: 'student2' }];
     state.sessions = [
-      { id: 'a', student_id: 'student', class_group_id: 'g1', subject_id: 'math', start_time: '2026-08-10T10:00:00Z', status: 'completed', tutor_joined_at: '2026-08-10T10:00:00Z', school_billing_kind: 'base' },
+      { id: 'a', student_id: 'student', class_group_id: 'g1', subject_id: 'math', start_time: '2026-08-10T10:00:00Z', status: 'completed',
+        tutor_joined_at: evidence === 'tutor join' ? '2026-08-10T10:00:00Z' : null,
+        student_joined_at: evidence === 'student join' ? '2026-08-10T10:05:00Z' : null, school_billing_kind: 'base' },
       { id: 'b', student_id: 'student2', class_group_id: 'g1', subject_id: 'math', start_time: '2026-08-10T10:00:00Z', status: 'no_show', school_billing_kind: 'base' },
     ];
     const response = await run();

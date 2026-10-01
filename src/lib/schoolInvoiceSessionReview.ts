@@ -16,6 +16,8 @@ export type SchoolInvoiceContractWindow = {
   suspension_started_at?: string | null;
   suspension_until?: string | null;
   suspension_resumed_at?: string | null;
+  /** Runtime validation of the frozen subject reference; never alters the signed snapshot. */
+  missingIndividualSubject?: boolean;
 };
 
 export type SchoolSessionBillingDecision = {
@@ -99,7 +101,16 @@ export function schoolInvoiceContractReason(
   if (matching.some((contract) => !contract.order_snapshot)
     || contracts.some((contract) => !contract.order_snapshot && !contract.class_group_id)) return 'contract_review';
   // Older/direct school lessons do not necessarily have an extra-lessons agreement.
-  if (!matching.length) return 'payable';
+  if (!matching.length) {
+    // A deleted subject cannot safely turn a signed agreement's lessons into
+    // unrestricted direct charges. Leave other, explicitly matched services alone.
+    const unresolvedIndividual = !session.class_group_id && contracts.some((contract) => (
+      contract.signing_status === 'signed'
+      && contract.order_snapshot?.service_type === 'individual'
+      && contract.missingIndividualSubject
+    ));
+    return unresolvedIndividual ? 'contract_review' : 'payable';
+  }
   const valid = matching.filter((contract) => {
     if (!contract.accepted_at || !contract.order_snapshot || contract.signing_status !== 'signed') return false;
     const order = contract.order_snapshot;

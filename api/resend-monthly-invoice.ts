@@ -6,7 +6,12 @@
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import Stripe from 'stripe';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { marketFromRequest } from './_lib/market.js';
+import { lessonCheckoutBreakdownCents, orgFeeProfile } from './_lib/marketMoney.js';
+import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
+import { retrieveConnectCheckoutSessionWithScope } from './_lib/stripeDirectCharge.js';
 import {
   tutorUsesManualStudentPayments,
   trimManualPaymentBankDetails,
@@ -14,6 +19,7 @@ import {
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
+import { orgHasPvmEducationInvoice } from './_lib/pvmEducationInvoice.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -47,10 +53,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from('billing_batches')
       .select(`
         id, tutor_id, period_start_date, period_end_date, total_amount, paid, payment_status,
-        payer_email, payer_name, payment_deadline_date,
+        payer_email, payer_name, payment_deadline_date, stripe_checkout_session_id,
         profiles!billing_batches_tutor_id_fkey(
           id, full_name, organization_id, enable_manual_student_payments, manual_payment_bank_details,
-          subscription_plan, manual_subscription_exempt
+          subscription_plan, manual_subscription_exempt, stripe_account_id
         )
       `)
       .eq('id', billingBatchId)
@@ -85,13 +91,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const toEmail = String(batch.payer_email || '').trim();
     if (!toEmail) return json(res, 400, { error: 'Nėra mokėtojo el. pašto' });
 
-    const { data: junction } = await supabase
+    const { data: junction, error: junctionError } = await supabase
       .from('billing_batch_sessions')
-      .select('session_id, sessions(id, start_time, price, subjects(name), students(full_name))')
+      .select('session_id, session_price, sessions(id, student_id, start_time, price, subjects(name), students(full_name))')
       .eq('billing_batch_id', batch.id);
+    if (junctionError || !junction?.length) {
+      return json(res, 502, { error: 'Nepavyko įkelti sąskaitos pamokų' });
+    }
 
     const sessionsForEmail = (junction || [])
-      .map((row: any) => row.sessions)
+      .map((row: any) => row.sessions ? { ...row.sessions, price: row.session_price } : null)
       .filter(Boolean)
       .sort((a: any, b: any) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
       .map((s: any) => {
@@ -128,19 +137,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
       : undefined;
 
-    const totalAmount = Number(batch.total_amount || 0).toFixed(2);
+    const lessonsTotal = Number(batch.total_amount || 0).toFixed(2);
     const usesManual = tutorUsesManualStudentPayments(tutor);
     const bankDetails = trimManualPaymentBankDetails(tutor.manual_payment_bank_details);
     const stablePaymentLink = `${appOrigin}/api/pay-invoice?batch=${batch.id}`;
+    let ownerName = tutor.full_name || 'Korepetitorius';
+    let checkoutTotalCents = Math.round(Number(batch.total_amount || 0) * 100);
+    let org: any = null;
+    if (tutor.organization_id) {
+      const { data, error } = await supabase.from('organizations')
+        .select('name, stripe_account_id, entity_type, slug, features')
+        .eq('id', tutor.organization_id).single();
+      if (error || !data) return json(res, 502, { error: 'Nepavyko įkelti organizacijos mokėjimo nustatymų' });
+      org = data;
+      ownerName = org.name || ownerName;
+    }
+    if (!usesManual) {
+      const market = marketFromRequest(req);
+      const feeProfile = orgFeeProfile(org?.slug) ?? orgFeeProfile(tutor.organization_id);
+      const feeSplit = resolveOrgPayerFeeSplit(org?.features);
+      if (!(org?.entity_type === 'school' && !feeProfile)) {
+        checkoutTotalCents = feeProfile
+          ? lessonCheckoutBreakdownCents(Number(batch.total_amount), market, feeProfile, feeSplit).totalCents
+          : junction.reduce((sum: number, row: any) => sum
+            + lessonCheckoutBreakdownCents(Number(row.session_price) || 0, market, null, feeSplit).totalCents, 0);
+      }
+      // The payer link reuses an open Checkout even after the org changes its
+      // fee settings. The reminder must quote that exact existing amount.
+      if (batch.stripe_checkout_session_id) {
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
+        const accountId = org?.stripe_account_id || tutor.stripe_account_id;
+        try {
+          const lookup = await retrieveConnectCheckoutSessionWithScope(stripe, batch.stripe_checkout_session_id, accountId);
+          if (lookup.stripeAccount === accountId && lookup.session.status === 'open'
+            && Number.isFinite(lookup.session.amount_total)) {
+            checkoutTotalCents = lookup.session.amount_total!;
+          }
+        } catch {
+          // pay-invoice also renews unavailable sessions with the current fees.
+        }
+      }
+    }
+    const totalAmount = (checkoutTotalCents / 100).toFixed(2);
+    const fees = checkoutTotalCents / 100 - Number(batch.total_amount || 0);
 
     const emailData: Record<string, unknown> = usesManual
       ? {
           recipientName: batch.payer_name || undefined,
           studentName,
-          tutorName: tutor.full_name || 'Korepetitorius',
+          tutorName: ownerName,
           periodText,
           sessions: sessionsForEmail,
-          lessonsTotal: totalAmount,
+          lessonsTotal,
           totalAmount,
           paymentDeadline: deadlineStr,
           manualPaymentInstructions: true,
@@ -151,10 +199,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : {
           recipientName: batch.payer_name || undefined,
           studentName,
-          tutorName: tutor.full_name || 'Korepetitorius',
+          tutorName: ownerName,
           periodText,
           sessions: sessionsForEmail,
-          lessonsTotal: totalAmount,
+          lessonsTotal,
+          platformFees: fees > 0 ? fees.toFixed(2) : undefined,
           totalAmount,
           paymentDeadline: deadlineStr,
           paymentLink: stablePaymentLink,
@@ -167,24 +216,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       data: emailData,
     };
 
-    const { data: inv } = await supabase
+    const { data: invoices, error: invoicesError } = await supabase
       .from('invoices')
-      .select('invoice_number, pdf_storage_path')
+      .select('id, invoice_number, pdf_storage_path, pdf_meta')
       .eq('billing_batch_id', batch.id)
       .neq('status', 'cancelled')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order('created_at', { ascending: true });
+    if (invoicesError) return json(res, 502, { error: 'Nepavyko įkelti sąskaitų PDF' });
 
-    if (inv?.pdf_storage_path) {
-      const { data: blob } = await supabase.storage.from('invoices').download(inv.pdf_storage_path);
-      if (blob) {
-        emailPayload.attachments = [{
-          filename: `${inv.invoice_number || 'saskaita'}.pdf`,
-          content: Buffer.from(await blob.arrayBuffer()).toString('base64'),
-        }];
+    // A legacy BB-* summary means the original request omitted S.F. Keep that
+    // reminder valid without attachments. Actual PVM child invoices must cover
+    // every billed lesson before a family reminder can be sent.
+    const requiresCompletePvmInvoices = orgHasPvmEducationInvoice(org?.features)
+      && invoices?.some(inv => (inv.pdf_meta as { layout?: string } | null)?.layout === 'pvm_education');
+    if (requiresCompletePvmInvoices) {
+      const expectedStudentCount = new Set(junction.map((row: any) => row.sessions?.student_id).filter(Boolean)).size;
+      if (!expectedStudentCount || invoices.length !== expectedStudentCount) {
+        return json(res, 409, { error: 'Pirmiausia sugeneruokite visų vaikų sąskaitas ir PDF' });
+      }
+      const { data: lineItems, error: lineItemsError } = await supabase.from('invoice_line_items')
+        .select('session_ids').in('invoice_id', invoices.map(inv => inv.id));
+      if (lineItemsError) return json(res, 502, { error: 'Nepavyko patikrinti sąskaitų pamokų' });
+      const invoicedSessionIds = new Set((lineItems || []).flatMap(item => item.session_ids || []));
+      if (junction.some((row: any) => !invoicedSessionIds.has(row.session_id))) {
+        return json(res, 409, { error: 'Pirmiausia sugeneruokite visų vaikų sąskaitas ir PDF' });
       }
     }
+
+    const attachments = [];
+    for (const inv of invoices || []) {
+      if (!inv.pdf_storage_path) {
+        if (requiresCompletePvmInvoices) return json(res, 409, { error: 'Pirmiausia sugeneruokite sąskaitos PDF' });
+        continue;
+      }
+      const { data: blob, error } = await supabase.storage.from('invoices').download(inv.pdf_storage_path);
+      if (error || !blob) return json(res, 502, { error: 'Nepavyko įkelti sąskaitos PDF' });
+      attachments.push({
+          filename: `${inv.invoice_number || 'saskaita'}.pdf`,
+          content: Buffer.from(await blob.arrayBuffer()).toString('base64'),
+      });
+    }
+    if (attachments.length) emailPayload.attachments = attachments;
 
     const requestOrigin = req.headers.origin ? String(req.headers.origin) : null;
     const emailRes = await fetch(`${requestOrigin || appOrigin}/api/send-email`, {

@@ -35,6 +35,18 @@ describe('school invoice session review', () => {
     expect(schoolInvoiceContractReason(session, [{ ...laterSign, start_within_14_status: 'no' }])).toBe('outside_contract');
   });
 
+  it('includes student-joined completed lessons from the agreed start, while excluding earlier history', () => {
+    const laterSign = { ...contract, accepted_at: '2026-09-24T07:29:00Z', unit_price_eur: 6,
+      order_snapshot: { ...contract.order_snapshot, start_date: '2026-09-07' } as any };
+    const attended = { ...session, status: 'completed', status_confirmed_at: null, tutor_joined_at: null,
+      student_joined_at: '2026-09-14T13:05:00Z', price: 0 };
+    expect(reviewSchoolInvoiceSession(attended, [laterSign], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 6, statusConfirmedAt: null });
+    expect(reviewSchoolInvoiceSession({ ...attended, start_time: '2026-09-03T13:00:00Z',
+      end_time: '2026-09-03T14:00:00Z', student_joined_at: '2026-09-03T13:05:00Z' }, [laterSign], undefined, false))
+      .toMatchObject({ included: false, reason: 'outside_contract' });
+  });
+
   it('excludes the suspension interval and includes sessions after resumption', () => {
     const paused = { ...contract, suspension_started_at: '2026-09-12T00:00:00Z' };
     expect(schoolInvoiceContractReason(session, [paused])).toBe('suspended');
@@ -53,6 +65,19 @@ describe('school invoice session review', () => {
       .toMatchObject({ included: false, reason: 'unconfirmed', canConfirm: true });
     expect(reviewSchoolInvoiceSession(session, [contract], undefined, true))
       .toMatchObject({ included: false, reason: 'already_invoiced', canConfirm: false });
+  });
+
+  it('holds unmatched individual lessons when a signed agreement references a missing subject', () => {
+    const individual = { ...session, class_group_id: null, subject_id: 'replacement-subject' };
+    const stale = { ...contract, class_group_id: null, missingIndividualSubject: true,
+      order_snapshot: { ...contract.order_snapshot, service_type: 'individual', subject_id: 'deleted-subject' } as any };
+    expect(reviewSchoolInvoiceSession(individual, [stale], undefined, false))
+      .toMatchObject({ included: false, reason: 'contract_review' });
+    const valid = { ...stale, id: 'valid', missingIndividualSubject: false,
+      order_snapshot: { ...stale.order_snapshot, subject_id: 'replacement-subject' } as any };
+    expect(reviewSchoolInvoiceSession(individual, [stale, valid], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable' });
+    expect(schoolInvoiceContractReason(session, [stale])).toBe('payable');
   });
 
   it('restores billing through a new audit entry while preserving the earlier exclusion', () => {

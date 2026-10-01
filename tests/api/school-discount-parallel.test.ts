@@ -181,6 +181,61 @@ describe('discount annex alongside an unsigned extra-lessons contract', () => {
     expect(bodyOf(forbidden).activities).toEqual([]);
   });
 
+  it('offers a contract-scoped individual addendum when its frozen subject was deleted', async () => {
+    const data = seed();
+    Object.assign(data.school_contracts[0], { class_group_id: null, signing_status: 'signed',
+      accepted_at: '2026-09-07T08:00:00Z', order_snapshot: {
+        ...data.school_contracts[0].order_snapshot, service_type: 'individual', group_id: null,
+        subject_id: 'deleted-subject', service_name: 'Rusų kalba Testinis mokinys',
+      } });
+    // The live series now uses a different subject. It must not redefine the signed addendum.
+    (data.recurring_individual_sessions as any[]).push({ student_id: 'student', active: true,
+      subject_id: 'replacement-subject', tutor_id: 'teacher', subject: { name: 'Rusų kalba' },
+      tutor: { full_name: 'Teacher', organization_id: 'school' } });
+    data.subjects.push({ id: 'replacement-subject', name: 'Rusų kalba', tutor_id: 'teacher' });
+    const db = database(data);
+    const options = response();
+    await offerHandler(req('POST', { action: 'options', studentId: 'student', contractId: 'contract' }), options);
+    expect(bodyOf(options).activities).toEqual([
+      { subjectId: null, tutorId: null, label: 'Rusų kalba Testinis mokinys' },
+    ]);
+    expect(bodyOf(options).contractAccepted).toBe(true);
+
+    const res = response();
+    await offerHandler(req('POST', { action: 'create', studentId: 'student', contractId: 'contract',
+      subjectId: null, tutorId: null, discountType: 'percent', discountValue: 25,
+      validFrom: '2026-10-01', validUntil: '2027-06-30' }), res);
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(db.tables.school_discount_agreements[0]).toMatchObject({ contract_id: 'contract',
+      subject_id: null, tutor_id: null, activity_label: 'Rusų kalba Testinis mokinys' });
+    expect(db.tables.school_contracts[0].order_snapshot.subject_id).toBe('deleted-subject');
+    expect(state.emails).toHaveLength(1);
+    expect(state.emails[0].attachments).toHaveLength(1);
+  });
+
+  it('allows an individual contract without subject metadata but rejects unrelated activity IDs', async () => {
+    const data = seed();
+    Object.assign(data.school_contracts[0], { class_group_id: null, order_snapshot: {
+      ...data.school_contracts[0].order_snapshot, service_type: 'individual', group_id: null,
+      subject_id: null, service_name: 'Individualus užsiėmimas',
+    } });
+    const db = database(data);
+    const options = response();
+    await offerHandler(req('POST', { action: 'options', studentId: 'student', contractId: 'contract' }), options);
+    expect(bodyOf(options).activities).toEqual([
+      { subjectId: null, tutorId: null, label: 'Individualus užsiėmimas' },
+    ]);
+
+    const res = response();
+    await offerHandler(req('POST', { action: 'create', studentId: 'student', contractId: 'contract',
+      subjectId: 'other-subject', tutorId: 'other-teacher', discountType: 'percent', discountValue: 25,
+      validFrom: '2026-10-01', validUntil: '2027-06-30' }), res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(bodyOf(res).error).toContain('nepriskirtas šiam mokiniui');
+    expect(db.tables.school_discount_agreements).toEqual([]);
+    expect(state.emails).toEqual([]);
+  });
+
   it('renews an expired main-contract link before the combined offer is sent', async () => {
     const data = seed(); data.school_contract_completion_tokens[0].expires_at = '2020-01-01T00:00:00Z';
     const db = database(data);

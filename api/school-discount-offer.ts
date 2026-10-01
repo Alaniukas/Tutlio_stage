@@ -64,6 +64,11 @@ async function loadStudentActivities(
 ): Promise<ActivityOption[]> {
   const order = snapshotFromRow(contract) as ExtraLessonsOrderSnapshot | null;
   if (!order) return [];
+  // The signed contract defines the discounted service. Subject/teacher IDs are
+  // optional metadata and can disappear when an individual series is replaced.
+  const contractActivity: ActivityOption[] = [{ subjectId: null, tutorId: null,
+    label: String(order.service_name || order.subject_name || 'Užsiėmimas') }];
+  if (order.service_type === 'individual' && !order.subject_id) return contractActivity;
   const groupId = contract.class_group_id || order.group_id;
   if (order.service_type === 'group' && groupId) {
     const { data: group } = await supabase.from('school_class_groups')
@@ -108,8 +113,11 @@ async function loadStudentActivities(
   if (first) return [{ ...first, label: String(order.service_name || first.label) }];
   // Before acceptance there may be no lessons or recurring series yet.
   if (order.service_type === 'individual' && order.subject_id) {
-    const { data: subject } = await supabase.from('subjects')
+    const { data: subject, error: subjectError } = await supabase.from('subjects')
       .select('id, name, tutor_id').eq('id', order.subject_id).maybeSingle();
+    // Do not infer a replacement subject from another lesson or rewrite the
+    // frozen order. A successful lookup with no row means the metadata is stale.
+    if (!subjectError && !subject) return contractActivity;
     if (subject?.tutor_id) {
       const { data: tutor } = await supabase.from('profiles')
         .select('id, full_name').eq('id', subject.tutor_id)
@@ -216,7 +224,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const activities = await loadStudentActivities(supabase, organizationId, studentId, contract);
-    const order = snapshotFromRow(contract) as ExtraLessonsOrderSnapshot | null;
     const input = normalizeSchoolDiscountAgreementInput({
       subjectId: body.subjectId,
       tutorId: body.tutorId,
@@ -225,7 +232,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       validFrom: body.validFrom,
       validUntil: body.validUntil,
       note: body.note,
-    }, { allowMissingSubject: order?.service_type === 'group' });
+    }, { allowMissingSubject: activities.some((activity) => !activity.subjectId) });
     const activity = activities.find((item) => activityKey(item.subjectId, item.tutorId) === activityKey(input.subjectId, input.tutorId));
     if (!activity) throw new Error('Pasirinktas užsiėmimas nepriskirtas šiam mokiniui.');
     const recipientEmail = String(student.payer_email || student.email || '').trim();

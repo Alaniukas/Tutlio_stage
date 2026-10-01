@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalSessionCharge, computeCanonicalSchoolMonthlyBill, schoolContractBillingModel, schoolInvoiceDueDate } from '../../src/lib/schoolCanonicalBilling';
+import { canonicalSessionCharge, computeCanonicalSchoolMonthlyBill, hasSchoolOccurrenceEvidence, schoolContractBillingModel, schoolInvoiceDueDate } from '../../src/lib/schoolCanonicalBilling';
 import { EXTRA_LESSONS_LEGAL_BODY } from '../../src/lib/extraLessonsLegalBody';
 
 const base = { unit_price_eur: 10, base_lessons_per_month: 8, period_start: '2026-08-01', period_end: '2026-08-31', service_type: 'group' as const };
@@ -45,6 +45,19 @@ describe('canonical DOCX monthly charges', () => {
     ] });
     expect(bill.billed_session_ids).toEqual(['confirmed']);
     expect(bill.review_session_ids).toEqual(['auto', 'active']);
+  });
+  it('bills a completed lesson with student join evidence when tutor tracking and manual confirmation are missing', () => {
+    const bill = computeCanonicalSchoolMonthlyBill({ ...base, sessions: [
+      { ...session, id: 'student-join', tutor_joined_at: null, status_confirmed_at: null, student_joined_at: '2026-08-10T10:05:00Z' },
+    ] });
+    expect(bill.billed_session_ids).toEqual(['student-join']);
+    expect(bill.review_session_ids).toEqual([]);
+    expect(bill.total_eur).toBe(10);
+  });
+  it.each(['active', 'no_show', 'cancelled'])('does not infer occurrence from student join alone for a %s lesson', (status) => {
+    const unresolved = { ...session, status, tutor_joined_at: null, status_confirmed_at: null, student_joined_at: '2026-08-10T10:05:00Z' };
+    expect(hasSchoolOccurrenceEvidence(unresolved)).toBe(false);
+    expect(canonicalSessionCharge(unresolved, 'group')).toBe('review');
   });
   it('bills only before termination and holds a lesson crossing the termination time', () => {
     const bill = computeCanonicalSchoolMonthlyBill({ ...base, endedAtIso: '2026-08-10T10:30:00Z', sessions: [

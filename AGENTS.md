@@ -446,6 +446,8 @@ Tai **nėra** atskira lentelė ir **nėra** sutartis prie kiekvienos pamokos. Ta
 **Testai:** `tests/lib/extra-lessons-contract.test.ts`, `tests/pages/school-extra-lessons-accept.test.tsx`, `tests/lib/school-extra-lessons-billing.test.ts`, `tests/lib/extra-lessons-parent-portal.test.ts`, `tests/api/send-email-extra-lessons.test.ts`, `tests/api/extra-lessons-first-lesson-invite.test.ts`, `tests/api/send-email-school-invite-and-invoice.test.ts`, `tests/api/school-monthly-invoice-email.test.ts`, `tests/api/pay-school-monthly-invoice.test.ts`, `tests/api/school-homework.test.ts`, `tests/lib/public-link-token.test.ts`, `tests/lib/school-payer-invoice-groups.test.ts`, `tests/api/school-monthly-invoice-admin.test.ts`.
 **Rankinis QA:** `test_school.md`.
 
+**S.F. įvykimo įrodymai (Laisvi vaikai):** `hasSchoolOccurrenceEvidence()` (`schoolCanonicalBilling.ts`) priima `tutor_joined_at` arba `status_confirmed_at`, kai statusas `completed` / `no_show`; `completed` užsiėmimui pakanka ir `student_joined_at`, jei mokytojo prisijungimas neužfiksuotas. Vien mokinio prisijungimas nepatvirtina `active`, `cancelled` ar `no_show`. Admin API įkelia visus tris laukus mokinio ir grupės užklausose; grupės įvykimo įrodymas gali būti kito dalyvio eilutėje. Sąskaitų peržiūros įspėjimas remiasi `reason === 'unconfirmed'`, ne vien tuščiu `status_confirmed_at`. Sutarties pradžios riba išlieka: 09.03 neapmokestinama, jei `start_date = 09.07`, net pasirinkus pradėti iš karto. Šiai pataisai naujo DB backfill nereikia; esami istoriniai `status_confirmed_at` įrašai lieka tinkamas įrodymas. KPI ir join/no-show cron logika atskira.
+
 ### Klasės grupės, įrašai, join no-show
 
 | Flag | UI / API |

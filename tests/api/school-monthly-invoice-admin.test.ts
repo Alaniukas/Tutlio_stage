@@ -1,6 +1,19 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createElement } from 'react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const state = vi.hoisted(() => ({ tables: {} as Record<string, any[]>, writes: [] as any[], canEdit: true, adminOrg: 'org1' }));
+vi.mock('../../src/lib/apiHelpers', () => ({ authHeaders: async () => ({ Authorization: 'Bearer mock' }) }));
+vi.mock('../../src/lib/i18n', () => ({ useTranslation: () => ({ t: (key: string) => key, locale: 'lt' }) }));
+vi.mock('../../src/components/ui/month-filter-input', () => ({
+  MonthFilterInput: ({ value, onChange, disabled }: any) => createElement('input', {
+    'aria-label': 'Invoice month', type: 'month', value, disabled, onChange: (event: any) => onChange(event.target.value),
+  }),
+}));
+vi.mock('../../src/components/ui/date-input', () => ({
+  DateInput: (props: any) => createElement('input', { ...props, 'aria-label': 'Invoice due date', type: 'date' }),
+}));
+
+const state = vi.hoisted(() => ({ tables: {} as Record<string, any[]>, writes: [] as any[], canEdit: true, adminOrg: 'org1', rowLimit: Infinity }));
 vi.mock('../../api/_lib/schoolConsultationsAccess.js', () => ({
   requireConsultationsAuth: async () => ({ userId: 'admin1' }),
   assertOrgConsultationsEnabled: async () => ({ ok: true }),
@@ -16,13 +29,20 @@ vi.mock('../../api/_lib/orgAdminAccess.js', () => ({
 }));
 vi.mock('../../api/_lib/invoiceNumber.js', () => ({ allocateInvoiceNumber: vi.fn() }));
 vi.mock('../../api/_lib/invoiceBranding.js', () => ({ resolveInvoiceBranding: async () => ({}) }));
-vi.mock('../../api/_lib/schoolMonthlyInvoicePdf.js', () => ({ generateSchoolMonthlyInvoicePdf: async () => new Uint8Array([1, 2, 3]) }));
+vi.mock('../../api/_lib/schoolMonthlyInvoicePdf.js', () => ({ generateSchoolMonthlyInvoicePdf: vi.fn(async () => new Uint8Array([1, 2, 3])) }));
 vi.mock('../../api/_lib/schoolMonthlyInvoiceEmail.js', () => ({ sendSchoolMonthlyInvoiceEmail: vi.fn() }));
 
 function query(table: string) {
   let rows = [...(state.tables[table] || [])];
+  let sessionColumns: string[] | null = null;
   const builder: any = {
-    select: () => builder,
+    select: (columns?: string) => {
+      // Honor session projections so the mock cannot hide a missing attendance field in SELECT.
+      if (table === 'sessions' && columns && columns !== '*') {
+        sessionColumns = columns.split(/,(?![^(]*\))/).map((column) => column.trim().split(/[:(]/)[0]);
+      }
+      return builder;
+    },
     eq: (key: string, value: any) => { rows = rows.filter((row) => key.split('.').reduce((item, part) => item?.[part], row) === value); return builder; },
     in: (key: string, values: any[]) => { rows = rows.filter((row) => values.includes(row[key])); return builder; },
     gte: (key: string, value: any) => { rows = rows.filter((row) => row[key] >= value); return builder; },
@@ -45,7 +65,8 @@ function query(table: string) {
     update: (row: any) => { rows = rows.map((item) => ({ ...item, ...row })); return builder; },
     range: (from: number, to: number) => { rows = rows.slice(from, to + 1); return builder; },
     single: async () => ({ data: rows[0] || null, error: null }),
-    then: (resolve: any) => resolve({ data: rows, error: null }),
+    then: (resolve: any) => resolve({ data: rows.slice(0, state.rowLimit).map((row) => sessionColumns
+      ? Object.fromEntries(Object.entries(row).filter(([key]) => sessionColumns!.includes(key))) : row), error: null }),
   };
   return builder;
 }
@@ -53,6 +74,8 @@ function query(table: string) {
 import handler from '../../api/school-monthly-invoice-admin';
 import { allocateInvoiceNumber } from '../../api/_lib/invoiceNumber.js';
 import { sendSchoolMonthlyInvoiceEmail } from '../../api/_lib/schoolMonthlyInvoiceEmail.js';
+import { generateSchoolMonthlyInvoicePdf } from '../../api/_lib/schoolMonthlyInvoicePdf.js';
+import SchoolMonthlyInvoiceDialog from '../../src/components/school/SchoolMonthlyInvoiceDialog';
 
 async function request(extra: Record<string, unknown> = {}) {
   const result = { status: 0, body: null as any };
@@ -65,7 +88,7 @@ async function request(extra: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-only';
-  state.writes = []; state.canEdit = true; state.adminOrg = 'org1';
+  state.writes = []; state.canEdit = true; state.adminOrg = 'org1'; state.rowLimit = Infinity;
   state.tables = {
     students: [{ id: 'child1', organization_id: 'org1', full_name: 'Child One', payer_email: 'parent@example.com' }],
     organizations: [{ id: 'org1', name: 'Target School', features: {} }],
@@ -73,11 +96,46 @@ beforeEach(() => {
     sessions: [{ id: 'lesson1', student_id: 'child1', tutor_id: 'teacher1', subject_id: 'math', class_group_id: 'group1',
       start_time: '2026-09-14T13:00:00Z', end_time: '2026-09-14T14:00:00Z', status: 'completed', price: 12,
       status_confirmed_at: '2026-09-14T14:05:00Z', tutor: { full_name: 'Teacher One', organization_id: 'org1' }, subject: { name: 'Math' } }],
-    student_lesson_discounts: [], school_contracts: [], school_session_billing_decisions: [], school_monthly_invoices: [],
+    subjects: [], student_lesson_discounts: [], school_contracts: [], school_session_billing_decisions: [], school_monthly_invoices: [],
   };
 });
 
+afterEach(() => vi.unstubAllGlobals());
+
 describe('school monthly invoice review API', () => {
+  it('previews a completed individual lesson with student join evidence and no tutor join or manual confirmation', async () => {
+    Object.assign(state.tables.sessions[0], { class_group_id: null, status_confirmed_at: null,
+      tutor_joined_at: null, student_joined_at: '2026-09-14T13:05:00Z' });
+    const result = await request({ action: 'preview' });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ totalEur: 12, reviewSessionIds: [],
+      sessions: [{ included: true, reason: 'payable', statusConfirmedAt: null }] });
+    expect(state.writes).toEqual([]);
+  });
+  it('bills a reserved group place using another completed attendee student join without changing the absent child attendance', async () => {
+    Object.assign(state.tables.sessions[0], { status: 'no_show', status_confirmed_at: null, tutor_joined_at: null });
+    state.tables.sessions.push({ ...state.tables.sessions[0], id: 'attendee', student_id: 'child2',
+      status: 'completed', student_joined_at: '2026-09-14T13:05:00Z' });
+    const result = await request({ action: 'preview' });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ totalEur: 12, reviewSessionIds: [],
+      sessions: [{ id: 'lesson1', included: true, reason: 'payable', status: 'no_show' }] });
+    expect(result.body.sessions).toHaveLength(1);
+    expect(state.writes).toEqual([]);
+  });
+  it.each(['different group', 'different occurrence'])('does not borrow student join evidence from a %s', async (scope) => {
+    Object.assign(state.tables.sessions[0], { status: 'no_show', status_confirmed_at: null, tutor_joined_at: null });
+    state.tables.sessions.push({ ...state.tables.sessions[0], id: 'other-attendee', student_id: 'child2',
+      status: 'completed', student_joined_at: '2026-09-14T13:05:00Z',
+      ...(scope === 'different group' ? { class_group_id: 'another-group' }
+        : { start_time: '2026-09-15T13:00:00Z', end_time: '2026-09-15T14:00:00Z' }),
+    });
+    const result = await request();
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ reviewSessionIds: ['lesson1'],
+      sessions: [{ id: 'lesson1', included: false, reason: 'unconfirmed' }] });
+    expect(state.writes).toEqual([]);
+  });
   it('previews the target school, payer and per-session amounts without changing records', async () => {
     const result = await request({ action: 'preview' });
     expect(result.status).toBe(200);
@@ -137,6 +195,47 @@ describe('school monthly invoice review API', () => {
     expect(result.body.sessions[0]).toMatchObject({ status: 'no_show', included: true, reason: 'payable' });
     expect(state.writes).toEqual([]);
   });
+  it('loads occurrence evidence beyond the database response cap', async () => {
+    state.rowLimit = 2;
+    const lesson = state.tables.sessions[0];
+    lesson.id = 'a'; lesson.status = 'no_show'; lesson.status_confirmed_at = null;
+    state.tables.sessions.push(
+      { ...lesson, id: 'b', student_id: 'child2' },
+      { ...lesson, id: 'c', student_id: 'child3', status: 'completed', status_confirmed_at: '2026-09-14T14:05:00Z' },
+    );
+    const result = await request();
+    expect(result.body.sessions[0]).toMatchObject({ included: true, reason: 'payable' });
+  });
+  it('hides pre-service history without billing it or changing attendance', async () => {
+    const lesson = state.tables.sessions[0];
+    state.tables.sessions.push({ ...lesson, id: 'before-service', start_time: '2026-09-03T09:00:00Z', end_time: '2026-09-03T10:00:00Z' });
+    state.tables.school_contracts.push({ id: 'contract1', organization_id: 'org1', student_id: 'child1', kind: 'extra_lessons',
+      signing_status: 'signed', accepted_at: '2026-09-08T10:00:00Z', start_within_14_status: 'yes', class_group_id: 'group1',
+      order_snapshot: { service_type: 'group', group_id: 'group1', start_date: '2026-09-07', end_date: '2027-06-01' } });
+    const result = await request({ action: 'preview' });
+    expect(result.status).toBe(200);
+    expect(result.body.sessions.map((row: any) => row.id)).toEqual(['lesson1']);
+    expect(result.body.lines.flatMap((line: any) => line.sessionIds)).toEqual(['lesson1']);
+    expect(state.tables.sessions).toHaveLength(2);
+    expect(state.writes).toEqual([]);
+  });
+  it('requires review for deleted frozen individual subjects while keeping a valid agreement billable', async () => {
+    const lesson = state.tables.sessions[0];
+    lesson.class_group_id = null; lesson.subject_id = 'current-russian';
+    const stale = { id: 'stale', organization_id: 'org1', student_id: 'child1', kind: 'extra_lessons',
+      signing_status: 'signed', accepted_at: '2026-09-01T10:00:00Z', start_within_14_status: 'yes', class_group_id: null,
+      order_snapshot: { service_type: 'individual', subject_id: 'deleted-russian', start_date: '2026-09-07', end_date: '2027-06-01' } };
+    state.tables.school_contracts.push(stale);
+    expect((await request()).body).toMatchObject({ reviewSessionIds: ['lesson1'],
+      sessions: [{ included: false, reason: 'contract_review' }] });
+    const batch = await request({ action: 'batch-preview' });
+    expect(batch.body.payers[0].students[0]).toMatchObject({ reviewSessionIds: ['lesson1'], reviewReasons: ['contract_review'] });
+    state.tables.subjects.push({ id: 'current-russian', tutor: { organization_id: 'org1' } });
+    state.tables.school_contracts.push({ ...stale, id: 'valid',
+      order_snapshot: { ...stale.order_snapshot, subject_id: 'current-russian' } });
+    expect((await request()).body).toMatchObject({ reviewSessionIds: [], sessions: [{ included: true, reason: 'payable' }] });
+    expect(state.writes).toEqual([]);
+  });
   it('locks historical fixed-contract coverage even when an older invoice has no billed session ids', async () => {
     state.tables.school_contracts.push({ id: 'contract1', organization_id: 'org1', student_id: 'child1', kind: 'extra_lessons',
       signing_status: 'signed', accepted_at: '2026-09-01T00:00:00Z', start_within_14_status: 'yes', class_group_id: 'group1',
@@ -152,7 +251,7 @@ describe('school monthly invoice review API', () => {
       signing_status: 'signed', accepted_at: '2026-09-01T00:00:00Z', start_within_14_status: 'yes', class_group_id: 'group1',
       withdrawal_requested_at: '2026-09-13T10:00:00Z',
       order_snapshot: { service_type: 'group', group_id: 'group1', start_date: '2026-09-01', end_date: '2027-06-01' } });
-    expect((await request()).body.sessions[0]).toMatchObject({ included: false, reason: 'outside_contract' });
+    expect((await request()).body.sessions).toEqual([]);
     for (const endTime of [null, '2099-09-15T14:00:00Z']) {
       state.tables.sessions[0].end_time = endTime;
       expect((await request({ action: 'billing-decision', sessionId: 'lesson1', excluded: true, reason: 'Earlier end' })).status).toBe(409);
@@ -213,6 +312,112 @@ describe('school monthly invoice batch by payer', () => {
     expect(state.writes).toEqual([]);
   });
 
+  it('makes every payer sendable when completed lessons have student joins but no tutor joins or manual confirmations', async () => {
+    familyTables();
+    for (const lesson of state.tables.sessions) Object.assign(lesson, {
+      status_confirmed_at: null, tutor_joined_at: null, student_joined_at: '2026-09-14T13:05:00Z',
+    });
+    const result = await request({ action: 'batch-preview', studentId: undefined });
+    expect(result.status).toBe(200);
+    expect(result.body.payers).toHaveLength(2);
+    for (const payer of result.body.payers) {
+      expect(payer.sendableStudentIds).toHaveLength(1);
+      expect(payer.students[0]).toMatchObject({ lessonCount: 1, totalEur: 6, reviewSessionIds: [] });
+    }
+    expect(state.writes).toEqual([]);
+  });
+
+  it('runs the September student-join flow from the real dialog through review, PDF amounts, issuance and duplicate protection', async () => {
+    familyTables();
+    for (const contract of state.tables.school_contracts) {
+      contract.accepted_at = '2026-09-24T07:29:00Z';
+      contract.order_snapshot.start_date = '2026-09-07';
+    }
+    for (const lesson of [...state.tables.sessions]) {
+      Object.assign(lesson, { status_confirmed_at: null, tutor_joined_at: null,
+        student_joined_at: '2026-09-14T13:05:00Z' });
+      state.tables.sessions.push({ ...lesson, id: `${lesson.id}-before-service`,
+        start_time: '2026-09-03T13:00:00Z', end_time: '2026-09-03T14:00:00Z',
+        student_joined_at: '2026-09-03T13:05:00Z' });
+    }
+    // One child's join proves this occurrence; the other reserved place remains billable.
+    Object.assign(state.tables.sessions[1], { status: 'no_show', student_joined_at: null });
+    const attendanceBefore = structuredClone(state.tables.sessions);
+    vi.mocked(allocateInvoiceNumber).mockResolvedValueOnce('SF-1').mockResolvedValueOnce('SF-2');
+    vi.mocked(sendSchoolMonthlyInvoiceEmail).mockResolvedValue({ sent: true } as any);
+    const calls: any[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+      expect(url).toBe('/api/school-monthly-invoice-admin');
+      const body = JSON.parse(init.body);
+      calls.push(body);
+      const response = await request(body);
+      return { ok: response.status >= 200 && response.status < 300, status: response.status, json: async () => response.body };
+    }));
+    const onOpenChange = vi.fn();
+    render(createElement(SchoolMonthlyInvoiceDialog, {
+      batch: true, open: true, organizationId: 'org1', onOpenChange,
+      students: state.tables.students.map((child) => ({ id: child.id, fullName: child.full_name })),
+    }));
+    fireEvent.change(screen.getByLabelText('Invoice month'), { target: { value: '2026-09' } });
+    fireEvent.click(screen.getByRole('button', { name: 'school.invoice.batch.preview' }));
+    await screen.findByText('Akvilė Adomaitytė');
+    expect(screen.getByText('Raimonda Širvytė')).toBeTruthy();
+    expect(screen.queryByText('school.invoice.batch.blocked')).toBeNull();
+    expect(state.writes).toEqual([]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'school.invoice.batch.reviewChild' })[0]);
+    await screen.findByText('school.invoice.review.reason.payable');
+    expect(screen.queryByText('school.invoice.review.unconfirmed')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Formuoti peržiūrai' }));
+    await screen.findByText('Peržiūra paruošta');
+    expect(generateSchoolMonthlyInvoicePdf).toHaveBeenCalledWith(expect.objectContaining({
+      preview: true, studentName: 'Adomaitis Kajus', subtotalEur: 6, totalEur: 6,
+      lines: [expect.objectContaining({ quantity: 1, amountEur: 6 })],
+    }));
+    expect(state.writes).toEqual([]);
+    expect(sendSchoolMonthlyInvoiceEmail).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'common.back: school.invoice.batch.title' }));
+    await screen.findByText('Akvilė Adomaitytė');
+    fireEvent.click(screen.getByRole('button', { name: 'school.invoice.batch.sendAll' }));
+    await waitFor(() => expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(state.tables.school_monthly_invoices.map((invoice) => ({ studentId: invoice.student_id,
+      total: invoice.total_eur, sessions: invoice.billed_session_ids })).sort((a, b) => a.studentId.localeCompare(b.studentId))).toEqual([
+      { studentId: 'kajus', total: 6, sessions: ['kajus-lesson'] },
+      { studentId: 'palaima', total: 6, sessions: ['palaima-lesson'] },
+    ]);
+    expect(state.tables.school_monthly_invoice_lines.map((line) => ({ quantity: line.quantity,
+      amount: line.amount_eur, sessions: line.session_ids })).sort((a, b) => a.sessions[0].localeCompare(b.sessions[0]))).toEqual([
+      { quantity: 1, amount: 6, sessions: ['kajus-lesson'] },
+      { quantity: 1, amount: 6, sessions: ['palaima-lesson'] },
+    ]);
+    expect(vi.mocked(sendSchoolMonthlyInvoiceEmail).mock.calls.map((call) => call[2].student.payer_email).sort())
+      .toEqual(['akvile@example.com', 'raimonda@example.com']);
+    expect(state.tables.sessions).toEqual(attendanceBefore);
+    expect((screen.getByRole('button', { name: 'school.invoice.batch.sendAll' }) as HTMLButtonElement).disabled).toBe(true);
+    const writesBeforeRetry = state.writes.length;
+    const retry = await request(calls.find((call) => call.action === 'send-batch'));
+    expect(retry.body).toMatchObject({ sentCount: 0, skippedCount: 2 });
+    expect(state.writes).toHaveLength(writesBeforeRetry);
+    expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it('blocks stale student-join previews if occurrence evidence disappears before sending', async () => {
+    familyTables();
+    for (const lesson of state.tables.sessions) Object.assign(lesson, {
+      status_confirmed_at: null, tutor_joined_at: null, student_joined_at: '2026-09-14T13:05:00Z',
+    });
+    const preview = await request({ action: 'batch-preview' });
+    const tokens = Object.fromEntries(preview.body.payers.flatMap((payer: any) =>
+      payer.students.map((child: any) => [child.studentId, child.previewToken])));
+    for (const lesson of state.tables.sessions) lesson.student_joined_at = null;
+    const result = await request({ action: 'send-batch', previewTokens: tokens });
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({ sentCount: 0, skippedCount: 2 });
+    expect(state.writes).toEqual([]);
+    expect(allocateInvoiceNumber).not.toHaveBeenCalled();
+    expect(sendSchoolMonthlyInvoiceEmail).not.toHaveBeenCalled();
+  });
+
   it('sends a personalized invoice email per child for one payer or for everyone', async () => {
     familyTables();
     vi.mocked(allocateInvoiceNumber).mockResolvedValue('SF-1');
@@ -245,6 +450,66 @@ describe('school monthly invoice batch by payer', () => {
     const result = await request({ action: 'send-batch', payerKey: 'akvile@example.com' });
     expect(result.status).toBe(400);
     expect(result.body.sentCount || 0).toBe(0);
+    expect(allocateInvoiceNumber).not.toHaveBeenCalled();
+  });
+
+  it('keeps already invoiced children visible in the period review', async () => {
+    familyTables();
+    state.tables.school_monthly_invoices.push({ id: 'issued', organization_id: 'org1', student_id: 'kajus',
+      billed_session_ids: ['kajus-lesson'], period_start: '2026-09-01', period_end: '2026-09-30', billing_model: 'actual' });
+    const preview = await request({ action: 'batch-preview' });
+    expect(preview.body.payers).toHaveLength(2);
+    const group = preview.body.payers.find((row: any) => row.payerEmail === 'akvile@example.com');
+    expect(group.students[0]).toMatchObject({ studentId: 'kajus', alreadyIssued: true, lessonCount: 0 });
+    expect(group.sendableStudentIds).toEqual([]);
+  });
+
+  it('does not select a newly added child that was absent from the reviewed preview', async () => {
+    familyTables();
+    vi.mocked(allocateInvoiceNumber).mockResolvedValue('SF-1');
+    vi.mocked(sendSchoolMonthlyInvoiceEmail).mockResolvedValue({ sent: true } as any);
+    const preview = await request({ action: 'batch-preview' });
+    const tokens = Object.fromEntries(preview.body.payers.flatMap((group: any) =>
+      group.students.map((row: any) => [row.studentId, row.previewToken])));
+    state.tables.students.push({ ...state.tables.students[0], id: 'new-child', full_name: 'New Child' });
+    state.tables.sessions.push({ ...state.tables.sessions[0], id: 'new-lesson', student_id: 'new-child' });
+    state.tables.school_contracts.push({ ...state.tables.school_contracts[0], id: 'new-contract', student_id: 'new-child' });
+    const result = await request({ action: 'send-batch', previewTokens: tokens });
+    expect(result.status).toBe(200);
+    expect(result.body.sent.map((row: any) => row.studentId).sort()).toEqual(['kajus', 'palaima']);
+    expect(result.body.skippedCount).toBe(0);
+    expect(vi.mocked(sendSchoolMonthlyInvoiceEmail).mock.calls.every((call) => call[1].student_id !== 'new-child')).toBe(true);
+  });
+
+  it('reports a reviewed child that becomes unconfirmed while sending the other child', async () => {
+    familyTables();
+    vi.mocked(allocateInvoiceNumber).mockResolvedValue('SF-1');
+    vi.mocked(sendSchoolMonthlyInvoiceEmail).mockResolvedValue({ sent: true } as any);
+    const preview = await request({ action: 'batch-preview' });
+    const tokens = Object.fromEntries(preview.body.payers.flatMap((group: any) =>
+      group.students.map((row: any) => [row.studentId, row.previewToken])));
+    // A separate occurrence loses its confirmation after the administrator reviewed it.
+    state.tables.sessions[1].class_group_id = null;
+    state.tables.sessions[1].status_confirmed_at = null;
+    const result = await request({ action: 'send-batch', studentIds: ['kajus', 'palaima'], previewTokens: tokens });
+    expect(result.status).toBe(200);
+    expect(result.body.sentCount).toBe(1);
+    expect(result.body.sent[0].studentId).toBe('kajus');
+    expect(result.body.skippedCount).toBe(1);
+    expect(result.body.skipped[0]).toMatchObject({ studentId: 'palaima', error: expect.stringContaining('patvirtinkite') });
+    expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports an explicitly requested child whose payer changes after review', async () => {
+    familyTables();
+    const preview = await request({ action: 'batch-preview' });
+    const group = preview.body.payers.find((row: any) => row.payerEmail === 'akvile@example.com');
+    state.tables.students[0].payer_email = 'changed@example.com';
+    const result = await request({ action: 'send-batch', payerKey: group.payerKey, studentIds: ['kajus'],
+      previewTokens: { kajus: group.students[0].previewToken } });
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({ sentCount: 0, skippedCount: 1,
+      skipped: [{ studentId: 'kajus', error: expect.stringContaining('pasikeitė') }] });
     expect(allocateInvoiceNumber).not.toHaveBeenCalled();
   });
 });

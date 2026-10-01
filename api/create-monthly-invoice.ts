@@ -11,7 +11,7 @@ import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, directChargeApplicationFeeCents, isManoKorepetitoriusOrg, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
-import { directChargeOptions } from './_lib/stripeDirectCharge.js';
+import { directChargeOptions, expireConnectCheckoutSession } from './_lib/stripeDirectCharge.js';
 import {
     tutorUsesManualStudentPayments,
     trimManualPaymentBankDetails,
@@ -21,6 +21,7 @@ import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 import { proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
 import { isMonthlyBillingOnlyStudent } from '../src/lib/studentPaymentModel.js';
+import { orgHasPvmEducationInvoice } from './_lib/pvmEducationInvoice.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -73,8 +74,9 @@ async function generateMonthlySalesInvoicePdf(
         periodStartDate: string;
         periodEndDate: string;
         sessionIds: string[];
+        expectedInvoiceCount: number;
     }
-): Promise<{ invoiceNumber: string; pdfBase64: string } | null> {
+): Promise<Array<{ invoiceNumber: string; pdfBase64: string }> | null> {
     try {
         const invRes = await postInternalJson(
             resolveApiUrl(req, '/api/generate-invoice'),
@@ -97,13 +99,18 @@ async function generateMonthlySalesInvoicePdf(
         }
 
         const invData = (await invRes.json().catch(() => null)) as { invoiceIds?: string[] } | null;
-        const invoiceId = invData?.invoiceIds?.[0];
-        if (!invoiceId) {
-            console.error('[create-monthly-invoice] generate-invoice returned no invoice id');
+        const invoiceIds = invData?.invoiceIds;
+        if (!invoiceIds?.length || invoiceIds.length !== opts.expectedInvoiceCount) {
+            console.error('[create-monthly-invoice] generate-invoice did not return every expected invoice');
             return null;
         }
 
-        return await loadInvoicePdfAttachment(invoiceId);
+        // PVM education invoices are issued separately for each child, even
+        // when their parent receives one payment request for the family.
+        const attachments = await Promise.all(invoiceIds.map(loadInvoicePdfAttachment));
+        return attachments.every((attachment) => attachment !== null)
+            ? attachments as Array<{ invoiceNumber: string; pdfBase64: string }>
+            : null;
     } catch (err) {
         console.error('[create-monthly-invoice] generate-invoice error:', err);
         return null;
@@ -310,6 +317,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let useSchoolOrgAbsorbedFees = false;
         let feeProfile: OrgFeeProfile | null = null;
         let feeSplit = null;
+        let salesInvoicePerStudent = false;
         const usesManualStudentPayments = tutorUsesManualStudentPayments(tutor);
         let tutorManualBankDetails = '';
 
@@ -318,10 +326,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (tutor.organization_id) {
                 const { data: org } = await supabase
                     .from('organizations')
-                    .select('name')
+                    .select('name, features')
                     .eq('id', tutor.organization_id)
                     .single();
                 if (org?.name) ownerName = org.name;
+                salesInvoicePerStudent = orgHasPvmEducationInvoice(org?.features);
             }
         } else if (tutor.organization_id) {
             const { data: org } = await supabase
@@ -337,6 +346,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ownerName = org.name || ownerName;
             feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
             feeSplit = resolveOrgPayerFeeSplit((org as { features?: unknown }).features);
+            salesInvoicePerStudent = orgHasPvmEducationInvoice(org.features);
             // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
             useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school' && !feeProfile;
         } else {
@@ -352,6 +362,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         // 5. Create billing batch and checkout for EACH payer
         const results = [];
+        const failures: Array<{ payerEmail: string; batchId?: string; stage: string; error: string }> = [];
 
         for (const [payerEmail, payerSessions] of sessionsByPayer.entries()) {
             const firstSession = payerSessions[0];
@@ -379,13 +390,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     payment_status: 'pending',
                     payer_email: payerEmail,
                     payer_name: payerName,
-                    sent_at: new Date().toISOString(),
+                    sent_at: null,
                 })
                 .select()
                 .single();
 
             if (batchErr || !billingBatch) {
                 console.error('[create-monthly-invoice] Error creating batch:', batchErr);
+                failures.push({ payerEmail, stage: 'batch', error: 'Nepavyko sukurti mokėjimo užklausos.' });
                 continue;
             }
 
@@ -403,15 +415,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (junctionErr) {
                 console.error(`[create-monthly-invoice] billing_batch_sessions insert failed for batch ${billingBatch.id}:`, junctionErr);
                 await supabase.from('billing_batches').delete().eq('id', billingBatch.id);
+                failures.push({ payerEmail, stage: 'sessions', error: 'Nepavyko susieti pamokų. Atnaujinkite sąskaitos peržiūrą.' });
                 continue;
             }
 
             // Update sessions with batch reference
             const sessionIdsForBatch = payerSessions.map(s => s.id);
-            await supabase
+            const { error: sessionLinkErr } = await supabase
                 .from('sessions')
                 .update({ payment_batch_id: billingBatch.id })
                 .in('id', sessionIdsForBatch);
+            if (sessionLinkErr) {
+                await supabase.from('billing_batches').delete().eq('id', billingBatch.id);
+                failures.push({ payerEmail, stage: 'sessions', error: 'Nepavyko susieti pamokų. Atnaujinkite sąskaitos peržiūrą.' });
+                continue;
+            }
 
             // Stripe Checkout (skipped for solo tutors in manual pupil-payment mode)
             const periodText = `${startDate.toLocaleDateString('lt-LT')} - ${endDate.toLocaleDateString('lt-LT')}`;
@@ -534,19 +552,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 await supabase.from('sessions').update({ payment_batch_id: null }).in('id', sessionIdsForBatch);
                 await supabase.from('billing_batch_sessions').delete().eq('billing_batch_id', billingBatch.id);
                 await supabase.from('billing_batches').delete().eq('id', billingBatch.id);
+                failures.push({ payerEmail, stage: 'checkout', error: 'Nepavyko paruošti Stripe mokėjimo. Atnaujinkite sąskaitos peržiūrą ir bandykite dar kartą.' });
                 continue;
             }
 
             if (checkoutSession?.id) {
-                await supabase
+                const { error: checkoutSaveErr } = await supabase
                     .from('billing_batches')
                     .update({ stripe_checkout_session_id: checkoutSession.id })
                     .eq('id', billingBatch.id);
+                if (checkoutSaveErr) {
+                    await expireConnectCheckoutSession(stripe, checkoutSession.id, stripeAccountId).catch(() => {});
+                    await supabase.from('sessions').update({ payment_batch_id: null }).eq('payment_batch_id', billingBatch.id);
+                    await supabase.from('billing_batches').delete().eq('id', billingBatch.id);
+                    failures.push({ payerEmail, stage: 'checkout', error: 'Nepavyko išsaugoti Stripe nuorodos. Atnaujoję sąskaitos peržiūrą bandykite dar kartą.' });
+                    continue;
+                }
             }
 
             // Generate S.F. PDF via shared generate-invoice (same path as lesson packages).
-            let sfPdfBase64: string | null = null;
-            let sfInvoiceNumber: string | null = null;
+            let sfAttachments: Array<{ invoiceNumber: string; pdfBase64: string }> | null = null;
             if (shouldIncludeSalesInvoice) {
                 console.log(`[create-monthly-invoice] Generating S.F. for batch ${billingBatch.id}, tutor ${tutorId}`);
                 const sfResult = await generateMonthlySalesInvoicePdf(req, {
@@ -555,18 +580,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     periodStartDate,
                     periodEndDate,
                     sessionIds: sessionIdsForBatch,
+                    expectedInvoiceCount: salesInvoicePerStudent ? new Set(payerSessions.map(s => s.student_id)).size : 1,
                 });
                 if (sfResult) {
-                    sfPdfBase64 = sfResult.pdfBase64;
-                    sfInvoiceNumber = sfResult.invoiceNumber;
-                    console.log(`[create-monthly-invoice] S.F. generated: ${sfInvoiceNumber}, pdfBase64 length: ${sfPdfBase64.length}`);
+                    sfAttachments = sfResult;
                 } else {
                     console.log('[create-monthly-invoice] generate-invoice returned no PDF for batch', billingBatch.id);
                 }
             }
 
-            // Safety net: ensure an invoices row exists for this batch so it appears on /invoices.
-            {
+            // Preserve the legacy summary for solo tutors or requests without
+            // S.F. Organization sales invoices use their configured numbering.
+            if (!tutor.organization_id || !shouldIncludeSalesInvoice) {
                 const { data: existingInv } = await supabase
                     .from('invoices')
                     .select('id, invoice_number, pdf_storage_path')
@@ -623,13 +648,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             await supabase.from('invoice_line_items').insert(fbLineItems);
                         }
                     }
-                } else if (shouldIncludeSalesInvoice && existingInv.pdf_storage_path && !sfPdfBase64) {
+                } else if (shouldIncludeSalesInvoice && existingInv.pdf_storage_path && !sfAttachments) {
                     const attached = await loadInvoicePdfAttachment(existingInv.id);
                     if (attached) {
-                        sfPdfBase64 = attached.pdfBase64;
-                        sfInvoiceNumber = attached.invoiceNumber;
+                        sfAttachments = [attached];
                     }
                 }
+            }
+
+            if (shouldIncludeSalesInvoice && !sfAttachments?.length) {
+                const { data: generatedInvoices, error: invoiceLookupErr } = await supabase
+                    .from('invoices').select('id').eq('billing_batch_id', billingBatch.id);
+                if (!invoiceLookupErr && generatedInvoices?.length === 0) {
+                    if (checkoutSession?.id) {
+                        await expireConnectCheckoutSession(stripe, checkoutSession.id, stripeAccountId).catch(() => {});
+                    }
+                    await supabase.from('sessions').update({ payment_batch_id: null }).eq('payment_batch_id', billingBatch.id);
+                    await supabase.from('billing_batches').delete().eq('id', billingBatch.id);
+                    failures.push({ payerEmail, stage: 'invoice', error: 'Nepavyko paruošti S.F. PDF. Laiškas neišsiųstas. Atnaujinkite sąskaitos peržiūrą ir bandykite dar kartą.' });
+                } else {
+                    failures.push({ payerEmail, batchId: billingBatch.id, stage: 'invoice', error: 'Mokėjimo užklausa sukurta, bet nepavyko paruošti visų S.F. PDF. Laiškas neišsiųstas. Patikrinkite sąskaitų sąrašą prieš kartodami.' });
+                }
+                continue;
             }
 
             // Prepare session details for email (sorted oldest → newest)
@@ -698,20 +738,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         to: payerEmail,
                         data: emailData,
                     };
-                    if (sfPdfBase64 && sfInvoiceNumber) {
-                        (emailPayload as any).attachments = [{ filename: `${sfInvoiceNumber}.pdf`, content: sfPdfBase64 }];
-                        console.log(`[create-monthly-invoice] Attaching S.F. PDF ${sfInvoiceNumber} to email for ${payerEmail}`);
+                    if (sfAttachments?.length) {
+                        emailPayload.attachments = sfAttachments.map(attachment => ({
+                            filename: `${attachment.invoiceNumber}.pdf`, content: attachment.pdfBase64,
+                        }));
                     }
                     const emailUrl = resolveApiUrl(req, '/api/send-email');
                     const emailRes = await postInternalJson(emailUrl, emailPayload, 20000);
                     if (!emailRes.ok) {
                         const body = await emailRes.text().catch(() => '');
                         console.error(`[create-monthly-invoice] send-email HTTP ${emailRes.status}:`, body);
+                        throw new Error('Invoice email delivery failed');
                     }
                 } catch (e) {
                     console.error('[create-monthly-invoice] Error sending email:', e);
+                    failures.push({ payerEmail, batchId: billingBatch.id, stage: 'email', error: 'Sąskaita sukurta, bet laiškas neišsiųstas. Sąskaitų sąraše pasirinkite Siųsti dar kartą.' });
+                    continue;
                 }
+            } else {
+                failures.push({ payerEmail, batchId: billingBatch.id, stage: 'checkout', error: 'Nepavyko paruošti mokėjimo nuorodos. Laiškas neišsiųstas.' });
+                continue;
             }
+
+            await supabase.from('billing_batches').update({ sent_at: new Date().toISOString() }).eq('id', billingBatch.id);
 
             results.push({
                 batchId: billingBatch.id,
@@ -719,15 +768,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 sessionsCount: lessonCount,
                 totalAmount: totalLessonPrice,
                 checkoutUrl: checkoutSession?.url ?? null,
+                emailSent: true,
+                invoiceNumbers: sfAttachments?.map(attachment => attachment.invoiceNumber) ?? [],
             });
 
             console.log(`[create-monthly-invoice] Created batch ${billingBatch.id} for ${payerEmail} with ${lessonCount} sessions`);
         }
 
-        return res.status(200).json({
-            success: true,
+        const hasFailures = failures.length > 0;
+        return res.status(hasFailures ? (results.length > 0 ? 207 : 502) : 200).json({
+            success: !hasFailures,
             batches: results,
             totalBatches: results.length,
+            failures,
+            ...(hasFailures ? { error: failures.map(failure => `${failure.payerEmail}: ${failure.error}`).join('\n') } : {}),
         });
     } catch (err: any) {
         console.error('create-monthly-invoice error:', err);
