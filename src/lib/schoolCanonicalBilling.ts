@@ -69,7 +69,6 @@ export function computeCanonicalSchoolMonthlyBill(input: Omit<ExtraLessonsBillin
     if (seen.has(session.id)) continue;
     seen.add(session.id);
     const day = sessionYmdVilnius(session.start_time);
-    if (input.acceptedAtIso && Date.parse(session.start_time) < Date.parse(input.acceptedAtIso)) continue;
     if (!day || day < input.period_start || day > input.period_end
       || (input.serviceEndYmd && day > input.serviceEndYmd)
       || !isSessionInExtraLessonsServiceWindow(session.start_time, { serviceStartYmd: input.serviceStartYmd || '', endedAtIso: input.endedAtIso })) continue;

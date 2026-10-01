@@ -102,7 +102,6 @@ export function schoolInvoiceContractReason(
   if (!matching.length) return 'payable';
   const valid = matching.filter((contract) => {
     if (!contract.accepted_at || !contract.order_snapshot || contract.signing_status !== 'signed') return false;
-    if (Date.parse(session.start_time) < Date.parse(contract.accepted_at)) return false;
     const order = contract.order_snapshot;
     const endedAt = [contract.withdrawal_requested_at, contract.terminated_at]
       .filter((value): value is string => Boolean(value)).sort()[0];

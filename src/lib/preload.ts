@@ -440,7 +440,7 @@ export async function preloadOrgAdminData() {
       preloadDashboard(org, orgId, tutorIds, visibleTutors, sessionsRes.data || []);
     }
 
-    if (orgId && !getCached(companyStatsCacheKey(orgId))) {
+    if (orgId && org?.entity_type !== 'school' && !getCached(companyStatsCacheKey(orgId))) {
       preloadStats(visibleTutors, tutorIds, orgId);
     }
   } finally {

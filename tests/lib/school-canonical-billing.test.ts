@@ -58,7 +58,8 @@ describe('canonical DOCX monthly charges', () => {
     expect(computeCanonicalSchoolMonthlyBill({ ...base, serviceStartYmd: '2026-08-15', sessions: [session] }).total_eur).toBe(0);
     expect(computeCanonicalSchoolMonthlyBill({ ...base, sessions: [session] }).total_eur).toBe(10);
     expect(computeCanonicalSchoolMonthlyBill({ ...base, sessions: [session, { ...session, id: 'two', start_time: '2026-08-11T10:00:00Z', end_time: '2026-08-11T11:00:00Z' }] }).total_eur).toBe(20);
-    expect(computeCanonicalSchoolMonthlyBill({ ...base, acceptedAtIso: '2026-08-10T10:30:00Z', sessions: [session] }).total_eur).toBe(0);
+    expect(computeCanonicalSchoolMonthlyBill({ ...base, acceptedAtIso: '2026-08-24T10:30:00Z', serviceStartYmd: '2026-08-07', sessions: [session] }).total_eur).toBe(10);
+    expect(computeCanonicalSchoolMonthlyBill({ ...base, acceptedAtIso: '2026-08-10T10:30:00Z', serviceStartYmd: '2026-08-24', sessions: [session] }).total_eur).toBe(0);
   });
   it('holds paid or packaged lessons to prevent charging the same service again', () => {
     expect(canonicalSessionCharge({ ...session, paid: true }, 'individual')).toBe('review');

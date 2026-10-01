@@ -26,6 +26,15 @@ describe('school invoice session review', () => {
     expect(schoolInvoiceContractReason(session, [{ ...contract, withdrawal_requested_at: '2026-09-14T13:30:00Z' }])).toBe('contract_review');
   });
 
+  it('bills lessons that already happened once the family later signs with immediate start', () => {
+    const laterSign = { ...contract, accepted_at: '2026-09-24T07:29:00Z', start_within_14_status: 'yes' as const,
+      unit_price_eur: 6, order_snapshot: { ...contract.order_snapshot, start_date: '2026-09-07', unit_price_eur: 6 } as any };
+    expect(schoolInvoiceContractReason(session, [laterSign])).toBe('payable');
+    expect(reviewSchoolInvoiceSession({ ...session, price: 0 }, [laterSign], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 6 });
+    expect(schoolInvoiceContractReason(session, [{ ...laterSign, start_within_14_status: 'no' }])).toBe('outside_contract');
+  });
+
   it('excludes the suspension interval and includes sessions after resumption', () => {
     const paused = { ...contract, suspension_started_at: '2026-09-12T00:00:00Z' };
     expect(schoolInvoiceContractReason(session, [paused])).toBe('suspended');

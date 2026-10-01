@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { companyStatsCacheKey, getCached, setCache } from '@/lib/dataCache';
 import {
@@ -23,6 +24,9 @@ import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import { isProKlaseOrg, orgFeeProfile } from '@/lib/marketMoney';
 import { sumOrgTutorLessonsPayEur } from '@/lib/orgTutorLessonPay';
+import { resolveSchoolTutorGroupPayRate } from '@/lib/schoolTutorDefaultPay';
+import { sumSchoolTutorPayEur } from '@/lib/schoolTutorLessonPay';
+import { fetchSchoolTutorAttendancePayRows } from '@/lib/schoolTutorAttendancePay';
 import {
   countConductedOrgSessions,
   filterConductedOrgSessions,
@@ -47,7 +51,7 @@ import {
   normalizeStatsDateRange,
   statsDateRangeKey,
 } from '@/lib/statsDateRange';
-import { schoolCalendarInstant } from '@/lib/schoolTime';
+import { schoolCalendarInstant, schoolDate } from '@/lib/schoolTime';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { authHeaders } from '@/lib/apiHelpers';
 import {
@@ -73,6 +77,7 @@ interface TutorStat {
   earnings: number;
   companyCommission: number;
   netEarnings: number;
+  schoolUnresolvedPayCount?: number;
 }
 
 const EMPTY_SCHOOL_ACTIVITY: SchoolActivitySummary = {
@@ -163,7 +168,7 @@ export default function CompanyStats() {
     const tutorList = await getOrgVisibleTutors(
       supabase as any,
       adminRow.organization_id,
-      'id, full_name, email, company_commission_percent, company_commission_by_subject',
+      'id, full_name, email, company_commission_percent, company_individual_commission_percent, company_commission_by_subject',
     );
 
     const tutorIds = tutorList.map(t => t.id);
@@ -174,9 +179,27 @@ export default function CompanyStats() {
       .gte('start_time', startIso)
       .lte('start_time', endIso);
 
-    const allSessions = tutorIds.length
-      ? await fetchAllRows<any>((from, to) => sessionQuery().order('start_time').order('id').range(from, to))
-      : [];
+    const [allSessions, orgPayRow, attendanceLists] = await Promise.all([
+      tutorIds.length
+        ? fetchAllRows<any>((from, to) => sessionQuery().order('start_time').order('id').range(from, to))
+        : Promise.resolve([] as any[]),
+      isSchool
+        ? supabase
+            .from('organizations')
+            .select('default_company_commission_percent')
+            .eq('id', adminRow.organization_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null as { default_company_commission_percent?: number | null } | null }),
+      isSchool && tutorIds.length
+        ? Promise.all(tutorIds.map((tutorId) => fetchSchoolTutorAttendancePayRows({
+            tutorId,
+            periodStart: format(schoolDate(startIso), 'yyyy-MM-dd'),
+            periodEnd: format(schoolDate(endIso), 'yyyy-MM-dd'),
+          })))
+        : Promise.resolve([] as Awaited<ReturnType<typeof fetchSchoolTutorAttendancePayRows>>[]),
+    ]);
+    const attendanceByTutor = new Map(tutorIds.map((tutorId, index) => [tutorId, attendanceLists[index] || []]));
+    const orgDefaultRate = orgPayRow.data?.default_company_commission_percent ?? null;
     const proKlase = !isSchool && isProKlaseOrg(adminRow.organization_id);
     const proKlaseFeeProfile = proKlase ? orgFeeProfile(adminRow.organization_id) : null;
 
@@ -216,6 +239,20 @@ export default function CompanyStats() {
       const tutorSessions = allSessions.filter(s => s.tutor_id === tutor.id);
       if (isSchool) {
         const activity = schoolActivitySummary(tutorSessions, new Date(), schoolOutcomeOptions);
+        const schoolGroupPayRate = resolveSchoolTutorGroupPayRate({
+          tutorRate: (tutor as { company_commission_percent?: number | null }).company_commission_percent,
+          orgDefaultRate,
+          organizationId: adminRow.organization_id,
+        });
+        const pay = sumSchoolTutorPayEur(
+          [...tutorSessions, ...(attendanceByTutor.get(tutor.id) || [])],
+          schoolGroupPayRate,
+          new Date(),
+          {
+            requireConfirmation: schoolOutcomeOptions.requireConfirmation,
+            individualRate: (tutor as { company_individual_commission_percent?: number | null }).company_individual_commission_percent,
+          },
+        );
         return {
           id: tutor.id,
           full_name: tutor.full_name,
@@ -233,7 +270,8 @@ export default function CompanyStats() {
           totalCancelled: activity.cancelled,
           earnings: 0,
           companyCommission: 0,
-          netEarnings: 0,
+          netEarnings: pay.payEur,
+          schoolUnresolvedPayCount: pay.unresolvedCount,
         };
       }
 
@@ -385,6 +423,7 @@ export default function CompanyStats() {
       <SchoolActivityStatsView
         activity={schoolActivity}
         tutorStats={tutorStats}
+        showFinanceTotals={showFinanceTotals}
         filterStartDate={filterStartDate}
         filterEndDate={filterEndDate}
         onStartDateChange={setFilterStartDate}
@@ -647,6 +686,7 @@ export default function CompanyStats() {
 function SchoolActivityStatsView({
   activity,
   tutorStats,
+  showFinanceTotals,
   filterStartDate,
   filterEndDate,
   onStartDateChange,
@@ -656,6 +696,7 @@ function SchoolActivityStatsView({
 }: {
   activity: SchoolActivitySummary;
   tutorStats: TutorStat[];
+  showFinanceTotals: boolean;
   filterStartDate: Date | null;
   filterEndDate: Date | null;
   onStartDateChange: (date: Date | null) => void;
@@ -664,6 +705,9 @@ function SchoolActivityStatsView({
   onClear: () => void;
 }) {
   const { t } = useTranslation();
+  const { fmt } = useMarketMoney();
+  const totalTeacherPay = tutorStats.reduce((sum, stat) => sum + stat.netEarnings, 0);
+  const unresolvedPayCount = tutorStats.reduce((sum, stat) => sum + (stat.schoolUnresolvedPayCount || 0), 0);
   const cards = [
     {
       label: t('schoolStats.scheduled'),
@@ -747,6 +791,24 @@ function SchoolActivityStatsView({
         ))}
       </div>
 
+      {showFinanceTotals ? (
+        <div className="flex min-w-0 items-center gap-4 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+            <Wallet className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-2xl font-bold text-gray-900">{fmt(totalTeacherPay)}</p>
+            <p className="text-xs font-medium leading-4 text-gray-600">{t('schoolStats.teacherPay')}</p>
+            <p className="mt-0.5 text-xs leading-4 text-gray-400">{t('schoolStats.teacherPayHint')}</p>
+            {unresolvedPayCount > 0 ? (
+              <p className="mt-1 text-xs font-medium text-amber-700">
+                {t('schoolStats.teacherPayUnresolved', { count: unresolvedPayCount })}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-sm leading-6 text-blue-900">
         {t('schoolStats.methodExplanation')}
       </div>
@@ -765,6 +827,13 @@ function SchoolActivityStatsView({
                 <div key={stat.id} className="space-y-3 p-4">
                   <p className="font-semibold text-gray-900">{stat.full_name}</p>
                   <div className="grid grid-cols-3 gap-2 text-center">
+                    {showFinanceTotals ? (
+                      <SchoolTeacherMetric
+                        label={t('schoolStats.teacherPayShort')}
+                        value={fmt(stat.netEarnings)}
+                        tone="text-blue-800"
+                      />
+                    ) : null}
                     <SchoolTeacherMetric label={t('schoolStats.scheduledShort')} value={stat.scheduledSessions} />
                     <SchoolTeacherMetric label={t('schoolStats.completedShort')} value={stat.completedSessions} />
                     <SchoolTeacherMetric label={t('schoolStats.attendanceShort')} value={stat.attendanceRate === null ? '–' : `${stat.attendanceRate}%`} />
@@ -781,6 +850,9 @@ function SchoolActivityStatsView({
                 <thead>
                   <tr className="border-b border-gray-100 text-xs font-semibold uppercase tracking-wide text-gray-500">
                     <th className="px-5 py-3 text-left">{t('role.staffSchool')}</th>
+                    {showFinanceTotals ? (
+                    <th className="px-4 py-3 text-right">{t('schoolStats.teacherPayShort')}</th>
+                    ) : null}
                     <th className="px-4 py-3 text-right">{t('schoolStats.scheduledShort')}</th>
                     <th className="px-4 py-3 text-right">{t('schoolStats.completedShort')}</th>
                     <th className="px-4 py-3 text-right">{t('schoolStats.attendanceShort')}</th>
@@ -793,6 +865,9 @@ function SchoolActivityStatsView({
                   {tutorStats.map(stat => (
                     <tr key={stat.id} className="hover:bg-gray-50/60">
                       <td className="px-5 py-3 font-medium text-gray-900">{stat.full_name}</td>
+                      {showFinanceTotals ? (
+                      <td className="px-4 py-3 text-right font-semibold text-blue-800">{fmt(stat.netEarnings)}</td>
+                      ) : null}
                       <td className="px-4 py-3 text-right font-semibold text-gray-800">{stat.scheduledSessions}</td>
                       <td className="px-4 py-3 text-right font-semibold text-emerald-700">{stat.completedSessions}</td>
                       <td className="px-4 py-3 text-right font-semibold text-cyan-700">

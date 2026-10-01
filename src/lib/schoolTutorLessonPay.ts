@@ -98,3 +98,19 @@ export function schoolTutorPayOccurrences<T extends SchoolTutorPayRow>(
       payEur: payIssue ? null : snapshots[0] ?? fallbackRate, payIssue }];
   });
 }
+
+/** Admin stats / finance totals: one EUR amount per conducted meeting, never per child row. */
+export function sumSchoolTutorPayEur(
+  rows: SchoolTutorPayRow[],
+  defaultRate: number | null | undefined,
+  now: Date = new Date(),
+  options: SchoolTutorPayOptions = {},
+): { payEur: number; meetingCount: number; unresolvedCount: number } {
+  const occurrences = schoolTutorPayOccurrences(rows, defaultRate, now, options);
+  const priced = occurrences.filter((occurrence) => occurrence.payEur !== null);
+  return {
+    meetingCount: occurrences.length,
+    unresolvedCount: occurrences.length - priced.length,
+    payEur: Math.round(priced.reduce((sum, occurrence) => sum + (occurrence.payEur ?? 0), 0) * 100) / 100,
+  };
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { schoolTutorPayOccurrences } from '@/lib/schoolTutorLessonPay';
+import { schoolTutorPayOccurrences, sumSchoolTutorPayEur } from '@/lib/schoolTutorLessonPay';
 
 const now = new Date('2026-09-30T12:00:00Z');
 const row = { id: 'child-1', tutor_id: 'teacher', class_group_id: 'group', subject_id: 'math',
@@ -145,5 +145,30 @@ describe('school teacher pay by meeting', () => {
     expect(schoolTutorPayOccurrences([grouped, { ...grouped, id: 'child-2', start_time: '2026-09-30T09:00:00+03:00' }], 45, now)).toHaveLength(1);
     expect(schoolTutorPayOccurrences([grouped, { ...grouped, id: 'child-2', tutor_id: 'other' }], 45, now)).toHaveLength(2);
     expect(schoolTutorPayOccurrences([{ ...grouped, subjects: null }, { ...grouped, id: 'child-2', subjects: null }], 45, now)).toHaveLength(2);
+  });
+  it('sums school stats pay once per meeting, not once per child row', () => {
+    const children = [1, 2, 3, 4, 5, 6, 7, 8].map((index) => ({
+      ...row,
+      id: `child-${index}`,
+      student_id: `student-${index}`,
+    }));
+    const later = {
+      ...row,
+      id: 'later',
+      student_id: 'student-later',
+      start_time: '2026-09-30T08:00:00Z',
+      end_time: '2026-09-30T09:00:00Z',
+    };
+    expect(sumSchoolTutorPayEur(children, 45, now)).toEqual({
+      payEur: 45,
+      meetingCount: 1,
+      unresolvedCount: 0,
+    });
+    expect(sumSchoolTutorPayEur([...children, later], 45, now).payEur).toBe(90);
+    expect(sumSchoolTutorPayEur(
+      [row, { ...row, id: 'child-2', tutor_pay_eur_snapshot: 20 }],
+      45,
+      now,
+    )).toEqual({ payEur: 0, meetingCount: 1, unresolvedCount: 1 });
   });
 });
