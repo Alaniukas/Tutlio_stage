@@ -51,7 +51,7 @@ describe('school monitoring', () => {
       { ...group, student_id: 'a', status: 'no_show' },
       { ...group, student_id: 'a', status: 'cancelled' },
     ];
-    expect(schoolStudentAttendance(rows)[0]).toMatchObject({ joined: 2, unconfirmed: 1, noShow: 1, cancelled: 1 });
+    expect(schoolStudentAttendance(rows)[0]).toMatchObject({ joined: 2, unconfirmed: 0, noShow: 1, cancelled: 1 });
   });
   it('separates meeting totals from child attendance totals', () => {
     const now = new Date('2026-09-10T12:00:00Z');
@@ -78,7 +78,7 @@ describe('school monitoring', () => {
       attendanceRate: 50,
     });
   });
-  it('marks ended active meetings and their child rows as awaiting confirmation', () => {
+  it('does not treat ended unmarked meetings as unconfirmed attendance without join evidence', () => {
     const now = new Date('2026-09-10T12:00:00Z');
     const rows = [
       { ...group, id: '1', student_id: 'a', status: 'active', start_time: '2026-09-10T09:00:00Z', end_time: '2026-09-10T10:00:00Z' },
@@ -88,8 +88,28 @@ describe('school monitoring', () => {
       scheduled: 1,
       upcoming: 0,
       awaitingOutcome: 1,
-      unconfirmedStudents: 2,
+      unconfirmedStudents: 0,
       attendanceRate: null,
+    });
+  });
+  it('counts unconfirmed attendance only when the system saw the child miss a held online lesson', () => {
+    const now = new Date('2026-09-10T12:00:00Z');
+    const occurrence = {
+      ...group,
+      meeting_link: 'https://meet.google.com/abc',
+      tutor_joined_at: '2026-09-10T09:01:00Z',
+      start_time: '2026-09-10T09:00:00Z',
+      end_time: '2026-09-10T10:00:00Z',
+    };
+    const rows = [
+      { ...occurrence, id: 'missed', student_id: 'a', status: 'active', student_joined_at: null },
+      { ...occurrence, id: 'joined', student_id: 'b', status: 'active', student_joined_at: '2026-09-10T09:02:00Z' },
+      { ...occurrence, id: 'no-lesson', student_id: 'c', status: 'active', tutor_joined_at: null, student_joined_at: null },
+    ];
+    expect(schoolActivitySummary(rows, now)).toMatchObject({
+      unconfirmedStudents: 1,
+      attendedStudents: 1,
+      absentStudents: 0,
     });
   });
   it('treats a legacy automatic missed-join outcome as unconfirmed until a person confirms it', () => {
@@ -162,7 +182,7 @@ describe('school monitoring', () => {
       awaitingOutcome: 2,
       attendedStudents: 0,
       absentStudents: 0,
-      unconfirmedStudents: 2,
+      unconfirmedStudents: 0,
       attendanceRate: null,
     });
     expect(rows.map(row => row.status)).toEqual(['completed', 'no_show']);
@@ -187,7 +207,7 @@ describe('school monitoring', () => {
       cancelled: 1,
       attendedStudents: 2,
       absentStudents: 1,
-      unconfirmedStudents: 1,
+      unconfirmedStudents: 0,
       confirmedAttendance: 3,
       attendanceRate: 67,
     });
@@ -206,6 +226,7 @@ describe('school monitoring', () => {
     expect(schoolActivitySummary([row], now)).toMatchObject({ completed: 1, attendedStudents: 1, awaitingOutcome: 0 });
     expect(schoolActivitySummary([row], now, { requireConfirmation: false })).toEqual(schoolActivitySummary([row], now));
     expect(schoolActivitySummary([row], now, { requireConfirmation: true })).toMatchObject({ completed: 0, attendedStudents: 0, awaitingOutcome: 1 });
+    expect(schoolActivitySummary([row], now, { requireConfirmation: true, countStoredCompleted: true })).toMatchObject({ completed: 1, awaitingOutcome: 0 });
   });
   it('reads beyond server page caps and does not silently swallow errors', async () => {
     const source = Array.from({ length: 1307 }, (_, id) => ({ id }));

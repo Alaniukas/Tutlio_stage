@@ -27,7 +27,7 @@ describe('per-group minimum policy', () => {
     seed.school_class_groups.push({ id: 'other', organization_id: 'school', name: 'Other', minimum_active_students: 3 });
     seed.school_contracts.push({ ...seed.school_contracts[1], id: 'other-contract', class_group_id: 'other' });
     const db = schoolGroupDatabase(seed);
-    expect(await exit(db)).toMatchObject({ groupSuspended: true, activeStudentCount: 2, minimumStudentCount: 3, suspendedContractCount: 2 });
+    expect(await exit(db)).toMatchObject({ groupSuspended: true, activeStudentCount: 2, minimumStudentCount: 3, suspendedContractCount: 2, notificationsSent: 0, notificationsAttempted: 0 });
     expect(db.tables.school_class_groups[1].suspension_started_at).toBeUndefined();
     expect(db.tables.school_contracts[3].suspension_started_at).toBeUndefined();
     expect(db.tables.school_contracts.slice(1, 3).map(row => row.suspension_scope)).toEqual(['group_under_minimum', 'group_under_minimum']);

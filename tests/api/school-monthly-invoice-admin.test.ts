@@ -4,7 +4,11 @@ const state = vi.hoisted(() => ({ tables: {} as Record<string, any[]>, writes: [
 vi.mock('../../api/_lib/schoolConsultationsAccess.js', () => ({
   requireConsultationsAuth: async () => ({ userId: 'admin1' }),
   assertOrgConsultationsEnabled: async () => ({ ok: true }),
-  serviceSupabase: () => ({ from: query }),
+  assertSchoolMonthlyInvoiceEnabled: async () => ({ ok: true }),
+  serviceSupabase: () => ({
+    from: query,
+    storage: { from: () => ({ upload: async () => ({ error: null }) }) },
+  }),
 }));
 vi.mock('../../api/_lib/orgAdminAccess.js', () => ({
   requireOrgAdminAccess: async () => ({ ok: true, access: { userId: 'admin1', organizationId: state.adminOrg,
@@ -24,10 +28,23 @@ function query(table: string) {
     gte: (key: string, value: any) => { rows = rows.filter((row) => row[key] >= value); return builder; },
     lte: (key: string, value: any) => { rows = rows.filter((row) => row[key] <= value); return builder; },
     or: () => builder,
-    order: (key: string, options: any) => { rows.sort((a, b) => options.ascending ? (a[key] > b[key] ? 1 : -1) : (a[key] > b[key] ? -1 : 1)); return builder; },
+    order: (key: string, options: any = {}) => { rows.sort((a, b) => options.ascending ? (a[key] > b[key] ? 1 : -1) : (a[key] > b[key] ? -1 : 1)); return builder; },
     is: () => builder,
     maybeSingle: async () => ({ data: rows[0] || null, error: null }),
-    insert: (row: any) => { state.writes.push({ table, row }); (state.tables[table] ||= []).push({ ...row, id: state.writes.length, created_at: new Date().toISOString() }); return builder; },
+    insert: (row: any) => {
+      const items = (Array.isArray(row) ? row : [row]).map((item, index) => ({
+        ...item,
+        id: item.id || `id-${state.writes.length + index + 1}`,
+        created_at: item.created_at || new Date().toISOString(),
+      }));
+      state.writes.push({ table, row: Array.isArray(row) ? items : items[0] });
+      (state.tables[table] ||= []).push(...items);
+      rows = items;
+      return builder;
+    },
+    update: (row: any) => { rows = rows.map((item) => ({ ...item, ...row })); return builder; },
+    range: (from: number, to: number) => { rows = rows.slice(from, to + 1); return builder; },
+    single: async () => ({ data: rows[0] || null, error: null }),
     then: (resolve: any) => resolve({ data: rows, error: null }),
   };
   return builder;
@@ -35,6 +52,7 @@ function query(table: string) {
 
 import handler from '../../api/school-monthly-invoice-admin';
 import { allocateInvoiceNumber } from '../../api/_lib/invoiceNumber.js';
+import { sendSchoolMonthlyInvoiceEmail } from '../../api/_lib/schoolMonthlyInvoiceEmail.js';
 
 async function request(extra: Record<string, unknown> = {}) {
   const result = { status: 0, body: null as any };
@@ -140,5 +158,93 @@ describe('school monthly invoice review API', () => {
       expect((await request({ action: 'billing-decision', sessionId: 'lesson1', excluded: true, reason: 'Earlier end' })).status).toBe(409);
     }
     expect(state.writes).toEqual([]);
+  });
+});
+
+describe('school monthly invoice batch by payer', () => {
+  function familyTables() {
+    const lesson = {
+      start_time: '2026-09-14T13:00:00Z',
+      end_time: '2026-09-14T14:00:00Z',
+      status: 'completed',
+      price: 0,
+      status_confirmed_at: '2026-09-14T14:05:00Z',
+      tutor: { full_name: 'Teacher One', organization_id: 'org1' },
+      subject: { name: 'Math' },
+    };
+    const contract = {
+      kind: 'extra_lessons',
+      signing_status: 'signed',
+      accepted_at: '2026-09-01T00:00:00Z',
+      start_within_14_status: 'yes',
+      unit_price_eur: 6,
+      order_snapshot: { service_type: 'group', group_id: 'group1', start_date: '2026-09-01', end_date: '2027-06-01' },
+    };
+    state.tables.students = [
+      { id: 'kajus', organization_id: 'org1', full_name: 'Adomaitis Kajus', payer_name: 'Akvilė Adomaitytė', payer_email: 'akvile@example.com' },
+      { id: 'palaima', organization_id: 'org1', full_name: 'Palaima Jokūbas', payer_name: 'Raimonda Širvytė', payer_email: 'raimonda@example.com' },
+    ];
+    state.tables.sessions = [
+      { ...lesson, id: 'kajus-lesson', student_id: 'kajus', tutor_id: 'teacher1', subject_id: 'math', class_group_id: 'group1' },
+      { ...lesson, id: 'palaima-lesson', student_id: 'palaima', tutor_id: 'teacher1', subject_id: 'math', class_group_id: 'group1' },
+    ];
+    state.tables.school_contracts = [
+      { ...contract, id: 'c-kajus', organization_id: 'org1', student_id: 'kajus', class_group_id: 'group1' },
+      { ...contract, id: 'c-palaima', organization_id: 'org1', student_id: 'palaima', class_group_id: 'group1' },
+    ];
+  }
+
+  it('previews separate payer groups using contract unit price when session.price is 0', async () => {
+    familyTables();
+    const result = await request({ action: 'batch-preview', studentId: undefined });
+    expect(result.status).toBe(200);
+    expect(result.body.payers).toHaveLength(2);
+    expect(result.body.payers.map((group: any) => group.payerEmail).sort()).toEqual([
+      'akvile@example.com',
+      'raimonda@example.com',
+    ]);
+    expect(result.body.payers.find((group: any) => group.payerEmail === 'akvile@example.com')).toMatchObject({
+      payerName: 'Akvilė Adomaitytė',
+      totalEur: 6,
+      students: [{ fullName: 'Adomaitis Kajus', lessonCount: 1, totalEur: 6 }],
+    });
+    expect(result.body.payers.find((group: any) => group.payerEmail === 'raimonda@example.com').students[0].fullName)
+      .toBe('Palaima Jokūbas');
+    expect(state.writes).toEqual([]);
+  });
+
+  it('sends a personalized invoice email per child for one payer or for everyone', async () => {
+    familyTables();
+    vi.mocked(allocateInvoiceNumber).mockResolvedValue('SF-1');
+    vi.mocked(sendSchoolMonthlyInvoiceEmail).mockResolvedValue({ sent: true } as any);
+    const preview = await request({ action: 'batch-preview' });
+    const tokens = Object.fromEntries(preview.body.payers.flatMap((group: any) =>
+      group.students.map((row: any) => [row.studentId, row.previewToken])));
+
+    const onePayer = await request({
+      action: 'send-batch',
+      payerKey: 'akvile@example.com',
+      previewTokens: tokens,
+    });
+    expect(onePayer.status).toBe(200);
+    expect(onePayer.body.sentCount).toBe(1);
+    expect(onePayer.body.sent[0].payerEmail).toBe('akvile@example.com');
+    expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendSchoolMonthlyInvoiceEmail).mock.calls[0][1].student_id).toBe('kajus');
+
+    const everyone = await request({ action: 'send-batch', previewTokens: tokens });
+    expect(everyone.status).toBe(200);
+    expect(everyone.body.sentCount).toBe(1);
+    expect(everyone.body.sent[0].payerEmail).toBe('raimonda@example.com');
+    expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(sendSchoolMonthlyInvoiceEmail).mock.calls[1][2].student.full_name).toBe('Palaima Jokūbas');
+  });
+
+  it('does not issue invoices when the payer preview token is missing', async () => {
+    familyTables();
+    const result = await request({ action: 'send-batch', payerKey: 'akvile@example.com' });
+    expect(result.status).toBe(400);
+    expect(result.body.sentCount || 0).toBe(0);
+    expect(allocateInvoiceNumber).not.toHaveBeenCalled();
   });
 });

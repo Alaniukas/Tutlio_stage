@@ -81,18 +81,23 @@ const PLAIN_COMPANY_FEATURES = {
   org_admin_calendar_view: true,
 };
 
-const SCHOOL_FEATURES = {
+const LAISVI_STYLE_SCHOOL_FEATURES = {
   custom_branding: true,
   manual_payments: false,
   org_admin_calendar_view: true,
   org_admin_calendar_full_control: true,
-  school_contract_esign: false,
+  school_contract_esign: true,
   school_extra_lessons_contract: true,
   school_class_groups: true,
   school_join_no_show: true,
   school_teacher_labels: true,
-  // Parked: school recordings UI (Įrašai) is hidden for now. Re-enable: true + SCHOOL_LESSON_RECORDINGS_NAV_READY.
-  school_lesson_recordings: false,
+  school_staff_documents: true,
+  school_lesson_recordings: true,
+  tutor_lesson_status_confirmation: true,
+};
+
+const SCHOOL_FEATURES = {
+  ...LAISVI_STYLE_SCHOOL_FEATURES,
 };
 
 const ORGS = [
@@ -473,6 +478,7 @@ async function seedOrg(supabase, org) {
       enable_prepaid_packages: org.enablePrepaidPackages,
       enable_monthly_billing: org.enableMonthlyBilling,
       features: org.features,
+      ...(org.entityType === 'school' ? { default_company_commission_percent: 45 } : {}),
     },
     { onConflict: 'id' },
   );
@@ -488,6 +494,7 @@ async function seedOrg(supabase, org) {
       ...org.users.tutor,
       organization_id: org.orgId,
       enable_manual_student_payments: false,
+      ...(org.entityType === 'school' ? { company_commission_percent: 45 } : {}),
     },
     { ...org.users.student1, organization_id: org.orgId },
     { ...org.users.student2, organization_id: org.orgId },

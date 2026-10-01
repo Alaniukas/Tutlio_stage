@@ -35,7 +35,7 @@ export async function findSchoolAttendanceDuplicateInvoices(db: SupabaseClient, 
 /** Load full occurrences even when a caller submits only one child from a group. */
 export async function loadSchoolTutorInvoiceRows(db: SupabaseClient, select: string, input: {
   tutorId: string; periodStart: string; periodEnd: string; sessionIds?: string[]; attendanceIds?: string[]; studentId?: string;
-  defaultRate: number | null; now: Date; organizationId?: string | null; features?: Record<string, unknown> | null;
+  defaultRate: number | null; individualRate?: number | null; now: Date; organizationId?: string | null; features?: Record<string, unknown> | null;
 }) {
   const from = schoolDate(input.periodStart);
   const until = schoolDate(input.periodEnd);
@@ -54,6 +54,7 @@ export async function loadSchoolTutorInvoiceRows(db: SupabaseClient, select: str
   const allRows = [...rows, ...attendanceRows];
   const occurrences = schoolTutorPayOccurrences(allRows, input.defaultRate, input.now, {
     requireConfirmation: orgRequiresTutorStatusConfirmation(input.organizationId, input.features),
+    individualRate: input.individualRate,
   });
   const selectedIds = new Set(input.sessionIds || []);
   const selectedAttendanceIds = new Set((input.attendanceIds || []).map(id => id.toLowerCase()));

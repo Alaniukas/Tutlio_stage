@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { STAFF_CONSENT_QUESTIONS } from '@/lib/staffConsentQuestions';
 
 type Answer = 'yes' | 'no' | null;
-type ConsentInfo = { employeeName?: string; schoolName?: string; previewUrl?: string | null; answersSubmitted?: boolean; signed?: boolean; needsPersonalDetails?: boolean };
+type ConsentInfo = { employeeName?: string; schoolName?: string; previewUrl?: string | null; answersSubmitted?: boolean; signed?: boolean; needsPersonalDetails?: boolean; detailsHeldBySchool?: boolean };
 
 export default function SchoolStaffConsent({ previewInfo }: { previewInfo?: ConsentInfo }) {
   const [params] = useSearchParams();
@@ -19,15 +19,23 @@ export default function SchoolStaffConsent({ previewInfo }: { previewInfo?: Cons
     if (previewInfo) return;
     if (!token) { setError('Nuoroda negalioja.'); return; }
     let active = true;
-    fetch(`/api/school-staff-consent?token=${encodeURIComponent(token)}`)
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 12000);
+    fetch(`/api/school-staff-consent?token=${encodeURIComponent(token)}`, { signal: controller.signal })
       .then(async (response) => {
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || 'Nepavyko atidaryti sutikimo.');
         return body;
       })
       .then((body) => { if (active) setInfo(body); })
-      .catch((cause) => { if (active) setError(cause?.message || 'Nepavyko atidaryti sutikimo.'); });
-    return () => { active = false; };
+      .catch((cause) => {
+        if (!active) return;
+        setError(cause?.name === 'AbortError'
+          ? 'Forma užtruko per ilgai. Atnaujinkite puslapį.'
+          : cause?.message || 'Nepavyko atidaryti sutikimo.');
+      })
+      .finally(() => window.clearTimeout(timer));
+    return () => { active = false; controller.abort(); };
   }, [token]);
 
   const submit = async () => {
@@ -79,6 +87,9 @@ export default function SchoolStaffConsent({ previewInfo }: { previewInfo?: Cons
         ) : info && (
           <>
             <p className="mt-5 text-sm text-slate-700">Peržiūrėkite visą dokumentą ir kiekviename punkte pasirinkite „Sutinku“ arba „Nesutinku“. Abu atsakymai leidžiami. Po to reikės atskirai pasirašyti elektroniniu parašu.</p>
+            {info.detailsHeldBySchool && !info.needsPersonalDetails && (
+              <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">Mokykla jau įrašė gyvenamosios vietos adresą ir asmens kodą į susitarimą su priedu. Čia pažymėkite tik sutikimo punktus.</p>
+            )}
             {info.needsPersonalDetails && (
               <section className="mt-6 space-y-3 rounded-xl border border-slate-200 p-4">
                 <h2 className="font-semibold">Duomenys susitarimui ir jo priedui</h2>
@@ -91,12 +102,14 @@ export default function SchoolStaffConsent({ previewInfo }: { previewInfo?: Cons
                 </label>
               </section>
             )}
-            {info.previewUrl && (
+            {info.previewUrl ? (
               <details className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <summary className="cursor-pointer font-medium text-indigo-700">Peržiūrėti visą dokumentą PDF</summary>
                 <a href={info.previewUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm text-indigo-700 underline">Atidaryti PDF atskirame lange</a>
                 <iframe src={info.previewUrl} title="Visas darbuotojo sutikimo dokumentas" className="mt-3 h-64 w-full rounded-lg border border-slate-200 bg-white sm:h-[420px]" />
               </details>
+            ) : (
+              <p className="mt-5 text-sm text-slate-600">PDF peržiūra nebūtina norint pažymėti punktus. Jei jos dar nematyti, dokumentas vis tiek bus paruoštas po pateikimo.</p>
             )}
             <div className="mt-7 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
               <h2 className="text-lg font-semibold">Jūsų pasirinkimai</h2>

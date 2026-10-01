@@ -59,4 +59,46 @@ describe('school invoice attendance review', () => {
     expect(screen.queryByRole('button', { name: 'school.invoice.review.exclude' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'school.invoice.review.absent' })).toBeNull();
   });
+
+  it('groups payers in batch mode and can send one family or everyone', async () => {
+    const calls: any[] = [];
+    const payers = [
+      {
+        payerKey: 'akvile@example.com',
+        payerName: 'Akvilė Adomaitytė',
+        payerEmail: 'akvile@example.com',
+        totalEur: 12,
+        sendableStudentIds: ['kajus', 'etme'],
+        students: [
+          { studentId: 'kajus', fullName: 'Adomaitis Kajus', lessonCount: 1, totalEur: 6, reviewSessionIds: [], alreadyIssued: false, payerEmail: 'akvile@example.com', payerName: 'Akvilė', previewToken: 't1' },
+          { studentId: 'etme', fullName: 'Vitkutė Etmė', lessonCount: 1, totalEur: 6, reviewSessionIds: [], alreadyIssued: false, payerEmail: 'akvile@example.com', payerName: 'Akvilė', previewToken: 't2' },
+        ],
+      },
+      {
+        payerKey: 'raimonda@example.com',
+        payerName: 'Raimonda Širvytė',
+        payerEmail: 'raimonda@example.com',
+        totalEur: 6,
+        sendableStudentIds: ['palaima'],
+        students: [
+          { studentId: 'palaima', fullName: 'Palaima Jokūbas', lessonCount: 1, totalEur: 6, reviewSessionIds: [], alreadyIssued: false, payerEmail: 'raimonda@example.com', payerName: 'Raimonda', previewToken: 't3' },
+        ],
+      },
+    ];
+    const fetcher = vi.fn(async (_url: string, init: any) => {
+      const body = JSON.parse(init.body);
+      calls.push(body);
+      if (body.action === 'batch-preview') return { ok: true, json: async () => ({ payers }) };
+      return { ok: true, json: async () => ({ sentCount: body.payerKey ? 2 : 3, skipped: [] }) };
+    });
+    vi.stubGlobal('fetch', fetcher);
+    render(<SchoolMonthlyInvoiceDialog batch open onOpenChange={() => {}} organizationId="org1"
+      students={[{ id: 'kajus', fullName: 'Adomaitis Kajus' }, { id: 'palaima', fullName: 'Palaima Jokūbas' }]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'school.invoice.batch.preview' }));
+    await screen.findByText('Raimonda Širvytė');
+    expect(screen.getByText('Akvilė Adomaitytė')).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: 'school.invoice.batch.sendPayer' })[0]);
+    await waitFor(() => expect(calls.some((call) => call.action === 'send-batch' && call.payerKey === 'akvile@example.com')).toBe(true));
+    expect(calls.find((call) => call.action === 'send-batch').studentIds).toEqual(['kajus', 'etme']);
+  });
 });

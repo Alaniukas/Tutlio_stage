@@ -49,6 +49,26 @@ export async function assertOrgConsultationsEnabled(
   return { ok: true, familyPortal };
 }
 
+export async function assertSchoolMonthlyInvoiceEnabled(
+  supabase: SupabaseClient,
+  organizationId: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const consultations = await assertOrgConsultationsEnabled(supabase, organizationId);
+  if (consultations.ok) return { ok: true };
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('id, slug, features, entity_type')
+    .eq('id', organizationId)
+    .maybeSingle();
+  if (!org) return { ok: false, status: 404, error: 'Organizacija nerasta.' };
+  const features = (org.features || {}) as Record<string, unknown>;
+  if (org.entity_type === 'school'
+    && (schoolExtraLessonsDiscountEnabled(org.id, features) || schoolExtraLessonsDiscountEnabled(org.slug, features))) {
+    return { ok: true };
+  }
+  return consultations;
+}
+
 export async function assertOrgExtraLessonsDiscountEnabled(
   supabase: SupabaseClient,
   organizationId: string,

@@ -1,3 +1,4 @@
+import { isUnconfirmedDetectedStudentAbsence } from './schoolJoinNoShow.js';
 import { isSchoolClassGroupSuspended, schoolGroupMinimumStudents } from './schoolGroupMinimumPolicy.js';
 
 export type SchoolDashboardContract = {
@@ -87,6 +88,10 @@ type ActionSession = {
   start_time: string;
   end_time: string;
   status: string;
+  meeting_link?: string | null;
+  tutor_joined_at?: string | null;
+  student_joined_at?: string | null;
+  no_show_reason?: string | null;
   status_confirmed_at?: string | null;
   cancelled_at?: string | null;
   updated_at?: string | null;
@@ -195,8 +200,7 @@ export function buildSchoolAdminActionQueue(input: {
   }
 
   for (const session of input.sessions) {
-    const ended = instant(session.end_time) < nowMs;
-    if (session.status === 'active' && ended && !session.status_confirmed_at) {
+    if (isUnconfirmedDetectedStudentAbsence(session, now)) {
       items.push({
         id: `attendance:${session.id}`,
         category: 'attendance',

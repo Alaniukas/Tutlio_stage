@@ -119,6 +119,30 @@ describe('school dashboard action queues', () => {
     expect(actions.some((item) => item.id === 'contract-document:contract-doc')).toBe(true);
   });
 
+  it('queues unconfirmed attendance only when the system saw the child miss a held lesson', () => {
+    const now = new Date('2026-09-18T12:00:00.000Z');
+    const base = {
+      student_id: 'student-1',
+      student_name: 'Jonas',
+      tutor_name: 'Mokytoja',
+      topic: 'Matematika',
+      start_time: '2026-09-17T10:00:00.000Z',
+      end_time: '2026-09-17T11:00:00.000Z',
+      meeting_link: 'https://meet.google.com/abc',
+    };
+    const actions = buildSchoolAdminActionQueue({
+      now,
+      contracts: [],
+      invoices: [],
+      sessions: [
+        { ...base, id: 'missed', status: 'active', tutor_joined_at: '2026-09-17T10:02:00.000Z', student_joined_at: null },
+        { ...base, id: 'history', status: 'active', tutor_joined_at: null, student_joined_at: null },
+        { ...base, id: 'joined', status: 'active', tutor_joined_at: '2026-09-17T10:02:00.000Z', student_joined_at: '2026-09-17T10:03:00.000Z' },
+      ],
+    });
+    expect(actions.map((item) => item.id)).toEqual(['attendance:missed']);
+  });
+
   it('orders the informational movement feed newest first and identifies the actor', () => {
     const feed = buildSchoolActivityFeed({
       contracts: [],

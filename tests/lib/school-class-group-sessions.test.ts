@@ -236,7 +236,8 @@ describe('schoolClassGroupSessions', () => {
     }
     const financeRows = rows.map(row => ({ ...row, start_time: start.toISOString(), end_time: end.toISOString(), tutor_id: 't1', tutor_pay_eur_snapshot: 45 }));
     expect(schoolMeetingOccurrences(financeRows, options)[0].row.status).toBe('active');
-    expect(schoolTutorPayOccurrences(financeRows, 45, new Date('2026-09-09T00:00:00Z'), options)).toEqual([]);
+    expect(schoolTutorPayOccurrences(financeRows, 45, new Date('2026-09-09T00:00:00Z'), options)).toHaveLength(1);
+    expect(schoolTutorPayOccurrences(financeRows, 45, new Date('2026-09-09T00:00:00Z'), options)[0].payEur).toBe(45);
     expect(pickClassGroupOccurrenceSession(rows)).toBe(rows[0]);
     expect(mergeSchoolClassGroupSessions(rows, meta, { preferCancelledOccurrence: true })[0].status).toBe('cancelled');
   });

@@ -79,6 +79,28 @@ describe('CompanyContracts discount addendum eligibility', () => {
     expect(screen.queryByRole('button', { name: 'Sukurti nuolaidos priedą' })).toBeNull();
   });
 
+  it('shows each sent discount addendum and whether parents confirmed it', () => {
+    testState.cache.contracts = [contract({
+      discount_agreements: [
+        {
+          id: 'pending-addendum', agreement_number: 'NPR-1', activity_label: 'Matematika',
+          discount_type: 'percent', discount_value: 20, valid_from: '2026-10-01', valid_until: '2027-06-30', status: 'pending',
+        },
+        {
+          id: 'accepted-addendum', agreement_number: 'NPR-2', activity_label: 'Lietuvių kalba',
+          discount_type: 'amount', discount_value: 10, valid_from: '2026-09-01', valid_until: '2027-06-30', status: 'accepted',
+        },
+      ],
+    })];
+    render(<MemoryRouter initialEntries={['/school/contracts']}><CompanyContracts /></MemoryRouter>);
+    expect(screen.getByText('Nuolaidos priedas NPR-1')).toBeTruthy();
+    expect(screen.getByText('Laukia tėvų patvirtinimo')).toBeTruthy();
+    expect(screen.getByText('Nuolaidos priedas NPR-2')).toBeTruthy();
+    expect(screen.getByText('Patvirtinta')).toBeTruthy();
+    expect(screen.getByText('20 %')).toBeTruthy();
+    expect(screen.getByText('10 €')).toBeTruthy();
+  });
+
   it('retains the organization feature gate', () => {
     testState.cache.contracts = [contract()];
     testState.cache.orgFeatures.school_extra_lessons_contract = false;

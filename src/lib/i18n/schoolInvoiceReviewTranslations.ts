@@ -33,6 +33,16 @@ export const schoolInvoiceReviewLt: Record<string, string> = {
   'school.invoice.review.reason.excluded': 'Neįtraukta administratoriaus sprendimu',
   'school.invoice.review.reason.already_invoiced': 'Jau įtraukta į išrašytą sąskaitą',
   'school.invoice.review.reason.not_ended': 'Užsiėmimas dar nesibaigė',
+  'school.invoice.batch.title': 'Sąskaitos mokėtojams',
+  'school.invoice.batch.help': 'Kaina imama iš sutarties (užsiėmimo kaina × užsiėmimų skaičius). Kiekvienas mokėtojas gauna savo vaikų sąskaitas, ne svetimų šeimų.',
+  'school.invoice.batch.preview': 'Peržiūrėti mokėtojus',
+  'school.invoice.batch.empty': 'Pasirinktu laikotarpiu nėra apmokestinamų užsiėmimų.',
+  'school.invoice.batch.sendPayer': 'Siųsti šiam mokėtojui',
+  'school.invoice.batch.sendAll': 'Siųsti visiems',
+  'school.invoice.batch.sent': 'Išsiųsta sąskaitų: {count}.',
+  'school.invoice.batch.blocked': 'Dar reikia patvirtinti lankomumą',
+  'school.invoice.batch.childLine': '{name} · {count} užsiėm. · {amount}',
+  'school.invoice.batch.reviewChild': 'Peržiūrėti vaiką',
 };
 
 export const schoolInvoiceReviewEn: Record<string, string> = {
@@ -70,4 +80,14 @@ export const schoolInvoiceReviewEn: Record<string, string> = {
   'school.invoice.review.reason.excluded': 'Excluded by an administrator',
   'school.invoice.review.reason.already_invoiced': 'Already included in an issued invoice',
   'school.invoice.review.reason.not_ended': 'The session has not ended yet',
+  'school.invoice.batch.title': 'Invoices for payers',
+  'school.invoice.batch.help': 'The amount is lesson price × sessions in the period. Each payer only receives invoices for their own children.',
+  'school.invoice.batch.preview': 'Review payers',
+  'school.invoice.batch.empty': 'There are no billable sessions in this period.',
+  'school.invoice.batch.sendPayer': 'Send to this payer',
+  'school.invoice.batch.sendAll': 'Send to all',
+  'school.invoice.batch.sent': 'Invoices sent: {count}.',
+  'school.invoice.batch.blocked': 'Attendance still needs confirmation',
+  'school.invoice.batch.childLine': '{name} · {count} sessions · {amount}',
+  'school.invoice.batch.reviewChild': 'Review child',
 };

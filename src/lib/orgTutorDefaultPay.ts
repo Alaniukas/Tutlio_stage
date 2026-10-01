@@ -12,6 +12,7 @@ export function resolveDefaultTutorPayForSave(
 
 export type TutorPayUpdatePatch = {
   company_commission_percent?: number;
+  company_individual_commission_percent?: number | null;
   company_commission_by_subject?: Record<string, number>;
 };
 
@@ -23,6 +24,8 @@ export type TutorPayUpdatePatch = {
 export function buildTutorPayUpdatePatch(options: {
   basePayEdited: boolean;
   basePay: number;
+  individualPayEdited?: boolean;
+  individualPay?: number | null;
   subjectPayEdited: boolean;
   subjectPay: Record<string, number>;
   subjectPayEnabled: boolean;
@@ -30,6 +33,9 @@ export function buildTutorPayUpdatePatch(options: {
   return {
     ...(options.basePayEdited
       ? { company_commission_percent: options.basePay }
+      : {}),
+    ...(options.individualPayEdited
+      ? { company_individual_commission_percent: options.individualPay }
       : {}),
     ...(options.subjectPayEnabled && options.subjectPayEdited
       ? { company_commission_by_subject: options.subjectPay }

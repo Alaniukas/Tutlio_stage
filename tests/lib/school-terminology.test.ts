@@ -112,7 +112,7 @@ describe('applySchoolTerminology', () => {
   it.each([
     ['cal.deleteRecurringTitle', 'Ištrinti pasikartojantį užsiėmimą'],
     ['orgFinance.schoolCurrentPayRate', 'Dabar nustatytas bazinis atlygis: {amount} € už užsiėmimą.'],
-    ['orgFinance.schoolSummaryNote', 'Vienas atlygis už grupinį užsiėmimą. Taikomas išsaugotas užsiėmimo tarifas, o jei jo nėra - dabar nustatytas bazinis atlygis. Atsiskaitymus tvarko mokykla.'],
+    ['orgFinance.schoolSummaryNote', 'Atlygis skaičiuojamas už pravestą užsiėmimą, ne už mokinių skaičių. Grupiniam ir individualiam užsiėmimui galima nustatyti skirtingą atlygį. Įvykęs užsiėmimas skaičiuojamas ir be patvirtinimo žymos. Taikomas išsaugotas užsiėmimo tarifas, o jei jo nėra - atitinkamas dabartinis atlygis. Atsiskaitymus tvarko mokykla.'],
     ['orgFinance.schoolFinalizedLessons', 'Užsiėmimai su galutiniu rezultatu'],
     ['cal.deleteOnlyThis', 'Tik šį užsiėmimą'],
     ['cal.deleteThisAndFuture', 'Šį ir visus ateinančius užsiėmimus'],

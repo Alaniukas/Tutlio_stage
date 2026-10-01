@@ -95,6 +95,7 @@ Maršrutai apibrėžti `src/App.tsx`.
 
 | Kelias | Komponentas | Paskirtis |
 |--------|-------------|-----------|
+| `/school` (Apžvalga) | `SchoolDashboard.tsx` | 4 KPI kortelės (šiandien / artimiausi / įvyko / nepatvirtintas lankomumas), admin veiksmų eilė, sutarčių be patvirtinimo įspėjimai, tvarkaraštis + sujungta „Reikia dėmesio“ (lankomumas + neįvykę), sutartys/mokėjimai tik kaip žymės jei yra laukiančių; „Kas vyksta sistemoje“ suskleista. Laisvi vaikai rodo trumpesnius sąrašus (5 eil.). Detalūs mėnesio rodikliai → `/school/stats` |
 | `/school/contracts` | `CompanyContracts.tsx` | Metinės sutartys + extra-lessons pasiūlymas (flag) |
 | `/school/students` | `CompanyStudents.tsx` | Mokinių CRUD, enrollment filtrai, extra-lessons offer |
 | `/school/groups` | `CompanyClassGroups.tsx` | Klasės grupės: kortelė / **Redaguoti** → `ClassGroupFormDialog` (info + nariai + **Ištrinti** adminui). Keli savaitės slotai su **skirtinga diena ir starto laiku**. Adminui sąrašas skaidomas **pagal mokytoją** (filtras + paieška). Išsaugojus pamokos materializuojamos **iš karto** (ne tik cron) |
@@ -157,16 +158,16 @@ Maršrutai apibrėžti `src/App.tsx`.
 
 ```bash
 npm install
-cp .env.example .env.local   # užpildyti raktus
+cp .env.example .env   # užpildyti raktus
 npm run dev                  # frontend :3000 + API :3002
 ```
 
 **Windows PowerShell:** naudok `;` vietoj `&&` komandų grandinėse.
 
 **Lokalus dev (svarbu demo / school QA):**
-- `.env` faile dažnai būna **pasenęs** Supabase URL (`xklzjhfztjxltrdkplog` — nebeegzistuoja).
-- Naudok `.env.local` su raktais iš `.env.vercel.stage` (ref `cuhciqwmqfuajeeqjjbm`), tada `npm run dev`.
-- Demo prisijungimas veikia tik su teisingu Supabase projektu: `http://localhost:3000/school/login`
+- Vienintelis šaltinis: **`.env`** projekto šaknyje. `dev-api-local.ts` ir seed skriptai krauna tik jį (ne `.env.local`, ne `.env.vercel.*`).
+- Vite vis tiek automatiškai merge'ina `.env.local`, jei failas egzistuoja — **pervadink arba ištrink** `.env.local` / `.env.vercel.stage`, kad frontend ir API naudotų tą patį `.env`.
+- `.env` turi rodyti į `cuhciqwmqfuajeeqjjbm` (ne pasenusį `xklzjhfztjxltrdkplog`), tada `npm run dev`.
 
 **Alternatyvos:**
 - `npm run dev:prod` — naudoja `.env.local` prod Supabase (reikia zsh)
@@ -217,7 +218,7 @@ npm run vercel:deploy-prod
 - Vercel projektas: `tutlio`
 - Alias: `tutlio.lt`, `tutlio.pl`
 - Build: `npm run build` → `dist/`
-- Cron job'ai: `vercel.json` → `crons` (sessions, reminders, contract reconcile, blog, `school-join-no-show` kas 5 min, `bill-school-extra-lessons` 1 d. 04:00 UTC)
+- Cron job'ai: `vercel.json` → `crons` (sessions, reminders, contract reconcile, blog, `school-join-no-show` kas 5 min). **Mėnesio 1 d. naktiniai laiškai yra sistema, ne rankinis triggeris:** `generate-monthly-packages` 00:30 UTC (03:30 Vilnius) — Pro Klasė / org mėnesio paketų pasiūlymai; `bill-extra-lessons` 03:00 UTC (06:00 Vilnius) — company extra pamokų paketai; `bill-school-extra-lessons` 04:00 UTC (07:00 Vilnius) — mokyklų extra-lessons mėnesio sąskaitos. Extra-lessons **sutarčių** offer laiškai crono neturi — tik admin UI (`extra-lessons-contract-offer`).
 
 **Git taisyklės (iš vartotojo preferencijų):**
 - **Produkcijos deployas tik su vartotojo leidimu. Prieš kiekvieną deployą visus jam skirtus pakeitimus pirma commitink būtent `simo-local` šakoje, patikrink švarų darbinį aplanką ir pushink į `origin/simo-local`; tik tada deployink.** Leidimas deployui apima šį būtiną išankstinį commitą ir push. Atskirų commitų be vartotojo leidimo nedaryk.
@@ -240,7 +241,7 @@ Migracijos: `supabase/migrations/` (datuotos `202603*`–`202608*`).
 |---------|-----------|
 | `organizations` | Org/mokykla (`entity_type`, `features` JSON) |
 | `organization_admins` | Org adminų ryšys |
-| `profiles` | Tutor profiliai (`company_commission_percent`; Mano Korepetitorius dar `company_commission_by_subject`) |
+| `profiles` | Tutor profiliai (`company_commission_percent`; mokykloms dar `company_individual_commission_percent`; Mano Korepetitorius dar `company_commission_by_subject`) |
 | `students` | Mokiniai (`grade`, `media_publicity_consent`, `school_year`, `enrollment_status`, `municipality`, `exit_*`, `has_debt_manual`) |
 | `sessions` | Pamokos (`is_makeup`, `is_complimentary`; school extra: `school_billing_kind`, `student_joined_at`) |
 | `school_contract_templates` | Sutarčių šablonai (DOCX body) |
@@ -434,6 +435,7 @@ Tai **nėra** atskira lentelė ir **nėra** sutartis prie kiekvienos pamokos. Ta
 3. Tėvai `/school-extra-lessons-accept` — layout kaip `SchoolContractComplete`: PDF iframe + **Atidaryti visą PDF**, trūkstami užsakymo laukai, privalomas sąlygų checkbox, **„Patvirtinti sutartį“**. 14 d. (Vilnius): radio **Sutinku pradėti iš karto** / **Palaukti**; jei pirma pamoka jau po 14 d. — laukelis nerodomas (`na`). Po sėkmės ekrano atsisakymo mygtuko nėra — 14 d. atsisakymas tėvų paskyroje. Demo Mokykla ir Laisvi vaikai visada pildo kanoninį DOCX `docs/legal/extra-lessons-laisvi-vaikai.docx` (kopija `api/_lib/templates/`). Kitos mokyklos — savo extra-lessons DOCX. GET/preview generuoja PDF (`api/_lib/extraLessonsPdf.ts`); converter fallback — pilnas teisinis tekstas, ne santrauka. Po laukų pakeitimo `POST preview: true` atnaujina PDF. Užšaldoma redakcija (`document_sha256`), `accepted_by_user_id`, `start_within_14_status`.
 4. 14 d. **„Atsisakyti sutarties“** vs po lango **„Nutraukti sutartį“** — **tik tėvų portalas** (`/parent`, `ParentExtraLessonsContracts`). Po click-wrap sėkmės ekrane atsisakymo mygtuko **nėra**. API `extra-lessons-contract-withdraw` + pareiškimo PDF + el. pašto patvirtinimas mokėtojui. Mokytojo atskirai neinformuoti.
 5. Mėnesio sąskaita: baziniai kreditai + extra joined pamokos (`schoolExtraLessonsBilling.ts`, cron `bill-school-extra-lessons` 1 d. 04:00 UTC). Extra pamoka mokama tik jei `school_billing_kind === 'extra'` ir mokinys prisijungė / `completed`; `no_show` neskaičiuojamas. Jei tėvas **ne** prašė ankstyvos pradžios (`start_within_14_status = no`), pamokos/sąskaita ne anksčiau nei `accepted_at + 14 d.` Sukūrus sąskaitą cron'as **iš karto siunčia** `school_monthly_invoice` laišką mokėtojui (`api/_lib/schoolMonthlyInvoiceEmail.ts`): suvestinė + mygtukas **Apmokėti** → viešas `GET /api/pay-school-monthly-invoice?invoice=&t=` (HMAC `publicLinkToken.ts`, Stripe Connect kaip įmokoms, be paskyros). Apmokėjimą žymi `stripe-webhook` (`tutlio_school_monthly_invoice_id`) ir `/school-payment-success?monthly=` → `confirm-school-monthly-invoice-payment`. Jei mokykla be Stripe Connect — laiškas be mygtuko, nurodo mokyklos kontaktą. Migracija `20260905120000_school_monthly_invoice_payments.sql` (checkout id, `invoice_email_sent_at`, `paid_via`) — kodas toleruoja, kol nepritaikyta.
+   **Admin S.F. pagal faktą (Laisvi vaikai / extra-lessons / family portal):** ne `CreateInvoiceModal` ir ne `sessions.price` (dažnai 0). `/school/finance` Mokėjimai ir Sąskaitos atidaro `SchoolMonthlyInvoiceDialog` `batch` režimą. Suma = sutarties `unit_price_eur` × to mėnesio apmokestinami užsiėmimai (`resolveSchoolInvoiceUnitPrice`). Grupavimas pagal `payer_email` (`schoolPayerInvoiceGroups`) - broliai/seserys kartu, kitos šeimos (pvz. Palaima vs Akvilė) atskirai. **Siųsti šiam mokėtojui** arba **Siųsti visiems**; kiekvienam vaikui atskiras personalizuotas `school_monthly_invoice` laiškas. Gate `schoolMonthlyInvoicesEnabled` (consultations **arba** `school_extra_lessons_contract` **arba** `school_family_portal`). API `batch-preview` / `send-batch` `api/school-monthly-invoice-admin.ts`.
 6. **Po sutarties patvirtinimo** (`extra-lessons-contract-accept`) siunčiamas `school_extra_first_lesson_invite` (`api/_lib/extraLessonsFirstLessonInvite.ts`): grupės pamokos materializuojamos iš karto, parenkama artimiausia aktyvi mokinio pamoka nuo paslaugų pradžios (`pickNearestSession`), laiške data / laikas / mokytojas / grupė, sekama prisijungimo nuoroda (`/api/join-session`) ir **namų darbų nuoroda**. Be pamokos eilutės — planuojamas grafikas ir 14 d. pastaba.
 7. **Namų darbai be paskyros:** viešas `/school-homework?student=&t=` (`SchoolHomework.tsx`, API `api/school-homework.ts`): vaiko pamokos (−60/+45 d.), mokytojo failai iš `session-files` (visų lygiagrečių grupės eilučių aplankai), tėvų įkėlimai `nd-<mokinys>-<failas>` į pamokos aplanką (signed upload URL, 10 MB, tie patys plėtiniai kaip `SessionFiles`), sekamas „Prisijungti“ tik lango metu. Nuoroda dedama į kvietimo ir school priminimo laiškus (`homeworkUrl`). Mokytojas failus mato įprastame `SessionFiles`.
 
@@ -441,7 +443,7 @@ Tai **nėra** atskira lentelė ir **nėra** sutartis prie kiekvienos pamokos. Ta
 **Migracija:** `20260826140000_school_extra_lessons.sql`, `20260827120000_extra_lessons_start_within_14.sql`.
 **QA seed:** `scripts/seed-school-extra-lessons-qa.mjs` (tik Demo Mokykla, ne Laisvi vaikai), `scripts/seed-school-extra-lessons-legal-qa.mjs` (stabilūs tokenai kaip `test_school.md`).
 **QA laiškai:** visi extra-lessons / school įmokų / sutarčių tėvų laiškai Demo Mokykloje eina į `alaniukasa@gmail.com` (`students.payer_email`).
-**Testai:** `tests/lib/extra-lessons-contract.test.ts`, `tests/pages/school-extra-lessons-accept.test.tsx`, `tests/lib/school-extra-lessons-billing.test.ts`, `tests/lib/extra-lessons-parent-portal.test.ts`, `tests/api/send-email-extra-lessons.test.ts`, `tests/api/extra-lessons-first-lesson-invite.test.ts`, `tests/api/send-email-school-invite-and-invoice.test.ts`, `tests/api/school-monthly-invoice-email.test.ts`, `tests/api/pay-school-monthly-invoice.test.ts`, `tests/api/school-homework.test.ts`, `tests/lib/public-link-token.test.ts`.
+**Testai:** `tests/lib/extra-lessons-contract.test.ts`, `tests/pages/school-extra-lessons-accept.test.tsx`, `tests/lib/school-extra-lessons-billing.test.ts`, `tests/lib/extra-lessons-parent-portal.test.ts`, `tests/api/send-email-extra-lessons.test.ts`, `tests/api/extra-lessons-first-lesson-invite.test.ts`, `tests/api/send-email-school-invite-and-invoice.test.ts`, `tests/api/school-monthly-invoice-email.test.ts`, `tests/api/pay-school-monthly-invoice.test.ts`, `tests/api/school-homework.test.ts`, `tests/lib/public-link-token.test.ts`, `tests/lib/school-payer-invoice-groups.test.ts`, `tests/api/school-monthly-invoice-admin.test.ts`.
 **Rankinis QA:** `test_school.md`.
 
 ### Klasės grupės, įrašai, join no-show
@@ -452,7 +454,11 @@ Tai **nėra** atskira lentelė ir **nėra** sutartis prie kiekvienos pamokos. Ta
 | `school_lesson_recordings` | Adminas `/school/recordings` kiekvienai grupei arba aktyvaus individualaus pasikartojančio dalyko auditorijai priskiria privatų Drive aplanką (`school_recording_drive_folders`: tik vienas iš `group_id` / `subject_id`). Tie patys įrašai rodomi `/recordings`, `/student/recordings`, `/parent/recordings` ir HMAC namų darbų puslapyje. `api/school-lesson-recordings.ts` tikrina rolę / gyvą auditoriją ir išduoda trumpalaikį bilietą + `HttpOnly` peržiūros sesiją; `api/school-lesson-recording-stream.ts` dar kartą tikrina gyvą prieigą, aplanko tėvą ir 30 d. terminą, tada proxina Drive baitų intervalą. Service-account JSON tik `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64` serveryje. |
 | `school_join_no_show` | `api/school-join-no-show.ts` kas 5 min — online pamoka, mokinys per ~10 min nepaspaudė Join, **mokytojas prisijungė**. Tik DB `no_show` + `no_show_reason=missed_join`. **Ne** kviečia `notify-session-no-show`. `auto-complete-sessions` tokias pamokas praleidžia, kad cronas spėtų pažymėti. |
 
+**Nepatvirtintas lankomumas (Apžvalga / Užsiėmimai / Statistika):** `schoolActivitySummary.unconfirmedStudents` skaičiuoja tik vaikus, kurių sistema nematė prisijungiant prie vykusio online užsiėmimo, o mokytojas dar nepatvirtino (`isUnconfirmedDetectedStudentAbsence`: cron `missed_join` be `status_confirmed_at`, arba `student_joined_at` tuščias ir `tutor_joined_at` yra). Pasibaigę, bet niekada nepažymėti užsiėmimai be join įrodymų (pvz. prieš mokyklos startą 09.07) į šį skaičių **nepatenka**, kad administracija galėtų prašyti mokytojų patvirtinti realius neatvykimus. **KPI suderinimas:** Apžvalga, Užsiėmimai ir Statistika naudoja **einamąjį mėnesį** (`currentMonthStatsDateRange`); „Įvyko“ org su privalomu patvirtinimu skaičiuoja ir DB `completed` (`countStoredCompleted`), ne tik patvirtintus vaikus. Lankomumo % skaičiuojamas tik iš patvirtintų dalyvavimų + neatvykimų; nepatvirtinti į procentą neįeina.
+
 **Grupės priminimai mokytojui:** `api/send-reminders.ts` siunčia vieną laišką vienam grupės užsiėmimo laikui, nors `sessions` turi po eilutę kiekvienam mokiniui. Po sėkmės visos tos grupės/laiko eilutės pažymimos `reminder_tutor_sent`; studento, tėvų ir mokytojo priminimai dar turi Resend idempotency raktus nuo persidengiančių cron paleidimų. Tėvų priminimai grupėje eina greta (`api/_lib/sessionReminderQueue.ts`), o cron vienu paleidimu gali išsiųsti iki 1000 laiškų (+ burst vienai grupei), kad nepraleistų dalies mokinių toje pačioje pamokoje.
+
+**Grupės kaina ir sustabdymas be laiško tėvams:** materializuojant klasės grupės užsiėmimus `sessions.price` imama iš patvirtintos papildomų užsiėmimų sutarties `unit_price_eur` (jei eilutė dar su kaina 0, kitas suderinimas ją užpildo; ranka įrašyta nenulinė kaina lieka). Kai grupė sustabdoma, nes aktyvių mokinių liko mažiau nei minimumas, sutartys pristabdomos, bet šeimoms `school_group_suspended` laiškas nesiunčiamas: tai vidinis perskirstymas, kol pasirašomos kitos sutartys. Nuolaidos priedai (`school_discount_agreements`) rodomi prie atitinkamos sutarties kortelės su būsena (laukia / patvirtinta / nebegalioja / atšaukta).
 
 **Faktinis lankomumas be patvirtintos papildomų pamokų sutarties:** mokytojas gali pažymėti pasibaigusio grupės užsiėmimo lankomumą ir mokiniui, kuriam dėl nepatvirtintos sutarties nėra `sessions` eilutės. `api/school-group-attendance.ts` tikrina mokytoją, organizaciją, grupės narystę ir tikrą užsiėmimo laiką; toks faktas saugomas atskirai nuo pamokų materializavimo, sutarčių patvirtinimo ir sąskaitų (`school_group_attendance_attestations`, migracija `20260930105900_school_group_attendance_attestations.sql`). Kalendoriuje rodoma „Sutartis nepatvirtinta“, o mokyklos Apžvalgoje - istorinis pranešimas apie dalyvavimą be patvirtintos sutarties. Vėlesnis sutarties patvirtinimas šio fakto nepanaikina. Esamų `sessions` eilučių lankomumas ir toliau žymimas per `confirm-session-status`.
 
@@ -589,11 +595,13 @@ Numatytasis atlygis lieka `profiles.company_commission_percent` (€ / pamoka). 
 
 **Testai:** `tests/lib/org-tutor-lesson-pay.test.ts`. Migracija: `20260902190000_tutor_pay_by_subject.sql`.
 
-**Mokyklų mokytojų atlygis ir sąskaitos:** mokytojo atlygis (`profiles.company_commission_percent`) yra atskiras nuo vaikų sutarties kainos ir `sessions.price`. Grupės vaikų `sessions` eilutės nėra atskiri mokytojui apmokami užsiėmimai. `schoolTutorPayOccurrences()` (`src/lib/schoolTutorLessonPay.ts`) naudoja bendrą mokyklos užsiėmimų grupavimą, skaičiuoja vieną atlygį už įvykusį grupės užsiėmimą ir išsaugo visų vaikų eilučių ID dubliavimo patikrai. Istorinis `tutor_pay_eur_snapshot` turi pirmenybę prieš dabartinį tarifą. Jei istorinio atlygio nėra ir dabartinis tarifas nulinis arba vieno užsiėmimo istorinių tarifų reikšmės nesutampa, rodoma žinoma sumos dalis ir reikalaujama administratoriaus peržiūros prieš išrašant naują sąskaitą. Jau išrašytos sąskaitos automatiškai neperrašomos.
+**Mokyklų mokytojų atlygis ir sąskaitos:** mokytojo atlygis yra atskiras nuo vaikų sutarties kainos ir `sessions.price`. Grupės vaikų `sessions` eilutės nėra atskiri mokytojui apmokami užsiėmimai. `schoolTutorPayOccurrences()` (`src/lib/schoolTutorLessonPay.ts`) skaičiuoja **vieną atlygį už pravestą užsiėmimą**, ne už mokinių skaičių. Grupiniam užsiėmimui taikomas `profiles.company_commission_percent`; individualiam — `company_individual_commission_percent` (tuščias naudoja grupinį). **Laisvi vaikai + Demo Mokykla:** kanoninis **45 € / užsiėmimas** (`LAISVI_VAIKIAI_DEFAULT_TUTOR_PAY_EUR`, `resolveSchoolTutorGroupPayRate()`); keičiama per `CompanyTutors` / org numatytąjį `CompanySettings`. Migracija `20261001120000_laisvi_vaikai_tutor_pay_45.sql` nustato 45 € aktyviems mokytojams prod/test DB. Istorinis `tutor_pay_eur_snapshot` turi pirmenybę. Jei snapshot'ai nesutampa — reikia admin peržiūros prieš sąskaitą. Migracija `20261001100000_school_teacher_individual_pay.sql`.
 
 **Mokytojo suvestinių laikotarpiai:** administratoriaus mokytojo kortelė apima paskutinius 12 mėnesių ir rodo konkrečias laikotarpio datas. Mokytojo Finansai apima pasirinktą mėnesį arba datų intervalą. Lyginant sumas reikia sutapatinti laikotarpį; visur grupės užsiėmimas skaičiuojamas vieną kartą.
 
-**„Laisvų vaikų“ įvykimo patvirtinimas:** `src/lib/sessionStatusConfirmation.ts` šiai organizacijai visada reikalauja mokytojo arba administratoriaus rankinio rezultato patvirtinimo, net jei `tutor_lesson_status_confirmation` DB flag'as nenustatytas. `auto-complete-sessions` tokių užsiėmimų nebaigia pagal laiką. Seni `completed` / `no_show` be `status_confirmed_at` rodomi kaip laukiantys patvirtinimo ir neįtraukiami į pravestų užsiėmimų / mokytojo atlygio skaičiavimą ar naujas mokytojo sąskaitas. Istoriniai DB įrašai automatiškai neperrašomi ir netrinami. Kitų organizacijų numatytoji logika nesikeičia.
+**„Laisvų vaikų“ įvykimo patvirtinimas:** `src/lib/sessionStatusConfirmation.ts` šiai organizacijai visada reikalauja mokytojo arba administratoriaus rankinio rezultato patvirtinimo, net jei `tutor_lesson_status_confirmation` DB flag'as nenustatytas. `auto-complete-sessions` tokių užsiėmimų nebaigia pagal laiką. Kalendoriuje / KPI seni `completed` / `no_show` be `status_confirmed_at` vis dar rodomi kaip laukiantys patvirtinimo. **Mokytojo atlygis ir sąskaitos** `completed` statusą jau laiko pravestu užsiėmimu (be žymos); nepatvirtintas `no_show` į atlygį nepatenka. Istoriniai DB įrašai automatiškai neperrašomi ir netrinami. Kitų organizacijų numatytoji logika nesikeičia. KPI „Nepatvirtintas lankomumas“ vis tiek naudoja tik sistemos matomus neatvykimus, ne visą nepažymėtą istoriją.
+
+**Darbuotojų dokumentai (`school_staff_documents`, Laisvi vaikai + Demo Mokykla QA):** `/school/staff-documents` → `CompanyStaffDocuments.tsx` + `api/school-staff-documents.ts`. Org allowlist: `isStaffDocumentsOrg()` (`marketMoney.ts`) — prod VšĮ Laisvi vaikai ir Demo Mokykla (`c3a00000-…0001`); reikia ir `school_contract_esign`. **Kūrimas:** pirma įrašomi abu dokumentai, jei adminas įrašė adresą ir asmens kodą — privatus `staff-personal-details.json` (ne DB), tada siunčiamas sutikimo laiškas, **tada** fone ruošiamas PDF. Converter gedimas / timeout **nebepraranda** darbuotojo ir laiško: susitarimas lieka `draft` be `pdf_url`. **Sutikimo GET** (`/school-staff-consent`) **nekonvertuoja PDF** — forma atsidaro iš karto. Jei mokykla jau įrašė adresą/kodą, laukai nerodomi (`detailsHeldBySchool`); asmens kodas į naršyklę ir DB **nėra** siunčiamas. Jei mokykla paliko tuščius — darbuotojas pildo formoje, PDF generuojamas tik POST. **Numatyta PDF:** Tutlio sugeneruoja konfidencialumo susitarimą su priedu iš DOCX šablono (`renderStaffDocumentPdf`, `STAFF_DOCX_TIMEOUT_MS=120s`, du DOCX iš eilės, prieš konversiją laukia kol Railway converter `pending=0`). Pasirinktinai galima įkelti savo PDF vietoj šablono. Datos laukas naudoja bendrą `DateInput` kalendorių. **Lokalus PDF:** reikia `DOCX_CONVERTER_URL` + `DOCX_CONVERTER_API_KEY` (Railway) arba LibreOffice; bendras stage converter kartais grąžina `503 Converter busy` / `422` dideliam ~2 MB šablonui.
 
 ### Complimentary pamokos (ne tik Pro Klasė)
 
@@ -771,6 +779,7 @@ npm run security:pencheck
 | Mokiniai | `/school/students` |
 | Extra tėvas | `demo-mokykla.extra.parent@tutlio.lt` → `/login` |
 | Tėvų / mokėtojo laiškai | **`alaniukasa@gmail.com`** (offer, accept+PDF, atsisakymas, nutraukimas, įmokos, metinės sutartys) |
+| Nepatvirtintas lankomumas QA | `node scripts/seed-demo-school-unconfirmed-attendance-qa.mjs` — tik Demo Mokykla. KPI datos **relatyvios** (ne fiksuotos spalio 8/15): seed pritaiko pamokas prie „dabar“, kad mėnesio Apžvalgoje matytųsi **≈4 įvykę** ir **4 nepatvirtintus** (Lukas×2, Gabija×1, Nojus×1). 09.03 istorija ir vaikai be join įrodymų į skaičių neįeina. Po seed: hard refresh; `.env` → `cuhciqwmqfuajeeqjjbm`. |
 
 **Seed skriptai:**
 
@@ -783,10 +792,11 @@ npm run security:pencheck
 | `scripts/seed-school-extra-lessons-legal-qa.mjs` | 14 d. atsisakymas / click-wrap QA (laiškai `alaniukasa@gmail.com`) |
 | `scripts/seed-proklase-package-edit-qa.mjs` | Pro Klasė pending package edit QA |
 | `scripts/seed-school-contract-completion-test.mjs` | Sutarčių completion testiniai duomenys |
+| `scripts/seed-demo-school-unconfirmed-attendance-qa.mjs` | Demo Mokykla: 4 sistemos matomi neatvykimai (relatyvios datos) + 09.03 istorija be join įrodymų; įjungia school flag'us |
 
 **⚠️** Seed reikia `SUPABASE_SERVICE_ROLE_KEY` teisingam projektui (`cuhciqwmqfuajeeqjjbm`). Jei `node scripts/seed-*.mjs` failina su `fetch failed` — tikrink `.env` / naudok MCP `execute_sql` arba `.env.vercel.stage`.
 
-**⚠️ Lokalus prisijungimas:** jei `.env` rodo į `xklzjhfztjxltrdkplog` — demo login **neveiks**. Sukurk `.env.local` iš `.env.vercel.stage` Supabase raktų.
+**⚠️ Lokalus prisijungimas:** jei `.env` rodo į `xklzjhfztjxltrdkplog` — demo login **neveiks**. Įrašyk teisingus Supabase raktus į `.env` (ref `cuhciqwmqfuajeeqjjbm`).
 
 ---
 
@@ -797,7 +807,7 @@ npm run security:pencheck
 3. **Placeholder ≠ reikšmė** — school grafiko formoje `100.00` placeholder neaktyvuoja mygtuko.
 4. **School = company komponentai** — nekurk atskirų `School*.tsx` jei galima extend'inti `company/`.
 5. **RLS** — API dažnai naudoja service role; frontend — anon key + JWT.
-6. **`.env` Supabase URL** — gali būti pasenęs (`xklzjhfztjxltrdkplog`); stage/prod `cuhciqwmqfuajeeqjjbm`. Demo login reikalauja `.env.local` su teisingais raktais.
+6. **`.env` Supabase URL** — turi būti `cuhciqwmqfuajeeqjjbm`; ne naudok `.env.local` / `.env.vercel.*` vietoj `.env` lokaliai.
 7. **Per platus diff** — vartotojas nori minimalaus, fokusuoto pakeitimo.
 8. **xlsx paketas** — nenaudojamas; Excel eksportui naudok `exceljs` (`schoolFinanceXlsxExport.ts`).
 9. **Temp failai** — necommitink `scripts/_*.mjs`, `scripts/_last-*.pdf`, `tmp/`, `preview-*.html`.
@@ -835,6 +845,8 @@ npm run security:pencheck
 | Rankinis Pro Klasė QA | `test_proklase.md` |
 | Skeno folderio dialogas | `shouldPromptSchoolSignedOnScan()` `schoolContractFilters.ts` |
 | Mokytojų sutartys (WIP) | `CompanyStaffContracts.tsx`, `schoolContractParty.ts`, `school-contract-teacher-invite.ts` |
+| Darbuotojų dokumentai (konfidencialumas / sutikimas) | `CompanyStaffDocuments.tsx`, `api/school-staff-documents.ts`, `api/school-staff-consent.ts`, `api/_lib/schoolStaffDocuments.ts` |
+| Nepatvirtintas lankomumas | `schoolJoinNoShow.ts` (`isUnconfirmedDetectedStudentAbsence`), `schoolSessionMonitoring.ts` |
 | Klasės grupės | `CompanyClassGroups.tsx`, `ClassGroupFormDialog.tsx`, `schoolClassGroups.ts`, `api/school-class-groups.ts`, `api/_lib/schoolClassGroupMaterialize.ts` |
 | Mokyklos terminologija (mokytojas / užsiėmimas) | `src/lib/i18n/schoolTerminology.ts`, `terminologyStore.ts`, `hooks/useSchoolTerminology.ts`, `useParentHasSchoolOrg.ts`, `useOrgTerminologyMode.ts`, `api/send-email.ts` (school laiškai) |
 | „Prisijungti“ langas (tėvai / mokiniai) | `components/JoinLessonButton.tsx`, `lib/attendance.ts` |
@@ -842,11 +854,12 @@ npm run security:pencheck
 | School mokiniai + filtrai | `CompanyStudents.tsx`, `schoolStudentEnrollment.ts`, `authSession.ts`, `schoolStudentsExport.ts` |
 | Pamoka iš mokinio kortelės / tikslus laikas | `FindTutorModal.tsx`, `FindLessonBookDialog.tsx`, `PickedAvailabilityTimeEditor.tsx`, `pickedAvailabilityTime.ts`, `studentLessonPricing.ts` |
 | School mokėjimai | `CompanyPayments.tsx`, `useSchoolPaymentsData.ts` |
+| Mokyklos tėvų S.F. (mėnesinė) | `SchoolMonthlyInvoiceDialog` (`batch`), `api/school-monthly-invoice-admin.ts`, `schoolPayerInvoiceGroups.ts`, `schoolInvoiceSessionReview.ts` (`resolveSchoolInvoiceUnitPrice`) |
 | School finansų eksportas | `schoolFinanceExport.ts`, `schoolFinanceXlsxExport.ts` |
 | Complimentary pamoka | `sessionComplimentary.ts`, `api/mark-session-complimentary.ts` |
 | PVM S.F. / numeracija | `pvmEducationInvoice.ts`, `invoiceNumber.ts`, `reserve-invoice-number.ts` |
 | Pro Klasė atlygis / baudos / S.F. PVM | `proKlaseTutorPay.ts`, `proKlaseInvoice.ts`, `api/tutor-adjustment.ts`, `CompanyTutors.tsx` |
-| Mano Korepetitorius atlygis pagal dalyką | `orgTutorLessonPay.ts`, `CompanyTutors.tsx`, `generate-invoice.ts` |
+| Mokyklų mokytojo atlygis (užsiėmimas, grupė vs individualu) | `schoolTutorLessonPay.ts`, `schoolTutorDefaultPay.ts`, `CompanyTutors.tsx`, `api/_lib/schoolTutorInvoice.ts`, migracijos `20261001100000_*`, `20261001120000_*` |
 | Pro Klasė legal / pending package | `proKlaseLegal.ts`, `pendingPackageEdit.ts`, `api/update-pending-package.ts` |
 | Capacity / chat Broadcast | `docs/CAPACITY_1000_USERS_RUNBOOK.md`, `src/hooks/useChat.ts`, `src/lib/chatMessages.ts` |
 | Tutor quiz / lead | `QuizFunnel.tsx`, `src/lib/quizFunnel.ts`, `api/landing-lead.ts` |
@@ -899,4 +912,4 @@ npm run security:pencheck
 
 ---
 
-*Paskutinis atnaujinimas: 2026-09-05 (`main`): klasės grupių rekonsiliacija (iš karto po išsaugojimo, be dublikatų, DELETE), grupių filtras pagal mokytoją, mokyklų terminologija „mokytojas“ / „užsiėmimas“ runtime sluoksniu, tėvų kalendorius be priskirto korepetitoriaus, `JoinLessonButton` langas, mokyklos tėvų priminimai be paskyros, AI widget'as tik landing'e; tėvų srautas be paskyros: kvietimas į pirmą pamoką po click-wrap, viešas namų darbų puslapis (`/school-homework`), mėnesio sąskaitos laiškas su Stripe apmokėjimu (`pay-school-monthly-invoice`, migracija `20260905120000`). Jei radai neatitikimų su kodu — prioritetas kodui, atnaujink šį failą.*
+*Paskutinis atnaujinimas: 2026-10-01: Mokyklos tėvų S.F. pagal mokėtoją (sutarties kaina × mėnesio užsiėmimai, siųsti vienam arba visiems); darbuotojo sutikimo forma nebelaukia PDF; Užsiėmimai/Statistika KPI suderinimas su Apžvalga.*

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { latestSchoolBillingDecisions, reviewSchoolInvoiceSession, schoolInvoiceContractReason, type SchoolInvoiceContractWindow } from '../../src/lib/schoolInvoiceSessionReview';
+import { latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewSchoolInvoiceSession, schoolInvoiceContractReason, type SchoolInvoiceContractWindow } from '../../src/lib/schoolInvoiceSessionReview';
 
 const session = { id: 's1', class_group_id: 'group1', subject_id: 'math',
   start_time: '2026-09-14T13:00:00Z', end_time: '2026-09-14T14:00:00Z',
@@ -54,5 +54,11 @@ describe('school invoice session review', () => {
     const latest = latestSchoolBillingDecisions(rows);
     expect(reviewSchoolInvoiceSession(session, [contract], latest.get('s1'), false)).toMatchObject({ included: true, decisionId: 2 });
     expect(rows[1].excluded).toBe(true);
+  });
+
+  it('uses the signed extra-lessons unit price when the session row is stored as 0', () => {
+    const priced = { ...contract, unit_price_eur: 6, order_snapshot: { ...contract.order_snapshot, unit_price_eur: 6 } as any };
+    expect(resolveSchoolInvoiceUnitPrice({ price: 0, class_group_id: 'group1' }, [priced])).toBe(6);
+    expect(reviewSchoolInvoiceSession({ ...session, price: 0 }, [priced], undefined, false).unitPriceEur).toBe(6);
   });
 });

@@ -44,6 +44,18 @@ describe('buildTutorPayUpdatePatch', () => {
       subjectPayEnabled: false,
     })).toEqual({});
   });
+
+  it('writes only the individual school rate when only that field was edited', () => {
+    expect(buildTutorPayUpdatePatch({
+      basePayEdited: false,
+      basePay: 45,
+      individualPayEdited: true,
+      individualPay: 20,
+      subjectPayEdited: false,
+      subjectPay: {},
+      subjectPayEnabled: false,
+    })).toEqual({ company_individual_commission_percent: 20 });
+  });
 });
 
 describe('resolveDefaultTutorPayForSave', () => {

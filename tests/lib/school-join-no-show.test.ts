@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   shouldReviewStudentAttendanceFromMissingJoin,
   shouldRestoreAutomaticNoShowOnJoin,
+  isUnconfirmedDetectedStudentAbsence,
 } from '../../src/lib/schoolJoinNoShow';
 
 describe('schoolJoinNoShow', () => {
@@ -57,5 +58,39 @@ describe('schoolJoinNoShow', () => {
       no_show_reason: null,
       status_confirmed_at: null,
     })).toBe(false);
+  });
+
+  it('counts unconfirmed attendance only from detected absences, not unmarked history', () => {
+    const now = new Date('2026-08-26T10:20:00.000Z');
+    const held = {
+      start_time: start,
+      end_time: '2026-08-26T10:45:00.000Z',
+      meeting_link: 'https://meet.google.com/abc',
+      tutor_joined_at: '2026-08-26T10:02:00.000Z',
+      student_joined_at: null,
+      status_confirmed_at: null,
+    };
+    expect(isUnconfirmedDetectedStudentAbsence({ ...held, status: 'active' }, now)).toBe(true);
+    expect(isUnconfirmedDetectedStudentAbsence({
+      ...held, status: 'no_show', no_show_reason: 'missed_join',
+    }, now)).toBe(true);
+    expect(isUnconfirmedDetectedStudentAbsence({
+      ...held, status: 'no_show', no_show_reason: 'missed_join',
+      status_confirmed_at: '2026-08-26T10:16:00.000Z',
+    }, now)).toBe(false);
+    expect(isUnconfirmedDetectedStudentAbsence({
+      ...held, status: 'active', student_joined_at: '2026-08-26T10:03:00.000Z',
+    }, now)).toBe(false);
+    expect(isUnconfirmedDetectedStudentAbsence({
+      ...held, status: 'active', tutor_joined_at: null,
+    }, now)).toBe(false);
+    expect(isUnconfirmedDetectedStudentAbsence({
+      start_time: start,
+      end_time: '2026-08-26T10:45:00.000Z',
+      status: 'active',
+      meeting_link: null,
+      tutor_joined_at: null,
+      student_joined_at: null,
+    }, now)).toBe(false);
   });
 });

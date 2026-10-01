@@ -26,29 +26,6 @@ const DOTENV_FORCE_KEYS = new Set([
   'GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON',
 ]);
 
-const STRIPE_PARENT_OVERRIDE_KEYS = new Set([
-  'STRIPE_SECRET_KEY',
-  'STRIPE_PUBLISHABLE_KEY',
-  'STRIPE_WEBHOOK_SECRET',
-  'STRIPE_CONNECT_WEBHOOK_SECRET',
-  'STRIPE_MONTHLY_PRODUCT_ID',
-  'STRIPE_MONTHLY_PRICE_ID',
-  'STRIPE_YEARLY_PRODUCT_ID',
-  'STRIPE_YEARLY_PRICE_ID',
-  'STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID',
-  'STRIPE_SUBSCRIPTION_ONLY_PRICE_ID',
-  'STRIPE_SUBSCRIPTION_ONLY_YEARLY_PRICE_ID',
-  'STRIPE_MONTHLY_PRODUCT_ID_PLN',
-  'STRIPE_MONTHLY_PRICE_ID_PLN',
-  'STRIPE_YEARLY_PRODUCT_ID_PLN',
-  'STRIPE_YEARLY_PRICE_ID_PLN',
-  'STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID_PLN',
-  'STRIPE_SUBSCRIPTION_ONLY_PRICE_ID_PLN',
-  'STRIPE_SUBSCRIPTION_ONLY_YEARLY_PRICE_ID_PLN',
-  'STRIPE_ENTERPRISE_PRICE_ID',
-  'STRIPE_ENTERPRISE_PRICE_ID_PLN',
-]);
-
 function loadEnvFile(name: string) {
   const p = join(projectRoot, name);
   if (!existsSync(p)) return;
@@ -66,26 +43,22 @@ function loadEnvFile(name: string) {
     ) {
       value = value.slice(1, -1);
     }
-    // .env.local overrides .env, but dev:test / dev:prod pre-export Supabase vars — keep those.
-    const preserveFromParent =
-      name === '.env.local' &&
-      (key === 'SUPABASE_URL' ||
-        key === 'SUPABASE_SERVICE_ROLE_KEY' ||
-        key === 'VITE_SUPABASE_URL' ||
-        key === 'VITE_SUPABASE_ANON_KEY' ||
-        STRIPE_PARENT_OVERRIDE_KEYS.has(key));
-    if (preserveFromParent && process.env[key] !== undefined) continue;
-    // Windows often has stale Supabase vars in user env — project .env must win.
+    // Project .env wins over stale Windows user env for these keys.
     if (name === '.env' && DOTENV_FORCE_KEYS.has(key)) {
       process.env[key] = value;
       continue;
     }
-    if (process.env[key] === undefined || name === '.env.local') process.env[key] = value;
+    if (process.env[key] === undefined) process.env[key] = value;
   }
 }
 
 loadEnvFile('.env');
-loadEnvFile('.env.local');
+for (const extra of ['.env.local', '.env.vercel.stage', '.env.vercel.prod']) {
+  if (existsSync(join(projectRoot, extra))) {
+    console.warn(`[dev-api-local] Ignoring ${extra} — local dev uses only .env. Rename or remove it to avoid Vite overrides.`);
+    break;
+  }
+}
 /** Let API handlers infer browser origin on localhost even if VERCEL=1 leaked into .env */
 process.env.TUTLIO_DEV_API_LOCAL = '1';
 const suppressLocalSendEmail = process.env.TUTLIO_DEV_SUPPRESS_EMAIL === '1';
@@ -103,7 +76,7 @@ for (const key of ['SUPABASE_URL', 'VITE_SUPABASE_URL'] as const) {
   }
 }
 
-// Many .env.local files only define VITE_* — API auth must use the same project URL.
+// Many setups only define VITE_* — API auth must use the same project URL.
 if (!process.env.SUPABASE_URL && process.env.VITE_SUPABASE_URL) {
   process.env.SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 }
@@ -111,7 +84,7 @@ if (!process.env.SUPABASE_URL && process.env.VITE_SUPABASE_URL) {
 if (process.env.STRIPE_YEARLY_PRICE_ID) {
   console.log('[dev-api-local] STRIPE_YEARLY_PRICE_ID loaded');
 } else {
-  console.warn('[dev-api-local] STRIPE_YEARLY_PRICE_ID missing — restart after editing .env.local');
+  console.warn('[dev-api-local] STRIPE_YEARLY_PRICE_ID missing — restart after editing .env');
 }
 
 const stripeSecretMode = process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_')
@@ -126,7 +99,7 @@ const stripePublishableMode = process.env.STRIPE_PUBLISHABLE_KEY?.startsWith('pk
     : 'missing';
 if (stripePublishableMode === 'missing') {
   console.warn(
-    '[dev-api-local] STRIPE_PUBLISHABLE_KEY missing — Embedded Checkout cannot load. For dev:test, add TEST_STRIPE_PUBLISHABLE_KEY to .env.local.',
+    '[dev-api-local] STRIPE_PUBLISHABLE_KEY missing — Embedded Checkout cannot load. Add STRIPE_PUBLISHABLE_KEY to .env.',
   );
 } else if (stripeSecretMode !== stripePublishableMode) {
   console.warn(
@@ -140,7 +113,7 @@ const apiSupabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
 const viteSupabaseUrl = process.env.VITE_SUPABASE_URL || '';
 if (apiSupabaseUrl && viteSupabaseUrl && apiSupabaseUrl !== viteSupabaseUrl) {
   console.warn(
-    '[dev-api-local] SUPABASE_URL and VITE_SUPABASE_URL differ — /api/* auth will 401. Use npm run dev:test or dev:prod, or align .env.local.',
+    '[dev-api-local] SUPABASE_URL and VITE_SUPABASE_URL differ — /api/* auth will 401. Align both in .env.',
   );
 } else if (apiSupabaseUrl) {
   console.log('[dev-api-local] Supabase auth URL:', apiSupabaseUrl.replace(/^https?:\/\//, '').slice(0, 40));
@@ -155,6 +128,13 @@ if (!resendKey) {
   console.warn('[dev-api-local] RESEND_API_KEY / RESEND_API_KEY_STAGE missing — tutor/parent invite emails will fail');
 } else if (!process.env.RESEND_API_KEY?.trim() && process.env.RESEND_API_KEY_STAGE?.trim()) {
   console.log('[dev-api-local] Using RESEND_API_KEY_STAGE for outbound email');
+}
+
+const { hasDocxConverterEnv } = await import('../api/_lib/docxConverter.ts');
+if (!hasDocxConverterEnv()) {
+  console.warn('[dev-api-local] DOCX_CONVERTER_URL/API_KEY missing — staff documents and contract PDF generation will fail without LibreOffice');
+} else {
+  console.log('[dev-api-local] DOCX converter configured:', (process.env.DOCX_CONVERTER_URL || '').replace(/^https?:\/\//, '').split('/')[0]);
 }
 
 if (

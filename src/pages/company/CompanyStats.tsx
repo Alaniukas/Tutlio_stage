@@ -157,6 +157,7 @@ export default function CompanyStats() {
     if (!adminRow) return;
     const schoolOutcomeOptions = {
       requireConfirmation: orgRequiresTutorStatusConfirmation(adminRow.organization_id) || confirmationFeatureEnabled,
+      countStoredCompleted: orgRequiresTutorStatusConfirmation(adminRow.organization_id) || confirmationFeatureEnabled,
     };
 
     const tutorList = await getOrgVisibleTutors(
@@ -168,7 +169,7 @@ export default function CompanyStats() {
     const tutorIds = tutorList.map(t => t.id);
     const sessionQuery = () => supabase
       .from('sessions')
-      .select('id, class_group_id, start_time, end_time, tutor_id, student_id, status, payment_status, price, cancelled_by, paid, is_complimentary, exclude_from_lesson_count, lesson_package_id, subject_id, tutor_pay_eur_snapshot, student_joined_at, status_confirmed_at, subjects(is_trial, is_group)')
+      .select('id, class_group_id, start_time, end_time, tutor_id, student_id, status, payment_status, price, cancelled_by, paid, is_complimentary, exclude_from_lesson_count, lesson_package_id, subject_id, tutor_pay_eur_snapshot, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, no_show_reason, subjects(is_trial, is_group)')
       .in('tutor_id', tutorIds)
       .gte('start_time', startIso)
       .lte('start_time', endIso);

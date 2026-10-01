@@ -65,7 +65,7 @@ import { ClassGroupCancelScopeFields } from '@/components/ClassGroupCancelScopeF
 import { classGroupCancelTargets, classGroupOccurrenceSessionIds, sessionStatusCanCancel, usesClassGroupCancelFlow } from '@/lib/schoolClassGroupSessions';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
-import { defaultStatsDateRange } from '@/lib/statsDateRange';
+import { defaultStatsDateRange, currentMonthStatsDateRange } from '@/lib/statsDateRange';
 import { schoolCalendarInstant, schoolDate } from '@/lib/schoolTime';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { canDeleteOrgSession } from '@/lib/orgSessionDeletion';
@@ -281,8 +281,8 @@ export default function CompanySessions() {
   const [filterStatus, setFilterStatus] = useState('');
   const [search, setSearch] = useState('');
   const [sortNewest, setSortNewest] = useState(true);
-  const [filterStartDate, setFilterStartDate] = useState<Date | null>(() => isSchoolOrgView ? defaultStatsDateRange().start : null);
-  const [filterEndDate, setFilterEndDate] = useState<Date | null>(() => isSchoolOrgView ? defaultStatsDateRange().end : null);
+  const [filterStartDate, setFilterStartDate] = useState<Date | null>(() => isSchoolOrgView ? currentMonthStatsDateRange().start : null);
+  const [filterEndDate, setFilterEndDate] = useState<Date | null>(() => isSchoolOrgView ? currentMonthStatsDateRange().end : null);
   const [isFilterActive, setIsFilterActive] = useState(isSchoolOrgView);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [markingNoShow, setMarkingNoShow] = useState(false);
@@ -1272,7 +1272,7 @@ export default function CompanySessions() {
               onEndDateChange={setFilterEndDate}
               onClear={() => {
                 if (isSchoolOrgView) {
-                  const nextRange = defaultStatsDateRange();
+                  const nextRange = isSchoolOrgView ? currentMonthStatsDateRange() : defaultStatsDateRange();
                   setFilterStartDate(nextRange.start);
                   setFilterEndDate(nextRange.end);
                   setIsFilterActive(true);
@@ -2081,7 +2081,7 @@ export default function CompanySessions() {
 
 function SchoolSessionMonitoring({ sessions, requireConfirmation }: { sessions: Session[]; requireConfirmation: boolean }) {
   const { t } = useTranslation();
-  const options = { requireConfirmation };
+  const options = { requireConfirmation, countStoredCompleted: requireConfirmation };
   const activity = schoolActivitySummary(sessions, new Date(), options);
   const students = schoolStudentAttendance(sessions, new Date(), options);
   const attendanceRows = students.map(student => {

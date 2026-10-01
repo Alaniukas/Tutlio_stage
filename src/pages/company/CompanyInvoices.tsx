@@ -17,6 +17,9 @@ import {
 } from '@/components/ui/dialog';
 import InvoiceSettingsForm from '@/components/InvoiceSettingsForm';
 import CreateInvoiceModal from '@/components/CreateInvoiceModal';
+import SchoolMonthlyInvoiceDialog from '@/components/school/SchoolMonthlyInvoiceDialog';
+import Toast from '@/components/Toast';
+import { schoolMonthlyInvoicesEnabled } from '@/lib/schoolConsultationsOrg';
 import {
   FileText,
   Plus,
@@ -65,6 +68,10 @@ export default function CompanyInvoices() {
   const [invoices, setInvoices] = useState<Invoice[]>(ic?.invoices ?? []);
   const [loading, setLoading] = useState(!ic);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [monthlyInvoiceOpen, setMonthlyInvoiceOpen] = useState(false);
+  const [invoiceToast, setInvoiceToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [schoolInvoiceStudents, setSchoolInvoiceStudents] = useState<{ id: string; fullName: string; payerEmail?: string | null }[]>([]);
+  const [schoolPayerInvoices, setSchoolPayerInvoices] = useState(false);
   const [reserveOpen, setReserveOpen] = useState(false);
   const [reserveCount, setReserveCount] = useState(1);
   const [reserveBuyer, setReserveBuyer] = useState('');
@@ -146,6 +153,8 @@ export default function CompanyInvoices() {
       setOrgId(null);
       setInvoices([]);
       setTutors([]);
+      setSchoolInvoiceStudents([]);
+      setSchoolPayerInvoices(false);
       setLoading(false);
       return;
     }
@@ -160,10 +169,27 @@ export default function CompanyInvoices() {
 
     const { data: orgRow } = await supabase
       .from('organizations')
-      .select('invoice_issuer_mode, name')
+      .select('invoice_issuer_mode, name, entity_type, features')
       .eq('id', orgIdVal)
       .single();
     if (orgRow?.invoice_issuer_mode) setInvoiceIssuerMode(orgRow.invoice_issuer_mode);
+    const loadedOrg = orgRow as { entity_type?: string; features?: Record<string, unknown> } | null;
+    setSchoolPayerInvoices(schoolMonthlyInvoicesEnabled(orgIdVal, loadedOrg?.features, loadedOrg?.entity_type));
+
+    if (loadedOrg?.entity_type === 'school') {
+      const { data: studentRows } = await supabase
+        .from('students')
+        .select('id, full_name, payer_email')
+        .eq('organization_id', orgIdVal)
+        .order('full_name');
+      setSchoolInvoiceStudents((studentRows || []).map((row: { id: string; full_name?: string | null; payer_email?: string | null }) => ({
+        id: row.id,
+        fullName: row.full_name || 'Mokinys',
+        payerEmail: row.payer_email || null,
+      })));
+    } else {
+      setSchoolInvoiceStudents([]);
+    }
 
     const { data: orgInvProf } = await supabase
       .from('invoice_profiles')
@@ -622,7 +648,13 @@ export default function CompanyInvoices() {
               <span className="truncate">{t('invoices.reserveExternal')}</span>
             </Button>
             <Button
-              onClick={() => setIsCreateOpen(true)}
+              onClick={() => {
+                if (schoolPayerInvoices) {
+                  setMonthlyInvoiceOpen(true);
+                  return;
+                }
+                setIsCreateOpen(true);
+              }}
               disabled={orgInvoiceProfileReady === false}
               title={orgInvoiceProfileReady === false ? t('invoices.orgProfileIncompleteHint') : undefined}
               className="rounded-xl gap-2 bg-indigo-600 hover:bg-indigo-700 touch-manipulation flex-1 min-w-0 sm:flex-initial disabled:opacity-50"
@@ -1329,6 +1361,19 @@ export default function CompanyInvoices() {
         )}
       </div>
 
+      {schoolPayerInvoices && orgId && (
+        <SchoolMonthlyInvoiceDialog
+          batch
+          open={monthlyInvoiceOpen}
+          onOpenChange={setMonthlyInvoiceOpen}
+          organizationId={orgId}
+          students={schoolInvoiceStudents}
+          onSent={(message) => {
+            setInvoiceToast({ message, type: 'success' });
+            void loadData();
+          }}
+        />
+      )}
       <CreateInvoiceModal
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
@@ -1397,6 +1442,9 @@ export default function CompanyInvoices() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {invoiceToast && (
+        <Toast message={invoiceToast.message} type={invoiceToast.type} onClose={() => setInvoiceToast(null)} />
+      )}
     </>
   );
 }

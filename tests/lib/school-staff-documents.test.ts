@@ -9,6 +9,7 @@ import {
   staffPdfPathsForRetention,
   staffTemplateNames,
   staffTemplatePayload,
+  parseStoredStaffPersonalDetails,
   validateConsentAnswers,
   validateStaffPersonalDetails,
 } from '../../api/_lib/schoolStaffDocuments';
@@ -26,6 +27,9 @@ describe('school staff document templates and lifecycle', () => {
     expect(validateStaffPersonalDetails({ address: '  Vilniaus g. 1,  Vilnius  ', personalCode: '39001010013' }))
       .toEqual({ address: 'Vilniaus g. 1, Vilnius', personalCode: '39001010013' });
     expect(validateStaffPersonalDetails({ address: 'Vilniaus g. 1', personalCode: '123' })).toBeNull();
+    expect(parseStoredStaffPersonalDetails({ address: 'Vilniaus g. 1, Vilnius', personalCode: '39001010013' }))
+      .toEqual({ address: 'Vilniaus g. 1, Vilnius', personalCode: '39001010013' });
+    expect(parseStoredStaffPersonalDetails({ address: 'Vilniaus g. 1, Vilnius' })).toBeNull();
   });
 
   it('fills each of the three supplied DOCX templates without unresolved fields', () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { isLaisviVaikaiOrg } from '@/lib/marketMoney';
 import { format, type Locale as DateFnsLocale } from 'date-fns';
 import {
   AlertCircle,
@@ -6,13 +7,9 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronRight,
-  ClipboardCheck,
-  CreditCard,
-  FileClock,
   ListTodo,
   Activity,
   UserCheck,
-  UserX,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
@@ -31,7 +28,6 @@ import {
   isSchoolParentConfirmationPending,
   buildSchoolAdminActionQueue,
   buildSchoolActivityFeed,
-  schoolParentConfirmationLabel,
   sumPendingSchoolInvoices,
 } from '@/lib/schoolDashboard';
 import {
@@ -167,6 +163,8 @@ export default function SchoolDashboard() {
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [noShowTarget, setNoShowTarget] = useState<SchoolDashboardSession | null>(null);
   const [markingNoShow, setMarkingNoShow] = useState(false);
+  const [activityExpanded, setActivityExpanded] = useState(false);
+  const isCompactDash = isLaisviVaikaiOrg(membership?.organizationId);
   const attentionStorageKey = membership?.organizationId
     ? `tutlio:v1:school_dash_attention_rows:${membership.organizationId}`
     : undefined;
@@ -298,7 +296,10 @@ export default function SchoolDashboard() {
       const instant = Date.parse(row.start_time);
       return instant >= monthStart.getTime() && instant <= now.getTime();
     });
-    const outcomeOptions = { requireConfirmation: requireOutcomeConfirmation };
+    const outcomeOptions = {
+      requireConfirmation: requireOutcomeConfirmation,
+      countStoredCompleted: requireOutcomeConfirmation,
+    };
     const monthSummary = schoolActivitySummary(monthRows, now, outcomeOptions);
     const occurrences = schoolMeetingOccurrences(data.sessions, outcomeOptions);
     const todayAll = occurrences
@@ -345,8 +346,32 @@ export default function SchoolDashboard() {
   }), [data, requireOutcomeConfirmation]);
   const adminActions = useMemo(() => buildSchoolAdminActionQueue(outcomeData), [outcomeData]);
   const activityFeed = useMemo(() => buildSchoolActivityFeed(outcomeData), [outcomeData]);
-  const visibleAttention = derived.attention.filter(row => !dismissedIds.has(row.id)).slice(0, 8);
+  const visibleAttention = derived.attention.filter(row => !dismissedIds.has(row.id));
   const pendingInvoiceTotal = sumPendingSchoolInvoices(data.invoices);
+  const listLimit = isCompactDash ? 5 : 8;
+  const adminActionLimit = isCompactDash ? 6 : 10;
+  const visibleAttentionSlice = visibleAttention.slice(0, listLimit);
+  const reviewItems = useMemo(() => {
+    type ReviewItem =
+      | { kind: 'attention'; id: string; row: SchoolDashboardSession }
+      | { kind: 'notHeld'; id: string; row: SchoolDashboardSession; studentCount: number };
+    const items: ReviewItem[] = visibleAttentionSlice.map(row => ({
+      kind: 'attention',
+      id: row.id,
+      row,
+    }));
+    for (const occurrence of derived.notHeld) {
+      if (items.length >= listLimit) break;
+      if (items.some(item => item.id === occurrence.key)) continue;
+      items.push({
+        kind: 'notHeld',
+        id: occurrence.key,
+        row: occurrence.row,
+        studentCount: occurrence.studentCount,
+      });
+    }
+    return items;
+  }, [derived.notHeld, listLimit, visibleAttentionSlice]);
 
   const handleConfirmNoShow = async () => {
     if (!noShowTarget || !can('sessions.edit')) return;
@@ -400,6 +425,7 @@ export default function SchoolDashboard() {
       sub: t('schoolDash.scheduledToday'),
       icon: CalendarDays,
       tone: 'bg-blue-100 text-blue-700',
+      href: '/school/sessions',
     },
     {
       label: t('schoolDash.upcoming'),
@@ -407,6 +433,7 @@ export default function SchoolDashboard() {
       sub: t('schoolDash.nextFourteenDays'),
       icon: CalendarClock,
       tone: 'bg-indigo-100 text-indigo-700',
+      href: '/school/sessions',
     },
     {
       label: t('schoolDash.completedThisMonth'),
@@ -414,36 +441,41 @@ export default function SchoolDashboard() {
       sub: t('schoolDash.groupOnce'),
       icon: CheckCircle2,
       tone: 'bg-emerald-100 text-emerald-700',
+      href: '/school/stats',
     },
     {
-      label: t('schoolDash.attendance'),
-      value: derived.monthSummary.attendanceRate === null ? '–' : `${derived.monthSummary.attendanceRate}%`,
-      sub: t('schoolDash.attendanceRatio', {
-        attended: derived.monthSummary.attendedStudents,
-        confirmed: derived.monthSummary.confirmedAttendance,
-      }),
+      label: t('schoolDash.unconfirmedAttendance'),
+      value: derived.monthSummary.unconfirmedStudents,
+      sub: derived.monthSummary.attendanceRate === null
+        ? t('schoolDash.noAttendanceData')
+        : t('schoolDash.attendanceRatio', {
+          attended: derived.monthSummary.attendedStudents,
+          confirmed: derived.monthSummary.confirmedAttendance,
+        }),
       icon: UserCheck,
-      tone: 'bg-cyan-100 text-cyan-700',
+      tone: derived.monthSummary.unconfirmedStudents > 0 ? 'bg-amber-100 text-amber-800' : 'bg-cyan-100 text-cyan-700',
+      href: '/school/stats',
     },
-    ...(can('contracts.view') ? [{
+  ];
+
+  const quickAlerts = [
+    ...(can('contracts.view') && pendingContracts.length > 0 ? [{
       label: t('schoolDash.parentConfirmations'),
       value: pendingContracts.length,
-      sub: t('schoolDash.contractsWaiting'),
-      icon: FileClock,
-      tone: 'bg-amber-100 text-amber-700',
+      href: '/school/contracts',
+      tone: 'border-amber-200 bg-amber-50 text-amber-900',
     }] : []),
-    ...(can('finance.view') ? [{
+    ...(can('finance.view') && data.invoices.length > 0 ? [{
       label: t('schoolDash.unpaidInvoices'),
-      value: data.invoices.length,
-      sub: can('finance.totals') ? fmt(pendingInvoiceTotal) : t('schoolDash.monthEndInvoices'),
-      icon: CreditCard,
-      tone: 'bg-rose-100 text-rose-700',
+      value: can('finance.totals') ? fmt(pendingInvoiceTotal) : data.invoices.length,
+      href: '/school/finance?tab=payments',
+      tone: 'border-rose-200 bg-rose-50 text-rose-900',
     }] : []),
   ];
 
   return (
     <>
-      <div className="mx-auto max-w-6xl space-y-5 sm:space-y-6">
+      <div className="mx-auto max-w-6xl space-y-4 sm:space-y-5">
         <header>
           <h1 className="text-2xl font-bold text-gray-900">{t('schoolDash.greeting', { name: membership?.organizationName || '' })}</h1>
           <p className="mt-0.5 text-sm text-gray-500">
@@ -451,8 +483,40 @@ export default function SchoolDashboard() {
           </p>
         </header>
 
-        {can('sessions.view') && membership?.organizationId ? (
-          <SchoolContractAttendanceAlerts organizationId={membership.organizationId} canReviewContracts={can('contracts.view')} />
+        <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
+          {summaryCards.map(({ label, value, sub, icon: Icon, tone, href }) => (
+            <Link
+              key={label}
+              to={href}
+              className="min-w-0 rounded-2xl border border-gray-100 bg-white p-3 shadow-sm transition-colors hover:border-gray-200 hover:bg-gray-50/80 sm:p-3.5"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${tone}`}>
+                  <Icon className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xl font-bold leading-none text-gray-900 sm:text-2xl">{value}</p>
+                  <p className="mt-1 truncate text-xs font-medium text-gray-700">{label}</p>
+                </div>
+              </div>
+              <p className="mt-2 line-clamp-2 text-[11px] leading-snug text-gray-400">{sub}</p>
+            </Link>
+          ))}
+        </div>
+
+        {quickAlerts.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {quickAlerts.map(alert => (
+              <Link
+                key={alert.label}
+                to={alert.href}
+                className={`inline-flex min-h-[40px] items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors hover:opacity-90 ${alert.tone}`}
+              >
+                <span>{alert.label}</span>
+                <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px]">{alert.value}</span>
+              </Link>
+            ))}
+          </div>
         ) : null}
 
         <section className="overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-sm" aria-labelledby="school-admin-work-title">
@@ -460,19 +524,19 @@ export default function SchoolDashboard() {
             <div className="flex items-center gap-2">
               <ListTodo className="h-5 w-5 text-amber-700" />
               <div>
-                <h2 id="school-admin-work-title" className="font-semibold text-gray-950">Reikia administracijos veiksmo</h2>
-                <p className="text-xs text-amber-800">Sąrašas susidaro automatiškai ir dingsta sutvarkius priežastį.</p>
+                <h2 id="school-admin-work-title" className="font-semibold text-gray-950">{t('schoolDash.adminActionsTitle')}</h2>
+                <p className="text-xs text-amber-800">{t('schoolDash.adminActionsHint')}</p>
               </div>
             </div>
             <span className="rounded-full bg-white px-2.5 py-1 text-sm font-bold text-amber-800 shadow-sm">{adminActions.length}</span>
           </div>
           {adminActions.length === 0 ? (
-            <div className="flex items-center gap-2 px-4 py-5 text-sm text-emerald-700 sm:px-5">
-              <CheckCircle2 className="h-4 w-4" /> Šiuo metu nebaigtų administracijos darbų nėra.
+            <div className="flex items-center gap-2 px-4 py-4 text-sm text-emerald-700 sm:px-5">
+              <CheckCircle2 className="h-4 w-4" /> {t('schoolDash.adminActionsEmpty')}
             </div>
           ) : (
             <div className="divide-y divide-gray-100">
-              {adminActions.slice(0, 12).map((item) => (
+              {adminActions.slice(0, adminActionLimit).map((item) => (
                 <Link key={item.id} to={item.href} className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-amber-50/40 sm:px-5">
                   <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${item.priority === 3 ? 'bg-rose-500' : item.priority === 2 ? 'bg-amber-500' : 'bg-blue-500'}`} />
                   <span className="min-w-0 flex-1">
@@ -482,49 +546,23 @@ export default function SchoolDashboard() {
                   <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-gray-400" />
                 </Link>
               ))}
-              {adminActions.length > 12 ? (
-                <p className="px-5 py-3 text-xs text-gray-500">Rodoma 12 iš {adminActions.length}. Likę darbai matomi atitinkamuose sistemos languose.</p>
+              {adminActions.length > adminActionLimit ? (
+                <p className="px-5 py-3 text-xs text-gray-500">
+                  {t('schoolDash.adminActionsTruncated', { shown: adminActionLimit, total: adminActions.length })}
+                </p>
               ) : null}
             </div>
           )}
         </section>
 
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
-          {summaryCards.map(({ label, value, sub, icon: Icon, tone }) => (
-            <div key={label} className="min-w-0 rounded-2xl border border-gray-100 bg-white p-3.5 shadow-sm sm:p-4">
-              <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-xl ${tone}`}>
-                <Icon className="h-5 w-5" />
-              </div>
-              <p className="text-2xl font-bold text-gray-900">{value}</p>
-              <p className="mt-0.5 text-xs font-medium leading-snug text-gray-600">{label}</p>
-              <p className="mt-0.5 text-xs leading-snug text-gray-400">{sub}</p>
-            </div>
-          ))}
-        </div>
-
-        <DashboardSection title="Kas vyksta sistemoje" icon={Activity} iconClassName="text-indigo-600">
-          {activityFeed.length === 0 ? (
-            <EmptyState text="Naujausių pakeitimų dar nėra." />
-          ) : (
-            <div className="divide-y divide-gray-100">
-              {activityFeed.slice(0, 12).map((item) => (
-                <Link key={item.id} to={item.href} className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0 hover:text-indigo-700">
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-gray-900">{item.title}</span>
-                    <span className="mt-0.5 block text-xs text-gray-500">{item.actor} · {item.detail}</span>
-                  </span>
-                  <time className="shrink-0 text-xs text-gray-400" dateTime={item.occurredAt}>
-                    {format(schoolDate(item.occurredAt), 'd MMM, HH:mm', { locale: dateFnsLocale })}
-                  </time>
-                </Link>
-              ))}
-            </div>
-          )}
-        </DashboardSection>
+        {can('sessions.view') && membership?.organizationId ? (
+          <SchoolContractAttendanceAlerts organizationId={membership.organizationId} canReviewContracts={can('contracts.view')} />
+        ) : null}
 
         {can('sessions.view') ? (
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-5 lg:gap-5">
             <DashboardSection
+              className="lg:col-span-3"
               title={t('schoolDash.todayAndUpcoming')}
               icon={CalendarDays}
               iconClassName="text-blue-600"
@@ -537,7 +575,7 @@ export default function SchoolDashboard() {
                 <div className="space-y-4">
                   <MeetingList
                     title={t('schoolDash.today')}
-                    occurrences={derived.today}
+                    occurrences={derived.today.slice(0, listLimit)}
                     onOpen={sessionId => navigate(`/school/sessions?open=${encodeURIComponent(sessionId)}`)}
                     dateFnsLocale={dateFnsLocale}
                     showDate={false}
@@ -545,7 +583,7 @@ export default function SchoolDashboard() {
                   />
                   <MeetingList
                     title={t('schoolDash.upcoming')}
-                    occurrences={derived.upcoming}
+                    occurrences={derived.upcoming.slice(0, listLimit)}
                     onOpen={sessionId => navigate(`/school/sessions?open=${encodeURIComponent(sessionId)}`)}
                     dateFnsLocale={dateFnsLocale}
                     showDate
@@ -556,73 +594,16 @@ export default function SchoolDashboard() {
             </DashboardSection>
 
             <DashboardSection
-              title={t('schoolDash.completedAndAttendance')}
-              icon={ClipboardCheck}
-              iconClassName="text-emerald-600"
-              link="/school/stats"
-              linkLabel={t('companyDash.statistics')}
-            >
-              <div className="grid grid-cols-2 gap-3">
-                <SmallMetric label={t('schoolDash.completed')} value={derived.monthSummary.completed} />
-                <SmallMetric
-                  label={t('schoolDash.attendance')}
-                  value={derived.monthSummary.attendanceRate === null ? '–' : `${derived.monthSummary.attendanceRate}%`}
-                />
-                <SmallMetric label={t('schoolDash.attendedChildren')} value={derived.monthSummary.attendedStudents} />
-                <SmallMetric label={t('schoolDash.absentChildren')} value={derived.monthSummary.absentStudents} tone="text-rose-700" />
-                <SmallMetric label={t('schoolDash.unconfirmedAttendance')} value={derived.monthSummary.unconfirmedStudents} tone="text-amber-700" />
-                <SmallMetric label={t('schoolDash.cancelled')} value={derived.monthSummary.cancelled} tone="text-gray-700" />
-              </div>
-              <p className="mt-4 text-xs leading-5 text-gray-500">{t('schoolDash.attendanceExplanation')}</p>
-            </DashboardSection>
-
-            <DashboardSection
-              title={t('schoolDash.notHeldOrCancelled')}
-              icon={UserX}
-              iconClassName="text-rose-600"
-              link="/school/sessions"
-              linkLabel={t('schoolDash.allActivities')}
-            >
-              {derived.notHeld.length === 0 ? (
-                <EmptyState text={t('schoolDash.noNotHeld')} />
-              ) : (
-                <div className="space-y-2">
-                  {derived.notHeld.map(({ key, row, studentCount }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => navigate(`/school/sessions?open=${encodeURIComponent(String(row.id || ''))}`)}
-                      className="flex w-full items-center gap-3 rounded-xl border border-rose-100 bg-rose-50/40 p-3 text-left transition-colors hover:bg-rose-50"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-gray-900">{row.topic || row.student_name}</p>
-                        <p className="mt-0.5 truncate text-xs text-gray-500">
-                          {format(schoolDate(row.start_time || ''), 'd MMM, HH:mm', { locale: dateFnsLocale })}
-                          {' · '}{row.tutor_name}
-                          {studentCount > 1 ? ` · ${t('schoolDash.childrenCount', { count: studentCount })}` : ''}
-                        </p>
-                      </div>
-                      <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-rose-700">
-                        {row.status === 'cancelled'
-                          ? t('schoolDash.cancelled')
-                          : row.status === 'no_show'
-                            ? t('schoolDash.didNotOccur')
-                            : t('schoolDash.awaitingOutcome')}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </DashboardSection>
-
-            <DashboardSection
+              className="lg:col-span-2"
               title={t('companyDash.needsAttention')}
               icon={AlertCircle}
               iconClassName="text-amber-600"
+              link="/school/sessions"
+              linkLabel={t('schoolDash.allActivities')}
             >
-              {derived.attention.length === 0 ? (
-                <EmptyState text={t('schoolDash.noAttention')} />
-              ) : dismissalsReady && visibleAttention.length === 0 ? (
+              {derived.attention.length === 0 && derived.notHeld.length === 0 ? (
+                <EmptyState text={t('schoolDash.noReviewItems')} />
+              ) : dismissalsReady && reviewItems.length === 0 ? (
                 <div className="py-6 text-center">
                   <p className="text-sm text-gray-500">{t('dash.allRowsHiddenHint')}</p>
                   <button type="button" onClick={restoreAll} className="mt-2 text-sm font-medium text-indigo-600 hover:underline">
@@ -631,41 +612,71 @@ export default function SchoolDashboard() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {visibleAttention.map(row => (
-                    <div key={row.id} className="rounded-xl border border-amber-100 bg-amber-50/40 p-3">
-                      <div className="flex items-start gap-2">
-                        <button
-                          type="button"
-                          onClick={() => navigate(`/school/sessions?open=${encodeURIComponent(row.id)}`)}
-                          className="min-w-0 flex-1 py-1 text-left"
-                        >
-                          <p className="truncate text-sm font-semibold text-gray-900">{row.student_name}</p>
-                          <p className="mt-0.5 text-xs leading-relaxed text-gray-500 sm:truncate">
-                            {format(schoolDate(row.start_time), 'd MMM, HH:mm', { locale: dateFnsLocale })}
+                  {reviewItems.map((item) => {
+                    if (item.kind === 'attention') {
+                      const row = item.row;
+                      return (
+                        <div key={item.id} className="rounded-xl border border-amber-100 bg-amber-50/40 p-3">
+                          <div className="flex items-start gap-2">
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/school/sessions?open=${encodeURIComponent(row.id)}`)}
+                              className="min-w-0 flex-1 py-1 text-left"
+                            >
+                              <p className="truncate text-sm font-semibold text-gray-900">{row.student_name}</p>
+                              <p className="mt-0.5 text-xs leading-relaxed text-gray-500 sm:truncate">
+                                {format(schoolDate(row.start_time), 'd MMM, HH:mm', { locale: dateFnsLocale })}
+                                {' · '}{row.tutor_name}
+                              </p>
+                              <p className="mt-1 text-xs font-medium leading-relaxed text-rose-700">{attendanceIssueLabel(row, t)}</p>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => dismiss(row.id)}
+                              className="flex min-h-[44px] min-w-[44px] shrink-0 touch-manipulation items-center justify-center rounded-xl text-gray-400 hover:bg-white hover:text-gray-700"
+                              aria-label={t('dash.dismissRow')}
+                            >
+                              ×
+                            </button>
+                          </div>
+                          {can('sessions.edit') && row.status !== 'no_show' ? (
+                            <button
+                              type="button"
+                              onClick={() => setNoShowTarget(row)}
+                              className="mt-2 flex min-h-[44px] w-full touch-manipulation items-center justify-center rounded-xl px-3 py-2 text-center text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                            >
+                              {t('companyDash.confirmNoShowShort')}
+                            </button>
+                          ) : null}
+                        </div>
+                      );
+                    }
+                    const { row, studentCount } = item;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => navigate(`/school/sessions?open=${encodeURIComponent(String(row.id || ''))}`)}
+                        className="flex w-full items-center gap-3 rounded-xl border border-rose-100 bg-rose-50/40 p-3 text-left transition-colors hover:bg-rose-50"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-gray-900">{row.topic || row.student_name}</p>
+                          <p className="mt-0.5 truncate text-xs text-gray-500">
+                            {format(schoolDate(row.start_time || ''), 'd MMM, HH:mm', { locale: dateFnsLocale })}
                             {' · '}{row.tutor_name}
+                            {studentCount > 1 ? ` · ${t('schoolDash.childrenCount', { count: studentCount })}` : ''}
                           </p>
-                          <p className="mt-1 text-xs font-medium leading-relaxed text-rose-700">{attendanceIssueLabel(row, t)}</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => dismiss(row.id)}
-                          className="flex min-h-[44px] min-w-[44px] shrink-0 touch-manipulation items-center justify-center rounded-xl text-gray-400 hover:bg-white hover:text-gray-700"
-                          aria-label={t('dash.dismissRow')}
-                        >
-                          ×
-                        </button>
-                      </div>
-                      {can('sessions.edit') && row.status !== 'no_show' ? (
-                        <button
-                          type="button"
-                          onClick={() => setNoShowTarget(row)}
-                          className="mt-2 flex min-h-[44px] w-full touch-manipulation items-center justify-center rounded-xl px-3 py-2 text-center text-xs font-semibold text-rose-700 hover:bg-rose-50"
-                        >
-                          {t('companyDash.confirmNoShowShort')}
-                        </button>
-                      ) : null}
-                    </div>
-                  ))}
+                        </div>
+                        <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-rose-700">
+                          {row.status === 'cancelled'
+                            ? t('schoolDash.cancelled')
+                            : row.status === 'no_show'
+                              ? t('schoolDash.didNotOccur')
+                              : t('schoolDash.awaitingOutcome')}
+                        </span>
+                      </button>
+                    );
+                  })}
                   {dismissedIds.size > 0 && visibleAttention.length > 0 ? (
                     <button type="button" onClick={restoreAll} className="w-full pt-1 text-center text-xs font-medium text-indigo-600 hover:underline">
                       {t('dash.restoreHiddenRows')}
@@ -677,79 +688,41 @@ export default function SchoolDashboard() {
           </div>
         ) : null}
 
-        {(can('contracts.view') || can('finance.view')) ? (
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            {can('contracts.view') ? (
-              <DashboardSection
-                title={t('schoolDash.parentConfirmations')}
-                icon={FileClock}
-                iconClassName="text-amber-600"
-                link="/school/contracts"
-                linkLabel={t('schoolDash.openContracts')}
-              >
-                {pendingContracts.length === 0 ? (
-                  <EmptyState text={t('schoolDash.noParentConfirmations')} />
-                ) : (
-                  <div className="space-y-2">
-                    {pendingContracts.slice(0, 8).map(contract => {
-                      const pendingKind = schoolParentConfirmationLabel(contract);
-                      return (
-                        <Link
-                          key={contract.id}
-                          to="/school/contracts"
-                          className="block rounded-xl border border-amber-100 bg-amber-50/40 p-3 transition-colors hover:bg-amber-50"
-                        >
-                          <p className="text-sm font-semibold text-gray-900">{contract.student_name}</p>
-                          <p className="mt-0.5 text-xs text-amber-800">
-                            {pendingKind === 'offer'
-                              ? t('schoolDash.waitingOfferAcceptance')
-                              : pendingKind === 'signature'
-                                ? t('schoolDash.waitingParentSignature')
-                                : t('schoolDash.waitingParentData')}
-                          </p>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-              </DashboardSection>
+        {activityFeed.length > 0 ? (
+          <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:p-5">
+            <button
+              type="button"
+              onClick={() => setActivityExpanded(value => !value)}
+              className="flex w-full min-h-[44px] items-center justify-between gap-3 text-left"
+              aria-expanded={activityExpanded}
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <Activity className="h-5 w-5 shrink-0 text-indigo-600" />
+                <div>
+                  <h2 className="text-base font-bold text-gray-900 sm:text-lg">{t('schoolDash.activityFeedTitle')}</h2>
+                  <p className="text-xs text-gray-500">{t('schoolDash.activityFeedHint', { count: activityFeed.length })}</p>
+                </div>
+              </div>
+              <span className="shrink-0 text-xs font-semibold text-indigo-600">
+                {activityExpanded ? t('dash.showLess') : t('dash.showMore', { count: Math.min(activityFeed.length, 12) })}
+              </span>
+            </button>
+            {activityExpanded ? (
+              <div className="mt-4 divide-y divide-gray-100 border-t border-gray-100 pt-4">
+                {activityFeed.slice(0, 12).map((item) => (
+                  <Link key={item.id} to={item.href} className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0 hover:text-indigo-700">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-gray-900">{item.title}</span>
+                      <span className="mt-0.5 block text-xs text-gray-500">{item.actor} · {item.detail}</span>
+                    </span>
+                    <time className="shrink-0 text-xs text-gray-400" dateTime={item.occurredAt}>
+                      {format(schoolDate(item.occurredAt), 'd MMM, HH:mm', { locale: dateFnsLocale })}
+                    </time>
+                  </Link>
+                ))}
+              </div>
             ) : null}
-
-            {can('finance.view') ? (
-              <DashboardSection
-                title={t('schoolDash.unpaidMonthlyInvoices')}
-                icon={CreditCard}
-                iconClassName="text-rose-600"
-                link="/school/finance?tab=payments"
-                linkLabel={t('schoolDash.openPayments')}
-              >
-                {data.invoices.length === 0 ? (
-                  <EmptyState text={t('schoolDash.noUnpaidInvoices')} />
-                ) : (
-                  <div className="space-y-2">
-                    {data.invoices.slice(0, 8).map(invoice => (
-                      <Link
-                        key={invoice.id}
-                        to="/school/finance?tab=payments"
-                        className="flex items-center justify-between gap-3 rounded-xl border border-rose-100 bg-rose-50/40 p-3 transition-colors hover:bg-rose-50"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-gray-900">{invoice.student_name}</p>
-                          <p className="mt-0.5 text-xs text-gray-500">
-                            {format(schoolDate(invoice.period_start), 'MMMM yyyy', { locale: dateFnsLocale })}
-                            {invoice.due_date ? ` · ${t('schoolDash.dueDate', { date: format(schoolDate(invoice.due_date), 'd MMM', { locale: dateFnsLocale }) })}` : ''}
-                          </p>
-                        </div>
-                        {can('finance.totals') ? (
-                          <span className="shrink-0 text-sm font-semibold text-rose-700">{fmt(Number(invoice.total_eur) || 0)}</span>
-                        ) : null}
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </DashboardSection>
-            ) : null}
-          </div>
+          </section>
         ) : null}
       </div>
 
@@ -771,6 +744,7 @@ function DashboardSection({
   iconClassName,
   link,
   linkLabel,
+  className = '',
   children,
 }: {
   title: string;
@@ -778,10 +752,11 @@ function DashboardSection({
   iconClassName: string;
   link?: string;
   linkLabel?: string;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:p-5">
+    <section className={`rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:p-5 ${className}`}>
       <div className="mb-4 flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-2">
           <Icon className={`h-5 w-5 shrink-0 ${iconClassName}`} />
@@ -845,15 +820,6 @@ function MeetingList({
           })}
         </div>
       )}
-    </div>
-  );
-}
-
-function SmallMetric({ label, value, tone = 'text-gray-900' }: { label: string; value: string | number; tone?: string }) {
-  return (
-    <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-3">
-      <p className={`text-xl font-bold ${tone}`}>{value}</p>
-      <p className="mt-0.5 text-xs text-gray-500">{label}</p>
     </div>
   );
 }

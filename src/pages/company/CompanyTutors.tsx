@@ -40,6 +40,7 @@ import {
 import { schoolDate } from '@/lib/schoolTime';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { schoolTutorPayOccurrences } from '@/lib/schoolTutorLessonPay';
+import { resolveSchoolTutorGroupPayRate } from '@/lib/schoolTutorDefaultPay';
 import { fetchSchoolTutorAttendancePayRows } from '@/lib/schoolTutorAttendancePay';
 import { orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import { sumProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
@@ -63,6 +64,7 @@ interface Tutor {
   break_between_lessons: number;
   min_booking_hours: number;
   company_commission_percent?: number | null;
+  company_individual_commission_percent?: number | null;
   company_commission_by_subject?: Record<string, number> | null;
   personal_meeting_link?: string | null;
   /** Free-text subjects/grades note, e.g. "MAT 2-6 kls, LT 1-8 kls". */
@@ -547,10 +549,12 @@ export default function CompanyTutors() {
   const [editBreakBetween, setEditBreakBetween] = useState(0);
   const [editMinBooking, setEditMinBooking] = useState(1);
   const [editCommissionPercent, setEditCommissionPercent] = useState<number | ''>(0);
+  const [editIndividualCommissionPercent, setEditIndividualCommissionPercent] = useState<number | ''>('');
   const [tutorSaveError, setTutorSaveError] = useState<string | null>(null);
   const [tutorDetailsLoadError, setTutorDetailsLoadError] = useState(false);
   const [editSubjectPay, setEditSubjectPay] = useState<Record<string, string>>({});
   const baseTutorPayEditedRef = useRef(false);
+  const individualTutorPayEditedRef = useRef(false);
   const subjectTutorPayEditedRef = useRef(false);
   const editedSubjectPayIdsRef = useRef<Set<string>>(new Set());
   const [editMeetingLink, setEditMeetingLink] = useState('');
@@ -747,7 +751,7 @@ export default function CompanyTutors() {
     // Keep in sync with preload.ts — do not add optional migration columns here or
     // profiles SELECT fails on DBs without them and wipes the tutor list on reload.
     const tutorSelect =
-      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, personal_meeting_link, teaching_notes, has_active_license';
+      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_individual_commission_percent, company_commission_by_subject, personal_meeting_link, teaching_notes, has_active_license';
 
     const { data: tutorData } = await supabase
       .from('profiles')
@@ -1054,13 +1058,14 @@ export default function CompanyTutors() {
     setMeetingLinkHydrated(false);
     setMeetingLinkLoadError(false);
     baseTutorPayEditedRef.current = false;
+    individualTutorPayEditedRef.current = false;
     subjectTutorPayEditedRef.current = false;
     editedSubjectPayIdsRef.current.clear();
     const [{ data: subjects }, { data: freshProfile, error: profileErr }] = await Promise.all([
       supabase.from('subjects').select('*').eq('tutor_id', tutor.id),
       supabase
         .from('profiles')
-        .select('full_name, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, personal_meeting_link, teaching_notes')
+        .select('full_name, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_individual_commission_percent, company_commission_by_subject, personal_meeting_link, teaching_notes')
         .eq('id', tutor.id)
         .maybeSingle(),
     ]);
@@ -1111,10 +1116,16 @@ export default function CompanyTutors() {
 
     const conducted = filterConductedOrgSessions(sessions);
     const tutorRate = tutorRow.company_commission_percent ?? orgDefaults.company_commission_percent;
-    const schoolPay = isSchoolView ? schoolTutorPayOccurrences([...sessions, ...attendanceRows], tutorRow.company_commission_percent, statsNow, {
+    const schoolGroupPayRate = resolveSchoolTutorGroupPayRate({
+      tutorRate: tutorRow.company_commission_percent,
+      orgDefaultRate: orgDefaults.company_commission_percent,
+      organizationId: orgId,
+    });
+    const schoolPay = isSchoolView ? schoolTutorPayOccurrences([...sessions, ...attendanceRows], schoolGroupPayRate, statsNow, {
       requireConfirmation: orgRequiresTutorStatusConfirmation(orgId, {
         tutor_lesson_status_confirmation: hasFeature('tutor_lesson_status_confirmation'),
       }),
+      individualRate: tutorRow.company_individual_commission_percent,
     }) : null;
     const schoolKnownPay = schoolPay?.filter((occurrence) => occurrence.payEur !== null);
     const schoolUnresolvedPayCount = schoolPay?.filter((occurrence) => occurrence.payIssue).length;
@@ -1156,6 +1167,7 @@ export default function CompanyTutors() {
     setEditCommissionPercent(isSchoolView
       ? tutorRow.company_commission_percent ?? ''
       : tutorRow.company_commission_percent ?? orgDefaults.company_commission_percent);
+    setEditIndividualCommissionPercent(tutorRow.company_individual_commission_percent ?? '');
     const parsedPay = parseTutorPayBySubject(tutorRow.company_commission_by_subject);
     // Keep rates for subjects no longer shown in this editor. Saving one visible
     // rate must not silently erase historical or temporarily hidden overrides.
@@ -1168,6 +1180,7 @@ export default function CompanyTutors() {
     }
     setEditSubjectPay(nextPay);
     baseTutorPayEditedRef.current = false;
+    individualTutorPayEditedRef.current = false;
     subjectTutorPayEditedRef.current = false;
     editedSubjectPayIdsRef.current.clear();
     setEditMeetingLink(hydratedMeetingLink);
@@ -1232,8 +1245,14 @@ export default function CompanyTutors() {
       return;
     }
     const basePayEdited = baseTutorPayEditedRef.current;
+    const individualPayEdited = individualTutorPayEditedRef.current;
     const subjectPayEdited = subjectTutorPayEditedRef.current;
     if (basePayEdited && (editCommissionPercent === '' || !Number.isFinite(editCommissionPercent) || editCommissionPercent < 0)) {
+      setTutorSaveError(t('common.saveFailed'));
+      return;
+    }
+    if (individualPayEdited && editIndividualCommissionPercent !== ''
+      && (!Number.isFinite(editIndividualCommissionPercent) || editIndividualCommissionPercent < 0)) {
       setTutorSaveError(t('common.saveFailed'));
       return;
     }
@@ -1262,6 +1281,8 @@ export default function CompanyTutors() {
       const tutorPayPatch = buildTutorPayUpdatePatch({
         basePayEdited,
         basePay: Number(editCommissionPercent),
+        individualPayEdited,
+        individualPay: editIndividualCommissionPercent === '' ? null : Number(editIndividualCommissionPercent),
         subjectPayEdited,
         subjectPay: savedSubjectPay,
         subjectPayEnabled: isManoKorepetitoriusAdmin,
@@ -1280,7 +1301,7 @@ export default function CompanyTutors() {
         teaching_notes: editTeachingNotes.trim() || null,
       })
         .eq('id', selectedTutor.id)
-        .select('id, company_commission_percent, company_commission_by_subject, personal_meeting_link');
+        .select('id, company_commission_percent, company_individual_commission_percent, company_commission_by_subject, personal_meeting_link');
 
       const savedRow = updatedRows?.[0];
       const persistedSubjectPay = isManoKorepetitoriusAdmin
@@ -1294,6 +1315,8 @@ export default function CompanyTutors() {
         error
         || !savedRow
         || (basePayEdited && Number(savedRow.company_commission_percent) !== Number(editCommissionPercent))
+        || (individualPayEdited && Number(savedRow.company_individual_commission_percent ?? NaN) !== Number(editIndividualCommissionPercent === '' ? NaN : editIndividualCommissionPercent)
+          && !(editIndividualCommissionPercent === '' && savedRow.company_individual_commission_percent == null))
         || (meetingLinkChanged && !meetingLinkWasPersisted(personalLink, savedRow.personal_meeting_link))
         || (isManoKorepetitoriusAdmin && subjectPayEdited
           && JSON.stringify(persistedPayEntries) !== JSON.stringify(savedPayEntries))
@@ -1315,6 +1338,7 @@ export default function CompanyTutors() {
         break_between_lessons: editBreakBetween,
         min_booking_hours: editMinBooking,
         ...(basePayEdited ? { company_commission_percent: Number(editCommissionPercent) } : {}),
+        ...(individualPayEdited ? { company_individual_commission_percent: editIndividualCommissionPercent === '' ? null : Number(editIndividualCommissionPercent) } : {}),
         personal_meeting_link: savedRow.personal_meeting_link,
         teaching_notes: editTeachingNotes.trim() || null,
         ...(isManoKorepetitoriusAdmin && subjectPayEdited
@@ -2050,22 +2074,62 @@ export default function CompanyTutors() {
 
               <div className="space-y-3 pt-3 border-t border-gray-100">
                 <div className="pb-3 border-b border-gray-100">
-                  <Label className="text-xs font-medium text-gray-600">{t('compTut.commission')}</Label>
-                  <p className="text-[11px] text-gray-500 mb-1.5">{t('compTut.tutorFixedPayDesc')}</p>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min={0}
-                      step={0.5}
-                      value={editCommissionPercent}
-                      onChange={(e) => {
-                        baseTutorPayEditedRef.current = true;
-                        setEditCommissionPercent(e.target.value === '' ? '' : Number(e.target.value));
-                      }}
-                      className="rounded-xl w-28"
-                    />
-                    <span className="text-xs text-gray-500">{t('compTut.eurPerLesson')}</span>
-                  </div>
+                  {isSchoolView ? (
+                    <>
+                      <Label className="text-xs font-medium text-gray-600">{t('compTut.groupPay')}</Label>
+                      <p className="text-[11px] text-gray-500 mb-1.5">{t('compTut.groupPayHint')}</p>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          step={0.5}
+                          value={editCommissionPercent}
+                          onChange={(e) => {
+                            baseTutorPayEditedRef.current = true;
+                            setEditCommissionPercent(e.target.value === '' ? '' : Number(e.target.value));
+                          }}
+                          className="rounded-xl w-28"
+                        />
+                        <span className="text-xs text-gray-500">{t('compTut.eurPerLesson')}</span>
+                      </div>
+                      <Label className="text-xs font-medium text-gray-600 mt-3 block">{t('compTut.individualPay')}</Label>
+                      <p className="text-[11px] text-gray-500 mb-1.5">{t('compTut.individualPayHint')}</p>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          step={0.5}
+                          placeholder={editCommissionPercent === '' ? '' : String(editCommissionPercent)}
+                          value={editIndividualCommissionPercent}
+                          onChange={(e) => {
+                            individualTutorPayEditedRef.current = true;
+                            setEditIndividualCommissionPercent(e.target.value === '' ? '' : Number(e.target.value));
+                          }}
+                          className="rounded-xl w-28"
+                        />
+                        <span className="text-xs text-gray-500">{t('compTut.eurPerLesson')}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Label className="text-xs font-medium text-gray-600">{t('compTut.commission')}</Label>
+                      <p className="text-[11px] text-gray-500 mb-1.5">{t('compTut.tutorFixedPayDesc')}</p>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          step={0.5}
+                          value={editCommissionPercent}
+                          onChange={(e) => {
+                            baseTutorPayEditedRef.current = true;
+                            setEditCommissionPercent(e.target.value === '' ? '' : Number(e.target.value));
+                          }}
+                          className="rounded-xl w-28"
+                        />
+                        <span className="text-xs text-gray-500">{t('compTut.eurPerLesson')}</span>
+                      </div>
+                    </>
+                  )}
                   {isManoKorepetitoriusAdmin && selectedTutor.subjects.filter((s) => !s.is_trial).length > 0 && (
                     <div className="mt-3 space-y-2">
                       <p className="text-xs font-medium text-gray-600">{t('compTut.payBySubject')}</p>

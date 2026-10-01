@@ -6,6 +6,7 @@ import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 import { useTranslation } from '@/lib/i18n';
 import { LOCALE_FORMAT_TAGS } from '@/lib/i18n/locales';
 import type { SchoolInvoiceReviewSession } from '@/lib/schoolInvoiceSessionReview';
+import type { SchoolPayerInvoiceGroup } from '@/lib/schoolPayerInvoiceGroups';
 import { Button } from '@/components/ui/button';
 import { DateInput } from '@/components/ui/date-input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -60,6 +61,8 @@ type Props = {
   students: SchoolMonthlyInvoiceStudentOption[];
   onSent?: (message: string) => void;
   previewFixture?: SchoolMonthlyInvoicePreview;
+  /** School invoices tab: group by payer and send one family or everyone. */
+  batch?: boolean;
 };
 
 function monthRange(month: string): { start: string; end: string } {
@@ -141,6 +144,7 @@ export default function SchoolMonthlyInvoiceDialog({
   students,
   onSent,
   previewFixture,
+  batch = false,
 }: Props) {
   const { t, locale } = useTranslation();
   const defaultMonth = format(subMonths(new Date(), 1), 'yyyy-MM');
@@ -155,8 +159,11 @@ export default function SchoolMonthlyInvoiceDialog({
   const [review, setReview] = useState<InvoiceReview | null>(previewFixture || null);
   const [decisionEditor, setDecisionEditor] = useState<{ sessionId: string; excluded: boolean } | null>(null);
   const [decisionReason, setDecisionReason] = useState('');
+  const [batchPayers, setBatchPayers] = useState<SchoolPayerInvoiceGroup[] | null>(null);
+  const [sendingKey, setSendingKey] = useState<string | null>(null);
+  const [singleChild, setSingleChild] = useState(!batch);
 
-  const payload = (action: 'review' | 'billing-decision' | 'preview' | 'send') => {
+  const payload = (action: 'review' | 'billing-decision' | 'preview' | 'send' | 'batch-preview' | 'send-batch') => {
     const range = monthRange(month);
     return {
       action,
@@ -169,12 +176,14 @@ export default function SchoolMonthlyInvoiceDialog({
     };
   };
 
-  const requestReview = async () => {
+  const requestReview = async (overrideStudentId?: string) => {
     setLoading(true);
     setError('');
     try {
       const response = await fetch('/api/school-monthly-invoice-admin', {
-        method: 'POST', headers: await authHeaders(), body: JSON.stringify(payload('review')),
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ ...payload('review'), studentId: overrideStudentId || studentId }),
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json.error || t('school.invoice.review.loadError'));
@@ -241,6 +250,15 @@ export default function SchoolMonthlyInvoiceDialog({
     setStudentId((current) => current || defaultStudent);
   }, [open, previewFixture, defaultStudent]);
 
+  useEffect(() => {
+    if (!open || previewFixture || !batch) return;
+    setSingleChild(false);
+    setBatchPayers(null);
+    setPreview(null);
+    setReview(null);
+    setError('');
+  }, [open, batch, previewFixture]);
+
   const requestPreview = async () => {
     setLoading(true);
     setError('');
@@ -256,6 +274,65 @@ export default function SchoolMonthlyInvoiceDialog({
       setError(cause instanceof Error ? cause.message : 'Nepavyko suformuoti peržiūros.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const requestBatchPreview = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch('/api/school-monthly-invoice-admin', {
+        method: 'POST', headers: await authHeaders(), body: JSON.stringify(payload('batch-preview')),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || t('school.invoice.review.loadError'));
+      setBatchPayers(json.payers || []);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t('school.invoice.review.loadError'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const sendBatch = async (payerKey?: string) => {
+    if (previewFixture) {
+      onSent?.('Peržiūros režime sąskaita nesiunčiama.');
+      return;
+    }
+    const payers = batchPayers || [];
+    const previewTokens = Object.fromEntries(payers.flatMap((group) => group.students.map((row) => [row.studentId, row.previewToken])));
+    setSendingKey(payerKey || 'all');
+    setError('');
+    try {
+      const response = await fetch('/api/school-monthly-invoice-admin', {
+        method: 'POST', headers: await authHeaders(),
+        body: JSON.stringify({
+          ...payload('send-batch'),
+          payerKey,
+          studentIds: payerKey
+            ? payers.find((group) => group.payerKey === payerKey)?.sendableStudentIds
+            : undefined,
+          previewTokens,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || 'Nepavyko išsiųsti sąskaitos.');
+      onSent?.(t('school.invoice.batch.sent', { count: String(json.sentCount || 0) }));
+      const skipped = json.skippedCount
+        ? (json.skipped || []).map((row: { error?: string }) => row.error).filter(Boolean).join(' ')
+        : '';
+      if (payerKey) {
+        setSendingKey(null);
+        await requestBatchPreview();
+        if (skipped) setError(skipped);
+      } else {
+        onOpenChange(false);
+        setBatchPayers(null);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Nepavyko išsiųsti sąskaitos.');
+    } finally {
+      setSendingKey(null);
     }
   };
 
@@ -290,12 +367,16 @@ export default function SchoolMonthlyInvoiceDialog({
         <DialogHeader className="border-b border-slate-200 px-6 py-5">
           <DialogTitle className="flex items-center gap-2 text-xl">
             <FileText className="h-5 w-5 text-emerald-700" />
-            Formuoti mėnesinę sąskaitą
+            {batch && !singleChild ? t('school.invoice.batch.title') : 'Formuoti mėnesinę sąskaitą'}
           </DialogTitle>
-          <p className="text-sm text-slate-500">Pirmiausia patikrinkite sumas ir PDF. Sąskaita siunčiama tik paspaudus „Išsiųsti sąskaitą“.</p>
+          <p className="text-sm text-slate-500">
+            {batch && !singleChild
+              ? t('school.invoice.batch.help')
+              : 'Pirmiausia patikrinkite sumas ir PDF. Sąskaita siunčiama tik paspaudus „Išsiųsti sąskaitą“.'}
+          </p>
         </DialogHeader>
 
-        {review?.sessions && (
+        {review?.sessions && (!batch || singleChild) && (
           <section className="space-y-3 border-b border-slate-200 px-6 py-5" aria-labelledby="invoice-attendance-title">
             <h3 id="invoice-attendance-title" className="text-base font-semibold text-slate-900">{t('school.invoice.review.title')}</h3>
             <p className="text-xs leading-5 text-slate-600">{t('school.invoice.review.help')}</p>
@@ -388,6 +469,91 @@ export default function SchoolMonthlyInvoiceDialog({
               </Button>
             </div>
           </div>
+        ) : batch && !singleChild ? (
+          <div className="space-y-5 p-6">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Sąskaitos mėnuo</Label>
+                <MonthFilterInput value={month} onChange={(value) => {
+                  setMonth(value);
+                  setBatchPayers(null);
+                  setPreview(null);
+                  setReview(null);
+                }} />
+              </div>
+              <div className="space-y-2">
+                <Label>Apmokėti iki</Label>
+                <DateInput value={dueDate} onChange={(event) => {
+                  setDueDate(event.target.value);
+                  setBatchPayers(null);
+                  setPreview(null);
+                }} className="max-w-xs rounded-xl" />
+              </div>
+            </div>
+            {batchPayers && (
+              <div className="space-y-3">
+                {!batchPayers.length && <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{t('school.invoice.batch.empty')}</p>}
+                {batchPayers.map((group) => (
+                  <div key={group.payerKey} className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-slate-900">{group.payerName}</p>
+                        <p className="text-xs text-slate-500">{group.payerEmail || t('school.invoice.review.noPayer')}</p>
+                        <p className="mt-1 text-sm font-medium text-emerald-800">{money(group.totalEur)}</p>
+                      </div>
+                      <Button
+                        type="button"
+                        className="gap-2 bg-emerald-700 hover:bg-emerald-800"
+                        disabled={loading || !!sendingKey || !group.sendableStudentIds.length}
+                        onClick={() => void sendBatch(group.payerKey)}
+                      >
+                        {sendingKey === group.payerKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                        {t('school.invoice.batch.sendPayer')}
+                      </Button>
+                    </div>
+                    <ul className="mt-3 space-y-2">
+                      {group.students.map((child) => (
+                        <li key={child.studentId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                          <span>
+                            {t('school.invoice.batch.childLine', {
+                              name: child.fullName,
+                              count: String(child.lessonCount),
+                              amount: money(child.totalEur),
+                            })}
+                            {child.reviewSessionIds.length ? <span className="ml-2 text-amber-700">{t('school.invoice.batch.blocked')}</span> : null}
+                          </span>
+                          <Button type="button" size="sm" variant="outline" onClick={() => {
+                            setStudentId(child.studentId);
+                            setSingleChild(true);
+                            setPreview(null);
+                            setReview(null);
+                            void requestReview(child.studentId);
+                          }}>{t('school.invoice.batch.reviewChild')}</Button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+            {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Atšaukti</Button>
+              <Button type="button" variant="outline" onClick={() => void requestBatchPreview()} disabled={loading || !month}>
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                {t('school.invoice.batch.preview')}
+              </Button>
+              <Button
+                type="button"
+                className="gap-2 bg-emerald-700 hover:bg-emerald-800"
+                disabled={loading || !!sendingKey || !(batchPayers || []).some((group) => group.sendableStudentIds.length)}
+                onClick={() => void sendBatch()}
+              >
+                {sendingKey === 'all' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                {t('school.invoice.batch.sendAll')}
+              </Button>
+            </div>
+          </div>
         ) : (
           <div className="grid gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)]">
             <div className="space-y-5">
@@ -406,6 +572,7 @@ export default function SchoolMonthlyInvoiceDialog({
                     setPreview(null);
                     setReview(null);
                     setDecisionEditor(null);
+                    if (batch) setBatchPayers(null);
                   }} />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
@@ -442,6 +609,11 @@ export default function SchoolMonthlyInvoiceDialog({
               {error && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Atšaukti</Button>
+                {batch && (
+                  <Button type="button" variant="outline" onClick={() => { setSingleChild(false); setPreview(null); setReview(null); }} disabled={loading}>
+                    {t('school.invoice.batch.title')}
+                  </Button>
+                )}
                 {review && <Button type="button" variant="outline" onClick={() => void requestReview()} disabled={loading}>{t('school.invoice.review.refresh')}</Button>}
                 <Button type="button" className="gap-2 bg-emerald-700 hover:bg-emerald-800" onClick={() => void (review ? requestPreview() : requestReview())} disabled={loading || !studentId || !month}>
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}

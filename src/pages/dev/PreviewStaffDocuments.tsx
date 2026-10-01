@@ -48,6 +48,11 @@ export default function PreviewStaffDocuments() {
       {consent
         ? <SchoolStaffConsent previewInfo={{ schoolName: 'VšĮ „Laisvi vaikai“', employeeName: 'Austėja Kazlauskaitė', needsPersonalDetails: true }} />
         : <CompanyStaffDocumentsContent canEdit previewData={{ organizationId: ORG_ID, documents }} />}
+      {!consent && (
+        <p className="mx-auto max-w-6xl px-4 pb-8 text-sm text-slate-600 sm:px-6">
+          Peržiūros forma jau turi adreso ir asmens kodo laukus. PDF čia negeneruojamas — tikrą dokumentą kurkite Laisvi vaikai paskyroje su bandomuoju darbuotoju.
+        </p>
+      )}
     </div>
   );
 }

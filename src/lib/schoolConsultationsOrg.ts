@@ -40,3 +40,15 @@ export function schoolExtraLessonsDiscountEnabled(
 ): boolean {
   return isSchoolConsultationsOrg(orgIdOrSlug) && features?.school_extra_lessons_contract === true;
 }
+
+/** Parent S.F. for conducted lessons: extra-lessons schools, family portal, or consultations. */
+export function schoolMonthlyInvoicesEnabled(
+  orgIdOrSlug: string | null | undefined,
+  features: Record<string, unknown> | null | undefined,
+  entityType?: string | null,
+): boolean {
+  if (entityType && entityType !== 'school') return false;
+  return schoolConsultationsEnabled(orgIdOrSlug, features)
+    || schoolExtraLessonsDiscountEnabled(orgIdOrSlug, features)
+    || Boolean(features?.school_family_portal);
+}

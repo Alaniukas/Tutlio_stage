@@ -103,16 +103,14 @@ async function openDetails() {
 }
 
 describe('school administrator teacher-pay details', () => {
-  it('keeps an unset school teacher rate pending instead of using a positive organization default', async () => {
+  it('uses the organization default for school teacher pay when the tutor rate is unset', async () => {
     state.tutor.company_commission_percent = null;
     state.defaultRate = 90;
     state.sessions = [child('first', 'group-a', null)];
     const dialog = await openDetails();
-    expect(dialog.getByText('Pay rate pending')).toBeTruthy();
-    expect(dialog.getByRole('alert').textContent).toContain('pay rates: 1');
-    expect(dialog.queryByText('€90.00')).toBeNull();
-    expect(dialog.queryByText('€0.00')).toBeNull();
-    const rateInput = dialog.getByText('Commission').parentElement!.querySelector('input')!;
+    expect(dialog.getByText('€90.00')).toBeTruthy();
+    expect(dialog.queryByRole('alert')).toBeNull();
+    const rateInput = dialog.getByText('Group lesson pay').parentElement!.querySelector('input')!;
     expect(rateInput.value).toBe('');
   });
 
@@ -124,14 +122,14 @@ describe('school administrator teacher-pay details', () => {
     expect(dialog.getByText('€45.00')).toBeTruthy();
     expect(dialog.queryByText('€90.00')).toBeNull();
     expect(dialog.queryByRole('alert')).toBeNull();
-    expect(dialog.getByText('Commission').parentElement!.querySelector('input')!.value).toBe('');
+    expect(dialog.getByText('Group lesson pay').parentElement!.querySelector('input')!.value).toBe('');
   });
 
   it('does not configure an unset school tariff when saving an unrelated teacher field', async () => {
     state.tutor.company_commission_percent = null;
     state.defaultRate = 90;
     const dialog = await openDetails();
-    expect(dialog.getByText('Commission').parentElement!.querySelector('input')!.value).toBe('');
+    expect(dialog.getByText('Group lesson pay').parentElement!.querySelector('input')!.value).toBe('');
     fireEvent.change(dialog.getByDisplayValue('Teacher A'), { target: { value: 'Teacher Revised' } });
     fireEvent.click(dialog.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -204,21 +202,16 @@ describe('school administrator teacher-pay details', () => {
     if (error) expect(screen.getByRole('alert')).toBeTruthy();
   });
 
-  it('requires confirmation for a custom school feature and ignores pending sibling pay', async () => {
+  it('pays stored completed meetings without a confirmation stamp', async () => {
     state.manualConfirmation = true;
     state.tutor.company_commission_percent = 45;
-    state.sessions = [child('first', 'group-a', 45), child('second', 'group-a', 90)]
+    state.sessions = [child('first', 'group-a', 45), child('second', 'group-a', 45)]
       .map(row => ({ ...row, status_confirmed_at: null }));
-    let dialog = await openDetails();
-    expect(dialog.getByText('0')).toBeTruthy();
-    expect(dialog.getByText('€0.00')).toBeTruthy();
-
-    cleanup();
-    state.sessions[0].status_confirmed_at = '2026-09-28T13:00:00Z';
-    dialog = await openDetails();
+    const dialog = await openDetails();
     expect(dialog.getByText('1')).toBeTruthy();
     expect(dialog.getByText('€45.00')).toBeTruthy();
     expect(dialog.queryByRole('alert')).toBeNull();
+    expect(dialog.getByText('Individual lesson pay')).toBeTruthy();
   });
 
   it('pays each meeting once using a known sibling snapshot and shows unresolved meetings separately', async () => {
@@ -245,7 +238,7 @@ describe('school administrator teacher-pay details', () => {
     expect(dialog.getByText('€0.00')).toBeTruthy();
     expect(dialog.getByText('Lessons with a final outcome')).toBeTruthy();
     expect(dialog.queryByRole('alert')).toBeNull();
-    expect(dialog.getByText('Commission').parentElement!.querySelector('input')!.value).toBe('0');
+    expect(dialog.getByText('Group lesson pay').parentElement!.querySelector('input')!.value).toBe('0');
   });
 
   it('keeps a meeting pending when an active sibling outweighs a no-show child', async () => {

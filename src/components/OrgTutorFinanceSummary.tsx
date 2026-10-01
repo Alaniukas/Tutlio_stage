@@ -22,6 +22,7 @@ import { fmtMoney, isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMo
 import { sumProKlasePayBreakdown, type ProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
 import { parseTutorPayBySubject, sumOrgTutorLessonsPayEur } from '@/lib/orgTutorLessonPay';
 import { schoolTutorPayOccurrences } from '@/lib/schoolTutorLessonPay';
+import { resolveSchoolTutorGroupPayRate } from '@/lib/schoolTutorDefaultPay';
 import { fetchSchoolTutorAttendancePayRows } from '@/lib/schoolTutorAttendancePay';
 import { orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import { fetchAllRows } from '@/lib/fetchAllRows';
@@ -195,7 +196,7 @@ export default function OrgTutorFinanceSummary() {
         try {
           const organizationId = policyOrganizationId || profile?.organization_id;
           if (!organizationId) throw new Error('School organization required');
-          const [rows, attendanceRows] = await Promise.all([fetchAllRows<any>((from, to) => supabase
+          const [rows, attendanceRows, tutorPayRow, orgRow] = await Promise.all([fetchAllRows<any>((from, to) => supabase
             .from('sessions')
             .select('id, tutor_id, student_id, class_group_id, start_time, end_time, status, subject_id, tutor_pay_eur_snapshot, no_show_reason, status_confirmed_at, subjects(is_group), students!inner(organization_id)')
             .eq('tutor_id', user.id)
@@ -209,10 +210,24 @@ export default function OrgTutorFinanceSummary() {
               tutorId: user.id,
               periodStart: format(schoolDate(startIso), 'yyyy-MM-dd'),
               periodEnd: format(schoolDate(endIso), 'yyyy-MM-dd'),
-            })]);
+            }), supabase
+              .from('profiles')
+              .select('company_commission_percent, company_individual_commission_percent')
+              .eq('id', user.id)
+              .maybeSingle(), supabase
+              .from('organizations')
+              .select('default_company_commission_percent')
+              .eq('id', organizationId)
+              .maybeSingle()]);
           if (cancelled) return;
-          const occurrences = schoolTutorPayOccurrences([...rows, ...attendanceRows], payPerLessonEur, new Date(), {
+          const schoolGroupPayRate = resolveSchoolTutorGroupPayRate({
+            tutorRate: tutorPayRow.data?.company_commission_percent,
+            orgDefaultRate: orgRow.data?.default_company_commission_percent,
+            organizationId,
+          });
+          const occurrences = schoolTutorPayOccurrences([...rows, ...attendanceRows], schoolGroupPayRate, new Date(), {
             requireConfirmation: requiresSchoolConfirmation,
+            individualRate: tutorPayRow.data?.company_individual_commission_percent,
           });
           const priced = occurrences.filter((occurrence) => occurrence.payEur !== null);
           setCompletedCount(occurrences.length);

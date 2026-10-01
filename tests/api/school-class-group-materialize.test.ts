@@ -5,6 +5,7 @@ import {
   materializationWindow,
   reconcileClassGroupSessions,
   removeFutureClassGroupSessions,
+  type ExtraStartGateMap,
   type MaterializeGroupRow,
 } from '../../api/_lib/schoolClassGroupMaterialize';
 
@@ -140,6 +141,29 @@ describe('reconcileClassGroupSessions', () => {
     const second = await reconcileClassGroupSessions(db.client, group(), { window });
     expect(second).toMatchObject({ created: 0, deleted: 0 });
     expect(db.tables.sessions).toHaveLength(6);
+  });
+
+  it('copies the accepted contract unit price onto new lessons and existing zero-price rows', async () => {
+    const past = {
+      id: 'past-zero', tutor_id: 't1', student_id: 's1', class_group_id: 'g1', status: 'completed', price: 0,
+      start_time: '2026-08-28T16:00:00.000Z', end_time: '2026-08-28T16:45:00.000Z',
+      subject_id: null, meeting_link: 'https://meet.google.com/abc', student_joined_at: null, tutor_joined_at: null,
+    };
+    const priced = {
+      id: 'kept-price', tutor_id: 't1', student_id: 's1', class_group_id: 'g1', status: 'active', price: 12,
+      start_time: '2026-09-11T16:00:00.000Z', end_time: '2026-09-11T16:45:00.000Z',
+      subject_id: null, meeting_link: 'https://meet.google.com/abc', student_joined_at: null, tutor_joined_at: null,
+    };
+    const db = fakeSupabase([past, priced]);
+    const gates = new Map([
+      ['s1:g1', '2026-09-01'],
+      ['s2:g1', '2026-09-01'],
+    ]) as ExtraStartGateMap;
+    gates.priceByKey = new Map([['s1:g1', 6], ['s2:g1', 6]]);
+    await reconcileClassGroupSessions(db.client, group(), { window: materializationWindow(NOW, 14), extraGates: gates });
+    expect(db.inserted.every((row) => row.price === 6)).toBe(true);
+    expect(db.tables.sessions.find((row) => row.id === 'past-zero')?.price).toBe(6);
+    expect(db.tables.sessions.find((row) => row.id === 'kept-price')?.price).toBe(12);
   });
 
   it('moves the future lessons when a slot changes time instead of stacking a duplicate', async () => {

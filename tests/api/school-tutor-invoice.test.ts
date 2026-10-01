@@ -161,30 +161,19 @@ describe('school teacher invoices by meeting', () => {
     expect((await request({ attendanceIds: [attendanceId] })).code).toBe(409);
     expect(state.allocations).toBe(0);
   });
-  it('respects a custom school confirmation feature before treating historical outcomes as payable', async () => {
+  it('pays stored completed meetings without a confirmation stamp', async () => {
     state.tables.organizations[0].features = { tutor_lesson_status_confirmation: true };
-    expect((await request({ precheckOnly: true })).body).toMatchObject({ canGenerate: false, reason: 'no_sessions' });
-    expect((await request({ sessionIds: ['child-0'] })).code).toBe(409);
-    state.tables.sessions[0].status_confirmed_at = '2026-09-30T08:00:00Z';
-    state.tables.sessions[0].tutor_pay_eur_snapshot = 45;
-    state.tables.sessions[1].tutor_pay_eur_snapshot = 90;
     expect((await request({ precheckOnly: true })).body).toMatchObject({ canGenerate: true, candidateCount: 1 });
     expect(state.allocations).toBe(0);
   });
-  it('excludes unconfirmed Laisvi vaikai meetings from preview and rejects submitted unstamped rows', async () => {
+  it('pays stored completed Laisvi vaikai meetings without a confirmation stamp', async () => {
     const organizationId = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
     state.tables.profiles[0].organization_id = organizationId;
     state.tables.organizations[0].id = organizationId;
     state.tables.invoice_profiles[1].organization_id = organizationId;
     state.tables.sessions.forEach(row => { row.students = { ...row.students, organization_id: organizationId }; });
-    expect((await request({ precheckOnly: true })).body).toMatchObject({ canGenerate: false });
-    expect((await request({ sessionIds: ['child-0'] })).code).toBe(409);
-    expect(state.allocations).toBe(0);
-    expect(state.writes).toHaveLength(0);
-
-    state.tables.sessions[0].status_confirmed_at = '2026-09-15T07:05:00Z';
-    state.tables.sessions[0].status_confirmed_by = 'administrator';
     expect((await request({ precheckOnly: true })).body).toMatchObject({ canGenerate: true, candidateCount: 1 });
+    expect((await request({ sessionIds: ['child-0'] })).code).toBe(200);
   });
   it.each(['single', 'per_payment'])('issues one €45 meeting for six children with %s grouping and all source ids', async groupingType => {
     const result = await request({ groupingType, onlyPaid: true });

@@ -8,6 +8,11 @@ vi.mock('@/lib/contractStorage', () => ({ uploadContractFile: uploadMock }));
 vi.mock('@/contexts/OrgAdminAccessContext', () => ({
   useOrgAdminAccess: () => ({ can: () => true }),
 }));
+vi.mock('@/components/ui/date-input', () => ({
+  DateInput: ({ id, value, onChange }: { id?: string; value?: string; onChange?: (e: { target: { value: string } }) => void }) => (
+    <input id={id} type="date" aria-label="Darbo sutarties data" value={value} onChange={onChange} />
+  ),
+}));
 
 import CompanyStaffDocuments, { CompanyStaffDocumentsContent, type StaffDocument } from '../../src/pages/company/CompanyStaffDocuments';
 
@@ -35,7 +40,7 @@ describe('school staff document upload form', () => {
     fireEvent.change(screen.getByLabelText('Vardas, pavardė'), { target: { value: 'Vardas Pavardė' } });
     fireEvent.change(screen.getByLabelText('El. paštas'), { target: { value: 'employee@example.com' } });
     const file = new File(['%PDF-prepared'], 'agreement-and-annex.pdf', { type: 'application/pdf' });
-    fireEvent.change(screen.getByLabelText(/Paruoštas konfidencialumo susitarimas su priedu viename PDF/), {
+    fireEvent.change(screen.getByLabelText(/Savitas PDF vietoj Tutlio šablono/), {
       target: { files: [file] },
     });
     expect(screen.getByLabelText('Darbo sutarties Nr. (nebūtina)')).toBeTruthy();
@@ -107,7 +112,7 @@ describe('school staff document upload form', () => {
     await screen.findByRole('button', { name: 'Sukurti du dokumentus' });
     fireEvent.change(screen.getByLabelText('Vardas, pavardė'), { target: { value: 'Vardas Pavardė' } });
     fireEvent.change(screen.getByLabelText('El. paštas'), { target: { value: 'employee@example.com' } });
-    fireEvent.change(screen.getByLabelText(/Paruoštas konfidencialumo susitarimas/), {
+    fireEvent.change(screen.getByLabelText(/Savitas PDF vietoj Tutlio šablono/), {
       target: { files: [new File(['%PDF-prepared'], 'agreement.pdf', { type: 'application/pdf' })] },
     });
     fireEvent.click(screen.getByLabelText('PDF yra ir susitarimas, ir konfidencialios informacijos sąrašo priedas'));
@@ -120,5 +125,31 @@ describe('school staff document upload form', () => {
     expect(posts[1].confidentialityId).toBe(posts[0].confidentialityId);
     expect(posts[1].consentId).toBe(posts[0].consentId);
     expect(uploadMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends administrator-entered address and personal code so they are filled into the generated agreement', async () => {
+    const posts: any[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      if (!init?.method) return { ok: true, json: async () => ({ organizationId: ORG_ID, documents: [] }) };
+      posts.push(JSON.parse(String(init.body)));
+      return { ok: true, json: async () => ({ emailed: true }) };
+    }));
+    render(<CompanyStaffDocuments />);
+    await screen.findByRole('button', { name: 'Sukurti du dokumentus' });
+    fireEvent.change(screen.getByLabelText('Vardas, pavardė'), { target: { value: 'Vardas Pavardė' } });
+    fireEvent.change(screen.getByLabelText('El. paštas'), { target: { value: 'employee@example.com' } });
+    fireEvent.change(screen.getByLabelText(/Darbo sutarties Nr/), { target: { value: 'DS-42' } });
+    fireEvent.change(screen.getByLabelText(/Darbo sutarties data/), { target: { value: '2026-09-22' } });
+    fireEvent.change(screen.getByLabelText(/Gyvenamosios vietos adresas/), { target: { value: 'Vilniaus g. 1, Vilnius' } });
+    fireEvent.change(screen.getByLabelText(/Asmens kodas/), { target: { value: '39001010013' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sukurti du dokumentus' }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toMatchObject({
+      action: 'create-bundle',
+      address: 'Vilniaus g. 1, Vilnius',
+      personalCode: '39001010013',
+      employmentContractNumber: 'DS-42',
+    });
+    expect(uploadMock).not.toHaveBeenCalled();
   });
 });

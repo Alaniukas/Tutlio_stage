@@ -178,6 +178,9 @@ describe('prepared staff PDFs, consent and retention', () => {
     await consentHandler({ method: 'GET', query: { token } } as any, opened.res as any);
     expect(opened.res.statusCode).toBe(200);
     expect(opened.body.needsPersonalDetails).toBe(true);
+    expect(opened.body.detailsHeldBySchool).toBe(false);
+    expect(opened.body.previewUrl).toBeNull();
+    expect(state.render).not.toHaveBeenCalled();
 
     const answers = Array(10).fill('yes');
     const invalid = response();
@@ -212,6 +215,78 @@ describe('prepared staff PDFs, consent and retention', () => {
     }));
     expect(peakInFlight).toBe(1);
     expect(JSON.stringify(db.db.school_contracts)).not.toContain('39001010013');
+  });
+
+  it('saves both documents and emails even if the agreement PDF converter fails', async () => {
+    const { db, files } = setup();
+    state.render.mockRejectedValue(new Error('Converter busy'));
+    const created = response();
+    await documentsHandler({ method: 'POST', body: {
+      action: 'create-bundle', confidentialityId: EMPLOYEE_ID, consentId: CONSENT_ID,
+      groupId: GROUP_ID, name: 'Vardas Pavardė', email: 'employee@example.com',
+      employmentContractNumber: 'DS-42', employmentContractDate: '2026-09-22',
+      address: 'Vilniaus g. 1, Vilnius', personalCode: '39001010013',
+    } } as any, created.res as any);
+    expect(created.res.statusCode, JSON.stringify(created.body)).toBe(201);
+    expect(created.body.emailed).toBe(true);
+    expect(created.body.pdfPending).toBe(true);
+    expect(db.db.school_contracts).toHaveLength(2);
+    expect(db.db.school_contracts.find((row) => row.id === EMPLOYEE_ID)).toMatchObject({
+      signing_status: 'draft', pdf_url: null,
+    });
+    expect(db.db.school_contract_signatures.find((row) => row.contract_id === CONSENT_ID)?.token).toBeTruthy();
+    expect(JSON.stringify(db.db.school_contracts)).not.toContain('39001010013');
+    expect(files.has(`${ORG_ID}/contracts/${EMPLOYEE_ID}/staff-personal-details.json`)).toBe(true);
+
+    for (const row of db.db.school_contracts) row.organizations = db.db.organizations[0];
+    const renderCalls = state.render.mock.calls.length;
+    const token = db.db.school_contract_signatures.find((row) => row.contract_id === CONSENT_ID)?.token;
+    const opened = response();
+    await consentHandler({ method: 'GET', query: { token } } as any, opened.res as any);
+    expect(opened.res.statusCode).toBe(200);
+    expect(opened.body.needsPersonalDetails).toBe(false);
+    expect(opened.body.detailsHeldBySchool).toBe(true);
+    expect(opened.body.previewUrl).toBeNull();
+    expect(state.render.mock.calls.length).toBe(renderCalls);
+    expect(JSON.stringify(opened.body)).not.toContain('39001010013');
+
+    state.render.mockResolvedValue(Buffer.from('%PDF-generated'));
+    const submitted = response();
+    await consentHandler({ method: 'POST', body: { token, answers: Array(10).fill('yes') } } as any, submitted.res as any);
+    expect(submitted.res.statusCode, JSON.stringify(submitted.body)).toBe(200);
+    expect(db.db.school_contracts.find((row) => row.id === EMPLOYEE_ID)).toMatchObject({
+      signing_status: 'awaiting_school_signature',
+    });
+    expect(files.has(`${ORG_ID}/contracts/${EMPLOYEE_ID}/staff-personal-details.json`)).toBe(false);
+    expect(JSON.stringify(db.db.school_contracts)).not.toContain('39001010013');
+  });
+
+  it('generates the agreement from administrator-entered address and personal code without storing the code', async () => {
+    const { db, files } = setup();
+    const created = response();
+    await documentsHandler({ method: 'POST', body: {
+      action: 'create-bundle', confidentialityId: EMPLOYEE_ID, consentId: CONSENT_ID,
+      groupId: GROUP_ID, name: 'Vardas Pavardė', email: 'employee@example.com',
+      employmentContractNumber: 'DS-42', employmentContractDate: '2026-09-22',
+      address: 'Vilniaus g. 1, Vilnius', personalCode: '39001010013',
+    } } as any, created.res as any);
+    expect(created.res.statusCode, JSON.stringify(created.body)).toBe(201);
+    for (const row of db.db.school_contracts) row.organizations = db.db.organizations[0];
+    const agreement = db.db.school_contracts.find((row) => row.id === EMPLOYEE_ID)!;
+    expect(agreement).toMatchObject({ signing_status: 'awaiting_school_signature' });
+    expect(agreement.pdf_url).toContain(`${ORG_ID}/contracts/${EMPLOYEE_ID}/`);
+    expect(files.has(agreement.pdf_url)).toBe(true);
+    expect(state.render).toHaveBeenCalledWith('confidentiality', expect.objectContaining({
+      address: 'Vilniaus g. 1, Vilnius', personalCode: '39001010013',
+    }));
+    expect(JSON.stringify(db.db.school_contracts)).not.toContain('39001010013');
+
+    const token = db.db.school_contract_signatures.find((row) => row.contract_id === CONSENT_ID)?.token;
+    const opened = response();
+    await consentHandler({ method: 'GET', query: { token } } as any, opened.res as any);
+    expect(opened.res.statusCode).toBe(200);
+    expect(opened.body.needsPersonalDetails).toBe(false);
+    expect(opened.body.detailsHeldBySchool).toBe(true);
   });
 
   it('keeps both documents in draft if the consent PDF conversion fails', async () => {
@@ -303,7 +378,10 @@ describe('prepared staff PDFs, consent and retention', () => {
     const preview = response();
     await consentHandler({ method: 'GET', query: { token: 'safe-token' } } as any, preview.res as any);
     expect(preview.res.statusCode).toBe(200);
-    expect(preview.body.previewUrl).toContain('consent-preview.pdf');
+    expect(preview.body.previewUrl).toBeNull();
+    expect(preview.body.needsPersonalDetails).toBe(false);
+    expect(preview.body.detailsHeldBySchool).toBe(true);
+    expect(state.render).not.toHaveBeenCalled();
     expect(db.db.school_contracts[0].staff_viewed_at).toBeTruthy();
 
     const incomplete = response();

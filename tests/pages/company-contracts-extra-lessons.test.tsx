@@ -173,6 +173,7 @@ describe('CompanyContracts extra-lessons list', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Nutraukti sutartį' }));
 
     expect(await screen.findByText('Nutraukus sutartį iširs grupė „LT 5 kl.“.')).toBeTruthy();
+    expect(screen.getByText(/Šeimos apie tai el\. paštu neinformuojamos/)).toBeTruthy();
     const destructive = screen.getByRole('button', { name: 'Nutraukti ir sustabdyti grupę' }) as HTMLButtonElement;
     expect(destructive.disabled).toBe(true);
     fireEvent.click(screen.getByRole('checkbox'));

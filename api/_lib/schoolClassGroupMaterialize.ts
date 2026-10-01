@@ -67,7 +67,11 @@ export type MaterializeWindow = {
 };
 
 /** `${studentId}:${groupId}` → first service day (extra-lessons 14-day gate). */
-export type ExtraStartGateMap = Map<string, string> & { endYmdByKey?: Map<string, string> };
+export type ExtraStartGateMap = Map<string, string> & {
+  endYmdByKey?: Map<string, string>;
+  /** Accepted extra-lessons unit price (€ / session) for this student and group. */
+  priceByKey?: Map<string, number>;
+};
 
 export type ReconcileResult = {
   groupId: string;
@@ -173,9 +177,11 @@ export async function loadExtraLessonsStartGates(
   await restoreExpiredSchoolGroupMemberships(supabase, organizationId);
   const gates: ExtraStartGateMap = new Map();
   gates.endYmdByKey = new Map();
+  gates.priceByKey = new Map();
+  const priceAcceptedAt = new Map<string, string>();
   let query = supabase
     .from('school_contracts')
-    .select('student_id, class_group_id, accepted_at, signing_status, archived_at, terminated_at, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at, suspension_started_at, suspension_until, suspension_resumed_at')
+    .select('student_id, class_group_id, accepted_at, signing_status, archived_at, terminated_at, unit_price_eur, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at, suspension_started_at, suspension_until, suspension_resumed_at')
     .eq('kind', EXTRA_LESSONS_CONTRACT_KIND);
   if (organizationId) query = query.eq('organization_id', organizationId);
   const { data, error } = await query;
@@ -199,8 +205,23 @@ export async function loadExtraLessonsStartGates(
     if (ymd < gates.get(key)!) gates.set(key, ymd);
     const endDate = order.end_date || '9999-12-31';
     if (endDate > (gates.endYmdByKey.get(key) || '')) gates.endYmdByKey.set(key, endDate);
+    const unit = Math.round(Number(row.unit_price_eur || order.unit_price_eur || 0) * 100) / 100;
+    const acceptedAt = String(row.accepted_at || '');
+    if (unit > 0 && acceptedAt >= (priceAcceptedAt.get(key) || '')) {
+      priceAcceptedAt.set(key, acceptedAt);
+      gates.priceByKey.set(key, unit);
+    }
   }
   return gates;
+}
+
+function contractSessionPrice(
+  gates: ExtraStartGateMap | undefined,
+  studentId: string,
+  groupId: string,
+): number {
+  const price = gates?.priceByKey?.get(`${studentId}:${groupId}`);
+  return price && price > 0 ? price : 0;
 }
 
 type ExistingRow = {
@@ -215,6 +236,7 @@ type ExistingRow = {
   class_group_id: string | null;
   student_joined_at: string | null;
   tutor_joined_at: string | null;
+  price?: number | null;
 };
 
 function isoKey(value: string): string {
@@ -293,7 +315,7 @@ export async function reconcileClassGroupSessions(
   // 1) Rows already attached to this group (future part only).
   const { data: attachedRows, error: attachedErr } = await supabase
     .from('sessions')
-    .select('id, student_id, tutor_id, subject_id, meeting_link, start_time, end_time, status, class_group_id, student_joined_at, tutor_joined_at')
+    .select('id, student_id, tutor_id, subject_id, meeting_link, start_time, end_time, status, class_group_id, price, student_joined_at, tutor_joined_at')
     .eq('class_group_id', group.id)
     .gt('end_time', window.nowIso);
   if (attachedErr) throw new Error(`[class-groups] load sessions failed: ${attachedErr.message}`);
@@ -314,6 +336,8 @@ export async function reconcileClassGroupSessions(
         if (isoKey(row.end_time) !== want.endIso) patch.end_time = want.endIso;
         if ((row.meeting_link || null) !== (group.meeting_link || null)) patch.meeting_link = group.meeting_link || null;
         if ((row.subject_id || null) !== (group.subject_id || null)) patch.subject_id = group.subject_id || null;
+        const contractPrice = contractSessionPrice(options.extraGates, row.student_id, group.id);
+        if (contractPrice > 0 && !(Number(row.price) > 0)) patch.price = contractPrice;
         if (Object.keys(patch).length) toUpdate.push({ id: row.id, patch });
       }
       continue;
@@ -330,7 +354,7 @@ export async function reconcileClassGroupSessions(
     const startIsos = [...new Set(missing.map(([, v]) => v.startIso))];
     const { data: foreignRows } = await supabase
       .from('sessions')
-      .select('id, student_id, tutor_id, subject_id, meeting_link, start_time, end_time, status, class_group_id, student_joined_at, tutor_joined_at')
+      .select('id, student_id, tutor_id, subject_id, meeting_link, start_time, end_time, status, class_group_id, price, student_joined_at, tutor_joined_at')
       .eq('tutor_id', group.tutor_id)
       .in('student_id', activeMembers.length ? activeMembers.map((member) => member.student_id) : ['00000000-0000-0000-0000-000000000000'])
       .in('start_time', startIsos)
@@ -344,7 +368,10 @@ export async function reconcileClassGroupSessions(
       const existing = foreign.get(key);
       if (existing) {
         if (!existing.class_group_id) {
-          toUpdate.push({ id: existing.id, patch: { class_group_id: group.id } });
+          const contractPrice = contractSessionPrice(options.extraGates, want.student_id, group.id);
+          const patch: Record<string, unknown> = { class_group_id: group.id };
+          if (contractPrice > 0 && !(Number(existing.price) > 0)) patch.price = contractPrice;
+          toUpdate.push({ id: existing.id, patch });
           result.adopted += 1;
         }
         continue;
@@ -358,7 +385,7 @@ export async function reconcileClassGroupSessions(
         created_by_role: 'system',
         status: 'active',
         meeting_link: group.meeting_link || null,
-        price: 0,
+        price: contractSessionPrice(options.extraGates, want.student_id, group.id),
         school_billing_kind: 'base',
         class_group_id: group.id,
       });
@@ -383,6 +410,26 @@ export async function reconcileClassGroupSessions(
     const { error } = await supabase.from('sessions').insert(chunk);
     if (error) throw new Error(`[class-groups] insert sessions failed: ${error.message}`);
     result.created += chunk.length;
+  }
+
+  // Older group lessons were stored with price 0. Copy the contract unit price
+  // onto those rows, including ones that already happened, without replacing a
+  // price that was set on purpose.
+  const studentsByPrice = new Map<number, string[]>();
+  for (const member of group.members || []) {
+    if (!member.student_id) continue;
+    const price = contractSessionPrice(options.extraGates, member.student_id, group.id);
+    if (!(price > 0)) continue;
+    const ids = studentsByPrice.get(price) || [];
+    ids.push(member.student_id);
+    studentsByPrice.set(price, ids);
+  }
+  for (const [price, studentIds] of studentsByPrice) {
+    const { error } = await supabase.from('sessions').update({ price })
+      .eq('class_group_id', group.id)
+      .in('student_id', studentIds)
+      .eq('price', 0);
+    if (error) console.error('[class-groups] contract price backfill failed', group.id, error.message);
   }
   return result;
 }

@@ -1,7 +1,7 @@
 import { useTranslation } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { deriveAttendance, type AttendanceSessionLike } from '@/lib/attendance';
-import { isUnconfirmedAutomaticNoShow } from '@/lib/schoolJoinNoShow';
+import { isUnconfirmedDetectedStudentAbsence } from '@/lib/schoolJoinNoShow';
 import { UserCheck, AlertTriangle } from 'lucide-react';
 
 /**
@@ -12,7 +12,7 @@ import { UserCheck, AlertTriangle } from 'lucide-react';
 export default function AttendanceBadge({
   session,
   className,
-  manualConfirmationRequired = false,
+  manualConfirmationRequired: _manualConfirmationRequired = false,
 }: {
   session: AttendanceSessionLike & { meeting_link?: string | null; no_show_reason?: string | null };
   className?: string;
@@ -24,14 +24,8 @@ export default function AttendanceBadge({
 
   const info = deriveAttendance(session);
   if (!info.applicable) return null;
-  const automaticNoShowNeedsReview = isUnconfirmedAutomaticNoShow(session);
 
-  if (
-    manualConfirmationRequired
-    && (session.status !== 'no_show' || automaticNoShowNeedsReview)
-    && !session.status_confirmed_at
-    && info.flagged
-  ) {
+  if (isUnconfirmedDetectedStudentAbsence(session)) {
     return (
       <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-100 whitespace-nowrap', className)}>
         <AlertTriangle className="w-3 h-3" />

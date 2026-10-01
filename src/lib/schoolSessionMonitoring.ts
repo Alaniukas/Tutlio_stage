@@ -1,8 +1,10 @@
-import { isUnconfirmedAutomaticNoShow } from './schoolJoinNoShow.js';
+import { isUnconfirmedAutomaticNoShow, isUnconfirmedDetectedStudentAbsence } from './schoolJoinNoShow.js';
 import { effectiveSessionOutcome } from './sessionStatusConfirmation.js';
 
 export type SchoolOutcomeOptions = {
   requireConfirmation?: boolean;
+  /** Stored `completed` already means the meeting happened, even without a confirmation stamp. */
+  countStoredCompleted?: boolean;
 };
 
 type Row = {
@@ -14,6 +16,8 @@ type Row = {
   status?: string | null;
   student_id?: string;
   student_name?: string;
+  meeting_link?: string | null;
+  tutor_joined_at?: string | null;
   student_joined_at?: string | null;
   status_confirmed_at?: string | null;
   cancellation_reason?: string | null;
@@ -78,7 +82,7 @@ export function pickSchoolMeetingOutcome<T extends Pick<SchoolMeetingRow,
   const effectiveRows = rows.map((item) => {
     const status = isUnconfirmedAutomaticNoShow(item)
       ? 'active'
-      : options.requireConfirmation
+      : options.requireConfirmation && !(options.countStoredCompleted && item.status === 'completed')
         ? effectiveSessionOutcome(item, true)
         : item.status;
     return status === item.status ? item : ({ ...item, status } as T);
@@ -144,10 +148,7 @@ export function schoolStudentAttendance(
     else if (options.requireConfirmation
       ? status === 'completed' && Boolean(row.status_confirmed_at)
       : row.student_joined_at || (status === 'completed' && row.status_confirmed_at)) student.joined++;
-    else {
-      const attendanceCutoff = Date.parse(row.end_time || row.start_time || '');
-      if (Number.isFinite(attendanceCutoff) && attendanceCutoff < now.getTime()) student.unconfirmed++;
-    }
+    else if (isUnconfirmedDetectedStudentAbsence(row, now)) student.unconfirmed++;
     students.set(student.id, student);
   }
   return [...students.values()].sort((a, b) => a.name.localeCompare(b.name));

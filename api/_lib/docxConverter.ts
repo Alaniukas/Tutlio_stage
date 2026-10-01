@@ -251,3 +251,37 @@ export function hasDocxConverterEnv(): boolean {
     (process.env.DOCX_CONVERTER_URL || '').trim() && (process.env.DOCX_CONVERTER_API_KEY || '').trim(),
   );
 }
+
+/** Wait until the hosted converter is free enough to accept a large staff DOCX. */
+export async function waitForDocxConverterReady(timeoutMs = 25000): Promise<void> {
+  const base = normalizeDocxConverterBaseUrl(process.env.DOCX_CONVERTER_URL || '');
+  const key = (process.env.DOCX_CONVERTER_API_KEY || '').trim();
+  if (!base || !key) return;
+  const deadline = Date.now() + Math.max(1000, timeoutMs);
+  let delayMs = 1500;
+  while (Date.now() < deadline) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      try {
+        const res = await fetch(`${base}/health`, {
+          headers: { Authorization: `Bearer ${key}` },
+          signal: controller.signal,
+        });
+        const json = await res.json().catch(() => ({})) as {
+          ok?: boolean; pending?: number; active?: boolean | number; healthy?: boolean;
+        };
+        const pending = Number(json.pending || 0);
+        if (res.ok && json.ok !== false && pending === 0) return;
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      // Converter may be restarting — keep waiting until the budget runs out.
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return;
+    await sleep(Math.min(delayMs, remaining));
+    delayMs = Math.min(delayMs + 1500, 6000);
+  }
+}

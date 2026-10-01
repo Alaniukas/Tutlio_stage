@@ -11,6 +11,7 @@ export type SchoolInvoiceContractWindow = {
   terminated_at?: string | null;
   start_within_14_status?: string | null;
   start_within_14_days?: boolean | null;
+  unit_price_eur?: number | string | null;
   order_snapshot?: ExtraLessonsOrderSnapshot | null;
   suspension_started_at?: string | null;
   suspension_until?: string | null;
@@ -52,6 +53,35 @@ function inSuspension(session: CanonicalBillableSession, contract: SchoolInvoice
   const resumed = Date.parse(contract.suspension_resumed_at || '');
   if (Number.isFinite(resumed)) return start < resumed;
   return !contract.suspension_until || sessionYmdVilnius(session.start_time) <= contract.suspension_until;
+}
+
+function positiveMoney(value: unknown): number {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) / 100 : 0;
+}
+
+/** Session row first; otherwise the signed extra-lessons unit price for that group/subject. */
+export function resolveSchoolInvoiceUnitPrice(
+  session: {
+    price?: number | null;
+    class_group_id?: string | null;
+    subject_id?: string | null;
+    subject?: { price?: number | null } | Array<{ price?: number | null }> | null;
+  },
+  contracts: SchoolInvoiceContractWindow[] = [],
+): number {
+  const stored = positiveMoney(session.price);
+  if (stored) return stored;
+  const matching = contracts.filter((contract) => (
+    contract.signing_status === 'signed'
+    && schoolInvoiceSessionMatchesContract(session as CanonicalBillableSession, contract)
+  ));
+  for (const contract of matching) {
+    const unit = positiveMoney(contract.unit_price_eur) || positiveMoney(contract.order_snapshot?.unit_price_eur);
+    if (unit) return unit;
+  }
+  const subject = Array.isArray(session.subject) ? session.subject[0] : session.subject;
+  return positiveMoney(subject?.price);
 }
 
 export function schoolInvoiceSessionMatchesContract(session: CanonicalBillableSession, contract: SchoolInvoiceContractWindow): boolean {
@@ -122,7 +152,7 @@ export function reviewSchoolInvoiceSession(
     statusConfirmedAt: session.status_confirmed_at || null,
     subjectName: String(subject?.name || 'Užsiėmimas'),
     tutorName: String(tutor?.full_name || 'mokytojas'),
-    unitPriceEur: Number(session.price ?? subject?.price ?? 0),
+    unitPriceEur: resolveSchoolInvoiceUnitPrice(session, contracts),
     included: reason === 'payable',
     reason,
     exclusionReason: decision?.excluded ? decision.reason : null,

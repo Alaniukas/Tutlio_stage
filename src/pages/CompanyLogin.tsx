@@ -15,6 +15,22 @@ import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
 import { setLastPortal } from '@/lib/pwaPortal';
 import { loadSavedLoginForm, persistLoginForm, readRememberMePreference } from '@/lib/loginCredentials';
 
+const LOGIN_STEP_TIMEOUT_MS = 15000;
+
+async function withLoginTimeout<T>(thenable: PromiseLike<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve(thenable),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timeout`)), LOGIN_STEP_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export default function CompanyLogin() {
   const { t, locale } = useTranslation();
   const { platform } = usePlatform();
@@ -68,7 +84,10 @@ export default function CompanyLogin() {
     persistLoginForm(email, password, rememberMe);
 
     try {
-      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error: authError } = await withLoginTimeout(
+        supabase.auth.signInWithPassword({ email, password }),
+        'signIn',
+      );
       if (authError || !data.user) {
         setError(t('auth.invalidCredentials'));
         return;
@@ -79,11 +98,14 @@ export default function CompanyLogin() {
         return;
       }
 
-      const primaryAdmin = await supabase
-        .from('organization_admins')
-        .select('id, status')
-        .eq('user_id', data.user.id)
-        .maybeSingle();
+      const primaryAdmin = await withLoginTimeout(
+        supabase
+          .from('organization_admins')
+          .select('id, status')
+          .eq('user_id', data.user.id)
+          .maybeSingle(),
+        'organization_admins',
+      );
       const statusColumnsMissing = primaryAdmin.error && (
         primaryAdmin.error.code === '42703'
         || primaryAdmin.error.code === 'PGRST204'

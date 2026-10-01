@@ -10,6 +10,9 @@ describe('school invoice review translations', () => {
       expect(Object.keys(dictionary).sort(), locale).toEqual(Object.keys(schoolInvoiceReviewEn).sort());
       expect(Object.values(dictionary).every((value) => Boolean(value.trim())), locale).toBe(true);
       expect(dictionary['school.invoice.review.payer'], locale).toContain('{email}');
+      expect(dictionary['school.invoice.batch.sent'], locale).toContain('{count}');
+      expect(dictionary['school.invoice.batch.childLine'], locale).toContain('{name}');
+      expect(dictionary['school.invoice.batch.childLine'], locale).toContain('{amount}');
     }
   });
 });

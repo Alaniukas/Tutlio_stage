@@ -72,11 +72,12 @@ describe('school teacher pay by meeting', () => {
       .toMatchObject({ payEur: null, payIssue: 'conflicting_snapshot', sessionIds: ['child-1'], attendanceIds: ['attendance-1'] });
   });
 
-  it('requires an explicit teacher or administrator outcome before paying an elapsed meeting', () => {
+  it('pays a stored completed meeting without a confirmation stamp and still waits for no-show confirmation', () => {
     const options = { requireConfirmation: true };
-    expect(schoolTutorPayOccurrences([row], 45, now, options)).toEqual([]);
+    expect(schoolTutorPayOccurrences([row], 45, now, options)[0].payEur).toBe(45);
+    expect(schoolTutorPayOccurrences([{ ...row, status: 'no_show', status_confirmed_at: null }], 45, now, options)).toEqual([]);
     for (const status_confirmed_by of ['teacher', 'administrator']) {
-      const confirmed = { ...row, status_confirmed_at: now.toISOString(), status_confirmed_by };
+      const confirmed = { ...row, status: 'no_show', status_confirmed_at: now.toISOString(), status_confirmed_by };
       expect(schoolTutorPayOccurrences([confirmed], 45, now, options)[0].payEur).toBe(45);
     }
     expect(schoolTutorPayOccurrences([row], 45, now)).toHaveLength(1);
@@ -106,6 +107,22 @@ describe('school teacher pay by meeting', () => {
   it('flags contradictory snapshots instead of choosing an arbitrary child', () => {
     expect(schoolTutorPayOccurrences([row, { ...row, id: 'child-2', tutor_pay_eur_snapshot: 20 }], 30, now)[0])
       .toMatchObject({ payEur: null, payIssue: 'conflicting_snapshot' });
+    const stamped = { ...row, status_confirmed_at: now.toISOString() };
+    expect(schoolTutorPayOccurrences([stamped, { ...stamped, id: 'child-2', tutor_pay_eur_snapshot: 20 }], 30, now)[0])
+      .toMatchObject({ payEur: null, payIssue: 'conflicting_snapshot' });
+  });
+  it('pays group meetings once at the group rate and individual meetings at their own rate', () => {
+    const group = { ...row, tutor_pay_eur_snapshot: null };
+    const individual = { ...row, id: 'solo', class_group_id: null, subjects: { is_group: false }, tutor_pay_eur_snapshot: null };
+    const anotherIndividual = { ...individual, id: 'solo-2', start_time: '2026-09-30T08:00:00Z', end_time: '2026-09-30T09:00:00Z' };
+    const result = schoolTutorPayOccurrences(
+      [group, { ...group, id: 'child-2' }, individual, anotherIndividual],
+      45,
+      now,
+      { individualRate: 20 },
+    );
+    expect(result).toHaveLength(3);
+    expect(result.map((item) => item.payEur).sort()).toEqual([20, 20, 45]);
   });
   it('keeps pay identical for a full server occurrence and a conducted-only preview', () => {
     const extra = ['active', 'cancelled', 'no_show'].map((status, index) => ({ ...row, id: `pending-${index}`, status,

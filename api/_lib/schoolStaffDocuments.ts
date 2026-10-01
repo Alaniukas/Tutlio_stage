@@ -2,15 +2,21 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PDFDocument } from 'pdf-lib';
+import { hasDocxConverterEnv, waitForDocxConverterReady } from './docxConverter.js';
 import { renderDocxTemplateBufferToPdfBuffer } from './renderSchoolContractDocxToPdf.js';
+import { isStaffDocumentsOrg, LAISVI_VAIKIAI_ORG_ID } from '../../src/lib/marketMoney.js';
 
 export type StaffDocumentType = 'confidentiality' | 'consent';
 export type ConsentAnswer = 'yes' | 'no';
 export const STAFF_CONSENT_QUESTION_COUNT = 10;
 export const STAFF_DOCUMENT_RETENTION_DAYS = 30;
-// The bundled legal templates in this first rollout explicitly name this school.
-// Fail closed for other organizations until they provide their own templates.
-export const STAFF_TEMPLATE_ORG_ID = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
+/** Agreement template is ~2 MB; confidentiality bundle converts agreement + annex sequentially. */
+export const STAFF_DOCX_TIMEOUT_MS = 120000;
+
+// The bundled legal templates in this first rollout explicitly name Laisvi vaikai.
+// Demo Mokykla reuses them for QA; other orgs fail closed until they provide templates.
+export const STAFF_TEMPLATE_ORG_ID = LAISVI_VAIKIAI_ORG_ID;
+export { isStaffDocumentsOrg, staffDocumentsFeatureEnabled } from '../../src/lib/marketMoney.js';
 
 export function isStaffDocumentType(value: unknown): value is StaffDocumentType {
   return value === 'confidentiality' || value === 'consent';
@@ -49,6 +55,20 @@ export function staffFilesDeleteAt(signedAt: string): string {
 
 export function staffPdfPathsForRetention(paths: string[], folder: string): string[] {
   return paths.filter((path) => path.startsWith(`${folder}/`) && path.toLowerCase().endsWith('.pdf'));
+}
+
+/** Temporary private object — not a DB column — so the employee form does not re-ask. */
+export function staffPersonalDetailsStoragePath(organizationId: string, confidentialityId: string): string {
+  return `${organizationId}/contracts/${confidentialityId}/staff-personal-details.json`;
+}
+
+export function encodeStaffPersonalDetails(details: { address: string; personalCode: string }): Buffer {
+  return Buffer.from(JSON.stringify({ address: details.address, personalCode: details.personalCode }), 'utf8');
+}
+
+export function parseStoredStaffPersonalDetails(raw: unknown): { address: string; personalCode: string } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  return validateStaffPersonalDetails(raw as { address?: unknown; personalCode?: unknown });
 }
 
 function templateBytes(name: string): Buffer {
@@ -114,9 +134,11 @@ export async function renderStaffDocumentPdf(
         ? 'SUTINKU / NESUTINKU'
         : answers?.[index] === 'yes' ? 'SUTINKU' : 'NESUTINKU';
     }
+    if (hasDocxConverterEnv()) await waitForDocxConverterReady();
     return renderDocxTemplateBufferToPdfBuffer({
       templateBytes: templateBytes(staffTemplateNames(type)[0]),
       payload,
+      timeoutMs: STAFF_DOCX_TIMEOUT_MS,
     });
   }
 
@@ -128,7 +150,12 @@ export async function renderStaffDocumentPdf(
   // The hosted converter can fail when multiple large staff templates arrive
   // together. Convert the agreement and annex one at a time in PDF page order.
   for (const name of staffTemplateNames(type)) {
-    const part = await renderDocxTemplateBufferToPdfBuffer({ templateBytes: templateBytes(name), payload });
+    if (hasDocxConverterEnv()) await waitForDocxConverterReady();
+    const part = await renderDocxTemplateBufferToPdfBuffer({
+      templateBytes: templateBytes(name),
+      payload,
+      timeoutMs: STAFF_DOCX_TIMEOUT_MS,
+    });
     const source = await PDFDocument.load(part);
     const pages = await combined.copyPages(source, source.getPageIndices());
     pages.forEach((page) => combined.addPage(page));

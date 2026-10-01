@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from './types';
 import {
-  assertOrgConsultationsEnabled,
+  assertSchoolMonthlyInvoiceEnabled,
   requireConsultationsAuth,
   serviceSupabase,
 } from './_lib/schoolConsultationsAccess.js';
@@ -22,17 +22,22 @@ import { groupOccurrenceKey, hasSchoolOccurrenceEvidence, schoolInvoiceDueDate }
 import { requireOrgAdminAccess } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { wallClockToUtc } from './_lib/recurringOccurrences.js';
-import { latestSchoolBillingDecisions, reviewSchoolInvoiceSession, schoolInvoiceSessionMatchesContract, type SchoolInvoiceReviewSession } from '../src/lib/schoolInvoiceSessionReview.js';
+import { fetchAllRows } from '../src/lib/fetchAllRows.js';
+import { latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewSchoolInvoiceSession, schoolInvoiceSessionMatchesContract, type SchoolInvoiceReviewSession } from '../src/lib/schoolInvoiceSessionReview.js';
+import { groupSchoolPayerInvoicePreviews, schoolPayerKey, schoolStudentInvoiceSendable } from '../src/lib/schoolPayerInvoiceGroups.js';
 import { sessionYmdVilnius } from '../src/lib/schoolExtraLessonsBilling.js';
 
 type RequestBody = {
-  action?: 'options' | 'review' | 'billing-decision' | 'preview' | 'send';
+  action?: 'options' | 'review' | 'billing-decision' | 'preview' | 'send' | 'batch-preview' | 'send-batch';
   organizationId?: string;
   studentId?: string;
+  studentIds?: string[];
+  payerKey?: string;
   periodStart?: string;
   periodEnd?: string;
   dueDate?: string;
   previewToken?: string;
+  previewTokens?: Record<string, string>;
   sessionId?: string;
   excluded?: boolean;
   reason?: string;
@@ -133,7 +138,7 @@ async function loadDraft(body: RequestBody): Promise<DraftContext> {
       .or(`valid_until.is.null,valid_until.gte.${periodStart}`)
       .order('created_at', { ascending: false }),
     supabase.from('school_contracts')
-      .select('id, class_group_id, signing_status, accepted_at, withdrawal_requested_at, terminated_at, start_within_14_status, start_within_14_days, order_snapshot, suspension_started_at, suspension_until, suspension_resumed_at')
+      .select('id, class_group_id, signing_status, accepted_at, withdrawal_requested_at, terminated_at, start_within_14_status, start_within_14_days, unit_price_eur, order_snapshot, suspension_started_at, suspension_until, suspension_resumed_at')
       .eq('student_id', studentId).eq('organization_id', organizationId).eq('kind', 'extra_lessons'),
     supabase.from('school_session_billing_decisions')
       .select('id, session_reference_id, excluded, reason, created_at')
@@ -200,7 +205,7 @@ async function loadDraft(body: RequestBody): Promise<DraftContext> {
       subjectName: String(subject?.name || 'Užsiėmimas'),
       tutorId: String(session.tutor_id || ''),
       tutorName: String(tutor?.full_name || 'mokytojas'),
-      unitPriceEur: Number(session.price ?? subject?.price ?? 0),
+      unitPriceEur: resolveSchoolInvoiceUnitPrice(session, contracts || []),
     }];
   });
 
@@ -228,6 +233,31 @@ async function loadDraft(body: RequestBody): Promise<DraftContext> {
     reviewSessionIds,
     sessions: reviewSessions,
   };
+}
+
+const SESSION_SELECT = 'id, student_id, subject_id, tutor_id, start_time, end_time, status, price, class_group_id, school_billing_kind, tutor_joined_at, status_confirmed_at, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, subject:subjects(name, price), tutor:profiles!sessions_tutor_id_fkey!inner(full_name,organization_id)';
+
+async function loadBatchDrafts(body: RequestBody): Promise<{ drafts: DraftContext[] }> {
+  const organizationId = String(body.organizationId || '').trim();
+  const periodStart = String(body.periodStart || '').slice(0, 10);
+  const periodEnd = String(body.periodEnd || '').slice(0, 10);
+  if (!organizationId || !YMD.test(periodStart) || !YMD.test(periodEnd) || periodEnd < periodStart) {
+    throw new Error('Pasirinkite teisingą sąskaitos laikotarpį.');
+  }
+  const supabase = serviceSupabase();
+  const fromIso = wallClockToUtc(periodStart, '00:00:00').toISOString();
+  const untilIso = new Date(wallClockToUtc(periodEnd, '23:59:59').getTime() + 999).toISOString();
+  const sessions = await fetchAllRows<any>((from, to) => supabase.from('sessions').select(SESSION_SELECT)
+    .eq('tutor.organization_id', organizationId).gte('start_time', fromIso).lte('start_time', untilIso)
+    .order('start_time').order('id').range(from, to));
+  const studentIds = [...new Set(sessions.map((row) => String(row.student_id || '')).filter(Boolean))];
+  const drafts: DraftContext[] = [];
+  for (let i = 0; i < studentIds.length; i += 6) {
+    const chunk = await Promise.all(studentIds.slice(i, i + 6).map((studentId) =>
+      loadDraft({ ...body, organizationId, studentId, periodStart, periodEnd })));
+    drafts.push(...chunk);
+  }
+  return { drafts: drafts.filter((draft) => draft.lines.length || draft.reviewSessionIds.length) };
 }
 
 function digestPayload(draft: DraftContext, userId: string) {
@@ -291,13 +321,101 @@ async function renderDraftPdf(draft: DraftContext, invoiceNumber: string, previe
   });
 }
 
+async function issueAndSendDraft(draft: DraftContext, userId: string, previewToken: string) {
+  if (!draft.profile) throw new Error('Pirmiausia užpildykite mokyklos sąskaitų rekvizitus.');
+  if (!draft.lines.length) throw new Error('Pasirinktu laikotarpiu nėra patvirtintų apmokestinamų užsiėmimų. Peržiūrėkite lankomumą.');
+  if (draft.reviewSessionIds.length) {
+    throw new Error('Prieš išsiunčiant patvirtinkite peržiūros laukiančių užsiėmimų įvykimą arba neįtraukite jų į sąskaitą ir nurodykite priežastį.');
+  }
+  if (!String(draft.student.payer_email || '').trim()) {
+    throw new Error('Mokėtojo el. paštas nenurodytas. Pridėkite jį mokinio kortelėje; sąskaita vaikui nesiunčiama.');
+  }
+  const token = previewDigest(digestPayload(draft, userId));
+  if (!safeTokenEqual(String(previewToken || ''), token)) {
+    throw new Error('Sąskaitos duomenys pasikeitė. Peržiūrėkite ją dar kartą.');
+  }
+  const supabase = serviceSupabase();
+  const { data: existing } = await supabase.from('school_monthly_invoices')
+    .select('id, invoice_number').eq('student_id', draft.student.id)
+    .eq('period_start', draft.periodStart).is('contract_id', null).maybeSingle();
+  if (existing) throw new Error(`Šio laikotarpio sąskaita jau suformuota (${existing.invoice_number || existing.id}).`);
+  const invoiceNumber = await allocateInvoiceNumber(supabase, draft.profile.id);
+  const pdf = await renderDraftPdf(draft, invoiceNumber, false);
+  const { data: invoice, error: invoiceError } = await supabase.from('school_monthly_invoices').insert({
+    organization_id: draft.organizationId,
+    contract_id: null,
+    student_id: draft.student.id,
+    period_start: draft.periodStart,
+    period_end: draft.periodEnd,
+    unit_price_eur: 0,
+    base_lessons: 0,
+    base_amount_eur: 0,
+    extra_lessons: 0,
+    extra_amount_eur: 0,
+    subtotal_eur: draft.subtotalEur,
+    discount_amount_eur: draft.discountAmountEur,
+    discount_note: discountNotesForInvoice(draft.lines),
+    total_eur: draft.totalEur,
+    extra_session_ids: [],
+    billing_model: 'actual',
+    billed_session_ids: draft.lines.flatMap((line) => line.sessionIds),
+    payment_status: 'pending',
+    due_date: draft.dueDate,
+    invoice_number: invoiceNumber,
+  }).select('*').single();
+  if (invoiceError || !invoice) throw new Error(invoiceError?.message || 'Nepavyko sukurti sąskaitos.');
+  const lineRows = draft.lines.map((line, index) => ({
+    invoice_id: invoice.id,
+    sort_order: index,
+    description: line.description,
+    unit_price_eur: line.unitPriceEur,
+    quantity: line.quantity,
+    original_amount_eur: line.originalAmountEur,
+    discount_type: line.discountType,
+    discount_value: line.discountValue,
+    discount_amount_eur: line.discountAmountEur,
+    discount_note: line.discountNote,
+    amount_eur: line.amountEur,
+    source: line.source,
+    consultation_id: null,
+    session_id: line.sessionIds[0] || null,
+    session_ids: line.sessionIds,
+  }));
+  const { error: lineError } = await supabase.from('school_monthly_invoice_lines').insert(lineRows);
+  if (lineError) throw new Error(lineError.message);
+  const storagePath = `school-monthly/${draft.organizationId}/${invoice.id}.pdf`;
+  const { error: uploadError } = await supabase.storage.from('invoices')
+    .upload(storagePath, pdf, { contentType: 'application/pdf', upsert: true });
+  if (uploadError) throw new Error(uploadError.message);
+  await supabase.from('school_monthly_invoices').update({ pdf_path: storagePath }).eq('id', invoice.id);
+  invoice.pdf_path = storagePath;
+  const apiOrigin = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : (process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt');
+  const delivery = await sendSchoolMonthlyInvoiceEmail(supabase, invoice, {
+    apiOrigin,
+    publicOrigin: publicAppOrigin(),
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+    student: draft.student,
+    org: draft.org,
+    contract: {},
+    lines: lineRows,
+  });
+  return {
+    invoiceId: invoice.id,
+    invoiceNumber,
+    emailSent: Boolean(delivery.sent || delivery.alreadySent),
+    deliveryReason: delivery.reason,
+  };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const auth = await requireConsultationsAuth(req);
   if (!auth?.userId) return res.status(401).json({ error: 'Unauthorized' });
   const body = (req.body || {}) as RequestBody;
   const organizationId = String(body.organizationId || '').trim();
-  const gate = await assertOrgConsultationsEnabled(serviceSupabase(), organizationId);
+  const gate = await assertSchoolMonthlyInvoiceEnabled(serviceSupabase(), organizationId);
   if (gate.ok === false) return res.status(gate.status).json({ error: gate.error });
   const accessResult = await requireOrgAdminAccess(req, serviceSupabase(), 'finance.view');
   if (accessResult.ok === false) return res.status(accessResult.status).json({ error: accessResult.error });
@@ -307,11 +425,89 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const canEditBilling = hasOrgAdminPermission(access.role, access.permissions, 'finance.edit');
   const canEditAttendance = hasOrgAdminPermission(access.role, access.permissions, 'sessions.edit');
-  if (['send', 'billing-decision'].includes(body.action || '') && !canEditBilling) {
+  if (['send', 'send-batch', 'billing-decision'].includes(body.action || '') && !canEditBilling) {
     return res.status(403).json({ error: 'Insufficient organization permission' });
   }
 
   try {
+    if (body.action === 'batch-preview' || body.action === 'send-batch') {
+      const { drafts } = await loadBatchDrafts(body);
+      const students = drafts.map((draft) => {
+        const alreadyIssued = draft.sessions.some((session) => session.alreadyInvoiced) && !draft.lines.length
+          ? true
+          : false;
+        const issuedForPeriod = !draft.lines.length && draft.sessions.every((session) => session.alreadyInvoiced || session.reason === 'already_invoiced');
+        const row = {
+          studentId: draft.student.id,
+          fullName: String(draft.student.full_name || ''),
+          grade: draft.student.grade || null,
+          totalEur: draft.totalEur,
+          lessonCount: draft.lines.reduce((sum, line) => sum + line.quantity, 0),
+          reviewSessionIds: draft.reviewSessionIds,
+          alreadyIssued: issuedForPeriod || alreadyIssued,
+          payerEmail: String(draft.student.payer_email || '').trim(),
+          payerName: String(draft.student.payer_name || draft.student.full_name || ''),
+          previewToken: previewDigest(digestPayload(draft, auth.userId)),
+        };
+        return { draft, row };
+      });
+      const payers = groupSchoolPayerInvoicePreviews(students.map((item) => item.row));
+      if (body.action === 'batch-preview') {
+        return res.status(200).json({
+          ok: true,
+          organizationName: drafts[0]?.org.name || '',
+          periodStart: drafts[0]?.periodStart || body.periodStart,
+          periodEnd: drafts[0]?.periodEnd || body.periodEnd,
+          dueDate: drafts[0]?.dueDate || body.dueDate,
+          canEditBilling,
+          payers,
+        });
+      }
+      if (!drafts[0]?.profile) throw new Error('Pirmiausia užpildykite mokyklos sąskaitų rekvizitus.');
+      const requested = new Set((body.studentIds || []).map(String).filter(Boolean));
+      const payerKey = String(body.payerKey || '').trim();
+      const selected = students.filter((item) => {
+        if (payerKey && schoolPayerKey(item.row.payerEmail, item.row.studentId) !== payerKey) return false;
+        if (requested.size && !requested.has(item.row.studentId)) return false;
+        return schoolStudentInvoiceSendable(item.row);
+      });
+      if (!selected.length) throw new Error('Nėra paruoštų sąskaitų siuntimui. Patikrinkite mokėtojus ir lankomumą.');
+      const tokens = body.previewTokens || {};
+      const sent: Array<{ studentId: string; invoiceNumber: string; emailSent: boolean; payerEmail: string }> = [];
+      const skipped: Array<{ studentId: string; error: string }> = [];
+      for (const item of selected) {
+        const previewToken = String(tokens[item.row.studentId] || '');
+        if (!previewToken) {
+          skipped.push({
+            studentId: item.row.studentId,
+            error: 'Sąskaitos duomenys pasikeitė. Peržiūrėkite ją dar kartą.',
+          });
+          continue;
+        }
+        try {
+          const result = await issueAndSendDraft(item.draft, auth.userId, previewToken);
+          sent.push({
+            studentId: item.row.studentId,
+            invoiceNumber: result.invoiceNumber,
+            emailSent: result.emailSent,
+            payerEmail: item.row.payerEmail,
+          });
+        } catch (error) {
+          skipped.push({
+            studentId: item.row.studentId,
+            error: error instanceof Error ? error.message : 'Nepavyko išsiųsti sąskaitos.',
+          });
+        }
+      }
+      return res.status(sent.length ? 200 : 400).json({
+        ok: sent.length > 0,
+        sentCount: sent.length,
+        skippedCount: skipped.length,
+        sent,
+        skipped,
+      });
+    }
+
     const draft = await loadDraft(body);
     const reviewData = (current: DraftContext) => ({
       ok: true,
@@ -381,94 +577,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
     if (body.action !== 'send') return res.status(400).json({ error: 'Nežinomas veiksmas.' });
-    if (draft.reviewSessionIds.length) {
-      return res.status(409).json({ error: 'Prieš išsiunčiant patvirtinkite peržiūros laukiančių užsiėmimų įvykimą arba neįtraukite jų į sąskaitą ir nurodykite priežastį.' });
+    try {
+      const result = await issueAndSendDraft(draft, auth.userId, String(body.previewToken || ''));
+      return res.status(result.emailSent ? 200 : 202).json({
+        ok: true,
+        invoiceId: result.invoiceId,
+        invoiceNumber: result.invoiceNumber,
+        emailSent: result.emailSent,
+        deliveryReason: result.deliveryReason,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Nepavyko išsiųsti sąskaitos.';
+      const conflict = /pasikeitė|jau suformuota|patvirtinkite/i.test(message);
+      return res.status(conflict ? 409 : 400).json({ error: message });
     }
-    if (!String(draft.student.payer_email || '').trim()) {
-      return res.status(400).json({ error: 'Mokėtojo el. paštas nenurodytas. Pridėkite jį mokinio kortelėje; sąskaita vaikui nesiunčiama.' });
-    }
-    if (!safeTokenEqual(String(body.previewToken || ''), token)) {
-      return res.status(409).json({ error: 'Sąskaitos duomenys pasikeitė. Peržiūrėkite ją dar kartą.' });
-    }
-
-    const supabase = serviceSupabase();
-    const { data: existing } = await supabase.from('school_monthly_invoices')
-      .select('id, invoice_number').eq('student_id', draft.student.id)
-      .eq('period_start', draft.periodStart).is('contract_id', null).maybeSingle();
-    if (existing) return res.status(409).json({ error: `Šio laikotarpio sąskaita jau suformuota (${existing.invoice_number || existing.id}).` });
-
-    const invoiceNumber = await allocateInvoiceNumber(supabase, draft.profile.id);
-    const pdf = await renderDraftPdf(draft, invoiceNumber, false);
-    const { data: invoice, error: invoiceError } = await supabase.from('school_monthly_invoices').insert({
-      organization_id: draft.organizationId,
-      contract_id: null,
-      student_id: draft.student.id,
-      period_start: draft.periodStart,
-      period_end: draft.periodEnd,
-      unit_price_eur: 0,
-      base_lessons: 0,
-      base_amount_eur: 0,
-      extra_lessons: 0,
-      extra_amount_eur: 0,
-      subtotal_eur: draft.subtotalEur,
-      discount_amount_eur: draft.discountAmountEur,
-      discount_note: discountNotesForInvoice(draft.lines),
-      total_eur: draft.totalEur,
-      extra_session_ids: [],
-      billing_model: 'actual',
-      billed_session_ids: draft.lines.flatMap((line) => line.sessionIds),
-      payment_status: 'pending',
-      due_date: draft.dueDate,
-      invoice_number: invoiceNumber,
-    }).select('*').single();
-    if (invoiceError || !invoice) throw new Error(invoiceError?.message || 'Nepavyko sukurti sąskaitos.');
-
-    const lineRows = draft.lines.map((line, index) => ({
-      invoice_id: invoice.id,
-      sort_order: index,
-      description: line.description,
-      unit_price_eur: line.unitPriceEur,
-      quantity: line.quantity,
-      original_amount_eur: line.originalAmountEur,
-      discount_type: line.discountType,
-      discount_value: line.discountValue,
-      discount_amount_eur: line.discountAmountEur,
-      discount_note: line.discountNote,
-      amount_eur: line.amountEur,
-      source: line.source,
-      consultation_id: null,
-      session_id: line.sessionIds[0] || null,
-      session_ids: line.sessionIds,
-    }));
-    const { error: lineError } = await supabase.from('school_monthly_invoice_lines').insert(lineRows);
-    if (lineError) throw new Error(lineError.message);
-
-    const storagePath = `school-monthly/${draft.organizationId}/${invoice.id}.pdf`;
-    const { error: uploadError } = await supabase.storage.from('invoices')
-      .upload(storagePath, pdf, { contentType: 'application/pdf', upsert: true });
-    if (uploadError) throw new Error(uploadError.message);
-    await supabase.from('school_monthly_invoices').update({ pdf_path: storagePath }).eq('id', invoice.id);
-    invoice.pdf_path = storagePath;
-
-    const apiOrigin = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : (process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt');
-    const delivery = await sendSchoolMonthlyInvoiceEmail(supabase, invoice, {
-      apiOrigin,
-      publicOrigin: publicAppOrigin(),
-      serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
-      student: draft.student,
-      org: draft.org,
-      contract: {},
-      lines: lineRows,
-    });
-    return res.status(delivery.sent || delivery.alreadySent ? 200 : 202).json({
-      ok: true,
-      invoiceId: invoice.id,
-      invoiceNumber,
-      emailSent: Boolean(delivery.sent || delivery.alreadySent),
-      deliveryReason: delivery.reason,
-    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Nepavyko suformuoti sąskaitos.';
     return res.status(400).json({ error: message });

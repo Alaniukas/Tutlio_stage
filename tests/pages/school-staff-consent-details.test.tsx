@@ -35,4 +35,25 @@ describe('employee staff-document form', () => {
     });
     expect(screen.queryByLabelText('Asmens kodas')).toBeNull();
   });
+
+  it('does not re-ask for address and personal code when the school already entered them', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        employeeName: 'Vardas Pavardė',
+        schoolName: 'Mokykla',
+        needsPersonalDetails: false,
+        detailsHeldBySchool: true,
+      }),
+    })));
+
+    render(<MemoryRouter initialEntries={['/school-staff-consent?token=secret']}>
+      <Routes><Route path="/school-staff-consent" element={<SchoolStaffConsent />} /></Routes>
+    </MemoryRouter>);
+
+    expect(await screen.findByText(/Mokykla jau įrašė gyvenamosios vietos adresą/)).toBeTruthy();
+    expect(screen.queryByLabelText('Gyvenamosios vietos adresas')).toBeNull();
+    expect(screen.queryByLabelText('Asmens kodas')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Išsaugoti pasirinkimus' }) as HTMLButtonElement).disabled).toBe(true);
+  });
 });

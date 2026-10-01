@@ -18,6 +18,7 @@ import { proKlaseSessionPayEur } from '@/lib/proKlaseTutorPay';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isInvoiceProfileComplete, ORG_INVOICE_PROFILE_INCOMPLETE } from '@/lib/invoiceProfileReady';
 import { schoolTutorPayOccurrences } from '@/lib/schoolTutorLessonPay';
+import { resolveSchoolTutorGroupPayRate } from '@/lib/schoolTutorDefaultPay';
 import { fetchSchoolTutorAttendancePayRows } from '@/lib/schoolTutorAttendancePay';
 import { orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import { fetchAllRows } from '@/lib/fetchAllRows';
@@ -262,8 +263,9 @@ export default function CreateInvoiceModal({
             .lte('end_time', new Date().toISOString());
           return schoolPayMode ? query.eq('students.organization_id', schoolOrganizationId) : query.in('status', ['completed', 'no_show']);
         };
-        const [{ data: prof, error: profErr }, { data: sessRows, error: sessErr }, attendanceRows] = await Promise.all([
-          supabase.from('profiles').select('organization_id, company_commission_percent, company_commission_by_subject').eq('id', tutorId).maybeSingle(),
+        const [{ data: prof, error: profErr }, { data: orgRow }, { data: sessRows, error: sessErr }, attendanceRows] = await Promise.all([
+          supabase.from('profiles').select('organization_id, company_commission_percent, company_individual_commission_percent, company_commission_by_subject').eq('id', tutorId).maybeSingle(),
+          supabase.from('organizations').select('default_company_commission_percent').eq('id', schoolOrganizationId || '').maybeSingle(),
           schoolPayMode
             ? fetchAllRows<any>((from, to) => sessionQuery().order('start_time').order('id').range(from, to))
               .then(data => ({ data, error: null }))
@@ -275,13 +277,19 @@ export default function CreateInvoiceModal({
         if (sessErr) throw sessErr;
         if (schoolPayMode && (profErr || !prof)) throw profErr || new Error(t('common.error'));
         const orgId = (prof as any)?.organization_id as string | undefined;
-        const tutorPayRate = Number((prof as any)?.company_commission_percent) || 0;
+        const tutorPayRate = resolveSchoolTutorGroupPayRate({
+          tutorRate: (prof as { company_commission_percent?: number | null } | null)?.company_commission_percent,
+          orgDefaultRate: (orgRow as { default_company_commission_percent?: number | null } | null)?.default_company_commission_percent,
+          organizationId: orgId,
+        }) ?? 0;
         const proKlasePay = isProKlaseOrg(orgId);
         const rows = schoolPayMode
           ? schoolTutorPayOccurrences([...(sessRows || []), ...attendanceRows] as any[], tutorPayRate, new Date(), {
             requireConfirmation: orgRequiresTutorStatusConfirmation(orgId, {
               tutor_lesson_status_confirmation: hasFeature('tutor_lesson_status_confirmation'),
             }),
+            individualRate: (prof as { company_individual_commission_percent?: number | null } | null)
+              ?.company_individual_commission_percent,
           }).map((occurrence) => ({
             ...occurrence.row,
             price: occurrence.payEur,

@@ -237,21 +237,13 @@ describe('school teacher Finance', () => {
   it.each([
     { name: 'Laisvi vaikai', organizationId: '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17', feature: false },
     { name: 'a school using the confirmation feature', organizationId: 'school', feature: true },
-  ])('shows no $name earnings until a teacher or admin confirms the outcome', async ({ organizationId, feature }) => {
+  ])('counts stored completed $name meetings even without a confirmation stamp', async ({ organizationId, feature }) => {
     state.organizationId = organizationId;
     state.manualConfirmation = feature;
     state.rate = 45;
-    state.rows.forEach((row, index) => { row.status_confirmed_at = null; row.tutor_pay_eur_snapshot = index === 0 ? 45 : 90; });
+    state.rows.forEach((row) => { row.status_confirmed_at = null; row.tutor_pay_eur_snapshot = 45; });
     render(<OrgTutorFinanceSummary />);
-    let label = await screen.findByText(/^orgFinance.schoolFinalizedLessons/);
-    expect(label.nextElementSibling?.textContent).toBe('0');
-    expect(screen.queryByText('€45.00')).toBeNull();
-
-    cleanup();
-    state.rows[0].status_confirmed_at = '2026-09-15T11:00:00Z';
-    state.rows[0].status_confirmed_by = 'administrator';
-    render(<OrgTutorFinanceSummary />);
-    label = await screen.findByText(/^orgFinance.schoolFinalizedLessons/);
+    const label = await screen.findByText(/^orgFinance.schoolFinalizedLessons/);
     expect(label.nextElementSibling?.textContent).toBe('1');
     expect(screen.getByText('€45.00')).toBeTruthy();
   });
@@ -401,17 +393,10 @@ describe('school teacher invoice preview', () => {
     expect(state.posts.find(row => !row.precheckOnly).sessionIds).toEqual(current.map(row => row.id));
   });
 
-  it('uses a custom school confirmation feature and ignores pending sibling pay snapshots', async () => {
+  it('invoices stored completed meetings without a confirmation stamp', async () => {
     state.manualConfirmation = true;
     state.rate = 45;
-    state.rows.forEach((row, index) => { row.status_confirmed_at = null; row.tutor_pay_eur_snapshot = index === 0 ? 45 : 90; });
-    await preview();
-    expect(await screen.findByText('invoiceCreate.noSessions')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'invoiceCreate.generate' })).toBeNull();
-    expect(state.posts.filter(row => !row.precheckOnly)).toHaveLength(0);
-
-    cleanup();
-    state.rows[0].status_confirmed_at = '2026-09-15T11:00:00Z';
+    state.rows.forEach((row) => { row.status_confirmed_at = null; row.tutor_pay_eur_snapshot = 45; });
     await preview();
     expect(await screen.findByText(/invoiceCreate.sessionsCount:1 \| common.total: €45.00/)).toBeTruthy();
     expect(screen.queryByText('€90.00')).toBeNull();

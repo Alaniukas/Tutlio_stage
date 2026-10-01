@@ -53,6 +53,39 @@ export function shouldReviewStudentAttendanceFromMissingJoin(
   return Number.isFinite(startMs) && now.getTime() > startMs + ATTENDANCE_GRACE_MS;
 }
 
+/**
+ * Actionable unconfirmed attendance: the system saw that the child did not join
+ * an online lesson that the teacher did join, and nobody confirmed the outcome.
+ * Ended lessons without join evidence (for example before the school started
+ * using Tutlio attendance) are not counted.
+ */
+export function isUnconfirmedDetectedStudentAbsence(
+  session: {
+    status?: string | null;
+    no_show_reason?: string | null;
+    status_confirmed_at?: string | null;
+    meeting_link?: string | null;
+    start_time?: string;
+    end_time?: string | null;
+    student_joined_at?: string | null;
+    tutor_joined_at?: string | null;
+  },
+  now: Date = new Date(),
+): boolean {
+  if (session.status_confirmed_at || session.status === 'cancelled') return false;
+  if (session.no_show_reason === NO_SHOW_REASON_MISSED_JOIN || isUnconfirmedAutomaticNoShow(session)) return true;
+  if (!session.start_time) return false;
+  return shouldReviewStudentAttendanceFromMissingJoin({
+    id: 'review',
+    start_time: session.start_time,
+    end_time: session.end_time,
+    meeting_link: session.meeting_link,
+    status: 'active',
+    student_joined_at: session.student_joined_at,
+    tutor_joined_at: session.tutor_joined_at,
+  }, now);
+}
+
 export function orgHasJoinNoShow(features: Record<string, unknown> | null | undefined): boolean {
   return features?.school_join_no_show === true;
 }

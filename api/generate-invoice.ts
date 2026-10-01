@@ -28,6 +28,7 @@ import {
 } from './_lib/pvmEducationInvoice.js';
 import { isInvoiceProfileComplete, ORG_INVOICE_PROFILE_INCOMPLETE } from './_lib/invoiceProfileReady.js';
 import { fetchAllRows } from '../src/lib/fetchAllRows.js';
+import { resolveSchoolTutorGroupPayRate } from '../src/lib/schoolTutorDefaultPay.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -106,7 +107,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id, full_name, email, phone, organization_id, company_commission_percent, company_commission_by_subject')
+      .select('id, full_name, email, phone, organization_id, company_commission_percent, company_individual_commission_percent, company_commission_by_subject')
       .eq('id', tutorId)
       .single();
 
@@ -138,7 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let schoolOrg: any = null;
     let schoolOrgInvoiceProfile: any = null;
     if (isOrgTutor && profile.organization_id) {
-      const { data, error } = await supabase.from('organizations').select('entity_type,name,email,features')
+      const { data, error } = await supabase.from('organizations').select('entity_type,name,email,features,default_company_commission_percent')
         .eq('id', profile.organization_id).maybeSingle();
       if (error || !data?.entity_type) return res.status(503).json({ error: 'Organization invoice policy unavailable' });
       schoolTutorInvoice = data.entity_type === 'school';
@@ -232,7 +233,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let occurrences;
       try {
         occurrences = await loadSchoolTutorInvoiceRows(supabase, sessionSelect, { tutorId, periodStart, periodEnd,
-          sessionIds: body.sessionIds, attendanceIds: body.attendanceIds, studentId, defaultRate: profile.company_commission_percent, now: new Date(),
+          sessionIds: body.sessionIds, attendanceIds: body.attendanceIds, studentId, defaultRate: resolveSchoolTutorGroupPayRate({
+            tutorRate: profile.company_commission_percent,
+            orgDefaultRate: schoolOrg?.default_company_commission_percent,
+            organizationId: profile.organization_id,
+          }),
+          individualRate: (profile as { company_individual_commission_percent?: number | null }).company_individual_commission_percent,
+          now: new Date(),
           organizationId: profile.organization_id, features: schoolOrg?.features });
       } catch (error) {
         if (error instanceof SchoolTutorInvoiceSelectionError) return res.status(409).json({ error: error.message });

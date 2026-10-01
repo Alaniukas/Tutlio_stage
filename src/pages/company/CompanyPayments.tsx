@@ -28,7 +28,7 @@ import { useTranslation } from '@/lib/i18n';
 import { useSchoolPaymentsData, type SchoolPaymentInstallment } from '@/hooks/useSchoolPaymentsData';
 import { format } from 'date-fns';
 import SchoolMonthlyInvoiceDialog from '@/components/school/SchoolMonthlyInvoiceDialog';
-import { schoolConsultationsEnabled } from '@/lib/schoolConsultationsOrg';
+import { schoolMonthlyInvoicesEnabled } from '@/lib/schoolConsultationsOrg';
 
 interface NewInstallmentRow {
   amount: string;
@@ -62,7 +62,7 @@ export default function CompanyPayments() {
   const [collapsedContracts, setCollapsedContracts] = useState<Record<string, boolean>>({});
   const [monthlyInvoiceOpen, setMonthlyInvoiceOpen] = useState(false);
 
-  const monthlyInvoicesEnabled = schoolConsultationsEnabled(orgId, orgFeatures);
+  const monthlyInvoicesEnabled = schoolMonthlyInvoicesEnabled(orgId, orgFeatures, 'school');
   const monthlyInvoiceStudents = useMemo(() => {
     const unique = new Map<string, { id: string; fullName: string; payerEmail?: string | null }>();
     for (const contract of contracts) {
@@ -258,14 +258,14 @@ export default function CompanyPayments() {
               <span className="rounded-xl bg-emerald-700 p-2.5 text-white shadow-sm"><ReceiptText className="h-5 w-5" /></span>
               <div>
                 <p className="font-semibold text-gray-900">Mėnesinės užsiėmimų sąskaitos</p>
-                <p className="mt-1 max-w-2xl text-sm text-gray-600">Formuokite mėnesinę sąskaitą. Nuolaidų priedai kuriami prie užsiėmimų sutarčių.</p>
+                <p className="mt-1 max-w-2xl text-sm text-gray-600">Kaina = sutarties užsiėmimo kaina × to mėnesio užsiėmimai. Galite siųsti vienam mokėtojui arba visiems; kiekvienas gauna savo vaiko laišką.</p>
               </div>
             </div>
             <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
               <Button
                 type="button"
                 className="gap-2 bg-emerald-700 hover:bg-emerald-800"
-                disabled={monthlyInvoiceStudents.length === 0}
+                disabled={!orgId}
                 onClick={() => setMonthlyInvoiceOpen(true)}
               >
                 <Plus className="h-4 w-4" /> Formuoti mėnesinę sąskaitą
@@ -449,6 +449,7 @@ export default function CompanyPayments() {
       {monthlyInvoicesEnabled && orgId && (
         <>
           <SchoolMonthlyInvoiceDialog
+            batch
             open={monthlyInvoiceOpen}
             onOpenChange={setMonthlyInvoiceOpen}
             organizationId={orgId}

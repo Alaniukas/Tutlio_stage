@@ -96,6 +96,27 @@ export function isLaisviVaikaiOrg(orgIdOrSlug?: string | null): boolean {
   return key === LAISVI_VAIKIAI_ORG_ID || key === LAISVI_VAIKIAI_SLUG;
 }
 
+/** Bundled staff document templates (Laisvi-style legal DOCX) — prod + Demo Mokykla QA. */
+export function isStaffDocumentsOrg(orgIdOrSlug?: string | null): boolean {
+  if (!orgIdOrSlug) return false;
+  const key = orgIdOrSlug.trim().toLowerCase();
+  return (
+    key === LAISVI_VAIKIAI_ORG_ID
+    || key === LAISVI_VAIKIAI_SLUG
+    || key === DEMO_MOKYKLA_ORG_ID
+    || key === DEMO_MOKYKLA_SLUG
+  );
+}
+
+export function staffDocumentsFeatureEnabled(
+  orgIdOrSlug: string | null | undefined,
+  features: Record<string, unknown> | null | undefined,
+): boolean {
+  return isStaffDocumentsOrg(orgIdOrSlug)
+    && features?.school_staff_documents === true
+    && features?.school_contract_esign === true;
+}
+
 export function isMoksloVaisiaiOrg(orgIdOrSlug?: string | null): boolean {
   if (!orgIdOrSlug) return false;
   const key = orgIdOrSlug.trim().toLowerCase();

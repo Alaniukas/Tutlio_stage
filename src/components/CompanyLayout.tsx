@@ -39,7 +39,7 @@ import { useUser } from '@/contexts/UserContext';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { useSchoolTerminology } from '@/hooks/useSchoolTerminology';
 import { showDynamicPricingNav } from '@/lib/orgIntakeMode';
-import { isInstructionsHiddenForOrg, LAISVI_VAIKIAI_ORG_ID } from '@/lib/marketMoney';
+import { isInstructionsHiddenForOrg, isStaffDocumentsOrg } from '@/lib/marketMoney';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import type { OrgAdminPermission } from '@/lib/orgAdminPermissions';
 import SupportRobotIcon from '@/components/support/SupportRobotIcon';
@@ -191,7 +191,7 @@ export default function CompanyLayout() {
         showInstructions,
         hasFeature('school_class_groups'),
         SCHOOL_LESSON_RECORDINGS_NAV_READY && isSchool && hasFeature('school_lesson_recordings'),
-        isSchool && organizationId === LAISVI_VAIKIAI_ORG_ID && hasFeature('school_staff_documents'),
+        isSchool && isStaffDocumentsOrg(organizationId) && hasFeature('school_staff_documents'),
         isSchool && hasFeature('school_family_portal'),
       )
       .filter((item) => item.permission === null || can(item.permission)),

@@ -63,15 +63,20 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] },
             },
           },
+          // Auth tokens must never be cached or served stale by the SW.
+          {
+            urlPattern: /^https:\/\/[^/]+\.supabase\.co\/auth\/v1\//i,
+            handler: 'NetworkOnly',
+          },
           // Storage object GET/POST must not be served stale from SW during whiteboard collaboration.
           {
             urlPattern: /^https:\/\/[^/]+\.supabase\.co\/storage\/v1\//i,
             handler: 'NetworkOnly',
           },
           {
-            urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
+            urlPattern: /^https:\/\/[^/]+\.supabase\.co\/rest\/v1\//i,
             handler: 'NetworkFirst',
-            options: { cacheName: 'supabase-api', expiration: { maxEntries: 50, maxAgeSeconds: 300 } },
+            options: { cacheName: 'supabase-rest', expiration: { maxEntries: 50, maxAgeSeconds: 300 } },
           },
         ],
       },

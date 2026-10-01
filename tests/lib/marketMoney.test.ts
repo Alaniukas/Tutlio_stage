@@ -4,12 +4,14 @@ import {
   DEMO_MOKYKLA_SLUG,
   isLaisviVaikaiOrg,
   isProKlaseOrg,
+  isStaffDocumentsOrg,
   LAISVI_VAIKIAI_ORG_ID,
   LAISVI_VAIKIAI_SLUG,
   orgInstructionVideoUrl,
   PRO_KLASE_ORG_ID,
   PRO_KLASE_QA_ORG_ID,
   SCHOOL_ADMIN_INSTRUCTION_VIDEO_URL,
+  staffDocumentsFeatureEnabled,
 } from '../../src/lib/marketMoney';
 
 describe('isProKlaseOrg', () => {
@@ -36,6 +38,26 @@ describe('isLaisviVaikaiOrg', () => {
     expect(isLaisviVaikaiOrg('Laisvi-Vaikai')).toBe(true);
     expect(isLaisviVaikaiOrg(DEMO_MOKYKLA_ORG_ID)).toBe(false);
     expect(isLaisviVaikaiOrg(null)).toBe(false);
+  });
+});
+
+describe('isStaffDocumentsOrg', () => {
+  it('includes Laisvi vaikai and Demo Mokykla for bundled templates', () => {
+    expect(isStaffDocumentsOrg(LAISVI_VAIKIAI_ORG_ID)).toBe(true);
+    expect(isStaffDocumentsOrg(DEMO_MOKYKLA_ORG_ID)).toBe(true);
+    expect(isStaffDocumentsOrg(DEMO_MOKYKLA_SLUG)).toBe(true);
+    expect(isStaffDocumentsOrg(PRO_KLASE_ORG_ID)).toBe(false);
+  });
+
+  it('requires both staff-documents and e-sign flags', () => {
+    expect(staffDocumentsFeatureEnabled(DEMO_MOKYKLA_ORG_ID, {
+      school_staff_documents: true,
+      school_contract_esign: true,
+    })).toBe(true);
+    expect(staffDocumentsFeatureEnabled(DEMO_MOKYKLA_ORG_ID, {
+      school_staff_documents: true,
+      school_contract_esign: false,
+    })).toBe(false);
   });
 });
 

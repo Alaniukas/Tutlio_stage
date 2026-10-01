@@ -139,9 +139,63 @@ interface Contract {
   class_group_id?: string | null;
   suspension_scope?: 'individual' | 'group_under_minimum' | null;
   class_group?: { name?: string | null; tutor?: { full_name?: string | null } | null } | null;
+  discount_agreements?: ContractDiscountAgreement[];
   signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null; manually_marked_at?: string | null; signed_pdf_path?: string | null }[];
   installments?: { installment_number: number; amount: number; due_date: string | null; payment_status: string | null }[];
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null; media_publicity_consent?: string | null };
+}
+
+interface ContractDiscountAgreement {
+  id: string;
+  contract_id?: string;
+  agreement_number: string;
+  activity_label?: string | null;
+  discount_type: 'percent' | 'amount';
+  discount_value: number;
+  valid_from: string;
+  valid_until: string;
+  status: 'pending' | 'accepted' | 'cancelled' | 'expired';
+  pdf_path?: string | null;
+}
+
+const discountAgreementStatusLabel: Record<ContractDiscountAgreement['status'], string> = {
+  pending: 'Laukia tėvų patvirtinimo',
+  accepted: 'Patvirtinta',
+  expired: 'Nebegalioja',
+  cancelled: 'Atšaukta',
+};
+
+function discountAgreementValueLabel(agreement: ContractDiscountAgreement): string {
+  const value = Number(agreement.discount_value);
+  const formatted = Number.isFinite(value) ? value.toLocaleString('lt-LT') : String(agreement.discount_value);
+  return agreement.discount_type === 'percent' ? `${formatted} %` : `${formatted} €`;
+}
+
+async function loadDiscountAgreementsByContract(organizationId: string): Promise<Map<string, ContractDiscountAgreement[]>> {
+  const byContract = new Map<string, ContractDiscountAgreement[]>();
+  const { data, error } = await supabase
+    .from('school_discount_agreements')
+    .select('id, contract_id, agreement_number, activity_label, discount_type, discount_value, valid_from, valid_until, status, pdf_path, created_at')
+    .eq('organization_id', organizationId)
+    .order('created_at', { ascending: false });
+  if (error) {
+    console.error('[CompanyContracts] discount agreements failed:', error.message);
+    return byContract;
+  }
+  for (const row of (data || []) as ContractDiscountAgreement[]) {
+    if (!row.contract_id) continue;
+    const list = byContract.get(row.contract_id) || [];
+    list.push(row);
+    byContract.set(row.contract_id, list);
+  }
+  return byContract;
+}
+
+function withDiscountAgreements(contracts: Contract[], byContract: Map<string, ContractDiscountAgreement[]>): Contract[] {
+  return contracts.map((contract) => ({
+    ...contract,
+    discount_agreements: byContract.get(contract.id) || [],
+  }));
 }
 
 interface InstallmentDraft {
@@ -378,7 +432,7 @@ export default function CompanyContracts() {
     ]);
 
     const tData = tRes.data || [];
-    const cData = cRes.data || [];
+    const cData = withDiscountAgreements(cRes.data || [], await loadDiscountAgreementsByContract(admin.organization_id));
     const sData = sRes.data || [];
     setTemplates(tData);
     setContracts(cData);
@@ -421,7 +475,7 @@ export default function CompanyContracts() {
       console.error('[CompanyContracts] background contract refresh failed:', error.message);
       return;
     }
-    const nextContracts = (data || []) as Contract[];
+    const nextContracts = withDiscountAgreements((data || []) as Contract[], await loadDiscountAgreementsByContract(orgId));
     setContracts(nextContracts);
     const cached = getCached<any>(CONTRACTS_CACHE_KEY);
     if (cached) setCache(CONTRACTS_CACHE_KEY, { ...cached, contracts: nextContracts });
@@ -1808,15 +1862,11 @@ export default function CompanyContracts() {
       setTerminationImpact(null);
       setTerminationGroupConfirmed(false);
       const groupWasNewlySuspended = body.groupJustSuspended === true;
-      const notificationsIncomplete = groupWasNewlySuspended
-        && Number(body.notificationsSent || 0) < Number(body.notificationsAttempted || 0);
       setToast({
         message: groupWasNewlySuspended
-          ? notificationsIncomplete || Number(body.notificationsAttempted || 0) === 0
-            ? `Sutartis nutraukta ir grupė „${body.groupName || terminationImpact?.groupName || ''}“ sustabdyta. Ne visoms šeimoms pavyko išsiųsti pranešimą, todėl jas reikia informuoti rankiniu būdu.`
-            : `Sutartis nutraukta. Grupė „${body.groupName || terminationImpact?.groupName || ''}“ automatiškai sustabdyta, šeimos informuotos.`
+          ? `Sutartis nutraukta. Grupė „${body.groupName || terminationImpact?.groupName || ''}“ automatiškai sustabdyta. Šeimos neinformuotos.`
           : 'Sutartis nutraukta. Mokinio prieiga prie užsiėmimų ir būsimas skaičiavimas sustabdyti.',
-        type: notificationsIncomplete || (groupWasNewlySuspended && Number(body.notificationsAttempted || 0) === 0) ? 'warning' : 'success',
+        type: 'success',
       });
       reload();
     } catch (error) {
@@ -1850,19 +1900,15 @@ export default function CompanyContracts() {
       setSuspensionReason('');
       setSuspensionUntil('');
       const groupWasNewlySuspended = body.groupJustSuspended === true;
-      const notificationsIncomplete = groupWasNewlySuspended
-        && Number(body.notificationsSent || 0) < Number(body.notificationsAttempted || 0);
       setToast({
         message: action === 'suspend'
           ? groupWasNewlySuspended
-            ? notificationsIncomplete || Number(body.notificationsAttempted || 0) === 0
-              ? `Sutartis ir grupė „${body.groupName || ''}“ sustabdyta, nes liko mažiau nei ${body.minimumStudentCount || 3} aktyvūs mokiniai. Ne visas šeimas pavyko informuoti el. paštu.`
-              : `Sutartis ir grupė „${body.groupName || ''}“ sustabdyta, nes liko mažiau nei ${body.minimumStudentCount || 3} aktyvūs mokiniai. Šeimos informuotos.`
+            ? `Sutartis ir grupė „${body.groupName || ''}“ sustabdyta, nes liko mažiau nei ${body.minimumStudentCount || 3} aktyvūs mokiniai. Šeimos neinformuotos.`
             : 'Sutartis sustabdyta. Prieiga, priminimai ir naujas skaičiavimas pristabdyti.'
           : body.groupResumed
             ? `Grupė „${body.groupName || ''}“ ir jos sutartys atnaujintos.`
             : 'Sutarties vykdymas atnaujintas.',
-        type: notificationsIncomplete || (groupWasNewlySuspended && Number(body.notificationsAttempted || 0) === 0) ? 'warning' : 'success',
+        type: 'success',
       });
       reload();
     } catch (error) {
@@ -2476,6 +2522,26 @@ export default function CompanyContracts() {
                           {c.order_snapshot?.schedule_label || null}
                         </p>
                       )}
+                      {(c.discount_agreements || []).length > 0 && (
+                        <div className="mt-2 space-y-1.5">
+                          {c.discount_agreements!.map((agreement) => (
+                            <div key={agreement.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+                              <span className="font-medium">Nuolaidos priedas {agreement.agreement_number}</span>
+                              {agreement.activity_label && <span>{agreement.activity_label}</span>}
+                              <span>{discountAgreementValueLabel(agreement)}</span>
+                              <span className={agreement.status === 'accepted' ? 'font-semibold text-emerald-800' : agreement.status === 'pending' ? 'font-semibold text-amber-800' : 'text-slate-600'}>
+                                {discountAgreementStatusLabel[agreement.status] || agreement.status}
+                              </span>
+                              <span className="text-xs text-emerald-900">{agreement.valid_from} - {agreement.valid_until}</span>
+                              {agreement.pdf_path && (
+                                <button type="button" className="text-xs font-semibold underline" onClick={() => { void openContractFile(agreement.pdf_path); }}>
+                                  Atidaryti priedą
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {(c.installments || []).length > 0 && (
                         <p className="text-xs text-gray-500 mt-1">
                           <span className="font-medium text-gray-600">{tr('school.installmentsLabel')}</span>{' '}
@@ -2863,7 +2929,7 @@ export default function CompanyContracts() {
           contractId={discountContract.id}
           contractAccepted={Boolean(discountContract.accepted_at)}
           lockStudent
-          onSaved={(message, type) => setToast({ message, type })}
+          onSaved={(message, type) => { setToast({ message, type }); reload(); }}
         />
       )}
 

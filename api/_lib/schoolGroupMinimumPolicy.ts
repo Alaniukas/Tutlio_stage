@@ -10,7 +10,6 @@ import {
   type SchoolGroupContractState,
 } from '../../src/lib/schoolGroupMinimumPolicy.js';
 import { isSchoolContractSuspended } from '../../src/lib/schoolContractLifecycle.js';
-import { internalApiOrigin } from './extraLessonsContractShared.js';
 import { materializeClassGroupNow } from './schoolClassGroupMaterialize.js';
 import { syncSchoolContractGroupMembership } from './schoolGroupMembership.js';
 import { isArchivedEnrollmentStatus } from '../../src/lib/schoolStudentEnrollment.js';
@@ -117,72 +116,6 @@ export async function previewSchoolGroupContractExit(
   };
 }
 
-async function sendGroupSuspensionEmails(
-  req: VercelRequest,
-  supabase: SupabaseClient,
-  context: SchoolGroupMinimumContext,
-  reason: string,
-  activeStudentCount: number,
-): Promise<{ sent: number; attempted: number }> {
-  const { data: organization } = await supabase.from('organizations')
-    .select('name, email')
-    .eq('id', context.group.organization_id)
-    .maybeSingle();
-  const deliveries: Array<{ to: string; parentName: string; studentName: string }> = [];
-  const seen = new Set<string>();
-  for (const contract of rosterContracts(context)) {
-    if (!isEligibleSchoolGroupContract(contract) || !contract.student_id) continue;
-    const student = contract.student;
-    const recipients = [
-      { email: student?.payer_email, name: student?.payer_name },
-      { email: student?.parent_secondary_email, name: student?.parent_secondary_name },
-      ...(!student?.payer_email && !student?.parent_secondary_email
-        ? [{ email: student?.email, name: student?.full_name }]
-        : []),
-    ];
-    for (const recipient of recipients) {
-      const email = String(recipient.email || '').trim().toLowerCase();
-      const key = `${contract.student_id}:${email}`;
-      if (!email || seen.has(key)) continue;
-      seen.add(key);
-      deliveries.push({
-        to: email,
-        parentName: String(recipient.name || student?.full_name || '').trim(),
-        studentName: String(student?.full_name || '').trim(),
-      });
-    }
-  }
-  const results = await Promise.allSettled(deliveries.map(async (delivery) => {
-    const response = await fetch(`${internalApiOrigin(req)}/api/send-email`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '',
-      },
-      body: JSON.stringify({
-        type: 'school_group_suspended',
-        to: delivery.to,
-        data: {
-          organizationId: context.group.organization_id,
-          schoolName: organization?.name || 'Mokykla',
-          contactEmail: organization?.email || null,
-          parentName: delivery.parentName,
-          studentName: delivery.studentName,
-          groupName: context.group.name,
-          activeStudentCount,
-          minimumStudentCount: schoolGroupMinimumStudents(context.group),
-          reason,
-        },
-      }),
-    });
-    if (!response.ok) throw new Error((await response.text()).slice(0, 300));
-  }));
-  return {
-    sent: results.filter((result) => result.status === 'fulfilled').length,
-    attempted: deliveries.length,
-  };
-}
-
 async function pauseActiveGroupContracts(
   supabase: SupabaseClient,
   context: SchoolGroupMinimumContext,
@@ -213,7 +146,7 @@ async function pauseActiveGroupContracts(
 
 /** Run after the trigger contract has already been suspended or terminated. */
 export async function suspendSchoolGroupIfBelowMinimum(
-  req: VercelRequest,
+  _req: VercelRequest,
   supabase: SupabaseClient,
   params: {
     organizationId: string;
@@ -269,16 +202,17 @@ export async function suspendSchoolGroupIfBelowMinimum(
   if (groupError) throw new Error(groupError.message);
 
   await materializeClassGroupNow(supabase, params.groupId, params.organizationId);
-  const refreshed = await loadSchoolGroupMinimumContext(supabase, params.organizationId, params.groupId) || context;
-  const notificationDelivery = await sendGroupSuspensionEmails(req, supabase, refreshed, reason, activeStudentCount);
+  // Falling under the minimum is an internal redistribution while other
+  // contracts are still being signed. The group and remaining contracts pause,
+  // but families are not emailed.
   return {
     groupSuspended: true,
     groupJustSuspended: true,
     groupName: context.group.name,
     activeStudentCount,
     suspendedContractCount,
-    notificationsSent: notificationDelivery.sent,
-    notificationsAttempted: notificationDelivery.attempted,
+    notificationsSent: 0,
+    notificationsAttempted: 0,
     minimumStudentCount,
   };
 }

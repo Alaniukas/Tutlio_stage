@@ -1,13 +1,46 @@
 import type { VercelRequest, VercelResponse } from './types';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
-import { renderStaffDocumentPdf, validateConsentAnswers, validateStaffPersonalDetails, STAFF_TEMPLATE_ORG_ID } from './_lib/schoolStaffDocuments.js';
+import {
+  renderStaffDocumentPdf,
+  validateConsentAnswers,
+  validateStaffPersonalDetails,
+  isStaffDocumentsOrg,
+  staffPersonalDetailsStoragePath,
+  parseStoredStaffPersonalDetails,
+} from './_lib/schoolStaffDocuments.js';
 import { schoolContractPdfStoragePath, SCHOOL_CONTRACTS_BUCKET } from './_lib/schoolContractPdfPath.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify(body));
+}
+
+async function loadStashedStaffDetails(
+  supabase: SupabaseClient,
+  organizationId: string,
+  confidentialityId: string,
+): Promise<{ address: string; personalCode: string } | null> {
+  const { data, error } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET)
+    .download(staffPersonalDetailsStoragePath(organizationId, confidentialityId));
+  if (error || !data) return null;
+  try {
+    const blob = data as Blob & { arrayBuffer?: () => Promise<ArrayBuffer> };
+    const raw = typeof blob.arrayBuffer === 'function'
+      ? Buffer.from(await blob.arrayBuffer())
+      : Buffer.from(String(data));
+    const parsed = JSON.parse(raw.toString('utf8'));
+    return parseStoredStaffPersonalDetails(parsed);
+  } catch {
+    return null;
+  }
+}
+
+async function previewExists(supabase: SupabaseClient, folder: string): Promise<boolean> {
+  const { data: listed } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET)
+    .list(folder, { search: 'consent-preview.pdf', limit: 5 });
+  return (listed || []).some((file) => file.name === 'consent-preview.pdf');
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -31,7 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select('id, organization_id, contract_number, counterparty_name, counterparty_email, signing_status, staff_document_type, staff_document_group_id, staff_consent_answers, staff_revoked_at, staff_employment_contract_number, staff_employment_contract_date, organizations(name, entity_type, features)')
     .eq('id', signature.contract_id).maybeSingle();
   const org = (contract as any)?.organizations;
-  if (!contract || contract.organization_id !== STAFF_TEMPLATE_ORG_ID || contract.staff_document_type !== 'consent' || org?.entity_type !== 'school'
+  if (!contract || !isStaffDocumentsOrg(contract.organization_id) || contract.staff_document_type !== 'consent' || org?.entity_type !== 'school'
     || org?.features?.school_staff_documents !== true || org?.features?.school_contract_esign !== true) {
     return json(res, 404, { error: 'Dokumentas nerastas.' });
   }
@@ -46,34 +79,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (agreementError || !agreement || agreement.staff_revoked_at) {
     return json(res, 409, { error: 'Susitarimas nerastas arba atšauktas. Kreipkitės į mokyklą.' });
   }
-  const needsPersonalDetails = !agreement.pdf_url;
+  const stashedDetails = agreement.pdf_url
+    ? null
+    : await loadStashedStaffDetails(supabase, agreement.organization_id, agreement.id);
+  const needsPersonalDetails = !agreement.pdf_url && !stashedDetails;
   if (req.method === 'GET') {
     await supabase.from('school_contracts').update({ staff_viewed_at: new Date().toISOString() })
       .eq('id', contract.id).is('staff_viewed_at', null);
     let previewUrl: string | null = null;
     if (!contract.staff_consent_answers) {
       const folder = `${contract.organization_id}/contracts/${contract.id}`;
-      const previewPath = `${folder}/consent-preview.pdf`;
-      const { data: listed } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET)
-        .list(folder, { search: 'consent-preview.pdf', limit: 5 });
-      if (!(listed || []).some((file) => file.name === 'consent-preview.pdf')) {
-        try {
-          const preview = await renderStaffDocumentPdf('consent', {
-            name: String(contract.counterparty_name || ''),
-            employmentContractNumber: String(contract.staff_employment_contract_number || ''),
-            employmentContractDate: String(contract.staff_employment_contract_date || ''),
-            date: new Date(),
-          }, null, true);
-          await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).upload(previewPath, preview, {
-            contentType: 'application/pdf', upsert: true,
-          });
-        } catch (error) {
-          console.error('[school-staff-consent] preview', error);
-        }
+      if (await previewExists(supabase, folder)) {
+        const { data: signed } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET)
+          .createSignedUrl(`${folder}/consent-preview.pdf`, 3600);
+        previewUrl = signed?.signedUrl || null;
       }
-      const { data: signed } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).createSignedUrl(previewPath, 3600);
-      previewUrl = signed?.signedUrl || null;
-      if (!previewUrl) return json(res, 503, { error: 'Sutikimo dokumento dabar parodyti nepavyko. Bandykite vėliau.' });
     }
     return json(res, 200, {
       employeeName: contract.counterparty_name,
@@ -82,6 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       signed: contract.signing_status === 'signed',
       previewUrl,
       needsPersonalDetails,
+      detailsHeldBySchool: Boolean(agreement.pdf_url || stashedDetails),
     });
   }
   if (contract.staff_consent_answers || contract.signing_status !== 'draft') {
@@ -92,11 +113,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (needsPersonalDetails && agreement.signing_status !== 'draft') {
     return json(res, 409, { error: 'Susitarimo būsena pasikeitė. Atnaujinkite puslapį.' });
   }
-  const details = needsPersonalDetails ? validateStaffPersonalDetails({
-    address: req.body?.address,
-    personalCode: req.body?.personalCode,
-  }) : null;
-  if (needsPersonalDetails && !details) {
+  const details = needsPersonalDetails
+    ? validateStaffPersonalDetails({
+      address: req.body?.address,
+      personalCode: req.body?.personalCode,
+    })
+    : stashedDetails;
+  if (!agreement.pdf_url && !details) {
     return json(res, 400, { error: 'Įveskite gyvenamosios vietos adresą ir 11 skaitmenų asmens kodą.' });
   }
 
@@ -107,13 +130,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let agreementPdf: Buffer | null;
   let consentPdf: Buffer;
   try {
-    agreementPdf = needsPersonalDetails ? await renderStaffDocumentPdf('confidentiality', {
+    agreementPdf = !agreement.pdf_url && details ? await renderStaffDocumentPdf('confidentiality', {
         name: String(agreement.counterparty_name || ''),
         employmentContractNumber: String(contract.staff_employment_contract_number || ''),
         employmentContractDate: String(contract.staff_employment_contract_date || ''),
         date: new Date(),
-        address: details?.address,
-        personalCode: details?.personalCode,
+        address: details.address,
+        personalCode: details.personalCode,
       }) : null;
     consentPdf = await renderStaffDocumentPdf('consent', {
         name: String(contract.counterparty_name || ''),
@@ -162,6 +185,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (updateError) throw updateError;
       if (!updated) return json(res, 409, { error: 'Susitarimas jau pakeistas. Atnaujinkite puslapį.' });
       uploadedAgreement = false; // The private PDF is now referenced by the agreement.
+      await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET)
+        .remove([staffPersonalDetailsStoragePath(agreement.organization_id, agreement.id)]);
     }
     const { data: updated, error: updateError } = await supabase.from('school_contracts').update({
       staff_consent_answers: answers,

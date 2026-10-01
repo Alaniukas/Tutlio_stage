@@ -5,7 +5,7 @@ import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { ensureSignatureRow, fetchSignatureRows, inviteTeacherToSign, renewParentSignatureAccess, sendInternalEmail } from './_lib/schoolContractSigning.js';
-import { staffDocumentStatus, STAFF_TEMPLATE_ORG_ID } from './_lib/schoolStaffDocuments.js';
+import { staffDocumentStatus, staffDocumentsFeatureEnabled, renderStaffDocumentPdf, validateStaffPersonalDetails, staffPersonalDetailsStoragePath, encodeStaffPersonalDetails } from './_lib/schoolStaffDocuments.js';
 import { schoolContractPdfStoragePath, SCHOOL_CONTRACTS_BUCKET } from './_lib/schoolContractPdfPath.js';
 import { cancelSigning } from './_lib/gosignClient.js';
 import { PDFDocument } from 'pdf-lib';
@@ -87,7 +87,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const orgId = access.organizationId;
   const { data: org } = await supabase.from('organizations').select('name, entity_type, features').eq('id', orgId).maybeSingle();
-  if (orgId !== STAFF_TEMPLATE_ORG_ID || org?.entity_type !== 'school' || org?.features?.school_staff_documents !== true || org?.features?.school_contract_esign !== true) {
+  if (org?.entity_type !== 'school' || !staffDocumentsFeatureEnabled(orgId, org?.features)) {
     return json(res, 403, { error: 'Darbuotojų dokumentų funkcija šiai mokyklai neįjungta.' });
   }
 
@@ -115,6 +115,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const preparedPath = String(req.body?.preparedPdfPath || '').trim();
     if (preparedPath && req.body?.preparedDetailsConfirmed !== true) {
       return json(res, 400, { error: 'Patvirtinkite, kad įkeltame PDF jau įrašytas darbuotojo adresas ir asmens kodas.' });
+    }
+    const enteredAddress = String(req.body?.address || '').trim();
+    const enteredPersonalCode = String(req.body?.personalCode || '').trim();
+    const details = validateStaffPersonalDetails({
+      address: req.body?.address,
+      personalCode: req.body?.personalCode,
+    });
+    if ((enteredAddress || enteredPersonalCode) && !details) {
+      return json(res, 400, { error: 'Įveskite gyvenamosios vietos adresą ir 11 skaitmenų asmens kodą.' });
+    }
+    if (preparedPath && details) {
+      return json(res, 400, { error: 'Įkeltame PDF jau turi būti darbuotojo duomenys. Adreso ir asmens kodo laukų tada nepildykite.' });
     }
     if (employmentNumber.length > 100 || (employmentDate && !/^\d{4}-\d{2}-\d{2}$/.test(employmentDate))) {
       return json(res, 400, { error: 'Neteisingas darbo sutarties numeris arba data.' });
@@ -171,6 +183,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return json(res, 400, { error: 'PDF failo nepavyko perskaityti.' });
         }
       }
+      const agreementPdfPath = preparedPath || null;
       const base = {
         organization_id: orgId,
         template_id: null,
@@ -184,22 +197,76 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         staff_employment_contract_number: employmentNumber || null,
         staff_employment_contract_date: employmentDate || null,
       };
-      // One PostgREST insert is one SQL statement: either both documents exist or neither does.
+      // Persist first so a slow/failing converter cannot lose the employee or the invite.
       const { data: contracts, error: insertError } = await supabase.from('school_contracts').insert([
-        { ...base, id: confidentialityId, contract_number: number, pdf_url: preparedPath || null,
-          signing_status: preparedPath ? 'awaiting_school_signature' : 'draft', staff_document_type: 'confidentiality' },
+        { ...base, id: confidentialityId, contract_number: number, pdf_url: agreementPdfPath,
+          signing_status: agreementPdfPath ? 'awaiting_school_signature' : 'draft', staff_document_type: 'confidentiality' },
         { ...base, id: consentId, contract_number: consentNumber, pdf_url: null,
           signing_status: 'draft', staff_document_type: 'consent' },
       ]).select(SELECT);
       if (insertError || !contracts || contracts.length !== 2) throw insertError || new Error('Nepavyko sukurti abiejų dokumentų.');
+
+      const detailsPath = !preparedPath && details
+        ? staffPersonalDetailsStoragePath(orgId, confidentialityId)
+        : null;
+      if (detailsPath && details) {
+        const { error: stashError } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).upload(
+          detailsPath,
+          encodeStaffPersonalDetails(details),
+          { contentType: 'application/json', upsert: true },
+        );
+        if (stashError) {
+          console.error('[school-staff-documents] details stash failed', stashError.message || 'unknown');
+        }
+      }
+
       const consent = contracts.find((item: any) => item.staff_document_type === 'consent');
       let emailed = false;
       if (consent) {
         try { emailed = await sendConsentChoicesInvite(supabase, consent, origin, org.name || 'Mokykla'); }
         catch (emailError) { console.error('[school-staff-documents] consent invite:', emailError); }
       }
-      return json(res, 201, { documents: contracts, emailed });
+
+      json(res, 201, {
+        documents: contracts,
+        emailed,
+        pdfReady: Boolean(agreementPdfPath),
+        pdfPending: Boolean(!preparedPath && details),
+      });
+
+      if (detailsPath && details) {
+        try {
+          const generated = await renderStaffDocumentPdf('confidentiality', {
+            name,
+            employmentContractNumber: employmentNumber,
+            employmentContractDate: employmentDate,
+            date: new Date(),
+            address: details.address,
+            personalCode: details.personalCode,
+          });
+          const { error: uploadError } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).upload(path, generated, {
+            contentType: 'application/pdf', upsert: false,
+          });
+          if (uploadError && !/already exists|duplicate|resource already exists/i.test(uploadError.message || '')) {
+            throw uploadError;
+          }
+          const { error: updateError } = await supabase.from('school_contracts').update({
+            pdf_url: path,
+            signing_status: 'awaiting_school_signature',
+          }).eq('id', confidentialityId).eq('signing_status', 'draft').is('pdf_url', null);
+          if (updateError) throw updateError;
+          await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).remove([detailsPath]);
+        } catch (error) {
+          const detail = error instanceof Error && error.message ? error.message : 'unknown';
+          console.error('[school-staff-documents] agreement render failed', detail);
+        }
+      }
+      return;
     } catch (error: any) {
+      if (res.writableEnded || res.headersSent) {
+        console.error('[school-staff-documents] after response:', error?.message || error);
+        return;
+      }
       await removeUnclaimedPdf().catch((cleanupError) => console.error('[school-staff-documents] cleanup:', cleanupError));
       return json(res, 500, { error: error?.message || 'Nepavyko sukurti abiejų dokumentų.' });
     }
