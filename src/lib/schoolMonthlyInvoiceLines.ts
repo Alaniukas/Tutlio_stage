@@ -25,6 +25,7 @@ export type MonthlyInvoiceLineInput = {
 
 export type SchoolLessonInvoiceSession = {
   id: string;
+  classGroupId?: string | null;
   subjectId: string;
   subjectName: string;
   tutorId: string;
@@ -78,7 +79,7 @@ export function buildSchoolLessonInvoiceLines(
 ): SchoolLessonInvoiceLine[] {
   const grouped = new Map<string, SchoolLessonInvoiceSession[]>();
   for (const session of sessions) {
-    const key = [session.subjectId, session.tutorId, money(session.unitPriceEur)].join(':');
+    const key = [session.classGroupId || '', session.subjectId, session.tutorId, money(session.unitPriceEur)].join(':');
     const current = grouped.get(key) || [];
     current.push(session);
     grouped.set(key, current);

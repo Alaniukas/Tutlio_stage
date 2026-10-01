@@ -48,6 +48,28 @@ export type SchoolInvoiceReviewSession = {
   canConfirm: boolean;
 };
 
+type SchoolInvoiceActivity = {
+  class_group_id?: string | null;
+  class_group?: { name?: string | null } | Array<{ name?: string | null }> | null;
+  subject?: { name?: string | null; price?: number | null } | Array<{ name?: string | null; price?: number | null }> | null;
+};
+
+/** Historical group rows may still reference a subject named for an individual child. */
+export function schoolInvoiceSessionActivityName(
+  session: SchoolInvoiceActivity,
+  contracts: SchoolInvoiceContractWindow[] = [],
+): string {
+  if (session.class_group_id) {
+    const group = Array.isArray(session.class_group) ? session.class_group[0] : session.class_group;
+    const order = contracts.find((contract) => (
+      (contract.class_group_id || contract.order_snapshot?.group_id) === session.class_group_id
+    ))?.order_snapshot;
+    return String(group?.name || order?.group_name || order?.service_name || 'Užsiėmimas');
+  }
+  const subject = Array.isArray(session.subject) ? session.subject[0] : session.subject;
+  return String(subject?.name || 'Užsiėmimas');
+}
+
 function inSuspension(session: CanonicalBillableSession, contract: SchoolInvoiceContractWindow): boolean {
   const suspended = Date.parse(contract.suspension_started_at || '');
   const start = Date.parse(session.start_time);
@@ -136,13 +158,12 @@ export function schoolInvoiceContractReason(
 }
 
 export function reviewSchoolInvoiceSession(
-  session: CanonicalBillableSession & { subject?: any; tutor?: any; price?: number | null },
+  session: CanonicalBillableSession & SchoolInvoiceActivity & { tutor?: any; price?: number | null },
   contracts: SchoolInvoiceContractWindow[],
   decision: SchoolSessionBillingDecision | undefined,
   alreadyInvoiced: boolean,
   nowMs = Date.now(),
 ): SchoolInvoiceReviewSession {
-  const subject = Array.isArray(session.subject) ? session.subject[0] : session.subject;
   const tutor = Array.isArray(session.tutor) ? session.tutor[0] : session.tutor;
   const ended = Number.isFinite(Date.parse(session.end_time || '')) && Date.parse(session.end_time || '') <= nowMs;
   const contractReason = schoolInvoiceContractReason(session, contracts);
@@ -160,7 +181,7 @@ export function reviewSchoolInvoiceSession(
     endTime: session.end_time || '',
     status: session.status,
     statusConfirmedAt: session.status_confirmed_at || null,
-    subjectName: String(subject?.name || 'Užsiėmimas'),
+    subjectName: schoolInvoiceSessionActivityName(session, contracts),
     tutorName: String(tutor?.full_name || 'mokytojas'),
     unitPriceEur: resolveSchoolInvoiceUnitPrice(session, contracts),
     included: reason === 'payable',

@@ -18,7 +18,7 @@ function fakeDb(): any {
       };
       const q: any = {
         select: () => q, order: () => q,
-        eq: (key: string, value: unknown) => { state.filters.push(['eq', key, value]); predicates.push(row => key.split('.').reduce((item, part) => item?.[part], row) === value); return q; },
+        eq: (key: string, value: unknown) => { state.filters.push(['eq', key, value]); predicates.push(row => key.split(/\.|->>/).reduce((item, part) => item?.[part], row) === value); return q; },
         neq: (key: string, value: unknown) => { predicates.push(row => row[key] !== value); return q; },
         in: (key: string, value: unknown[]) => { predicates.push(row => value.includes(row[key])); return q; },
         gte: (key: string, value: unknown) => { state.filters.push(['gte', key, value]); compare(key, value, (a, b) => a >= b); return q; },
@@ -62,6 +62,18 @@ async function request(body: any = {}) {
   return res;
 }
 describe('school teacher invoices by meeting', () => {
+  it('stores an explicit beneficiary and purpose on Pro Klasė tutor-pay invoices', async () => {
+    const org = 'b0a00000-7e57-4000-8000-000000000001';
+    state.tables.profiles[0].organization_id = org;
+    state.tables.profiles[0].company_commission_percent = 20;
+    state.tables.organizations = [{ id: org, name: 'Pro Klasė QA', entity_type: 'company' }];
+    state.tables.invoice_profiles[1].organization_id = org;
+    state.tables.sessions = state.tables.sessions.map(row => ({ ...row, students: { ...row.students, organization_id: org },
+      status_confirmed_at: '2026-09-15T08:00:00Z' }));
+    expect((await request()).code).toBe(200);
+    expect(state.writes.find(write => write.table === 'invoices')?.value.pdf_meta)
+      .toMatchObject({ invoiceKind: 'tutor_pay', tutorId: 'teacher' });
+  });
   const attendanceId = '60e0a05a-044c-4314-bc6c-97e4e9dc311d';
   const attendance = () => ({ id: attendanceId, organization_id: 'school', group_id: 'group', tutor_id: 'teacher',
     student_id: 'unsigned-child', anchor_session_id: null, start_time: base.start_time, end_time: base.end_time,
@@ -75,7 +87,7 @@ describe('school teacher invoices by meeting', () => {
     const result = await request({ sessionIds: [], attendanceIds: [attendanceId] });
     expect(result.code).toBe(200);
     const invoice = state.writes.find(write => write.table === 'invoices' && write.value.total_amount)?.value;
-    expect(invoice).toMatchObject({ total_amount: 45, pdf_meta: { layout: 'school_tutor_meetings', tutorId: 'teacher',
+    expect(invoice).toMatchObject({ total_amount: 45, pdf_meta: { invoiceKind: 'tutor_pay', layout: 'school_tutor_meetings', tutorId: 'teacher',
       schoolMeetingKeys: [`class|group|teacher|${Date.parse(base.start_time)}`] } });
     const line = state.writes.find(write => write.table === 'invoice_line_items')!.value[0];
     expect(line).toMatchObject({ quantity: 1, total_price: 45, session_ids: [], school_attendance_ids: [attendanceId] });
@@ -94,7 +106,7 @@ describe('school teacher invoices by meeting', () => {
     state.tables.school_group_attendance_attestations = [attendance()];
     state.tables.sessions = [{ ...base, id: 'new-real-row', student_id: 'unsigned-child' }];
     state.tables.invoices = [{ id: 'earlier', organization_id: 'school', status: 'issued', invoice_number: 'OLD', total_amount: 45,
-      pdf_meta: { layout: 'school_tutor_meetings', tutorId: 'teacher',
+      pdf_meta: { invoiceKind: 'tutor_pay', layout: 'school_tutor_meetings', tutorId: 'teacher',
         schoolMeetingKeys: [`class|group|teacher|${Date.parse(base.start_time)}`] } }];
     state.tables.invoice_line_items = [{ invoice_id: 'earlier', session_ids: [], school_attendance_ids: [attendanceId] }];
     expect((await request({ sessionIds: ['new-real-row'], precheckOnly: true })).body).toMatchObject({ canGenerate: false, reason: 'duplicate' });
@@ -105,7 +117,7 @@ describe('school teacher invoices by meeting', () => {
     state.tables.sessions = [];
     state.tables.school_group_attendance_attestations = [attendance()];
     state.tables.invoices = [{ id: 'earlier', organization_id: 'school', status: 'issued', invoice_number: 'OLD', total_amount: 45,
-      pdf_meta: { layout: 'school_tutor_meetings', tutorId: 'teacher' } }];
+      pdf_meta: { invoiceKind: 'tutor_pay', layout: 'school_tutor_meetings', tutorId: 'teacher' } }];
     state.tables.invoice_line_items = [{ invoice_id: 'earlier', session_ids: [], school_attendance_ids: [attendanceId] }];
     expect((await request({ precheckOnly: true })).body.reason).toBe('duplicate');
     state.tables.invoices[0].pdf_meta.tutorId = 'other-teacher';
@@ -179,7 +191,7 @@ describe('school teacher invoices by meeting', () => {
     const result = await request({ groupingType, onlyPaid: true });
     expect(result.code).toBe(200);
     const invoice = state.writes.find(write => write.table === 'invoices' && write.value.total_amount)?.value;
-    expect(invoice).toMatchObject({ total_amount: 45, pdf_meta: { layout: 'school_tutor_meetings', tutorId: 'teacher' } });
+    expect(invoice).toMatchObject({ total_amount: 45, pdf_meta: { invoiceKind: 'tutor_pay', layout: 'school_tutor_meetings', tutorId: 'teacher' } });
     const lines = state.writes.find(write => write.table === 'invoice_line_items')!.value;
     expect(lines).toHaveLength(1); expect(lines[0]).toMatchObject({ quantity: 1, total_price: 45 });
     expect(lines[0].session_ids).toHaveLength(6);
@@ -201,14 +213,14 @@ describe('school teacher invoices by meeting', () => {
   it('expands a submitted child to siblings and blocks an overlapping earlier school teacher invoice', async () => {
     state.tables.invoice_line_items = [{ invoice_id: 'earlier', session_ids: ['child-5'] }];
     state.tables.invoices = [{ id: 'earlier', organization_id: 'school', status: 'issued', invoice_number: 'OLD', total_amount: 45,
-      period_start: '2026-09-10', period_end: '2026-09-20', pdf_meta: { layout: 'school_tutor_meetings', tutorId: 'teacher' } }];
+      period_start: '2026-09-10', period_end: '2026-09-20', pdf_meta: { invoiceKind: 'tutor_pay', layout: 'school_tutor_meetings', tutorId: 'teacher' } }];
     expect((await request({ sessionIds: ['child-0'], precheckOnly: true })).body).toMatchObject({ canGenerate: false, reason: 'duplicate' });
     expect(state.filters).not.toContainEqual(['eq', 'period_start', '2026-09-01']);
     expect(state.filters.find(filter => filter[0] === 'overlaps')?.[2]).toHaveLength(6);
   });
-  it('recognizes legacy teacher invoices by seller and organization buyer without conflating payer invoices', async () => {
+  it('recognizes migrated legacy teacher invoices by seller and organization buyer without conflating payer invoices', async () => {
     state.tables.invoice_line_items = [{ invoice_id: 'earlier', session_ids: ['child-5'] }];
-    state.tables.invoices = [{ id: 'earlier', organization_id: 'school', status: 'issued', total_amount: 45, pdf_meta: null,
+    state.tables.invoices = [{ id: 'earlier', organization_id: 'school', status: 'issued', total_amount: 45, pdf_meta: { invoiceKind: 'tutor_pay', tutorId: 'teacher' },
       seller_snapshot: { name: 'Teacher' }, buyer_snapshot: { name: 'Legal School', companyCode: '123' } }];
     expect((await request({ precheckOnly: true })).body.reason).toBe('duplicate');
     Object.assign(state.tables.invoices[0], { seller_snapshot: { name: 'Legal School', companyCode: '123' }, buyer_snapshot: { name: 'Student' } });
@@ -217,7 +229,7 @@ describe('school teacher invoices by meeting', () => {
   it('finds an old teacher invoice beyond capped pages of overlapping customer invoice lines', async () => {
     state.cap = 37;
     state.tables.invoices = [{ id: 'customer', organization_id: 'school', status: 'issued', pdf_meta: { layout: 'pvm_education' } },
-      { id: 'legacy', organization_id: 'school', status: 'issued', invoice_number: 'OLD', total_amount: 45, pdf_meta: null,
+      { id: 'legacy', organization_id: 'school', status: 'issued', invoice_number: 'OLD', total_amount: 45, pdf_meta: { invoiceKind: 'tutor_pay', tutorId: 'teacher' },
         seller_snapshot: { name: 'Teacher' }, buyer_snapshot: { name: 'Legal School', companyCode: '123' } }];
     state.tables.invoice_line_items = [...Array.from({ length: 1005 }, (_, index) => ({
       id: `line-${index}`, invoice_id: 'customer', session_ids: ['child-0'],

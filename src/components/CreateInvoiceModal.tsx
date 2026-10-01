@@ -12,6 +12,7 @@ import { endOfDay, format, subDays } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { fetchPaidSalesInvoiceCandidates } from '@/lib/manualSalesInvoicePreview';
 import { fetchOrgTutorInvoicesDeduped } from '@/lib/fetchOrgTutorInvoicesDeduped';
+import { isOwnOrgTutorInvoice } from '@/lib/orgTutorInvoiceAccess';
 import { orgTutorSessionPayEur } from '@/lib/orgTutorLessonPay';
 import { isProKlaseOrg } from '@/lib/marketMoney';
 import { proKlaseSessionPayEur } from '@/lib/proKlaseTutorPay';
@@ -111,15 +112,15 @@ export default function CreateInvoiceModal({
       const { data: profile } = await supabase
         .from('profiles')
         .select('organization_id')
-        .eq('id', user.id)
+        .eq('id', billingTutorId ?? user.id)
         .maybeSingle();
       if (!profile?.organization_id) return;
       const { data: org } = await supabase
         .from('organizations')
-        .select('name, contact_email')
+        .select('name, email')
         .eq('id', profile.organization_id)
         .maybeSingle();
-      if (org) setOrgBuyerInfo({ name: org.name, email: (org as any).contact_email || undefined });
+      if (org) setOrgBuyerInfo({ name: org.name, email: org.email || undefined });
     } catch {
       // ignore
     }
@@ -215,7 +216,8 @@ export default function CreateInvoiceModal({
           const periodInvoiceRes = await fetchOrgTutorInvoicesDeduped(periodInvoiceKey);
           if (periodInvoiceRes.ok) {
             const periodInvoiceJson = periodInvoiceRes.data;
-            const periodInvoices = (periodInvoiceJson.periodInvoices || []) as Array<{ invoice_number?: string; total_amount?: number }>;
+            const periodInvoices = ((periodInvoiceJson.periodInvoices || []) as Array<{ invoice_number?: string; total_amount?: number; pdf_meta?: unknown }>)
+              .filter(invoice => isOwnOrgTutorInvoice(invoice, user.id));
             if (periodInvoices.length > 0) {
               const totalIssued = periodInvoices.reduce((sum, inv) => sum + Number(inv.total_amount || 0), 0);
               const nums = periodInvoices.map((inv) => inv.invoice_number).filter(Boolean).join(', ');
@@ -528,7 +530,7 @@ export default function CreateInvoiceModal({
   const schoolKnownCount = sessions.filter(row => row._schoolMeeting && row.price !== null).length;
 
   const buyerInfo = useMemo(() => {
-    if (isOrgTutor && orgBuyerInfo) return orgBuyerInfo;
+    if (isOrgTutor) return orgBuyerInfo;
     if (sessions.length === 0) return null;
     const first = sessions[0];
     const student = first.students as any;

@@ -129,6 +129,7 @@ export async function tryIssueSalesInvoiceForStripePackage(
       invoice_number: invoiceNumber,
       issued_by_user_id: tutor.id,
       organization_id: tutor.organization_id ?? null,
+      seller_user_id: usesOrganizationInvoiceProfile ? null : tutor.id,
       seller_snapshot: sellerSnapshot,
       buyer_snapshot: buyerSnapshot,
       issue_date: issueDate,

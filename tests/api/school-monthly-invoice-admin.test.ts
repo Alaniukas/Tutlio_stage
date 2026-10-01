@@ -44,12 +44,13 @@ function query(table: string) {
       return builder;
     },
     eq: (key: string, value: any) => { rows = rows.filter((row) => key.split('.').reduce((item, part) => item?.[part], row) === value); return builder; },
+    neq: (key: string, value: any) => { rows = rows.filter((row) => row[key] !== value); return builder; },
     in: (key: string, values: any[]) => { rows = rows.filter((row) => values.includes(row[key])); return builder; },
     gte: (key: string, value: any) => { rows = rows.filter((row) => row[key] >= value); return builder; },
     lte: (key: string, value: any) => { rows = rows.filter((row) => row[key] <= value); return builder; },
     or: () => builder,
     order: (key: string, options: any = {}) => { rows.sort((a, b) => options.ascending ? (a[key] > b[key] ? 1 : -1) : (a[key] > b[key] ? -1 : 1)); return builder; },
-    is: () => builder,
+    is: (key: string, value: any) => { rows = rows.filter((row) => (row[key] ?? null) === value); return builder; },
     maybeSingle: async () => ({ data: rows[0] || null, error: null }),
     insert: (row: any) => {
       const items = (Array.isArray(row) ? row : [row]).map((item, index) => ({
@@ -103,6 +104,77 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('school monthly invoice review API', () => {
+  it('restores eight group lessons after cancellation, uses the group name in the PDF, and issues only once', async () => {
+    const original = state.tables.sessions[0];
+    state.tables.sessions = Array.from({ length: 8 }, (_, index) => ({ ...original,
+      id: `kajus-${index}`, price: 6,
+      subject: { name: 'Anglų kalba individuali Nojus Gibieža' },
+      class_group: { name: 'Gintaras Kulbis Intermediate 1 grupė' },
+    }));
+    state.tables.school_monthly_invoices.push({ id: 'cancelled', organization_id: 'org1', student_id: 'child1',
+      contract_id: null, period_start: '2026-09-01', period_end: '2026-09-30', payment_status: 'cancelled',
+      billing_model: 'actual', billed_session_ids: state.tables.sessions.map((row) => row.id) });
+    const attendanceBefore = structuredClone(state.tables.sessions);
+    const preview = await request({ action: 'preview' });
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({ totalEur: 48, reviewSessionIds: [],
+      lines: [{ quantity: 8, amountEur: 48, subjectName: 'Gintaras Kulbis Intermediate 1 grupė' }] });
+    expect(preview.body.sessions.every((row: any) => row.included && !row.alreadyInvoiced)).toBe(true);
+    expect(generateSchoolMonthlyInvoicePdf).toHaveBeenCalledWith(expect.objectContaining({ totalEur: 48,
+      lines: [expect.objectContaining({ activity: 'Gintaras Kulbis Intermediate 1 grupė - mokytojas Teacher One' })] }));
+    expect(state.writes).toEqual([]);
+    vi.mocked(allocateInvoiceNumber).mockResolvedValue('SF-NEW');
+    vi.mocked(sendSchoolMonthlyInvoiceEmail).mockResolvedValue({ sent: true } as any);
+    expect((await request({ action: 'send', previewToken: preview.body.previewToken })).status).toBe(200);
+    expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledTimes(1);
+    expect(state.tables.school_monthly_invoices).toHaveLength(2);
+    expect(state.tables.school_monthly_invoices[0].payment_status).toBe('cancelled');
+    expect((await request({ action: 'send', previewToken: preview.body.previewToken })).status).toBe(400);
+    expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledTimes(1);
+    expect(state.tables.sessions).toEqual(attendanceBefore);
+  });
+
+  it('keeps distinct groups in separate invoice rows and includes groups with no subject id', async () => {
+    const original = state.tables.sessions[0];
+    state.tables.sessions = [
+      { ...original, id: 'lt', class_group: { name: 'Lietuvių kalba 1 klasė' } },
+      { ...original, id: 'math', class_group_id: 'group2', class_group: { name: 'Matematika 1 klasė' } },
+      { ...original, id: 'english', class_group_id: 'group3', subject_id: null, subject: null,
+        class_group: { name: 'Elementary 2 grupė' }, price: 0 },
+    ];
+    state.tables.school_contracts.push({ id: 'english-contract', organization_id: 'org1', student_id: 'child1',
+      kind: 'extra_lessons', signing_status: 'signed', class_group_id: 'group3', unit_price_eur: 6,
+      accepted_at: '2026-09-01T00:00:00Z', start_within_14_status: 'yes',
+      order_snapshot: { service_type: 'group', group_id: 'group3', start_date: '2026-09-01', end_date: '2027-06-01' } });
+    const preview = await request({ action: 'preview' });
+    expect(preview.status).toBe(200);
+    expect(preview.body.totalEur).toBe(30);
+    expect(preview.body.lines).toHaveLength(3);
+    expect(preview.body.lines.find((row: any) => row.subjectId === 'group3'))
+      .toMatchObject({ subjectName: 'Elementary 2 grupė', quantity: 1, amountEur: 6, sessionIds: ['english'] });
+    expect(preview.body.sessions.every((row: any) => row.included)).toBe(true);
+    expect(state.writes).toEqual([]);
+  });
+
+  it.each(['pending', 'paid'])('keeps a %s invoice blocking its sessions even when a cancelled copy exists', async (paymentStatus) => {
+    for (const status of ['cancelled', paymentStatus]) state.tables.school_monthly_invoices.push({
+      id: status, organization_id: 'org1', student_id: 'child1', payment_status: status, billed_session_ids: ['lesson1'],
+    });
+    expect((await request()).body.sessions[0]).toMatchObject({ alreadyInvoiced: true, included: false });
+    expect(state.writes).toEqual([]);
+  });
+
+  it('does not retain the service-period lock from a cancelled fixed-contract invoice', async () => {
+    state.tables.school_contracts.push({ id: 'contract1', organization_id: 'org1', student_id: 'child1', kind: 'extra_lessons',
+      signing_status: 'signed', accepted_at: '2026-09-01T00:00:00Z', start_within_14_status: 'yes', class_group_id: 'group1',
+      order_snapshot: { service_type: 'group', group_id: 'group1', start_date: '2026-09-01', end_date: '2027-06-01' } });
+    state.tables.school_monthly_invoices.push({ id: 'cancelled-fixed', organization_id: 'org1', student_id: 'child1',
+      contract_id: 'contract1', payment_status: 'cancelled', period_start: '2026-09-01', period_end: '2026-09-30',
+      billing_model: 'fixed', billed_session_ids: [] });
+    expect((await request()).body.sessions[0]).toMatchObject({ alreadyInvoiced: false, included: true, reason: 'payable' });
+    expect(state.writes).toEqual([]);
+  });
+
   it('previews a completed individual lesson with student join evidence and no tutor join or manual confirmation', async () => {
     Object.assign(state.tables.sessions[0], { class_group_id: null, status_confirmed_at: null,
       tutor_joined_at: null, student_joined_at: '2026-09-14T13:05:00Z' });

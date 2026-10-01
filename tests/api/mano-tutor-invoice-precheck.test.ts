@@ -112,7 +112,7 @@ describe('Mano tutor invoice precheck', () => {
     mocks.profileRate = 20;
     mocks.itemRows = [{ invoice_id: 'earlier-tutor-invoice', session_ids: ['lesson-1'] }];
     mocks.invoiceRows = [{ id: 'earlier-tutor-invoice', invoice_number: 'T-123', total_amount: 20,
-      pdf_meta: { layout: 'classic_lt_tutor' } }];
+      pdf_meta: { layout: 'classic_lt_tutor', invoiceKind: 'tutor_pay', tutorId: 'tutor-1' } }];
     const res = response();
     await handler({ method: 'POST', body: {
       tutorId: 'tutor-1', periodStart: '2026-09-01', periodEnd: '2026-09-30',

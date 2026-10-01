@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
+import { isOwnOrgTutorInvoice } from '../src/lib/orgTutorInvoiceAccess.js';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
@@ -25,7 +26,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { data: invoice, error: invErr } = await supabase
       .from('invoices')
-      .select('id, status, issued_by_user_id, organization_id, billing_batch_id, pdf_storage_path, origin')
+      .select('id, status, issued_by_user_id, organization_id, billing_batch_id, pdf_storage_path, origin, pdf_meta')
       .eq('id', invoiceId)
       .maybeSingle();
 
@@ -48,7 +49,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ) {
         return res.status(403).json({ error: 'Insufficient organization permission' });
       }
-    } else if (invoice.issued_by_user_id !== auth.userId) {
+    } else if (invoice.issued_by_user_id !== auth.userId
+      || (invoice.organization_id && !isOwnOrgTutorInvoice(invoice, auth.userId))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 

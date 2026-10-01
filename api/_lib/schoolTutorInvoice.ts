@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isOwnOrgTutorInvoice } from '../../src/lib/orgTutorInvoiceAccess.js';
 import { schoolDate } from '../../src/lib/schoolTime.js';
 import { schoolTutorPayOccurrences } from '../../src/lib/schoolTutorLessonPay.js';
 import { fetchAllRows } from '../../src/lib/fetchAllRows.js';
@@ -16,7 +17,8 @@ export async function findSchoolAttendanceDuplicateInvoices(db: SupabaseClient, 
   const invoices = await fetchAllRows<any>((from, to) => db.from('invoices')
     .select('id,invoice_number,total_amount,pdf_meta').eq('organization_id', input.organizationId)
     .neq('status', 'cancelled').order('id').range(from, to));
-  const ownInvoices = invoices.filter(invoice => invoice.pdf_meta?.layout === SCHOOL_TUTOR_INVOICE_LAYOUT
+  const ownInvoices = invoices.filter(invoice => isOwnOrgTutorInvoice(invoice, input.tutorId)
+    && invoice.pdf_meta?.layout === SCHOOL_TUTOR_INVOICE_LAYOUT
     && invoice.pdf_meta?.tutorId === input.tutorId);
   const ownIds = new Set(ownInvoices.map(invoice => invoice.id));
   const duplicateIds = new Set<string>(ownInvoices.filter(invoice => Array.isArray(invoice.pdf_meta?.schoolMeetingKeys)

@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
+import { isOwnOrgTutorInvoice } from '../src/lib/orgTutorInvoiceAccess.js';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
@@ -44,20 +45,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'Invoice not found' });
     }
 
-    if (invoice.issued_by_user_id !== userId) {
-      if (invoice.organization_id) {
-        const adminRow = await getOrgAdminAccessByUserId(supabase, userId);
-        if (
-          !adminRow
-          || adminRow.organizationId !== invoice.organization_id
-          || !hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.view')
-        ) {
-          return res.status(403).json({ error: 'Forbidden' });
-        }
-      } else {
+    if (invoice.organization_id) {
+      const adminRow = await getOrgAdminAccessByUserId(supabase, userId);
+      const adminCanRead = adminRow?.organizationId === invoice.organization_id
+        && hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.view');
+      if (!adminCanRead && !isOwnOrgTutorInvoice(invoice, userId || '')) {
         return res.status(403).json({ error: 'Forbidden' });
       }
+    } else if (invoice.issued_by_user_id !== userId) {
+      return res.status(403).json({ error: 'Forbidden' });
     }
+    res.setHeader('Cache-Control', 'private, no-store');
 
     if ((invoice as { origin?: string }).origin === 'external') {
       return res.status(400).json({ error: 'External reserved invoices have no PDF' });

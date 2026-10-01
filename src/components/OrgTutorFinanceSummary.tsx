@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
 import { dedupeAuthGetUser } from '@/lib/preload';
 import { fetchOrgTutorInvoicesDeduped } from '@/lib/fetchOrgTutorInvoicesDeduped';
+import { isOwnOrgTutorInvoice } from '@/lib/orgTutorInvoiceAccess';
 import {
   Euro,
   TrendingUp,
@@ -51,6 +52,7 @@ function daysInRangeInclusive(start: Date, end: Date): number {
 }
 
 interface Invoice {
+  pdf_meta?: unknown;
   id: string;
   invoice_number: string;
   issue_date: string;
@@ -62,8 +64,6 @@ interface Invoice {
   grouping_type: string;
   pdf_storage_path: string | null;
   issued_by_user_id: string;
-  issued_by_name?: string;
-  issued_by_is_admin?: boolean;
   billing_batch_id?: string | null;
   created_at: string;
 }
@@ -101,7 +101,6 @@ export default function OrgTutorFinanceSummary() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const rangeLabel = useMemo(() => {
     if (periodMode === 'month') {
@@ -128,7 +127,6 @@ export default function OrgTutorFinanceSummary() {
     const load = async () => {
       const user = await dedupeAuthGetUser();
       if (!user) return;
-      setCurrentUserId(user.id);
 
       setLoading(true);
       setSummaryLoadError(false);
@@ -382,7 +380,6 @@ export default function OrgTutorFinanceSummary() {
   const fetchInvoices = useCallback(async () => {
     const user = await dedupeAuthGetUser();
     if (!user) return;
-    setCurrentUserId(user.id);
 
     setInvoicesLoading(true);
     try {
@@ -391,7 +388,7 @@ export default function OrgTutorFinanceSummary() {
         console.error('[OrgTutorFinanceSummary] invoices fetch:', r.data);
         setInvoices([]);
       } else {
-        setInvoices((r.data.invoices || []) as Invoice[]);
+        setInvoices((r.data.invoices as Invoice[]).filter(invoice => isOwnOrgTutorInvoice(invoice, user.id)));
       }
     } catch (error) {
       console.error('[OrgTutorFinanceSummary] invoices fetch error:', error);
@@ -665,11 +662,6 @@ export default function OrgTutorFinanceSummary() {
                           {format(new Date(inv.issue_date), 'yyyy-MM-dd')} {' \u00B7 '}
                           {'\u20AC'}{Number(inv.total_amount).toFixed(2)}
                         </p>
-                        {currentUserId && inv.issued_by_user_id !== currentUserId && (
-                          <p className="text-[11px] text-indigo-600 truncate">
-                            {t('companyLogin.loginSubtitle')}: {inv.issued_by_name || '—'}
-                          </p>
-                        )}
                       </div>
                     </div>
 

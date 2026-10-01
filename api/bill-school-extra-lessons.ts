@@ -154,6 +154,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .maybeSingle();
     if (existingError) return res.status(500).json({ error: existingError.message, created, emailed });
     if (existing) {
+      // Cancellation is an admin decision; cron must not resend or recreate it.
+      if (existing.payment_status === 'cancelled') { skipped++; continue; }
       if (model === 'actual' && existing.billing_model !== 'actual') {
         held++; review.push({ contract_id: contract.id, reason: 'existing_invoice_uses_old_billing_model' }); continue;
       }
@@ -242,6 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('organization_id', contract.organization_id).eq('student_id', contract.student_id).order('id', { ascending: false }),
       supabase.from('school_monthly_invoices').select('id, billed_session_ids, extra_session_ids, lines:school_monthly_invoice_lines(session_id,session_ids)')
         .eq('organization_id', contract.organization_id).eq('student_id', contract.student_id)
+        .neq('payment_status', 'cancelled')
         .lte('period_start', end).gte('period_end', start),
     ]);
     if (decisionError || issuedError) {

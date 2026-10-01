@@ -6,6 +6,8 @@ import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
+import { fetchOrgTutorInvoicesDeduped } from '@/lib/fetchOrgTutorInvoicesDeduped';
+import { isOwnOrgTutorInvoice } from '@/lib/orgTutorInvoiceAccess';
 import InvoiceSettingsForm from '@/components/InvoiceSettingsForm';
 import CreateInvoiceModal from '@/components/CreateInvoiceModal';
 import { MonthFilterInput } from '@/components/ui/month-filter-input';
@@ -28,6 +30,7 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 interface Invoice {
+  pdf_meta?: unknown;
   id: string;
   invoice_number: string;
   issue_date: string;
@@ -64,6 +67,7 @@ export default function InvoicesPage() {
   const [sortAsc, setSortAsc] = useState(true);
 
   const fetchInvoices = useCallback(async () => {
+    if (orgPolicy.loading) return;
     /** Tas pats `sub` kaip PostgREST `auth.uid()` — ne konteksto profilis. */
     const { data: authData, error: authErr } = await supabase.auth.getUser();
     const uid = authData?.user?.id;
@@ -76,6 +80,20 @@ export default function InvoicesPage() {
 
     setLoading(true);
     setListError(null);
+
+    if (orgPolicy.isOrgTutor) {
+      try {
+        const result = await fetchOrgTutorInvoicesDeduped();
+        if (!result.ok) throw new Error('Invoice access unavailable');
+        setInvoices((result.data.invoices as Invoice[]).filter(invoice =>
+          isOwnOrgTutorInvoice(invoice, uid) && (statusFilter === 'all' || invoice.status === statusFilter)));
+      } catch {
+        setInvoices([]);
+        setListError(t('common.error'));
+      }
+      setLoading(false);
+      return;
+    }
 
     /** Be įterpto `billing_batches(paid)`: jei RLS blokuoja susijusią „batch“ eilutę, visas sąskaitų SELECT gali sugriūti → tuščias sąrašas. */
     let query = supabase
@@ -140,7 +158,7 @@ export default function InvoicesPage() {
 
     setInvoices(enriched as Invoice[]);
     setLoading(false);
-  }, [statusFilter, invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd]);
+  }, [orgPolicy.loading, orgPolicy.isOrgTutor, statusFilter, invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd, t]);
 
   const hasActivePeriodFilter = useMemo(() => {
     if (invoicePeriodMode === 'month') return Boolean(invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth));

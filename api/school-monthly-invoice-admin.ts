@@ -23,7 +23,7 @@ import { requireOrgAdminAccess } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { wallClockToUtc } from './_lib/recurringOccurrences.js';
 import { fetchAllRows } from '../src/lib/fetchAllRows.js';
-import { latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewSchoolInvoiceSession, schoolInvoiceSessionMatchesContract, type SchoolInvoiceReviewSession } from '../src/lib/schoolInvoiceSessionReview.js';
+import { latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewSchoolInvoiceSession, schoolInvoiceSessionActivityName, schoolInvoiceSessionMatchesContract, type SchoolInvoiceReviewSession } from '../src/lib/schoolInvoiceSessionReview.js';
 import { groupSchoolPayerInvoicePreviews, schoolPayerKey, schoolStudentInvoiceSendable } from '../src/lib/schoolPayerInvoiceGroups.js';
 import { sessionYmdVilnius } from '../src/lib/schoolExtraLessonsBilling.js';
 
@@ -125,7 +125,7 @@ async function loadDraft(body: RequestBody): Promise<DraftContext> {
       .select('id, business_name, company_code, address, contact_email, contact_phone, bank_name, iban, invoice_series')
       .eq('organization_id', organizationId).maybeSingle(),
     supabase.from('sessions')
-      .select('id, subject_id, tutor_id, start_time, end_time, status, price, class_group_id, school_billing_kind, student_joined_at, tutor_joined_at, status_confirmed_at, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, subject:subjects(name, price), tutor:profiles!sessions_tutor_id_fkey!inner(full_name,organization_id)')
+      .select('id, subject_id, tutor_id, start_time, end_time, status, price, class_group_id, school_billing_kind, student_joined_at, tutor_joined_at, status_confirmed_at, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, class_group:school_class_groups(name), subject:subjects(name, price), tutor:profiles!sessions_tutor_id_fkey!inner(full_name,organization_id)')
       .eq('student_id', studentId)
       .eq('tutor.organization_id', organizationId)
       .gte('start_time', wallClockToUtc(periodStart, '00:00:00').toISOString())
@@ -145,7 +145,7 @@ async function loadDraft(body: RequestBody): Promise<DraftContext> {
       .eq('student_id', studentId).eq('organization_id', organizationId).order('id', { ascending: false }),
     supabase.from('school_monthly_invoices')
       .select('id, contract_id, period_start, period_end, billing_model, billed_session_ids, extra_session_ids, lines:school_monthly_invoice_lines(session_id,session_ids)')
-      .eq('student_id', studentId).eq('organization_id', organizationId),
+      .eq('student_id', studentId).eq('organization_id', organizationId).neq('payment_status', 'cancelled'),
   ]);
   for (const result of results) if (result.error) {
     throw new Error(result.error.message.includes('school_session_billing_decisions')
@@ -211,14 +211,15 @@ async function loadDraft(body: RequestBody): Promise<DraftContext> {
       if (review && ['unconfirmed', 'contract_review'].includes(review.reason)) reviewSessionIds.push(session.id);
       return [];
     }
-    const subject = Array.isArray(session.subject) ? session.subject[0] : session.subject;
     const tutor = Array.isArray(session.tutor) ? session.tutor[0] : session.tutor;
-    const subjectId = String(session.subject_id || '').trim();
+    // A class group is a service even when no standalone subject is assigned.
+    const subjectId = String(session.subject_id || session.class_group_id || '').trim();
     if (!subjectId) return [];
     return [{
       id: String(session.id),
+      classGroupId: session.class_group_id || null,
       subjectId,
-      subjectName: String(subject?.name || 'Užsiėmimas'),
+      subjectName: schoolInvoiceSessionActivityName(session, contracts || []),
       tutorId: String(session.tutor_id || ''),
       tutorName: String(tutor?.full_name || 'mokytojas'),
       unitPriceEur: resolveSchoolInvoiceUnitPrice(session, contracts || []),
@@ -291,6 +292,7 @@ function digestPayload(draft: DraftContext, userId: string) {
       statusConfirmedAt: session.statusConfirmedAt, reason: session.reason, decisionId: session.decisionId })),
     lines: draft.lines.map((line) => ({
       subjectId: line.subjectId,
+      description: line.description,
       tutorId: line.tutorId,
       unitPriceEur: line.unitPriceEur,
       quantity: line.quantity,
@@ -353,9 +355,11 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
     throw new Error('Sąskaitos duomenys pasikeitė. Peržiūrėkite ją dar kartą.');
   }
   const supabase = serviceSupabase();
-  const { data: existing } = await supabase.from('school_monthly_invoices')
+  const { data: existing, error: existingError } = await supabase.from('school_monthly_invoices')
     .select('id, invoice_number').eq('student_id', draft.student.id)
-    .eq('period_start', draft.periodStart).is('contract_id', null).maybeSingle();
+    .eq('organization_id', draft.organizationId).eq('period_start', draft.periodStart)
+    .is('contract_id', null).neq('payment_status', 'cancelled').maybeSingle();
+  if (existingError) throw new Error(existingError.message);
   if (existing) throw new Error(`Šio laikotarpio sąskaita jau suformuota (${existing.invoice_number || existing.id}).`);
   const invoiceNumber = await allocateInvoiceNumber(supabase, draft.profile.id);
   const pdf = await renderDraftPdf(draft, invoiceNumber, false);

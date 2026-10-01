@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   attendanceRows: [] as any[],
   attendanceError: false,
   attendanceRequests: [] as string[],
+  invoices: [] as any[],
   pageCap: 2,
   queries: [] as Array<{ table: string; select: string; filters: Array<[string, string, unknown]>; range?: [number, number] }>,
   from: vi.fn(),
@@ -32,7 +33,7 @@ vi.mock('@/hooks/useOrgTutorPolicy', () => ({ useOrgTutorPolicy: () => ({
 vi.mock('@/lib/preload', () => ({ dedupeAuthGetUser: async () => ({ id: 'teacher' }) }));
 vi.mock('@/lib/apiHelpers', () => ({ authHeaders: async () => ({ 'Content-Type': 'application/json' }) }));
 vi.mock('@/lib/fetchOrgTutorInvoicesDeduped', () => ({ fetchOrgTutorInvoicesDeduped: async () => ({
-  ok: true, data: { invoices: [], periodInvoices: [] },
+  ok: true, data: { invoices: state.invoices, periodInvoices: state.invoices },
 }) }));
 vi.mock('@/lib/supabase', () => ({ supabase: {
   from: (...args: unknown[]) => state.from(...args),
@@ -115,6 +116,7 @@ beforeEach(() => {
   state.entityType = 'school'; state.orgError = false; state.rate = 0; state.organizationId = 'school'; state.manualConfirmation = false;
   state.rows = groupRows(); state.queries = []; state.posts = [];
   state.attendanceRows = []; state.attendanceError = false; state.attendanceRequests = [];
+  state.invoices = [];
   state.pageCap = 2; state.precheck = { ok: true, code: undefined };
   state.from.mockReset(); state.from.mockImplementation(query);
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -140,6 +142,23 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('school teacher Finance', () => {
+  it('shows only own remuneration even if an old API returns automatic and related customer invoices', async () => {
+    state.entityType = 'company'; state.rate = 20; state.rows = [];
+    state.invoices = [
+      { id: 'client', invoice_number: 'SF-001', issued_by_user_id: 'teacher', buyer_snapshot: { name: 'Ruste' },
+        total_amount: 10.40, status: 'paid', issue_date: '2026-08-26', pdf_meta: null },
+      { id: 'own', invoice_number: 'MY-PAY', issued_by_user_id: 'admin', buyer_snapshot: { name: 'Organization' },
+        total_amount: 100, status: 'issued', issue_date: '2026-08-26', pdf_meta: { invoiceKind: 'tutor_pay', tutorId: 'teacher' } },
+      { id: 'other', invoice_number: 'OTHER-PAY', issued_by_user_id: 'admin', buyer_snapshot: { name: 'Organization' },
+        total_amount: 200, status: 'paid', issue_date: '2026-08-26', pdf_meta: { invoiceKind: 'tutor_pay', tutorId: 'another' } },
+    ];
+    render(<OrgTutorFinanceSummary />);
+    expect(await screen.findByText('MY-PAY')).toBeTruthy();
+    expect(screen.queryByText('SF-001')).toBeNull();
+    expect(screen.queryByText('OTHER-PAY')).toBeNull();
+    expect(document.body.textContent).not.toContain('Ruste');
+    expect(document.body.textContent).not.toContain('10.40');
+  });
   it('includes a completed attendance-only meeting once at its stored historical rate', async () => {
     state.rows = [];
     state.rate = 90;

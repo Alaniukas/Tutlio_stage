@@ -9,6 +9,18 @@ const contract: SchoolInvoiceContractWindow = { id: 'c1', signing_status: 'signe
   order_snapshot: { service_type: 'group', group_id: 'group1', start_date: '2026-09-01', end_date: '2027-06-01', schedule_slots: [] } as any };
 
 describe('school invoice session review', () => {
+  it('uses group names even when a historical subject names another child, and keeps individual names', () => {
+    const subject = { name: 'Anglų kalba individuali Nojus Gibieža' };
+    expect(reviewSchoolInvoiceSession({ ...session, subject, class_group: { name: 'Intermediate 1 grupė' } },
+      [contract], undefined, false).subjectName).toBe('Intermediate 1 grupė');
+    const namedContract = { ...contract, order_snapshot: { ...contract.order_snapshot, service_name: 'Intermediate 1 grupė' } as any };
+    expect(reviewSchoolInvoiceSession({ ...session, subject }, [namedContract], undefined, false).subjectName)
+      .toBe('Intermediate 1 grupė');
+    expect(reviewSchoolInvoiceSession({ ...session, subject }, [], undefined, false).subjectName).toBe('Užsiėmimas');
+    expect(reviewSchoolInvoiceSession({ ...session, class_group_id: null, subject }, [], undefined, false).subjectName)
+      .toBe(subject.name);
+  });
+
   it('keeps a confirmed group absence billable, but an audited exclusion waives its charge without rewriting attendance', () => {
     const normal = reviewSchoolInvoiceSession(session, [contract], undefined, false);
     expect(normal).toMatchObject({ included: true, status: 'no_show', reason: 'payable' });

@@ -1,26 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ contracts: [] as any[], sessions: [] as any[], discounts: [] as any[], billingDecisions: [] as any[],
-  issuedInvoices: [] as any[], inserts: [] as any[], filters: [] as any[], sessionError: null as any, billingReviewError: null as any, emails: 0 }));
+  issuedInvoices: [] as any[], existingInvoice: null as any, inserts: [] as any[], filters: [] as any[], sessionError: null as any, billingReviewError: null as any, emails: 0 }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
   from(table: string) {
     let insert: any;
     let afterId: string | null = null;
+    let excludeCancelled = false;
     const query: any = {
       select: () => query, not: () => query, is: () => query,
       order: () => query, limit: () => query, in: () => query,
       gt: (_key: string, value: string) => { afterId = value; return query; },
       eq: (key: string, value: any) => { state.filters.push([table, key, value]); return query; },
+      neq: (key: string, value: any) => { if (key === 'payment_status' && value === 'cancelled') excludeCancelled = true; return query; },
       gte: (key: string, value: any) => { state.filters.push([table, key, value]); return query; },
       lte: (key: string, value: any) => { state.filters.push([table, key, value]); return query; },
       insert: (row: any) => { insert = row; state.inserts.push(row); return query; },
-      maybeSingle: async () => ({ data: null, error: null }),
+      maybeSingle: async () => ({ data: table === 'school_monthly_invoices' ? state.existingInvoice : null, error: null }),
       single: async () => ({ data: { id: 'invoice', ...insert }, error: null }),
       then: (resolve: any) => resolve({ data: afterId ? []
         : table === 'school_contracts' ? state.contracts
         : table === 'school_discount_agreements' ? state.discounts
         : table === 'school_session_billing_decisions' ? state.billingDecisions
-        : table === 'school_monthly_invoices' ? state.issuedInvoices : state.sessions,
+        : table === 'school_monthly_invoices' ? state.issuedInvoices.filter((row) => !excludeCancelled || row.payment_status !== 'cancelled') : state.sessions,
       error: table === 'sessions' ? state.sessionError : table === 'school_session_billing_decisions' ? state.billingReviewError : null }),
     };
     return query;
@@ -45,12 +47,33 @@ async function run(query: Record<string, string> = {}) {
 
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-01T04:00:00Z'));
-  state.contracts = []; state.sessions = []; state.discounts = []; state.billingDecisions = []; state.issuedInvoices = [];
+  state.contracts = []; state.sessions = []; state.discounts = []; state.billingDecisions = []; state.issuedInvoices = []; state.existingInvoice = null;
   state.inserts = []; state.filters = []; state.sessionError = null; state.billingReviewError = null; state.emails = 0;
 });
 afterEach(() => vi.useRealTimers());
 
 describe('monthly school billing allocation', () => {
+  it('does not resend or recreate an explicitly cancelled contract invoice', async () => {
+    state.contracts = [contract('first', 'individual', null, 'math')];
+    state.existingInvoice = { id: 'cancelled', contract_id: 'first', payment_status: 'cancelled' };
+    expect((await run()).json).toHaveBeenCalledWith(expect.objectContaining({ created: 0, emailed: 0, skipped: 1 }));
+    expect(state.inserts).toEqual([]);
+    expect(state.emails).toBe(0);
+  });
+
+  it('does not let another cancelled invoice lock a contract service', async () => {
+    state.contracts = [{ ...contract('first', 'individual', null, 'math'),
+      organization_id: '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17', filled_body: EXTRA_LESSONS_LEGAL_BODY }];
+    state.sessions = [{ id: 'lesson', student_id: 'student', subject_id: 'math',
+      start_time: '2026-08-10T10:00:00Z', status: 'completed', status_confirmed_at: '2026-08-10T11:00:00Z' }];
+    state.issuedInvoices = [{ id: 'cancelled', payment_status: 'cancelled', billed_session_ids: ['lesson'] }];
+    expect((await run({ dryRun: 'true' })).json).toHaveBeenCalledWith(expect.objectContaining({
+      planned: [expect.objectContaining({ total_eur: 10, billed_session_ids: ['lesson'] })], held: 0,
+    }));
+    expect(state.inserts).toEqual([]);
+    expect(state.emails).toBe(0);
+  });
+
   it('previews an elapsed interval and organization without any inserts or emails', async () => {
     state.contracts = [contract('first', 'individual', null, 'math')];
     const response = await run({ dryRun: 'true', organizationId: '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17', periodStart: '2026-08-01', periodEnd: '2026-08-07' });

@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
+import { isOwnOrgTutorInvoice } from '../src/lib/orgTutorInvoiceAccess.js';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
@@ -131,6 +132,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (inactiveSeat) return res.status(403).json({ error: 'Organization access is inactive' });
         if (tutorId !== issuingUserId) {
           return res.status(403).json({ error: 'Tutors can only generate their own invoices' });
+        }
+        if (profile.organization_id && !isOrgTutor) {
+          return res.status(403).json({ error: 'Organization tutors can only invoice the organization for their own pay' });
         }
       }
     }
@@ -522,26 +526,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 .select('id, invoice_number, total_amount, pdf_meta, seller_snapshot, buyer_snapshot, issued_by_user_id')
                 .in('id', matchingInvoiceIds.slice(offset, offset + 200))
                 .eq('organization_id', profile.organization_id).neq('status', 'cancelled')
+                .eq('pdf_meta->>invoiceKind', 'tutor_pay').eq('pdf_meta->>tutorId', tutorId)
                 .order('id').range(from, to)));
             }
             const schoolBuyer = { name: schoolOrgInvoiceProfile?.business_name || schoolOrg?.name,
               companyCode: schoolOrgInvoiceProfile?.company_code };
-            existingInvoices = (data || []).filter((inv: any) => schoolTutorInvoice
+            existingInvoices = (data || []).filter((inv: any) => isOwnOrgTutorInvoice(inv, tutorId) && (schoolTutorInvoice
               ? (inv.pdf_meta?.layout === SCHOOL_TUTOR_INVOICE_LAYOUT && inv.pdf_meta?.tutorId === tutorId)
                 || (!inv.pdf_meta?.layout && invoicePartyMatches(inv.buyer_snapshot, schoolBuyer)
                   && invoicePartyMatches(inv.seller_snapshot, buildSellerSnapshot(sellerProfile, profile)))
-              : inv.pdf_meta?.layout === CLASSIC_LT_TUTOR_LAYOUT);
+              : inv.pdf_meta?.layout === CLASSIC_LT_TUTOR_LAYOUT));
           }
         } else {
-          const { data, error } = await supabase
+          let duplicateQuery = supabase
             .from('invoices')
-            .select('id, invoice_number, total_amount')
+            .select('id, invoice_number, total_amount, pdf_meta')
             .eq('organization_id', profile.organization_id)
             .eq('period_start', periodStart)
             .eq('period_end', periodEnd)
             .neq('status', 'cancelled');
+          if (isOrgTutor) duplicateQuery = duplicateQuery
+            .eq('pdf_meta->>invoiceKind', 'tutor_pay').eq('pdf_meta->>tutorId', tutorId);
+          const { data, error } = await duplicateQuery;
           if (error) return res.status(500).json({ error: error.message });
-          existingInvoices = data || [];
+          existingInvoices = isOrgTutor
+            ? (data || []).filter(invoice => isOwnOrgTutorInvoice(invoice, tutorId))
+            : data || [];
           const existingInvoiceIds = existingInvoices.map((inv: any) => inv.id);
           if (existingInvoiceIds.length > 0) {
             const { data: matchingItems, error: itemsErr } = await supabase
@@ -714,6 +724,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           invoice_number: invoiceNumber,
           issued_by_user_id: issuingUserId,
           organization_id: profile.organization_id ?? null,
+          seller_user_id: isOrgTutor || !profile.organization_id ? tutorId : null,
           seller_snapshot: sellerSnapshot,
           buyer_snapshot: buyer,
           issue_date: new Date().toISOString().slice(0, 10),
@@ -724,7 +735,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           total_amount: totalAmount,
           status: 'issued',
           origin: 'generated',
-          pdf_meta: pdfMeta,
+          pdf_meta: isOrgTutor ? { ...pdfMeta, invoiceKind: 'tutor_pay', tutorId } : pdfMeta,
           ...(body.billingBatchId ? { billing_batch_id: body.billingBatchId } : {}),
         })
         .select('id')
@@ -732,10 +743,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (invErr || !invoice) {
         console.error('[generate-invoice] Error creating invoice:', invErr);
-        if (manoTutorInvoice) {
-          return res.status(500).json({ error: 'Nepavyko sukurti korepetitoriaus sąskaitos. Bandykite dar kartą.' });
-        }
-        continue;
+        return res.status(invErr?.code === '23505' ? 409 : 500).json({
+          error: invErr?.code === '23505'
+            ? 'Sąskaitos numeris jau naudojamas. Patikrinkite pardavėjo S.F. seriją ir numeraciją.'
+            : 'Nepavyko sukurti sąskaitos. Patikrinkite sąskaitų sąrašą prieš kartodami.',
+          invoiceIds: createdInvoices,
+          count: createdInvoices.length,
+        });
       }
 
       // Insert line items
@@ -753,10 +767,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (liInsertErr) {
         console.error('[generate-invoice] line items insert failed:', liInsertErr);
         await supabase.from('invoices').delete().eq('id', invoice.id);
-        if (manoTutorInvoice) {
-          return res.status(500).json({ error: 'Nepavyko įrašyti korepetitoriaus sąskaitos pamokų. Patikrinkite sąskaitų sąrašą prieš kartodami.' });
-        }
-        continue;
+        return res.status(500).json({
+          error: 'Nepavyko įrašyti sąskaitos pamokų. Patikrinkite sąskaitų sąrašą prieš kartodami.',
+          invoiceIds: createdInvoices,
+          count: createdInvoices.length,
+        });
       }
 
       // Generate PDF
@@ -844,7 +859,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .in('id', invoicedPkgIds);
       }
 
-      if (onlyPaid && !schoolTutorInvoice) {
+      if (onlyPaid && !isOrgTutor) {
         const pkgSet = new Set(resolvedPackageIds);
         const invoicedSessionIds = lineItems.flatMap(li => li.sessionIds).filter(id => !pkgSet.has(id));
         if (invoicedSessionIds.length > 0) {
