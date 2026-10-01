@@ -166,12 +166,16 @@ export default function SchoolMonthlyInvoiceDialog({
   const batchScrollTop = useRef(0);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  const payload = (action: 'review' | 'billing-decision' | 'preview' | 'send' | 'batch-preview' | 'send-batch') => {
+  const payload = (action: 'review' | 'billing-decision' | 'preview' | 'send' | 'batch-preview' | 'send-batch', options?: {
+    studentId?: string;
+    studentIds?: string[];
+  }) => {
     const range = monthRange(month);
     return {
       action,
       organizationId,
-      studentId,
+      studentId: options?.studentId || studentId,
+      studentIds: options?.studentIds,
       periodStart: range.start,
       periodEnd: range.end,
       dueDate,
@@ -179,14 +183,17 @@ export default function SchoolMonthlyInvoiceDialog({
     };
   };
 
-  const requestReview = async (overrideStudentId?: string) => {
+  const requestReview = async (overrideStudentId?: string, overrideStudentIds?: string[]) => {
     setLoading(true);
     setError('');
     try {
       const response = await fetch('/api/school-monthly-invoice-admin', {
         method: 'POST',
         headers: await authHeaders(),
-        body: JSON.stringify({ ...payload('review'), studentId: overrideStudentId || studentId }),
+        body: JSON.stringify(payload('review', {
+          studentId: overrideStudentId || studentId,
+          studentIds: overrideStudentIds,
+        })),
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json.error || t('school.invoice.review.loadError'));
@@ -329,6 +336,9 @@ export default function SchoolMonthlyInvoiceDialog({
     }
     const payers = batchPayers || [];
     const previewTokens = Object.fromEntries(payers.flatMap((group) => group.students.map((row) => [row.studentId, row.previewToken])));
+    const payerPreviewTokens = Object.fromEntries(
+      payers.flatMap((group) => (group.payerPreviewToken ? [[group.payerKey, group.payerPreviewToken]] : [])),
+    );
     setSendingKey(payerKey || 'all');
     setError('');
     batchNeedsRefresh.current = true;
@@ -338,10 +348,8 @@ export default function SchoolMonthlyInvoiceDialog({
         body: JSON.stringify({
           ...payload('send-batch'),
           payerKey,
-          studentIds: payerKey
-            ? payers.find((group) => group.payerKey === payerKey)?.sendableStudentIds
-            : payers.flatMap((group) => group.sendableStudentIds),
           previewTokens,
+          payerPreviewTokens,
         }),
       });
       const json = await response.json().catch(() => ({}));

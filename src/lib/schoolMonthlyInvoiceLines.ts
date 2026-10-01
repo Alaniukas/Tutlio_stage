@@ -25,6 +25,8 @@ export type MonthlyInvoiceLineInput = {
 
 export type SchoolLessonInvoiceSession = {
   id: string;
+  studentId?: string;
+  studentName?: string;
   classGroupId?: string | null;
   subjectId: string;
   subjectName: string;
@@ -43,6 +45,8 @@ export type SchoolLessonDiscountInput = {
 
 export type SchoolLessonInvoiceLine = MonthlyInvoiceLineInput & {
   source: 'lesson';
+  studentId?: string;
+  studentName?: string;
   subjectId: string;
   tutorId: string;
   subjectName: string;
@@ -79,7 +83,13 @@ export function buildSchoolLessonInvoiceLines(
 ): SchoolLessonInvoiceLine[] {
   const grouped = new Map<string, SchoolLessonInvoiceSession[]>();
   for (const session of sessions) {
-    const key = [session.classGroupId || '', session.subjectId, session.tutorId, money(session.unitPriceEur)].join(':');
+    const key = [
+      session.studentId || '',
+      session.classGroupId || '',
+      session.subjectId,
+      session.tutorId,
+      money(session.unitPriceEur),
+    ].join(':');
     const current = grouped.get(key) || [];
     current.push(session);
     grouped.set(key, current);
@@ -97,6 +107,8 @@ export function buildSchoolLessonInvoiceLines(
     const applied = invoiceLineDiscount(originalAmountEur, discount);
     return {
       description: `${first.subjectName} - mokytojas ${first.tutorName}`,
+      studentId: first.studentId,
+      studentName: first.studentName,
       subjectId: first.subjectId,
       tutorId: first.tutorId,
       subjectName: first.subjectName,

@@ -85,6 +85,7 @@ describe('school invoice attendance review', () => {
         payerEmail: 'akvile@example.com',
         totalEur: 12,
         sendableStudentIds: ['kajus', 'etme'],
+        payerPreviewToken: 'payer-token-akvile',
         students: [
           { studentId: 'kajus', fullName: 'Adomaitis Kajus', lessonCount: 1, totalEur: 6, reviewSessionIds: [], alreadyIssued: false, payerEmail: 'akvile@example.com', payerName: 'Akvilė', previewToken: 't1' },
           { studentId: 'etme', fullName: 'Vitkutė Etmė', lessonCount: 1, totalEur: 6, reviewSessionIds: [], alreadyIssued: false, payerEmail: 'akvile@example.com', payerName: 'Akvilė', previewToken: 't2' },
@@ -115,13 +116,17 @@ describe('school invoice attendance review', () => {
     expect(screen.getByText('Akvilė Adomaitytė')).toBeTruthy();
     fireEvent.click(screen.getAllByRole('button', { name: 'school.invoice.batch.sendPayer' })[0]);
     await waitFor(() => expect(calls.some((call) => call.action === 'send-batch' && call.payerKey === 'akvile@example.com')).toBe(true));
-    expect(calls.find((call) => call.action === 'send-batch').studentIds).toEqual(['kajus', 'etme']);
+    expect(calls.find((call) => call.action === 'send-batch')).toMatchObject({
+      payerKey: 'akvile@example.com',
+      payerPreviewTokens: { 'akvile@example.com': 'payer-token-akvile' },
+      previewTokens: { kajus: 't1', etme: 't2' },
+    });
   });
 });
 
 const batchGroup = {
   payerKey: 'parent@example.com', payerName: 'Parent One', payerEmail: 'parent@example.com', totalEur: 12,
-  sendableStudentIds: ['child1'],
+  sendableStudentIds: ['child1'], payerPreviewToken: 'payer-token-before',
   students: [{ studentId: 'child1', fullName: 'Child One', lessonCount: 1, totalEur: 12,
     reviewSessionIds: [], alreadyIssued: false, payerEmail: 'parent@example.com', payerName: 'Parent One', previewToken: 'token-before' }],
 };
@@ -226,6 +231,7 @@ describe('school invoice batch review navigation', () => {
       if (body.action === 'batch-preview') {
         batchLoads += 1;
         return { ok: true, json: async () => ({ payers: [{ ...batchGroup,
+          payerPreviewToken: batchLoads > 1 ? 'payer-token-after' : 'payer-token-before',
           students: [{ ...batchGroup.students[0], previewToken: batchLoads > 1 ? 'token-after' : 'token-before' }] }] }) };
       }
       return { ok: true, json: async () => body.action === 'send-batch' ? { sentCount: 1, skippedCount: 0 } : invoiceReview };
@@ -243,7 +249,8 @@ describe('school invoice batch review navigation', () => {
     expect(batchLoads).toBe(2);
     fireEvent.click(screen.getByRole('button', { name: 'school.invoice.batch.sendAll' }));
     await waitFor(() => expect(calls.find((call) => call.action === 'send-batch')).toMatchObject({
-      studentIds: ['child1'], previewTokens: { child1: 'token-after' },
+      previewTokens: { child1: 'token-after' },
+      payerPreviewTokens: { 'parent@example.com': 'payer-token-after' },
     }));
   });
 

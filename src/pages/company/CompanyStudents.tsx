@@ -68,6 +68,8 @@ import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/
 import { SessionList } from '@/components/SessionList';
 import {
   getStudentRecentPastSessions,
+  getStudentUpcomingSessions,
+  ORG_STUDENT_MODAL_RECENT_SESSION_LIMIT,
   type Session,
 } from '@/lib/session-stats';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
@@ -1237,19 +1239,20 @@ export default function CompanyStudents() {
       setSelectedStudentSessionCount(null);
       return;
     }
+    const studentIds = selectedStudentGroupIds;
     let cancelled = false;
     (async () => {
       const { count } = await supabase
         .from('sessions')
         .select('id', { count: 'exact', head: true })
-        .eq('student_id', selectedStudent.id);
+        .in('student_id', studentIds);
       if (cancelled) return;
       setSelectedStudentSessionCount(typeof count === 'number' ? count : 0);
     })();
     return () => {
       cancelled = true;
     };
-  }, [selectedStudent?.id, isStudentModalOpen]);
+  }, [selectedStudent?.id, isStudentModalOpen, selectedStudentGroupIds]);
 
   useEffect(() => {
     if (!selectedStudent) return;
@@ -1318,9 +1321,9 @@ export default function CompanyStudents() {
         console.error('Error fetching student sessions (org modal):', error);
         setModalRecentSessions([]);
       } else {
-        setModalRecentSessions(
-          getStudentRecentPastSessions((data || []) as Session[], studentIds, 3)
-        );
+        const rows = (data || []) as Session[];
+        const past = getStudentRecentPastSessions(rows, studentIds, ORG_STUDENT_MODAL_RECENT_SESSION_LIMIT);
+        setModalRecentSessions(past.length ? past : getStudentUpcomingSessions(rows, studentIds, ORG_STUDENT_MODAL_RECENT_SESSION_LIMIT));
       }
       if (!cancelled) setLoadingModalSessions(false);
     })();

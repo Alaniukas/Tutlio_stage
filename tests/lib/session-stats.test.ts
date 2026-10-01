@@ -7,6 +7,7 @@ import {
   countPastUnpaidSessions,
   formatCancellationBreakdown,
   getStudentRecentPastSessions,
+  getStudentUpcomingSessions,
   isStudentNoShowSession,
   matchesOrgSessionStatChip,
   toggleOrgSessionStatChip,
@@ -107,6 +108,24 @@ describe('getStudentRecentPastSessions across tutor assignments', () => {
     expect(getStudentRecentPastSessions(rows, 'old-tutor-student').map((row) => row.id))
       .toEqual(['recent-cancellation', 'old-tutor-trial', 'older-lesson']);
     expect(getStudentRecentPastSessions(rows, [])).toEqual([]);
+  });
+});
+
+describe('getStudentUpcomingSessions', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T12:00:00.000Z'));
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('returns the next scheduled sessions when nothing has ended yet', () => {
+    const rows: Session[] = [
+      { ...base, id: 'future-2', student_id: 'child', start_time: '2026-10-10T14:00:00.000Z', end_time: '2026-10-10T15:00:00.000Z', status: 'active' },
+      { ...base, id: 'future-1', student_id: 'child', start_time: '2026-10-05T14:00:00.000Z', end_time: '2026-10-05T15:00:00.000Z', status: 'active' },
+      { ...base, id: 'other-child', student_id: 'other', start_time: '2026-10-06T14:00:00.000Z', end_time: '2026-10-06T15:00:00.000Z', status: 'active' },
+    ];
+    expect(getStudentUpcomingSessions(rows, ['child']).map((row) => row.id)).toEqual(['future-1', 'future-2']);
   });
 });
 

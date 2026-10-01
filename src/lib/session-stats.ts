@@ -386,9 +386,12 @@ export function countStudentSessionStats(rows: SessionAttributionRow[]): Student
   return counters;
 }
 
+/** Org admin student modal: recent past sessions for one child identity (all tutor rows), newest first. */
+export const ORG_STUDENT_MODAL_RECENT_SESSION_LIMIT = 5;
+
 /**
- * Org admin student modal: past "occurred" (incl. no_show) + cancelled sessions
- * across the same child's tutor assignments, newest by end_time first.
+ * Past "occurred" (incl. no_show) + cancelled sessions for the same child
+ * (`orgStudentIdentityGroupKey`: payer + name), across tutor assignments.
  */
 export function getStudentRecentPastSessions(
   sessions: Session[],
@@ -410,6 +413,22 @@ export function getStudentRecentPastSessions(
   for (const s of [...occurredLike, ...cancelled]) byId.set(s.id, s);
   return Array.from(byId.values())
     .sort((a, b) => new Date(b.end_time).getTime() - new Date(a.end_time).getTime())
+    .slice(0, limit);
+}
+
+/** Org admin student modal: next scheduled sessions when nothing has ended yet. */
+export function getStudentUpcomingSessions(
+  sessions: Session[],
+  studentIds: string | readonly string[],
+  limit = 3,
+): Session[] {
+  const allowedStudentIds = new Set(typeof studentIds === 'string' ? [studentIds] : studentIds);
+  const now = new Date();
+  return sessions
+    .filter((session) => allowedStudentIds.has(session.student_id)
+      && session.status !== 'cancelled'
+      && new Date(session.start_time).getTime() >= now.getTime())
+    .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
     .slice(0, limit);
 }
 

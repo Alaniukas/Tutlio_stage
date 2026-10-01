@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewSchoolInvoiceSession, schoolInvoiceContractReason, type SchoolInvoiceContractWindow } from '../../src/lib/schoolInvoiceSessionReview';
+import { latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewSchoolInvoiceSession, schoolInvoiceContractReason, schoolInvoiceSessionActivityName, type SchoolInvoiceContractWindow } from '../../src/lib/schoolInvoiceSessionReview';
 
 const session = { id: 's1', class_group_id: 'group1', subject_id: 'math',
   start_time: '2026-09-14T13:00:00Z', end_time: '2026-09-14T14:00:00Z',
@@ -19,6 +19,27 @@ describe('school invoice session review', () => {
     expect(reviewSchoolInvoiceSession({ ...session, subject }, [], undefined, false).subjectName).toBe('Užsiėmimas');
     expect(reviewSchoolInvoiceSession({ ...session, class_group_id: null, subject }, [], undefined, false).subjectName)
       .toBe(subject.name);
+  });
+
+  it('prefers the signed individual contract label when the session subject names another child', () => {
+    const wrongSubject = { name: 'Kristina Šlaustienė Skaitymas ir rašymas (individuali) Nojus Gibieža' };
+    const domasContract = {
+      ...contract, class_group_id: null,
+      order_snapshot: {
+        service_type: 'individual', subject_id: 'domas-subject', service_name: 'Kristina Šlaustienė Skaitymas ir rašymas (individuali) Domas Sakalauskas',
+        start_date: '2026-09-01', end_date: '2027-06-01',
+      } as any,
+    };
+    expect(schoolInvoiceSessionActivityName(
+      { ...session, class_group_id: null, subject_id: 'domas-subject', subject: wrongSubject },
+      [domasContract],
+      'Sakalauskas Domas',
+    )).toBe('Kristina Šlaustienė Skaitymas ir rašymas (individuali) Domas Sakalauskas');
+    expect(schoolInvoiceSessionActivityName(
+      { ...session, class_group_id: null, subject_id: 'nojus-subject', subject: wrongSubject },
+      [],
+      'Sakalauskas Domas',
+    )).toBe('Kristina Šlaustienė Skaitymas ir rašymas (individuali) Sakalauskas Domas');
   });
 
   it('keeps a confirmed group absence billable, but an audited exclusion waives its charge without rewriting attendance', () => {

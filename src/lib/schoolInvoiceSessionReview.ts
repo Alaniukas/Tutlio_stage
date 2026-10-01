@@ -50,14 +50,41 @@ export type SchoolInvoiceReviewSession = {
 
 type SchoolInvoiceActivity = {
   class_group_id?: string | null;
+  subject_id?: string | null;
   class_group?: { name?: string | null } | Array<{ name?: string | null }> | null;
   subject?: { name?: string | null; price?: number | null } | Array<{ name?: string | null; price?: number | null }> | null;
 };
+
+function studentNameInLabel(studentFullName: string, label: string): boolean {
+  const parts = studentFullName.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return true;
+  const normalized = label.toLowerCase();
+  return parts.every((part) => normalized.includes(part.toLowerCase()));
+}
+
+function individualContractActivityName(
+  session: SchoolInvoiceActivity,
+  contracts: SchoolInvoiceContractWindow[],
+  studentFullName?: string | null,
+): string | null {
+  const subjectId = String(session.subject_id || '').trim();
+  const signed = contracts.filter((contract) => contract.signing_status === 'signed' && contract.order_snapshot?.service_type === 'individual');
+  if (subjectId) {
+    const bySubject = signed.find((contract) => String(contract.order_snapshot?.subject_id || '') === subjectId);
+    if (bySubject?.order_snapshot?.service_name) return String(bySubject.order_snapshot.service_name);
+  }
+  if (studentFullName) {
+    const byStudent = signed.find((contract) => studentNameInLabel(studentFullName, String(contract.order_snapshot?.service_name || '')));
+    if (byStudent?.order_snapshot?.service_name) return String(byStudent.order_snapshot.service_name);
+  }
+  return null;
+}
 
 /** Historical group rows may still reference a subject named for an individual child. */
 export function schoolInvoiceSessionActivityName(
   session: SchoolInvoiceActivity,
   contracts: SchoolInvoiceContractWindow[] = [],
+  studentFullName?: string | null,
 ): string {
   if (session.class_group_id) {
     const group = Array.isArray(session.class_group) ? session.class_group[0] : session.class_group;
@@ -67,7 +94,13 @@ export function schoolInvoiceSessionActivityName(
     return String(group?.name || order?.group_name || order?.service_name || 'Užsiėmimas');
   }
   const subject = Array.isArray(session.subject) ? session.subject[0] : session.subject;
-  return String(subject?.name || 'Užsiėmimas');
+  const raw = String(subject?.name || 'Užsiėmimas');
+  const fromContract = individualContractActivityName(session, contracts, studentFullName);
+  if (fromContract) return fromContract;
+  if (studentFullName && raw.includes('(individuali)') && !studentNameInLabel(studentFullName, raw)) {
+    return raw.replace(/\s+[A-ZĄČĘĖĮŠŲŪŽ][^\s]+\s+[A-ZĄČĘĖĮŠŲŪŽ][^\s]+$/, ` ${studentFullName}`);
+  }
+  return raw;
 }
 
 function inSuspension(session: CanonicalBillableSession, contract: SchoolInvoiceContractWindow): boolean {

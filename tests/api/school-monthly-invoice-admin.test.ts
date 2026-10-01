@@ -86,6 +86,14 @@ async function request(extra: Record<string, unknown> = {}) {
   return result;
 }
 
+function batchTokens(preview: { body: any }) {
+  const previewTokens = Object.fromEntries(preview.body.payers.flatMap((group: any) =>
+    group.students.map((child: any) => [child.studentId, child.previewToken])));
+  const payerPreviewTokens = Object.fromEntries(preview.body.payers.flatMap((group: any) =>
+    (group.payerPreviewToken ? [[group.payerKey, group.payerPreviewToken]] : [])));
+  return { previewTokens, payerPreviewTokens };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-only';
@@ -479,10 +487,9 @@ describe('school monthly invoice batch by payer', () => {
       status_confirmed_at: null, tutor_joined_at: null, student_joined_at: '2026-09-14T13:05:00Z',
     });
     const preview = await request({ action: 'batch-preview' });
-    const tokens = Object.fromEntries(preview.body.payers.flatMap((payer: any) =>
-      payer.students.map((child: any) => [child.studentId, child.previewToken])));
+    const tokens = batchTokens(preview);
     for (const lesson of state.tables.sessions) lesson.student_joined_at = null;
-    const result = await request({ action: 'send-batch', previewTokens: tokens });
+    const result = await request({ action: 'send-batch', ...tokens });
     expect(result.status).toBe(400);
     expect(result.body).toMatchObject({ sentCount: 0, skippedCount: 2 });
     expect(state.writes).toEqual([]);
@@ -490,26 +497,45 @@ describe('school monthly invoice batch by payer', () => {
     expect(sendSchoolMonthlyInvoiceEmail).not.toHaveBeenCalled();
   });
 
-  it('sends a personalized invoice email per child for one payer or for everyone', async () => {
+  it('sends one combined invoice email per payer and splits sibling lines in the PDF', async () => {
     familyTables();
+    state.tables.students.push({
+      id: 'etme', organization_id: 'org1', full_name: 'Vitkutė Etmė', payer_name: 'Akvilė Adomaitytė', payer_email: 'akvile@example.com',
+    });
+    state.tables.sessions.push({
+      ...state.tables.sessions[0], id: 'etme-lesson', student_id: 'etme', tutor_id: 'teacher1', subject_id: 'math', class_group_id: 'group1',
+    });
+    state.tables.school_contracts.push({
+      ...state.tables.school_contracts[0], id: 'c-etme', organization_id: 'org1', student_id: 'etme', class_group_id: 'group1',
+    });
     vi.mocked(allocateInvoiceNumber).mockResolvedValue('SF-1');
     vi.mocked(sendSchoolMonthlyInvoiceEmail).mockResolvedValue({ sent: true } as any);
     const preview = await request({ action: 'batch-preview' });
-    const tokens = Object.fromEntries(preview.body.payers.flatMap((group: any) =>
-      group.students.map((row: any) => [row.studentId, row.previewToken])));
+    const tokens = batchTokens(preview);
+    const akvileGroup = preview.body.payers.find((group: any) => group.payerEmail === 'akvile@example.com');
+    expect(akvileGroup.students).toHaveLength(2);
+    expect(akvileGroup.payerPreviewToken).toBeTruthy();
 
     const onePayer = await request({
       action: 'send-batch',
       payerKey: 'akvile@example.com',
-      previewTokens: tokens,
+      ...tokens,
     });
     expect(onePayer.status).toBe(200);
     expect(onePayer.body.sentCount).toBe(1);
-    expect(onePayer.body.sent[0].payerEmail).toBe('akvile@example.com');
+    expect(onePayer.body.sent[0]).toMatchObject({ payerEmail: 'akvile@example.com', studentIds: ['kajus', 'etme'] });
     expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(sendSchoolMonthlyInvoiceEmail).mock.calls[0][1].student_id).toBe('kajus');
+    expect(state.tables.school_monthly_invoices[0].total_eur).toBe(12);
+    expect(state.tables.school_monthly_invoices[0].billed_session_ids.sort()).toEqual(['etme-lesson', 'kajus-lesson']);
+    expect(vi.mocked(generateSchoolMonthlyInvoicePdf).mock.calls.at(-1)?.[0]).toMatchObject({
+      studentName: 'Adomaitis Kajus, Vitkutė Etmė',
+      lines: expect.arrayContaining([
+        expect.objectContaining({ studentName: 'Adomaitis Kajus' }),
+        expect.objectContaining({ studentName: 'Vitkutė Etmė' }),
+      ]),
+    });
 
-    const everyone = await request({ action: 'send-batch', previewTokens: tokens });
+    const everyone = await request({ action: 'send-batch', ...tokens });
     expect(everyone.status).toBe(200);
     expect(everyone.body.sentCount).toBe(1);
     expect(everyone.body.sent[0].payerEmail).toBe('raimonda@example.com');
@@ -541,14 +567,13 @@ describe('school monthly invoice batch by payer', () => {
     vi.mocked(allocateInvoiceNumber).mockResolvedValue('SF-1');
     vi.mocked(sendSchoolMonthlyInvoiceEmail).mockResolvedValue({ sent: true } as any);
     const preview = await request({ action: 'batch-preview' });
-    const tokens = Object.fromEntries(preview.body.payers.flatMap((group: any) =>
-      group.students.map((row: any) => [row.studentId, row.previewToken])));
+    const tokens = batchTokens(preview);
     state.tables.students.push({ ...state.tables.students[0], id: 'new-child', full_name: 'New Child' });
     state.tables.sessions.push({ ...state.tables.sessions[0], id: 'new-lesson', student_id: 'new-child' });
     state.tables.school_contracts.push({ ...state.tables.school_contracts[0], id: 'new-contract', student_id: 'new-child' });
-    const result = await request({ action: 'send-batch', previewTokens: tokens });
+    const result = await request({ action: 'send-batch', ...tokens });
     expect(result.status).toBe(200);
-    expect(result.body.sent.map((row: any) => row.studentId).sort()).toEqual(['kajus', 'palaima']);
+    expect(result.body.sent.flatMap((row: any) => row.studentIds).sort()).toEqual(['kajus', 'palaima']);
     expect(result.body.skippedCount).toBe(0);
     expect(vi.mocked(sendSchoolMonthlyInvoiceEmail).mock.calls.every((call) => call[1].student_id !== 'new-child')).toBe(true);
   });
@@ -558,15 +583,14 @@ describe('school monthly invoice batch by payer', () => {
     vi.mocked(allocateInvoiceNumber).mockResolvedValue('SF-1');
     vi.mocked(sendSchoolMonthlyInvoiceEmail).mockResolvedValue({ sent: true } as any);
     const preview = await request({ action: 'batch-preview' });
-    const tokens = Object.fromEntries(preview.body.payers.flatMap((group: any) =>
-      group.students.map((row: any) => [row.studentId, row.previewToken])));
+    const tokens = batchTokens(preview);
     // A separate occurrence loses its confirmation after the administrator reviewed it.
     state.tables.sessions[1].class_group_id = null;
     state.tables.sessions[1].status_confirmed_at = null;
-    const result = await request({ action: 'send-batch', studentIds: ['kajus', 'palaima'], previewTokens: tokens });
+    const result = await request({ action: 'send-batch', ...tokens });
     expect(result.status).toBe(200);
     expect(result.body.sentCount).toBe(1);
-    expect(result.body.sent[0].studentId).toBe('kajus');
+    expect(result.body.sent[0].studentIds).toEqual(['kajus']);
     expect(result.body.skippedCount).toBe(1);
     expect(result.body.skipped[0]).toMatchObject({ studentId: 'palaima', error: expect.stringContaining('patvirtinkite') });
     expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledTimes(1);
@@ -577,8 +601,12 @@ describe('school monthly invoice batch by payer', () => {
     const preview = await request({ action: 'batch-preview' });
     const group = preview.body.payers.find((row: any) => row.payerEmail === 'akvile@example.com');
     state.tables.students[0].payer_email = 'changed@example.com';
-    const result = await request({ action: 'send-batch', payerKey: group.payerKey, studentIds: ['kajus'],
-      previewTokens: { kajus: group.students[0].previewToken } });
+    const result = await request({
+      action: 'send-batch',
+      payerKey: group.payerKey,
+      previewTokens: { kajus: group.students[0].previewToken },
+      payerPreviewTokens: { [group.payerKey]: group.payerPreviewToken },
+    });
     expect(result.status).toBe(400);
     expect(result.body).toMatchObject({ sentCount: 0, skippedCount: 1,
       skipped: [{ studentId: 'kajus', error: expect.stringContaining('pasikeitė') }] });
