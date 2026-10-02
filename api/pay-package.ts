@@ -6,6 +6,7 @@
 // browser to it. Replaces embedding Stripe URLs directly in emails.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createHash } from 'node:crypto';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
@@ -185,11 +186,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ...(pkg.subject_id ? { subject_id: pkg.subject_id } : {}),
         };
 
-        let checkoutSession: Stripe.Checkout.Session;
+        let checkoutParams: Stripe.Checkout.SessionCreateParams;
 
         if (useSchoolOrgAbsorbedFees) {
             const { applicationFeeCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
-            checkoutSession = await stripe.checkout.sessions.create({
+            checkoutParams = {
                 mode: 'payment',
                 locale: checkoutLocale,
                 customer_email: customerEmail,
@@ -203,14 +204,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
                 success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId!)}`,
                 cancel_url: `${appOrigin}/package-cancelled`,
-            }, directChargeOptions(
-                stripeAccountId!,
-                `package-checkout:${packageId}:${pkg.stripe_checkout_session_id || 'initial'}`,
-            ));
+            };
         } else {
             const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile, feeSplit);
             const applicationFeeCents = directChargeApplicationFeeCents(basePriceEur, market, feeProfile, feeSplit);
-            checkoutSession = await stripe.checkout.sessions.create({
+            checkoutParams = {
                 mode: 'payment',
                 locale: checkoutLocale,
                 customer_email: customerEmail,
@@ -227,25 +225,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 metadata: { ...metadataBase, ...checkoutBaseMetadata(basePriceEur, market) },
                 success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId!)}`,
                 cancel_url: `${appOrigin}/package-cancelled`,
-            }, directChargeOptions(
-                stripeAccountId!,
-                `package-checkout:${packageId}:${pkg.stripe_checkout_session_id || 'initial'}`,
-            ));
+            };
         }
+
+        // Retries of the same request share a key, while package edits, payer
+        // changes, locale and return URLs must produce a different key. Hash
+        // the full request so personal details never appear in the key itself.
+        const requestHash = createHash('sha256').update(JSON.stringify({
+            stripeAccountId,
+            previousCheckoutSessionId: pkg.stripe_checkout_session_id || null,
+            params: checkoutParams,
+        })).digest('hex');
+        const checkoutSession = await stripe.checkout.sessions.create(
+            checkoutParams,
+            directChargeOptions(stripeAccountId!, `package-checkout:v2:${packageId}:${requestHash}`),
+        );
 
         // 6. Publish the Checkout Session only while the package is still payable.
         // Cancellation can race this request after the initial read; in that case
         // expire the new session before its URL is returned to the payer.
-        const { data: checkoutClaim, error: checkoutClaimError } = await supabase
+        let checkoutClaimQuery = supabase
             .from('lesson_packages')
             .update({ stripe_checkout_session_id: checkoutSession.id })
             .eq('id', packageId)
             .eq('paid', false)
-            .eq('payment_status', 'pending')
-            .eq('active', true)
+            .eq('payment_status', 'pending');
+        // Tutor-owned pending offers become active only AFTER payment.
+        // Pooled offers must already be active to remain payable.
+        if (pkg.pool_organization_id) checkoutClaimQuery = checkoutClaimQuery.eq('active', true);
+        const { data: checkoutClaim, error: checkoutClaimError } = await checkoutClaimQuery
             .select('id')
             .maybeSingle();
         if (checkoutClaimError) {
+            console.error('[pay-package] Failed to publish checkout:', { packageId, error: checkoutClaimError });
             await expireConnectCheckoutSession(stripe, checkoutSession.id, stripeAccountId).catch(() => {});
             return res.status(500).send(errorPage('Klaida', 'Nepavyko paruošti mokėjimo. Bandykite dar kartą.'));
         }

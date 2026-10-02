@@ -1,6 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { allocateInvoiceNumber } from './invoiceNumber.js';
 import { proKlaseVatExemptionNote } from './proKlaseInvoice.js';
+import { isProKlaseOrg } from './marketMoney.js';
+import { tryIssueProKlasePaidSourceInvoice } from './proKlaseSalesInvoice.js';
 
 export type PackageRowForSf = {
   id: string;
@@ -10,6 +12,8 @@ export type PackageRowForSf = {
   paid_at?: string | null;
   payment_method?: string | null;
   manual_sales_invoice_id?: string | null;
+  pool_organization_id?: string | null;
+  stripe_checkout_session_id?: string | null;
   students?: {
     full_name?: string;
     email?: string | null;
@@ -38,6 +42,18 @@ export async function tryIssueSalesInvoiceForStripePackage(
     .single();
 
   if (!tutor) return;
+
+  const organizationId = packageRow.pool_organization_id || tutor.organization_id;
+  if (isProKlaseOrg(organizationId)) {
+    await tryIssueProKlasePaidSourceInvoice(supabase, {
+      organizationId,
+      sourceType: 'package',
+      sourceId: packageRow.id,
+      checkoutId: packageRow.stripe_checkout_session_id,
+      baseAmountEur: Number(packageRow.total_price),
+    });
+    return;
+  }
 
   let invoiceProfile: Record<string, unknown> | null = null;
   let usesOrganizationInvoiceProfile = false;

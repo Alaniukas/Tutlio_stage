@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { markInvoicesPaidForPackage } from './_lib/markPackageInvoicePaid.js';
 import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
+import { tryIssueProKlasePaidSourceInvoice } from './_lib/proKlaseSalesInvoice.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { sendTrialReservationConfirmedNotifications } from './_lib/trialReservation.js';
 import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
@@ -173,6 +174,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ?? null,
         tutorId: finalPackage.tutor_id ?? null,
         stripeCheckoutSessionId: checkout.id,
+      });
+      await tryIssueProKlasePaidSourceInvoice(supabase, {
+        organizationId: finalPackage.pool_organization_id ?? tutorRow?.organization_id,
+        sourceType: 'package', sourceId: packageId,
+        checkoutId: checkout.id,
+        baseAmountEur: metadataBaseEur(checkout.metadata) ?? Number(finalPackage.total_price),
       });
     } catch (e) {
       console.error('[confirm-package-payment] platform fee record:', e);

@@ -5,6 +5,8 @@ import { MemoryRouter } from 'react-router-dom';
 const state = vi.hoisted(() => ({
   paymentModel: 'monthly_billing' as string | null,
   paidHistory: false,
+  paymentPayer: 'student',
+  pendingPackage: false,
 }));
 
 vi.mock('@/components/StudentLayout', () => ({ default: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
@@ -12,7 +14,7 @@ vi.mock('@/lib/preload', () => ({
   dedupeAuthGetUser: async () => ({ id: 'user-1', email: 'student@example.com' }),
   rpcGetStudentProfilesDeduped: async () => ({ data: [{
     id: 'student-1', tutor_id: null, payment_model: state.paymentModel,
-    payment_payer: 'student', email: 'student@example.com', payer_email: null,
+    payment_payer: state.paymentPayer, email: 'student@example.com', payer_email: 'parent@example.com',
   }] }),
 }));
 vi.mock('@/lib/i18n', () => ({ useTranslation: () => ({ t: (key: string) => key, dateFnsLocale: undefined }) }));
@@ -31,7 +33,11 @@ vi.mock('@/lib/supabase', () => ({
           return query;
         },
         limit: async () => {
-          if (table === 'lesson_packages' || table === 'invoices') return { data: [] };
+          if (table === 'lesson_packages') return { data: state.pendingPackage ? [{
+            id: 'shared-offer', total_lessons: 4, total_price: 132, paid: false,
+            payment_status: 'pending', payment_method: 'stripe', subject: { name: 'Paketas' },
+          }] : [] };
+          if (table === 'invoices') return { data: [] };
           if (table === 'profiles') return { data: [{
             id: 'tutor-1', organization_id: 'org-1',
             enable_per_lesson: true, enable_monthly_billing: false,
@@ -66,6 +72,16 @@ describe('student payment page and monthly lessons', () => {
   beforeEach(() => {
     state.paymentModel = 'monthly_billing';
     state.paidHistory = false;
+    state.paymentPayer = 'student';
+    state.pendingPackage = false;
+  });
+
+  it.each(['student', 'parent'])('shows the package pay link in the student account when the designated payer is %s', async (payer) => {
+    state.paymentPayer = payer;
+    state.pendingPackage = true;
+    render(<MemoryRouter><StudentPayments /></MemoryRouter>);
+    const link = await screen.findByRole('link', { name: 'stuPay.payNow' });
+    expect(link.getAttribute('href')).toContain('/api/pay-package?package=shared-offer');
   });
 
   it('does not offer a future monthly lesson for immediate payment', async () => {

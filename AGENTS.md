@@ -561,13 +561,17 @@ Išėję / baigę (`left`, `graduated`) — archyvas (šiukšlinė), ne pagrindi
 
 **Testai:** `tests/lib/school-finance-export.test.ts`
 
-### Pro Klasė org_tutor (company org `isProKlaseOrg()`)
+### Visų organizacijų korepetitorių finansų privatumas
 
 **Privaloma finansų privatumo taisyklė (2026-10-01 incidentas):** organizacijos korepetitorius mato tik savo atlygio suvestinę ir savo korepetitorius → organizacija sąskaitas. Klientų / tėvų sąskaitų, sumų, apmokėjimo būsenų ir PDF jam neatskleisti. `issued_by_user_id` **nėra** sąskaitos savininko įrodymas: automatinis klientų billing jame įrašo korepetitoriaus ID. Pamokų priklausymas korepetitoriui taip pat nesuteikia prieigos prie klientų finansų.
 
 Atlygio sąskaitos žymimos `invoices.pdf_meta.invoiceKind = 'tutor_pay'` ir `tutorId` (atlygio gavėjo Auth ID). Autoritetinga UI / API patikra: `src/lib/orgTutorInvoiceAccess.ts`; DB / priedų apsauga: `20261001134513_org_tutor_invoice_privacy.sql` (restriktinės RLS sąskaitoms, eilutėms ir Storage PDF). Taisyklė taikoma **visoms organizacijoms**. Neklasifikuota / dviprasmiška sąskaita korepetitoriui nerodoma. Administratoriaus išrašyta korepetitoriaus atlygio sąskaita matoma tik tam atlygio gavėjui. Duplikatų / sąskaitos kūrimo patikros taip pat negali grąžinti kliento sąskaitos numerio ar sumos. Užklausų deduplikavimas privalo atskirti prisijungimo sesijas.
 
 Keičiant billing arba tutor finansus būtina paleisti `tests/api/org-tutor-invoice-access.test.ts`, `tests/db/org-tutor-invoice-privacy.test.ts`, `tests/lib/org-tutor-invoices-deduped.test.ts` ir tutor finansų / sąskaitų regresijas. Į produkciją pirmiausia taikyti šią DB migraciją, tada API/UI pakeitimus; be migracijos senos atlygio sąskaitos saugumo sumetimais bus paslėptos.
+
+Vizuali regresija: `tests/browser/org-tutor-invoice-privacy/README.md`. Atskirame lokaliame Vite įėjime naudojami tikri finansų / sąskaitos kūrimo komponentai ir sintetiniai duomenys. Tikrinti Pro Klasė, naują company ir school su išjungtais feature flag'ais, desktop ir mobile: klientų / kito korepetitoriaus SF nerodomos, savo PDF ir SF kūrimas veikia, kliento SF neblokuoja atlygio SF, tikras savo atlygio duplikatas blokuojamas. Šis QA įėjimas negali patekti į produkcijos buildą.
+
+### Pro Klasė org_tutor (company org `isProKlaseOrg()`)
 
 **Org ID:** `3422031d-6e21-424d-980b-35a9c6d7b8f1` (`src/lib/marketMoney.ts`)
 

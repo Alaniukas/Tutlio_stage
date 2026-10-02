@@ -7,6 +7,7 @@ import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedg
 import { retrieveConnectCheckoutSession } from './_lib/stripeDirectCharge.js';
 import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 import { markLinkedPackagePaidForSession } from './_lib/sessionPackagePayment.js';
+import { tryIssueProKlasePaidSourceInvoice } from './_lib/proKlaseSalesInvoice.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -242,6 +243,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             if (!updatedSession) {
                 await markLinkedPackagePaidForSession(supabase, sessionId, checkoutSession!);
+                await tryIssueProKlasePaidSourceInvoice(supabase, {
+                    organizationId: tutorProfile?.organization_id,
+                    sourceType: 'session', sourceId: sessionId,
+                    checkoutId: checkoutSessionId, baseAmountEur: lessonBaseEur,
+                });
                 return res.status(200).json({ success: true, already_paid: true });
             }
 
@@ -340,6 +346,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             await markLinkedPackagePaidForSession(supabase, sessionId, checkoutSession!);
+            await tryIssueProKlasePaidSourceInvoice(supabase, {
+                organizationId: tutorProfile?.organization_id,
+                sourceType: 'session', sourceId: sessionId,
+                checkoutId: checkoutSessionId, baseAmountEur: lessonBaseEur,
+            });
             return res.status(200).json({ success: true });
         } else {
             return res.status(400).json({ error: 'Payment not successful yet' });

@@ -71,6 +71,30 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('organization tutor invoice confidentiality', () => {
+  it.each([
+    ['b0a00000-7e57-4000-8000-000000000001', 'company'],
+    ['d1000000-0000-4000-8000-000000000001', 'company'],
+    ['d2000000-0000-4000-8000-000000000001', 'school'],
+  ])('enforces the same privacy rule for organization %s (%s), without feature flags', async (organizationId, entityType) => {
+    state.tables.profiles[0].organization_id = organizationId;
+    state.tables.organizations = [{ id: organizationId, entity_type: entityType, features: {} }];
+    state.tables.invoices = state.tables.invoices.map(row => ({ ...row, organization_id: organizationId }));
+    const res = response(); await list({ method: 'GET', query: {} } as any, res);
+    expect(res.code).toBe(200);
+    expect(res.body.invoices.map((row: any) => row.id)).toEqual(['own-pay','admin-issued-own-pay']);
+    for (const invoiceId of ['automatic-customer','related-customer','other-pay']) {
+      const denied = response(); await pdf({ method:'GET',query:{ id: invoiceId } } as any,denied);
+      expect(denied.code).toBe(403);
+    }
+    const ownPdf = response(); await pdf({ method:'GET',query:{ id:'own-pay' } } as any,ownPdf);
+    expect(ownPdf.code).toBe(200);
+    const deletion = response(); await remove({ method:'POST',body:{ invoiceId:'automatic-customer' } } as any,deletion);
+    expect(deletion.code).toBe(403);
+    const generation = response();
+    await generate({ method:'POST',body:{ tutorId:'tutor',periodStart:'2026-09-01',periodEnd:'2026-09-30',
+      groupingType:'single',isOrgTutor:false,precheckOnly:true } } as any,generation);
+    expect(generation.code).toBe(403);
+  });
   it.each([{}, { periodStart:'2026-08-01',periodEnd:'2026-08-31',tutorId:'other' }])('lists only own pay and never client invoices, including automatic billing (%j)', async query => {
     const res=response(); await list({ method:'GET',query } as any,res);
     expect(res.code).toBe(200);

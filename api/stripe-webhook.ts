@@ -3,6 +3,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { tryIssueSalesInvoiceForStripePackage } from './_lib/issuePackageSalesInvoice.js';
+import { tryIssueProKlasePaidSourceInvoice } from './_lib/proKlaseSalesInvoice.js';
 import { markInvoicesPaidForPackage } from './_lib/markPackageInvoicePaid.js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
@@ -19,6 +20,7 @@ import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
 import { markSchoolMonthlyInvoicePaid } from './_lib/schoolMonthlyInvoiceEmail.js';
 import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 import { markLinkedPackagePaidForSession } from './_lib/sessionPackagePayment.js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -430,7 +432,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     .eq('paid', false)
                     .neq('payment_status', 'cancelled')
                     .select(
-                        'id, tutor_id, total_lessons, available_lessons, total_price, payment_method, manual_sales_invoice_id, paid_at, pool_organization_id, students(full_name, email, payer_email, payer_name), subject:subjects(name), lesson_package_items(subject_id, total_lessons, price_per_lesson, position, subjects!inner(name))'
+                        'id, tutor_id, total_lessons, available_lessons, total_price, payment_method, manual_sales_invoice_id, paid_at, pool_organization_id, stripe_checkout_session_id, students(full_name, email, payer_email, payer_name), subject:subjects(name), lesson_package_items(subject_id, total_lessons, price_per_lesson, position, subjects!inner(name))'
                     )
                     .maybeSingle();
 
@@ -532,7 +534,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }
 
                     try {
-                        await tryIssueSalesInvoiceForStripePackage(supabase, updatedPackage as any);
+                        if (isProKlaseOrg(packageOrganizationId)) {
+                            await tryIssueProKlasePaidSourceInvoice(supabase, {
+                                organizationId: packageOrganizationId,
+                                sourceType: 'package', sourceId: packageId,
+                                checkoutId: session.id, baseAmountEur: packageBaseEur,
+                            });
+                        } else {
+                            await tryIssueSalesInvoiceForStripePackage(supabase, updatedPackage as any);
+                        }
                     } catch (sfErr) {
                         console.error('[stripe-webhook] Auto S.F. for package failed (non-blocking):', sfErr);
                     }
@@ -541,10 +551,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     try {
                         const { data: pkgRow } = await supabase
                             .from('lesson_packages')
-                            .select('manual_sales_invoice_id')
+                            .select('manual_sales_invoice_id, tutor_id, pool_organization_id, total_price')
                             .eq('id', packageId)
                             .maybeSingle();
                         await markInvoicesPaidForPackage(supabase, packageId, pkgRow?.manual_sales_invoice_id);
+                        if (pkgRow) {
+                            const { data: tutorRow } = pkgRow.pool_organization_id
+                                ? { data: null }
+                                : await supabase.from('profiles').select('organization_id').eq('id', pkgRow.tutor_id).maybeSingle();
+                            await tryIssueProKlasePaidSourceInvoice(supabase, {
+                                organizationId: pkgRow.pool_organization_id || tutorRow?.organization_id,
+                                sourceType: 'package', sourceId: packageId,
+                                checkoutId: session.id,
+                                baseAmountEur: metadataBaseEur(session.metadata) ?? Number(pkgRow.total_price),
+                            });
+                        }
                     } catch (invErr) {
                         console.error('[stripe-webhook] Error marking package invoice paid (already-paid path):', invErr);
                     }
@@ -956,6 +977,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
                             if (!updateErr) {
                                 await markLinkedPackagePaidForSession(supabase, sessionId, session);
+                                await tryIssueProKlasePaidSourceInvoice(supabase, {
+                                    organizationId: tutor?.organization_id,
+                                    sourceType: 'session', sourceId: sessionId,
+                                    checkoutId: session.id, baseAmountEur: lessonBaseEur,
+                                });
                             }
                         }
                     }

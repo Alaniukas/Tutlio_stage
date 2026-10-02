@@ -10,7 +10,7 @@ beforeAll(async () => {
     CREATE ROLE authenticated;
     CREATE SCHEMA auth; CREATE SCHEMA storage;
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT NULLIF(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
-    CREATE TABLE organizations(id uuid PRIMARY KEY,name text);
+    CREATE TABLE organizations(id uuid PRIMARY KEY,name text,entity_type text DEFAULT 'company',features jsonb DEFAULT '{}');
     CREATE TABLE profiles(id uuid PRIMARY KEY,organization_id uuid,full_name text);
     CREATE TABLE organization_admins(user_id uuid,organization_id uuid);
     CREATE TABLE invoice_profiles(user_id uuid,organization_id uuid,business_name text,company_code text);
@@ -35,7 +35,7 @@ beforeAll(async () => {
     CREATE POLICY pdf_parent ON storage.objects FOR SELECT USING (bucket_id='invoices' AND EXISTS(SELECT 1 FROM invoices i WHERE i.pdf_storage_path=objects.name AND parent_can_view_sales_invoice(i.id)));
     GRANT USAGE ON SCHEMA public,auth,storage TO authenticated;
     GRANT ALL ON ALL TABLES IN SCHEMA public,storage TO authenticated;
-    INSERT INTO organizations VALUES ('${id(1)}','Pro Klasė');
+    INSERT INTO organizations(id,name) VALUES ('${id(1)}','Pro Klasė');
     INSERT INTO profiles VALUES ('${id(2)}','${id(1)}','ADMINISTRACIJOS KOREPETITORIUS'),('${id(3)}','${id(1)}','Other teacher');
     INSERT INTO organization_admins VALUES ('${id(4)}','${id(1)}');
     INSERT INTO invoice_profiles VALUES (NULL,'${id(1)}','MB POKALBIŲ ERDVĖ','123');
@@ -66,6 +66,30 @@ async function asUser<T=any>(user: string,query: string) {
   finally { await db.exec('RESET ROLE'); }
 }
 describe('actual PostgreSQL invoice access policies', () => {
+  it.each([
+    ['Pro Klasė QA', 'company', 700],
+    ['Unconfigured tutor organization', 'company', 800],
+    ['Unconfigured school', 'school', 900],
+  ] as const)('protects invoices, line items, and PDF storage in %s with all feature flags off', async (name, entityType, seed) => {
+    const orgId = id(seed), tutorId = id(seed + 1), otherTutorId = id(seed + 2);
+    const customerId = id(seed + 10), ownId = id(seed + 11), otherPayId = id(seed + 12);
+    await db.query('INSERT INTO organizations(id,name,entity_type,features) VALUES($1,$2,$3,$4)', [orgId,name,entityType,{}]);
+    await db.query('INSERT INTO profiles VALUES($1,$2,$3)', [tutorId,orgId,'Tutor']);
+    for (const [invoiceId, buyer, meta] of [
+      [customerId,'Private customer',null],
+      [ownId,name,{ invoiceKind:'tutor_pay',tutorId }],
+      [otherPayId,name,{ invoiceKind:'tutor_pay',tutorId:otherTutorId }],
+    ] as const) {
+      await db.query('INSERT INTO invoices(id,organization_id,issued_by_user_id,buyer_snapshot,pdf_meta,pdf_storage_path) VALUES($1,$2,$3,$4,$5,$6)',
+        [invoiceId,orgId,tutorId,{name:buyer},meta,`${invoiceId}.pdf`]);
+      await db.query('INSERT INTO invoice_line_items VALUES($1,$2)',[invoiceId,invoiceId]);
+      await db.query("INSERT INTO storage.objects VALUES($1,'invoices',$2)",[invoiceId,`${invoiceId}.pdf`]);
+    }
+    expect((await asUser(tutorId,'SELECT id FROM invoices')).map(r => r.id)).toEqual([ownId]);
+    expect((await asUser(tutorId,'SELECT invoice_id FROM invoice_line_items')).map(r => r.invoice_id)).toEqual([ownId]);
+    expect((await asUser(tutorId,'SELECT name FROM storage.objects')).map(r => r.name)).toEqual([`${ownId}.pdf`]);
+    expect(await asUser(id(2),`SELECT id FROM invoices WHERE organization_id='${orgId}'`)).toEqual([]);
+  });
   it('denies the reported automatic client invoice, and preserves only own tutor pay', async () => {
     expect((await asUser(id(2),'SELECT id FROM invoices ORDER BY id')).map(r => r.id)).toEqual([13,14,16,17].map(id));
     expect((await asUser(id(2),'SELECT invoice_id FROM invoice_line_items ORDER BY invoice_id')).map(r => r.invoice_id)).toEqual([13,14,16,17].map(id));

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
+  rpc: vi.fn(async (_name: string, _params: unknown) => ({ data: 'sales-invoice-1', error: null })),
   checkoutRetrieve: vi.fn(),
   constructEvent: vi.fn(),
   syncCalendar: vi.fn(async (_sessionId: string, _tutorId: string) => {}),
@@ -21,10 +22,11 @@ vi.mock('stripe', () => ({
   },
 }));
 vi.mock('@supabase/supabase-js', () => ({
-  createClient: () => ({ from: mocks.from }),
+  createClient: () => ({ from: mocks.from, rpc: mocks.rpc }),
 }));
 vi.mock('../../api/_lib/stripeDirectCharge.js', () => ({
   retrieveConnectCheckoutSession: mocks.checkoutRetrieve,
+  resolveTutorStripeAccount: vi.fn(async () => 'acct_org'),
 }));
 vi.mock('../../api/_lib/google-calendar.js', () => ({
   syncSessionToGoogle: mocks.syncCalendar,
@@ -197,7 +199,7 @@ function response() {
   return { res, result };
 }
 
-type Endpoint = 'confirm' | 'webhook';
+type Endpoint = 'confirm' | 'webhook' | 'package-confirm';
 const endpoints: Endpoint[] = ['confirm', 'webhook'];
 let db: PaymentDatabase;
 let checkout: Row;
@@ -211,6 +213,9 @@ async function callEndpoint(endpoint: Endpoint) {
       method: 'POST',
       body: { sessionId: 'session-1', checkoutSessionId: checkout.id },
     } as any, res as any);
+  } else if (endpoint === 'package-confirm') {
+    const handler = (await import('../../api/confirm-package-payment')).default;
+    await handler({ method: 'POST', body: { sessionId: checkout.id }, headers: {} } as any, res as any);
   } else {
     const handler = (await import('../../api/stripe-webhook')).default;
     const req = {
@@ -271,6 +276,38 @@ afterEach(() => {
 });
 
 describe('session Stripe payment synchronizes its trial package', () => {
+  it.each(endpoints)('%s retries Pro Klasė sales invoicing on first payment and already-paid callbacks', async endpoint => {
+    const orgId = '3422031d-6e21-424d-980b-35a9c6d7b8f1';
+    db.tables.profiles[0].organization_id = orgId;
+    db.tables.organizations[0].id = orgId;
+    db.package.pool_organization_id = orgId;
+
+    expect((await callEndpoint(endpoint)).status).toBe(200);
+    expect((await callEndpoint(endpoint)).status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledTimes(2);
+    expect(mocks.rpc).toHaveBeenCalledWith('issue_proklase_paid_source_invoice', {
+      p_source_type: 'session', p_source_id: 'session-1', p_checkout_id: checkout.id, p_base_amount: 10,
+    });
+    expect(emails()).toHaveLength(2);
+  });
+
+  it('issues a Pro Klasė package invoice when the success page confirms first and retries on webhook replay', async () => {
+    const orgId = '3422031d-6e21-424d-980b-35a9c6d7b8f1';
+    db.tables.profiles[0].organization_id = orgId;
+    db.tables.organizations[0].id = orgId;
+    db.package.pool_organization_id = orgId;
+    db.package.stripe_checkout_session_id = checkout.id;
+    checkout.metadata = { tutlio_package_id: 'package-1' };
+
+    expect((await callEndpoint('package-confirm')).status).toBe(200);
+    expect((await callEndpoint('webhook')).status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledTimes(2);
+    expect(mocks.rpc).toHaveBeenCalledWith('issue_proklase_paid_source_invoice', {
+      p_source_type: 'package', p_source_id: 'package-1', p_checkout_id: checkout.id, p_base_amount: 10,
+    });
+    expect(mocks.issueInvoice).not.toHaveBeenCalled();
+  });
+
   it.each(endpoints)('%s marks the linked trial package paid and active with the successful checkout', async endpoint => {
     const result = await callEndpoint(endpoint);
 

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mock = vi.hoisted(() => ({ create: vi.fn(), retrieve: vi.fn(), expire: vi.fn(), from: vi.fn(), pkg: {} as any, checkoutClaim: {} as any }));
+const mock = vi.hoisted(() => ({ create: vi.fn(), retrieve: vi.fn(), expire: vi.fn(), from: vi.fn(), pkg: {} as any, checkoutClaim: {} as any,
+  origin: '', org: {} as any, items: [] as any[] }));
 vi.mock('stripe', () => ({ default: class { checkout = { sessions: { create: mock.create, retrieve: mock.retrieve, expire: mock.expire } }; } }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ from: mock.from }) }));
-vi.mock('../../api/_lib/public-origin.js', () => ({ publicOriginFromRequest: () => 'https://tutlio.pl' }));
+vi.mock('../../api/_lib/public-origin.js', () => ({ publicOriginFromRequest: () => mock.origin }));
 import handler from '../../api/pay-package';
 import { directChargeApplicationFeeCents, orgFeeProfile } from '../../api/_lib/marketMoney';
 
@@ -13,15 +14,20 @@ beforeEach(() => {
     payment_method: 'stripe', expires_at: '2099-10-01T00:00Z', students: { full_name: 'Student' },
     profiles: { full_name: 'Tutor', organization_id: 'changed-org' } };
   mock.checkoutClaim = mock.pkg;
+  mock.origin = 'https://tutlio.pl';
+  mock.org = { stripe_account_id: 'org-account', stripe_onboarding_complete: true, name: 'Pro Klase', slug: 'proklase' };
+  mock.items = [{ total_lessons: 4, price_per_lesson: 27, subjects: { name: 'Lithuanian' } }, { total_lessons: 5, price_per_lesson: 27, subjects: { name: 'Maths' } }];
   mock.create.mockResolvedValue({ id: 'checkout', url: 'https://checkout.stripe.com/test' });
   mock.expire.mockResolvedValue({ id: 'cs_old', status: 'expired' });
   mock.from.mockImplementation((table: string) => {
-    const data = table === 'lesson_packages' ? mock.pkg : table === 'organizations'
-      ? { stripe_account_id: 'org-account', stripe_onboarding_complete: true, name: 'Pro Klase', slug: 'proklase' }
-      : [{ total_lessons: 4, price_per_lesson: 27, subjects: { name: 'Lithuanian' } }, { total_lessons: 5, price_per_lesson: 27, subjects: { name: 'Maths' } }];
+    const data = table === 'lesson_packages' ? mock.pkg : table === 'organizations' ? mock.org : mock.items;
+    const filters: Array<[string, unknown]> = [];
     const q: any = { then: (resolve: any) => Promise.resolve({ data, error: null }).then(resolve) };
-    for (const method of ['select','eq','single','order','update']) q[method] = vi.fn(() => q);
-    q.maybeSingle = vi.fn(async () => ({ data: table === 'lesson_packages' ? mock.checkoutClaim : data, error: null }));
+    for (const method of ['select','single','order','update']) q[method] = vi.fn(() => q);
+    q.eq = vi.fn((column: string, value: unknown) => { filters.push([column, value]); return q; });
+    q.maybeSingle = vi.fn(async () => ({ data: table === 'lesson_packages'
+      ? mock.checkoutClaim && filters.every(([column, value]) => mock.checkoutClaim[column] === value) ? mock.checkoutClaim : null
+      : data, error: null }));
     return q;
   });
 });
@@ -47,13 +53,53 @@ describe('pooled package payment', () => {
     expect(checkout.success_url).toBe('https://tutlio.pl/package-success?session_id={CHECKOUT_SESSION_ID}&stripe_account=org-account');
     expect(checkout.cancel_url).toBe('https://tutlio.pl/package-cancelled');
     expect(checkout.metadata.tutlio_package_id).toBe('pool');
-    expect(options.idempotencyKey).toBe('package-checkout:pool:initial');
+    expect(options.idempotencyKey).toMatch(/^package-checkout:v2:pool:[a-f0-9]{64}$/);
     const orgQuery = mock.from.mock.results[mock.from.mock.calls.findIndex(([table]) => table === 'organizations')].value;
     expect(orgQuery.eq).toHaveBeenCalledWith('id', mock.pkg.pool_organization_id);
   });
   it('uses the same provider idempotency key for concurrent initial requests', async () => {
     await Promise.all([pay(), pay()]);
-    expect(mock.create.mock.calls.map(call => call[1].idempotencyKey)).toEqual(['package-checkout:pool:initial','package-checkout:pool:initial']);
+    expect(mock.create.mock.calls[0][1].idempotencyKey).toBe(mock.create.mock.calls[1][1].idempotencyKey);
+  });
+  it.each(['payer', 'locale', 'origin', 'price', 'school payer'])('can regenerate checkout after a %s change without a Stripe idempotency conflict', async (change) => {
+    if (change === 'school payer') {
+      mock.pkg.pool_organization_id = 'school-org';
+      mock.org.slug = 'school';
+      mock.org.entity_type = 'school';
+    }
+    const requests = new Map<string, string>();
+    mock.create.mockImplementation(async (params, options) => {
+      const body = JSON.stringify(params);
+      const previous = requests.get(options.idempotencyKey);
+      if (previous && previous !== body) throw new Error('StripeIdempotencyError: parameters changed');
+      requests.set(options.idempotencyKey, body);
+      return { id: 'checkout', url: 'https://checkout.stripe.com/test' };
+    });
+    expect((await pay()).redirect).toHaveBeenCalledWith(303, 'https://checkout.stripe.com/test');
+    if (change === 'payer' || change === 'school payer') mock.pkg.students.payer_email = 'new-parent@example.com';
+    if (change === 'origin') mock.origin = 'https://www.tutlio.lt';
+    if (change === 'price') { mock.items[0].price_per_lesson = 30; mock.pkg.total_price = 255; }
+    expect((await pay(change === 'locale' ? 'pl' : undefined)).redirect)
+      .toHaveBeenCalledWith(303, 'https://checkout.stripe.com/test');
+    expect(requests.size).toBe(2);
+    expect(mock.create.mock.calls[1][1].idempotencyKey).not.toContain('new-parent@example.com');
+  });
+  it('allows a tutor-owned unpaid offer that becomes active only after payment, including an earlier billing month', async () => {
+    mock.pkg.pool_organization_id = null;
+    mock.pkg.active = false;
+    mock.pkg.expires_at = null;
+    mock.pkg.billing_period_end = '2026-09-30';
+    expect((await pay()).redirect).toHaveBeenCalledWith(303, 'https://checkout.stripe.com/test');
+    expect(mock.expire).not.toHaveBeenCalled();
+  });
+  it.each(['student', 'parent'])('allows the same package link when the designated payer is %s', async (payer) => {
+    mock.pkg.students.payment_payer = payer;
+    expect((await pay()).redirect).toHaveBeenCalledWith(303, 'https://checkout.stripe.com/test');
+  });
+  it('does not collect payment for an inactive pooled offer', async () => {
+    mock.pkg.active = false;
+    expect((await pay()).status).toHaveBeenCalledWith(409);
+    expect(mock.create).not.toHaveBeenCalled();
   });
   it('never collects payment for an expired package', async () => {
     mock.pkg.expires_at = '2000-01-01T00:00Z';
@@ -96,5 +142,12 @@ describe('pooled package payment', () => {
     expect(mock.create).toHaveBeenCalledOnce();
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.redirect).not.toHaveBeenCalled();
+    expect(mock.expire).toHaveBeenCalledWith('checkout', { stripeAccount: 'org-account' });
+  });
+  it('does not publish a pooled checkout when the offer becomes inactive during checkout creation', async () => {
+    mock.checkoutClaim = { ...mock.pkg, active: false };
+    const res = await pay();
+    expect(res.redirect).not.toHaveBeenCalled();
+    expect(mock.expire).toHaveBeenCalledWith('checkout', { stripeAccount: 'org-account' });
   });
 });

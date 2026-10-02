@@ -153,6 +153,14 @@ describe('GET /api/parent-pending-packages', () => {
     expect(mocks.rpc).toHaveBeenCalledWith('get_parent_child_ids', { p_user_id: PARENT_USER });
   });
 
+  it.each(['student', 'parent'])('returns the linked child package when the designated payer is %s', async (payer) => {
+    mocks.tables.students[0].payment_payer = payer;
+    mocks.tables.students[0].payer_email = 'someone-else@example.com';
+    const { result } = await run();
+    expect(result.statusCode).toBe(200);
+    expect(result.body.packages.map((pkg: any) => pkg.id)).toEqual(['package-1']);
+  });
+
   it.each([null, { userId: null, isInternal: true }, { userId: PARENT_USER, isInternal: true }])(
     'rejects unauthenticated and internal callers (%j)', async (auth) => {
       mocks.auth.mockResolvedValue(auth);

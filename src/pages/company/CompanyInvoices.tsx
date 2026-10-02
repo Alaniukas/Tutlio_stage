@@ -216,7 +216,7 @@ export default function CompanyInvoices() {
       query = query.eq('status', statusFilter);
     }
 
-    if (invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth)) {
+    if (invoicePeriodMode === 'month' && invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth)) {
       const [yStr, mStr] = invoiceMonth.split('-');
       const y = parseInt(yStr, 10);
       const m = parseInt(mStr, 10);
