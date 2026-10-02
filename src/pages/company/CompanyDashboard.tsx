@@ -12,6 +12,7 @@ import {
   ChevronRight,
   CheckCircle,
   CreditCard,
+  Mail,
   X,
 } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays } from 'date-fns';
@@ -66,6 +67,7 @@ interface OrgSessionRow {
   tutor_joined_at?: string | null;
   student_joined_at?: string | null;
   status_confirmed_at?: string | null;
+  status_reminder_last_sent_at?: string | null;
   tutor_comment?: string | null;
   student?: { full_name: string; payment_model?: string | null } | null;
 }
@@ -84,17 +86,18 @@ interface RecentOrgPayment {
 }
 
 const DASH_CACHE_KEY = 'company_dashboard';
+const TUTOR_OUTCOME_REMINDER_COOLDOWN_MS = 60 * 60 * 1000;
 
 function attendanceAttentionSummary(
   session: Pick<OrgSessionRow, 'start_time' | 'end_time' | 'status' | 'tutor_joined_at' | 'student_joined_at' | 'status_confirmed_at' | 'meeting_link'>,
   t: (key: string, params?: Record<string, string>) => string,
-  manualConfirmationRequired = false,
+  proKlaseOutcomePending = false,
 ): string {
   const info = deriveAttendance(session);
-  if (manualConfirmationRequired && !session.status_confirmed_at) {
+  if (proKlaseOutcomePending && !session.status_confirmed_at) {
     const endMs = session.end_time ? Date.parse(String(session.end_time)) : NaN;
     if (Number.isFinite(endMs) && endMs <= Date.now()) {
-      return t('att.unconfirmed');
+      return t('companyDash.tutorOutcomeNotMarked');
     }
   }
   const time = (iso: string | null | undefined) =>
@@ -156,6 +159,7 @@ export default function CompanyDashboard() {
   const [attentionList, setAttentionList] = useState<OrgAttentionRow[]>(cached?.attentionList ?? []);
   const [noShowTarget, setNoShowTarget] = useState<OrgAttentionRow | null>(null);
   const [markingNoShow, setMarkingNoShow] = useState(false);
+  const [remindingTutorSessionId, setRemindingTutorSessionId] = useState<string | null>(null);
   const [cancelledList, setCancelledList] = useState<OrgSessionRow[]>(cached?.cancelledList ?? []);
   const [recentPayments, setRecentPayments] = useState<RecentOrgPayment[]>(cached?.recentPayments ?? []);
   const [tutorPayMap, setTutorPayMap] = useState<Map<string, TutorPay>>(
@@ -293,7 +297,7 @@ export default function CompanyDashboard() {
 
       const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, tutor_comment, student:students(full_name, payment_model)')
+      .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, status_reminder_last_sent_at, tutor_comment, student:students(full_name, payment_model)')
       .in('tutor_id', tutorIds)
       .order('start_time', { ascending: true })
       .limit(800);
@@ -712,6 +716,34 @@ export default function CompanyDashboard() {
     }
   };
 
+  const handleSendTutorOutcomeReminder = async (session: OrgAttentionRow) => {
+    if (!isProKlaseAdmin) return;
+    setRemindingTutorSessionId(session.id);
+    try {
+      const response = await fetch('/api/remind-tutor-session-status', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ sessionId: session.id }),
+      });
+      const body = await response.json().catch(() => ({} as Record<string, unknown>));
+      if (response.status === 429) {
+        alert(t('companyDash.tutorOutcomeReminderTooSoon'));
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(typeof body.error === 'string' ? body.error : response.statusText);
+      }
+      alert(t('companyDash.tutorOutcomeReminderSent'));
+      void loadData();
+    } catch (error) {
+      alert(t('companyDash.tutorOutcomeReminderFailed', {
+        msg: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      setRemindingTutorSessionId(null);
+    }
+  };
+
   if (loading) {
     return (
       <>
@@ -901,7 +933,11 @@ export default function CompanyDashboard() {
                                 <>
                                   {' · '}
                                   <span className={isProKlaseAdmin ? 'text-amber-700 font-medium' : 'text-rose-600 font-medium'}>
-                                    {attendanceAttentionSummary(s, t, isProKlaseAdmin)}
+                                    {attendanceAttentionSummary(
+                                      s,
+                                      t,
+                                      isProKlaseAdmin && hasAttendanceReason,
+                                    )}
                                   </span>
                                 </>
                               )}
@@ -939,25 +975,50 @@ export default function CompanyDashboard() {
                         </div>
                         {hasAttendanceReason
                           && (isProKlaseAdmin ? end.getTime() <= Date.now() : s.status !== 'no_show') && (
-                          <div className="mt-2 flex gap-2">
+                          <div className="mt-2 space-y-2">
+                            <div className="flex gap-2">
+                              {isProKlaseAdmin && (
+                                <button
+                                  type="button"
+                                  disabled={markingNoShow || remindingTutorSessionId === s.id}
+                                  onClick={() => void handleConfirmAttended(s)}
+                                  className="flex min-h-[44px] flex-1 touch-manipulation items-center justify-center rounded-xl px-3 py-2 text-center text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-50 disabled:opacity-50"
+                                >
+                                  {t('compSess.markAttended')}
+                                </button>
+                              )}
+                              {s.status !== 'no_show' && (
+                                <button
+                                  type="button"
+                                  disabled={markingNoShow || remindingTutorSessionId === s.id}
+                                  onClick={() => setNoShowTarget(s)}
+                                  className="flex min-h-[44px] flex-1 touch-manipulation items-center justify-center rounded-xl px-3 py-2 text-center text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:opacity-50"
+                                >
+                                  {t('companyDash.confirmNoShowShort')}
+                                </button>
+                              )}
+                            </div>
                             {isProKlaseAdmin && (
                               <button
                                 type="button"
-                                disabled={markingNoShow}
-                                onClick={() => void handleConfirmAttended(s)}
-                                className="flex min-h-[44px] flex-1 touch-manipulation items-center justify-center rounded-xl px-3 py-2 text-center text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-50 disabled:opacity-50"
+                                disabled={
+                                  markingNoShow
+                                  || remindingTutorSessionId === s.id
+                                  || (() => {
+                                    const lastSent = s.status_reminder_last_sent_at
+                                      ? Date.parse(s.status_reminder_last_sent_at)
+                                      : NaN;
+                                    return Number.isFinite(lastSent)
+                                      && Date.now() - lastSent < TUTOR_OUTCOME_REMINDER_COOLDOWN_MS;
+                                  })()
+                                }
+                                onClick={() => void handleSendTutorOutcomeReminder(s)}
+                                className="flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-center text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-50 disabled:opacity-50"
                               >
-                                {t('compSess.markAttended')}
-                              </button>
-                            )}
-                            {s.status !== 'no_show' && (
-                              <button
-                                type="button"
-                                disabled={markingNoShow}
-                                onClick={() => setNoShowTarget(s)}
-                                className="flex min-h-[44px] flex-1 touch-manipulation items-center justify-center rounded-xl px-3 py-2 text-center text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:opacity-50"
-                              >
-                                {t('companyDash.confirmNoShowShort')}
+                                <Mail className="w-3.5 h-3.5" />
+                                {remindingTutorSessionId === s.id
+                                  ? t('companyDash.tutorOutcomeReminderSending')
+                                  : t('companyDash.sendTutorOutcomeReminder')}
                               </button>
                             )}
                           </div>

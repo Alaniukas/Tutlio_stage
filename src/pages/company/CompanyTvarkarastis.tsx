@@ -32,7 +32,7 @@ import type { Locale } from 'date-fns';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 
 import { useTranslation } from '@/lib/i18n';
-import { getCached, setCache } from '@/lib/dataCache';
+import { getCached, setCache, companyTvarkarastisCacheKey, dedupeAsync } from '@/lib/dataCache';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { supabase } from '@/lib/supabase';
 import { sendEmail } from '@/lib/email';
@@ -217,6 +217,7 @@ import {
   selectionContainsEveryTutor,
   writeCalendarTutorFilter,
 } from '@/lib/calendarTutorFilterPersistence';
+import { scheduleFetchWindow } from '@/lib/orgScheduleFetchWindow';
 
 const locales = { lt, en: enUS };
 const localizer = dateFnsLocalizer({
@@ -251,10 +252,37 @@ async function emailOrgTutorAvailabilityNotice(
   }).catch(err => console.error('[OrgSchedule] availability notice', err));
 }
 
-/** Same shape as fetchData sessions query — reused when refreshing one row for the lesson modal. */
+/** Full row for the lesson modal (loaded on click). */
 const TVARKARASTIS_SESSION_SELECT = `
   *,
   student:students(full_name, email, admin_comment, admin_comment_visible_to_tutor, grade),
+  tutor:profiles!sessions_tutor_id_fkey(full_name)
+`;
+
+/** Lightweight calendar grid payload — no admin comments or other modal-only fields. */
+const TVARKARASTIS_CALENDAR_SESSION_SELECT = `
+  id,
+  tutor_id,
+  student_id,
+  subject_id,
+  class_group_id,
+  start_time,
+  end_time,
+  status,
+  paid,
+  topic,
+  meeting_link,
+  price,
+  recurring_session_id,
+  status_confirmed_at,
+  no_show_reason,
+  is_makeup,
+  is_complimentary,
+  cancellation_reason_code,
+  lesson_package_id,
+  original_start_time,
+  payment_status,
+  student:students(full_name, grade),
   tutor:profiles!sessions_tutor_id_fkey(full_name)
 `;
 
@@ -472,22 +500,25 @@ export default function CompanyTvarkarastis() {
     }
   };
 
-  const tc = getCached<{
+  const scheduleCacheKey = organizationId ? companyTvarkarastisCacheKey(organizationId) : null;
+
+  const tc = scheduleCacheKey ? getCached<{
     orgTutors: OrgTutor[];
-    sessions: Session[];
     availability: Availability[];
     subjects: Subject[];
     students: Student[];
     individualPricing: Array<{ student_id: string; subject_id: string; price: number }>;
     dynamicPricingRules?: OrganizationDynamicPricingRule[];
     orgUsesLicenses?: boolean;
-  }>('company_tvarkarastis');
+  }>(scheduleCacheKey) : null;
 
   // Data state
   const [loading, setLoading] = useState(!tc);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const sessionsRequestRef = useRef(0);
   const [orgUsesLicenses, setOrgUsesLicenses] = useState(tc?.orgUsesLicenses ?? false);
   const [orgTutors, setOrgTutors] = useState<OrgTutor[]>(tc?.orgTutors ?? []);
-  const [sessions, setSessions] = useState<Session[]>(tc?.sessions ?? []);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [availability, setAvailability] = useState<Availability[]>(tc?.availability ?? []);
   const [subjects, setSubjects] = useState<Subject[]>(tc?.subjects ?? []);
   const [students, setStudents] = useState<Student[]>(tc?.students ?? []);
@@ -506,10 +537,10 @@ export default function CompanyTvarkarastis() {
   const [tutorSearchQuery, setTutorSearchQuery] = useState('');
   const [selectedSubjectIds, setSelectedSubjectIds] = useState<string[]>([]);
   const [showOnlyAvailability, setShowOnlyAvailability] = useState(false);
-  const [showOnlySessions, setShowOnlySessions] = useState(false);
+  const [showOnlySessions, setShowOnlySessions] = useState(isSchoolOrgView);
 
   // Calendar state
-  const [currentView, setCurrentView] = useState<View>(Views.WEEK);
+  const [currentView, setCurrentView] = useState<View>(isSchoolOrgView ? Views.MONTH : Views.WEEK);
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
 
   // Modal state
@@ -677,15 +708,6 @@ export default function CompanyTvarkarastis() {
   const [findLessonBookCreatedIntervals, setFindLessonBookCreatedIntervals] = useState<Array<{ start: number; end: number }>>([]);
   const [findLessonBookSuccess, setFindLessonBookSuccess] = useState(false);
 
-  useEffect(() => {
-    if (featuresLoading) return;
-    if (!organizationId) {
-      setLoading(false);
-      return;
-    }
-    fetchData();
-  }, [featuresLoading, organizationId, ctxUser?.id]);
-
   // Org trial defaults (same source as CompanyStudents / create-trial-package).
   useEffect(() => {
     if (!organizationId) return;
@@ -774,11 +796,106 @@ export default function CompanyTvarkarastis() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createStudentId, featuresLoading, trialDefaults, trialPolicy]);
 
-  const fetchData = async () => {
-    if (!organizationId) return;
-    if (!getCached('company_tvarkarastis')) setLoading(true);
+  const enrichParsedSessions = (
+    sessionsData: any[],
+    tutorLinksById: Map<string, string | null | undefined>,
+    studentsById: Map<string, Student>,
+    subjectsById: Map<string, { meeting_link?: string | null }>,
+  ): Session[] => (
+    (sessionsData || []).map((session: any) =>
+      enrichSessionMeetingLink({
+        ...session,
+        start_time: new Date(session.start_time),
+        end_time: new Date(session.end_time),
+      }, {
+        tutorPersonalLink: tutorLinksById.get(session.tutor_id),
+        studentsById,
+        subjectsById,
+      }),
+    )
+  );
+
+  const loadAvailabilityForTutors = async (
+    tutorIds: string[],
+    tutorRows: Array<{ id: string; full_name?: string | null }>,
+  ) => {
+    if (!organizationId || tutorIds.length === 0) return [];
+    const tutorNameById = new Map(tutorRows.map((t) => [t.id, t.full_name || '']));
+    const availabilityData = await fetchAllRows<any>((from, to) => supabase
+      .from('availability')
+      .select('*')
+      .in('tutor_id', tutorIds)
+      .order('id', { ascending: true })
+      .range(from, to));
+    const mappedAvailability = (availabilityData || []).map((row: any) => ({
+      ...row,
+      tutor: { full_name: tutorNameById.get(row.tutor_id) || '' },
+    }));
+    setAvailability(mappedAvailability);
+    if (scheduleCacheKey) {
+      const prevCache = getCached<any>(scheduleCacheKey);
+      if (prevCache) {
+        setCache(scheduleCacheKey, { ...prevCache, availability: mappedAvailability });
+      }
+    }
+    return mappedAvailability;
+  };
+
+  const loadSessionsForWindow = useCallback(async (opts?: { background?: boolean }) => {
+    if (!organizationId || orgTutors.length === 0) return;
+    const tutorIds = orgTutors.map((tutor) => tutor.id);
+    const weekStartsOn = locale === 'he' ? 0 : 1;
+    const { start, end } = scheduleFetchWindow(currentDate, currentView, { weekStartsOn });
+    const requestId = ++sessionsRequestRef.current;
+    if (!opts?.background) setSessionsLoading(true);
 
     try {
+      const sessionsData = tutorIds.length > 0
+        ? await fetchAllRows<any>((from, to) => supabase
+            .from('sessions')
+            .select(TVARKARASTIS_CALENDAR_SESSION_SELECT)
+            .in('tutor_id', tutorIds)
+            .not('hidden_from_calendar', 'eq', true)
+            .gte('start_time', start.toISOString())
+            .lte('start_time', end.toISOString())
+            .order('start_time', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, to))
+        : [];
+      if (requestId !== sessionsRequestRef.current) return;
+
+      const tutorLinksById = new Map(
+        orgTutors.map((t) => [t.id, t.personal_meeting_link]),
+      );
+      const studentsById = new Map(students.map((s) => [s.id, s]));
+      const subjectsById = new Map(subjects.map((s) => [s.id, s]));
+      setSessions(enrichParsedSessions(sessionsData, tutorLinksById, studentsById, subjectsById));
+    } catch (error) {
+      if (requestId !== sessionsRequestRef.current) return;
+      console.error('[CompanyTvarkarastis] loadSessionsForWindow failed:', error);
+    } finally {
+      if (requestId === sessionsRequestRef.current) setSessionsLoading(false);
+    }
+  }, [currentDate, currentView, locale, orgTutors, organizationId, students, subjects]);
+
+  const fetchScheduleMeta = async () => {
+    if (!organizationId || !scheduleCacheKey) return;
+    const cached = getCached<any>(scheduleCacheKey);
+    if (cached?.orgTutors?.length) {
+      setOrgTutors(cached.orgTutors as OrgTutor[]);
+      setAvailability(cached.availability || []);
+      setSubjects(cached.subjects || []);
+      setStudents(cached.students || []);
+      setIndividualPricing(cached.individualPricing || []);
+      setDynamicPricingRules(cached.dynamicPricingRules || []);
+      setOrgUsesLicenses(Boolean(cached.orgUsesLicenses));
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+
+    try {
+      await dedupeAsync(`schedule-meta:${organizationId}`, async () => {
       const filteredTutors = await getOrgVisibleTutors(
         supabase as any,
         organizationId,
@@ -787,9 +904,6 @@ export default function CompanyTvarkarastis() {
       const tutorIds = filteredTutors.map((t: any) => t.id);
       setOrgTutors(filteredTutors as OrgTutor[]);
 
-      // Keep "all teachers" selected when a newly invited teacher first appears.
-      // A cached calendar otherwise keeps only the old IDs and silently filters out
-      // lessons created by the new teacher until the whole app cache is cleared.
       setSelectedTutorIds((previous) => {
         const saved = readCalendarTutorFilter(ctxUser?.id, organizationId);
         if (saved) {
@@ -808,46 +922,13 @@ export default function CompanyTvarkarastis() {
         return previous.filter((id) => currentTutorIds.has(id));
       });
 
-      // Fetch sessions for org tutors
-      const schedulePast = addDays(new Date(), -90).toISOString();
-      const scheduleFuture = addDays(new Date(), 180).toISOString();
-      const sessionsData = tutorIds.length > 0
-        ? await fetchAllRows<any>((from, to) => supabase
-            .from('sessions')
-            .select(TVARKARASTIS_SESSION_SELECT)
-            .in('tutor_id', tutorIds)
-            .not('hidden_from_calendar', 'eq', true)
-            .gte('start_time', schedulePast)
-            .lte('start_time', scheduleFuture)
-            .order('start_time', { ascending: true })
-            .order('id', { ascending: true })
-            .range(from, to))
-        : [];
+      let mappedAvailability: any[] = [];
+      if (!isSchoolOrgView && tutorIds.length > 0) {
+        mappedAvailability = await loadAvailabilityForTutors(tutorIds, filteredTutors as OrgTutor[]);
+      } else {
+        setAvailability([]);
+      }
 
-      const parsedSessions = (sessionsData || []).map((session: any) => ({
-        ...session,
-        start_time: new Date(session.start_time),
-        end_time: new Date(session.end_time),
-      }));
-
-      // Fetch availability for org tutors
-      const tutorNameById = new Map(filteredTutors.map((t: any) => [t.id, t.full_name || '']));
-      const availabilityData = tutorIds.length > 0
-        ? await fetchAllRows<any>((from, to) => supabase
-            .from('availability')
-            .select('*')
-            .in('tutor_id', tutorIds)
-            .order('id', { ascending: true })
-            .range(from, to))
-        : [];
-
-      const mappedAvailability = (availabilityData || []).map((row: any) => ({
-        ...row,
-        tutor: { full_name: tutorNameById.get(row.tutor_id) || '' },
-      }));
-      setAvailability(mappedAvailability);
-
-      // Fetch subjects for org tutors
       const { data: subjectsData } = await supabase
         .from('subjects')
         .select('*')
@@ -855,7 +936,6 @@ export default function CompanyTvarkarastis() {
 
       setSubjects(subjectsData || []);
 
-      // Visi org mokiniai (legacy rows may lack organization_id but have tutor_id in org)
       const studentSelect =
         `${ORG_STUDENT_PICKER_SELECT}, payment_model, personal_meeting_link, pricing_lessons_per_week`;
       let studentsData: Student[] = [];
@@ -896,23 +976,6 @@ export default function CompanyTvarkarastis() {
       }
 
       setStudents(studentsData);
-
-      const tutorLinksById = new Map(
-        filteredTutors.map((t: { id: string; personal_meeting_link?: string | null }) => [
-          t.id,
-          t.personal_meeting_link,
-        ]),
-      );
-      const studentsById = new Map(studentsData.map((s) => [s.id, s]));
-      const subjectsById = new Map((subjectsData || []).map((s: { id: string; meeting_link?: string | null }) => [s.id, s]));
-      const enrichedSessions = parsedSessions.map((session) =>
-        enrichSessionMeetingLink(session, {
-          tutorPersonalLink: tutorLinksById.get(session.tutor_id),
-          studentsById,
-          subjectsById,
-        }),
-      );
-      setSessions(enrichedSessions);
 
       const { data: pricingData } = await supabase
         .from('student_individual_pricing')
@@ -958,9 +1021,8 @@ export default function CompanyTvarkarastis() {
         setDynamicPricingRules(nextDynamicPricingRules);
       }
 
-      setCache('company_tvarkarastis', {
+      setCache(scheduleCacheKey, {
         orgTutors: filteredTutors,
-        sessions: enrichedSessions,
         availability: mappedAvailability,
         subjects: subjectsData || [],
         students: studentsData || [],
@@ -968,79 +1030,53 @@ export default function CompanyTvarkarastis() {
         dynamicPricingRules: nextDynamicPricingRules,
         orgUsesLicenses: nextOrgUsesLicenses,
       });
+      });
     } catch (error) {
-      console.error('Error fetching data:', error);
+      console.error('Error fetching schedule metadata:', error);
     } finally {
       setLoading(false);
     }
   };
 
+  const refreshSchedule = useCallback(async () => {
+    await fetchScheduleMeta();
+    await loadSessionsForWindow({ background: true });
+  }, [loadSessionsForWindow]);
+
   const refreshCalendarSessionsOnly = useCallback(async () => {
-    if (!organizationId) return;
-    const tutorIds = orgTutors.map((tutor) => tutor.id);
-    if (tutorIds.length === 0) return;
+    await loadSessionsForWindow({ background: true });
+  }, [loadSessionsForWindow]);
 
-    try {
-      const schedulePast = addDays(new Date(), -90).toISOString();
-      const scheduleFuture = addDays(new Date(), 180).toISOString();
-      const sessionsData = await fetchAllRows<any>((from, to) => supabase
-        .from('sessions')
-        .select(TVARKARASTIS_SESSION_SELECT)
-        .in('tutor_id', tutorIds)
-        .not('hidden_from_calendar', 'eq', true)
-        .gte('start_time', schedulePast)
-        .lte('start_time', scheduleFuture)
-        .order('start_time', { ascending: true })
-        .order('id', { ascending: true })
-        .range(from, to));
-
-      const parsedSessions = (sessionsData || []).map((session: any) => ({
-        ...session,
-        start_time: new Date(session.start_time),
-        end_time: new Date(session.end_time),
-      }));
-
-      const tutorNameById = new Map(orgTutors.map((t) => [t.id, t.full_name || '']));
-      const availabilityData = await fetchAllRows<any>((from, to) => supabase
-        .from('availability')
-        .select('*')
-        .in('tutor_id', tutorIds)
-        .order('id', { ascending: true })
-        .range(from, to));
-
-      const mappedAvailability = (availabilityData || []).map((row: any) => ({
-        ...row,
-        tutor: { full_name: tutorNameById.get(row.tutor_id) || '' },
-      }));
-
-      const tutorLinksById = new Map(
-        orgTutors.map((t) => [t.id, t.personal_meeting_link]),
-      );
-      const studentsById = new Map(students.map((s) => [s.id, s]));
-      const subjectsById = new Map(subjects.map((s) => [s.id, s]));
-      const enrichedSessions = parsedSessions.map((session) =>
-        enrichSessionMeetingLink(session, {
-          tutorPersonalLink: tutorLinksById.get(session.tutor_id),
-          studentsById,
-          subjectsById,
-        }),
-      );
-
-      setSessions(enrichedSessions);
-      setAvailability(mappedAvailability);
-
-      const prevCache = getCached<any>('company_tvarkarastis');
-      if (prevCache) {
-        setCache('company_tvarkarastis', {
-          ...prevCache,
-          sessions: enrichedSessions,
-          availability: mappedAvailability,
-        });
-      }
-    } catch (error) {
-      console.error('[CompanyTvarkarastis] refreshCalendarSessionsOnly failed:', error);
+  useEffect(() => {
+    if (featuresLoading) return;
+    if (!organizationId) {
+      setLoading(false);
+      return;
     }
-  }, [organizationId, orgTutors, students, subjects]);
+    void fetchScheduleMeta();
+  }, [featuresLoading, organizationId, ctxUser?.id]);
+
+  useEffect(() => {
+    if (featuresLoading || !organizationId || orgTutors.length === 0) return;
+    void loadSessionsForWindow();
+  }, [featuresLoading, organizationId, orgTutors.length, currentDate, currentView, loadSessionsForWindow]);
+
+  useEffect(() => {
+    if (featuresLoading || !organizationId || orgTutors.length === 0) return;
+    if (isSchoolOrgView && showOnlySessions) return;
+    if (availability.length > 0) return;
+    void loadAvailabilityForTutors(
+      orgTutors.map((tutor) => tutor.id),
+      orgTutors,
+    );
+  }, [
+    availability.length,
+    featuresLoading,
+    isSchoolOrgView,
+    organizationId,
+    orgTutors,
+    showOnlySessions,
+  ]);
 
   const runSessionCreateInBackground = useCallback((
     label: string,
@@ -1080,7 +1116,8 @@ export default function CompanyTvarkarastis() {
   useEffect(() => {
     if (featuresLoading || !organizationId) return;
     const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') void fetchData();
+      if (document.visibilityState !== 'visible' || orgTutors.length === 0) return;
+      void loadSessionsForWindow({ background: true });
     };
     window.addEventListener('focus', refreshWhenVisible);
     document.addEventListener('visibilitychange', refreshWhenVisible);
@@ -1088,9 +1125,9 @@ export default function CompanyTvarkarastis() {
       window.removeEventListener('focus', refreshWhenVisible);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-    // `fetchData` intentionally uses the latest filter state from the render.
+    // Background tab refresh reloads only the visible calendar window.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [featuresLoading, organizationId, ctxUser?.id]);
+  }, [featuresLoading, organizationId, orgTutors.length, loadSessionsForWindow]);
 
   // Filter data based on selected filters
   const filteredSessions = useMemo(() => {
@@ -1135,11 +1172,14 @@ export default function CompanyTvarkarastis() {
   const availabilityBlocks = useMemo(() => {
     if (showOnlySessions) return [];
 
+    const weekStartsOn = locale === 'he' ? 0 : 1;
+    const { start: startOfPeriod, end: endOfPeriod } = scheduleFetchWindow(
+      currentDate,
+      currentView,
+      { weekStartsOn, paddingDays: 0 },
+    );
+
     const blocks: any[] = [];
-    const startOfPeriod = new Date(currentDate);
-    startOfPeriod.setDate(startOfPeriod.getDate() - 30);
-    const endOfPeriod = new Date(currentDate);
-    endOfPeriod.setDate(endOfPeriod.getDate() + 60);
 
     const tutorSessions = (tutorId: string) =>
       mergedCalendarSessions
@@ -1182,7 +1222,7 @@ export default function CompanyTvarkarastis() {
     }
 
     return blocks;
-  }, [filteredAvailability, currentDate, showOnlySessions, mergedCalendarSessions]);
+  }, [filteredAvailability, currentDate, currentView, showOnlySessions, mergedCalendarSessions, locale]);
 
   /** Trial (bandomoji) lessons get a distinct highlight in the calendar. */
   const trialSubjectIds = useMemo(
@@ -2115,7 +2155,7 @@ export default function CompanyTvarkarastis() {
         setEditMakeRecurring(false);
         setIsEditingSession(false);
         setIsEventDetailOpen(false);
-        fetchData();
+        refreshSchedule();
         return;
       }
 
@@ -2421,7 +2461,7 @@ export default function CompanyTvarkarastis() {
 
       setIsEditingSession(false);
       setIsEventDetailOpen(false);
-      fetchData();
+      refreshSchedule();
     } catch (err: any) {
       console.error('[OrgSchedule] save session error', err);
       alert(t('compSch.errorSaving', { msg: err.message }));
@@ -2477,7 +2517,7 @@ export default function CompanyTvarkarastis() {
         setLeaveFreeTimeOnCancel(false);
         setClassGroupCancelScope('whole_occurrence');
         setClassGroupCancelStudentId('');
-        fetchData();
+        refreshSchedule();
         try {
           await fetch('/api/google-calendar-sync', {
             method: 'POST',
@@ -2516,7 +2556,7 @@ export default function CompanyTvarkarastis() {
       }
       setIsEventDetailOpen(false);
       setNoShowDialogOpen(false);
-      void fetchData();
+      void refreshSchedule();
       void fetch('/api/notify-session-no-show', {
         method: 'POST',
         headers: await authHeaders(),
@@ -2541,7 +2581,7 @@ export default function CompanyTvarkarastis() {
         endTime: selectedEvent.end_time,
       });
       setIsEventDetailOpen(false);
-      void fetchData();
+      void refreshSchedule();
     } catch (error) {
       alert(t('cal.confirmStatusError', { msg: error instanceof Error ? error.message : String(error) }));
     } finally {
@@ -2579,7 +2619,7 @@ export default function CompanyTvarkarastis() {
         session: participant.session ? updateRow(participant.session) : null,
       })));
       setSelectedEvent((current) => current ? updateRow(current) : current);
-      void fetchData();
+      void refreshSchedule();
       if (status === 'no_show' && !(session.status === 'no_show' && session.status_confirmed_at)) {
         void fetch('/api/notify-session-no-show', {
           method: 'POST',
@@ -2603,7 +2643,7 @@ export default function CompanyTvarkarastis() {
       .eq('id', selectedEvent.id);
     if (!error) {
       setIsEventDetailOpen(false);
-      fetchData();
+      refreshSchedule();
     }
     setNoShowSaving(false);
   };
@@ -2648,7 +2688,7 @@ export default function CompanyTvarkarastis() {
         alert(t('compSch.errorPayment', { msg: error.message }));
       } else {
         setSelectedEvent((prev) => (prev ? { ...prev, paid: nextPaid, payment_status: paymentStatus, is_complimentary: nextPaid ? prev.is_complimentary : false } : prev));
-        fetchData();
+        refreshSchedule();
       }
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
@@ -2676,7 +2716,7 @@ export default function CompanyTvarkarastis() {
               }
             : prev,
         );
-        fetchData();
+        refreshSchedule();
       }
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
@@ -2701,7 +2741,7 @@ export default function CompanyTvarkarastis() {
       } else {
         alert(t('cal.continueLearningSuccess'));
         setIsEventDetailOpen(false);
-        fetchData();
+        refreshSchedule();
       }
     } catch (err: any) {
       alert(t('cal.continueLearningFailed', { msg: err.message || '' }));
@@ -2725,10 +2765,10 @@ export default function CompanyTvarkarastis() {
       const result = await hardDeleteScheduleSession(targetSessionId, deleteScope);
       const deletedIds = new Set(result.deletedSessionIds);
       setSessions((prev) => prev.filter((session) => !deletedIds.has(session.id)));
-      fetchData();
+      refreshSchedule();
     } catch (e: any) {
       alert(e?.message || t('cal.deleteFailed'));
-      fetchData();
+      refreshSchedule();
     } finally {
       setSaving(false);
     }
@@ -2776,7 +2816,7 @@ export default function CompanyTvarkarastis() {
         void emailOrgTutorAvailabilityNotice(editingAvailability.tutor_id, 'updated', schedHtml);
         setIsAvailabilityEditOpen(false);
         setEditingAvailability(null);
-        fetchData();
+        refreshSchedule();
       } else {
         alert(error?.message || t('compSch.availSaveFailed'));
       }
@@ -2811,7 +2851,7 @@ export default function CompanyTvarkarastis() {
       }
       setIsAvailabilityEditOpen(false);
       setEditingAvailability(null);
-      fetchData();
+      refreshSchedule();
     } catch (err) {
       console.error(err);
       alert(t('compSch.availSaveFailed'));
@@ -2854,7 +2894,7 @@ export default function CompanyTvarkarastis() {
       setCreateAvailTutorId('');
       setCreateAvailStart('09:00');
       setCreateAvailEnd('11:00');
-      fetchData();
+      refreshSchedule();
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
     }
@@ -2942,7 +2982,7 @@ export default function CompanyTvarkarastis() {
         { start: new Date(selectedSlot.startIso).getTime(), end: new Date(selectedSlot.endIso).getTime() },
       ]);
       setCreateFromAvailSuccess(true);
-      fetchData();
+      refreshSchedule();
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
     }
@@ -3086,7 +3126,7 @@ export default function CompanyTvarkarastis() {
       setFindLessonBookMeetingLink('');
       setFindLessonBookTutorMeetingLink('');
       alert(t('findLesson.trialReserveSent'));
-      fetchData();
+      refreshSchedule();
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
     }
@@ -3513,13 +3553,18 @@ export default function CompanyTvarkarastis() {
         </div>
 
         {/* Calendar */}
-        <div className="bg-white rounded-lg border p-3 sm:p-4 min-w-0 max-w-full overflow-x-hidden">
-          {loading ? (
+        <div className="bg-white rounded-lg border p-3 sm:p-4 min-w-0 max-w-full overflow-x-hidden relative">
+          {loading && orgTutors.length === 0 ? (
             <div className="flex items-center justify-center h-96">
               <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
             </div>
           ) : (
             <div className="space-y-3">
+              {sessionsLoading && (
+                <div className="absolute inset-0 z-10 flex items-start justify-center pt-24 bg-white/60 pointer-events-none">
+                  <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+                </div>
+              )}
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between min-w-0">
                 <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
                   <Button type="button" variant="outline" size="sm" onClick={goCalendarToday} className="touch-manipulation shrink-0">

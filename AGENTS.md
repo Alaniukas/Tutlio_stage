@@ -583,7 +583,7 @@ Vizuali regresija: `tests/browser/org-tutor-invoice-privacy/README.md`. Atskiram
 | Baudos | `tutor_adjustments` lentelė, `api/tutor-adjustment.ts`, admin UI `CompanyTutors.tsx` |
 | Sąskaitos | `api/generate-invoice.ts` — Pro Klasė line items + adjustments |
 | Korep finansai | `OrgTutorFinanceSummary.tsx` — breakdown UI |
-| Statusai po pamokos | `tutor_lesson_status_confirmation` — Įvyko / Neatvyko; Atšaukti tik admin |
+| Statusai po pamokos | `tutor_lesson_status_confirmation` — Įvyko / Neatvyko; Atšaukti tik admin. Pro Klasės admin apžvalgos „Reikia dėmesio“ lankomumo eilutė rodo **„Korepetitorius nepažymėjo, kad įvyko pamoka“** (ne school join logika). Rankinis priminimas korep.: `POST /api/remind-tutor-session-status` (el. paštas, tas pats template kaip cron `lesson-status-confirmation-reminders`; cooldown 1 val.). |
 | Korep negali | atšaukti (`cancel-session`), trinti (`delete-session`); **ne** gali rankinio „Palikti laisvą laiką“ atšaukiant/perkeliant (`hideProKlaseOrgTutorFreeTime`) — bet **gali** kurti laisvą laiką per kalendoriaus slot drag |
 | Komentarai | privalomi po kiekvienos pamokos; cron `api/proklase-lesson-comment-reminders.ts` |
 | Mokinio kortelės pastabos | `StudentNotesFields` / `StudentNotesCard`: administracijos komentarai ir paskutinio kontakto data saugomi tik adminams prieinamoje `student_admin_notes`; atskiras komentaras korepetitoriui lieka `students.admin_comment` su `admin_comment_visible_to_tutor=true`. `save_student_notes` RPC atominiu būdu atnaujina visus to paties vaiko priskyrimus. Migracija `20260930130513_student_private_admin_notes.sql` būtina prieš web pakeitimų publikavimą; seni privatūs komentarai išsaugomi, o naujas korepetitoriaus priskyrimas paveldi pastabas. |
@@ -848,6 +848,7 @@ npm run security:pencheck
 29. **Pro Klasė vs universalus fix'as** — finansų privatumas (`orgTutorInvoiceAccess.ts`, migracija `20261001134513_*`, `invoiceKind`/`tutorId` `generate-invoice.ts`) ir pardavėjo numeracija (`20261001134821_*`) yra **visų org** taisyklės. Neperkelk į universalų sluoksnį: `proKlaseSessionPayEur`, `tutor_adjustments`, Pro Klasės PVM pastabą, `pk-*` login prefix, paketų API (`proklase-student-packages.ts`), org ID guard'us atšaukimo / laisvo laiko UI.
 30. **DB testai su PGlite** — `tests/db/*.test.ts` importuoja `@electric-sql/pglite` (devDependency). Be `npm install` jie krenta su „Failed to resolve import“, nors API/lib regresijos testai praeina.
 31. **School duplicate student rows** — tas pats vaikas (mokėtojo el. paštas + vardas) gali turėti kelis `students.id` (vienas mokytojui). Mokinių sąraše jie **sujungiami** į vieną kortelę (`orgStudentIdentityGroupKey`), bet finansuose anksčiau skaičiuodavo atskirai. Naujas kodas: `loadBatchDrafts` + `ensureStudentPairedWithTutor` naudoja tapatybę, ne tik `linked_user_id`. Atsitiktiniai dubliatai (du tutorless įrašai) — `scripts/repair-laisvi-duplicate-students.mjs`.
+32. **Tuščias / lėtas org tvarkaraštis (`/school/schedule`, `CompanyTvarkarastis`)** — nebekrauna ~270 d. × visų mokytojų vienu metu. Sesijos imamos tik matomam langui (`orgScheduleFetchWindow.ts` pagal day/week/month + 7 d. padding), kalendoriui lengvas `TVARKARASTIS_CALENDAR_SESSION_SELECT`, pilna eilutė tik paspaudus (`TVARKARASTIS_SESSION_SELECT`). Mokykloms numatytai `showOnlySessions=true` (tik užimti laikai, be laisvo laiko skaičiavimo). Fono refresh nebepaleidžia viso puslapio spinnerio — tik `sessionsLoading` overlay. Detalės modalui jau kraunamos on-click. Jei vis tiek tuščia: filtre spausti **Visi** arba hard refresh.
 
 ---
 
@@ -888,6 +889,7 @@ npm run security:pencheck
 | Org korep kvietimas | `CompanyTutors.tsx`, `api/invite-tutor.ts` |
 | Embedded prenumerata | `EmbeddedSubscriptionCheckoutDialog.tsx`, `create-subscription-checkout.ts` |
 | Tutor kalendorius / laisvas laikas | `Calendar.tsx`, `AvailabilityManager.tsx`, `calendarSessionEventStyle.ts` |
+| Org admin tvarkaraštis (school/company) | `CompanyTvarkarastis.tsx`, `orgScheduleFetchWindow.ts`, `dataCache.ts` (`companyTvarkarastisCacheKey`) |
 | Org admin tutor filtrai (scroll) | `orgUi.ts` |
 | Org email branding | `api/_lib/emailOrgBranding.ts`, `api/send-email.ts`, `src/lib/email.ts` |
 | Stripe webhook | `api/stripe-webhook.ts` |
@@ -930,4 +932,4 @@ npm run security:pencheck
 
 ---
 
-*Paskutinis atnaujinimas: 2026-10-02: S.F. grupės įvykimo įrodymas nebe remiasi vienu `status_confirmed_at` be prisijungimų; individuali be sutarties ir bandomoji grupė su `sent` pasiūlymu gali būti apmokestinama pagal faktą.*
+*Paskutinis atnaujinimas: 2026-10-02 vakar: Org tvarkaraštis krauna tik matomą mėnesio/savaitės langą ir lengvą sesijų select; mokykloms numatytai rodomos tik pamokos, detalės kraunamos paspaudus.*

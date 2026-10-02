@@ -22,6 +22,10 @@ export function companyStatsCacheKey(orgId: string): string {
   return `company_stats:${orgId}`;
 }
 
+export function companyTvarkarastisCacheKey(orgId: string): string {
+  return `company_tvarkarastis:${orgId}`;
+}
+
 export function setCache<T>(key: string, data: T, ttl = DEFAULT_TTL): void {
   store.set(key, { data, ts: Date.now(), ttl });
 }
