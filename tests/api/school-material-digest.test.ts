@@ -51,6 +51,31 @@ it('renders only the latest file revision but atomically consumes every revision
   expect(claims[0].payload.p_entries).toHaveLength(2);
 });
 
+it('sends one branded digest with a signed homework link without enabling family accounts, and excludes pre-policy publications', async () => {
+  vi.stubEnv('JOIN_LINK_SECRET', 'synthetic-digest-secret');
+  const cutoff = new Date(Date.now() - 300_000).toISOString();
+  const db = await database({ organizations: [{ id: org, name: 'Email Only School', entity_type: 'school',
+      features: { school_join_and_material_notifications: true, public_name: 'Own Brand' }, preferred_locale: 'en' }],
+    school_material_baselines: [{ organization_id: org, notifications_started_at: cutoff }],
+    school_material_publications: [{ ...pub(), legacy_access: true },
+      { ...pub(publicationB, 'v0'), first_published_at: new Date(Date.now() - 600_000).toISOString(), legacy_access: true }],
+    school_material_digest_entries: [{ publication_id: publicationA, student_id: childB }, { publication_id: publicationB, student_id: childB }],
+  });
+  const [id] = await prepare(db);
+  expect(id).toBeTruthy();
+  const row = await delivery(db, id);
+  expect(row.recipient_email).toBe('guardian@school.test');
+  expect(row.payload.from).toContain('Own Brand');
+  expect(row.payload.items).toHaveLength(1);
+  const link = new URL(row.payload.items[0].url);
+  expect(link.pathname).toBe('/school-homework'); expect(link.searchParams.get('student')).toBe(childB);
+  expect(link.searchParams.get('t')).toHaveLength(40);
+  const send = vi.fn().mockResolvedValue({ id: 'confirmed-synthetic' });
+  expect(await deliverSchoolMaterialDigest(db.client, id, send)).toBe('sent');
+  expect(await prepare(db)).toEqual([]); expect(send).toHaveBeenCalledTimes(1);
+  expect((await db.pg.query<any>('SELECT state FROM school_material_digest_entries WHERE publication_id=$1', [publicationB])).rows[0].state).toBe('skipped');
+});
+
 it('claims a delivery once across parallel workers and preserves its provider and sent timestamp on reruns', async () => {
   const db = await database(); const [id] = await prepare(db);
   const send = vi.fn(async () => ({ id: 'provider-confirmed' }));

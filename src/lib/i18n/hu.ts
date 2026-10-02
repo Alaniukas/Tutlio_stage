@@ -5595,6 +5595,23 @@ export const huOverrides: Record<string, string> = {
   "compare.customChip2": "Díjazási szabályok",
   "compare.customChip3": "Szülői elfogadó linkek",
   "compare.customChip4": "Saját arculatú felületek",
+  "companyDash.tutorOutcomeNotMarked": "A tanár nem jelölte az órát megtartottnak",
+  "companyDash.sendTutorOutcomeReminder": "Emlékeztető küldése a tanárnak",
+  "companyDash.tutorOutcomeReminderSending": "Küldés…",
+  "companyDash.tutorOutcomeReminderSent": "Az emlékeztetőt e-mailben elküldtük a tanárnak.",
+  "companyDash.tutorOutcomeReminderFailed": "Nem sikerült elküldeni az emlékeztetőt: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "Az elmúlt órában már küldtünk emlékeztetőt.",
+  "schoolDash.adminActionsTitle": "Adminisztrátori intézkedés szükséges",
+  "schoolDash.adminActionsHint": "A lista automatikusan készül, és a probléma megoldása után kiürül.",
+  "schoolDash.adminActionsEmpty": "Jelenleg nincsenek nyitott adminisztrációs feladatok.",
+  "schoolDash.adminActionsTruncated": "{shown} megjelenítve a következőből: {total}. A többi elem a kapcsolódó képernyőkön érhető el.",
+  "schoolDash.noReviewItems": "Nincs ellenőrzésre váró jelenlét vagy meg nem tartott foglalkozás.",
+  "schoolDash.activityFeedTitle": "Legutóbbi tevékenység",
+  "schoolDash.activityFeedHint": "{count} legutóbbi esemény",
+  "schoolStats.teacherPay": "Tanárok díjazása",
+  "schoolStats.teacherPayShort": "Díjazás",
+  "schoolStats.teacherPayHint": "Egy díj minden megtartott foglalkozásért, a csoportban lévő gyermekek számától függetlenül",
+  "schoolStats.teacherPayUnresolved": "{count} foglalkozást ellenőrizni kell a számlázás előtt",
 };
 
 export const hu: Record<string, string> = { ...en, ...huOverrides };

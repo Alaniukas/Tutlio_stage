@@ -5594,6 +5594,23 @@ export const idOverrides: Record<string, string> = {
   "compare.customChip2": "Aturan honor",
   "compare.customChip3": "Tautan persetujuan orang tua",
   "compare.customChip4": "Portal bermerek Anda",
+  "companyDash.tutorOutcomeNotMarked": "Tutor belum menandai pelajaran sebagai selesai",
+  "companyDash.sendTutorOutcomeReminder": "Kirim pengingat kepada tutor",
+  "companyDash.tutorOutcomeReminderSending": "Mengirim…",
+  "companyDash.tutorOutcomeReminderSent": "Pengingat telah dikirim kepada tutor melalui email.",
+  "companyDash.tutorOutcomeReminderFailed": "Pengingat tidak dapat dikirim: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "Pengingat sudah dikirim dalam satu jam terakhir.",
+  "schoolDash.adminActionsTitle": "Tindakan admin diperlukan",
+  "schoolDash.adminActionsHint": "Daftar ini dibuat secara otomatis dan dikosongkan setelah masalah diselesaikan.",
+  "schoolDash.adminActionsEmpty": "Saat ini tidak ada tugas admin yang belum selesai.",
+  "schoolDash.adminActionsTruncated": "Menampilkan {shown} dari {total}. Item lainnya tersedia di layar terkait.",
+  "schoolDash.noReviewItems": "Tidak ada kehadiran atau sesi yang tidak terlaksana yang perlu ditinjau.",
+  "schoolDash.activityFeedTitle": "Aktivitas terbaru",
+  "schoolDash.activityFeedHint": "{count} peristiwa terbaru",
+  "schoolStats.teacherPay": "Honor guru",
+  "schoolStats.teacherPayShort": "Honor",
+  "schoolStats.teacherPayHint": "Satu tarif per sesi yang terlaksana, bukan per anak dalam kelompok",
+  "schoolStats.teacherPayUnresolved": "{count} sesi perlu ditinjau sebelum pembuatan faktur",
 };
 
 export const id: Record<string, string> = { ...en, ...idOverrides };

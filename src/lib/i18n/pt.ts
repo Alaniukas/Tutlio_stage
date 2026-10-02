@@ -5590,6 +5590,23 @@ export const ptOverrides: Record<string, string> = {
   "compare.customChip2": "Regras de remuneração",
   "compare.customChip3": "Links de aceitação para encarregados de educação",
   "compare.customChip4": "Portais com a sua marca",
+  "companyDash.tutorOutcomeNotMarked": "O explicador não marcou a aula como concluída",
+  "companyDash.sendTutorOutcomeReminder": "Enviar lembrete ao explicador",
+  "companyDash.tutorOutcomeReminderSending": "A enviar…",
+  "companyDash.tutorOutcomeReminderSent": "O lembrete foi enviado ao explicador por e-mail.",
+  "companyDash.tutorOutcomeReminderFailed": "Não foi possível enviar o lembrete: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "Já foi enviado um lembrete na última hora.",
+  "schoolDash.adminActionsTitle": "É necessária uma ação do administrador",
+  "schoolDash.adminActionsHint": "Esta lista é criada automaticamente e fica vazia quando o problema é resolvido.",
+  "schoolDash.adminActionsEmpty": "De momento, não há tarefas administrativas pendentes.",
+  "schoolDash.adminActionsTruncated": "A mostrar {shown} de {total}. Os restantes itens estão disponíveis nos ecrãs correspondentes.",
+  "schoolDash.noReviewItems": "Não há presenças nem sessões não realizadas para verificar.",
+  "schoolDash.activityFeedTitle": "Atividade recente",
+  "schoolDash.activityFeedHint": "{count} eventos recentes",
+  "schoolStats.teacherPay": "Remuneração dos professores",
+  "schoolStats.teacherPayShort": "Remuneração",
+  "schoolStats.teacherPayHint": "Uma tarifa por sessão realizada, independentemente do número de crianças no grupo",
+  "schoolStats.teacherPayUnresolved": "{count} sessões precisam de ser revistas antes da faturação",
 };
 
 export const pt: Record<string, string> = { ...en, ...ptOverrides };

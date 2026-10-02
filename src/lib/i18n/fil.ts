@@ -5594,6 +5594,23 @@ export const filOverrides: Record<string, string> = {
   "compare.customChip2": "Mga panuntunan sa bayad",
   "compare.customChip3": "Link ng pagsang-ayon ng magulang",
   "compare.customChip4": "Portal na may inyong brand",
+  "companyDash.tutorOutcomeNotMarked": "Hindi pa minarkahan ng tutor na tapos na ang aralin",
+  "companyDash.sendTutorOutcomeReminder": "Magpadala ng paalala sa tutor",
+  "companyDash.tutorOutcomeReminderSending": "Ipinapadala…",
+  "companyDash.tutorOutcomeReminderSent": "Naipadala na sa tutor ang paalala sa email.",
+  "companyDash.tutorOutcomeReminderFailed": "Hindi maipadala ang paalala: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "May naipadalang paalala na sa loob ng nakaraang oras.",
+  "schoolDash.adminActionsTitle": "Kailangan ng aksiyon ng admin",
+  "schoolDash.adminActionsHint": "Awtomatikong ginagawa ang listahang ito at nawawala kapag nalutas na ang problema.",
+  "schoolDash.adminActionsEmpty": "Walang nakabinbing gawain ng admin sa ngayon.",
+  "schoolDash.adminActionsTruncated": "Ipinapakita ang {shown} sa {total}. Makikita ang iba pang item sa mga kaugnay na screen.",
+  "schoolDash.noReviewItems": "Walang attendance o hindi natuloy na session na kailangang suriin.",
+  "schoolDash.activityFeedTitle": "Kamakailang aktibidad",
+  "schoolDash.activityFeedHint": "{count} kamakailang kaganapan",
+  "schoolStats.teacherPay": "Bayad sa mga guro",
+  "schoolStats.teacherPayShort": "Bayad",
+  "schoolStats.teacherPayHint": "Isang rate sa bawat isinagawang session, hindi sa bawat bata sa grupo",
+  "schoolStats.teacherPayUnresolved": "Kailangang suriin ang {count} session bago gumawa ng invoice",
 };
 
 export const fil: Record<string, string> = { ...en, ...filOverrides };

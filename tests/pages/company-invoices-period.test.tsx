@@ -131,4 +131,14 @@ describe('Company invoice period filters', () => {
     expect(screen.queryByText('SEP-1')).toBeNull();
     expect(screen.getByText('OCT-1')).toBeTruthy();
   });
+
+  it('shows the invoice currency and warns when organization invoice settings are missing', async () => {
+    state.invoices[0] = { ...state.invoices[0], total_amount: 50, pdf_meta: { currency: 'PLN' } };
+    render(<CompanyInvoices />);
+    await expectInvoiceCount(19);
+    expect(screen.getByText(/50\.00 PLN/)).toBeTruthy();
+    expect(screen.queryByText(/€50\.00/)).toBeNull();
+    expect(screen.getByText('invoices.orgProfileIncomplete')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'invoices.openOrgSettings' })).toBeTruthy();
+  });
 });

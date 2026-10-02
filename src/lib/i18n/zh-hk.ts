@@ -5591,6 +5591,23 @@ export const zhHkOverrides: Record<string, string> = {
   "compare.customChip2": "薪酬規則",
   "compare.customChip3": "家長確認連結",
   "compare.customChip4": "你自己品牌的專頁",
+  "companyDash.tutorOutcomeNotMarked": "導師尚未將課堂標記為已完成",
+  "companyDash.sendTutorOutcomeReminder": "向導師發送提醒",
+  "companyDash.tutorOutcomeReminderSending": "正在發送…",
+  "companyDash.tutorOutcomeReminderSent": "已透過電郵向導師發送提醒。",
+  "companyDash.tutorOutcomeReminderFailed": "無法發送提醒：{msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "過去一小時內已發送提醒。",
+  "schoolDash.adminActionsTitle": "需要管理員處理",
+  "schoolDash.adminActionsHint": "此清單會自動建立，問題解決後會清空。",
+  "schoolDash.adminActionsEmpty": "目前沒有待處理的管理工作。",
+  "schoolDash.adminActionsTruncated": "顯示 {total} 項中的 {shown} 項。其餘項目可在相關頁面查看。",
+  "schoolDash.noReviewItems": "沒有需要核對的出席記錄或未舉行的課堂。",
+  "schoolDash.activityFeedTitle": "最近活動",
+  "schoolDash.activityFeedHint": "最近 {count} 項事件",
+  "schoolStats.teacherPay": "教師薪酬",
+  "schoolStats.teacherPayShort": "薪酬",
+  "schoolStats.teacherPayHint": "每次已舉行的課堂按一個費率計算，不按組內兒童人數計算",
+  "schoolStats.teacherPayUnresolved": "開立發票前需要核對 {count} 次課堂",
 };
 
 export const zhHk: Record<string, string> = { ...en, ...zhHkOverrides };

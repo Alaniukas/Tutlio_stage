@@ -9,8 +9,6 @@ const mocks = vi.hoisted(() => ({
   constructEvent: vi.fn(),
   syncCalendar: vi.fn(async (_sessionId: string, _tutorId: string) => {}),
   recordFee: vi.fn(async (_supabase: unknown, _params: unknown) => {}),
-  issueInvoice: vi.fn(async () => {}),
-  markPackageInvoicesPaid: vi.fn(async () => {}),
   confirmTrialReservations: vi.fn(async () => {}),
   applyMonthlyExpiry: vi.fn(async () => {}),
   fetch: vi.fn(async (_input: unknown, _init?: unknown) => ({ ok: true })),
@@ -34,12 +32,6 @@ vi.mock('../../api/_lib/google-calendar.js', () => ({
 vi.mock('../../api/_lib/platformFeeLedger.js', () => ({
   recordStripePlatformFee: mocks.recordFee,
   metadataBaseEur: () => null,
-}));
-vi.mock('../../api/_lib/issuePackageSalesInvoice.js', () => ({
-  tryIssueSalesInvoiceForStripePackage: mocks.issueInvoice,
-}));
-vi.mock('../../api/_lib/markPackageInvoicePaid.js', () => ({
-  markInvoicesPaidForPackage: mocks.markPackageInvoicesPaid,
 }));
 vi.mock('../../api/_lib/enterpriseLicenseWebhook.js', () => ({
   handleEnterpriseCheckoutCompleted: vi.fn(),
@@ -276,6 +268,86 @@ afterEach(() => {
 });
 
 describe('session Stripe payment synchronizes its trial package', () => {
+  it('does not pay linked lessons or invoice a cancelled package checkout', async () => {
+    checkout.metadata = { tutlio_package_id: 'package-1' };
+    db.package.payment_status = 'cancelled';
+    expect((await callEndpoint('webhook')).status).toBe(200);
+    expect(db.session.paid).toBe(false);
+    expect(db.package.paid).toBe(false);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('repairs a temporary linked-session update failure on a paid package webhook replay', async () => {
+    checkout.metadata = { tutlio_package_id: 'package-1' };
+    db.failNextUpdate('sessions');
+    expect((await callEndpoint('webhook')).status).toBe(500);
+    expect(db.package.paid).toBe(true);
+    expect(db.session.paid).toBe(false);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect((await callEndpoint('webhook')).status).toBe(200);
+    expect(db.session.paid).toBe(true);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(emails()).toHaveLength(2);
+  });
+
+  it('retries a failed paid-session update before issuing the invoice', async () => {
+    db.failNextUpdate('sessions');
+    expect((await callEndpoint('webhook')).status).toBe(500);
+    expect(db.session.paid).toBe(false);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect((await callEndpoint('webhook')).status).toBe(200);
+    expect(db.session.paid).toBe(true);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['confirm', 'webhook'], ['webhook', 'confirm'],
+    ['package-confirm', 'webhook'], ['webhook', 'package-confirm'],
+  ] as const)('retries invoicing for another tutor organization in %s -> %s order', async (first, second) => {
+    const source = first === 'package-confirm' || second === 'package-confirm' ? 'package' : 'session';
+    db.package.stripe_checkout_session_id = checkout.id;
+    if (source === 'package') checkout.metadata = { tutlio_package_id: 'package-1' };
+    expect((await callEndpoint(first)).status).toBe(200);
+    expect((await callEndpoint(second)).status).toBe(200);
+    expect((await callEndpoint(second)).status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledTimes(3);
+    expect(mocks.rpc).toHaveBeenCalledWith('issue_paid_source_sales_invoice', {
+      p_source_type: source, p_source_id: `${source}-1`, p_checkout_id: checkout.id,
+      p_base_amount: 10, p_currency: 'EUR',
+    });
+    expect(db.package.paid).toBe(true);
+  });
+
+  it.each(['session', 'package'])('returns 500 for a temporary %s invoice failure, then repairs it on webhook replay', async source => {
+    if (source === 'package') checkout.metadata = { tutlio_package_id: 'package-1' };
+    mocks.rpc.mockResolvedValueOnce({ data: null, error: { message: 'Temporary invoice failure' } } as any);
+    expect((await callEndpoint('webhook')).status).toBe(500);
+    expect(db.package.paid).toBe(true);
+    const receiptCount = emails().length;
+    expect((await callEndpoint('webhook')).status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledTimes(2);
+    expect(emails()).toHaveLength(receiptCount);
+  });
+
+  it('keeps a paid browser checkout successful during an invoice failure and retries via the webhook', async () => {
+    mocks.rpc.mockResolvedValueOnce({ data: null, error: { message: 'Temporary invoice failure' } } as any);
+    expect((await callEndpoint('confirm')).status).toBe(200);
+    expect((await callEndpoint('webhook')).status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledTimes(2);
+    expect(emails()).toHaveLength(2);
+  });
+
+  it.each(endpoints)('%s keeps Polish paid amounts in PLN in both accounting operations', async endpoint => {
+    checkout.currency = 'pln';
+    checkout.metadata.tutlio_currency = 'eur';
+    expect((await callEndpoint(endpoint)).status).toBe(200);
+    expect(mocks.recordFee.mock.calls[0][1]).toMatchObject({ currency: 'pln' });
+    expect(mocks.rpc).toHaveBeenCalledWith('issue_paid_source_sales_invoice', {
+      p_source_type: 'session', p_source_id: 'session-1', p_checkout_id: checkout.id,
+      p_base_amount: 10, p_currency: 'PLN',
+    });
+  });
+
   it.each(endpoints)('%s retries Pro Klasė sales invoicing on first payment and already-paid callbacks', async endpoint => {
     const orgId = '3422031d-6e21-424d-980b-35a9c6d7b8f1';
     db.tables.profiles[0].organization_id = orgId;
@@ -285,8 +357,9 @@ describe('session Stripe payment synchronizes its trial package', () => {
     expect((await callEndpoint(endpoint)).status).toBe(200);
     expect((await callEndpoint(endpoint)).status).toBe(200);
     expect(mocks.rpc).toHaveBeenCalledTimes(2);
-    expect(mocks.rpc).toHaveBeenCalledWith('issue_proklase_paid_source_invoice', {
+    expect(mocks.rpc).toHaveBeenCalledWith('issue_paid_source_sales_invoice', {
       p_source_type: 'session', p_source_id: 'session-1', p_checkout_id: checkout.id, p_base_amount: 10,
+      p_currency: 'EUR',
     });
     expect(emails()).toHaveLength(2);
   });
@@ -302,10 +375,10 @@ describe('session Stripe payment synchronizes its trial package', () => {
     expect((await callEndpoint('package-confirm')).status).toBe(200);
     expect((await callEndpoint('webhook')).status).toBe(200);
     expect(mocks.rpc).toHaveBeenCalledTimes(2);
-    expect(mocks.rpc).toHaveBeenCalledWith('issue_proklase_paid_source_invoice', {
+    expect(mocks.rpc).toHaveBeenCalledWith('issue_paid_source_sales_invoice', {
       p_source_type: 'package', p_source_id: 'package-1', p_checkout_id: checkout.id, p_base_amount: 10,
+      p_currency: 'EUR',
     });
-    expect(mocks.issueInvoice).not.toHaveBeenCalled();
   });
 
   it.each(endpoints)('%s marks the linked trial package paid and active with the successful checkout', async endpoint => {
@@ -320,7 +393,6 @@ describe('session Stripe payment synchronizes its trial package', () => {
     ]);
     expect(mocks.recordFee).toHaveBeenCalledTimes(1);
     expect(mocks.recordFee.mock.calls[0][1]).toMatchObject({ sourceType: 'session', sourceId: 'session-1' });
-    expect(mocks.issueInvoice).not.toHaveBeenCalled();
   });
 
   it('also synchronizes an asynchronous successful checkout webhook', async () => {
@@ -407,6 +479,7 @@ describe('session Stripe payment synchronizes its trial package', () => {
     expect(db.package).toEqual(pendingPackage);
     expect(db.operations.some(operation => operation.table === 'lesson_packages')).toBe(false);
     expect(emails().every(email => email.type.startsWith('penalty_payment_'))).toBe(true);
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it.each(endpoints)('%s does not pay either row until Stripe reports payment_status=paid', async endpoint => {
@@ -487,15 +560,14 @@ describe('session Stripe payment synchronizes its trial package', () => {
       ['prepaid_package_success', 'student@example.test'],
     ]);
     expect(mocks.recordFee.mock.calls[0][1]).toMatchObject({ sourceType: 'package', sourceId: 'package-1' });
-    expect(mocks.issueInvoice).toHaveBeenCalledTimes(1);
-    expect(mocks.markPackageInvoicesPaid).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
     expect(mocks.syncCalendar).toHaveBeenCalledWith('session-1', 'tutor-1');
 
     await callEndpoint('webhook');
 
     expect(emails()).toHaveLength(2);
     expect(mocks.recordFee).toHaveBeenCalledTimes(1);
-    expect(mocks.issueInvoice).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc).toHaveBeenCalledTimes(2);
   });
 });
 

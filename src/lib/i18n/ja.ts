@@ -5593,6 +5593,23 @@ export const jaOverrides: Record<string, string> = {
   "compare.customChip2": "報酬ルール",
   "compare.customChip3": "保護者向けの承諾リンク",
   "compare.customChip4": "自社ブランドのポータル",
+  "companyDash.tutorOutcomeNotMarked": "講師が授業を完了として記録していません",
+  "companyDash.sendTutorOutcomeReminder": "講師にリマインダーを送信",
+  "companyDash.tutorOutcomeReminderSending": "送信中…",
+  "companyDash.tutorOutcomeReminderSent": "講師にメールでリマインダーを送信しました。",
+  "companyDash.tutorOutcomeReminderFailed": "リマインダーを送信できませんでした: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "過去一時間以内にリマインダーが送信されています。",
+  "schoolDash.adminActionsTitle": "管理者の対応が必要です",
+  "schoolDash.adminActionsHint": "この一覧は自動で作成され、問題が解決すると消去されます。",
+  "schoolDash.adminActionsEmpty": "現在、未対応の管理業務はありません。",
+  "schoolDash.adminActionsTruncated": "{total}件中{shown}件を表示しています。残りの項目は関連する画面で確認できます。",
+  "schoolDash.noReviewItems": "確認が必要な出欠記録や未実施の授業はありません。",
+  "schoolDash.activityFeedTitle": "最近のアクティビティ",
+  "schoolDash.activityFeedHint": "最近のイベント{count}件",
+  "schoolStats.teacherPay": "教師への報酬",
+  "schoolStats.teacherPayShort": "報酬",
+  "schoolStats.teacherPayHint": "実施した授業ごとに一つの料金を適用し、グループ内の子どもの人数では計算しません",
+  "schoolStats.teacherPayUnresolved": "請求書の発行前に{count}件の授業を確認する必要があります",
 };
 
 export const ja: Record<string, string> = { ...en, ...jaOverrides };

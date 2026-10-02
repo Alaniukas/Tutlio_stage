@@ -121,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ? await supabase.from('students').select('id, full_name').in('id', studentIds)
     : { data: [] as Array<{ id: string; full_name?: string | null }> };
   const studentNameById = new Map(
-    (studentRows ?? []).map((row) => [row.id, row.full_name || '']),
+    (studentRows ?? []).map((row) => [row.id, row.full_name || ''] as const),
   );
 
   const { data: orgRow } = await supabase

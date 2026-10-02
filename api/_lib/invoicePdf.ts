@@ -56,6 +56,7 @@ export interface InvoicePdfData {
   }[];
 
   totalAmount: number;
+  currency?: 'EUR' | 'PLN';
 
   deductedAmount?: number;
   amountDue?: number;
@@ -387,6 +388,7 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   const secondary = branding?.secondaryColor ?? defaultSecondary;
   const isClassicLtTutor = data.layout === CLASSIC_LT_TUTOR_LAYOUT;
   const isPvmLayout = data.layout === 'pvm_education';
+  const currency = data.currency ?? 'EUR';
   const isVatInvoice =
     data.isVatInvoice === true || isPvmLayout || (!isClassicLtTutor && !!data.seller.vatCode);
   const title = isVatInvoice ? 'PVM SĄSKAITA FAKTŪRA' : 'SĄSKAITA FAKTŪRA';
@@ -521,7 +523,7 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
     drawTableHeaderBar([
       { text: 'Eil. Nr.', x: colDesc },
       { text: 'Prekės ar paslaugos pavadinimas', x: colDesc + 50 },
-      { text: 'Suma, EUR', x: colTotal },
+      { text: `Suma, ${currency}`, x: colTotal },
     ]);
     ensureSpace(40);
     drawText(ctx, '1', colDesc, y, { size: LINE_ITEM_FONT_SIZE });
@@ -533,7 +535,7 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
       { text: 'Paslaugos aprašymas', x: colDesc },
       { text: 'Kiekis', x: colQty },
       { text: 'Vnt. kaina', x: colUnit },
-      { text: 'Suma, EUR', x: colTotal },
+      { text: `Suma, ${currency}`, x: colTotal },
     ]);
 
     for (const item of data.lineItems) {
@@ -568,7 +570,7 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   const taxExemptionNote = data.seller.taxExemptionNote?.trim();
   ensureSpace(taxExemptionNote ? 98 : 80);
   drawText(ctx, 'IŠ VISO:', colUnit - 30, y, { size: 11, bold: true });
-  const totalAmountText = `${formatEur(data.totalAmount)} EUR`;
+  const totalAmountText = `${formatEur(data.totalAmount)} ${currency}`;
   drawText(ctx, totalAmountText, colTotal, y, {
     size: 11,
     bold: true,
@@ -592,13 +594,13 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
       size: 9,
       color: ctx.gray,
     });
-    drawText(ctx, `-${formatEur(data.deductedAmount)} EUR`, colTotal, y, { size: 9, color: ctx.gray });
+    drawText(ctx, `-${formatEur(data.deductedAmount)} ${currency}`, colTotal, y, { size: 9, color: ctx.gray });
     y -= 16;
   }
 
   if (data.amountDue != null) {
     drawText(ctx, 'MOKĖTINA SUMA:', colUnit - 30, y, { size: 12, bold: true });
-    drawText(ctx, `${formatEur(data.amountDue)} EUR`, colTotal, y, {
+    drawText(ctx, `${formatEur(data.amountDue)} ${currency}`, colTotal, y, {
       size: 12,
       bold: true,
       color: primary,

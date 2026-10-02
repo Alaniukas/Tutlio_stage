@@ -85,7 +85,7 @@ const from = vi.fn((_table: string) => {
   return resolving;
 });
 
-const createClient = vi.fn(() => ({ from }));
+const createClient = vi.fn(() => ({ from, rpc: vi.fn(async () => ({ data: 'invoice', error: null })) }));
 vi.mock('@supabase/supabase-js', () => ({ createClient }));
 vi.mock('../../api/_lib/google-calendar.js', () => ({
   syncSessionToGoogle: vi.fn(() => Promise.resolve()),
@@ -95,9 +95,6 @@ vi.mock('../../api/_lib/trialReservation.js', () => ({
 }));
 vi.mock('../../api/_lib/packageMonth.js', () => ({
   applyMonthlyPackageExpiry: vi.fn(async () => {}),
-}));
-vi.mock('../../api/_lib/markPackageInvoicePaid.js', () => ({
-  markInvoicesPaidForPackage: vi.fn(async () => {}),
 }));
 vi.mock('../../api/_lib/platformFeeLedger.js', () => ({
   recordStripePlatformFee: vi.fn(async () => {}),

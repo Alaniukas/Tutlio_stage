@@ -49,6 +49,7 @@ interface Invoice {
   issue_date: string;
   buyer_snapshot: { name: string; email?: string };
   total_amount: number;
+  pdf_meta?: { currency?: string } | null;
   status: 'issued' | 'paid' | 'cancelled';
   issued_by_user_id: string;
   created_at: string;
@@ -1265,7 +1266,9 @@ export default function CompanyInvoices() {
                           {' \u00B7 '}
                           {format(new Date(inv.issue_date), 'yyyy-MM-dd')}
                           {' \u00B7 '}
-                          {'\u20AC'}{Number(inv.total_amount).toFixed(2)}
+                          {inv.pdf_meta?.currency === 'PLN'
+                            ? `${Number(inv.total_amount).toFixed(2)} PLN`
+                            : `€${Number(inv.total_amount).toFixed(2)}`}
                         </p>
                         {inv.status === 'issued' && inv.billing_batch_id && inv.billing_batches && !inv.billing_batches.paid && (
                           <p className="text-xs text-amber-700 mt-0.5">{t('invoices.checkoutPendingSubtitle')}</p>

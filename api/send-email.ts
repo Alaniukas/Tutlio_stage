@@ -8,6 +8,7 @@ if (typeof process !== 'undefined' && process.env.TUTLIO_DEV_API_LOCAL === '1') 
 }
 
 import type { VercelRequest, VercelResponse } from './types';
+import { schoolJoinAndMaterialNotificationsEnabled } from '../src/lib/schoolNotificationPolicy.js';
 import { t, isValidLocale, localizedFromEmail, type Locale } from './_lib/i18n.js';
 import { preloadExtraLocaleDict } from './_lib/loadExtraLocaleDict.js';
 import { isMoksloVaisiaiOrg, isProKlaseOrg } from './_lib/marketMoney.js';
@@ -21,6 +22,7 @@ import { Resend } from 'resend';
 import { htmlLanguageCode, localeDirection, LOCALE_FORMAT_TAGS } from '../src/lib/i18n/locales.js';
 import {
   applySchoolTerminology,
+  applySchoolTerminologyToHtml,
   schoolTerminologyForOrg,
   type SchoolTerminology,
 } from '../src/lib/i18n/schoolTerminology.js';
@@ -623,7 +625,7 @@ function sessionReminder(d: any, locale: Locale) {
   const calendarUrl = d.isTutor
     ? `${getAppUrl()}/calendar?${dateParam ? `date=${dateParam}&` : ''}sessionId=${sessionId}`
     : `${getAppUrl()}/student/sessions?sessionId=${sessionId}`;
-  const schoolJoinButton = schoolFlow && d.meetingLink
+  const schoolJoinButton = (schoolFlow || d.schoolReminderJoinButton === true) && d.meetingLink
     ? `<div style="text-align:center; margin-top:20px;">${outlookEmailButton(String(d.meetingLink), t(locale, 'em.btnJoinNow'), '#4f46e5', { fontWeight: '600', fontSize: '15px', padding: '14px 32px' })}</div>`
     : '';
   const homeworkButton = schoolFlow && d.homeworkUrl
@@ -634,7 +636,7 @@ function sessionReminder(d: any, locale: Locale) {
     : '';
   const cta = schoolFlow
     ? schoolJoinButton + homeworkButton + recordingsButton
-    : `<div style="text-align:center; margin-top:20px;">
+    : schoolJoinButton || `<div style="text-align:center; margin-top:20px;">
           ${outlookEmailButton(sessionId ? calendarUrl : (d.isTutor ? `${getAppUrl()}/dashboard` : `${getAppUrl()}/student/sessions`), t(locale, 'em.btnOpenLesson'), '#ea580c', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
         </div>`;
   return {
@@ -3720,6 +3722,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               }
             }
             const features = (org.features && typeof org.features === 'object' ? org.features : {}) as Record<string, unknown>;
+            if (schoolJoinAndMaterialNotificationsEnabled({ entityType: isSchoolOrg ? 'school' : null, features })) {
+              const reminder = type === 'session_reminder' || type === 'session_reminder_payer';
+              // New homework is announced in the digest. Lesson reminders and
+              // booking, rescheduling and cancellation notices retain their delivery.
+              if (type === 'session_comment_added') {
+                return res.status(200).json({ success: true, skipped: true, reason: 'school_join_material_policy' });
+              }
+              if (reminder) {
+                (data as any).schoolFlow = true;
+                (data as any).schoolReminderJoinButton = true;
+              }
+            }
             if (isSchoolOrg && features.school_family_portal === true
               && ['booking_confirmation', 'recurring_booking_confirmation', 'session_comment_added', 'school_extra_first_lesson_invite', 'session_student_no_show'].includes(String(type))) {
               return res.status(200).json({ success: true, skipped: true, reason: 'school_family_digest_policy' });
@@ -3915,7 +3929,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (schoolEmailTerminology && (schoolEmailTerminology.staff || schoolEmailTerminology.activity)) {
       emailContent = {
         subject: applySchoolTerminology(emailContent.subject, locale, schoolEmailTerminology),
-        html: applySchoolTerminology(emailContent.html, locale, schoolEmailTerminology),
+        html: applySchoolTerminologyToHtml(emailContent.html, locale, schoolEmailTerminology),
       };
     }
 

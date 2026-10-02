@@ -360,6 +360,15 @@ export function enLessonToActivity(text: string): string {
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
+/** Email copy transforms must leave attributes, signed URLs and placeholders intact. */
+export function applySchoolTerminologyToHtml(
+  html: string,
+  locale: Locale | string,
+  mode: SchoolTerminology,
+): string {
+  return mapPlainSegments(html, (part) => applySchoolTerminology(part, locale, mode));
+}
+
 /** Per-key overrides for strings the generic rules cannot inflect well (final values). */
 export const LT_ACTIVITY_KEY_OVERRIDES: Record<string, string> = {
   'common.lesson': 'Užsiėmimas',

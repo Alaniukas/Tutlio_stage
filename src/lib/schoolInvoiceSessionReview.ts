@@ -81,7 +81,7 @@ function individualContractActivityName(
 }
 
 function contractActivitySuffix(
-  session: Pick<CanonicalBillableSession, 'class_group_id' | 'subject_id' | 'start_time'>,
+  session: Pick<CanonicalBillableSession, 'class_group_id' | 'subject_id'>,
   contracts: SchoolInvoiceContractWindow[],
 ): string | null {
   if (!contracts.length) return null;
@@ -177,7 +177,7 @@ export function resolveSchoolInvoiceUnitPrice(
   return positiveMoney(subject?.price);
 }
 
-export function schoolInvoiceSessionMatchesContract(session: CanonicalBillableSession, contract: SchoolInvoiceContractWindow): boolean {
+export function schoolInvoiceSessionMatchesContract(session: Pick<CanonicalBillableSession, 'class_group_id' | 'subject_id'>, contract: SchoolInvoiceContractWindow): boolean {
   const order = contract.order_snapshot;
   if (!order) return Boolean(contract.class_group_id) && contract.class_group_id === session.class_group_id;
   return sessionMatchesExtraLessonsContract(session, { ...order, group_id: contract.class_group_id || order.group_id });

@@ -5090,6 +5090,23 @@ export const itOverrides: Record<string, string> = {
   "support.contact.safety": "Non includere password, codici di autenticazione o dati completi della carta.",
   "support.contact.error": "Non siamo riusciti a inviare il modulo. Riprova o scrivi a info@tutlio.lt.",
   "support.contact.back": "Torna all'assistenza IA",
+  "companyDash.tutorOutcomeNotMarked": "Il tutor non ha contrassegnato la lezione come completata",
+  "companyDash.sendTutorOutcomeReminder": "Invia un promemoria al tutor",
+  "companyDash.tutorOutcomeReminderSending": "Invio…",
+  "companyDash.tutorOutcomeReminderSent": "Il promemoria è stato inviato al tutor via e-mail.",
+  "companyDash.tutorOutcomeReminderFailed": "Impossibile inviare il promemoria: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "È già stato inviato un promemoria nell’ultima ora.",
+  "schoolDash.adminActionsTitle": "È richiesto un intervento dell’amministratore",
+  "schoolDash.adminActionsHint": "L’elenco viene creato automaticamente e si svuota quando il problema è risolto.",
+  "schoolDash.adminActionsEmpty": "Al momento non ci sono attività amministrative in sospeso.",
+  "schoolDash.adminActionsTruncated": "Visualizzati {shown} di {total}. Le altre voci sono disponibili nelle schermate corrispondenti.",
+  "schoolDash.noReviewItems": "Non ci sono presenze o sessioni non svolte da verificare.",
+  "schoolDash.activityFeedTitle": "Attività recente",
+  "schoolDash.activityFeedHint": "{count} eventi recenti",
+  "schoolStats.teacherPay": "Compensi degli insegnanti",
+  "schoolStats.teacherPayShort": "Compensi",
+  "schoolStats.teacherPayHint": "Una tariffa per sessione svolta, indipendentemente dal numero di bambini nel gruppo",
+  "schoolStats.teacherPayUnresolved": "{count} sessioni richiedono una verifica prima della fatturazione",
 };
 
 Object.assign(itOverrides, {

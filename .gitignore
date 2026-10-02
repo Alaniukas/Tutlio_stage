@@ -24,3 +24,5 @@ load-results/
 artifacts/
 # Local production audit exports contain personal data.
 docs/audits/
+output/
+outputs/

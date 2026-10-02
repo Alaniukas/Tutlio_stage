@@ -5593,6 +5593,23 @@ export const bgOverrides: Record<string, string> = {
   "compare.customChip2": "Правила за възнаграждение",
   "compare.customChip3": "Връзки за потвърждение от родители",
   "compare.customChip4": "Портали с вашата марка",
+  "companyDash.tutorOutcomeNotMarked": "Преподавателят не е отбелязал урока като завършен",
+  "companyDash.sendTutorOutcomeReminder": "Изпрати напомняне на преподавателя",
+  "companyDash.tutorOutcomeReminderSending": "Изпращане…",
+  "companyDash.tutorOutcomeReminderSent": "Напомнянето е изпратено на преподавателя по имейл.",
+  "companyDash.tutorOutcomeReminderFailed": "Напомнянето не можа да бъде изпратено: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "Вече е изпратено напомняне през последния час.",
+  "schoolDash.adminActionsTitle": "Необходимо е действие от администратор",
+  "schoolDash.adminActionsHint": "Списъкът се създава автоматично и се изчиства след решаване на проблема.",
+  "schoolDash.adminActionsEmpty": "В момента няма отворени административни задачи.",
+  "schoolDash.adminActionsTruncated": "Показани са {shown} от {total}. Останалите елементи са достъпни в съответните екрани.",
+  "schoolDash.noReviewItems": "Няма присъствия или непроведени занятия за проверка.",
+  "schoolDash.activityFeedTitle": "Последна активност",
+  "schoolDash.activityFeedHint": "{count} последни събития",
+  "schoolStats.teacherPay": "Възнаграждение на учителите",
+  "schoolStats.teacherPayShort": "Възнаграждение",
+  "schoolStats.teacherPayHint": "Една ставка за проведено занятие, независимо от броя деца в групата",
+  "schoolStats.teacherPayUnresolved": "{count} занятия трябва да бъдат проверени преди фактуриране",
 };
 
 export const bg: Record<string, string> = { ...en, ...bgOverrides };

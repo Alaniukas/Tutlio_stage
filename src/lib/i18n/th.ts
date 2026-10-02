@@ -5594,6 +5594,23 @@ export const thOverrides: Record<string, string> = {
   "compare.customChip2": "กฎค่าตอบแทน",
   "compare.customChip3": "ลิงก์ตอบรับสำหรับผู้ปกครอง",
   "compare.customChip4": "พอร์ทัลที่ใช้แบรนด์ของคุณ",
+  "companyDash.tutorOutcomeNotMarked": "ผู้สอนยังไม่ได้ทำเครื่องหมายว่าบทเรียนเสร็จสิ้น",
+  "companyDash.sendTutorOutcomeReminder": "ส่งการแจ้งเตือนให้ผู้สอน",
+  "companyDash.tutorOutcomeReminderSending": "กำลังส่ง…",
+  "companyDash.tutorOutcomeReminderSent": "ส่งการแจ้งเตือนให้ผู้สอนทางอีเมลแล้ว",
+  "companyDash.tutorOutcomeReminderFailed": "ไม่สามารถส่งการแจ้งเตือนได้: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "ส่งการแจ้งเตือนไปแล้วภายในหนึ่งชั่วโมงที่ผ่านมา",
+  "schoolDash.adminActionsTitle": "ต้องให้ผู้ดูแลระบบดำเนินการ",
+  "schoolDash.adminActionsHint": "รายการนี้สร้างขึ้นโดยอัตโนมัติและจะล้างเมื่อแก้ไขปัญหาแล้ว",
+  "schoolDash.adminActionsEmpty": "ขณะนี้ไม่มีงานของผู้ดูแลระบบที่ค้างอยู่",
+  "schoolDash.adminActionsTruncated": "แสดง {shown} จาก {total} รายการ รายการที่เหลือดูได้ในหน้าจอที่เกี่ยวข้อง",
+  "schoolDash.noReviewItems": "ไม่มีข้อมูลการเข้าเรียนหรือคาบที่ไม่ได้จัดซึ่งต้องตรวจสอบ",
+  "schoolDash.activityFeedTitle": "กิจกรรมล่าสุด",
+  "schoolDash.activityFeedHint": "{count} เหตุการณ์ล่าสุด",
+  "schoolStats.teacherPay": "ค่าตอบแทนครู",
+  "schoolStats.teacherPayShort": "ค่าตอบแทน",
+  "schoolStats.teacherPayHint": "หนึ่งอัตราต่อคาบที่สอนจริง ไม่ใช่ต่อเด็กแต่ละคนในกลุ่ม",
+  "schoolStats.teacherPayUnresolved": "ต้องตรวจสอบ {count} คาบก่อนออกใบแจ้งหนี้",
 };
 
 export const th: Record<string, string> = { ...en, ...thOverrides };

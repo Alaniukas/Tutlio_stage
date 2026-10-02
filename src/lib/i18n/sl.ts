@@ -5592,6 +5592,23 @@ export const slOverrides: Record<string, string> = {
   "compare.customChip2": "Pravila plačil",
   "compare.customChip3": "Povezave za potrditev staršev",
   "compare.customChip4": "Portali z vašo podobo",
+  "companyDash.tutorOutcomeNotMarked": "Inštruktor ure ni označil kot zaključene",
+  "companyDash.sendTutorOutcomeReminder": "Pošlji opomnik inštruktorju",
+  "companyDash.tutorOutcomeReminderSending": "Pošiljanje…",
+  "companyDash.tutorOutcomeReminderSent": "Opomnik je bil inštruktorju poslan po e-pošti.",
+  "companyDash.tutorOutcomeReminderFailed": "Opomnika ni bilo mogoče poslati: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "Opomnik je bil že poslan v zadnji uri.",
+  "schoolDash.adminActionsTitle": "Potreben je ukrep skrbnika",
+  "schoolDash.adminActionsHint": "Seznam se ustvari samodejno in se izprazni, ko je težava odpravljena.",
+  "schoolDash.adminActionsEmpty": "Trenutno ni odprtih skrbniških nalog.",
+  "schoolDash.adminActionsTruncated": "Prikazanih {shown} od {total}. Preostale postavke so na voljo v ustreznih pogledih.",
+  "schoolDash.noReviewItems": "Ni prisotnosti ali neizvedenih učnih srečanj za pregled.",
+  "schoolDash.activityFeedTitle": "Nedavna dejavnost",
+  "schoolDash.activityFeedHint": "{count} nedavnih dogodkov",
+  "schoolStats.teacherPay": "Plačilo učiteljev",
+  "schoolStats.teacherPayShort": "Plačilo",
+  "schoolStats.teacherPayHint": "Ena tarifa za izvedeno učno srečanje, ne za vsakega otroka v skupini",
+  "schoolStats.teacherPayUnresolved": "{count} učnih srečanj je treba pregledati pred izdajo računa",
 };
 
 export const sl: Record<string, string> = { ...en, ...slOverrides };

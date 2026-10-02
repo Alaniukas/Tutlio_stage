@@ -5594,6 +5594,23 @@ export const trOverrides: Record<string, string> = {
   "compare.customChip2": "Ücret kuralları",
   "compare.customChip3": "Veliler için onay bağlantıları",
   "compare.customChip4": "Kendi markanızla portallar",
+  "companyDash.tutorOutcomeNotMarked": "Öğretmen dersi tamamlandı olarak işaretlememiş",
+  "companyDash.sendTutorOutcomeReminder": "Öğretmene hatırlatma gönder",
+  "companyDash.tutorOutcomeReminderSending": "Gönderiliyor…",
+  "companyDash.tutorOutcomeReminderSent": "Hatırlatma öğretmene e-postayla gönderildi.",
+  "companyDash.tutorOutcomeReminderFailed": "Hatırlatma gönderilemedi: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "Son bir saat içinde zaten bir hatırlatma gönderildi.",
+  "schoolDash.adminActionsTitle": "Yönetici işlemi gerekiyor",
+  "schoolDash.adminActionsHint": "Bu liste otomatik oluşturulur ve sorun çözüldüğünde temizlenir.",
+  "schoolDash.adminActionsEmpty": "Şu anda bekleyen yönetici görevi yok.",
+  "schoolDash.adminActionsTruncated": "{total} öğeden {shown} gösteriliyor. Diğer öğeler ilgili ekranlarda bulunabilir.",
+  "schoolDash.noReviewItems": "İncelenmesi gereken devam kaydı veya yapılmamış oturum yok.",
+  "schoolDash.activityFeedTitle": "Son etkinlikler",
+  "schoolDash.activityFeedHint": "Son {count} olay",
+  "schoolStats.teacherPay": "Öğretmen ücretleri",
+  "schoolStats.teacherPayShort": "Ücretler",
+  "schoolStats.teacherPayHint": "Gruptaki çocuk sayısına göre değil, gerçekleştirilen her oturum için tek ücret",
+  "schoolStats.teacherPayUnresolved": "Faturalandırmadan önce {count} oturumun incelenmesi gerekiyor",
 };
 
 export const tr: Record<string, string> = { ...en, ...trOverrides };

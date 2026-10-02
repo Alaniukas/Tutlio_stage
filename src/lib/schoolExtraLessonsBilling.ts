@@ -62,7 +62,7 @@ export function sessionYmdVilnius(iso: string): string {
 
 /** Scope each student's lessons to this agreement, never to all their subjects/groups. */
 export function sessionMatchesExtraLessonsContract(
-  session: ExtraLessonsBillableSession,
+  session: Pick<ExtraLessonsBillableSession, 'class_group_id' | 'subject_id'>,
   scope: { service_type: string; group_id?: string | null; subject_id?: string | null },
 ): boolean {
   if (scope.service_type === 'group') return Boolean(scope.group_id) && session.class_group_id === scope.group_id;

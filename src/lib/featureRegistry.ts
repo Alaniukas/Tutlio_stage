@@ -593,6 +593,16 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     defaultValue: false,
   },
 
+  school_join_and_material_notifications: {
+    id: 'school_join_and_material_notifications',
+    name: 'Priminimai su prisijungimu ir medžiagos suvestinė',
+    nameEn: 'Reminders with joining and material digest',
+    description: 'Užsiėmimų priminimai siunčiami įprastu nustatytu laiku, su pagrindiniu prisijungimo mygtuku, kai yra nuoroda. Mokytojų priminimai išlieka. Nauji namų darbai ir įrašai pranešami viena dienos suvestine.',
+    descriptionEn: 'Session reminders retain their configured timing, with a primary join button when a meeting link is available. Teacher reminders remain enabled. New homework and recordings are announced in one daily digest.',
+    category: 'automation',
+    defaultValue: false,
+  },
+
   school_teacher_labels: {
     id: 'school_teacher_labels',
     name: 'Terminologija „mokytojas“ / „mokinys“',

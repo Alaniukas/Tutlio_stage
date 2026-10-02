@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadExtraLessonsStartGates, materializeClassGroupNow, materializationWindow, reconcileClassGroupSessions } from '../../api/_lib/schoolClassGroupMaterialize';
 import { buildExtraLessonsOrderSnapshot } from '../../src/lib/extraLessonsContract';
 import { groupSeed, schoolGroupDatabase } from '../fixtures/schoolGroupDatabase';
@@ -9,6 +9,12 @@ const order = buildExtraLessonsOrderSnapshot({
   start_date: '2026-09-01', end_date: '2027-06-15', unit_price_eur: 12, base_lessons_per_month: 4,
   schedule_slots: [{ weekday: 1, start_time: '18:00' }], group_id: 'group',
 });
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-09-28T10:00:00Z'));
+});
+afterEach(() => { vi.useRealTimers(); });
 
 describe('extra contract materialization gates', () => {
   it('blocks ended and unsigned agreements even if a stale membership remains', async () => {

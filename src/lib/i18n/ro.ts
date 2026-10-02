@@ -5887,6 +5887,23 @@ export const roOverrides: Record<string, string> = {
   "compare.customChip2": "Reguli de plată",
   "compare.customChip3": "Linkuri de acceptare pentru părinți",
   "compare.customChip4": "Portaluri cu brandul tău",
+  "companyDash.tutorOutcomeNotMarked": "Profesorul nu a marcat lecția ca finalizată",
+  "companyDash.sendTutorOutcomeReminder": "Trimite un memento profesorului",
+  "companyDash.tutorOutcomeReminderSending": "Se trimite…",
+  "companyDash.tutorOutcomeReminderSent": "Mementoul a fost trimis profesorului prin e-mail.",
+  "companyDash.tutorOutcomeReminderFailed": "Mementoul nu a putut fi trimis: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "Un memento a fost deja trimis în ultima oră.",
+  "schoolDash.adminActionsTitle": "Este necesară intervenția administratorului",
+  "schoolDash.adminActionsHint": "Lista este creată automat și se golește după rezolvarea problemei.",
+  "schoolDash.adminActionsEmpty": "În prezent nu există sarcini administrative deschise.",
+  "schoolDash.adminActionsTruncated": "Se afișează {shown} din {total}. Celelalte elemente sunt disponibile în ecranele corespunzătoare.",
+  "schoolDash.noReviewItems": "Nu există prezențe sau ședințe neținute care necesită verificare.",
+  "schoolDash.activityFeedTitle": "Activitate recentă",
+  "schoolDash.activityFeedHint": "{count} evenimente recente",
+  "schoolStats.teacherPay": "Remunerația profesorilor",
+  "schoolStats.teacherPayShort": "Remunerație",
+  "schoolStats.teacherPayHint": "Un tarif pentru fiecare ședință ținută, indiferent de numărul de copii din grup",
+  "schoolStats.teacherPayUnresolved": "{count} ședințe trebuie verificate înainte de facturare",
 };
 
 export const ro: Record<string, string> = { ...en, ...roOverrides };

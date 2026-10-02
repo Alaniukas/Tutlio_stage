@@ -57,6 +57,14 @@ export type ClassGroupOccurrence = {
   startIso: string;
   endIso: string;
   slot: SchoolMemberSlot;
+  originalStartIso?: string;
+  meetingLink?: string | null;
+  rescheduledAt?: string;
+};
+
+export type ClassGroupOccurrenceOverride = {
+  original_start_time: string; start_time: string; end_time: string;
+  meeting_link: string | null; updated_at: string;
 };
 
 export type MaterializeWindow = {
@@ -132,11 +140,13 @@ function alignedSlotStart(schoolYearStart: string, weekday: number): string {
 export function expectedClassGroupOccurrences(
   group: MaterializeGroupRow,
   window: MaterializeWindow,
+  overrides: ClassGroupOccurrenceOverride[] = [],
 ): ClassGroupOccurrence[] {
   const out: ClassGroupOccurrence[] = [];
   const seen = new Set<string>();
   const duration = Math.max(15, Number(group.duration_minutes) || 45);
   const nowMs = window.now.getTime();
+  const movedOriginals = new Set(overrides.map(row => isoKey(row.original_start_time)));
   for (const slot of group.slots || []) {
     const weekday = Number(slot.weekday);
     if (!Number.isFinite(weekday) || weekday < 0 || weekday > 6) continue;
@@ -162,10 +172,26 @@ export function expectedClassGroupOccurrences(
       }
       if (endUtc.getTime() <= nowMs) continue; // already over — history, not ours
       const startIso = startUtc.toISOString();
+      if (movedOriginals.has(startIso)) continue;
       if (seen.has(startIso)) continue; // two slots on the same weekday/time
       seen.add(startIso);
       out.push({ ymd, startIso, endIso: endUtc.toISOString(), slot: { weekday, start_time: startTime } });
     }
+  }
+  for (const override of overrides) {
+    const start = new Date(override.start_time);
+    const end = new Date(override.end_time);
+    const original = new Date(override.original_start_time);
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || !Number.isFinite(original.getTime())
+      || end.getTime() <= nowMs || end <= start) continue;
+    const ymd = ymdInVilnius(start);
+    // An explicit move can be farther away than the regular rolling horizon.
+    if (ymd < window.windowStartYmd) continue;
+    const originalYmd = ymdInVilnius(original);
+    const weekday = new Date(`${originalYmd}T12:00:00Z`).getUTCDay();
+    const startTime = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Vilnius', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(original);
+    out.push({ ymd, startIso: start.toISOString(), endIso: end.toISOString(), originalStartIso: original.toISOString(),
+      slot: { weekday, start_time: startTime }, meetingLink: override.meeting_link, rescheduledAt: override.updated_at });
   }
   return out.sort((a, b) => a.startIso.localeCompare(b.startIso));
 }
@@ -290,14 +316,19 @@ export async function reconcileClassGroupSessions(
     ? []
     : (group.members || []).filter((member) => member.student_id && !detached?.has(member.student_id));
 
-  const occurrences = expectedClassGroupOccurrences(group, window);
+  const overrides = await supabase.from('school_class_group_occurrence_overrides')
+    .select('original_start_time,start_time,end_time,meeting_link,updated_at').eq('group_id', group.id);
+  // Fail closed: generating against an unknown exception set can erase a move.
+  if (overrides.error) throw new Error(`[class-groups] load occurrence overrides failed: ${overrides.error.message}`);
+  const occurrences = expectedClassGroupOccurrences(group, window, overrides.data || []);
   const exclusions = await loadSessionRecurrenceExclusions(supabase, { classGroupId: group.id });
-  const expected = new Map<string, { student_id: string; startIso: string; endIso: string }>();
+  const expected = new Map<string, ClassGroupOccurrence & { student_id: string }>();
   for (const occ of occurrences) {
     for (const member of activeMembers) {
       if (!memberFollowsGroupSlot(member.schedule_slots, occ.slot)) continue;
       const studentId = member.student_id;
-      if (isSessionOccurrenceExcluded(exclusions, studentId, occ.startIso)) {
+      if (isSessionOccurrenceExcluded(exclusions, studentId, occ.startIso)
+        || (occ.originalStartIso && isSessionOccurrenceExcluded(exclusions, studentId, occ.originalStartIso))) {
         result.skipped += 1;
         continue;
       }
@@ -308,7 +339,7 @@ export async function reconcileClassGroupSessions(
         result.skipped += 1;
         continue;
       }
-      expected.set(rowKey(studentId, occ.startIso), { student_id: studentId, startIso: occ.startIso, endIso: occ.endIso });
+      expected.set(rowKey(studentId, occ.startIso), { ...occ, student_id: studentId });
     }
   }
 
@@ -322,8 +353,8 @@ export async function reconcileClassGroupSessions(
 
   const nowMs = window.now.getTime();
   const seen = new Set<string>();
-  const toDelete: string[] = [];
-  const toUpdate: Array<{ id: string; patch: Record<string, unknown> }> = [];
+  const toDelete: ExistingRow[] = [];
+  const toUpdate: Array<{ id: string; patch: Record<string, unknown>; snapshot: ExistingRow }> = [];
 
   for (const row of (attachedRows || []) as ExistingRow[]) {
     const key = rowKey(row.student_id, isoKey(row.start_time));
@@ -334,16 +365,17 @@ export async function reconcileClassGroupSessions(
         const patch: Record<string, unknown> = {};
         if (row.tutor_id !== group.tutor_id) patch.tutor_id = group.tutor_id;
         if (isoKey(row.end_time) !== want.endIso) patch.end_time = want.endIso;
-        if ((row.meeting_link || null) !== (group.meeting_link || null)) patch.meeting_link = group.meeting_link || null;
+        const meetingLink = want.originalStartIso ? want.meetingLink : group.meeting_link;
+        if ((row.meeting_link || null) !== (meetingLink || null)) patch.meeting_link = meetingLink || null;
         if ((row.subject_id || null) !== (group.subject_id || null)) patch.subject_id = group.subject_id || null;
         const contractPrice = contractSessionPrice(options.extraGates, row.student_id, group.id);
         if (contractPrice > 0 && !(Number(row.price) > 0)) patch.price = contractPrice;
-        if (Object.keys(patch).length) toUpdate.push({ id: row.id, patch });
+        if (Object.keys(patch).length) toUpdate.push({ id: row.id, patch, snapshot: row });
       }
       continue;
     }
     // Duplicate of a kept row, a slot that moved, or a removed member.
-    if (isReplaceableGeneratedRow(row, nowMs)) toDelete.push(row.id);
+    if (isReplaceableGeneratedRow(row, nowMs)) toDelete.push(row);
   }
 
   // 2) Same student + same start already booked with this teacher outside the
@@ -371,7 +403,7 @@ export async function reconcileClassGroupSessions(
           const contractPrice = contractSessionPrice(options.extraGates, want.student_id, group.id);
           const patch: Record<string, unknown> = { class_group_id: group.id };
           if (contractPrice > 0 && !(Number(existing.price) > 0)) patch.price = contractPrice;
-          toUpdate.push({ id: existing.id, patch });
+          toUpdate.push({ id: existing.id, patch, snapshot: existing });
           result.adopted += 1;
         }
         continue;
@@ -384,26 +416,48 @@ export async function reconcileClassGroupSessions(
         end_time: want.endIso,
         created_by_role: 'system',
         status: 'active',
-        meeting_link: group.meeting_link || null,
+        meeting_link: (want.originalStartIso ? want.meetingLink : group.meeting_link) || null,
         price: contractSessionPrice(options.extraGates, want.student_id, group.id),
         school_billing_kind: 'base',
         class_group_id: group.id,
+        ...(want.originalStartIso ? { original_start_time: want.originalStartIso, rescheduled_at: want.rescheduledAt } : {}),
       });
     }
   }
 
-  if (toDelete.length) {
-    const { error } = await supabase.from('sessions').delete().in('id', toDelete);
+  if (toDelete.length || toUpdate.length || toInsert.length) {
+    const current = await supabase.from('school_class_group_occurrence_overrides')
+      .select('original_start_time,start_time,end_time,meeting_link,updated_at').eq('group_id', group.id);
+    if (current.error) throw new Error(`[class-groups] recheck occurrence overrides failed: ${current.error.message}`);
+    const version = (rows: ClassGroupOccurrenceOverride[]) => JSON.stringify(rows.map(row =>
+      [isoKey(row.original_start_time), isoKey(row.start_time), isoKey(row.end_time), row.meeting_link, row.updated_at]).sort());
+    if (version(current.data || []) !== version(overrides.data || [])) {
+      throw new Error('[class-groups] occurrence moved during reconciliation; retry with the current schedule');
+    }
+  }
+  const deletesByTime = new Map<string, ExistingRow[]>();
+  for (const row of toDelete) {
+    const key = `${row.start_time}/${row.end_time}`;
+    deletesByTime.set(key, [...(deletesByTime.get(key) || []), row]);
+  }
+  for (const rows of deletesByTime.values()) {
+    const { data, error } = await supabase.from('sessions').delete().in('id', rows.map(row => row.id))
+      .eq('start_time', rows[0].start_time).eq('end_time', rows[0].end_time).eq('status', 'active')
+      .is('student_joined_at', null).is('tutor_joined_at', null).select('id');
     if (error) throw new Error(`[class-groups] delete stale sessions failed: ${error.message}`);
-    result.deleted = toDelete.length;
+    result.deleted += data?.length ?? rows.length;
   }
   for (const item of toUpdate) {
-    const { error } = await supabase.from('sessions').update(item.patch).eq('id', item.id);
+    const snapshot = item.snapshot;
+    let query = supabase.from('sessions').update(item.patch).eq('id', item.id)
+      .eq('start_time', snapshot.start_time).eq('end_time', snapshot.end_time).eq('status', snapshot.status!);
+    query = snapshot.meeting_link ? query.eq('meeting_link', snapshot.meeting_link) : query.is('meeting_link', null);
+    const { data, error } = await query.select('id');
     if (error) {
       console.error('[class-groups] session update failed', item.id, error.message);
       continue;
     }
-    result.updated += 1;
+    result.updated += data?.length ?? 1;
   }
   for (let i = 0; i < toInsert.length; i += INSERT_CHUNK) {
     const chunk = toInsert.slice(i, i + INSERT_CHUNK);

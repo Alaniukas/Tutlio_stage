@@ -15,8 +15,8 @@ export const ATTENDANCE_GRACE_MS = 10 * 60 * 1000;
 export type AttendanceSideStatus = 'joined' | 'late' | 'missing' | 'pending';
 
 export interface AttendanceSessionLike {
-  start_time: string;
-  end_time?: string | null;
+  start_time: Date | string;
+  end_time?: Date | string | null;
   status?: string | null;
   tutor_joined_at?: string | null;
   student_joined_at?: string | null;
@@ -83,7 +83,7 @@ export function deriveAttendance(
   session: AttendanceSessionLike,
   now: Date = new Date(),
 ): AttendanceInfo {
-  const startMs = Date.parse(session.start_time);
+  const startMs = session.start_time instanceof Date ? session.start_time.getTime() : Date.parse(session.start_time);
   const nowMs = now.getTime();
   if (session.status === 'cancelled' || !Number.isFinite(startMs)) {
     return { applicable: false, tutor: 'pending', student: 'pending', flagged: false, confirmedManually: false };

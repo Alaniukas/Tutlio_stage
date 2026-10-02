@@ -12,6 +12,12 @@ const END = '2026-06-12T15:00:00.000Z';
 const at = (offsetMin: number) => new Date(Date.parse(START) + offsetMin * 60 * 1000);
 const iso = (offsetMin: number) => at(offsetMin).toISOString();
 
+it('derives the same attendance from calendar Date values and database ISO timestamps', () => {
+  const lesson = { start_time: START, end_time: END, student_joined_at: iso(0) };
+  expect(deriveAttendance({ ...lesson, start_time: new Date(START), end_time: new Date(END) }, at(15)))
+    .toEqual(deriveAttendance(lesson, at(15)));
+});
+
 describe('isWithinJoinClickWindow', () => {
   it('opens 30 min before start and closes at lesson end', () => {
     expect(isWithinJoinClickWindow(at(-31), START, END)).toBe(false);

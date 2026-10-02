@@ -173,6 +173,50 @@ function reminderRequestBodies(fetchMock: ReturnType<typeof vi.fn>) {
 }
 
 describe('session reminder capacity behavior', () => {
+  it.each(['configured','payer','in_person','tutor_link','student_link','subject_link','disabled','too_early'])('preserves configured reminders with material digests for %s', async mode => {
+    const session = futureSession();
+    Object.assign(session.student, { organization_id: 'school-1', payer_email: 'payer@example.test', parent_secondary_email: 'second@example.test' });
+    session.tutor.organization_id = 'school-1';
+    const start = Date.now() + (mode === 'too_early' ? 180 : 90) * 60_000;
+    session.start_time = new Date(start).toISOString();
+    session.end_time = new Date(start + 60 * 60_000).toISOString();
+    if (mode === 'payer') session.student.email = '';
+    if (['in_person','tutor_link','student_link','subject_link'].includes(mode)) session.meeting_link = '';
+    if (mode === 'tutor_link') Object.assign(session.tutor, { personal_meeting_link: 'https://meet.google.com/teacher-room' });
+    if (mode === 'student_link') Object.assign(session.student, { personal_meeting_link: 'https://meet.google.com/student-room' });
+    if (mode === 'subject_link') Object.assign(session, { subjects: { meeting_link: 'https://meet.google.com/subject-room' } });
+    if (mode === 'disabled') Object.assign(session.tutor, { reminder_student_hours: 0, reminder_tutor_hours: 0 });
+    mocks.organization = { entity_type: 'school', features: { school_join_and_material_notifications: true } };
+    mocks.sessions.push(session);
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+    await handler(mockReq(), mockRes());
+    const reminders = reminderRequestBodies(fetchMock);
+    const expectedRecipients = mode === 'disabled' || mode === 'too_early' ? []
+      : [...(mode === 'payer' ? [] : [session.student.email]), 'payer@example.test', 'second@example.test', session.tutor.email];
+    expect(reminders.map(body => body.to)).toEqual(expectedRecipients);
+    expect(reminders.every(body => body.data.schoolJoinOnly !== true)).toBe(true);
+    const teacherReminder = reminders.find(body => body.data.isTutor === true);
+    if (expectedRecipients.length) {
+      expect(teacherReminder).toBeDefined();
+      const expectedLink = mode === 'tutor_link' ? 'https://meet.google.com/teacher-room'
+        : mode === 'student_link' ? 'https://meet.google.com/student-room'
+          : mode === 'subject_link' ? 'https://meet.google.com/subject-room'
+            : mode === 'in_person' ? null : session.meeting_link;
+      expect(reminders.every(body => body.data.meetingLink === expectedLink)).toBe(true);
+    }
+  });
+  it('keeps separate teacher and student reminder timing when material digests are enabled', async () => {
+    const session = futureSession();
+    Object.assign(session.student, { organization_id: 'school-1' });
+    Object.assign(session.tutor, { organization_id: 'school-1', reminder_student_hours: 0.25, reminder_tutor_hours: 2 });
+    mocks.organization = { entity_type: 'school', features: { school_join_and_material_notifications: true } };
+    mocks.sessions.push(session);
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+    await handler(mockReq(), mockRes());
+    expect(reminderRequestBodies(fetchMock).map(body => body.to)).toEqual([session.tutor.email]);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.sessions.length = 0;

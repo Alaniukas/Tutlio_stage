@@ -27,7 +27,7 @@ export type JoinNoShowSession = AttendanceSessionLike & {
   status?: string | null;
   student_joined_at?: string | null;
   tutor_joined_at?: string | null;
-  end_time?: string | null;
+  end_time?: Date | string | null;
 };
 
 /**
@@ -49,7 +49,7 @@ export function shouldReviewStudentAttendanceFromMissingJoin(
   if (!info.applicable) return false;
   if (info.student !== 'missing') return false;
   if (info.tutor === 'missing' || info.tutor === 'pending') return false;
-  const startMs = Date.parse(session.start_time);
+  const startMs = session.start_time instanceof Date ? session.start_time.getTime() : Date.parse(session.start_time);
   return Number.isFinite(startMs) && now.getTime() > startMs + ATTENDANCE_GRACE_MS;
 }
 
@@ -65,8 +65,8 @@ export function isUnconfirmedDetectedStudentAbsence(
     no_show_reason?: string | null;
     status_confirmed_at?: string | null;
     meeting_link?: string | null;
-    start_time?: string;
-    end_time?: string | null;
+    start_time?: Date | string;
+    end_time?: Date | string | null;
     student_joined_at?: string | null;
     tutor_joined_at?: string | null;
   },

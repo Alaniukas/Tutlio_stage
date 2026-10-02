@@ -5089,7 +5089,24 @@ export const esMxOverrides: Record<string, string> = {
   "support.contact.successBody": "Gracias - el equipo de Tutlio responderá por correo, normalmente en 15 minutos.",
   "support.contact.safety": "No incluyas contraseñas, códigos de autenticación ni los datos completos de la tarjeta.",
   "support.contact.error": "No pudimos enviar el formulario. Inténtelo de nuevo o escriba a info@tutlio.lt.",
-  "support.contact.back": "Volver a la asistencia con IA"
+  "support.contact.back": "Volver a la asistencia con IA",
+  "companyDash.tutorOutcomeNotMarked": "El profesor no ha marcado la clase como completada",
+  "companyDash.sendTutorOutcomeReminder": "Enviar recordatorio al profesor",
+  "companyDash.tutorOutcomeReminderSending": "Enviando…",
+  "companyDash.tutorOutcomeReminderSent": "Se envió el recordatorio al profesor por correo electrónico.",
+  "companyDash.tutorOutcomeReminderFailed": "No se pudo enviar el recordatorio: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "Ya se envió un recordatorio durante la última hora.",
+  "schoolDash.adminActionsTitle": "Se requiere una acción del administrador",
+  "schoolDash.adminActionsHint": "Esta lista se genera automáticamente y se vacía cuando se resuelve el problema.",
+  "schoolDash.adminActionsEmpty": "No hay tareas administrativas pendientes en este momento.",
+  "schoolDash.adminActionsTruncated": "Se muestran {shown} de {total}. Los demás elementos están disponibles en las pantallas correspondientes.",
+  "schoolDash.noReviewItems": "No hay asistencias ni sesiones no realizadas que revisar.",
+  "schoolDash.activityFeedTitle": "Actividad reciente",
+  "schoolDash.activityFeedHint": "{count} eventos recientes",
+  "schoolStats.teacherPay": "Remuneración de los profesores",
+  "schoolStats.teacherPayShort": "Remuneración",
+  "schoolStats.teacherPayHint": "Una tarifa por sesión impartida, no por cada niño del grupo",
+  "schoolStats.teacherPayUnresolved": "{count} sesiones necesitan revisión antes de facturar",
 };
 
 Object.assign(esMxOverrides, {

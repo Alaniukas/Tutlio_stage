@@ -75,6 +75,7 @@ export function groupSeed(minimum = 3): Record<string, SchoolTestRow[]> {
       schedule_slots: [{ weekday: 1, start_time: '18:00' }],
     })),
     school_class_group_slots: [],
+    school_class_group_occurrence_overrides: [],
     school_contracts: ['s1', 's2', 's3'].map((student_id, index) => ({
       id: `c${index + 1}`, organization_id: 'school', student_id, kind: 'extra_lessons', class_group_id: 'group',
       signing_status: 'signed', accepted_at: '2026-08-01T08:00:00.000Z', suspended_group_membership: null,

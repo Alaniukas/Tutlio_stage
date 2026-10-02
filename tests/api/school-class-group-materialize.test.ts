@@ -30,11 +30,11 @@ function group(overrides: Partial<MaterializeGroupRow> = {}): MaterializeGroupRo
 type Row = Record<string, any>;
 
 /** Minimal in-memory `sessions` + `students` tables behind a supabase-like query builder. */
-function fakeSupabase(sessions: Row[], students: Row[] = [{ id: 's1', detached_at: null }, { id: 's2', detached_at: null }], exclusions: Row[] = []) {
+function fakeSupabase(sessions: Row[], students: Row[] = [{ id: 's1', detached_at: null }, { id: 's2', detached_at: null }], exclusions: Row[] = [], overrides: Row[] = []) {
   const inserted: Row[] = [];
   const deleted: string[] = [];
   const updated: Array<{ id: string; patch: Row }> = [];
-  const tables: Record<string, Row[]> = { sessions, students, session_recurrence_exclusions: exclusions };
+  const tables: Record<string, Row[]> = { sessions, students, session_recurrence_exclusions: exclusions, school_class_group_occurrence_overrides: overrides };
 
   function builder(table: string) {
     const filters: Array<(row: Row) => boolean> = [];
@@ -44,6 +44,7 @@ function fakeSupabase(sessions: Row[], students: Row[] = [{ id: 's1', detached_a
     const api: any = {
       select() { return api; },
       eq(col: string, v: unknown) { filters.push((r) => r[col] === v); return api; },
+      is(col: string, v: unknown) { filters.push((r) => v === null ? r[col] == null : r[col] === v); return api; },
       neq(col: string, v: unknown) { filters.push((r) => r[col] !== v); return api; },
       in(col: string, values: unknown[]) { filters.push((r) => values.includes(r[col])); return api; },
       gt(col: string, v: string) { filters.push((r) => Date.parse(r[col]) > Date.parse(v)); return api; },
@@ -105,6 +106,77 @@ describe('expectedClassGroupOccurrences', () => {
 });
 
 describe('reconcileClassGroupSessions', () => {
+  const moved = (original = '2026-09-04T16:00:00.000Z', start = '2026-09-05T10:00:00.000Z') => ({
+    group_id: 'g1', original_start_time: original, start_time: start,
+    end_time: new Date(Date.parse(start) + 45 * 60_000).toISOString(), meeting_link: 'https://meet.google.com/kept', updated_at: NOW.toISOString(),
+  });
+
+  it('keeps the session IDs and Meet link when a past occurrence is moved into the future', async () => {
+    const override = moved();
+    const rows = ['s1', 's2'].map(student_id => ({ id: `moved-${student_id}`, student_id, tutor_id: 't1', subject_id: null,
+      class_group_id: 'g1', status: 'active', start_time: override.start_time, end_time: override.end_time,
+      meeting_link: override.meeting_link, original_start_time: override.original_start_time }));
+    const savedRows = structuredClone(rows);
+    const db = fakeSupabase(rows, undefined, [], [override]);
+    const window = materializationWindow(new Date('2026-09-04T18:00:00Z'), 7);
+    const result = await reconcileClassGroupSessions(db.client, group(), { window });
+    expect(result.deleted).toBe(0);
+    expect(db.tables.sessions.filter(row => row.id.startsWith('moved-'))).toMatchObject(savedRows);
+    expect(db.updated.some(update => update.id.startsWith('moved-'))).toBe(false);
+    expect(db.inserted.some(row => row.start_time === override.original_start_time)).toBe(false);
+    expect((await reconcileClassGroupSessions(db.client, group(), { window })).created).toBe(0);
+  });
+
+  it('adds a new member at the replacement time and still follows their original weekly slot', async () => {
+    const override = moved();
+    const db = fakeSupabase([], undefined, [], [override]);
+    const groups = group({ members: [{ student_id: 's1', schedule_slots: [{ weekday: 5, start_time: '19:00' }] },
+      { student_id: 's2', schedule_slots: [{ weekday: 4, start_time: '19:00' }] }] });
+    await reconcileClassGroupSessions(db.client, groups, { window: materializationWindow(NOW, 7) });
+    expect(db.inserted.filter(row => row.start_time === override.start_time)).toMatchObject([
+      { student_id: 's1', meeting_link: override.meeting_link, original_start_time: override.original_start_time },
+    ]);
+    expect(db.inserted.some(row => row.start_time === override.original_start_time)).toBe(false);
+  });
+
+  it('never resurrects the original future occurrence after its earlier replacement has completed', async () => {
+    const override = moved('2026-09-11T16:00:00.000Z', '2026-09-03T10:00:00.000Z');
+    const db = fakeSupabase([{ id: 'completed-move', student_id: 's1', class_group_id: 'g1', status: 'completed',
+      start_time: override.start_time, end_time: override.end_time }], undefined, [], [override]);
+    await reconcileClassGroupSessions(db.client, group(), { window: materializationWindow(NOW, 14) });
+    expect(db.tables.sessions.find(row => row.id === 'completed-move')).toBeDefined();
+    expect(db.inserted.some(row => row.start_time === override.original_start_time)).toBe(false);
+  });
+
+  it('loads a moved occurrence even after its original date leaves the rolling window, and honors deletion exclusions', async () => {
+    const override = moved('2026-09-04T16:00:00.000Z', '2026-10-10T10:00:00.000Z');
+    const db = fakeSupabase([], undefined, [{ class_group_id: 'g1', student_id: 's1', scope: 'single', start_time: override.original_start_time }], [override]);
+    await reconcileClassGroupSessions(db.client, group(), { window: materializationWindow(new Date('2026-10-02T12:00:00Z'), 14) });
+    expect(db.inserted.filter(row => row.start_time === override.start_time)).toMatchObject([{ student_id: 's2' }]);
+  });
+
+  it('preserves an explicit move beyond the rolling horizon without replacing its ID or link', async () => {
+    const override = moved('2026-09-04T16:00:00.000Z', '2027-01-09T10:00:00.000Z');
+    const db = fakeSupabase([{ id: 'far-move', student_id: 's1', tutor_id: 't1', class_group_id: 'g1', status: 'active',
+      start_time: override.start_time, end_time: override.end_time, meeting_link: override.meeting_link }], undefined, [], [override]);
+    await reconcileClassGroupSessions(db.client, group(), { window: materializationWindow(NOW, 7) });
+    expect(db.deleted).not.toContain('far-move');
+    expect(db.tables.sessions.find(row => row.id === 'far-move')?.meeting_link).toBe(override.meeting_link);
+    expect(db.inserted.some(row => row.student_id === 's1' && row.start_time === override.start_time)).toBe(false);
+    expect(db.inserted.some(row => row.student_id === 's2' && row.start_time === override.start_time)).toBe(true);
+  });
+
+  it('abandons a stale reconciliation when a manual move is committed while the schedule is being read', async () => {
+    const db = fakeSupabase([]);
+    const builder = db.client.from;
+    let reads = 0;
+    db.client.from = (table: string) => {
+      if (table === 'school_class_group_occurrence_overrides' && ++reads === 2) db.tables[table].push(moved());
+      return builder(table);
+    };
+    await expect(reconcileClassGroupSessions(db.client, group(), { window: materializationWindow(NOW, 7) })).rejects.toThrow('moved during reconciliation');
+    expect(db.deleted).toEqual([]); expect(db.inserted).toEqual([]); expect(db.updated).toEqual([]);
+  });
   it('does not regenerate a deleted member occurrence while keeping other students and dates', async () => {
     const excludedStart = '2026-09-04T16:00:00.000Z';
     const db = fakeSupabase([], undefined, [{

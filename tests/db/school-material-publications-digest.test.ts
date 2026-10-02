@@ -7,14 +7,15 @@ const uid = (index: number) => `00000000-0000-4000-8000-${String(index).padStart
 const org = uid(1), otherOrg = uid(2), childA = uid(101), childB = uid(102), soloChild = uid(103), detachedChild = uid(104), outsider = uid(201);
 const teacher = uid(50), group = uid(70), subject = uid(60), lessonA = uid(1001), lessonB = uid(1002), lessonDetached = uid(1004);
 
-async function database() {
+async function database(beforeNotificationSql = '') {
   const db = new PGlite();
   await db.exec(`
     CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
     CREATE SCHEMA storage;
     CREATE TABLE public.organizations(id uuid PRIMARY KEY,entity_type text,features jsonb);
-    CREATE TABLE public.profiles(id uuid PRIMARY KEY,organization_id uuid,email text,reminder_student_hours numeric,reminder_tutor_hours numeric);
-    CREATE TABLE public.students(id uuid PRIMARY KEY,organization_id uuid,email text,payer_email text,parent_secondary_email text,payment_payer text,linked_user_id uuid,detached_at timestamptz,enrollment_status text);
+    CREATE TABLE public.profiles(id uuid PRIMARY KEY,organization_id uuid,email text,reminder_student_hours numeric,reminder_tutor_hours numeric,personal_meeting_link text);
+    CREATE TABLE public.students(id uuid PRIMARY KEY,organization_id uuid,email text,payer_email text,parent_secondary_email text,payment_payer text,linked_user_id uuid,detached_at timestamptz,enrollment_status text,personal_meeting_link text);
+    CREATE TABLE public.subjects(id uuid PRIMARY KEY,meeting_link text);
     CREATE TABLE public.parent_profiles(id uuid PRIMARY KEY,email text,disable_lesson_reminders boolean);
     CREATE TABLE public.parent_students(student_id uuid,parent_id uuid);
     CREATE TABLE public.school_contracts(id uuid PRIMARY KEY,organization_id uuid,student_id uuid,kind text,signing_status text,archived_at timestamptz,terminated_at timestamptz);
@@ -23,12 +24,12 @@ async function database() {
     CREATE TABLE public.school_contract_signatures(id uuid PRIMARY KEY,contract_id uuid,role text,status text,signer_email text,signer_name text,signer_personal_code text);
     CREATE TABLE public.sessions(id uuid PRIMARY KEY,student_id uuid,tutor_id uuid,class_group_id uuid,start_time timestamptz,status text,
       tutor_comment text,show_comment_to_student boolean,show_comment_to_parent boolean,topic text,
-      reminder_student_sent boolean,reminder_tutor_sent boolean,reminder_payer_sent boolean);
+      reminder_student_sent boolean,reminder_tutor_sent boolean,reminder_payer_sent boolean,meeting_link text,subject_id uuid);
     CREATE TABLE public.school_class_group_members(group_id uuid,student_id uuid);
     CREATE TABLE public.recurring_individual_sessions(subject_id uuid,tutor_id uuid,student_id uuid,active boolean);
     CREATE TABLE storage.objects(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),bucket_id text,name text,created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now());
     INSERT INTO organizations VALUES ('${org}','school','{}'),('${otherOrg}','school','{"school_family_portal":true}');
-    INSERT INTO profiles VALUES ('${teacher}','${org}','teacher@school.invalid',2,2);
+    INSERT INTO profiles(id,organization_id,email,reminder_student_hours,reminder_tutor_hours) VALUES ('${teacher}','${org}','teacher@school.invalid',2,2);
     INSERT INTO students(id,organization_id,email,enrollment_status) VALUES
       ('${childA}','${org}','child@school.test','active'),('${childB}','${org}','st-child@account.invalid','active'),
       ('${soloChild}','${org}',NULL,'active'),('${detachedChild}','${org}',NULL,'active'),('${outsider}','${otherOrg}',NULL,'active');
@@ -42,8 +43,99 @@ async function database() {
     INSERT INTO storage.objects(bucket_id,name,created_at,updated_at) VALUES ('session-files','${lessonA}/old.pdf',now()-interval '1 day',now()-interval '1 day');
   `);
   await db.exec(readFileSync('supabase/migrations/20260928190300_school_material_publications_digest.sql', 'utf8'));
+  if (beforeNotificationSql) await db.exec(beforeNotificationSql);
+  await db.exec(readFileSync('supabase/migrations/20261002113654_school_join_material_notifications.sql', 'utf8'));
   return db;
 }
+
+it('enables the requested schools without enabling private accounts and initializes the notification cutoff only once', async () => {
+  const laisvi = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17', demo = 'c3a00000-7e57-4000-8000-000000000001';
+  const db = await database(`INSERT INTO organizations VALUES ('${laisvi}','school','{"public_name":"Own school"}'),('${demo}','school','{}');`);
+  try {
+    const rows = (await db.query<any>('SELECT id,features FROM organizations WHERE id IN ($1,$2)', [laisvi,demo])).rows;
+    expect(rows.every(row => row.features.school_join_and_material_notifications === true && row.features.school_family_portal === undefined)).toBe(true);
+    expect((await db.query<any>('SELECT features FROM organizations WHERE id=$1', [org])).rows[0].features).toEqual({});
+    const before = (await db.query('SELECT organization_id,notifications_started_at,completed_at FROM school_material_baselines ORDER BY organization_id')).rows;
+    expect(before).toHaveLength(2);
+    expect(before.every((row: any) => row.notifications_started_at && !row.completed_at)).toBe(true);
+    expect((await db.query('SELECT school_start_material_notifications() AS count')).rows[0]).toEqual({ count: 0 });
+    expect((await db.query('SELECT organization_id,notifications_started_at,completed_at FROM school_material_baselines ORDER BY organization_id')).rows).toEqual(before);
+    const acl = (await db.query(`SELECT has_function_privilege('authenticated','public.school_start_material_notifications()','EXECUTE') AS user_execute,
+      has_function_privilege('service_role','public.school_start_material_notifications()','EXECUTE') AS service_execute`)).rows[0];
+    expect(acl).toEqual({ user_execute: false, service_execute: true });
+  } finally { await db.close(); }
+}, 30_000);
+
+it('queues new homework and recordings for quiet schools while excluding the old inventory and private child submissions', async () => {
+  const db = await database();
+  try {
+    await db.exec(`INSERT INTO school_material_publications(organization_id,source,target_id,file_id,source_version,label,first_published_at,legacy_access)
+      VALUES ('${org}','session_file','${lessonA}','${lessonA}/before.pdf','v1','before.pdf',now()-interval '1 day',true);
+      UPDATE organizations SET features='{"school_join_and_material_notifications":true}' WHERE id='${org}';
+      SELECT school_start_material_notifications();
+      INSERT INTO storage.objects(bucket_id,name) VALUES ('session-files','${lessonA}/new-task.pdf'),('session-files','${lessonA}/nd-child.pdf');
+      UPDATE sessions SET tutor_comment='Child homework',show_comment_to_student=true,show_comment_to_parent=false WHERE id='${lessonA}';
+      UPDATE sessions SET tutor_comment='Parent homework',show_comment_to_student=false,show_comment_to_parent=true WHERE id='${lessonB}';
+      INSERT INTO school_material_publications(organization_id,source,target_id,file_id,source_version,label,source_created_at,legacy_access) VALUES
+        ('${org}','drive','${group}','old-newly-discovered','v1','Old recording',now()-interval '1 day',true),
+        ('${org}','drive','${group}','new-recording','v1','New recording',now()+interval '1 second',true);`);
+    const rows = (await db.query<any>(`SELECT p.file_id,a.student_id FROM school_pending_material_audience(1000) a
+      JOIN school_material_publications p ON p.id=a.publication_id`)).rows;
+    const readers = (file: string) => rows.filter(row => row.file_id === file).map(row => row.student_id).sort();
+    expect(readers(`${lessonA}/before.pdf`)).toEqual([]);
+    expect(readers('old-newly-discovered')).toEqual([]);
+    expect(readers(`${lessonA}/nd-child.pdf`)).toEqual([]);
+    expect(readers(`${lessonA}/new-task.pdf`)).toEqual([childA,childB]);
+    expect(readers(`${lessonA}/comment`)).toEqual([childA]);
+    expect(readers(`${lessonB}/comment`)).toEqual([childB]);
+    expect(readers('new-recording')).toEqual([childA,childB]);
+    await db.exec(`DELETE FROM school_class_group_members WHERE student_id='${childB}';`);
+    expect((await db.query<any>(`SELECT a.student_id FROM school_pending_material_audience(1000) a JOIN school_material_publications p
+      ON p.id=a.publication_id WHERE p.file_id='new-recording'`)).rows.map(row => row.student_id)).toEqual([childA]);
+  } finally { await db.close(); }
+}, 30_000);
+
+it('retains configured student and teacher reminder timing when material digests are enabled', async () => {
+  const db = await database();
+  try {
+    await db.exec(`UPDATE organizations SET features='{"school_join_and_material_notifications":true}' WHERE id='${org}';
+      UPDATE sessions SET start_time=now()+interval '90 minutes';
+      UPDATE students SET payer_email='guardian@school.test' WHERE id='${childB}';`);
+    const due = async () => (await db.query<any>('SELECT id FROM get_due_session_reminder_ids(1000)')).rows.map(row => row.id);
+    const allLessons=[lessonA,lessonB,lessonDetached].sort();
+    expect((await due()).sort()).toEqual(allLessons); // In-person reminders still run.
+    await db.exec(`UPDATE sessions SET meeting_link='https://meet.google.com/same';`);
+    expect((await due()).sort()).toEqual(allLessons);
+    await db.exec(`UPDATE sessions SET reminder_student_sent=true,reminder_payer_sent=true;`);
+    expect((await due()).sort()).toEqual(allLessons); // Teacher reminders remain enabled.
+    await db.exec(`UPDATE sessions SET reminder_tutor_sent=true;`);
+    expect(await due()).toEqual([]);
+    await db.exec(`UPDATE sessions SET reminder_student_sent=false WHERE id='${lessonA}';
+      UPDATE profiles SET reminder_student_hours=1,reminder_tutor_hours=0;`);
+    expect(await due()).toEqual([]); // A configured one-hour reminder is not due yet.
+    await db.exec(`UPDATE profiles SET reminder_student_hours=3;`);
+    expect(await due()).toEqual([lessonA]);
+    await db.exec(`UPDATE organizations SET features='{}' WHERE id='${org}';`);
+    expect(await due()).toEqual([lessonA]);
+  } finally { await db.close(); }
+}, 30_000);
+
+it('keeps notification activation separate from a later legacy inventory cutover for private accounts', async () => {
+  const db = await database();
+  try {
+    await db.exec(`UPDATE organizations SET features='{"school_join_and_material_notifications":true}' WHERE id='${org}';
+      SELECT school_start_material_notifications();
+      UPDATE school_material_baselines SET cutoff_at=now()-interval '1 day',notifications_started_at=now()-interval '1 day' WHERE organization_id='${org}';
+      INSERT INTO storage.objects(bucket_id,name,created_at,updated_at) VALUES ('session-files','${lessonA}/while-quiet.pdf',now()-interval '1 hour',now()-interval '1 hour');
+      SELECT school_baseline_session_materials('${org}');`);
+    const baseline = (await db.query<any>('SELECT * FROM school_material_baselines WHERE organization_id=$1', [org])).rows[0];
+    expect(Date.parse(baseline.cutoff_at)).toBeGreaterThan(Date.parse(baseline.notifications_started_at));
+    expect(baseline.legacy_inventory_started_at).toBeTruthy();
+    await db.exec(`SELECT school_baseline_session_materials('${org}');`);
+    expect((await db.query<any>('SELECT cutoff_at FROM school_material_baselines WHERE organization_id=$1', [org])).rows[0].cutoff_at).toEqual(baseline.cutoff_at);
+    expect((await db.query<any>('SELECT legacy_access FROM school_material_publications WHERE file_id=$1', [`${lessonA}/while-quiet.pdf`])).rows.every(row => row.legacy_access)).toBe(true);
+  } finally { await db.close(); }
+}, 30_000);
 
 it('publishes versions atomically, restricts live multirow group audiences and keeps student submissions private', async () => {
   const db = await database();

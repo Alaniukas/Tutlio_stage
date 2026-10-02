@@ -5088,7 +5088,24 @@ export const elOverrides: Record<string, string> = {
   "support.contact.successBody": "Ευχαριστούμε - η ομάδα Tutlio θα απαντήσει μέσω email, συνήθως εντός 15 λεπτών.",
   "support.contact.safety": "Μην συμπεριλαμβάνετε κωδικούς πρόσβασης, κωδικούς επαλήθευσης ή πλήρη στοιχεία κάρτας.",
   "support.contact.error": "Δεν ήταν δυνατή η αποστολή της φόρμας. Δοκιμάστε ξανά ή στείλτε email στο info@tutlio.lt.",
-  "support.contact.back": "Επιστροφή στην υποστήριξη AI"
+  "support.contact.back": "Επιστροφή στην υποστήριξη AI",
+  "companyDash.tutorOutcomeNotMarked": "Ο καθηγητής δεν έχει σημειώσει το μάθημα ως ολοκληρωμένο",
+  "companyDash.sendTutorOutcomeReminder": "Αποστολή υπενθύμισης στον καθηγητή",
+  "companyDash.tutorOutcomeReminderSending": "Αποστολή…",
+  "companyDash.tutorOutcomeReminderSent": "Η υπενθύμιση στάλθηκε στον καθηγητή με email.",
+  "companyDash.tutorOutcomeReminderFailed": "Δεν ήταν δυνατή η αποστολή της υπενθύμισης: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "Έχει ήδη σταλεί υπενθύμιση την τελευταία ώρα.",
+  "schoolDash.adminActionsTitle": "Απαιτείται ενέργεια διαχειριστή",
+  "schoolDash.adminActionsHint": "Η λίστα δημιουργείται αυτόματα και αδειάζει όταν επιλυθεί το πρόβλημα.",
+  "schoolDash.adminActionsEmpty": "Δεν υπάρχουν εκκρεμείς εργασίες διαχείρισης αυτή τη στιγμή.",
+  "schoolDash.adminActionsTruncated": "Εμφανίζονται {shown} από {total}. Τα υπόλοιπα στοιχεία είναι διαθέσιμα στις αντίστοιχες οθόνες.",
+  "schoolDash.noReviewItems": "Δεν υπάρχουν παρουσίες ή συνεδρίες που δεν έγιναν για έλεγχο.",
+  "schoolDash.activityFeedTitle": "Πρόσφατη δραστηριότητα",
+  "schoolDash.activityFeedHint": "{count} πρόσφατα συμβάντα",
+  "schoolStats.teacherPay": "Αμοιβές εκπαιδευτικών",
+  "schoolStats.teacherPayShort": "Αμοιβές",
+  "schoolStats.teacherPayHint": "Μία αμοιβή ανά συνεδρία που πραγματοποιήθηκε, ανεξάρτητα από τον αριθμό παιδιών στην ομάδα",
+  "schoolStats.teacherPayUnresolved": "{count} συνεδρίες χρειάζονται έλεγχο πριν από την τιμολόγηση",
 };
 
 Object.assign(elOverrides, {

@@ -7,11 +7,13 @@ export async function schoolMaterialDigestDatabase(seed: Record<string, Record<s
   const pg = new PGlite();
   await pg.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
     CREATE TABLE organizations(id uuid PRIMARY KEY,name text,entity_type text,features jsonb,preferred_locale text,logo_url text,brand_color text,brand_color_secondary text);
-    CREATE TABLE students(id uuid PRIMARY KEY,organization_id uuid,full_name text,email text,linked_user_id uuid,detached_at timestamptz,enrollment_status text);
+    CREATE TABLE students(id uuid PRIMARY KEY,organization_id uuid,full_name text,email text,linked_user_id uuid,detached_at timestamptz,enrollment_status text,
+      payer_email text,payer_name text,parent_secondary_email text,parent_secondary_name text);
     CREATE TABLE parent_profiles(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),email text,email_notification_opt_out jsonb,disable_lesson_reminders boolean);
   `);
   const migration = readFileSync('supabase/migrations/20260928190300_school_material_publications_digest.sql', 'utf8');
   await pg.exec(migration.slice(0, migration.indexOf('ALTER TABLE public.school_material_publications ENABLE ROW')));
+  await pg.exec('ALTER TABLE school_material_baselines ADD COLUMN notifications_started_at timestamptz');
   for (const name of ['school_claim_material_digest', 'school_reserve_material_digest']) {
     const start = migration.indexOf(`CREATE FUNCTION public.${name}(`);
     const end = migration.indexOf('$$;', start) + 3;

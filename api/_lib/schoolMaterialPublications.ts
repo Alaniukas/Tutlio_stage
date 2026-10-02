@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getDriveFileMetadata, isRecordingWithinRetention, listDriveRecordings, type DriveRecordingFile } from './googleDriveRecordings.js';
 import { loadSchoolFamilyGuardianAccess, schoolFamilyPortalEnabled } from './schoolFamilyGuardianAccess.js';
 import { recordingSlotScope, recordingSlotTags, recordingVisibleToScope } from './schoolRecordingSlotAccess.js';
+import { schoolJoinContact, schoolMaterialDigestsEnabled } from '../../src/lib/schoolNotificationPolicy.js';
 
 export const MATERIAL_PUBLICATIONS = 'school_material_publications';
 export type SchoolMaterialPublication = {
@@ -9,6 +10,16 @@ export type SchoolMaterialPublication = {
   target_id: string; file_id: string; source_version: string; label: string;
   source_created_at: string | null; first_published_at: string; legacy_access: boolean;
 };
+
+/** Enabling the digest must not notify families about the existing inventory. */
+export function schoolMaterialPublicationIsNotifiable(publication: SchoolMaterialPublication,
+  features?: Record<string, unknown> | null, notificationsStartedAt?: string | null): boolean {
+  if (schoolFamilyPortalEnabled(features)) return !publication.legacy_access;
+  if (!schoolMaterialDigestsEnabled(features)) return false;
+  const cutoff = Date.parse(notificationsStartedAt || '');
+  return Number.isFinite(cutoff) && Date.parse(publication.first_published_at) >= cutoff
+    && (publication.source !== 'drive' || Date.parse(publication.source_created_at || '') >= cutoff);
+}
 
 /** Unknown publications are private after cutover, including an old Drive file newly added to a folder. */
 export async function schoolRecordingPublicationAllowsLegacyAccess(db: SupabaseClient, input: {
@@ -88,12 +99,28 @@ export async function prepareSchoolMaterialBaseline(db: SupabaseClient, organiza
   return { complete, folders };
 }
 
-/** Return the real child inbox, otherwise the verified annual guardian inbox. Never use an Auth alias. */
+/** Private portals require a verified guardian; email-only schools use their existing contacts. */
 export async function schoolMaterialRecipient(db: SupabaseClient, student: {
   id: string; organization_id: string; email?: string | null; full_name?: string | null; linked_user_id?: string | null;
-}): Promise<{ email: string; kind: 'student' | 'payer'; name: string; userId?: string | null } | null> {
+  payer_email?: string | null; payer_name?: string | null; parent_secondary_email?: string | null; parent_secondary_name?: string | null;
+}, features?: Record<string, unknown> | null): Promise<{ email: string; kind: 'student' | 'payer'; name: string; userId?: string | null } | null> {
   const email = String(student.email || '').trim().toLowerCase();
   if (email.includes('@') && !email.endsWith('.invalid')) return { email, kind: 'student', name: student.full_name || '', userId: student.linked_user_id };
+  if (!schoolFamilyPortalEnabled(features) && features?.school_join_and_material_notifications === true) {
+    const contact = schoolJoinContact(student);
+    if (contact) return { ...contact, name: contact.name || '' };
+    const links = await db.from('parent_students').select('parent_id').eq('student_id', student.id);
+    if (links.error) throw new Error('school_family_contact_unavailable');
+    const parentIds = (links.data || []).map(link => link.parent_id);
+    if (!parentIds.length) return null;
+    const parents = await db.from('parent_profiles').select('email,full_name').in('id', parentIds).order('id');
+    if (parents.error) throw new Error('school_family_contact_unavailable');
+    for (const parent of parents.data || []) {
+      const fallback = schoolJoinContact({ payer_email: parent.email, payer_name: parent.full_name });
+      if (fallback) return { ...fallback, name: fallback.name || '' };
+    }
+    return null;
+  }
   const { data, error } = await db.from('school_family_guardians').select('guardian_user_id, guardian_email, guardian_name')
     .eq('organization_id', student.organization_id).eq('student_id', student.id).maybeSingle();
   if (error) throw new Error('school_family_contact_unavailable');
@@ -111,7 +138,7 @@ export async function schoolStudentMayViewPublication(db: SupabaseClient, public
     db.from('students').select('organization_id,detached_at,enrollment_status').eq('id', studentId).single(),
   ]);
   if (org.error || student.error) throw new Error('school_material_access_unavailable');
-  if (org.data.entity_type !== 'school' || !schoolFamilyPortalEnabled(org.data.features)
+  if (org.data.entity_type !== 'school' || !schoolMaterialDigestsEnabled(org.data.features)
     || student.data.organization_id !== publication.organization_id || student.data.detached_at
     || (student.data.enrollment_status && student.data.enrollment_status !== 'active')) return false;
   // Student submissions are kept in the family workflow, never shared as

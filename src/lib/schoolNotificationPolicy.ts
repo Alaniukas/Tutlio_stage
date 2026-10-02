@@ -1,8 +1,20 @@
-/** Optional school policy: one short join email to the child, or one parent fallback. */
-export function schoolCompactNotificationsEnabled(organization: {
+type SchoolNotificationOrganization = {
   entityType?: string | null;
   features?: Record<string, unknown> | null;
-} | null): boolean {
+};
+
+/** Keep lesson reminders, lead with joining, and collect new materials in a daily digest. */
+export function schoolJoinAndMaterialNotificationsEnabled(organization: SchoolNotificationOrganization | null): boolean {
+  return organization?.entityType === 'school'
+    && organization.features?.school_join_and_material_notifications === true;
+}
+
+export function schoolMaterialDigestsEnabled(features?: Record<string, unknown> | null): boolean {
+  return features?.school_family_portal === true || features?.school_join_and_material_notifications === true;
+}
+
+/** One short join email to the child, or one parent fallback. */
+export function schoolCompactNotificationsEnabled(organization: SchoolNotificationOrganization | null): boolean {
   return organization?.entityType === 'school'
     && (organization.features?.school_compact_notifications === true
       || organization.features?.school_family_portal === true);
@@ -23,7 +35,7 @@ export function schoolJoinContact(student: {
   ];
   for (const contact of contacts) {
     const email = String(contact.email || '').trim().toLowerCase();
-    if (email) return { email, name: contact.name || null, kind: contact.kind };
+    if (email.includes('@') && !email.endsWith('.invalid')) return { email, name: contact.name || null, kind: contact.kind };
   }
   return null;
 }

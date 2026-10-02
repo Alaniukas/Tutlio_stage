@@ -5590,6 +5590,23 @@ export const arOverrides: Record<string, string> = {
   "compare.customChip2": "قواعد الأجور",
   "compare.customChip3": "روابط الموافقة لأولياء الأمور",
   "compare.customChip4": "بوابات بعلامتك التجارية",
+  "companyDash.tutorOutcomeNotMarked": "لم يحدد المدرّس الدرس على أنه مكتمل",
+  "companyDash.sendTutorOutcomeReminder": "إرسال تذكير إلى المدرّس",
+  "companyDash.tutorOutcomeReminderSending": "جارٍ الإرسال…",
+  "companyDash.tutorOutcomeReminderSent": "أُرسل التذكير إلى المدرّس عبر البريد الإلكتروني.",
+  "companyDash.tutorOutcomeReminderFailed": "تعذّر إرسال التذكير: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "أُرسل تذكير بالفعل خلال الساعة الماضية.",
+  "schoolDash.adminActionsTitle": "يلزم إجراء من المسؤول",
+  "schoolDash.adminActionsHint": "تُنشأ هذه القائمة تلقائيًا وتُفرغ بعد حل المشكلة.",
+  "schoolDash.adminActionsEmpty": "لا توجد مهام إدارية معلّقة حاليًا.",
+  "schoolDash.adminActionsTruncated": "يُعرض {shown} من {total}. تتوفر بقية العناصر في الشاشات ذات الصلة.",
+  "schoolDash.noReviewItems": "لا توجد سجلات حضور أو جلسات لم تُعقد تحتاج إلى مراجعة.",
+  "schoolDash.activityFeedTitle": "النشاط الأخير",
+  "schoolDash.activityFeedHint": "{count} من الأحداث الأخيرة",
+  "schoolStats.teacherPay": "أجور المعلمين",
+  "schoolStats.teacherPayShort": "الأجور",
+  "schoolStats.teacherPayHint": "أجر واحد لكل جلسة منعقدة، وليس لكل طفل في المجموعة",
+  "schoolStats.teacherPayUnresolved": "تحتاج {count} جلسات إلى مراجعة قبل إصدار الفاتورة",
 };
 
 /** Untranslated product areas retain the English source until separately reviewed. */

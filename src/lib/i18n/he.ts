@@ -5590,6 +5590,23 @@ export const heOverrides: Record<string, string> = {
   "compare.customChip2": "כללי שכר",
   "compare.customChip3": "קישורי אישור להורים",
   "compare.customChip4": "אזורים אישיים עם המותג שלכם",
+  "companyDash.tutorOutcomeNotMarked": "המורה לא סימן את השיעור כהושלם",
+  "companyDash.sendTutorOutcomeReminder": "שליחת תזכורת למורה",
+  "companyDash.tutorOutcomeReminderSending": "שולח…",
+  "companyDash.tutorOutcomeReminderSent": "התזכורת נשלחה למורה בדוא״ל.",
+  "companyDash.tutorOutcomeReminderFailed": "לא ניתן היה לשלוח את התזכורת: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "תזכורת כבר נשלחה במהלך השעה האחרונה.",
+  "schoolDash.adminActionsTitle": "נדרשת פעולה של מנהל",
+  "schoolDash.adminActionsHint": "הרשימה נוצרת אוטומטית ומתרוקנת לאחר פתרון הבעיה.",
+  "schoolDash.adminActionsEmpty": "אין כרגע משימות ניהול פתוחות.",
+  "schoolDash.adminActionsTruncated": "מוצגים {shown} מתוך {total}. שאר הפריטים זמינים במסכים המתאימים.",
+  "schoolDash.noReviewItems": "אין נתוני נוכחות או מפגשים שלא התקיימו הדורשים בדיקה.",
+  "schoolDash.activityFeedTitle": "פעילות אחרונה",
+  "schoolDash.activityFeedHint": "{count} אירועים אחרונים",
+  "schoolStats.teacherPay": "שכר מורים",
+  "schoolStats.teacherPayShort": "שכר",
+  "schoolStats.teacherPayHint": "תעריף אחד לכל מפגש שהתקיים, ללא תלות במספר הילדים בקבוצה",
+  "schoolStats.teacherPayUnresolved": "יש לבדוק {count} מפגשים לפני הפקת חשבונית",
 };
 
 export const he: Record<string, string> = { ...en, ...heOverrides };

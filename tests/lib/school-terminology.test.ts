@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   applySchoolTerminology,
+  applySchoolTerminologyToHtml,
   enLessonToActivity,
   ltLessonToActivity,
   schoolTerminologyForOrg,
@@ -95,6 +96,19 @@ describe('enLessonToActivity', () => {
 });
 
 describe('applySchoolTerminology', () => {
+  it('keeps signed links and attributes intact while rewriting visible English school email copy', () => {
+    const href = 'https://tutlio.lt/api/join-session?sid=lesson&t=token&role=tutor';
+    const html = `<a href="${href}" data-role="tutor">Join the tutor lesson</a> {tutor} ${href}`;
+    expect(applySchoolTerminologyToHtml(html, 'en', { staff: true, activity: true }))
+      .toBe(`<a href="${href}" data-role="tutor">Join the teacher session</a> {tutor} ${href}`);
+  });
+
+  it('keeps Lithuanian link attributes intact while transforming the visible staff and activity wording', () => {
+    const html = '<a href="https://example.test/korepetitorius/pamoka" title="Pamoka">Korepetitorius: pamoka</a>';
+    expect(applySchoolTerminologyToHtml(html, 'lt', { staff: true, activity: true }))
+      .toBe('<a href="https://example.test/korepetitorius/pamoka" title="Pamoka">Mokytojas: užsiėmimas</a>');
+  });
+
   it('swaps staff wording through the schools copy layer and activity wording through the LT rules', () => {
     const out = applySchoolTerminology('Korepetitorius dar nepriskirtas. Čia matysite savo pamokas.', 'lt', { staff: true, activity: true });
     expect(out).toBe('Mokytojas dar nepriskirtas. Čia matysite savo užsiėmimus.');

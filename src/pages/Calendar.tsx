@@ -1215,7 +1215,7 @@ export default function CalendarPage() {
     [sessionsAfterClassGroups, mergeGroupSessions],
   );
 
-  const attendanceOnlyCalendarEvents = useMemo<Session[]>(() => {
+  const attendanceOnlyCalendarEvents = useMemo<AttendanceOnlyGroupOccurrence[]>(() => {
     if (!isSchoolTutor || !showClassGroups) return [];
     const weekOpts = { weekStartsOn: locale === 'he' ? 0 as const : 1 as const };
     const start = currentView === Views.DAY ? startOfDay(currentDate)

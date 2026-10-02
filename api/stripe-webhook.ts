@@ -2,9 +2,7 @@ import { Buffer } from 'buffer';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
-import { tryIssueSalesInvoiceForStripePackage } from './_lib/issuePackageSalesInvoice.js';
-import { tryIssueProKlasePaidSourceInvoice } from './_lib/proKlaseSalesInvoice.js';
-import { markInvoicesPaidForPackage } from './_lib/markPackageInvoicePaid.js';
+import { issuePaidSourceSalesInvoice } from './_lib/paidSourceSalesInvoice.js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
@@ -20,7 +18,7 @@ import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
 import { markSchoolMonthlyInvoicePaid } from './_lib/schoolMonthlyInvoiceEmail.js';
 import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 import { markLinkedPackagePaidForSession } from './_lib/sessionPackagePayment.js';
-import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { checkoutChargeCurrency } from './_lib/marketMoney.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -437,7 +435,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     .maybeSingle();
 
                 if (updateErr && updateErr.code !== 'PGRST116') {
-                    console.error('[stripe-webhook] Error updating package:', updateErr);
+                    throw new Error(`Could not activate paid package: ${updateErr.message}`);
                 } else if (updatedPackage) {
                     const student = updatedPackage.students as any;
                     const subject = (updatedPackage as any).subject || (updatedPackage as any).subjects;
@@ -470,6 +468,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         sourceId: packageId,
                         baseAmountEur: packageBaseEur,
                         grossAmountEur: packageGrossEur,
+                        currency: checkoutChargeCurrency(session),
                         organizationId: packageOrganizationId,
                         tutorId: (updatedPackage as any).tutor_id ?? null,
                         stripeCheckoutSessionId: session.id,
@@ -522,53 +521,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }
 
                     console.log(`[stripe-webhook] Package ${packageId} activated successfully`);
-
-                    try {
-                        await markInvoicesPaidForPackage(
-                            supabase,
-                            packageId,
-                            (updatedPackage as { manual_sales_invoice_id?: string | null }).manual_sales_invoice_id
-                        );
-                    } catch (invErr) {
-                        console.error('[stripe-webhook] Error updating invoice status:', invErr);
-                    }
-
-                    try {
-                        if (isProKlaseOrg(packageOrganizationId)) {
-                            await tryIssueProKlasePaidSourceInvoice(supabase, {
-                                organizationId: packageOrganizationId,
-                                sourceType: 'package', sourceId: packageId,
-                                checkoutId: session.id, baseAmountEur: packageBaseEur,
-                            });
-                        } else {
-                            await tryIssueSalesInvoiceForStripePackage(supabase, updatedPackage as any);
-                        }
-                    } catch (sfErr) {
-                        console.error('[stripe-webhook] Auto S.F. for package failed (non-blocking):', sfErr);
-                    }
                 } else {
                     console.log(`[stripe-webhook] Package ${packageId} was already paid, skipping duplicate email`);
-                    try {
-                        const { data: pkgRow } = await supabase
-                            .from('lesson_packages')
-                            .select('manual_sales_invoice_id, tutor_id, pool_organization_id, total_price')
-                            .eq('id', packageId)
-                            .maybeSingle();
-                        await markInvoicesPaidForPackage(supabase, packageId, pkgRow?.manual_sales_invoice_id);
-                        if (pkgRow) {
-                            const { data: tutorRow } = pkgRow.pool_organization_id
-                                ? { data: null }
-                                : await supabase.from('profiles').select('organization_id').eq('id', pkgRow.tutor_id).maybeSingle();
-                            await tryIssueProKlasePaidSourceInvoice(supabase, {
-                                organizationId: pkgRow.pool_organization_id || tutorRow?.organization_id,
-                                sourceType: 'package', sourceId: packageId,
-                                checkoutId: session.id,
-                                baseAmountEur: metadataBaseEur(session.metadata) ?? Number(pkgRow.total_price),
-                            });
-                        }
-                    } catch (invErr) {
-                        console.error('[stripe-webhook] Error marking package invoice paid (already-paid path):', invErr);
-                    }
+                }
+
+                const { data: paidPackage, error: invoiceSourceError } = await supabase
+                    .from('lesson_packages').select('total_price, paid, payment_status, tutor_id')
+                    .eq('id', packageId).maybeSingle();
+                if (invoiceSourceError) throw new Error(invoiceSourceError.message);
+                if (!paidPackage?.paid || paidPackage.payment_status === 'cancelled') {
+                    return res.status(200).json({ received: true });
                 }
 
                 // If there are pre-created sessions tied to this package (e.g. trial lessons),
@@ -578,19 +540,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     // is the exactly-once guard: this and confirm-package-payment.ts both attempt it,
                     // but only the caller that actually flips a row notifies (tutor email + deferred
                     // student/parent invite), so the success-page/webhook race can't double-send.
-                    const { data: confirmedHolds } = await supabase
+                    const { data: confirmedHolds, error: holdError } = await supabase
                         .from('sessions')
                         .update({ paid: true, payment_status: 'paid', reservation_expires_at: null })
                         .eq('lesson_package_id', packageId)
                         .eq('payment_status', 'reserved')
                         .select('id, tutor_id, student_id, start_time, end_time, topic, meeting_link');
+                    if (holdError) throw new Error(holdError.message);
 
-                    const { data: paidSessions } = await supabase
+                    const { data: paidSessions, error: sessionsError } = await supabase
                         .from('sessions')
                         .update({ paid: true, payment_status: 'paid' })
                         .eq('lesson_package_id', packageId)
                         .eq('paid', false)
                         .select('id, tutor_id');
+                    if (sessionsError) throw new Error(sessionsError.message);
 
                     for (const ps of [...(confirmedHolds || []), ...(paidSessions || [])]) {
                         syncSessionToGoogle(ps.id, ps.tutor_id).catch(() => {});
@@ -606,11 +570,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     // Calendar-month packages (req 6): cap validity to the month of the first lesson.
                     await applyMonthlyPackageExpiry(supabase, {
                         packageId,
-                        tutorId: (updatedPackage as any).tutor_id,
+                        tutorId: paidPackage.tutor_id,
                     });
                 } catch (e) {
                     console.error('[stripe-webhook] Error updating sessions for prepaid package:', e);
+                    throw e;
                 }
+
+                // Run for both callback orders and every replay. Database errors
+                // reach the handler's 500 response so Stripe retries the invoice.
+                await issuePaidSourceSalesInvoice(supabase, {
+                    sourceType: 'package', sourceId: packageId, checkoutId: session.id,
+                    baseAmount: metadataBaseEur(session.metadata) ?? Number(paidPackage.total_price),
+                    currency: checkoutChargeCurrency(session),
+                }, { retryOnError: true });
             }
             // Handle monthly invoice payment
             else if (session.payment_status === 'paid' && session.metadata?.tutlio_billing_batch_id) {
@@ -672,6 +645,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         sourceId: batchId,
                         baseAmountEur: batchBaseEur,
                         grossAmountEur: batchGrossEur,
+                        currency: checkoutChargeCurrency(session),
                         organizationId: tutor?.organization_id ?? null,
                         tutorId: updatedBatch.tutor_id ?? null,
                         stripeCheckoutSessionId: session.id,
@@ -851,6 +825,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     sourceId: sessionId,
                                     baseAmountEur: metadataBaseEur(session.metadata),
                                     grossAmountEur: grossEur,
+                                    currency: checkoutChargeCurrency(session),
                                     organizationId: tutor?.organization_id ?? null,
                                     tutorId: (dbSession as any).tutor_id ?? null,
                                     stripeCheckoutSessionId: session.id,
@@ -905,7 +880,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                 .maybeSingle();
 
                             if (updateErr) {
-                                console.error('[stripe-webhook] Error updating lesson session:', updateErr);
+                                throw new Error(`Could not confirm paid lesson: ${updateErr.message}`);
                             } else if (updated) {
                                 syncSessionToGoogle(sessionId, (updated as any).tutor_id || (dbSession as any).tutor_id).catch(() => {});
 
@@ -914,6 +889,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     sourceId: sessionId,
                                     baseAmountEur: lessonBaseEur,
                                     grossAmountEur: grossEur,
+                                    currency: checkoutChargeCurrency(session),
                                     organizationId: tutor?.organization_id ?? null,
                                     tutorId: (dbSession as any).tutor_id ?? null,
                                     stripeCheckoutSessionId: session.id,
@@ -977,11 +953,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
                             if (!updateErr) {
                                 await markLinkedPackagePaidForSession(supabase, sessionId, session);
-                                await tryIssueProKlasePaidSourceInvoice(supabase, {
-                                    organizationId: tutor?.organization_id,
+                                await issuePaidSourceSalesInvoice(supabase, {
                                     sourceType: 'session', sourceId: sessionId,
-                                    checkoutId: session.id, baseAmountEur: lessonBaseEur,
-                                });
+                                    checkoutId: session.id, baseAmount: lessonBaseEur,
+                                    currency: checkoutChargeCurrency(session),
+                                }, { retryOnError: true });
                             }
                         }
                     }

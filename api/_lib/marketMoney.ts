@@ -313,6 +313,17 @@ export function metadataCurrency(
   return c === 'pln' ? 'pln' : 'eur';
 }
 
+/** Stripe's actual charge currency takes precedence over legacy metadata. */
+export function checkoutChargeCurrency(checkout: {
+  currency?: string | null;
+  metadata?: Record<string, string> | null;
+}): ChargeCurrency {
+  const currency = checkout.currency?.toLowerCase();
+  if (!currency) return metadataCurrency(checkout.metadata);
+  if (currency === 'eur' || currency === 'pln') return currency;
+  throw new Error(`Unsupported lesson checkout currency: ${currency}`);
+}
+
 export function creditNote(amount: number, market: TutlioMarket): string {
   const formatted =
     market === 'pl'

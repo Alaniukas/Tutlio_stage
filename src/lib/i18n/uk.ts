@@ -5590,6 +5590,23 @@ export const ukOverrides: Record<string, string> = {
   "compare.customChip2": "Правила оплати праці",
   "compare.customChip3": "Посилання для підтвердження батьками",
   "compare.customChip4": "Портали з вашим брендом",
+  "companyDash.tutorOutcomeNotMarked": "Викладач не позначив урок як завершений",
+  "companyDash.sendTutorOutcomeReminder": "Надіслати нагадування викладачу",
+  "companyDash.tutorOutcomeReminderSending": "Надсилання…",
+  "companyDash.tutorOutcomeReminderSent": "Нагадування надіслано викладачу електронною поштою.",
+  "companyDash.tutorOutcomeReminderFailed": "Не вдалося надіслати нагадування: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "Нагадування вже було надіслано протягом останньої години.",
+  "schoolDash.adminActionsTitle": "Потрібна дія адміністратора",
+  "schoolDash.adminActionsHint": "Список формується автоматично й очищується після усунення проблеми.",
+  "schoolDash.adminActionsEmpty": "Наразі немає відкритих адміністративних завдань.",
+  "schoolDash.adminActionsTruncated": "Показано {shown} із {total}. Решта пунктів доступні на відповідних екранах.",
+  "schoolDash.noReviewItems": "Немає даних відвідування чи непроведених занять, які потребують перевірки.",
+  "schoolDash.activityFeedTitle": "Остання активність",
+  "schoolDash.activityFeedHint": "{count} останніх подій",
+  "schoolStats.teacherPay": "Оплата вчителів",
+  "schoolStats.teacherPayShort": "Оплата",
+  "schoolStats.teacherPayHint": "Одна ставка за проведене заняття, незалежно від кількості дітей у групі",
+  "schoolStats.teacherPayUnresolved": "{count} занять потребують перевірки перед виставленням рахунку",
 };
 
 export const uk: Record<string, string> = { ...en, ...ukOverrides };

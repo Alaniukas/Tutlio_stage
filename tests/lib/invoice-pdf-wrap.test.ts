@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import fontkit from '@pdf-lib/fontkit';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, PDFPage } from 'pdf-lib';
 import {
   generateInvoicePdf,
   resolveInvoiceFontPath,
@@ -61,6 +61,25 @@ describe('wrapInvoiceDescription', () => {
 });
 
 describe('generateInvoicePdf', () => {
+  it('renders a paid PLN invoice with PLN labels and no EUR total', async () => {
+    const draw = vi.spyOn(PDFPage.prototype, 'drawText');
+    try {
+      const pdf = await generateInvoicePdf({
+        invoiceNumber: 'PL-020', issueDate: '2026-10-02',
+        seller: { name: 'Polish Organization', entityType: 'company' }, buyer: { name: 'Parent' },
+        lineItems: [{ description: 'Lessons', quantity: 1, unitPrice: 50, totalPrice: 50 }],
+        totalAmount: 50, currency: 'PLN',
+      });
+      expect(pdf.byteLength).toBeGreaterThan(1000);
+      const labels = draw.mock.calls.map(([text]) => text);
+      expect(labels).toContain('Suma, PLN');
+      expect(labels).toContain('50,00 PLN');
+      expect(labels.some(label => label.includes('EUR'))).toBe(false);
+    } finally {
+      draw.mockRestore();
+    }
+  });
+
   it('renders a PDF with Unicode invoice labels', async () => {
     const pdf = await generateInvoicePdf({
       invoiceNumber: 'SF-TEST-001',

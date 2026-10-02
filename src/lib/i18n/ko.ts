@@ -5594,6 +5594,23 @@ export const koOverrides: Record<string, string> = {
   "compare.customChip2": "보수 규칙",
   "compare.customChip3": "학부모 수락 링크",
   "compare.customChip4": "우리 브랜드 포털",
+  "companyDash.tutorOutcomeNotMarked": "강사가 수업을 완료로 표시하지 않았습니다",
+  "companyDash.sendTutorOutcomeReminder": "강사에게 알림 보내기",
+  "companyDash.tutorOutcomeReminderSending": "보내는 중…",
+  "companyDash.tutorOutcomeReminderSent": "강사에게 이메일로 알림을 보냈습니다.",
+  "companyDash.tutorOutcomeReminderFailed": "알림을 보내지 못했습니다: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "지난 한 시간 동안 이미 알림을 보냈습니다.",
+  "schoolDash.adminActionsTitle": "관리자 조치 필요",
+  "schoolDash.adminActionsHint": "이 목록은 자동으로 생성되며 문제가 해결되면 비워집니다.",
+  "schoolDash.adminActionsEmpty": "현재 처리할 관리자 업무가 없습니다.",
+  "schoolDash.adminActionsTruncated": "총 {total}개 중 {shown}개를 표시합니다. 나머지 항목은 해당 화면에서 확인할 수 있습니다.",
+  "schoolDash.noReviewItems": "검토할 출석 기록이나 진행되지 않은 수업이 없습니다.",
+  "schoolDash.activityFeedTitle": "최근 활동",
+  "schoolDash.activityFeedHint": "최근 이벤트 {count}개",
+  "schoolStats.teacherPay": "교사 보수",
+  "schoolStats.teacherPayShort": "보수",
+  "schoolStats.teacherPayHint": "진행한 수업마다 한 번 지급하며 그룹의 아이 수에 따라 계산하지 않습니다",
+  "schoolStats.teacherPayUnresolved": "청구 전에 수업 {count}개를 검토해야 합니다",
 };
 
 export const ko: Record<string, string> = { ...en, ...koOverrides };

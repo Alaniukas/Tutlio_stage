@@ -5590,6 +5590,23 @@ export const hiOverrides: Record<string, string> = {
   "compare.customChip2": "मेहनताने के नियम",
   "compare.customChip3": "अभिभावकों के लिए स्वीकृति लिंक",
   "compare.customChip4": "आपके ब्रांड वाले पोर्टल",
+  "companyDash.tutorOutcomeNotMarked": "शिक्षक ने पाठ को पूरा हुआ चिह्नित नहीं किया है",
+  "companyDash.sendTutorOutcomeReminder": "शिक्षक को अनुस्मारक भेजें",
+  "companyDash.tutorOutcomeReminderSending": "भेजा जा रहा है…",
+  "companyDash.tutorOutcomeReminderSent": "शिक्षक को ईमेल से अनुस्मारक भेज दिया गया है।",
+  "companyDash.tutorOutcomeReminderFailed": "अनुस्मारक नहीं भेजा जा सका: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "पिछले घंटे में अनुस्मारक पहले ही भेजा जा चुका है।",
+  "schoolDash.adminActionsTitle": "व्यवस्थापक की कार्रवाई आवश्यक है",
+  "schoolDash.adminActionsHint": "यह सूची अपने आप बनती है और समस्या हल होने पर खाली हो जाती है।",
+  "schoolDash.adminActionsEmpty": "अभी व्यवस्थापक का कोई काम लंबित नहीं है।",
+  "schoolDash.adminActionsTruncated": "{total} में से {shown} दिखाए जा रहे हैं। बाकी मदें संबंधित स्क्रीन पर उपलब्ध हैं।",
+  "schoolDash.noReviewItems": "उपस्थिति या न हुए सत्रों की समीक्षा आवश्यक नहीं है।",
+  "schoolDash.activityFeedTitle": "हाल की गतिविधि",
+  "schoolDash.activityFeedHint": "{count} हाल की घटनाएँ",
+  "schoolStats.teacherPay": "शिक्षकों का पारिश्रमिक",
+  "schoolStats.teacherPayShort": "पारिश्रमिक",
+  "schoolStats.teacherPayHint": "हर आयोजित सत्र के लिए एक दर, समूह के हर बच्चे के लिए अलग नहीं",
+  "schoolStats.teacherPayUnresolved": "बिल बनाने से पहले {count} सत्रों की समीक्षा आवश्यक है",
 };
 
 export const hi: Record<string, string> = { ...en, ...hiOverrides };

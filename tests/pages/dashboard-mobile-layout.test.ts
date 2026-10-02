@@ -24,7 +24,7 @@ describe('dashboard mobile layout safeguards', () => {
     const company = source('src/pages/company/CompanyDashboard.tsx');
     const school = source('src/pages/company/SchoolDashboard.tsx');
 
-    expect(company).toContain('mt-2 flex gap-2');
+    expect(company).toMatch(/className="mt-2 space-y-2">\s*<div className="flex gap-2">/);
     expect(company).toContain('min-h-[44px] flex-1 touch-manipulation');
     expect(company).toContain('min-h-[44px] min-w-[44px]');
     expect(school).toContain('mt-2 flex min-h-[44px] w-full touch-manipulation');

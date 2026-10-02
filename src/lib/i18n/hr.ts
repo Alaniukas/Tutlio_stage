@@ -5594,6 +5594,23 @@ export const hrOverrides: Record<string, string> = {
   "compare.customChip2": "Pravila naknada",
   "compare.customChip3": "Poveznice za potvrdu roditelja",
   "compare.customChip4": "Portali s vašim identitetom",
+  "companyDash.tutorOutcomeNotMarked": "Instruktor nije označio sat kao završen",
+  "companyDash.sendTutorOutcomeReminder": "Pošalji podsjetnik instruktoru",
+  "companyDash.tutorOutcomeReminderSending": "Slanje…",
+  "companyDash.tutorOutcomeReminderSent": "Podsjetnik je poslan instruktoru e-poštom.",
+  "companyDash.tutorOutcomeReminderFailed": "Podsjetnik nije moguće poslati: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "Podsjetnik je već poslan tijekom posljednjeg sata.",
+  "schoolDash.adminActionsTitle": "Potrebna je radnja administratora",
+  "schoolDash.adminActionsHint": "Popis se stvara automatski i prazni se nakon rješavanja problema.",
+  "schoolDash.adminActionsEmpty": "Trenutačno nema otvorenih administrativnih zadataka.",
+  "schoolDash.adminActionsTruncated": "Prikazano {shown} od {total}. Ostale stavke dostupne su na odgovarajućim zaslonima.",
+  "schoolDash.noReviewItems": "Nema dolazaka ni neodržanih termina koje treba provjeriti.",
+  "schoolDash.activityFeedTitle": "Nedavna aktivnost",
+  "schoolDash.activityFeedHint": "{count} nedavnih događaja",
+  "schoolStats.teacherPay": "Naknade nastavnika",
+  "schoolStats.teacherPayShort": "Naknade",
+  "schoolStats.teacherPayHint": "Jedna naknada po održanom terminu, ne po svakom djetetu u grupi",
+  "schoolStats.teacherPayUnresolved": "{count} termina treba provjeriti prije izdavanja računa",
 };
 
 export const hr: Record<string, string> = { ...en, ...hrOverrides };

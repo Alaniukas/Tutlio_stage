@@ -5593,6 +5593,23 @@ export const skOverrides: Record<string, string> = {
   "compare.customChip2": "Pravidlá odmeňovania",
   "compare.customChip3": "Odkazy na potvrdenie pre rodičov",
   "compare.customChip4": "Portály s vašou značkou",
+  "companyDash.tutorOutcomeNotMarked": "Lektor neoznačil lekciu ako dokončenú",
+  "companyDash.sendTutorOutcomeReminder": "Poslať lektorovi pripomienku",
+  "companyDash.tutorOutcomeReminderSending": "Odosielanie…",
+  "companyDash.tutorOutcomeReminderSent": "Pripomienka bola lektorovi odoslaná e-mailom.",
+  "companyDash.tutorOutcomeReminderFailed": "Pripomienku sa nepodarilo odoslať: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "Pripomienka už bola odoslaná počas poslednej hodiny.",
+  "schoolDash.adminActionsTitle": "Vyžaduje sa zásah správcu",
+  "schoolDash.adminActionsHint": "Zoznam sa vytvára automaticky a vyprázdni sa po vyriešení problému.",
+  "schoolDash.adminActionsEmpty": "Momentálne nie sú žiadne otvorené administratívne úlohy.",
+  "schoolDash.adminActionsTruncated": "Zobrazených {shown} z {total}. Zvyšné položky nájdete na príslušných obrazovkách.",
+  "schoolDash.noReviewItems": "Žiadna dochádzka ani neuskutočnené lekcie nevyžadujú kontrolu.",
+  "schoolDash.activityFeedTitle": "Nedávna aktivita",
+  "schoolDash.activityFeedHint": "{count} najnovších udalostí",
+  "schoolStats.teacherPay": "Odmeny učiteľov",
+  "schoolStats.teacherPayShort": "Odmeny",
+  "schoolStats.teacherPayHint": "Jedna sadzba za uskutočnenú lekciu, bez ohľadu na počet detí v skupine",
+  "schoolStats.teacherPayUnresolved": "{count} lekcií vyžaduje kontrolu pred vystavením faktúry",
 };
 
 export const sk: Record<string, string> = { ...en, ...skOverrides };

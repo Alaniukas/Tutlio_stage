@@ -158,6 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         totalPrice: Number(li.total_price),
       })),
       totalAmount: Number(invoice.total_amount),
+      currency: invoice.pdf_meta?.currency === 'PLN' ? 'PLN' : 'EUR',
       branding: branding ?? undefined,
       isVatInvoice: !!seller?.vatCode || !!pvmMeta,
       invoiceNumberLabel: pvmMeta || classicTutorMeta

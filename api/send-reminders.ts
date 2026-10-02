@@ -199,7 +199,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const studentOrgFeatures = studentOrgId && studentOrgId !== orgId
           ? await getOrgFeatures(studentOrgId)
           : orgFeatures;
-        const compactSchoolNotifications = schoolCompactNotificationsEnabled(await getOrgRow(studentOrgId));
+        const notificationOrg = await getOrgRow(studentOrgId);
+        const compactSchoolNotifications = schoolCompactNotificationsEnabled(notificationOrg);
         const familyPortalNotifications = schoolFlowForSession && studentOrgFeatures?.school_family_portal === true;
         if (familyPortalNotifications) reminderStudentHours = 0.25;
         const compactJoinContact = compactSchoolNotifications
@@ -233,10 +234,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ...(orgId ? { organizationId: orgId } : {}),
         };
 
-        if ((!compactSchoolNotifications || resolvedMeetingLink) && reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
+        if ((!compactSchoolNotifications || resolvedMeetingLink) && (!compactSchoolNotifications || compactJoinContact?.kind === 'student') && reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
           try {
             emailAttempts += 1;
-            const reminderDeliveryScope = `student:${session.id}`;
+            const reminderDeliveryScope = `student:${session.id}:${startTime.toISOString()}`;
             const resp = await fetch(`${API_URL}/api/send-email`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
@@ -426,7 +427,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             try {
               emailAttempts += 1;
-              const reminderDeliveryScope = `payer:${session.id}`;
+              const reminderDeliveryScope = `payer:${session.id}:${startTime.toISOString()}`;
               const resp = await fetch(`${API_URL}/api/send-email`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
@@ -515,7 +516,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               time: timeStr,
               topic: session.topic,
               duration: durationMinutes,
-              meetingLink: session.meeting_link,
+              meetingLink: resolvedMeetingLink || null,
               reminderDeliveryScope: tutorReminderScope,
             };
             const tutorReminderData = isOrgTutor(tutor.organization_id)

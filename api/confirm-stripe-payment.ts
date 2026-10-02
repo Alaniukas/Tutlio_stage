@@ -7,7 +7,8 @@ import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedg
 import { retrieveConnectCheckoutSession } from './_lib/stripeDirectCharge.js';
 import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 import { markLinkedPackagePaidForSession } from './_lib/sessionPackagePayment.js';
-import { tryIssueProKlasePaidSourceInvoice } from './_lib/proKlaseSalesInvoice.js';
+import { issuePaidSourceSalesInvoice } from './_lib/paidSourceSalesInvoice.js';
+import { checkoutChargeCurrency } from './_lib/marketMoney.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -149,6 +150,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     sourceId: sessionId,
                     baseAmountEur: metadataBaseEur(meta),
                     grossAmountEur: totalChargedEur ?? null,
+                    currency: checkoutChargeCurrency(checkoutSession!),
                     organizationId: tutorProfile?.organization_id ?? null,
                     tutorId: sessionData.tutor_id ?? null,
                     stripeCheckoutSessionId: checkoutSessionId,
@@ -243,10 +245,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             if (!updatedSession) {
                 await markLinkedPackagePaidForSession(supabase, sessionId, checkoutSession!);
-                await tryIssueProKlasePaidSourceInvoice(supabase, {
-                    organizationId: tutorProfile?.organization_id,
+                await issuePaidSourceSalesInvoice(supabase, {
                     sourceType: 'session', sourceId: sessionId,
-                    checkoutId: checkoutSessionId, baseAmountEur: lessonBaseEur,
+                    checkoutId: checkoutSessionId, baseAmount: lessonBaseEur,
+                    currency: checkoutChargeCurrency(checkoutSession!),
                 });
                 return res.status(200).json({ success: true, already_paid: true });
             }
@@ -275,6 +277,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 sourceId: sessionId,
                 baseAmountEur: lessonBaseEur,
                 grossAmountEur: totalChargedEur ?? null,
+                currency: checkoutChargeCurrency(checkoutSession!),
                 organizationId: tutorProfile?.organization_id ?? null,
                 tutorId: sessionData.tutor_id ?? null,
                 stripeCheckoutSessionId: checkoutSessionId,
@@ -346,10 +349,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             await markLinkedPackagePaidForSession(supabase, sessionId, checkoutSession!);
-            await tryIssueProKlasePaidSourceInvoice(supabase, {
-                organizationId: tutorProfile?.organization_id,
+            await issuePaidSourceSalesInvoice(supabase, {
                 sourceType: 'session', sourceId: sessionId,
-                checkoutId: checkoutSessionId, baseAmountEur: lessonBaseEur,
+                checkoutId: checkoutSessionId, baseAmount: lessonBaseEur,
+                currency: checkoutChargeCurrency(checkoutSession!),
             });
             return res.status(200).json({ success: true });
         } else {

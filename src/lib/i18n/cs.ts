@@ -5592,6 +5592,23 @@ export const csOverrides: Record<string, string> = {
   "compare.customChip2": "Pravidla odměňování",
   "compare.customChip3": "Odkazy na potvrzení pro rodiče",
   "compare.customChip4": "Portály s vaší značkou",
+  "companyDash.tutorOutcomeNotMarked": "Lektor neoznačil lekci jako dokončenou",
+  "companyDash.sendTutorOutcomeReminder": "Poslat lektorovi připomenutí",
+  "companyDash.tutorOutcomeReminderSending": "Odesílání…",
+  "companyDash.tutorOutcomeReminderSent": "Připomenutí bylo lektorovi odesláno e-mailem.",
+  "companyDash.tutorOutcomeReminderFailed": "Připomenutí se nepodařilo odeslat: {msg}",
+  "companyDash.tutorOutcomeReminderTooSoon": "Připomenutí již bylo odesláno během poslední hodiny.",
+  "schoolDash.adminActionsTitle": "Je vyžadován zásah správce",
+  "schoolDash.adminActionsHint": "Seznam se vytváří automaticky a vyprázdní se po vyřešení problému.",
+  "schoolDash.adminActionsEmpty": "Momentálně nejsou žádné otevřené úkoly správy.",
+  "schoolDash.adminActionsTruncated": "Zobrazeno {shown} z {total}. Zbývající položky najdete v příslušných obrazovkách.",
+  "schoolDash.noReviewItems": "Žádná docházka ani neuskutečněné lekce nevyžadují kontrolu.",
+  "schoolDash.activityFeedTitle": "Nedávná aktivita",
+  "schoolDash.activityFeedHint": "{count} nejnovějších událostí",
+  "schoolStats.teacherPay": "Odměny učitelů",
+  "schoolStats.teacherPayShort": "Odměny",
+  "schoolStats.teacherPayHint": "Jedna sazba za uskutečněnou lekci, bez ohledu na počet dětí ve skupině",
+  "schoolStats.teacherPayUnresolved": "{count} lekcí vyžaduje kontrolu před vystavením faktury",
 };
 
 export const cs: Record<string, string> = { ...en, ...csOverrides };

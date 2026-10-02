@@ -4,13 +4,25 @@ import { resolveOrgEmailReplyTo } from './orgEmailReplyTo.js';
 import { notificationLocale } from './notificationLocale.js';
 import { parseOrgParentNotificationOptOut, parseParentNotificationOptOut } from '../../src/lib/parentNotificationPreferences.js';
 import { schoolFamilyPortalEnabled } from './schoolFamilyGuardianAccess.js';
-import { schoolMaterialRecipient, schoolStudentMayViewPublication, type SchoolMaterialPublication } from './schoolMaterialPublications.js';
+import { schoolMaterialRecipient, schoolMaterialPublicationIsNotifiable, schoolStudentMayViewPublication, type SchoolMaterialPublication } from './schoolMaterialPublications.js';
+import { schoolMaterialDigestsEnabled } from '../../src/lib/schoolNotificationPolicy.js';
+import { buildSchoolHomeworkUrl } from './publicLinkToken.js';
 import { recordingSlotScope, recordingSlotTags, recordingVisibleToScope } from './schoolRecordingSlotAccess.js';
 import { deniedRecordingOrganizations } from './schoolRecordingAccessDenials.js';
 import { schoolFamilyMaterialTranslations } from '../../src/lib/i18n/schoolFamilyMaterialTranslations.js';
 import type { Locale } from '../../src/lib/i18n/locales.js';
 
-type Student = { id: string; organization_id: string; full_name: string; email: string | null; linked_user_id: string | null };
+type Student = { id: string; organization_id: string; full_name: string; email: string | null; linked_user_id: string | null;
+  payer_email?: string | null; payer_name?: string | null; parent_secondary_email?: string | null; parent_secondary_name?: string | null };
+const STUDENT_CONTACT_SELECT = 'id,organization_id,full_name,email,linked_user_id,payer_email,payer_name,parent_secondary_email,parent_secondary_name';
+
+async function notificationCutoffs(db: SupabaseClient, orgs: Array<{ id: string; features?: Record<string, unknown> | null }>) {
+  const ids = orgs.filter(org => !schoolFamilyPortalEnabled(org.features) && schoolMaterialDigestsEnabled(org.features)).map(org => org.id);
+  if (!ids.length) return new Map<string, string>();
+  const result = await db.from('school_material_baselines').select('organization_id,notifications_started_at').in('organization_id', ids);
+  if (result.error) throw result.error;
+  return new Map<string, string>((result.data || []).map(row => [row.organization_id, row.notifications_started_at]));
+}
 export type DigestItem = { publication_id: string; student_id: string; child: string; label: string; source: string; url: string };
 export type DigestPayload = { from: string; to: string[]; replyTo?: string[]; subject: string; html: string; items: DigestItem[] };
 export const SCHOOL_DIGEST_PROVIDER_WINDOW_MS = 23 * 60 * 60_000;
@@ -80,7 +92,7 @@ export async function queueSchoolMaterialAudience(db: SupabaseClient): Promise<n
   if (!pairs.length) return 0;
   const [pubs, students] = await Promise.all([
     db.from('school_material_publications').select('*').in('id', [...new Set(pairs.map((p) => p.publication_id))]),
-    db.from('students').select('id,organization_id,full_name,email,linked_user_id').in('id', [...new Set(pairs.map((p) => p.student_id))]),
+    db.from('students').select(STUDENT_CONTACT_SELECT).in('id', [...new Set(pairs.map((p) => p.student_id))]),
   ]);
   if (pubs.error || students.error) throw pubs.error || students.error;
   const orgs = await db.from('organizations').select('id,features').eq('entity_type', 'school')
@@ -89,6 +101,7 @@ export async function queueSchoolMaterialAudience(db: SupabaseClient): Promise<n
   const pubById = new Map<string, SchoolMaterialPublication>((pubs.data || []).map((p) => [p.id, p]));
   const studentById = new Map<string, Student>((students.data || []).map((s) => [s.id, s]));
   const featureById = new Map((orgs.data || []).map((o) => [o.id, o.features]));
+  const cutoffs = await notificationCutoffs(db, orgs.data || []);
   const scopes = new Map<string, ReturnType<typeof recordingSlotScope>>();
   const tags = new Map<string, ReturnType<typeof recordingSlotTags>>();
   const entries: Array<{ publication_id: string; student_id: string; state: 'pending' | 'skipped' }> = [];
@@ -97,7 +110,7 @@ export async function queueSchoolMaterialAudience(db: SupabaseClient): Promise<n
       try {
       const pub = pubById.get(pair.publication_id); const student = studentById.get(pair.student_id);
       if (!pub || !student || pub.organization_id !== student.organization_id) return;
-      let allowed = schoolFamilyPortalEnabled(featureById.get(pub.organization_id));
+      let allowed = schoolMaterialPublicationIsNotifiable(pub, featureById.get(pub.organization_id), cutoffs.get(pub.organization_id));
       if (allowed && pub.source === 'drive' && !pub.target_id.startsWith('subject:')) {
         const key = `${pub.target_id}/${student.id}`;
         if (!scopes.has(key)) scopes.set(key, recordingSlotScope(db, pub.target_id, [student.id], false, { organizationId: pub.organization_id, features: featureById.get(pub.organization_id) }));
@@ -106,7 +119,7 @@ export async function queueSchoolMaterialAudience(db: SupabaseClient): Promise<n
         allowed = recordingVisibleToScope(scope, tagMap.get(pub.file_id) || null);
       }
       if (allowed && pub.source === 'drive') {
-        const recipient = await schoolMaterialRecipient(db, student);
+        const recipient = await schoolMaterialRecipient(db, student, featureById.get(pub.organization_id));
         allowed = Boolean(recipient) && !await recordingDeniedForRecipient(db, pub.organization_id, student, recipient!);
       }
       entries.push({ ...pair, state: allowed ? 'pending' : 'skipped' });
@@ -128,14 +141,18 @@ export async function prepareSchoolMaterialDigests(db: SupabaseClient, input: { 
   const result = await query;
   if (result.error) throw result.error;
   const rows = result.data || []; if (!rows.length) return [];
-  const students = await db.from('students').select('id,organization_id,full_name,email,linked_user_id')
+  const students = await db.from('students').select(STUDENT_CONTACT_SELECT)
     .in('id', [...new Set(rows.map((r) => r.student_id))]);
   if (students.error) throw students.error;
   const childById = new Map<string, Student>((students.data || []).map((s) => [s.id, s]));
+  const orgs = await db.from('organizations').select('id,entity_type,features').in('id', [...new Set((students.data || []).map(child => child.organization_id))]);
+  if (orgs.error) throw orgs.error;
+  const featureById = new Map((orgs.data || []).filter(org => org.entity_type === 'school').map(org => [org.id, org.features]));
+  const cutoffs = await notificationCutoffs(db, orgs.data || []);
   const contacts = new Map<string, Awaited<ReturnType<typeof schoolMaterialRecipient>>>();
   const unresolved = new Set<string>();
   for (const student of childById.values()) {
-    try { contacts.set(student.id, await schoolMaterialRecipient(db, student)); }
+    try { contacts.set(student.id, await schoolMaterialRecipient(db, student, featureById.get(student.organization_id))); }
     catch { unresolved.add(student.id); }
   }
   const skipped: Entry[] = [];
@@ -144,15 +161,19 @@ export async function prepareSchoolMaterialDigests(db: SupabaseClient, input: { 
     if (unresolved.has(row.student_id)) continue;
     const child = childById.get(row.student_id); const contact = contacts.get(row.student_id);
     const pub = (Array.isArray(row.publication) ? row.publication[0] : row.publication) as SchoolMaterialPublication;
-    if (!child || !contact || !pub || pub.legacy_access || pub.organization_id !== child.organization_id) { skipped.push(row); continue; }
+    if (!child || !contact || !pub || pub.organization_id !== child.organization_id
+      || !schoolMaterialPublicationIsNotifiable(pub, featureById.get(pub.organization_id), cutoffs.get(pub.organization_id))) { skipped.push(row); continue; }
     try {
       if (!await schoolStudentMayViewPublication(db, pub, child.id, { recipientKind: contact.kind })) { skipped.push(row); continue; }
     } catch { continue; } // An uncertain DB/Drive check remains pending for a later run.
     const key = `${pub.organization_id}/${contact.email}`;
     const batch = batches.get(key) || { orgId: pub.organization_id, email: contact.email, entries: [], items: new Map() };
     const portal = contact.kind === 'student' ? 'student' : 'parent';
+    const homeworkUrl = schoolFamilyPortalEnabled(featureById.get(pub.organization_id))
+      ? `${input.origin}/${portal}/homework?student=${encodeURIComponent(child.id)}`
+      : buildSchoolHomeworkUrl(input.origin, child.id);
     const item = { publication_id: pub.id, student_id: child.id, child: child.full_name, label: pub.label,
-      source: pub.source, url: `${input.origin}/${portal}/homework?student=${encodeURIComponent(child.id)}${pub.source === 'drive' ? '#recordings' : ''}` };
+      source: pub.source, url: `${homeworkUrl}${pub.source === 'drive' ? '#recordings' : ''}` };
     const itemKey = `${child.id}/${pub.source}/${pub.file_id}`;
     const publishedAt = Date.parse(pub.first_published_at) || 0;
     const earlier = batch.items.get(itemKey);
@@ -168,7 +189,7 @@ export async function prepareSchoolMaterialDigests(db: SupabaseClient, input: { 
   for (const batch of batches.values()) {
     const org = await db.from('organizations').select('name,email,logo_url,brand_color,brand_color_secondary,features,preferred_locale').eq('id', batch.orgId).single();
     if (org.error) throw org.error;
-    if (!schoolFamilyPortalEnabled(org.data.features) || await digestOptedOut(db, batch.email, org.data.features)) {
+    if (!schoolMaterialDigestsEnabled(org.data.features) || await digestOptedOut(db, batch.email, org.data.features)) {
       await skipPendingEntries(db, batch.entries); continue;
     }
     const locale = await notificationLocale(db, batch.email, null, org.data.preferred_locale);
@@ -258,19 +279,21 @@ export async function deliverSchoolMaterialDigest(db: SupabaseClient, id: string
   try {
     const org = await db.from('organizations').select('entity_type,features').eq('id', delivery.organization_id).maybeSingle();
     if (org.error) throw org.error;
-    if (!org.data || org.data.entity_type !== 'school' || !schoolFamilyPortalEnabled(org.data.features)
+    if (!org.data || org.data.entity_type !== 'school' || !schoolMaterialDigestsEnabled(org.data.features)
       || await digestOptedOut(db, delivery.recipient_email, org.data.features)) return await skipDelivery(db, delivery);
     if (!payload?.items?.length || payload.to?.length !== 1 || payload.to[0] !== delivery.recipient_email) return await skipDelivery(db, delivery);
+    const cutoffs = await notificationCutoffs(db, [{ id: delivery.organization_id, features: org.data.features }]);
     for (const item of payload.items) {
-      const child = await db.from('students').select('id,organization_id,full_name,email,linked_user_id,detached_at,enrollment_status').eq('id', item.student_id).maybeSingle();
+      const child = await db.from('students').select(`${STUDENT_CONTACT_SELECT},detached_at,enrollment_status`).eq('id', item.student_id).maybeSingle();
       if (child.error) throw child.error;
       if (!child.data || child.data.organization_id !== delivery.organization_id || child.data.detached_at
         || (child.data.enrollment_status && child.data.enrollment_status !== 'active')) return await skipDelivery(db, delivery);
-      const recipient = await schoolMaterialRecipient(db, child.data);
+      const recipient = await schoolMaterialRecipient(db, child.data, org.data.features);
       if (!recipient || recipient.email !== delivery.recipient_email) return await skipDelivery(db, delivery);
       const publication = await db.from('school_material_publications').select('*').eq('id', item.publication_id).eq('organization_id', delivery.organization_id).maybeSingle();
       if (publication.error) throw publication.error;
-      if (!publication.data || !await schoolStudentMayViewPublication(db, publication.data, child.data.id, { recipientKind: recipient.kind, verifyDrive: true })) return await skipDelivery(db, delivery);
+      if (!publication.data || !schoolMaterialPublicationIsNotifiable(publication.data, org.data.features, cutoffs.get(delivery.organization_id))
+        || !await schoolStudentMayViewPublication(db, publication.data, child.data.id, { recipientKind: recipient.kind, verifyDrive: true })) return await skipDelivery(db, delivery);
       if (item.source === 'drive') {
         if (await recordingDeniedForRecipient(db, delivery.organization_id, child.data, recipient)) return await skipDelivery(db, delivery);
       }

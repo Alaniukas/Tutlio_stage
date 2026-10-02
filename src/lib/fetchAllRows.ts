@@ -6,6 +6,5 @@ export async function fetchAllRows<T>(query: (from: number, to: number) => Promi
     if (error) throw new Error(error.message);
     if (!data?.length) return rows;
     rows.push(...data);
-    if (data.length < 500) return rows;
   }
 }

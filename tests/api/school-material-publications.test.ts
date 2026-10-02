@@ -8,6 +8,15 @@ vi.mock('../../api/_lib/schoolFamilyGuardianAccess.js', async (original) => ({
 }));
 import { legacySessionMaterialPaths, prepareSchoolMaterialBaseline, registerDrivePublications, schoolMaterialRecipient, schoolRecordingPublicationAllowsLegacyAccess, schoolStudentMayViewPublication } from '../../api/_lib/schoolMaterialPublications';
 
+it('uses one existing payer for a quiet-school child with an Auth alias while private portals still require verified guardians', async () => {
+  const db = database();
+  const child = { id: 'child', organization_id: 'school', email: 'alias@account.invalid', full_name: 'QA child',
+    payer_email: 'First@school.test', payer_name: 'First parent', parent_secondary_email: 'second@school.test' };
+  expect(await schoolMaterialRecipient(db.client, child, { school_join_and_material_notifications: true }))
+    .toMatchObject({ email: 'first@school.test', kind: 'payer', name: 'First parent' });
+  expect(await schoolMaterialRecipient(db.client, child, { school_join_and_material_notifications: true, school_family_portal: true })).toBeNull();
+});
+
 type Row = Record<string, any>;
 function database(seed: Record<string, Row[]> = {}) {
   const tables = structuredClone({ school_material_publications: [], organizations: [], school_material_baselines: [], school_recording_drive_folders: [], school_family_guardians: [], students: [], sessions: [], school_class_group_members: [], school_recording_file_slots: [], school_contracts: [], recurring_individual_sessions: [], ...seed });

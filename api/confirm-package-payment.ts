@@ -2,9 +2,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
-import { markInvoicesPaidForPackage } from './_lib/markPackageInvoicePaid.js';
 import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
-import { tryIssueProKlasePaidSourceInvoice } from './_lib/proKlaseSalesInvoice.js';
+import { issuePaidSourceSalesInvoice } from './_lib/paidSourceSalesInvoice.js';
+import { checkoutChargeCurrency } from './_lib/marketMoney.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { sendTrialReservationConfirmedNotifications } from './_lib/trialReservation.js';
 import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
@@ -146,16 +146,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[confirm-package-payment] monthly expiry:', e);
     }
 
-    try {
-      await markInvoicesPaidForPackage(
-        supabase,
-        packageId,
-        (finalPackage as { manual_sales_invoice_id?: string | null }).manual_sales_invoice_id
-      );
-    } catch (e) {
-      console.error('[confirm-package-payment] mark invoices paid:', e);
-    }
-
     // Record platform fee (idempotent; webhook records it too — first writer wins).
     // Bookkeeping must never fail an already-activated payment.
     try {
@@ -169,21 +159,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sourceId: packageId,
         baseAmountEur: metadataBaseEur(checkout.metadata) ?? Number(finalPackage.total_price),
         grossAmountEur: checkout.amount_total != null ? checkout.amount_total / 100 : null,
+        currency: checkoutChargeCurrency(checkout),
         organizationId: finalPackage.pool_organization_id
           ?? (tutorRow as { organization_id?: string | null } | null)?.organization_id
           ?? null,
         tutorId: finalPackage.tutor_id ?? null,
         stripeCheckoutSessionId: checkout.id,
       });
-      await tryIssueProKlasePaidSourceInvoice(supabase, {
-        organizationId: finalPackage.pool_organization_id ?? tutorRow?.organization_id,
-        sourceType: 'package', sourceId: packageId,
-        checkoutId: checkout.id,
-        baseAmountEur: metadataBaseEur(checkout.metadata) ?? Number(finalPackage.total_price),
-      });
     } catch (e) {
       console.error('[confirm-package-payment] platform fee record:', e);
     }
+
+    await issuePaidSourceSalesInvoice(supabase, {
+      sourceType: 'package', sourceId: packageId, checkoutId: checkout.id,
+      baseAmount: metadataBaseEur(checkout.metadata) ?? Number(finalPackage.total_price),
+      currency: checkoutChargeCurrency(checkout),
+    });
 
     // NOTE: Email sending is handled by stripe-webhook.ts to avoid duplicates.
     // This endpoint only confirms payment status for the UI.
