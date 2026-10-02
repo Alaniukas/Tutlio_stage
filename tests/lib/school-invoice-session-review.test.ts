@@ -16,7 +16,8 @@ describe('school invoice session review', () => {
     const namedContract = { ...contract, order_snapshot: { ...contract.order_snapshot, service_name: 'Intermediate 1 grupė' } as any };
     expect(reviewSchoolInvoiceSession({ ...session, subject }, [namedContract], undefined, false).subjectName)
       .toBe('Intermediate 1 grupė');
-    expect(reviewSchoolInvoiceSession({ ...session, subject }, [], undefined, false).subjectName).toBe('Užsiėmimas');
+    expect(reviewSchoolInvoiceSession({ ...session, subject, class_group: { name: 'Intermediate 1 grupė' } },
+      [], undefined, false).subjectName).toBe('Intermediate 1 grupė');
     expect(reviewSchoolInvoiceSession({ ...session, class_group_id: null, subject }, [], undefined, false).subjectName)
       .toBe(subject.name);
   });
@@ -123,9 +124,41 @@ describe('school invoice session review', () => {
     expect(rows[1].excluded).toBe(true);
   });
 
-  it('uses the signed extra-lessons unit price when the session row is stored as 0', () => {
+  it('marks unsigned group agreements in the activity label', () => {
+    const sentOnly = { ...contract, signing_status: 'sent', accepted_at: null };
+    expect(reviewSchoolInvoiceSession({ ...session, class_group: { name: 'Etika (5-9 kl)' } },
+      [sentOnly], undefined, false).subjectName).toBe('Etika (5-9 kl) · sutartis nepasirašyta');
+  });
+
+  it('does not use a group subject price when the session row is stored as 0', () => {
     const priced = { ...contract, unit_price_eur: 6, order_snapshot: { ...contract.order_snapshot, unit_price_eur: 6 } as any };
     expect(resolveSchoolInvoiceUnitPrice({ price: 0, class_group_id: 'group1' }, [priced])).toBe(6);
     expect(reviewSchoolInvoiceSession({ ...session, price: 0 }, [priced], undefined, false).unitPriceEur).toBe(6);
+    expect(resolveSchoolInvoiceUnitPrice({
+      price: 0,
+      class_group_id: 'group1',
+      subject_id: 'wrong-individual',
+      subject: { price: 20 },
+    }, [])).toBe(0);
+  });
+
+  it('bills an evidenced trial group lesson from a sent offer without a signature', () => {
+    const sentOnly = { ...contract, signing_status: 'sent', accepted_at: null, unit_price_eur: 6,
+      order_snapshot: { ...contract.order_snapshot, unit_price_eur: 6 } as any };
+    const attended = { ...session, status: 'completed', tutor_joined_at: '2026-09-10T08:59:00Z',
+      student_joined_at: '2026-09-10T09:14:00Z', status_confirmed_at: '2026-09-10T10:00:00Z', price: 0 };
+    expect(reviewSchoolInvoiceSession(attended, [sentOnly], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 6 });
+    expect(reviewSchoolInvoiceSession({ ...attended, tutor_joined_at: null, student_joined_at: null,
+      status_confirmed_at: '2026-09-10T10:00:00Z' }, [sentOnly], undefined, false))
+      .toMatchObject({ included: false, reason: 'outside_contract' });
+  });
+
+  it('bills a direct individual lesson without any extra-lessons agreement', () => {
+    const individual = { ...session, class_group_id: null, subject_id: 'alina-lt', price: 20,
+      tutor_joined_at: null, student_joined_at: '2026-09-07T08:02:00Z', status_confirmed_at: '2026-09-07T09:00:00Z',
+      subject: { name: 'Alina Armonienė Lietuvių kalba individuali pamoka', price: 20 } };
+    expect(reviewSchoolInvoiceSession(individual, [], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 20 });
   });
 });

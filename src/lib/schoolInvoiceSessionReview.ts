@@ -1,5 +1,5 @@
 import { extraLessonsServiceStartYmd, type ExtraLessonsOrderSnapshot, type StartWithin14Status } from './extraLessonsContract.js';
-import { canonicalSessionCharge, type CanonicalBillableSession } from './schoolCanonicalBilling.js';
+import { canonicalSessionCharge, hasSchoolOccurrenceEvidence, type CanonicalBillableSession } from './schoolCanonicalBilling.js';
 import { isSessionInExtraLessonsServiceWindow, sessionMatchesExtraLessonsContract, sessionYmdVilnius } from './schoolExtraLessonsBilling.js';
 
 export type SchoolInvoiceContractWindow = {
@@ -80,6 +80,28 @@ function individualContractActivityName(
   return null;
 }
 
+function contractActivitySuffix(
+  session: Pick<CanonicalBillableSession, 'class_group_id' | 'subject_id' | 'start_time'>,
+  contracts: SchoolInvoiceContractWindow[],
+): string | null {
+  if (!contracts.length) return null;
+  const matching = contracts.filter((contract) => schoolInvoiceSessionMatchesContract(session, contract));
+  if (session.class_group_id) {
+    if (!matching.length) return 'sutartis nėra';
+    const signed = matching.filter((contract) => (
+      contract.signing_status === 'signed' && contract.accepted_at && contract.order_snapshot
+    ));
+    if (!signed.length) return 'sutartis nepasirašyta';
+    return null;
+  }
+  if (!matching.length) return null;
+  const signed = matching.filter((contract) => (
+    contract.signing_status === 'signed' && contract.accepted_at && contract.order_snapshot
+  ));
+  if (!signed.length) return 'sutartis nepasirašyta';
+  return null;
+}
+
 /** Historical group rows may still reference a subject named for an individual child. */
 export function schoolInvoiceSessionActivityName(
   session: SchoolInvoiceActivity,
@@ -91,16 +113,24 @@ export function schoolInvoiceSessionActivityName(
     const order = contracts.find((contract) => (
       (contract.class_group_id || contract.order_snapshot?.group_id) === session.class_group_id
     ))?.order_snapshot;
-    return String(group?.name || order?.group_name || order?.service_name || 'Užsiėmimas');
+    const base = String(group?.name || order?.group_name || order?.service_name || 'Užsiėmimas');
+    const suffix = contractActivitySuffix(session, contracts);
+    return suffix ? `${base} · ${suffix}` : base;
   }
   const subject = Array.isArray(session.subject) ? session.subject[0] : session.subject;
   const raw = String(subject?.name || 'Užsiėmimas');
   const fromContract = individualContractActivityName(session, contracts, studentFullName);
-  if (fromContract) return fromContract;
-  if (studentFullName && raw.includes('(individuali)') && !studentNameInLabel(studentFullName, raw)) {
-    return raw.replace(/\s+[A-ZĄČĘĖĮŠŲŪŽ][^\s]+\s+[A-ZĄČĘĖĮŠŲŪŽ][^\s]+$/, ` ${studentFullName}`);
+  if (fromContract) {
+    const suffix = contractActivitySuffix(session, contracts);
+    return suffix ? `${fromContract} · ${suffix}` : fromContract;
   }
-  return raw;
+  if (studentFullName && raw.includes('(individuali)') && !studentNameInLabel(studentFullName, raw)) {
+    const renamed = raw.replace(/\s+[A-ZĄČĘĖĮŠŲŪŽ][^\s]+\s+[A-ZĄČĘĖĮŠŲŪŽ][^\s]+$/, ` ${studentFullName}`);
+    const suffix = contractActivitySuffix(session, contracts);
+    return suffix ? `${renamed} · ${suffix}` : renamed;
+  }
+  const suffix = contractActivitySuffix(session, contracts);
+  return suffix && raw === 'Užsiėmimas' ? `${raw} · ${suffix}` : (suffix ? `${raw} · ${suffix}` : raw);
 }
 
 function inSuspension(session: CanonicalBillableSession, contract: SchoolInvoiceContractWindow): boolean {
@@ -130,13 +160,19 @@ export function resolveSchoolInvoiceUnitPrice(
   const stored = positiveMoney(session.price);
   if (stored) return stored;
   const matching = contracts.filter((contract) => (
-    contract.signing_status === 'signed'
+    (contract.signing_status === 'signed' || contract.signing_status === 'sent')
     && schoolInvoiceSessionMatchesContract(session as CanonicalBillableSession, contract)
   ));
+  const signedMatching = matching.filter((contract) => contract.signing_status === 'signed');
+  for (const contract of signedMatching) {
+    const unit = positiveMoney(contract.unit_price_eur) || positiveMoney(contract.order_snapshot?.unit_price_eur);
+    if (unit) return unit;
+  }
   for (const contract of matching) {
     const unit = positiveMoney(contract.unit_price_eur) || positiveMoney(contract.order_snapshot?.unit_price_eur);
     if (unit) return unit;
   }
+  if (session.class_group_id) return 0;
   const subject = Array.isArray(session.subject) ? session.subject[0] : session.subject;
   return positiveMoney(subject?.price);
 }
@@ -182,7 +218,14 @@ export function schoolInvoiceContractReason(
       });
   });
   if (valid.length > 1) return 'contract_review';
-  if (!valid.length) return 'outside_contract';
+  if (!valid.length) {
+    const evidenced = hasSchoolOccurrenceEvidence(session)
+      || Boolean(session.class_group_id && session.group_occurred);
+    if (evidenced && matching.some((contract) => contract.signing_status === 'sent' && contract.order_snapshot)) {
+      return 'payable';
+    }
+    return 'outside_contract';
+  }
   if (inSuspension(session, valid[0])) return 'suspended';
   const endedAt = [valid[0].withdrawal_requested_at, valid[0].terminated_at]
     .filter((value): value is string => Boolean(value)).sort()[0];
@@ -196,6 +239,7 @@ export function reviewSchoolInvoiceSession(
   decision: SchoolSessionBillingDecision | undefined,
   alreadyInvoiced: boolean,
   nowMs = Date.now(),
+  studentFullName?: string | null,
 ): SchoolInvoiceReviewSession {
   const tutor = Array.isArray(session.tutor) ? session.tutor[0] : session.tutor;
   const ended = Number.isFinite(Date.parse(session.end_time || '')) && Date.parse(session.end_time || '') <= nowMs;
@@ -214,7 +258,7 @@ export function reviewSchoolInvoiceSession(
     endTime: session.end_time || '',
     status: session.status,
     statusConfirmedAt: session.status_confirmed_at || null,
-    subjectName: schoolInvoiceSessionActivityName(session, contracts),
+    subjectName: schoolInvoiceSessionActivityName(session, contracts, studentFullName),
     tutorName: String(tutor?.full_name || 'mokytojas'),
     unitPriceEur: resolveSchoolInvoiceUnitPrice(session, contracts),
     included: reason === 'payable',

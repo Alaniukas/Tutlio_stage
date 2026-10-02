@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { sameOrgStudentIdentity } from '@/lib/orgStudentIdentity';
-import { reassignOpenLessonsToTutor } from '@/lib/reassignStudentTutorLessons';
+import { sameOrgStudentIdentity } from '@/lib/orgStudentIdentity.js';
+import { reassignOpenLessonsToTutor } from '@/lib/reassignStudentTutorLessons.js';
 
 export const generateStudentInviteCode = () =>
   Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -27,6 +27,34 @@ type StudentPairingRow = {
 const PAIRING_SELECT =
   'id, tutor_id, linked_user_id, organization_id, full_name, email, phone, grade, payer_name, payer_email, payer_phone, child_birth_date, payment_model, preferred_availability, admin_comment, admin_comment_visible_to_tutor';
 
+function mergePairingRows(primary: StudentPairingRow, rows: StudentPairingRow[]): StudentPairingRow[] {
+  const byId = new Map<string, StudentPairingRow>();
+  byId.set(primary.id, primary);
+  for (const row of rows) {
+    if (row.id !== primary.id) byId.set(row.id, row);
+  }
+  return [...byId.values()];
+}
+
+async function loadOrgStudentIdentitySiblings(
+  supabase: SupabaseClient,
+  student: StudentPairingRow,
+): Promise<StudentPairingRow[]> {
+  const payerEmail = String(student.payer_email ?? '').trim();
+  const orgId = student.organization_id;
+  if (!payerEmail || !orgId || !String(student.full_name ?? '').trim()) return [];
+
+  const { data, error } = await supabase
+    .from('students')
+    .select(PAIRING_SELECT)
+    .eq('organization_id', orgId)
+    .eq('payer_email', payerEmail);
+  if (error) throw new Error(error.message || 'Failed to load student tutor pairings.');
+  return (data || []).filter((row) => (
+    row.id !== student.id && sameOrgStudentIdentity(student, row as StudentPairingRow)
+  )) as StudentPairingRow[];
+}
+
 /**
  * Guarantees a students row pairing this student identity with the given
  * tutor, so booking a lesson with any org tutor auto-assigns them on the
@@ -51,7 +79,8 @@ export async function ensureStudentPairedWithTutor(
 
   if (student.tutor_id === tutorId) return studentRowId;
 
-  let siblings: StudentPairingRow[] = [student];
+  const identitySiblings = await loadOrgStudentIdentitySiblings(supabase, student);
+  let siblings = mergePairingRows(student, identitySiblings);
   if (student.linked_user_id) {
     const { data: siblingRows, error: siblingsError } = await supabase
       .from('students')
@@ -63,8 +92,7 @@ export async function ensureStudentPairedWithTutor(
       && row.organization_id === student.organization_id
       && sameOrgStudentIdentity(student, row as StudentPairingRow),
     ) as StudentPairingRow[];
-    // Always include the explicit source even if the linked lookup is stale.
-    siblings = [student, ...sameChild.filter((candidate) => candidate.id !== student.id)];
+    siblings = mergePairingRows(student, [...identitySiblings, ...sameChild]);
   }
 
   const { data: privateNotes, error: notesError } = await supabase

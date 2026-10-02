@@ -11,7 +11,7 @@ const eligible: SchoolGroupAttendanceParticipant = {
 function SavingRoster({ target }: { target: SchoolGroupAttendanceTarget }) {
   const [participant, setParticipant] = useState(eligible);
   const [saving, setSaving] = useState(false);
-  return <SchoolGroupRosterAttendanceControls participant={participant} disabled={saving} onConfirm={async (studentId, status) => {
+  return <SchoolGroupRosterAttendanceControls participant={participant} disabled={saving} onConfirmAttestation={async (studentId, status) => {
     setSaving(true);
     try {
       const attendance = await confirmSchoolGroupRosterAttendance(target, studentId, status, {
@@ -40,10 +40,10 @@ describe('school roster attendance controls', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<SavingRoster target={target} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Mokinys atvyko' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Mokinys atvyko' }).getAttribute('aria-pressed')).toBe('true'));
-    fireEvent.click(screen.getByRole('button', { name: 'Mokinys neatvyko' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Mokinys neatvyko' }).getAttribute('aria-pressed')).toBe('true'));
+    fireEvent.click(screen.getByRole('button', { name: 'Patvirtinti dalyvavimą' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Patvirtinti dalyvavimą' }).getAttribute('aria-pressed')).toBe('true'));
+    fireEvent.click(screen.getByRole('button', { name: 'Nedalyvavo' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Nedalyvavo' }).getAttribute('aria-pressed')).toBe('true'));
 
     expect(fetchMock.mock.calls).toHaveLength(2);
     for (const [index, [url, init]] of fetchMock.mock.calls.entries()) {
@@ -55,23 +55,23 @@ describe('school roster attendance controls', () => {
 
   it('lets the teacher attest both outcomes for an eligible child without a confirmed contract', () => {
     const onConfirm = vi.fn();
-    render(<SchoolGroupRosterAttendanceControls participant={eligible} disabled={false} onConfirm={onConfirm} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Mokinys atvyko' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Mokinys neatvyko' }));
+    render(<SchoolGroupRosterAttendanceControls participant={eligible} disabled={false} onConfirmAttestation={onConfirm} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Patvirtinti dalyvavimą' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Nedalyvavo' }));
     expect(onConfirm.mock.calls).toEqual([['child', 'completed'], ['child', 'no_show']]);
   });
 
   it('updates pressed outcomes from the saved attestation and prevents a second click during saving', () => {
     const onConfirm = vi.fn();
-    const { rerender } = render(<SchoolGroupRosterAttendanceControls participant={eligible} disabled={true} onConfirm={onConfirm} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Mokinys atvyko' }));
+    const { rerender } = render(<SchoolGroupRosterAttendanceControls participant={eligible} disabled={true} onConfirmAttestation={onConfirm} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Patvirtinti dalyvavimą' }));
     expect(onConfirm).not.toHaveBeenCalled();
     for (const status of ['completed', 'no_show'] as const) {
       rerender(<SchoolGroupRosterAttendanceControls participant={{ ...eligible, attendance: {
         id: 'attestation', status, statusConfirmedAt: '2026-09-30T12:00:00Z', contractConfirmed: false,
-      } }} disabled={false} onConfirm={onConfirm} />);
-      expect(screen.getByRole('button', { name: 'Mokinys atvyko' }).getAttribute('aria-pressed')).toBe(String(status === 'completed'));
-      expect(screen.getByRole('button', { name: 'Mokinys neatvyko' }).getAttribute('aria-pressed')).toBe(String(status === 'no_show'));
+      } }} disabled={false} onConfirmAttestation={onConfirm} />);
+      expect(screen.getByRole('button', { name: 'Patvirtinti dalyvavimą' }).getAttribute('aria-pressed')).toBe(String(status === 'completed'));
+      expect(screen.getByRole('button', { name: 'Nedalyvavo' }).getAttribute('aria-pressed')).toBe(String(status === 'no_show'));
     }
   });
 

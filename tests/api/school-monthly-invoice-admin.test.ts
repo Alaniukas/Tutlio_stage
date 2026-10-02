@@ -104,7 +104,8 @@ beforeEach(() => {
     invoice_profiles: [{ id: 'profile1', organization_id: 'org1', business_name: 'Target School' }],
     sessions: [{ id: 'lesson1', student_id: 'child1', tutor_id: 'teacher1', subject_id: 'math', class_group_id: 'group1',
       start_time: '2026-09-14T13:00:00Z', end_time: '2026-09-14T14:00:00Z', status: 'completed', price: 12,
-      status_confirmed_at: '2026-09-14T14:05:00Z', tutor: { full_name: 'Teacher One', organization_id: 'org1' }, subject: { name: 'Math' } }],
+      tutor_joined_at: '2026-09-14T13:00:00Z', status_confirmed_at: '2026-09-14T14:05:00Z',
+      tutor: { full_name: 'Teacher One', organization_id: 'org1' }, subject: { name: 'Math' } }],
     subjects: [], student_lesson_discounts: [], school_contracts: [], school_session_billing_decisions: [], school_monthly_invoices: [],
   };
 });
@@ -269,7 +270,7 @@ describe('school monthly invoice review API', () => {
   it('uses other group attendees as occurrence evidence while keeping the absent child status', async () => {
     state.tables.sessions[0].status = 'no_show'; state.tables.sessions[0].status_confirmed_at = null;
     state.tables.sessions.push({ ...state.tables.sessions[0], id: 'sibling', student_id: 'child2', status: 'completed',
-      status_confirmed_at: '2026-09-14T14:05:00Z' });
+      student_joined_at: '2026-09-14T13:05:00Z', status_confirmed_at: '2026-09-14T14:05:00Z' });
     const result = await request();
     expect(result.body.sessions).toHaveLength(1);
     expect(result.body.sessions[0]).toMatchObject({ status: 'no_show', included: true, reason: 'payable' });
@@ -281,7 +282,7 @@ describe('school monthly invoice review API', () => {
     lesson.id = 'a'; lesson.status = 'no_show'; lesson.status_confirmed_at = null;
     state.tables.sessions.push(
       { ...lesson, id: 'b', student_id: 'child2' },
-      { ...lesson, id: 'c', student_id: 'child3', status: 'completed', status_confirmed_at: '2026-09-14T14:05:00Z' },
+      { ...lesson, id: 'c', student_id: 'child3', status: 'completed', student_joined_at: '2026-09-14T13:05:00Z' },
     );
     const result = await request();
     expect(result.body.sessions[0]).toMatchObject({ included: true, reason: 'payable' });
@@ -347,6 +348,7 @@ describe('school monthly invoice batch by payer', () => {
       end_time: '2026-09-14T14:00:00Z',
       status: 'completed',
       price: 0,
+      tutor_joined_at: '2026-09-14T13:00:00Z',
       status_confirmed_at: '2026-09-14T14:05:00Z',
       tutor: { full_name: 'Teacher One', organization_id: 'org1' },
       subject: { name: 'Math' },
@@ -587,6 +589,8 @@ describe('school monthly invoice batch by payer', () => {
     // A separate occurrence loses its confirmation after the administrator reviewed it.
     state.tables.sessions[1].class_group_id = null;
     state.tables.sessions[1].status_confirmed_at = null;
+    state.tables.sessions[1].tutor_joined_at = null;
+    state.tables.sessions[1].student_joined_at = null;
     const result = await request({ action: 'send-batch', ...tokens });
     expect(result.status).toBe(200);
     expect(result.body.sentCount).toBe(1);

@@ -24,6 +24,7 @@ import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { wallClockToUtc } from './_lib/recurringOccurrences.js';
 import { fetchAllRows } from '../src/lib/fetchAllRows.js';
 import { latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewSchoolInvoiceSession, schoolInvoiceSessionActivityName, schoolInvoiceSessionMatchesContract, type SchoolInvoiceReviewSession } from '../src/lib/schoolInvoiceSessionReview.js';
+import { orgStudentIdentityGroupKey } from '../src/lib/orgStudentIdentity.js';
 import { groupSchoolPayerInvoicePreviews, schoolPayerKey, schoolStudentInvoiceSendable } from '../src/lib/schoolPayerInvoiceGroups.js';
 import { sessionYmdVilnius } from '../src/lib/schoolExtraLessonsBilling.js';
 
@@ -135,7 +136,7 @@ function composeDraftContext(input: {
     });
     return reviewSchoolInvoiceSession({ ...session,
       group_occurred: Boolean(session.class_group_id) && groupEvidence.has(groupOccurrenceKey(session)),
-    }, contracts || [], latestDecisions.get(session.id), invoiced.has(session.id) || coveredByContractInvoice);
+    }, contracts || [], latestDecisions.get(session.id), invoiced.has(session.id) || coveredByContractInvoice, Date.now(), String(student.full_name || ''));
   });
   const reviewById = new Map(reviewSessions.map((row) => [row.id, row]));
   const reviewSessionIds: string[] = [];
@@ -146,7 +147,7 @@ function composeDraftContext(input: {
       return [];
     }
     const sessionStudent = studentsById.get(String(session.student_id || '')) || student;
-    const sessionContracts = (contracts || []).filter((contract: any) => contract.student_id === sessionStudent.id);
+    const sessionContracts = contracts;
     const tutor = Array.isArray(session.tutor) ? session.tutor[0] : session.tutor;
     const subjectId = String(session.subject_id || session.class_group_id || '').trim();
     if (!subjectId) return [];
@@ -185,6 +186,7 @@ function composeDraftContext(input: {
     dueDate,
     reviewSessionIds,
     sessions: reviewSessions,
+    payerStudentIds: studentIds,
   };
 }
 
@@ -242,7 +244,9 @@ async function loadDraft(body: RequestBody): Promise<DraftContext> {
     throw new Error('Pasirinkite mokinį ir teisingą sąskaitos laikotarpį.');
   }
   const { drafts } = await loadBatchDrafts(body, studentIds);
-  const draft = drafts.find((row) => studentIds.includes(row.student.id));
+  const draft = drafts.find((row) => studentIds.some((id) => (
+    id === row.student.id || (row.payerStudentIds || []).includes(id)
+  )));
   if (!draft) throw new Error('Mokinys arba mokykla nerasta.');
   return draft;
 }
@@ -348,17 +352,17 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
     groupEvidence = new Set((groupSessions || []).filter(hasSchoolOccurrenceEvidence).map(groupOccurrenceKey));
   }
 
-  const drafts = studentIds.map((id) => composeDraftContext({
+  const drafts = [...groupStudentIdsByIdentity(studentsById, studentIds).values()].map((ids) => composeDraftContext({
     organizationId,
-    studentIds: [id],
+    studentIds: ids,
     studentsById,
     org,
     profile,
-    sessions: sessions.filter((row) => String(row.student_id || '') === id),
-    savedDiscounts: discounts.filter((row: any) => String(row.student_id || '') === id),
-    storedContracts: contracts.filter((row: any) => String(row.student_id || '') === id),
-    decisions: decisions.filter((row: any) => String(row.student_id || '') === id),
-    invoices: invoices.filter((row: any) => String(row.student_id || '') === id),
+    sessions: sessions.filter((row) => ids.includes(String(row.student_id || ''))),
+    savedDiscounts: discounts.filter((row: any) => ids.includes(String(row.student_id || ''))),
+    storedContracts: contracts.filter((row: any) => ids.includes(String(row.student_id || ''))),
+    decisions: decisions.filter((row: any) => ids.includes(String(row.student_id || ''))),
+    invoices: invoices.filter((row: any) => ids.includes(String(row.student_id || ''))),
     liveIndividualSubjectIds,
     groupEvidence,
     periodStart,
@@ -367,6 +371,26 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
   })).filter((draft): draft is DraftContext => Boolean(draft));
 
   return { drafts };
+}
+
+function groupStudentIdsByIdentity(studentsById: Map<string, any>, studentIds: string[]): Map<string, string[]> {
+  const groups = new Map<string, string[]>();
+  for (const id of studentIds) {
+    const row = studentsById.get(id);
+    if (!row) continue;
+    const key = orgStudentIdentityGroupKey({
+      id: row.id,
+      organization_id: row.organization_id,
+      full_name: row.full_name,
+      payer_email: row.payer_email,
+      email: row.email,
+      linked_user_id: null,
+    });
+    const list = groups.get(key) || [];
+    if (!list.includes(id)) list.push(id);
+    groups.set(key, list);
+  }
+  return groups;
 }
 
 function digestPayload(draft: DraftContext, userId: string) {

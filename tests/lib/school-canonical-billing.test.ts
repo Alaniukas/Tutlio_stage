@@ -46,6 +46,15 @@ describe('canonical DOCX monthly charges', () => {
     expect(bill.billed_session_ids).toEqual(['confirmed']);
     expect(bill.review_session_ids).toEqual(['auto', 'active']);
   });
+  it('does not treat a manual group completion stamp as proof the group actually ran', () => {
+    const groupSession = { ...session, class_group_id: 'group1', tutor_joined_at: null, student_joined_at: null,
+      status_confirmed_at: '2026-08-10T11:05:00Z' };
+    expect(hasSchoolOccurrenceEvidence(groupSession)).toBe(false);
+    expect(canonicalSessionCharge(groupSession, 'group')).toBe('review');
+    const bill = computeCanonicalSchoolMonthlyBill({ ...base, sessions: [groupSession] });
+    expect(bill.billed_session_ids).toEqual([]);
+    expect(bill.review_session_ids).toEqual(['one']);
+  });
   it('bills a completed lesson with student join evidence when tutor tracking and manual confirmation are missing', () => {
     const bill = computeCanonicalSchoolMonthlyBill({ ...base, sessions: [
       { ...session, id: 'student-join', tutor_joined_at: null, status_confirmed_at: null, student_joined_at: '2026-08-10T10:05:00Z' },

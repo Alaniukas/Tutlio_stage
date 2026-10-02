@@ -34,10 +34,14 @@ export function groupOccurrenceKey(session: Pick<CanonicalBillableSession, 'clas
   return `${session.class_group_id || ''}:${new Date(session.start_time).toISOString()}`;
 }
 
+/** Join tracking or a confirmed absence; manual completion alone does not prove a group ran. */
 export function hasSchoolOccurrenceEvidence(session: CanonicalBillableSession): boolean {
   if (!['completed', 'no_show'].includes(session.status)) return false;
-  if (session.tutor_joined_at || session.status_confirmed_at) return true;
-  return session.status === 'completed' && Boolean(session.student_joined_at);
+  if (session.tutor_joined_at) return true;
+  if (session.status === 'completed' && session.student_joined_at) return true;
+  if (session.status === 'no_show' && session.status_confirmed_at) return true;
+  if (session.status === 'completed' && session.status_confirmed_at && !session.class_group_id) return true;
+  return false;
 }
 
 /** Canonical DOCX §§4.3–4.5: distinguish absent child from a service not supplied. */

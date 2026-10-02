@@ -180,6 +180,12 @@ import {
   type SchoolGroupAttendanceParticipant,
   type SchoolGroupAttendanceTarget,
 } from '@/lib/schoolGroupAttendance';
+import { schoolAttendanceLabel } from '@/lib/i18n/schoolAttendanceCopy';
+import {
+  schoolClassGroupOccurrenceKey,
+  schoolLessonHasEnded,
+  schoolSessionNeedsTeacherAttendance,
+} from '@/lib/schoolAttendanceUi';
 import { groupToWriteDraft, type SchoolClassGroupRecord } from '@/lib/schoolClassGroups';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
@@ -259,6 +265,9 @@ interface Session {
   recurring_session_id?: string | null;
   class_group_id?: string | null;
   status_confirmed_at?: string | null;
+  completed_late?: boolean | null;
+  student_joined_at?: string | null;
+  tutor_joined_at?: string | null;
   no_show_reason?: string | null;
   no_show_when?: string | null;
   _isClassGroup?: boolean;
@@ -478,6 +487,7 @@ export default function CalendarPage() {
   );
   const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [attendanceOnlyOccurrence, setAttendanceOnlyOccurrence] = useState<AttendanceOnlyGroupOccurrence | null>(null);
+  const attendancePromptOpenedRef = useRef<Set<string>>(new Set());
   const [groupAttendanceParticipants, setGroupAttendanceParticipants] = useState<SchoolGroupAttendanceParticipant[]>([]);
   const [groupAttendanceLoading, setGroupAttendanceLoading] = useState(false);
   const [groupAttendanceError, setGroupAttendanceError] = useState<string | null>(null);
@@ -1730,6 +1740,49 @@ export default function CalendarPage() {
     }
     setIsEventModalOpen(true);
   }, [isLaisviVaikai, requiresStatusConfirmation]);
+
+  useEffect(() => {
+    if (!isSchoolTutor || loading || isEventModalOpen || attendanceOnlyOccurrence) return;
+    if (isAvailabilityModalOpen || isCreateModalOpen || isUpcomingListModalOpen || isSlotEditOpen) return;
+
+    const pendingAttendanceOnly = attendanceOnlyCalendarEvents.find((event) => {
+      if (!schoolLessonHasEnded(event.end_time)) return false;
+      return !attendancePromptOpenedRef.current.has(event.id);
+    });
+    if (pendingAttendanceOnly) {
+      attendancePromptOpenedRef.current.add(pendingAttendanceOnly.id);
+      setAttendanceOnlyOccurrence(pendingAttendanceOnly);
+      return;
+    }
+
+    const pendingGroup = mergedSessions.find((event) => {
+      if (!event._isClassGroup || !event._classGroupSessions?.length) return false;
+      const groupId = event.class_group_id || event._classGroupId;
+      if (!groupId) return false;
+      const key = schoolClassGroupOccurrenceKey(groupId, event.start_time);
+      if (attendancePromptOpenedRef.current.has(key)) return false;
+      return event._classGroupSessions.some((row) =>
+        schoolSessionNeedsTeacherAttendance(row, requiresStatusConfirmation),
+      );
+    });
+    if (!pendingGroup) return;
+    const groupId = pendingGroup.class_group_id || pendingGroup._classGroupId || '';
+    attendancePromptOpenedRef.current.add(schoolClassGroupOccurrenceKey(groupId, pendingGroup.start_time));
+    handleSelectEvent(pendingGroup);
+  }, [
+    attendanceOnlyCalendarEvents,
+    attendanceOnlyOccurrence,
+    handleSelectEvent,
+    isAvailabilityModalOpen,
+    isCreateModalOpen,
+    isEventModalOpen,
+    isSchoolTutor,
+    isSlotEditOpen,
+    isUpcomingListModalOpen,
+    loading,
+    mergedSessions,
+    requiresStatusConfirmation,
+  ]);
 
   // When student changes, check for individual pricing to auto-fill
   const handleStudentChange = (studentId: string) => {
@@ -4336,6 +4389,7 @@ export default function CalendarPage() {
             ...row,
             status,
             status_confirmed_at: confirmedAt,
+            completed_late: status === 'completed' ? late : row.completed_late,
             no_show_reason: status === 'completed' ? null : row.no_show_reason,
             no_show_when: status === 'completed' ? null : row.no_show_when,
           }
@@ -4420,12 +4474,20 @@ export default function CalendarPage() {
     }
   };
 
-  const renderRosterAttendanceControls = (studentId: string) => {
+  const renderRosterAttendanceControls = (studentId: string, session?: Session | null) => {
     if (!isSchoolTutor) return null;
+    const participant = groupAttendanceByStudent.get(studentId);
+    if (!session && !participant?.canConfirmAttendance) return null;
     return <SchoolGroupRosterAttendanceControls
-      participant={groupAttendanceByStudent.get(studentId)}
+      session={session}
+      participant={participant}
+      requireConfirmation={requiresStatusConfirmation}
       disabled={Boolean(noShowSavingId) || saving}
-      onConfirm={(id, status) => void handleConfirmRosterAttendance(id, status)}
+      onConfirmSession={(status, late) => {
+        if (!session) return;
+        void handleConfirmSessionStatus(session, status, late, { keepModalOpen: true });
+      }}
+      onConfirmAttestation={(id, status) => void handleConfirmRosterAttendance(id, status)}
     />;
   };
 
@@ -5684,9 +5746,10 @@ export default function CalendarPage() {
       }}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{attendanceOnlyOccurrence?._classGroupName} · {t('schoolDash.attendance')}</DialogTitle>
+            <DialogTitle>{attendanceOnlyOccurrence?._classGroupName} · {schoolAttendanceLabel(locale, 'promptTitle')}</DialogTitle>
             <DialogDescription>
               {attendanceOnlyOccurrence && `${format(attendanceOnlyOccurrence.start_time, 'yyyy-MM-dd HH:mm')} - ${format(attendanceOnlyOccurrence.end_time, 'HH:mm')}`}
+              {' · '}{schoolAttendanceLabel(locale, 'promptDesc')}
             </DialogDescription>
           </DialogHeader>
           {groupAttendanceLoading && <p role="status" className="text-sm text-gray-500">{t('common.loading')}</p>}
@@ -5704,7 +5767,7 @@ export default function CalendarPage() {
                     <p className="text-xs text-gray-500">{t('school.groups.noSessionForOccurrence')}</p>
                   )}
                 </div>
-                {renderRosterAttendanceControls(member.student_id)}
+                {renderRosterAttendanceControls(member.student_id, null)}
               </div>
             ))}
           </div>
@@ -5901,6 +5964,12 @@ export default function CalendarPage() {
                       </div>
                     </div>
                   </div>
+                  {isClassGroupSession && selectedEvent && schoolLessonHasEnded(selectedEvent.end_time) && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2">
+                      <p className="text-sm font-semibold text-amber-950">{schoolAttendanceLabel(locale, 'promptTitle')}</p>
+                      <p className="mt-1 text-xs text-amber-900/80">{schoolAttendanceLabel(locale, 'promptDesc')}</p>
+                    </div>
+                  )}
                   {isClassGroupSession && groupAttendanceLoading && <p role="status" className="text-xs text-gray-500">{t('common.loading')}</p>}
                   {isClassGroupSession && groupAttendanceError && <p role="alert" className="text-sm text-red-600">{groupAttendanceError}</p>}
                   <div className="space-y-1.5 max-h-48 overflow-y-auto">
@@ -5930,7 +5999,7 @@ export default function CalendarPage() {
                                 <p className="text-xs text-gray-500">{t('school.groups.noSessionForOccurrence')}</p>
                               )}
                             </div>
-                            {renderRosterAttendanceControls(participant.student_id)}
+                            {renderRosterAttendanceControls(participant.student_id, null)}
                           </div>
                         );
                       }
@@ -5959,63 +6028,11 @@ export default function CalendarPage() {
                         </div>
                         )}
                         <div className="flex items-center gap-1 flex-shrink-0 flex-wrap justify-end">
-                          {(() => {
+                          {isSchoolTutor && isClassGroupSession
+                            ? renderRosterAttendanceControls(participant.student_id, session)
+                            : (() => {
                             const rowEnd = new Date(session.end_time);
                             const rowFuture = isAfter(rowEnd, new Date());
-                            if (
-                              isSchoolTutor
-                              && !rowFuture
-                              && ['active', 'completed', 'no_show'].includes(session.status)
-                            ) {
-                              return (
-                                <div className="flex flex-wrap justify-end gap-1">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    aria-pressed={effectiveSessionOutcome(session, requiresStatusConfirmation) === 'completed'}
-                                    className={cn(
-                                      'h-8 px-2 text-xs',
-                                      effectiveSessionOutcome(session, requiresStatusConfirmation) === 'completed'
-                                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                                        : 'border-gray-200 text-gray-700',
-                                    )}
-                                    disabled={noShowSavingId === session.id || saving}
-                                    onClick={() => void handleConfirmSessionStatus(
-                                      session,
-                                      'completed',
-                                      false,
-                                      { keepModalOpen: true },
-                                    )}
-                                  >
-                                    <CheckCircle className="mr-1 h-3.5 w-3.5" />
-                                    {t('compSess.markAttended')}
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    aria-pressed={effectiveSessionOutcome(session, requiresStatusConfirmation) === 'no_show'}
-                                    className={cn(
-                                      'h-8 px-2 text-xs',
-                                      effectiveSessionOutcome(session, requiresStatusConfirmation) === 'no_show'
-                                        ? 'border-rose-300 bg-rose-50 text-rose-800'
-                                        : 'border-gray-200 text-gray-700',
-                                    )}
-                                    disabled={noShowSavingId === session.id || saving}
-                                    onClick={() => void handleConfirmSessionStatus(
-                                      session,
-                                      'no_show',
-                                      false,
-                                      { keepModalOpen: true },
-                                    )}
-                                  >
-                                    <UserX className="mr-1 h-3.5 w-3.5" />
-                                    {t('compSess.markNoShow')}
-                                  </Button>
-                                </div>
-                              );
-                            }
                             if (session.status === 'no_show') {
                               return rowFuture ? (
                                 <Button
@@ -6033,50 +6050,20 @@ export default function CalendarPage() {
                                 <span className="text-xs font-semibold text-rose-600">{t('common.noShow')}</span>
                               );
                             }
-                            if (session.status === 'active') {
-                              if (requiresStatusConfirmation && isAfter(new Date(), rowEnd)) {
-                                return (
-                                  <div className="flex flex-wrap gap-1 justify-end">
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      className="h-8 px-2 text-xs bg-green-600 hover:bg-green-700 text-white"
-                                      disabled={noShowSavingId === session.id || saving}
-                                      onClick={() => void handleConfirmSessionStatus(session, 'completed')}
-                                    >
-                                      <CheckCircle className="w-3.5 h-3.5 mr-1" />
-                                      {t('cal.statusHappened')}
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 px-2 text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
-                                      disabled={noShowSavingId === session.id || saving}
-                                      onClick={() => void handleConfirmSessionStatus(session, 'no_show')}
-                                    >
-                                      <UserX className="w-3.5 h-3.5 mr-1" />
-                                      {noShowSavingId === session.id ? '…' : t('cal.statusNoShowOpt')}
-                                    </Button>
-                                  </div>
-                                );
-                              }
-                              if (!requiresStatusConfirmation) {
-                                return (
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 px-2 text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
-                                    disabled={noShowSavingId === session.id || saving}
-                                    onClick={() => void handleMarkStudentNoShowForSession(session)}
-                                  >
-                                    <UserX className="w-3.5 h-3.5 mr-1" />
-                                    {noShowSavingId === session.id ? '…' : t('common.noShow')}
-                                  </Button>
-                                );
-                              }
-                              return null;
+                            if (session.status === 'active' && !requiresStatusConfirmation) {
+                              return (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 px-2 text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
+                                  disabled={noShowSavingId === session.id || saving}
+                                  onClick={() => void handleMarkStudentNoShowForSession(session)}
+                                >
+                                  <UserX className="w-3.5 h-3.5 mr-1" />
+                                  {noShowSavingId === session.id ? '…' : t('common.noShow')}
+                                </Button>
+                              );
                             }
                             if (session.status === 'completed' && rowFuture) {
                               return (
@@ -6499,44 +6486,16 @@ export default function CalendarPage() {
             {isSchoolTutor &&
               !isGroupSession &&
               selectedEvent &&
-              ['active', 'completed', 'no_show'].includes(selectedEvent.status) &&
-              !isAfter(selectedEvent.end_time, new Date()) && (
-                <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3 space-y-2">
-                  <p className="text-sm font-semibold text-indigo-950">{t('schoolDash.awaitingOutcome')}</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      aria-pressed={effectiveSessionOutcome(selectedEvent, requiresStatusConfirmation) === 'completed'}
-                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'completed')}
-                      disabled={noShowSavingId === selectedEvent.id}
-                      className={cn(
-                        'rounded-xl',
-                        effectiveSessionOutcome(selectedEvent, requiresStatusConfirmation) === 'completed'
-                          ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                          : 'border-gray-200 text-gray-700',
-                      )}
-                    >
-                      <CheckCircle className="mr-1 h-4 w-4" />
-                      {t('compSess.markAttended')}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      aria-pressed={effectiveSessionOutcome(selectedEvent, requiresStatusConfirmation) === 'no_show'}
-                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'no_show')}
-                      disabled={noShowSavingId === selectedEvent.id}
-                      className={cn(
-                        'rounded-xl',
-                        effectiveSessionOutcome(selectedEvent, requiresStatusConfirmation) === 'no_show'
-                          ? 'border-rose-300 bg-rose-50 text-rose-800'
-                          : 'border-gray-200 text-gray-700',
-                      )}
-                    >
-                      <UserX className="mr-1 h-4 w-4" />
-                      {t('compSess.markNoShow')}
-                    </Button>
-                  </div>
+              schoolLessonHasEnded(selectedEvent.end_time) && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3 space-y-2">
+                  <p className="text-sm font-semibold text-amber-950">{schoolAttendanceLabel(locale, 'promptTitle')}</p>
+                  <p className="text-xs text-amber-900/80">{schoolAttendanceLabel(locale, 'promptDesc')}</p>
+                  <SchoolGroupRosterAttendanceControls
+                    session={selectedEvent}
+                    requireConfirmation={requiresStatusConfirmation}
+                    disabled={Boolean(noShowSavingId) || saving}
+                    onConfirmSession={(status, late) => void handleConfirmSessionStatus(selectedEvent, status, late)}
+                  />
                 </div>
               )}
             {selectedEvent?.status === 'active' && (

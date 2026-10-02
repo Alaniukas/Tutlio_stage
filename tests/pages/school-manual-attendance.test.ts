@@ -5,10 +5,10 @@ describe('school manual attendance controls', () => {
   it('lets a tutor confirm either outcome for each ended group participant', () => {
     const source = readFileSync('src/pages/Calendar.tsx', 'utf8').replace(/\r\n/g, '\n');
 
-    expect(source).toContain("'completed',\n                                      false,\n                                      { keepModalOpen: true }");
-    expect(source).toContain("'no_show',\n                                      false,\n                                      { keepModalOpen: true }");
-    expect(source).toContain('!options?.keepModalOpen');
-    expect(source).toContain('isSchoolTutor');
+    expect(source).toContain('renderRosterAttendanceControls(participant.student_id, session)');
+    expect(source).toContain('schoolAttendanceLabel(locale, \'promptTitle\')');
+    expect(source).toContain('onConfirmSession={(status, late) => void handleConfirmSessionStatus(selectedEvent, status, late)}');
+    expect(source).toContain('attendancePromptOpenedRef');
     expect(source).toContain("correctExisting: true");
   });
 

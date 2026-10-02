@@ -266,6 +266,50 @@ describe('ensureStudentPairedWithTutor', () => {
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
+  it('reuses a tutorless same-child row located through payer email identity', async () => {
+    const alanPrimary = {
+      id: 'alan-primary', tutor_id: 't-alina', linked_user_id: null, organization_id: 'lv-org',
+      full_name: 'Jurovickij Alan', email: null, phone: null, grade: '6 klasė',
+      payer_name: 'Ieva Jurovickė', payer_email: 'ievajuro@gmail.com', payer_phone: null,
+      child_birth_date: null, payment_model: null, preferred_availability: null,
+      admin_comment: null, admin_comment_visible_to_tutor: true,
+    };
+    const alanTutorless = { ...alanPrimary, id: 'alan-tutorless', tutor_id: null };
+    const updatedIds: string[] = [];
+    const supabase = {
+      from: vi.fn(() => {
+        const builder: Record<string, any> = {
+          select: vi.fn(() => builder),
+          eq: vi.fn((col: string, val: string) => {
+            builder._eq = { col, val };
+            return builder;
+          }),
+          in: vi.fn(() => builder),
+          update: vi.fn((payload: unknown) => {
+            builder._update = payload;
+            return builder;
+          }),
+          maybeSingle: vi.fn(async () => ({ data: alanPrimary, error: null })),
+          then(resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) {
+            if (builder._update && builder._eq?.col === 'id') {
+              updatedIds.push(builder._eq.val);
+              return Promise.resolve({ data: null, error: null }).then(resolve, reject);
+            }
+            if (builder._eq?.col === 'payer_email') {
+              return Promise.resolve({ data: [alanPrimary, alanTutorless], error: null }).then(resolve, reject);
+            }
+            return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+          },
+        };
+        return builder;
+      }),
+      rpc: vi.fn(async () => ({ error: null })),
+    } as any;
+
+    await expect(ensureStudentPairedWithTutor(supabase, 'alan-primary', 't-ieva')).resolves.toBe('alan-tutorless');
+    expect(updatedIds).toEqual(['alan-tutorless']);
+  });
+
   it('saves inherited notes before claiming a blank tutorless same-child pairing', async () => {
     const { client, inserted, updated } = pairingClient({
       source: { linked_user_id: 'child-auth', admin_comment: 'Tutor instructions' },
