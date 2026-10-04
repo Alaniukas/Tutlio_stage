@@ -23,7 +23,7 @@ import { requireOrgAdminAccess } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { wallClockToUtc } from './_lib/recurringOccurrences.js';
 import { fetchAllRows } from '../src/lib/fetchAllRows.js';
-import { latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewSchoolInvoiceSession, schoolInvoiceSessionActivityName, schoolInvoiceSessionMatchesContract, type SchoolInvoiceReviewSession } from '../src/lib/schoolInvoiceSessionReview.js';
+import { filterContractsForSchoolInvoiceReview, latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewSchoolInvoiceSession, schoolInvoiceSessionActivityName, schoolInvoiceSessionMatchesContract, type SchoolInvoiceReviewSession } from '../src/lib/schoolInvoiceSessionReview.js';
 import { orgStudentIdentityGroupKey } from '../src/lib/orgStudentIdentity.js';
 import { groupSchoolPayerInvoicePreviews, schoolPayerKey, schoolStudentInvoiceSendable } from '../src/lib/schoolPayerInvoiceGroups.js';
 import { sessionYmdVilnius } from '../src/lib/schoolExtraLessonsBilling.js';
@@ -121,11 +121,11 @@ function composeDraftContext(input: {
   const student = studentRecords.find((row) => String(row.payer_email || '').trim())
     || studentRecords.find((row) => uniqueSessions.some((session) => session.student_id === row.id))
     || studentRecords[0];
-  const contracts = (storedContracts || []).map((contract: any) => ({ ...contract,
+  const contracts = filterContractsForSchoolInvoiceReview((storedContracts || []).map((contract: any) => ({ ...contract,
     missingIndividualSubject: contract.signing_status === 'signed'
       && contract.order_snapshot?.service_type === 'individual'
       && !liveIndividualSubjectIds.has(String(contract.order_snapshot?.subject_id || '')),
-  }));
+  })));
   const latestDecisions = latestSchoolBillingDecisions(decisions || []);
   const invoiced = new Set<string>((invoices || []).flatMap((invoice: any) => [
     ...(invoice.billed_session_ids || []), ...(invoice.extra_session_ids || []),
@@ -319,8 +319,8 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
       .gte('valid_until', periodStart)
       .order('accepted_at', { ascending: false }),
     supabase.from('school_contracts')
-      .select('id, student_id, class_group_id, signing_status, accepted_at, withdrawal_requested_at, terminated_at, start_within_14_status, start_within_14_days, unit_price_eur, order_snapshot, suspension_started_at, suspension_until, suspension_resumed_at')
-      .in('student_id', studentIds).eq('organization_id', organizationId).eq('kind', 'extra_lessons'),
+      .select('id, student_id, class_group_id, signing_status, accepted_at, archived_at, created_at, withdrawal_requested_at, terminated_at, start_within_14_status, start_within_14_days, unit_price_eur, order_snapshot, suspension_started_at, suspension_until, suspension_resumed_at')
+      .in('student_id', studentIds).eq('organization_id', organizationId).eq('kind', 'extra_lessons').is('archived_at', null),
     supabase.from('school_session_billing_decisions')
       .select('id, student_id, session_reference_id, excluded, reason, created_at')
       .in('student_id', studentIds).eq('organization_id', organizationId).order('id', { ascending: false }),

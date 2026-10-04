@@ -88,8 +88,12 @@ describe('school invoice session review', () => {
     expect(schoolInvoiceContractReason(session, [{ ...paused, suspension_until: '2026-09-13' }])).toBe('payable');
   });
 
-  it('leaves overlapping agreements for review and does not apply a different subject agreement', () => {
-    expect(schoolInvoiceContractReason(session, [contract, { ...contract, id: 'c2' }])).toBe('contract_review');
+  it('picks the newest overlapping agreement and ignores archived duplicates', () => {
+    const older = { ...contract, id: 'c-old', accepted_at: '2026-08-01T10:00:00Z' };
+    const newer = { ...contract, id: 'c-new', accepted_at: '2026-09-15T10:00:00Z' };
+    expect(schoolInvoiceContractReason(session, [older, newer])).toBe('payable');
+    expect(schoolInvoiceContractReason(session, [contract, { ...contract, id: 'c2' }])).toBe('payable');
+    expect(schoolInvoiceContractReason(session, [contract, { ...contract, id: 'c-archived', archived_at: '2026-09-27T10:00:00Z' }])).toBe('payable');
     expect(schoolInvoiceContractReason(session, [{ ...contract, class_group_id: 'another', order_snapshot: { ...contract.order_snapshot, group_id: 'another' } as any }])).toBe('payable');
     expect(schoolInvoiceContractReason(session, [{ ...contract, order_snapshot: null }])).toBe('contract_review');
   });
@@ -142,13 +146,24 @@ describe('school invoice session review', () => {
     }, [])).toBe(0);
   });
 
-  it('bills an evidenced trial group lesson from a sent offer without a signature', () => {
+  it('bills group lessons from a complete sent offer without a signature', () => {
     const sentOnly = { ...contract, signing_status: 'sent', accepted_at: null, unit_price_eur: 6,
       order_snapshot: { ...contract.order_snapshot, unit_price_eur: 6 } as any };
+    expect(reviewSchoolInvoiceSession({ ...session, price: 0 }, [sentOnly], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 6 });
     const attended = { ...session, status: 'completed', tutor_joined_at: '2026-09-10T08:59:00Z',
       student_joined_at: '2026-09-10T09:14:00Z', status_confirmed_at: '2026-09-10T10:00:00Z', price: 0 };
     expect(reviewSchoolInvoiceSession(attended, [sentOnly], undefined, false))
       .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 6 });
+  });
+
+  it('still requires join evidence when a sent offer has no billable price', () => {
+    const sentOnly = { ...contract, signing_status: 'sent', accepted_at: null, unit_price_eur: null,
+      order_snapshot: { ...contract.order_snapshot, unit_price_eur: null } as any };
+    const attended = { ...session, status: 'completed', tutor_joined_at: '2026-09-10T08:59:00Z',
+      student_joined_at: '2026-09-10T09:14:00Z', status_confirmed_at: '2026-09-10T10:00:00Z', price: 0 };
+    expect(reviewSchoolInvoiceSession(attended, [sentOnly], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable' });
     expect(reviewSchoolInvoiceSession({ ...attended, tutor_joined_at: null, student_joined_at: null,
       status_confirmed_at: '2026-09-10T10:00:00Z' }, [sentOnly], undefined, false))
       .toMatchObject({ included: false, reason: 'outside_contract' });

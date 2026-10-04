@@ -7,6 +7,8 @@ export type SchoolInvoiceContractWindow = {
   class_group_id?: string | null;
   signing_status?: string;
   accepted_at?: string | null;
+  archived_at?: string | null;
+  created_at?: string | null;
   withdrawal_requested_at?: string | null;
   terminated_at?: string | null;
   start_within_14_status?: string | null;
@@ -147,6 +149,88 @@ function positiveMoney(value: unknown): number {
   return Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) / 100 : 0;
 }
 
+/** Archived duplicates must not block billing for the active agreement. */
+export function filterContractsForSchoolInvoiceReview(
+  contracts: SchoolInvoiceContractWindow[],
+): SchoolInvoiceContractWindow[] {
+  return contracts.filter((contract) => !contract.archived_at);
+}
+
+function contractHasCompleteBillableTerms(contract: SchoolInvoiceContractWindow): boolean {
+  if (!contract.order_snapshot) return false;
+  const unit = positiveMoney(contract.unit_price_eur) || positiveMoney(contract.order_snapshot.unit_price_eur);
+  return unit > 0;
+}
+
+function isBillableServiceContract(contract: SchoolInvoiceContractWindow): boolean {
+  if (!contract.order_snapshot) return false;
+  if (contract.signing_status === 'signed' && contract.accepted_at) return true;
+  return contract.signing_status === 'sent' && contractHasCompleteBillableTerms(contract);
+}
+
+function resolveAcceptedAtIso(contract: SchoolInvoiceContractWindow): string {
+  if (contract.accepted_at) return contract.accepted_at;
+  const start = contract.order_snapshot?.start_date;
+  return start ? `${start}T12:00:00.000Z` : '';
+}
+
+function sessionWithinContractWindow(session: CanonicalBillableSession, contract: SchoolInvoiceContractWindow): boolean {
+  const order = contract.order_snapshot;
+  if (!order) return false;
+  const acceptedAtIso = resolveAcceptedAtIso(contract);
+  if (!acceptedAtIso) return false;
+  const endedAt = [contract.withdrawal_requested_at, contract.terminated_at]
+    .filter((value): value is string => Boolean(value)).sort()[0];
+  return (!order.end_date || sessionYmdVilnius(session.start_time) <= order.end_date)
+    && isSessionInExtraLessonsServiceWindow(session.start_time, {
+      serviceStartYmd: extraLessonsServiceStartYmd({
+        status: (contract.start_within_14_status || (contract.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status,
+        acceptedAtIso,
+        order,
+      }),
+      endedAtIso: endedAt,
+    });
+}
+
+function contractBillablePriority(contract: SchoolInvoiceContractWindow): number {
+  if (contract.signing_status === 'signed' && contract.accepted_at) return 3;
+  if (contract.signing_status === 'sent' && contractHasCompleteBillableTerms(contract)) return 2;
+  return 0;
+}
+
+function pickCanonicalInvoiceContract(contracts: SchoolInvoiceContractWindow[]): SchoolInvoiceContractWindow | null {
+  const scored = contracts
+    .filter((contract) => contractBillablePriority(contract) > 0)
+    .sort((left, right) => {
+      const priorityDiff = contractBillablePriority(right) - contractBillablePriority(left);
+      if (priorityDiff !== 0) return priorityDiff;
+      const leftAccepted = Date.parse(left.accepted_at || '') || 0;
+      const rightAccepted = Date.parse(right.accepted_at || '') || 0;
+      if (rightAccepted !== leftAccepted) return rightAccepted - leftAccepted;
+      const leftCreated = Date.parse(left.created_at || '') || 0;
+      const rightCreated = Date.parse(right.created_at || '') || 0;
+      if (rightCreated !== leftCreated) return rightCreated - leftCreated;
+      return String(right.id).localeCompare(String(left.id));
+    });
+  return scored[0] || null;
+}
+
+function matchingBillableContracts(
+  session: CanonicalBillableSession,
+  contracts: SchoolInvoiceContractWindow[],
+): SchoolInvoiceContractWindow[] {
+  return contracts
+    .filter((contract) => schoolInvoiceSessionMatchesContract(session, contract))
+    .filter((contract) => isBillableServiceContract(contract))
+    .filter((contract) => sessionWithinContractWindow(session, contract));
+}
+
+function contractNeedsAdminReview(contract: SchoolInvoiceContractWindow): boolean {
+  if (contract.archived_at || contract.order_snapshot || contract.class_group_id) return false;
+  const status = String(contract.signing_status || '');
+  return status === 'sent' || status === 'signed';
+}
+
 /** Session row first; otherwise the signed extra-lessons unit price for that group/subject. */
 export function resolveSchoolInvoiceUnitPrice(
   session: {
@@ -188,37 +272,23 @@ export function schoolInvoiceContractReason(
   session: CanonicalBillableSession,
   contracts: SchoolInvoiceContractWindow[],
 ): 'payable' | 'outside_contract' | 'suspended' | 'contract_review' {
-  const matching = contracts.filter((contract) => schoolInvoiceSessionMatchesContract(session, contract));
+  const activeContracts = filterContractsForSchoolInvoiceReview(contracts);
+  const matching = activeContracts.filter((contract) => schoolInvoiceSessionMatchesContract(session, contract));
   if (matching.some((contract) => !contract.order_snapshot)
-    || contracts.some((contract) => !contract.order_snapshot && !contract.class_group_id)) return 'contract_review';
+    || activeContracts.some((contract) => contractNeedsAdminReview(contract))) return 'contract_review';
   // Older/direct school lessons do not necessarily have an extra-lessons agreement.
   if (!matching.length) {
     // A deleted subject cannot safely turn a signed agreement's lessons into
     // unrestricted direct charges. Leave other, explicitly matched services alone.
-    const unresolvedIndividual = !session.class_group_id && contracts.some((contract) => (
+    const unresolvedIndividual = !session.class_group_id && activeContracts.some((contract) => (
       contract.signing_status === 'signed'
       && contract.order_snapshot?.service_type === 'individual'
       && contract.missingIndividualSubject
     ));
     return unresolvedIndividual ? 'contract_review' : 'payable';
   }
-  const valid = matching.filter((contract) => {
-    if (!contract.accepted_at || !contract.order_snapshot || contract.signing_status !== 'signed') return false;
-    const order = contract.order_snapshot;
-    const endedAt = [contract.withdrawal_requested_at, contract.terminated_at]
-      .filter((value): value is string => Boolean(value)).sort()[0];
-    return (!order.end_date || sessionYmdVilnius(session.start_time) <= order.end_date)
-      && isSessionInExtraLessonsServiceWindow(session.start_time, {
-        serviceStartYmd: extraLessonsServiceStartYmd({
-          status: (contract.start_within_14_status || (contract.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status,
-          acceptedAtIso: contract.accepted_at,
-          order,
-        }),
-        endedAtIso: endedAt,
-      });
-  });
-  if (valid.length > 1) return 'contract_review';
-  if (!valid.length) {
+  const canonical = pickCanonicalInvoiceContract(matchingBillableContracts(session, activeContracts));
+  if (!canonical) {
     const evidenced = hasSchoolOccurrenceEvidence(session)
       || Boolean(session.class_group_id && session.group_occurred);
     if (evidenced && matching.some((contract) => contract.signing_status === 'sent' && contract.order_snapshot)) {
@@ -226,8 +296,8 @@ export function schoolInvoiceContractReason(
     }
     return 'outside_contract';
   }
-  if (inSuspension(session, valid[0])) return 'suspended';
-  const endedAt = [valid[0].withdrawal_requested_at, valid[0].terminated_at]
+  if (inSuspension(session, canonical)) return 'suspended';
+  const endedAt = [canonical.withdrawal_requested_at, canonical.terminated_at]
     .filter((value): value is string => Boolean(value)).sort()[0];
   if (endedAt && session.end_time && Date.parse(session.end_time) > Date.parse(endedAt)) return 'contract_review';
   return 'payable';
