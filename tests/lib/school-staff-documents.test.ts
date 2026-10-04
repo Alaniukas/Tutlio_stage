@@ -9,6 +9,7 @@ import {
   staffPdfPathsForRetention,
   staffTemplateNames,
   staffTemplatePayload,
+  formatStaffSigningDate,
   parseStoredStaffPersonalDetails,
   validateConsentAnswers,
   validateStaffPersonalDetails,
@@ -32,6 +33,16 @@ describe('school staff document templates and lifecycle', () => {
     expect(parseStoredStaffPersonalDetails({ address: 'Vilniaus g. 1, Vilnius' })).toBeNull();
   });
 
+  it('prefills the signing date with the document generation day in Vilnius time', () => {
+    expect(formatStaffSigningDate(new Date('2026-10-04T08:00:00Z'))).toBe('2026-10-04');
+    expect(staffTemplatePayload({
+      name: 'Vardas Pavardė',
+      employmentContractNumber: 'DS-42',
+      employmentContractDate: '2026-09-22',
+      date: new Date('2026-10-04T08:00:00Z'),
+    })['pasirašymo data']).toBe('2026-10-04');
+  });
+
   it('fills each of the three supplied DOCX templates without unresolved fields', () => {
     const fields = staffTemplatePayload({
       name: 'Vardas Pavardė',
@@ -51,6 +62,7 @@ describe('school staff document templates and lifecycle', () => {
       if (name !== 'staff-consent.docx') {
         expect(xml).toContain('Vilniaus g. 1, Vilnius');
         expect(xml).toContain('39001010013');
+        expect(xml).toContain('2026-09-22');
       }
       if (name === 'staff-consent.docx') {
         expect(xml).toContain('SUTINKU');

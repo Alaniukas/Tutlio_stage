@@ -127,6 +127,31 @@ describe('school staff document upload form', () => {
     expect(uploadMock).toHaveBeenCalledTimes(1);
   });
 
+  it('creates documents without address or personal code when the employee will fill them', async () => {
+    const posts: any[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      if (!init?.method) return { ok: true, json: async () => ({ organizationId: ORG_ID, documents: [] }) };
+      posts.push(JSON.parse(String(init.body)));
+      return { ok: true, json: async () => ({ emailed: true }) };
+    }));
+    render(<CompanyStaffDocuments />);
+    await screen.findByRole('button', { name: 'Sukurti du dokumentus' });
+    fireEvent.change(screen.getByLabelText('Vardas, pavardė'), { target: { value: 'Alina Armonienė' } });
+    fireEvent.change(screen.getByLabelText('El. paštas'), { target: { value: 'alina@example.com' } });
+    fireEvent.change(screen.getByLabelText(/Darbo sutarties Nr/), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText(/Darbo sutarties data/), { target: { value: '2024-11-04' } });
+    expect(screen.queryByLabelText(/Gyvenamosios vietos adresas/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Sukurti du dokumentus' }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toMatchObject({
+      action: 'create-bundle',
+      address: '',
+      personalCode: '',
+      employmentContractNumber: '10',
+      employmentContractDate: '2024-11-04',
+    });
+  });
+
   it('sends administrator-entered address and personal code so they are filled into the generated agreement', async () => {
     const posts: any[] = [];
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
@@ -140,6 +165,7 @@ describe('school staff document upload form', () => {
     fireEvent.change(screen.getByLabelText('El. paštas'), { target: { value: 'employee@example.com' } });
     fireEvent.change(screen.getByLabelText(/Darbo sutarties Nr/), { target: { value: 'DS-42' } });
     fireEvent.change(screen.getByLabelText(/Darbo sutarties data/), { target: { value: '2026-09-22' } });
+    fireEvent.click(screen.getByLabelText(/Įrašysiu dabar/));
     fireEvent.change(screen.getByLabelText(/Gyvenamosios vietos adresas/), { target: { value: 'Vilniaus g. 1, Vilnius' } });
     fireEvent.change(screen.getByLabelText(/Asmens kodas/), { target: { value: '39001010013' } });
     fireEvent.click(screen.getByRole('button', { name: 'Sukurti du dokumentus' }));

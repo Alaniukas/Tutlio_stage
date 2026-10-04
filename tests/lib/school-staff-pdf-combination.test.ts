@@ -48,6 +48,7 @@ describe('staff PDF composition', () => {
     expect(renderMock.mock.calls[0][0].payload).toMatchObject({
       darbuotojo_adresas: fields.address,
       darbuotojo_asmens_kodas: fields.personalCode,
+      'pasirašymo data': '2026-09-22',
     });
     expect(renderMock.mock.calls[1][0].payload).toMatchObject({
       darbuotojo_adresas: fields.address,

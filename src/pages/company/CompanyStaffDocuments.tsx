@@ -83,6 +83,7 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
   const [email, setEmail] = useState('');
   const [employmentContractNumber, setEmploymentContractNumber] = useState('');
   const [employmentContractDate, setEmploymentContractDate] = useState('');
+  const [personalDetailsMode, setPersonalDetailsMode] = useState<'employee' | 'admin'>('employee');
   const [address, setAddress] = useState('');
   const [personalCode, setPersonalCode] = useState('');
   const [preparedFile, setPreparedFile] = useState<File | null>(null);
@@ -163,9 +164,9 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
       setError('Patvirtinkite, kad PDF yra susitarimas su priedu ir jame jau įrašyti darbuotojo adresas bei asmens kodas.');
       return;
     }
-    const enteredAddress = address.trim().replace(/\s+/g, ' ');
-    const enteredPersonalCode = personalCode.trim();
-    if (!preparedFile && (enteredAddress || enteredPersonalCode) && (enteredAddress.length < 5 || !/^\d{11}$/.test(enteredPersonalCode))) {
+    const enteredAddress = personalDetailsMode === 'admin' ? address.trim().replace(/\s+/g, ' ') : '';
+    const enteredPersonalCode = personalDetailsMode === 'admin' ? personalCode.trim() : '';
+    if (!preparedFile && personalDetailsMode === 'admin' && (enteredAddress.length < 5 || !/^\d{11}$/.test(enteredPersonalCode))) {
       setError('Įveskite gyvenamosios vietos adresą ir 11 skaitmenų asmens kodą.');
       return;
     }
@@ -183,7 +184,7 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
         { ...common, id: crypto.randomUUID(), staff_document_type: 'consent', signing_status: 'draft', status: 'sent', pdf_url: null, sent_at: new Date().toISOString() },
         ...current,
       ]);
-      setName(''); setEmail(''); setEmploymentContractNumber(''); setEmploymentContractDate(''); setAddress(''); setPersonalCode(''); setPreparedFile(null); setPreparedIncludesAnnex(false); setPreparedDetailsConfirmed(false); setFileInputKey((key) => key + 1);
+      setName(''); setEmail(''); setEmploymentContractNumber(''); setEmploymentContractDate(''); setPersonalDetailsMode('employee'); setAddress(''); setPersonalCode(''); setPreparedFile(null); setPreparedIncludesAnnex(false); setPreparedDetailsConfirmed(false); setFileInputKey((key) => key + 1);
       setError(''); setMessage('Peržiūros režimu sukurti du pavyzdiniai dokumentai.');
       return;
     }
@@ -220,7 +221,7 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
               ? 'Sukurti du dokumentai. Susitarime su priedu įrašytas darbuotojo adresas ir asmens kodas. Sutikimo punktų forma išsiųsta darbuotojui.'
               : 'Sukurti du dokumentai. Darbuotojui išsiųsta nuoroda adresui, asmens kodui ir sutikimo punktams pateikti. Po to galėsite pasirašyti susitarimą su priedu.')
         : 'Sukurti du dokumentai, bet sutikimo laiškas neišsiųstas. Siųskite priminimą iš sąrašo.');
-      setName(''); setEmail(''); setEmploymentContractNumber(''); setEmploymentContractDate(''); setAddress(''); setPersonalCode(''); setPreparedFile(null); setPreparedIncludesAnnex(false); setPreparedDetailsConfirmed(false); setFileInputKey((key) => key + 1);
+      setName(''); setEmail(''); setEmploymentContractNumber(''); setEmploymentContractDate(''); setPersonalDetailsMode('employee'); setAddress(''); setPersonalCode(''); setPreparedFile(null); setPreparedIncludesAnnex(false); setPreparedDetailsConfirmed(false); setFileInputKey((key) => key + 1);
       pendingBundle.current = null;
       await load();
       if (result.pdfPending) window.setTimeout(() => { void load(true); }, 25000);
@@ -352,10 +353,23 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
           <label className="text-sm">Darbo sutarties data {preparedFile ? '(nebūtina)' : ''}
             <DateInput id="staff-employment-contract-date" className="mt-1" value={employmentContractDate} onChange={(event) => setEmploymentContractDate(event.target.value)} />
           </label>
-          {!preparedFile && <>
-            <label className="text-sm">Gyvenamosios vietos adresas (nebūtina, jei pildys darbuotojas)<input className="mt-1 w-full rounded-md border p-2" autoComplete="street-address" maxLength={300} value={address} onChange={(event) => setAddress(event.target.value)} /></label>
-            <label className="text-sm">Asmens kodas (nebūtina, jei pildys darbuotojas)<input inputMode="numeric" autoComplete="off" maxLength={11} className="mt-1 w-full rounded-md border p-2" value={personalCode} onChange={(event) => setPersonalCode(event.target.value.replace(/\D/g, ''))} /></label>
-          </>}
+          {!preparedFile && <fieldset className="space-y-3 sm:col-span-2">
+            <legend className="text-sm font-medium text-slate-800">Adresas ir asmens kodas susitarimui su priedu</legend>
+            <div className="flex flex-col gap-2 text-sm">
+              <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 p-3 has-[:checked]:border-emerald-600 has-[:checked]:bg-emerald-50">
+                <input type="radio" name="staff-personal-details-mode" className="mt-0.5" checked={personalDetailsMode === 'employee'} onChange={() => { setPersonalDetailsMode('employee'); setAddress(''); setPersonalCode(''); }} />
+                <span><span className="font-medium">Darbuotojas pats užpildys</span> — iš el. pašto nuorodos įves adresą, asmens kodą ir 10 sutikimo punktų.</span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 p-3 has-[:checked]:border-emerald-600 has-[:checked]:bg-emerald-50">
+                <input type="radio" name="staff-personal-details-mode" className="mt-0.5" checked={personalDetailsMode === 'admin'} onChange={() => setPersonalDetailsMode('admin')} />
+                <span><span className="font-medium">Įrašysiu dabar</span> — adresas ir asmens kodas bus įrašyti į susitarimą iš karto.</span>
+              </label>
+            </div>
+            {personalDetailsMode === 'admin' && <>
+              <label className="block text-sm">Gyvenamosios vietos adresas<input className="mt-1 w-full rounded-md border p-2" autoComplete="street-address" maxLength={300} value={address} onChange={(event) => setAddress(event.target.value)} /></label>
+              <label className="block text-sm">Asmens kodas<input inputMode="numeric" autoComplete="off" maxLength={11} className="mt-1 w-full rounded-md border p-2" value={personalCode} onChange={(event) => setPersonalCode(event.target.value.replace(/\D/g, ''))} /></label>
+            </>}
+          </fieldset>}
           <label className="text-sm sm:col-span-2">Savitas PDF vietoj Tutlio šablono (nebūtina)
             <input key={`prepared-${fileInputKey}`} type="file" accept=".pdf,application/pdf" className="peer sr-only" onChange={(event) => {
               setPreparedFile(event.target.files?.[0] || null);
@@ -368,7 +382,7 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
               <span className="break-all text-slate-600">{preparedFile?.name || 'PDF nepasirinktas'}</span>
             </span>
           </label>
-          <p className="text-xs text-slate-500 sm:col-span-2">Numatyta Tutlio sugeneruoja konfidencialumo susitarimą su priedu. Įkelkite PDF tik jei turite savo paruoštą variantą. Jei įrašysite adresą ir asmens kodą, sistema iš karto įrašys juos į susitarimą ir priedą. Jei paliksite tuščius ir PDF neįkelsite, darbuotojas šiuos duomenis įves iš el. pašto nuorodos. Darbo sutarties numeris ir data būtini, kai naudojamas Tutlio šablonas.</p>
+          <p className="text-xs text-slate-500 sm:col-span-2">Numatyta Tutlio sugeneruoja konfidencialumo susitarimą su priedu. Įkelkite PDF tik jei turite savo paruoštą variantą. Pasirinkus „Darbuotojas pats užpildys“, darbuotojas el. paštu gaus nuorodą adresui, asmens kodui ir 10 sutikimo punktams. Darbo sutarties numeris ir data būtini, kai naudojamas Tutlio šablonas.</p>
           {preparedFile && <>
             <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={preparedIncludesAnnex} onChange={(event) => setPreparedIncludesAnnex(event.target.checked)} /> PDF yra ir susitarimas, ir konfidencialios informacijos sąrašo priedas</label>
             <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={preparedDetailsConfirmed} onChange={(event) => setPreparedDetailsConfirmed(event.target.checked)} /> Įkeltame PDF jau įrašyti darbuotojo adresas ir asmens kodas. Tutlio įkelto PDF papildomai nepildo.</label>

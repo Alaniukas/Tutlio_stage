@@ -101,6 +101,15 @@ export function validateStaffPersonalDetails(value: {
   return { address, personalCode };
 }
 
+export function formatStaffSigningDate(date: Date): string {
+  return new Intl.DateTimeFormat('lt-LT', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: 'Europe/Vilnius',
+  }).format(date);
+}
+
 export function staffTemplatePayload(fields: StaffTemplateFields): Record<string, string> {
   const date = fields.date;
   const monthDay = new Intl.DateTimeFormat('lt-LT', { month: 'long', day: 'numeric', timeZone: 'Europe/Vilnius' })
@@ -113,9 +122,7 @@ export function staffTemplatePayload(fields: StaffTemplateFields): Record<string
     darbo_sutarties_data: fields.employmentContractDate,
     metai: new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone: 'Europe/Vilnius' }).format(date),
     mėnuo_diena: monthDay,
-    // The school and employee may sign on different days. The actual dates are
-    // recorded in their electronic signature certificates, not prefilled here.
-    'pasirašymo data': '',
+    'pasirašymo data': formatStaffSigningDate(date),
   };
 }
 
