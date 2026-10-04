@@ -14,6 +14,28 @@ export function formatInvoiceSeriesHeading(storedNumber: string): string {
   return `Nr. ${storedNumber}`;
 }
 
+/** School monthly invoice PDF heading: PAM-829 → "PAM NR. 829", any series works the same way. */
+export function formatSchoolInvoiceNumberLabel(invoiceNumber: string): string {
+  const trimmed = String(invoiceNumber || '').trim();
+  if (!trimmed || /peržiūra/i.test(trimmed)) return 'PERŽIŪRA';
+  const m = trimmed.match(/^([A-Za-zĀ-ž]+)-0*(\d+)$/i);
+  if (m) return `${m[1].toUpperCase()} NR. ${parseInt(m[2], 10)}`;
+  return trimmed;
+}
+
+/** Next invoice number for preview only; does not consume the sequence. */
+export function previewInvoiceNumber(profile: {
+  invoice_series?: string | null;
+  next_invoice_number?: number | null;
+} | null | undefined): string {
+  const series = String(profile?.invoice_series || '').trim();
+  const next = Number(profile?.next_invoice_number);
+  if (series && Number.isFinite(next) && next >= 1) {
+    return formatStoredInvoiceNumber(series, next);
+  }
+  return '';
+}
+
 export async function allocateInvoiceNumber(
   supabase: SupabaseClient,
   invoiceProfileId: string,

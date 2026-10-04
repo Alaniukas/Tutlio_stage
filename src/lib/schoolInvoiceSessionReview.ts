@@ -1,4 +1,4 @@
-import { extraLessonsServiceStartYmd, type ExtraLessonsOrderSnapshot, type StartWithin14Status } from './extraLessonsContract.js';
+import { extraLessonsServiceStartYmd, type ExtraLessonsOrderSnapshot, type ExtraLessonsScheduleSlot, type StartWithin14Status } from './extraLessonsContract.js';
 import { canonicalSessionCharge, hasSchoolOccurrenceEvidence, type CanonicalBillableSession } from './schoolCanonicalBilling.js';
 import { isSessionInExtraLessonsServiceWindow, sessionMatchesExtraLessonsContract, sessionYmdVilnius } from './schoolExtraLessonsBilling.js';
 
@@ -51,10 +51,12 @@ export type SchoolInvoiceReviewSession = {
 };
 
 type SchoolInvoiceActivity = {
+  start_time?: string;
   class_group_id?: string | null;
   subject_id?: string | null;
   class_group?: { name?: string | null } | Array<{ name?: string | null }> | null;
-  subject?: { name?: string | null; price?: number | null } | Array<{ name?: string | null; price?: number | null }> | null;
+  subject?: { name?: string | null; price?: number | null; is_trial?: boolean | null }
+    | Array<{ name?: string | null; price?: number | null; is_trial?: boolean | null }> | null;
 };
 
 function studentNameInLabel(studentFullName: string, label: string): boolean {
@@ -64,30 +66,165 @@ function studentNameInLabel(studentFullName: string, label: string): boolean {
   return parts.every((part) => normalized.includes(part.toLowerCase()));
 }
 
+function normalizeBillingLabel(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function individualSessionMatchesContractService(
+  session: SchoolInvoiceActivity,
+  order: ExtraLessonsOrderSnapshot,
+  studentFullName?: string | null,
+): boolean {
+  const subject = Array.isArray(session.subject) ? session.subject[0] : session.subject;
+  const subjectName = normalizeBillingLabel(String(subject?.name || ''));
+  const serviceName = normalizeBillingLabel(String(order.service_name || ''));
+  if (!subjectName || !serviceName) return false;
+  if (subjectName === serviceName || subjectName.includes(serviceName) || serviceName.includes(subjectName)) return true;
+  if (studentFullName && studentNameInLabel(studentFullName, subjectName) && studentNameInLabel(studentFullName, serviceName)) {
+    return true;
+  }
+  return false;
+}
+
+function parseClockMinutes(value: string): number | null {
+  const [hours, minutes] = String(value || '').split(':').map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  return hours * 60 + minutes;
+}
+
+function sessionFitsGroupSchedule(startIso: string, slots: ExtraLessonsScheduleSlot[] | undefined): boolean {
+  if (!slots?.length) return true;
+  const date = new Date(startIso);
+  if (!Number.isFinite(date.getTime())) return false;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Vilnius',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const weekdayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const weekday = weekdayMap[parts.find((part) => part.type === 'weekday')?.value || ''];
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value);
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value);
+  if (!Number.isFinite(weekday) || !Number.isFinite(hour) || !Number.isFinite(minute)) return false;
+  const startMinutes = hour * 60 + minute;
+  return slots.some((slot) => {
+    if (Number(slot.weekday) !== weekday) return false;
+    const slotStart = parseClockMinutes(slot.start_time);
+    const slotEnd = parseClockMinutes(slot.end_time || slot.start_time);
+    if (slotStart === null || slotEnd === null) return true;
+    return startMinutes >= slotStart - 5 && startMinutes < slotEnd;
+  });
+}
+
+function sessionGroupServiceLabel(session: SchoolInvoiceActivity): string {
+  if (!session.class_group_id) return '';
+  const group = Array.isArray(session.class_group) ? session.class_group[0] : session.class_group;
+  return String(group?.name || '').trim();
+}
+
+function groupServiceLabelsMatch(left: string, right: string): boolean {
+  const a = normalizeBillingLabel(left);
+  const b = normalizeBillingLabel(right);
+  if (!a || !b) return false;
+  return a === b || a.includes(b) || b.includes(a);
+}
+
+function tutorNamesMatch(session: SchoolInvoiceActivity & { tutor?: any }, order: ExtraLessonsOrderSnapshot): boolean {
+  const tutor = Array.isArray(session.tutor) ? session.tutor[0] : session.tutor;
+  const sessionTutor = normalizeBillingLabel(String(tutor?.full_name || ''));
+  const orderTutor = normalizeBillingLabel(String(order.tutor_name || ''));
+  if (!orderTutor || !sessionTutor) return true;
+  return sessionTutor === orderTutor || sessionTutor.includes(orderTutor) || orderTutor.includes(sessionTutor);
+}
+
+/** Group sessions may exist before class_group_id is linked or after the group row is recreated. */
+function groupContractLooselyMatchesSession(
+  session: Pick<CanonicalBillableSession, 'class_group_id' | 'subject_id' | 'start_time'> & SchoolInvoiceActivity & { tutor?: any },
+  contract: SchoolInvoiceContractWindow,
+): boolean {
+  const order = contract.order_snapshot;
+  if (!order || order.service_type !== 'group') return false;
+  const serviceLabel = String(order.group_name || order.service_name || '').trim();
+  if (!serviceLabel) return false;
+  const day = sessionYmdVilnius(session.start_time);
+  if (!day) return false;
+  if (order.start_date && day < order.start_date) return false;
+  if (order.end_date && day > order.end_date) return false;
+  if (!tutorNamesMatch(session, order)) return false;
+
+  const sessionLabel = sessionGroupServiceLabel(session);
+  if (sessionLabel && groupServiceLabelsMatch(sessionLabel, serviceLabel)) return true;
+  if (!session.class_group_id && !session.subject_id) {
+    return sessionFitsGroupSchedule(session.start_time, order.schedule_slots);
+  }
+  return false;
+}
+
+function isTrialLessonSession(session: SchoolInvoiceActivity): boolean {
+  const subject = Array.isArray(session.subject) ? session.subject[0] : session.subject;
+  return subject?.is_trial === true;
+}
+
+function sessionPlausiblyBelongsToIndividualContract(
+  session: SchoolInvoiceActivity,
+  contract: SchoolInvoiceContractWindow,
+  studentFullName?: string | null,
+): boolean {
+  const order = contract.order_snapshot;
+  if (!order || order.service_type !== 'individual' || session.class_group_id) return false;
+  if (order.subject_id && session.subject_id === order.subject_id) return true;
+  return individualSessionMatchesContractService(session, order, studentFullName);
+}
+
 function individualContractActivityName(
   session: SchoolInvoiceActivity,
   contracts: SchoolInvoiceContractWindow[],
   studentFullName?: string | null,
 ): string | null {
-  const subjectId = String(session.subject_id || '').trim();
-  const signed = contracts.filter((contract) => contract.signing_status === 'signed' && contract.order_snapshot?.service_type === 'individual');
-  if (subjectId) {
-    const bySubject = signed.find((contract) => String(contract.order_snapshot?.subject_id || '') === subjectId);
-    if (bySubject?.order_snapshot?.service_name) return String(bySubject.order_snapshot.service_name);
-  }
-  if (studentFullName) {
-    const byStudent = signed.find((contract) => studentNameInLabel(studentFullName, String(contract.order_snapshot?.service_name || '')));
-    if (byStudent?.order_snapshot?.service_name) return String(byStudent.order_snapshot.service_name);
-  }
+  const matching = contracts.filter((contract) => (
+    contract.order_snapshot?.service_type === 'individual'
+    && schoolInvoiceSessionMatchesContract(
+      session as Pick<CanonicalBillableSession, 'class_group_id' | 'subject_id' | 'start_time'> & SchoolInvoiceActivity,
+      contract,
+      studentFullName,
+    )
+  ));
+  const canonical = pickCanonicalInvoiceContract(matching.filter(isBillableServiceContract)) || matching[0];
+  if (canonical?.order_snapshot?.service_name) return String(canonical.order_snapshot.service_name);
   return null;
 }
 
+/** Individual sessions may exist before subjects.subject_id is linked on the row. */
+function individualContractLooselyMatchesSession(
+  session: Pick<CanonicalBillableSession, 'class_group_id' | 'subject_id' | 'start_time'> & SchoolInvoiceActivity & { tutor?: any },
+  contract: SchoolInvoiceContractWindow,
+  studentFullName?: string | null,
+): boolean {
+  const order = contract.order_snapshot;
+  if (!order || order.service_type !== 'individual' || session.class_group_id) return false;
+  if (order.subject_id && session.subject_id === order.subject_id) return false;
+  if (session.subject_id && individualSessionMatchesContractService(session, order, studentFullName)) return false;
+  const day = sessionYmdVilnius(session.start_time);
+  if (order.start_date && day < order.start_date) return false;
+  if (order.end_date && day > order.end_date) return false;
+  if (!tutorNamesMatch(session, order)) return false;
+  if (studentFullName && !studentNameInLabel(studentFullName, String(order.service_name || ''))) return false;
+  return !session.subject_id || individualSessionMatchesContractService(session, order, studentFullName);
+}
+
 function contractActivitySuffix(
-  session: Pick<CanonicalBillableSession, 'class_group_id' | 'subject_id'>,
+  session: SchoolInvoiceActivity,
   contracts: SchoolInvoiceContractWindow[],
+  studentFullName?: string | null,
 ): string | null {
   if (!contracts.length) return null;
-  const matching = contracts.filter((contract) => schoolInvoiceSessionMatchesContract(session, contract));
+  const matching = contracts.filter((contract) => schoolInvoiceSessionMatchesContract(
+    session as Pick<CanonicalBillableSession, 'class_group_id' | 'subject_id' | 'start_time'> & SchoolInvoiceActivity,
+    contract,
+    studentFullName,
+  ));
   if (session.class_group_id) {
     if (!matching.length) return 'sutartis nėra';
     const signed = matching.filter((contract) => (
@@ -116,22 +253,22 @@ export function schoolInvoiceSessionActivityName(
       (contract.class_group_id || contract.order_snapshot?.group_id) === session.class_group_id
     ))?.order_snapshot;
     const base = String(group?.name || order?.group_name || order?.service_name || 'Užsiėmimas');
-    const suffix = contractActivitySuffix(session, contracts);
+    const suffix = contractActivitySuffix(session, contracts, studentFullName);
     return suffix ? `${base} · ${suffix}` : base;
   }
   const subject = Array.isArray(session.subject) ? session.subject[0] : session.subject;
   const raw = String(subject?.name || 'Užsiėmimas');
   const fromContract = individualContractActivityName(session, contracts, studentFullName);
   if (fromContract) {
-    const suffix = contractActivitySuffix(session, contracts);
+    const suffix = contractActivitySuffix(session, contracts, studentFullName);
     return suffix ? `${fromContract} · ${suffix}` : fromContract;
   }
   if (studentFullName && raw.includes('(individuali)') && !studentNameInLabel(studentFullName, raw)) {
     const renamed = raw.replace(/\s+[A-ZĄČĘĖĮŠŲŪŽ][^\s]+\s+[A-ZĄČĘĖĮŠŲŪŽ][^\s]+$/, ` ${studentFullName}`);
-    const suffix = contractActivitySuffix(session, contracts);
+    const suffix = contractActivitySuffix(session, contracts, studentFullName);
     return suffix ? `${renamed} · ${suffix}` : renamed;
   }
-  const suffix = contractActivitySuffix(session, contracts);
+  const suffix = contractActivitySuffix(session, contracts, studentFullName);
   return suffix && raw === 'Užsiėmimas' ? `${raw} · ${suffix}` : (suffix ? `${raw} · ${suffix}` : raw);
 }
 
@@ -216,11 +353,12 @@ function pickCanonicalInvoiceContract(contracts: SchoolInvoiceContractWindow[]):
 }
 
 function matchingBillableContracts(
-  session: CanonicalBillableSession,
+  session: CanonicalBillableSession & SchoolInvoiceActivity,
   contracts: SchoolInvoiceContractWindow[],
+  studentFullName?: string | null,
 ): SchoolInvoiceContractWindow[] {
   return contracts
-    .filter((contract) => schoolInvoiceSessionMatchesContract(session, contract))
+    .filter((contract) => schoolInvoiceSessionMatchesContract(session, contract, studentFullName))
     .filter((contract) => isBillableServiceContract(contract))
     .filter((contract) => sessionWithinContractWindow(session, contract));
 }
@@ -237,15 +375,16 @@ export function resolveSchoolInvoiceUnitPrice(
     price?: number | null;
     class_group_id?: string | null;
     subject_id?: string | null;
-    subject?: { price?: number | null } | Array<{ price?: number | null }> | null;
+    subject?: { name?: string | null; price?: number | null } | Array<{ name?: string | null; price?: number | null }> | null;
   },
   contracts: SchoolInvoiceContractWindow[] = [],
+  studentFullName?: string | null,
 ): number {
   const stored = positiveMoney(session.price);
   if (stored) return stored;
   const matching = contracts.filter((contract) => (
     (contract.signing_status === 'signed' || contract.signing_status === 'sent')
-    && schoolInvoiceSessionMatchesContract(session as CanonicalBillableSession, contract)
+    && schoolInvoiceSessionMatchesContract(session as CanonicalBillableSession & SchoolInvoiceActivity, contract, studentFullName)
   ));
   const signedMatching = matching.filter((contract) => contract.signing_status === 'signed');
   for (const contract of signedMatching) {
@@ -261,19 +400,48 @@ export function resolveSchoolInvoiceUnitPrice(
   return positiveMoney(subject?.price);
 }
 
-export function schoolInvoiceSessionMatchesContract(session: Pick<CanonicalBillableSession, 'class_group_id' | 'subject_id'>, contract: SchoolInvoiceContractWindow): boolean {
+/** Invoice line key when session.subject_id and class_group_id are both empty (pre-link group row). */
+export function schoolInvoiceBillableSubjectKey(
+  session: Pick<CanonicalBillableSession, 'id' | 'class_group_id' | 'subject_id' | 'start_time'> & SchoolInvoiceActivity & { tutor?: any },
+  contracts: SchoolInvoiceContractWindow[] = [],
+  studentFullName?: string | null,
+): string | null {
+  const direct = String(session.subject_id || session.class_group_id || '').trim();
+  if (direct) return direct;
+  const matching = contracts.filter((contract) => schoolInvoiceSessionMatchesContract(session, contract, studentFullName));
+  const groupId = matching
+    .map((contract) => contract.order_snapshot?.subject_id || contract.class_group_id || contract.order_snapshot?.group_id)
+    .find((value) => Boolean(value));
+  if (groupId) return String(groupId);
+  if (matching.length) return `session:${session.id}`;
+  return null;
+}
+
+export function schoolInvoiceSessionMatchesContract(
+  session: Pick<CanonicalBillableSession, 'class_group_id' | 'subject_id' | 'start_time'> & SchoolInvoiceActivity & { tutor?: any },
+  contract: SchoolInvoiceContractWindow,
+  studentFullName?: string | null,
+): boolean {
   const order = contract.order_snapshot;
   if (!order) return Boolean(contract.class_group_id) && contract.class_group_id === session.class_group_id;
-  return sessionMatchesExtraLessonsContract(session, { ...order, group_id: contract.class_group_id || order.group_id });
+  const scope = { ...order, group_id: contract.class_group_id || order.group_id };
+  if (sessionMatchesExtraLessonsContract(session, scope)) return true;
+  if (order.service_type === 'group' && groupContractLooselyMatchesSession(session, contract)) return true;
+  if (order.service_type === 'individual' && !session.class_group_id) {
+    if (individualSessionMatchesContractService(session, order, studentFullName)) return true;
+    return individualContractLooselyMatchesSession(session, contract, studentFullName);
+  }
+  return false;
 }
 
 /** Historical service windows restrict charges; an absence alone does not waive a group charge. */
 export function schoolInvoiceContractReason(
-  session: CanonicalBillableSession,
+  session: CanonicalBillableSession & SchoolInvoiceActivity,
   contracts: SchoolInvoiceContractWindow[],
+  studentFullName?: string | null,
 ): 'payable' | 'outside_contract' | 'suspended' | 'contract_review' {
   const activeContracts = filterContractsForSchoolInvoiceReview(contracts);
-  const matching = activeContracts.filter((contract) => schoolInvoiceSessionMatchesContract(session, contract));
+  const matching = activeContracts.filter((contract) => schoolInvoiceSessionMatchesContract(session, contract, studentFullName));
   if (matching.some((contract) => !contract.order_snapshot)
     || activeContracts.some((contract) => contractNeedsAdminReview(contract))) return 'contract_review';
   // Older/direct school lessons do not necessarily have an extra-lessons agreement.
@@ -284,10 +452,11 @@ export function schoolInvoiceContractReason(
       contract.signing_status === 'signed'
       && contract.order_snapshot?.service_type === 'individual'
       && contract.missingIndividualSubject
+      && sessionPlausiblyBelongsToIndividualContract(session, contract, studentFullName)
     ));
     return unresolvedIndividual ? 'contract_review' : 'payable';
   }
-  const canonical = pickCanonicalInvoiceContract(matchingBillableContracts(session, activeContracts));
+  const canonical = pickCanonicalInvoiceContract(matchingBillableContracts(session, activeContracts, studentFullName));
   if (!canonical) {
     const evidenced = hasSchoolOccurrenceEvidence(session)
       || Boolean(session.class_group_id && session.group_occurred);
@@ -313,7 +482,25 @@ export function reviewSchoolInvoiceSession(
 ): SchoolInvoiceReviewSession {
   const tutor = Array.isArray(session.tutor) ? session.tutor[0] : session.tutor;
   const ended = Number.isFinite(Date.parse(session.end_time || '')) && Date.parse(session.end_time || '') <= nowMs;
-  const contractReason = schoolInvoiceContractReason(session, contracts);
+  if (isTrialLessonSession(session)) {
+    return {
+      id: session.id,
+      startTime: session.start_time,
+      endTime: session.end_time || '',
+      status: session.status,
+      statusConfirmedAt: session.status_confirmed_at || null,
+      subjectName: schoolInvoiceSessionActivityName(session, contracts, studentFullName),
+      tutorName: String(tutor?.full_name || 'mokytojas'),
+      unitPriceEur: 0,
+      included: false,
+      reason: 'free',
+      exclusionReason: null,
+      decisionId: decision?.id ?? null,
+      alreadyInvoiced,
+      canConfirm: !alreadyInvoiced && ended && ['active', 'completed', 'no_show'].includes(session.status),
+    };
+  }
+  const contractReason = schoolInvoiceContractReason(session, contracts, studentFullName);
   const charge = canonicalSessionCharge(session, session.class_group_id ? 'group' : 'individual');
   const reason: SchoolInvoiceReviewReason = alreadyInvoiced ? 'already_invoiced'
     : decision?.excluded ? 'excluded'
@@ -330,7 +517,7 @@ export function reviewSchoolInvoiceSession(
     statusConfirmedAt: session.status_confirmed_at || null,
     subjectName: schoolInvoiceSessionActivityName(session, contracts, studentFullName),
     tutorName: String(tutor?.full_name || 'mokytojas'),
-    unitPriceEur: resolveSchoolInvoiceUnitPrice(session, contracts),
+    unitPriceEur: resolveSchoolInvoiceUnitPrice(session, contracts, studentFullName),
     included: reason === 'payable',
     reason,
     exclusionReason: decision?.excluded ? decision.reason : null,

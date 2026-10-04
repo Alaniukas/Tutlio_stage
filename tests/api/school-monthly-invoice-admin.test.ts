@@ -27,7 +27,10 @@ vi.mock('../../api/_lib/orgAdminAccess.js', () => ({
   requireOrgAdminAccess: async () => ({ ok: true, access: { userId: 'admin1', organizationId: state.adminOrg,
     role: 'custom', permissions: { 'finance.view': true, 'finance.edit': state.canEdit, 'sessions.edit': true } } }),
 }));
-vi.mock('../../api/_lib/invoiceNumber.js', () => ({ allocateInvoiceNumber: vi.fn() }));
+vi.mock('../../api/_lib/invoiceNumber.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/_lib/invoiceNumber.js')>();
+  return { ...actual, allocateInvoiceNumber: vi.fn() };
+});
 vi.mock('../../api/_lib/invoiceBranding.js', () => ({ resolveInvoiceBranding: async () => ({}) }));
 vi.mock('../../api/_lib/schoolMonthlyInvoicePdf.js', () => ({ generateSchoolMonthlyInvoicePdf: vi.fn(async () => new Uint8Array([1, 2, 3])) }));
 vi.mock('../../api/_lib/schoolMonthlyInvoiceEmail.js', () => ({ sendSchoolMonthlyInvoiceEmail: vi.fn() }));
@@ -248,6 +251,23 @@ describe('school monthly invoice review API', () => {
     expect((await request({ action: 'billing-decision', sessionId: 'lesson1', excluded: true, reason: 'Earlier end' })).status).toBe(409);
     expect(state.writes).toEqual([]);
   });
+  it('allows a supplemental invoice in the same period when other sessions are still unbilled', async () => {
+    state.tables.school_monthly_invoices.push({
+      id: 'invoice1', organization_id: 'org1', student_id: 'child1', payment_status: 'pending',
+      period_start: '2026-09-01', period_end: '2026-09-30', contract_id: null,
+      invoice_number: 'PAM-800', billed_session_ids: ['lesson1'],
+    });
+    state.tables.sessions.push({ ...state.tables.sessions[0], id: 'new-lesson' });
+    const preview = await request({ action: 'preview' });
+    expect(preview.status).toBe(200);
+    expect(preview.body.totalEur).toBe(12);
+    vi.mocked(allocateInvoiceNumber).mockResolvedValue('PAM-801');
+    vi.mocked(sendSchoolMonthlyInvoiceEmail).mockResolvedValue({ sent: true } as any);
+    const send = await request({ action: 'send', previewToken: preview.body.previewToken });
+    expect(send.status).toBe(200);
+    expect(send.body).toMatchObject({ invoiceNumber: 'PAM-801', emailSent: true });
+    expect(state.tables.school_monthly_invoices).toHaveLength(2);
+  });
   it('blocks issuance before allocating an invoice number when payer email is missing, even if child email exists', async () => {
     state.tables.students[0].payer_email = null; state.tables.students[0].email = 'child@example.com';
     const result = await request({ action: 'send', previewToken: 'irrelevant' });
@@ -300,17 +320,21 @@ describe('school monthly invoice review API', () => {
     expect(state.tables.sessions).toHaveLength(2);
     expect(state.writes).toEqual([]);
   });
-  it('requires review for deleted frozen individual subjects while keeping a valid agreement billable', async () => {
+  it('bills individual lessons by service name when the frozen subject id drifted', async () => {
     const lesson = state.tables.sessions[0];
-    lesson.class_group_id = null; lesson.subject_id = 'current-russian';
+    lesson.class_group_id = null;
+    lesson.subject_id = 'current-russian';
+    lesson.subject = { name: 'Rusų kalba Tauras Granickis', price: 20 };
+    state.tables.students[0].full_name = 'Granickis Tauras';
     const stale = { id: 'stale', organization_id: 'org1', student_id: 'child1', kind: 'extra_lessons',
       signing_status: 'signed', accepted_at: '2026-09-01T10:00:00Z', start_within_14_status: 'yes', class_group_id: null,
-      order_snapshot: { service_type: 'individual', subject_id: 'deleted-russian', start_date: '2026-09-07', end_date: '2027-06-01' } };
+      unit_price_eur: 20,
+      order_snapshot: { service_type: 'individual', subject_id: 'deleted-russian', service_name: 'Rusų kalba Tauras Granickis',
+        start_date: '2026-09-07', end_date: '2027-06-01' } };
     state.tables.school_contracts.push(stale);
-    expect((await request()).body).toMatchObject({ reviewSessionIds: ['lesson1'],
-      sessions: [{ included: false, reason: 'contract_review' }] });
+    expect((await request()).body).toMatchObject({ reviewSessionIds: [], sessions: [{ included: true, reason: 'payable' }] });
     const batch = await request({ action: 'batch-preview' });
-    expect(batch.body.payers[0].students[0]).toMatchObject({ reviewSessionIds: ['lesson1'], reviewReasons: ['contract_review'] });
+    expect(batch.body.payers[0].students[0]).toMatchObject({ reviewSessionIds: [], reviewReasons: [] });
     state.tables.subjects.push({ id: 'current-russian', tutor: { organization_id: 'org1' } });
     state.tables.school_contracts.push({ ...stale, id: 'valid',
       order_snapshot: { ...stale.order_snapshot, subject_id: 'current-russian' } });

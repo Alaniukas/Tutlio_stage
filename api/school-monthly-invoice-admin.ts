@@ -5,7 +5,7 @@ import {
   requireConsultationsAuth,
   serviceSupabase,
 } from './_lib/schoolConsultationsAccess.js';
-import { allocateInvoiceNumber } from './_lib/invoiceNumber.js';
+import { allocateInvoiceNumber, previewInvoiceNumber } from './_lib/invoiceNumber.js';
 import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
 import { generateSchoolMonthlyInvoicePdf } from './_lib/schoolMonthlyInvoicePdf.js';
 import { sendSchoolMonthlyInvoiceEmail } from './_lib/schoolMonthlyInvoiceEmail.js';
@@ -23,7 +23,7 @@ import { requireOrgAdminAccess } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { wallClockToUtc } from './_lib/recurringOccurrences.js';
 import { fetchAllRows } from '../src/lib/fetchAllRows.js';
-import { filterContractsForSchoolInvoiceReview, latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewSchoolInvoiceSession, schoolInvoiceSessionActivityName, schoolInvoiceSessionMatchesContract, type SchoolInvoiceReviewSession } from '../src/lib/schoolInvoiceSessionReview.js';
+import { filterContractsForSchoolInvoiceReview, latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewSchoolInvoiceSession, schoolInvoiceBillableSubjectKey, schoolInvoiceSessionActivityName, schoolInvoiceSessionMatchesContract, type SchoolInvoiceReviewSession } from '../src/lib/schoolInvoiceSessionReview.js';
 import { orgStudentIdentityGroupKey } from '../src/lib/orgStudentIdentity.js';
 import { groupSchoolPayerInvoicePreviews, schoolPayerKey, schoolStudentInvoiceSendable } from '../src/lib/schoolPayerInvoiceGroups.js';
 import { sessionYmdVilnius } from '../src/lib/schoolExtraLessonsBilling.js';
@@ -155,7 +155,7 @@ function composeDraftContext(input: {
     const sessionStudent = studentsById.get(String(session.student_id || '')) || student;
     const sessionContracts = contracts;
     const tutor = Array.isArray(session.tutor) ? session.tutor[0] : session.tutor;
-    const subjectId = String(session.subject_id || session.class_group_id || '').trim();
+    const subjectId = schoolInvoiceBillableSubjectKey(session, sessionContracts, sessionStudent.full_name);
     if (!subjectId) return [];
     return [{
       id: String(session.id),
@@ -166,7 +166,7 @@ function composeDraftContext(input: {
       subjectName: schoolInvoiceSessionActivityName(session, sessionContracts, sessionStudent.full_name),
       tutorId: String(session.tutor_id || ''),
       tutorName: String(tutor?.full_name || 'mokytojas'),
-      unitPriceEur: resolveSchoolInvoiceUnitPrice(session, sessionContracts),
+      unitPriceEur: resolveSchoolInvoiceUnitPrice(session, sessionContracts, sessionStudent.full_name),
     }];
   });
   const contractsById = new Map((contracts || []).map((row: any) => [String(row.id), row]));
@@ -287,7 +287,7 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
       .select('id, name, email, logo_url, brand_color, brand_color_secondary, features, stripe_account_id, stripe_onboarding_complete')
       .eq('id', organizationId).maybeSingle(),
     supabase.from('invoice_profiles')
-      .select('id, business_name, company_code, address, contact_email, contact_phone, bank_name, iban, invoice_series')
+      .select('id, business_name, company_code, address, contact_email, contact_phone, bank_name, iban, invoice_series, next_invoice_number')
       .eq('organization_id', organizationId).maybeSingle(),
     fetchAllRows<any>(sessionQuery),
   ]);
@@ -487,13 +487,23 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
   }
   const supabase = serviceSupabase();
   const invoiceStudentIds = draft.payerStudentIds?.length ? draft.payerStudentIds : [draft.student.id];
-  const { data: existingRows, error: existingError } = await supabase.from('school_monthly_invoices')
-    .select('id, invoice_number, student_id').in('student_id', invoiceStudentIds)
-    .eq('organization_id', draft.organizationId).eq('period_start', draft.periodStart)
-    .is('contract_id', null).neq('payment_status', 'cancelled');
-  if (existingError) throw new Error(existingError.message);
-  const existing = (existingRows || [])[0];
-  if (existing) throw new Error(`Šio laikotarpio sąskaita jau suformuota (${existing.invoice_number || existing.id}).`);
+  const draftSessionIds = [...new Set(draft.lines.flatMap((line) => line.sessionIds.map(String)))];
+  if (draftSessionIds.length) {
+    const { data: priorInvoices, error: priorError } = await supabase.from('school_monthly_invoices')
+      .select('id, invoice_number, billed_session_ids, extra_session_ids, lines:school_monthly_invoice_lines(session_id, session_ids)')
+      .in('student_id', invoiceStudentIds)
+      .eq('organization_id', draft.organizationId)
+      .neq('payment_status', 'cancelled');
+    if (priorError) throw new Error(priorError.message);
+    const billedSessionIds = new Set<string>((priorInvoices || []).flatMap((invoice: any) => [
+      ...(invoice.billed_session_ids || []),
+      ...(invoice.extra_session_ids || []),
+      ...(invoice.lines || []).flatMap((line: any) => [line.session_id, ...(line.session_ids || [])].filter(Boolean)),
+    ].map(String)));
+    if (draftSessionIds.some((sessionId) => billedSessionIds.has(sessionId))) {
+      throw new Error('Kai kurie užsiėmimai jau įtraukti į kitą sąskaitą. Atnaujinkite peržiūrą ir siųskite tik neįtrauktus užsiėmimus.');
+    }
+  }
   const invoiceNumber = await allocateInvoiceNumber(supabase, draft.profile.id);
   const pdf = await renderDraftPdf(draft, invoiceNumber, false);
   const { data: invoice, error: invoiceError } = await supabase.from('school_monthly_invoices').insert({
@@ -657,7 +667,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const error = item.row.reviewSessionIds.length
               ? 'Prieš išsiunčiant patvirtinkite peržiūros laukiančių užsiėmimų įvykimą arba neįtraukite jų į sąskaitą ir nurodykite priežastį.'
               : item.row.alreadyIssued
-                ? 'Šio laikotarpio sąskaita jau suformuota.'
+                ? 'Pasirinktu laikotarpiu visi užsiėmimai jau įtraukti į sąskaitą.'
                 : !String(item.row.payerEmail || '').trim()
                   ? 'Mokėtojo el. paštas nenurodytas. Pridėkite jį mokinio kortelėje; sąskaita vaikui nesiunčiama.'
                   : 'Pasirinktu laikotarpiu nėra patvirtintų apmokestinamų užsiėmimų. Peržiūrėkite lankomumą.';
@@ -672,7 +682,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             error: item.row.reviewSessionIds.length
               ? 'Prieš išsiunčiant patvirtinkite peržiūros laukiančių užsiėmimų įvykimą arba neįtraukite jų į sąskaitą ir nurodykite priežastį.'
               : item.row.alreadyIssued
-                ? 'Šio laikotarpio sąskaita jau suformuota.'
+                ? 'Pasirinktu laikotarpiu visi užsiėmimai jau įtraukti į sąskaitą.'
                 : 'Pasirinktu laikotarpiu nėra patvirtintų apmokestinamų užsiėmimų. Peržiūrėkite lankomumą.',
           });
         }
@@ -772,7 +782,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!draft.profile) throw new Error('Pirmiausia užpildykite mokyklos sąskaitų rekvizitus.');
     if (!draft.lines.length) throw new Error('Pasirinktu laikotarpiu nėra patvirtintų apmokestinamų užsiėmimų. Peržiūrėkite lankomumą.');
     if (body.action === 'preview') {
-      const pdf = await renderDraftPdf(draft, 'PAM-PERŽIŪRA', true);
+      const pdf = await renderDraftPdf(draft, previewInvoiceNumber(draft.profile) || 'PERŽIŪRA', true);
       return res.status(200).json({
         ok: true,
         previewToken: token,
@@ -801,7 +811,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Nepavyko išsiųsti sąskaitos.';
-      const conflict = /pasikeitė|jau suformuota|patvirtinkite/i.test(message);
+      const conflict = /pasikeitė|jau įtraukti|patvirtinkite/i.test(message);
       return res.status(conflict ? 409 : 400).json({ error: message });
     }
   } catch (error) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewSchoolInvoiceSession, schoolInvoiceContractReason, schoolInvoiceSessionActivityName, type SchoolInvoiceContractWindow } from '../../src/lib/schoolInvoiceSessionReview';
+import { buildSchoolLessonInvoiceLines } from '../../src/lib/schoolMonthlyInvoiceLines';
+import { latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewSchoolInvoiceSession, schoolInvoiceBillableSubjectKey, schoolInvoiceContractReason, schoolInvoiceSessionActivityName, type SchoolInvoiceContractWindow } from '../../src/lib/schoolInvoiceSessionReview';
 
 const session = { id: 's1', class_group_id: 'group1', subject_id: 'math',
   start_time: '2026-09-14T13:00:00Z', end_time: '2026-09-14T14:00:00Z',
@@ -105,15 +106,21 @@ describe('school invoice session review', () => {
       .toMatchObject({ included: false, reason: 'already_invoiced', canConfirm: false });
   });
 
-  it('holds unmatched individual lessons when a signed agreement references a missing subject', () => {
-    const individual = { ...session, class_group_id: null, subject_id: 'replacement-subject' };
-    const stale = { ...contract, class_group_id: null, missingIndividualSubject: true,
-      order_snapshot: { ...contract.order_snapshot, service_type: 'individual', subject_id: 'deleted-subject' } as any };
-    expect(reviewSchoolInvoiceSession(individual, [stale], undefined, false))
-      .toMatchObject({ included: false, reason: 'contract_review' });
+  it('matches individual lessons by service name when the frozen subject id drifted', () => {
+    const stale = { ...contract, class_group_id: null, missingIndividualSubject: true, unit_price_eur: 20,
+      order_snapshot: { ...contract.order_snapshot, service_type: 'individual', subject_id: 'deleted-subject',
+        service_name: 'Rusų kalba Tauras Granickis', start_date: '2026-09-01', end_date: '2027-06-01' } as any };
+    const russian = { ...session, class_group_id: null, subject_id: 'current-russian', price: 0,
+      subject: { name: 'Rusų kalba Tauras Granickis', price: 20 } };
+    expect(reviewSchoolInvoiceSession(russian, [stale], undefined, false, undefined, 'Granickis Tauras'))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 20 });
+    const unrelated = { ...session, class_group_id: null, subject_id: 'other-subject', price: 15,
+      subject: { name: 'Kita individuali paslauga', price: 15 } };
+    expect(reviewSchoolInvoiceSession(unrelated, [stale], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 15 });
     const valid = { ...stale, id: 'valid', missingIndividualSubject: false,
-      order_snapshot: { ...stale.order_snapshot, subject_id: 'replacement-subject' } as any };
-    expect(reviewSchoolInvoiceSession(individual, [stale, valid], undefined, false))
+      order_snapshot: { ...stale.order_snapshot, subject_id: 'current-russian' } as any };
+    expect(reviewSchoolInvoiceSession(russian, [stale, valid], undefined, false, undefined, 'Granickis Tauras'))
       .toMatchObject({ included: true, reason: 'payable' });
     expect(schoolInvoiceContractReason(session, [stale])).toBe('payable');
   });
@@ -175,5 +182,263 @@ describe('school invoice session review', () => {
       subject: { name: 'Alina Armonienė Lietuvių kalba individuali pamoka', price: 20 } };
     expect(reviewSchoolInvoiceSession(individual, [], undefined, false))
       .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 20 });
+  });
+
+  it('assigns a billable subject key to an orphan group session matched by schedule', () => {
+    const matematika = {
+      ...contract,
+      class_group_id: null,
+      order_snapshot: {
+        service_type: 'group',
+        group_id: 'old-group',
+        group_name: 'Ieva Šimkonytė Matematika 5 klasė',
+        service_name: 'Ieva Šimkonytė Matematika 5 klasė',
+        tutor_name: 'Ieva Šimkonytė',
+        start_date: '2026-09-11',
+        schedule_slots: [{ weekday: 5, start_time: '15:00', end_time: '16:00' }],
+      } as any,
+    };
+    expect(schoolInvoiceBillableSubjectKey({
+      id: 'orphan-math',
+      class_group_id: null,
+      subject_id: null,
+      start_time: '2026-09-11T12:00:00Z',
+      tutor: { full_name: 'Ieva Šimkonytė' },
+    }, [matematika])).toBe('old-group');
+  });
+
+  it('bills an attended group lesson before the session row is linked to a class group', () => {
+    const matematika = {
+      ...contract,
+      id: 'math-contract',
+      class_group_id: null,
+      unit_price_eur: 6,
+      accepted_at: '2026-09-11T10:04:47Z',
+      start_within_14_status: 'yes' as const,
+      order_snapshot: {
+        service_type: 'group',
+        group_id: 'old-group',
+        group_name: 'Ieva Šimkonytė Matematika 5 klasė',
+        service_name: 'Ieva Šimkonytė Matematika 5 klasė',
+        tutor_name: 'Ieva Šimkonytė',
+        start_date: '2026-09-11',
+        end_date: '2026-10-09',
+        unit_price_eur: 6,
+        schedule_slots: [{ weekday: 5, start_time: '15:00', end_time: '16:00' }],
+      } as any,
+    };
+    const attended = {
+      ...session,
+      id: 'orphan-math',
+      class_group_id: null,
+      subject_id: null,
+      class_group: null,
+      subject: null,
+      start_time: '2026-09-11T12:00:00Z',
+      end_time: '2026-09-11T13:00:00Z',
+      status: 'completed',
+      tutor: { full_name: 'Ieva Šimkonytė' },
+      tutor_joined_at: '2026-09-11T12:03:00Z',
+      student_joined_at: '2026-09-11T11:58:00Z',
+      status_confirmed_at: '2026-10-01T06:52:00Z',
+      price: 0,
+    };
+    expect(reviewSchoolInvoiceSession(attended, [matematika], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 6 });
+  });
+
+  it('bills a group lesson when the class group row was recreated after signing', () => {
+    const matematika = {
+      ...contract,
+      id: 'math-contract',
+      class_group_id: null,
+      unit_price_eur: 6,
+      accepted_at: '2026-09-11T10:04:47Z',
+      start_within_14_status: 'yes' as const,
+      order_snapshot: {
+        service_type: 'group',
+        group_id: 'old-group',
+        group_name: 'Ieva Šimkonytė Matematika 5 klasė',
+        service_name: 'Ieva Šimkonytė Matematika 5 klasė',
+        tutor_name: 'Ieva Šimkonytė',
+        start_date: '2026-09-11',
+        end_date: '2026-10-09',
+        unit_price_eur: 6,
+        schedule_slots: [{ weekday: 5, start_time: '15:30', end_time: '16:30' }],
+      } as any,
+    };
+    const attended = {
+      ...session,
+      id: 'relinked-math',
+      class_group_id: 'new-group',
+      class_group: { name: 'Ieva Šimkonytė Matematika 5 klasė' },
+      subject_id: 'math-subject',
+      subject: { name: 'Matematika', price: 0 },
+      start_time: '2026-09-25T12:30:00Z',
+      end_time: '2026-09-25T13:30:00Z',
+      status: 'completed',
+      tutor: { full_name: 'Ieva Šimkonytė' },
+      tutor_joined_at: '2026-09-25T12:32:00Z',
+      student_joined_at: '2026-09-25T12:24:00Z',
+      status_confirmed_at: '2026-10-01T05:56:00Z',
+      price: 0,
+    };
+    expect(reviewSchoolInvoiceSession(attended, [matematika], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 6 });
+  });
+
+  it('groups pre-link individual sessions with later rows under the same contract subject', () => {
+    const russian = {
+      ...contract,
+      id: 'russian-sent',
+      class_group_id: null,
+      signing_status: 'sent',
+      accepted_at: null,
+      unit_price_eur: 20,
+      order_snapshot: {
+        service_type: 'individual',
+        subject_id: 'russian-subject',
+        service_name: 'Olga Pekorienė Rusų kalba Individuali Lukrecija Daukaitė',
+        tutor_name: 'Olga Pekorienė',
+        start_date: '2026-09-10',
+        unit_price_eur: 20,
+      } as any,
+    };
+    const orphan = {
+      ...session,
+      id: 'russian-orphan',
+      class_group_id: null,
+      subject_id: null,
+      subject: null,
+      start_time: '2026-09-10T06:00:00Z',
+      end_time: '2026-09-10T07:00:00Z',
+      status: 'completed',
+      tutor: { full_name: 'Olga Pekorienė' },
+      tutor_joined_at: '2026-09-10T05:57:00Z',
+      student_joined_at: '2026-09-10T05:59:00Z',
+      status_confirmed_at: '2026-09-10T07:00:00Z',
+      price: 20,
+    };
+    const linked = {
+      ...orphan,
+      id: 'russian-linked',
+      subject_id: 'russian-subject',
+      subject: { name: 'Olga Pekorienė Rusų kalba Individuali Lukrecija Daukaitė', price: 20 },
+      start_time: '2026-09-17T06:00:00Z',
+      end_time: '2026-09-17T07:00:00Z',
+    };
+    expect(schoolInvoiceBillableSubjectKey(orphan, [russian], 'Daukaitė Lukrecija')).toBe('russian-subject');
+    expect(reviewSchoolInvoiceSession(orphan, [russian], undefined, false, undefined, 'Daukaitė Lukrecija').subjectName)
+      .toBe('Olga Pekorienė Rusų kalba Individuali Lukrecija Daukaitė · sutartis nepasirašyta');
+    expect(schoolInvoiceBillableSubjectKey(linked, [russian], 'Daukaitė Lukrecija')).toBe('russian-subject');
+  });
+
+  it('end-to-end: pre-link and linked individual sessions merge into one invoice line', () => {
+    const russian = {
+      ...contract,
+      id: 'russian-sent',
+      class_group_id: null,
+      signing_status: 'sent',
+      accepted_at: null,
+      unit_price_eur: 20,
+      order_snapshot: {
+        service_type: 'individual',
+        subject_id: 'russian-subject',
+        service_name: 'Olga Pekorienė Rusų kalba Individuali Lukrecija Daukaitė',
+        tutor_name: 'Olga Pekorienė',
+        start_date: '2026-09-10',
+        unit_price_eur: 20,
+      } as any,
+    };
+    const rows = [
+      {
+        id: 'russian-orphan',
+        class_group_id: null,
+        subject_id: null,
+        subject: null,
+        start_time: '2026-09-10T06:00:00Z',
+        end_time: '2026-09-10T07:00:00Z',
+        status: 'completed',
+        tutor_id: 'olga',
+        tutor: { full_name: 'Olga Pekorienė' },
+        tutor_joined_at: '2026-09-10T05:57:00Z',
+        student_joined_at: '2026-09-10T05:59:00Z',
+        status_confirmed_at: '2026-09-10T07:00:00Z',
+        price: 20,
+      },
+      {
+        id: 'russian-2',
+        class_group_id: null,
+        subject_id: 'russian-subject',
+        subject: { name: 'Olga Pekorienė Rusų kalba Individuali Lukrecija Daukaitė', price: 20 },
+        start_time: '2026-09-17T06:00:00Z',
+        end_time: '2026-09-17T07:00:00Z',
+        status: 'completed',
+        tutor_id: 'olga',
+        tutor: { full_name: 'Olga Pekorienė' },
+        tutor_joined_at: '2026-09-17T06:00:00Z',
+        student_joined_at: '2026-09-17T06:00:00Z',
+        status_confirmed_at: '2026-09-18T08:20:00Z',
+        price: 20,
+      },
+      {
+        id: 'russian-3',
+        class_group_id: null,
+        subject_id: 'russian-subject',
+        subject: { name: 'Olga Pekorienė Rusų kalba Individuali Lukrecija Daukaitė', price: 20 },
+        start_time: '2026-09-24T06:00:00Z',
+        end_time: '2026-09-24T07:00:00Z',
+        status: 'completed',
+        tutor_id: 'olga',
+        tutor: { full_name: 'Olga Pekorienė' },
+        tutor_joined_at: '2026-09-24T05:59:00Z',
+        student_joined_at: '2026-09-24T06:00:00Z',
+        status_confirmed_at: '2026-09-24T07:00:00Z',
+        price: 20,
+      },
+    ];
+    const billable = rows.flatMap((row) => {
+      const review = reviewSchoolInvoiceSession(row, [russian], undefined, false, Date.parse('2026-10-01T00:00:00Z'), 'Daukaitė Lukrecija');
+      if (!review.included) return [];
+      const subjectId = schoolInvoiceBillableSubjectKey(row, [russian], 'Daukaitė Lukrecija');
+      if (!subjectId) return [];
+      return [{
+        id: row.id,
+        studentId: 'lukrecija',
+        studentName: 'Daukaitė Lukrecija',
+        classGroupId: null,
+        subjectId,
+        subjectName: review.subjectName,
+        tutorId: row.tutor_id,
+        tutorName: 'Olga Pekorienė',
+        unitPriceEur: review.unitPriceEur,
+      }];
+    });
+    expect(billable).toHaveLength(3);
+    const lines = buildSchoolLessonInvoiceLines(billable);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      quantity: 3,
+      unitPriceEur: 20,
+      originalAmountEur: 60,
+      amountEur: 60,
+      sessionIds: ['russian-orphan', 'russian-2', 'russian-3'],
+    });
+    expect(lines[0].subjectName).toContain('Rusų kalba Individuali Lukrecija Daukaitė');
+  });
+
+  it('does not bill a trial lesson even when attendance is confirmed', () => {
+    const attended = {
+      ...session,
+      class_group_id: null,
+      subject_id: 'trial-subject',
+      subject: { name: 'Bandomoji pamoka', price: 6, is_trial: true },
+      status: 'completed',
+      student_joined_at: '2026-09-10T08:59:00Z',
+      status_confirmed_at: '2026-09-10T10:00:00Z',
+      price: 0,
+    };
+    expect(reviewSchoolInvoiceSession(attended, [contract], undefined, false))
+      .toMatchObject({ included: false, reason: 'free', unitPriceEur: 0 });
   });
 });

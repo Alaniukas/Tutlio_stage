@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
+import { formatSchoolInvoiceNumberLabel } from './invoiceNumber.js';
 import { resolveInvoiceFontPath, type InvoicePdfBranding } from './invoicePdf.js';
 
 export type SchoolMonthlyInvoicePdfLine = {
@@ -259,7 +260,7 @@ export async function generateSchoolMonthlyInvoicePdf(data: SchoolMonthlyInvoice
   };
   center('SĄSKAITA FAKTŪRA', 12);
   center('UŽ SUTEIKTAS PASLAUGAS', 12);
-  center(data.invoiceNumber.startsWith('PAM') ? data.invoiceNumber.replace(/^PAM[- ]?/, 'PAM NR. ') : `PAM NR. ${data.invoiceNumber}`, 10, true);
+  center(formatSchoolInvoiceNumberLabel(data.invoiceNumber), 10, true);
   center('(NR. BŪTINA įrašyti į bankinio pavedimo mokėjimo paskirtį)', 8);
 
   y = titleY - 9;
