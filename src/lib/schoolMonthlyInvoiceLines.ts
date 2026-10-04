@@ -1,3 +1,5 @@
+import { findLessonDiscountForSession } from './schoolMonthlyInvoiceDiscounts.js';
+
 export type InvoiceLineSource =
   | 'extra_base'
   | 'extra_overage'
@@ -40,6 +42,8 @@ export type SchoolLessonDiscountInput = {
   value: number;
   subjectId: string;
   tutorId?: string | null;
+  classGroupId?: string | null;
+  agreementId?: string | null;
   note?: string | null;
 };
 
@@ -100,10 +104,11 @@ export function buildSchoolLessonInvoiceLines(
     const quantity = rows.length;
     const unitPriceEur = money(first.unitPriceEur);
     const originalAmountEur = money(unitPriceEur * quantity);
-    const discount = discounts.find((candidate) => (
-      candidate.subjectId === first.subjectId
-      && (!candidate.tutorId || candidate.tutorId === first.tutorId)
-    ));
+    const discount = findLessonDiscountForSession(discounts, {
+      subjectId: first.subjectId,
+      tutorId: first.tutorId,
+      classGroupId: first.classGroupId || null,
+    });
     const applied = invoiceLineDiscount(originalAmountEur, discount);
     return {
       description: `${first.subjectName} - mokytojas ${first.tutorName}`,

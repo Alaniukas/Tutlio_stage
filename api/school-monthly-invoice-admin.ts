@@ -27,6 +27,11 @@ import { latestSchoolBillingDecisions, resolveSchoolInvoiceUnitPrice, reviewScho
 import { orgStudentIdentityGroupKey } from '../src/lib/orgStudentIdentity.js';
 import { groupSchoolPayerInvoicePreviews, schoolPayerKey, schoolStudentInvoiceSendable } from '../src/lib/schoolPayerInvoiceGroups.js';
 import { sessionYmdVilnius } from '../src/lib/schoolExtraLessonsBilling.js';
+import {
+  mapAcceptedDiscountAgreement,
+  mapSavedLessonDiscount,
+  mergeLessonDiscountInputs,
+} from '../src/lib/schoolMonthlyInvoiceDiscounts.js';
 
 type RequestBody = {
   action?: 'options' | 'review' | 'billing-decision' | 'preview' | 'send' | 'batch-preview' | 'send-batch';
@@ -95,6 +100,7 @@ function composeDraftContext(input: {
   profile: any;
   sessions: any[];
   savedDiscounts: any[];
+  acceptedDiscountAgreements: any[];
   storedContracts: any[];
   decisions: any[];
   invoices: any[];
@@ -106,7 +112,7 @@ function composeDraftContext(input: {
 }): DraftContext | null {
   const {
     organizationId, studentIds, studentsById, org, profile, sessions, savedDiscounts,
-    storedContracts, decisions, invoices, liveIndividualSubjectIds, groupEvidence,
+    acceptedDiscountAgreements, storedContracts, decisions, invoices, liveIndividualSubjectIds, groupEvidence,
     periodStart, periodEnd, dueDate,
   } = input;
   const studentRecords = studentIds.map((id) => studentsById.get(id)).filter(Boolean);
@@ -163,13 +169,14 @@ function composeDraftContext(input: {
       unitPriceEur: resolveSchoolInvoiceUnitPrice(session, sessionContracts),
     }];
   });
-  const persistent: SchoolLessonDiscountInput[] = (savedDiscounts || []).map((row: any) => ({
-    type: row.discount_type === 'amount' ? 'amount' : 'percent',
-    value: row.discount_type === 'amount' ? Number(row.amount_eur || 0) : Number(row.percent || 0),
-    subjectId: String(row.subject_id),
-    tutorId: row.tutor_id ? String(row.tutor_id) : null,
-    note: row.note || null,
-  }));
+  const contractsById = new Map((contracts || []).map((row: any) => [String(row.id), row]));
+  const persistent: SchoolLessonDiscountInput[] = mergeLessonDiscountInputs(
+    (savedDiscounts || []).map((row: any) => mapSavedLessonDiscount(row)),
+    (acceptedDiscountAgreements || []).map((row: any) => mapAcceptedDiscountAgreement(
+      row,
+      contractsById.get(String(row.contract_id || '')),
+    )),
+  );
   const lines = buildSchoolLessonInvoiceLines(billable, persistent);
   if (!reviewSessions.length) return null;
   return {
@@ -295,7 +302,7 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
     : [...new Set((allSessions || []).map((row) => String(row.student_id || '')).filter(Boolean))];
   if (!studentIds.length) return { drafts: [] };
 
-  const [studentsRes, discountsRes, contractsRes, decisionsRes, invoicesRes] = await Promise.all([
+  const [studentsRes, discountsRes, discountAgreementsRes, contractsRes, decisionsRes, invoicesRes] = await Promise.all([
     supabase.from('students')
       .select('id, organization_id, full_name, grade, email, phone, payer_name, payer_email, payer_phone')
       .in('id', studentIds).eq('organization_id', organizationId),
@@ -305,6 +312,12 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
       .lte('valid_from', periodEnd)
       .or(`valid_until.is.null,valid_until.gte.${periodStart}`)
       .order('created_at', { ascending: false }),
+    supabase.from('school_discount_agreements')
+      .select('id, student_id, contract_id, subject_id, tutor_id, discount_type, discount_value, valid_from, valid_until, note, agreement_number, status, accepted_at')
+      .in('student_id', studentIds).eq('organization_id', organizationId).eq('status', 'accepted')
+      .lte('valid_from', periodEnd)
+      .gte('valid_until', periodStart)
+      .order('accepted_at', { ascending: false }),
     supabase.from('school_contracts')
       .select('id, student_id, class_group_id, signing_status, accepted_at, withdrawal_requested_at, terminated_at, start_within_14_status, start_within_14_days, unit_price_eur, order_snapshot, suspension_started_at, suspension_until, suspension_resumed_at')
       .in('student_id', studentIds).eq('organization_id', organizationId).eq('kind', 'extra_lessons'),
@@ -315,7 +328,7 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
       .select('id, student_id, contract_id, period_start, period_end, billing_model, billed_session_ids, extra_session_ids, lines:school_monthly_invoice_lines(session_id,session_ids)')
       .in('student_id', studentIds).eq('organization_id', organizationId).neq('payment_status', 'cancelled'),
   ]);
-  for (const result of [studentsRes, discountsRes, contractsRes, decisionsRes, invoicesRes]) if (result.error) {
+  for (const result of [studentsRes, discountsRes, discountAgreementsRes, contractsRes, decisionsRes, invoicesRes]) if (result.error) {
     throw new Error(result.error.message.includes('school_session_billing_decisions')
       ? 'Lankomumo ir sąskaitos peržiūrai pirmiausia reikia pritaikyti duomenų bazės migraciją.'
       : result.error.message);
@@ -325,6 +338,7 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
   const allowedStudentIds = new Set(studentIds);
   const sessions = (allSessions || []).filter((row) => allowedStudentIds.has(String(row.student_id || '')));
   const discounts = discountsRes.data || [];
+  const discountAgreements = discountAgreementsRes.data || [];
   const contracts = contractsRes.data || [];
   const decisions = decisionsRes.data || [];
   const invoices = invoicesRes.data || [];
@@ -360,6 +374,7 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
     profile,
     sessions: sessions.filter((row) => ids.includes(String(row.student_id || ''))),
     savedDiscounts: discounts.filter((row: any) => ids.includes(String(row.student_id || ''))),
+    acceptedDiscountAgreements: discountAgreements.filter((row: any) => ids.includes(String(row.student_id || ''))),
     storedContracts: contracts.filter((row: any) => ids.includes(String(row.student_id || ''))),
     decisions: decisions.filter((row: any) => ids.includes(String(row.student_id || ''))),
     invoices: invoices.filter((row: any) => ids.includes(String(row.student_id || ''))),

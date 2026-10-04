@@ -10,6 +10,7 @@ import {
   schoolDiscountContractLinks,
   schoolDiscountPdfPath,
   signSchoolDiscountPdf,
+  syncStudentLessonDiscountFromAgreement,
 } from './_lib/schoolDiscountAgreementShared.js';
 import { SCHOOL_CONTRACTS_BUCKET } from './_lib/schoolContractPdfPath.js';
 import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
@@ -210,6 +211,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       context.agreement = current;
     } else context.agreement = acceptedAgreement;
+    try {
+      await syncStudentLessonDiscountFromAgreement(supabase, context.agreement);
+    } catch (syncError) {
+      console.error('[school-discount-accept] discount sync failed', syncError);
+    }
     const pdfUrl = await signSchoolDiscountPdf(supabase, context.agreement.pdf_path);
     return res.status(200).json(publicPayload(context, contractLinks, pdfUrl));
   } catch (error) {

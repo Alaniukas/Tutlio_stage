@@ -106,7 +106,7 @@ beforeEach(() => {
       start_time: '2026-09-14T13:00:00Z', end_time: '2026-09-14T14:00:00Z', status: 'completed', price: 12,
       tutor_joined_at: '2026-09-14T13:00:00Z', status_confirmed_at: '2026-09-14T14:05:00Z',
       tutor: { full_name: 'Teacher One', organization_id: 'org1' }, subject: { name: 'Math' } }],
-    subjects: [], student_lesson_discounts: [], school_contracts: [], school_session_billing_decisions: [], school_monthly_invoices: [],
+    subjects: [], student_lesson_discounts: [], school_discount_agreements: [], school_contracts: [], school_session_billing_decisions: [], school_monthly_invoices: [],
   };
 });
 
@@ -598,6 +598,55 @@ describe('school monthly invoice batch by payer', () => {
     expect(result.body.skippedCount).toBe(1);
     expect(result.body.skipped[0]).toMatchObject({ studentId: 'palaima', error: expect.stringContaining('patvirtinkite') });
     expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies a confirmed discount addendum when issuing a monthly invoice', async () => {
+    const original = state.tables.sessions[0];
+    state.tables.sessions = Array.from({ length: 3 }, (_, index) => ({
+      ...original,
+      id: `russian-${index}`,
+      price: 6,
+      class_group_id: 'group-russian',
+      class_group: { name: 'Rusų kalba 11 klasė' },
+      tutor_id: 'teacher1',
+      subject_id: null,
+      subject: null,
+    }));
+    state.tables.school_contracts.push({
+      id: 'contract-russian',
+      organization_id: 'org1',
+      student_id: 'child1',
+      kind: 'extra_lessons',
+      signing_status: 'signed',
+      accepted_at: '2026-09-01T00:00:00Z',
+      start_within_14_status: 'yes',
+      class_group_id: 'group-russian',
+      unit_price_eur: 6,
+      order_snapshot: { service_type: 'group', group_id: 'group-russian', start_date: '2026-09-01', end_date: '2027-06-01' },
+    });
+    state.tables.school_discount_agreements.push({
+      id: 'discount-1',
+      student_id: 'child1',
+      contract_id: 'contract-russian',
+      organization_id: 'org1',
+      subject_id: null,
+      tutor_id: 'teacher1',
+      discount_type: 'percent',
+      discount_value: 100,
+      valid_from: '2026-09-01',
+      valid_until: '2027-06-30',
+      agreement_number: 'NPR-20261001-097BB0',
+      status: 'accepted',
+      accepted_at: '2026-09-14T10:00:00Z',
+    });
+    const preview = await request({ action: 'preview' });
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({
+      subtotalEur: 18,
+      discountAmountEur: 18,
+      totalEur: 0,
+      lines: [{ quantity: 3, originalAmountEur: 18, discountAmountEur: 18, amountEur: 0, discountType: 'percent', discountValue: 100 }],
+    });
   });
 
   it('reports an explicitly requested child whose payer changes after review', async () => {

@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { SCHOOL_CONTRACTS_BUCKET } from './schoolContractPdfPath.js';
 import { extractSchoolContractStoragePath } from './schoolContractPdfPath.js';
 import { ensureExtraLessonsCompletionToken } from './extraLessonsCompletionToken.js';
+import { discountAgreementNote } from '../../src/lib/schoolMonthlyInvoiceDiscounts.js';
 
 export const SCHOOL_DISCOUNT_ACCEPTANCE_VERSION = '2026-09-28-v2';
 
@@ -139,6 +140,42 @@ export async function loadSchoolDiscountAgreementByToken(
     .maybeSingle();
   if (error || !data) return null;
   return data;
+}
+
+/** Keeps recurring lesson discounts in sync for monthly invoice review. */
+export async function syncStudentLessonDiscountFromAgreement(
+  supabase: SupabaseClient,
+  agreement: {
+    id: string;
+    organization_id: string;
+    student_id: string;
+    subject_id?: string | null;
+    tutor_id?: string | null;
+    discount_type: string;
+    discount_value: number | string;
+    valid_from: string;
+    valid_until: string;
+    note?: string | null;
+    agreement_number?: string | null;
+  },
+): Promise<void> {
+  if (!agreement.subject_id) return;
+  const discountType = agreement.discount_type === 'amount' ? 'amount' : 'percent';
+  const value = Number(agreement.discount_value || 0);
+  const { error } = await supabase.from('student_lesson_discounts').upsert({
+    organization_id: agreement.organization_id,
+    student_id: agreement.student_id,
+    subject_id: agreement.subject_id,
+    tutor_id: agreement.tutor_id || null,
+    discount_type: discountType,
+    percent: discountType === 'percent' ? value : null,
+    amount_eur: discountType === 'amount' ? value : null,
+    valid_from: agreement.valid_from,
+    valid_until: agreement.valid_until,
+    note: discountAgreementNote(agreement),
+    agreement_id: agreement.id,
+  }, { onConflict: 'agreement_id' });
+  if (error) throw error;
 }
 
 export async function signSchoolDiscountPdf(
