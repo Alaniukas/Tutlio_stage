@@ -148,7 +148,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const backgroundDetails = details || await loadStashedStaffDetails(supabase, agreement.organization_id, agreement.id);
   await completeStaffConsentPdfGeneration({
     supabase,
-    contract: { ...contract, staff_consent_answers: answers },
+    contract,
     agreement,
     answers,
     details: backgroundDetails,
