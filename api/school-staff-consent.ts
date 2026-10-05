@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
+import { waitUntil } from '@vercel/functions';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   validateConsentAnswers,
@@ -126,6 +127,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 400, { error: 'Įveskite gyvenamosios vietos adresą ir 11 skaitmenų asmens kodą.' });
   }
 
+  const { data: saved, error: saveError } = await supabase.from('school_contracts').update({
+    staff_consent_answers: answers,
+  }).eq('id', contract.id).is('staff_consent_answers', null).is('staff_revoked_at', null).select('id').maybeSingle();
+  if (saveError) {
+    console.error('[school-staff-consent] answers save failed', saveError.message || 'unknown');
+    return json(res, 502, { error: 'Nepavyko išsaugoti atsakymų. Bandykite dar kartą.' });
+  }
+  if (!saved) return json(res, 200, { ok: true });
+
   if (!agreement.pdf_url && details) {
     const { error: stashError } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).upload(
       staffPersonalDetailsStoragePath(agreement.organization_id, agreement.id),
@@ -134,19 +144,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
     if (stashError) {
       console.error('[school-staff-consent] details stash failed', stashError.message || 'unknown');
-      return json(res, 502, { error: 'Nepavyko išsaugoti atsakymų. Bandykite dar kartą.' });
     }
   }
 
-  const { data: saved, error: saveError } = await supabase.from('school_contracts').update({
-    staff_consent_answers: answers,
-  }).eq('id', contract.id).is('staff_consent_answers', null).is('staff_revoked_at', null).select('id').maybeSingle();
-  if (saveError) return json(res, 502, { error: 'Nepavyko išsaugoti atsakymų. Bandykite dar kartą.' });
-  if (!saved) return json(res, 200, { ok: true });
-
   json(res, 200, { ok: true });
   const backgroundDetails = details || await loadStashedStaffDetails(supabase, agreement.organization_id, agreement.id);
-  await completeStaffConsentPdfGeneration({
+  const background = completeStaffConsentPdfGeneration({
     supabase,
     contract,
     agreement,
@@ -155,4 +158,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     schoolName: String(org?.name || 'Mokykla'),
     source: 'employee_submit',
   });
+  try {
+    waitUntil(background);
+  } catch {
+    await background;
+  }
 }

@@ -56,19 +56,62 @@ export interface StaffConsentPdfContext {
   details: { address: string; personalCode: string } | null;
 }
 
-export async function persistStaffConsentPdfs(ctx: StaffConsentPdfContext): Promise<void> {
-  const { supabase, contract, agreement, answers, details } = ctx;
-  let agreementPdf: Buffer | null;
-  let consentPdf: Buffer;
+async function persistStaffAgreementPdfIfNeeded(
+  ctx: StaffConsentPdfContext,
+): Promise<StaffConsentPdfContext['agreement']> {
+  const { supabase, contract, agreement, details } = ctx;
+  if (agreement.pdf_url || !details) return agreement;
+
+  let agreementPdf: Buffer;
   try {
-    agreementPdf = !agreement.pdf_url && details ? await renderStaffDocumentPdf('confidentiality', {
+    agreementPdf = await renderStaffDocumentPdf('confidentiality', {
       name: String(agreement.counterparty_name || ''),
       employmentContractNumber: String(contract.staff_employment_contract_number || ''),
       employmentContractDate: String(contract.staff_employment_contract_date || ''),
       date: new Date(),
       address: details.address,
       personalCode: details.personalCode,
-    }) : null;
+    });
+  } catch (error) {
+    console.error('[school-staff-consent] agreement render failed', error instanceof Error ? error.name : 'unknown');
+    throw new Error('Nepavyko paruošti susitarimo PDF.');
+  }
+
+  const agreementPath = schoolContractPdfStoragePath({
+    organizationId: agreement.organization_id,
+    contractId: agreement.id,
+    contractNumber: agreement.contract_number,
+  }).replace(/\.pdf$/i, `-${randomUUID()}.pdf`);
+  let uploadedAgreement = false;
+  try {
+    const { error: uploadError } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).upload(agreementPath, agreementPdf, {
+      contentType: 'application/pdf', upsert: false,
+    });
+    if (uploadError) throw uploadError;
+    uploadedAgreement = true;
+    const { data: updated, error: updateError } = await supabase.from('school_contracts').update({
+      pdf_url: agreementPath,
+      signing_status: 'awaiting_school_signature',
+    }).eq('id', agreement.id).eq('signing_status', 'draft').is('pdf_url', null)
+      .is('staff_revoked_at', null).select('id').maybeSingle();
+    if (updateError) throw updateError;
+    if (!updated) throw new Error('Susitarimas jau pakeistas.');
+    uploadedAgreement = false;
+    await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET)
+      .remove([staffPersonalDetailsStoragePath(agreement.organization_id, agreement.id)]);
+    return { ...agreement, pdf_url: agreementPath };
+  } catch (error) {
+    console.error('[school-staff-consent] agreement save failed', error instanceof Error ? error.name : 'unknown');
+    throw error;
+  } finally {
+    if (uploadedAgreement) await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).remove([agreementPath]);
+  }
+}
+
+async function persistStaffConsentPdfOnly(ctx: StaffConsentPdfContext): Promise<void> {
+  const { supabase, contract, answers } = ctx;
+  let consentPdf: Buffer;
+  try {
     consentPdf = await renderStaffDocumentPdf('consent', {
       name: String(contract.counterparty_name || ''),
       employmentContractNumber: String(contract.staff_employment_contract_number || ''),
@@ -76,48 +119,22 @@ export async function persistStaffConsentPdfs(ctx: StaffConsentPdfContext): Prom
       date: new Date(),
     }, answers);
   } catch (error) {
-    console.error('[school-staff-consent] document render failed', error instanceof Error ? error.name : 'unknown');
-    throw new Error('Nepavyko paruošti dokumentų PDF.');
+    console.error('[school-staff-consent] consent render failed', error instanceof Error ? error.name : 'unknown');
+    throw new Error('Nepavyko paruošti sutikimo PDF.');
   }
 
-  const agreementPath = agreementPdf ? schoolContractPdfStoragePath({
-    organizationId: agreement.organization_id,
-    contractId: agreement.id,
-    contractNumber: agreement.contract_number,
-  }).replace(/\.pdf$/i, `-${randomUUID()}.pdf`) : null;
   const consentPath = schoolContractPdfStoragePath({
     organizationId: contract.organization_id,
     contractId: contract.id,
     contractNumber: contract.contract_number,
   }).replace(/\.pdf$/i, `-${randomUUID()}.pdf`);
-  let uploadedAgreement = false;
   let uploadedConsent = false;
   try {
-    if (agreementPath && agreementPdf) {
-      const { error: uploadError } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).upload(agreementPath, agreementPdf, {
-        contentType: 'application/pdf', upsert: false,
-      });
-      if (uploadError) throw uploadError;
-      uploadedAgreement = true;
-    }
     const { error: uploadError } = await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).upload(consentPath, consentPdf, {
       contentType: 'application/pdf', upsert: false,
     });
     if (uploadError) throw uploadError;
     uploadedConsent = true;
-
-    if (agreementPath) {
-      const { data: updated, error: updateError } = await supabase.from('school_contracts').update({
-        pdf_url: agreementPath,
-        signing_status: 'awaiting_school_signature',
-      }).eq('id', agreement.id).eq('signing_status', 'draft').is('pdf_url', null)
-        .is('staff_revoked_at', null).select('id').maybeSingle();
-      if (updateError) throw updateError;
-      if (!updated) throw new Error('Susitarimas jau pakeistas.');
-      uploadedAgreement = false;
-      await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET)
-        .remove([staffPersonalDetailsStoragePath(agreement.organization_id, agreement.id)]);
-    }
     const { data: updated, error: updateError } = await supabase.from('school_contracts').update({
       pdf_url: consentPath,
       signing_status: 'awaiting_school_signature',
@@ -127,12 +144,17 @@ export async function persistStaffConsentPdfs(ctx: StaffConsentPdfContext): Prom
     if (!updated) throw new Error('Dokumentas jau pakeistas.');
     uploadedConsent = false;
   } catch (error) {
-    console.error('[school-staff-consent] document save failed', error instanceof Error ? error.name : 'unknown');
+    console.error('[school-staff-consent] consent save failed', error instanceof Error ? error.name : 'unknown');
     throw error;
   } finally {
-    if (uploadedAgreement && agreementPath) await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).remove([agreementPath]);
     if (uploadedConsent) await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).remove([consentPath]);
   }
+}
+
+/** Agreement PDF is persisted before consent so a timeout can resume with only the consent step. */
+export async function persistStaffConsentPdfs(ctx: StaffConsentPdfContext): Promise<void> {
+  const agreement = await persistStaffAgreementPdfIfNeeded(ctx);
+  await persistStaffConsentPdfOnly({ ...ctx, agreement });
 }
 
 export async function persistStaffConsentPdfsWithRetry(ctx: StaffConsentPdfContext, attempts = 3): Promise<void> {

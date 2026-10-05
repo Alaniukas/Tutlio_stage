@@ -24,10 +24,14 @@ vi.mock('../../api/_lib/schoolStaffDocuments', async (importOriginal) => ({
   ...(await importOriginal() as object),
   renderStaffDocumentPdf: state.render,
 }));
+vi.mock('@vercel/functions', () => ({
+  waitUntil: () => { throw new Error('no Vercel context'); },
+}));
 
 import documentsHandler from '../../api/school-staff-documents';
 import consentHandler from '../../api/school-staff-consent';
 import retentionHandler from '../../api/school-staff-document-retention';
+import pdfRetryHandler from '../../api/school-staff-consent-pdf-retry';
 
 const ORG_ID = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
 const EMPLOYEE_ID = '11111111-1111-4111-8111-111111111111';
@@ -289,7 +293,7 @@ describe('prepared staff PDFs, consent and retention', () => {
     expect(opened.body.detailsHeldBySchool).toBe(true);
   });
 
-  it('keeps both documents in draft if the consent PDF conversion fails', async () => {
+  it('persists agreement PDF even when consent PDF conversion fails', async () => {
     const { db, files } = setup();
     const created = response();
     await documentsHandler({ method: 'POST', body: {
@@ -323,12 +327,13 @@ describe('prepared staff PDFs, consent and retention', () => {
     expect(submitted.res.statusCode).toBe(200);
     expect(submitted.body).toEqual({ ok: true });
     expect(db.db.school_contracts.find((row) => row.id === EMPLOYEE_ID)).toMatchObject({
-      signing_status: 'draft', pdf_url: null,
+      signing_status: 'awaiting_school_signature',
     });
+    expect(db.db.school_contracts.find((row) => row.id === EMPLOYEE_ID)?.pdf_url).toBeTruthy();
     expect(db.db.school_contracts.find((row) => row.id === CONSENT_ID)).toMatchObject({
       signing_status: 'draft', pdf_url: null, staff_consent_answers: Array(10).fill('yes'),
     });
-    expect(files.has(`${ORG_ID}/contracts/${EMPLOYEE_ID}/staff-personal-details.json`)).toBe(true);
+    expect(files.has(`${ORG_ID}/contracts/${EMPLOYEE_ID}/staff-personal-details.json`)).toBe(false);
     expect(files.size).toBe(2);
     expect(files.has(`${ORG_ID}/contracts/${CONSENT_ID}/staff-consent-pdf-alert.json`)).toBe(true);
     expect(emailCalls).toHaveLength(1);
@@ -344,6 +349,81 @@ describe('prepared staff PDFs, consent and retention', () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain('39001010013');
     expect(JSON.stringify(emailCalls)).not.toContain('39001010013');
     log.mockRestore();
+  });
+
+  it('persists agreement PDF before consent so cron can finish only the consent step', async () => {
+    const { db, files } = setup();
+    const created = response();
+    await documentsHandler({ method: 'POST', body: {
+      action: 'create-bundle', confidentialityId: EMPLOYEE_ID, consentId: CONSENT_ID,
+      groupId: GROUP_ID, name: 'Vardas Pavardė', email: 'employee@example.com',
+      employmentContractNumber: 'DS-42', employmentContractDate: '2026-09-22',
+    } } as any, created.res as any);
+    for (const row of db.db.school_contracts) row.organizations = db.db.organizations[0];
+    const token = db.db.school_contract_signatures.find((row) => row.contract_id === CONSENT_ID)?.token;
+    state.render
+      .mockResolvedValueOnce(Buffer.from('%PDF-agreement'))
+      .mockRejectedValueOnce(new Error('converter busy'));
+
+    const submitted = response();
+    await consentHandler({ method: 'POST', body: {
+      token, answers: Array(10).fill('yes'),
+      address: 'Vilniaus g. 1, Vilnius', personalCode: '39001010013',
+    } } as any, submitted.res as any);
+
+    expect(submitted.res.statusCode).toBe(200);
+    const agreement = db.db.school_contracts.find((row) => row.id === EMPLOYEE_ID)!;
+    const consent = db.db.school_contracts.find((row) => row.id === CONSENT_ID)!;
+    expect(agreement).toMatchObject({ signing_status: 'awaiting_school_signature' });
+    expect(agreement.pdf_url).toBeTruthy();
+    expect(consent).toMatchObject({
+      staff_consent_answers: Array(10).fill('yes'),
+      signing_status: 'draft',
+      pdf_url: null,
+    });
+
+    state.render.mockResolvedValue(Buffer.from('%PDF-generated'));
+    const retry = response();
+    await pdfRetryHandler({ method: 'GET' } as any, retry.res as any);
+    expect(retry.res.statusCode).toBe(200);
+    expect(retry.body).toMatchObject({ ok: true, attempted: 1, completed: 1 });
+    expect(consent).toMatchObject({ signing_status: 'awaiting_school_signature' });
+    expect(consent.pdf_url).toBeTruthy();
+  });
+
+  it('saves employee answers even if the private details stash is rejected', async () => {
+    const { db, files } = setup();
+    const created = response();
+    await documentsHandler({ method: 'POST', body: {
+      action: 'create-bundle', confidentialityId: EMPLOYEE_ID, consentId: CONSENT_ID,
+      groupId: GROUP_ID, name: 'Vardas Pavardė', email: 'employee@example.com',
+      employmentContractNumber: 'DS-42', employmentContractDate: '2026-09-22',
+    } } as any, created.res as any);
+    for (const row of db.db.school_contracts) row.organizations = db.db.organizations[0];
+    const token = db.db.school_contract_signatures.find((row) => row.contract_id === CONSENT_ID)?.token;
+    const previous = (db as any).storage.from();
+    (db as any).storage.from = () => ({
+      ...previous,
+      async upload(path: string, body: Buffer, opts?: { contentType?: string }) {
+        if (opts?.contentType === 'application/json' && path.endsWith('staff-personal-details.json')) {
+          return { data: null, error: { message: 'mime type application/json is not supported' } };
+        }
+        files.set(path, Buffer.from(body));
+        return { data: { path }, error: null };
+      },
+    });
+
+    const submitted = response();
+    await consentHandler({ method: 'POST', body: {
+      token, answers: Array(10).fill('yes'),
+      address: 'Vilniaus g. 1, Vilnius', personalCode: '39001010013',
+    } } as any, submitted.res as any);
+
+    expect(submitted.res.statusCode).toBe(200);
+    expect(submitted.body).toEqual({ ok: true });
+    expect(db.db.school_contracts.find((row) => row.id === CONSENT_ID)).toMatchObject({
+      staff_consent_answers: Array(10).fill('yes'),
+    });
   });
 
   it('rejects a mismatched upload path and incomplete data for template generation', async () => {

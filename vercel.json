@@ -104,6 +104,10 @@
         "api/school-staff-document-retention.ts": {
             "maxDuration": 300
         },
+        "api/school-staff-consent-pdf-retry.ts": {
+            "maxDuration": 300,
+            "includeFiles": "api/_lib/templates/staff/**"
+        },
         "api/school-contract-sign-init.ts": {
             "maxDuration": 90
         },
@@ -305,6 +309,10 @@
         },
         {
             "path": "/api/school-join-no-show",
+            "schedule": "*/5 * * * *"
+        },
+        {
+            "path": "/api/school-staff-consent-pdf-retry",
             "schedule": "*/5 * * * *"
         },
         {
