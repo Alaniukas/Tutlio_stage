@@ -301,6 +301,14 @@ describe('prepared staff PDFs, consent and retention', () => {
     for (const row of db.db.school_contracts) row.organizations = db.db.organizations[0];
     const token = db.db.school_contract_signatures.find((row) => row.contract_id === CONSENT_ID)?.token;
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const emailCalls: any[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/send-email')) {
+        emailCalls.push(JSON.parse(String(init?.body || '{}')));
+        return { ok: true, status: 200, text: async () => '' } as Response;
+      }
+      return { ok: true, json: async () => ({ ok: true }) } as Response;
+    }));
     state.render.mockImplementation(async (type: string) => {
       if (type === 'consent') throw new Error('converter failed with 39001010013');
       return Buffer.from('%PDF-generated');
@@ -312,16 +320,29 @@ describe('prepared staff PDFs, consent and retention', () => {
       address: 'Vilniaus g. 1, Vilnius', personalCode: '39001010013',
     } } as any, submitted.res as any);
 
-    expect(submitted.res.statusCode).toBe(502);
+    expect(submitted.res.statusCode).toBe(200);
+    expect(submitted.body).toEqual({ ok: true });
     expect(db.db.school_contracts.find((row) => row.id === EMPLOYEE_ID)).toMatchObject({
       signing_status: 'draft', pdf_url: null,
     });
     expect(db.db.school_contracts.find((row) => row.id === CONSENT_ID)).toMatchObject({
-      signing_status: 'draft', pdf_url: null,
+      signing_status: 'draft', pdf_url: null, staff_consent_answers: Array(10).fill('yes'),
     });
-    expect(db.db.school_contracts.find((row) => row.id === CONSENT_ID)?.staff_consent_answers ?? null).toBeNull();
-    expect(files.size).toBe(0);
+    expect(files.has(`${ORG_ID}/contracts/${EMPLOYEE_ID}/staff-personal-details.json`)).toBe(true);
+    expect(files.size).toBe(2);
+    expect(files.has(`${ORG_ID}/contracts/${CONSENT_ID}/staff-consent-pdf-alert.json`)).toBe(true);
+    expect(emailCalls).toHaveLength(1);
+    expect(emailCalls[0]).toMatchObject({
+      type: 'school_staff_consent_pdf_failed',
+      to: ['alaniukasa@gmail.com'],
+      data: expect.objectContaining({
+        employeeName: 'Vardas Pavardė',
+        schoolName: 'VšĮ Laisvi vaikai',
+        source: 'employee_submit',
+      }),
+    });
     expect(JSON.stringify(log.mock.calls)).not.toContain('39001010013');
+    expect(JSON.stringify(emailCalls)).not.toContain('39001010013');
     log.mockRestore();
   });
 

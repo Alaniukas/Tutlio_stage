@@ -317,6 +317,7 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
   const nextStep = (item: StaffDocument) => {
     if (item.status === 'revoked' || item.status === 'signed') return null;
     if (item.staff_document_type === 'consent' && !item.staff_consent_answers) return 'Laukiama 10 darbuotojo pasirinkimų';
+    if (item.staff_document_type === 'consent' && item.staff_consent_answers && !item.pdf_url) return 'Ruošiamas PDF (atsakymai gauti)';
     if (item.staff_document_type === 'confidentiality' && !item.pdf_url) return 'Laukiama darbuotojo adreso ir asmens kodo';
     if (item.signing_status === 'awaiting_school_signature') return 'Laukia mokyklos el. parašo';
     if (item.signing_status === 'signed_by_school') return 'Laukia darbuotojo el. parašo';

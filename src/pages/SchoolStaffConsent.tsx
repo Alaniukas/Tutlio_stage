@@ -3,7 +3,18 @@ import { useSearchParams } from 'react-router-dom';
 import { STAFF_CONSENT_QUESTIONS } from '@/lib/staffConsentQuestions';
 
 type Answer = 'yes' | 'no' | null;
-type ConsentInfo = { employeeName?: string; schoolName?: string; previewUrl?: string | null; answersSubmitted?: boolean; signed?: boolean; needsPersonalDetails?: boolean; detailsHeldBySchool?: boolean };
+type ConsentInfo = {
+  employeeName?: string;
+  schoolName?: string;
+  previewUrl?: string | null;
+  answersSubmitted?: boolean;
+  signed?: boolean;
+  needsPersonalDetails?: boolean;
+  detailsHeldBySchool?: boolean;
+};
+
+const LOAD_TIMEOUT_MS = 12000;
+const SUBMIT_TIMEOUT_MS = 30000;
 
 export default function SchoolStaffConsent({ previewInfo }: { previewInfo?: ConsentInfo }) {
   const [params] = useSearchParams();
@@ -20,7 +31,7 @@ export default function SchoolStaffConsent({ previewInfo }: { previewInfo?: Cons
     if (!token) { setError('Nuoroda negalioja.'); return; }
     let active = true;
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 12000);
+    const timer = window.setTimeout(() => controller.abort(), LOAD_TIMEOUT_MS);
     fetch(`/api/school-staff-consent?token=${encodeURIComponent(token)}`, { signal: controller.signal })
       .then(async (response) => {
         const body = await response.json().catch(() => ({}));
@@ -36,7 +47,7 @@ export default function SchoolStaffConsent({ previewInfo }: { previewInfo?: Cons
       })
       .finally(() => window.clearTimeout(timer));
     return () => { active = false; controller.abort(); };
-  }, [token]);
+  }, [token, previewInfo]);
 
   const submit = async () => {
     if (answers.some((answer) => answer === null)) { setError('Pažymėkite visus 10 punktų.'); return; }
@@ -52,11 +63,15 @@ export default function SchoolStaffConsent({ previewInfo }: { previewInfo?: Cons
         window.scrollTo({ top: 0, behavior: 'smooth' });
         return;
       }
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), SUBMIT_TIMEOUT_MS);
       const response = await fetch('/api/school-staff-consent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, answers, ...(info?.needsPersonalDetails ? { address: address.trim(), personalCode: personalCode.trim() } : {}) }),
+        signal: controller.signal,
       });
+      window.clearTimeout(timer);
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || 'Nepavyko išsaugoti atsakymų.');
       setInfo((current) => ({ ...current, answersSubmitted: true, needsPersonalDetails: false }));
@@ -64,7 +79,9 @@ export default function SchoolStaffConsent({ previewInfo }: { previewInfo?: Cons
       setAddress('');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (cause: any) {
-      setError(cause?.message || 'Nepavyko išsaugoti atsakymų.');
+      setError(cause?.name === 'AbortError'
+        ? 'Nepavyko išsaugoti atsakymų. Patikrinkite ryšį ir bandykite dar kartą.'
+        : cause?.message || 'Nepavyko išsaugoti atsakymų.');
     } finally {
       setBusy(false);
     }
@@ -122,11 +139,11 @@ export default function SchoolStaffConsent({ previewInfo }: { previewInfo?: Cons
                   <p aria-hidden="true" className="text-sm font-medium leading-6">{`1.${index + 1}. ${question}`}</p>
                   <div className="mt-2 flex flex-wrap gap-x-6 gap-y-3 text-sm">
                     <label className="flex cursor-pointer items-center gap-2">
-                      <input type="radio" name={`choice-${index}`} checked={answers[index] === 'yes'} onChange={() => setAnswers((old) => old.map((item, at) => at === index ? 'yes' : item))} />
+                      <input type="radio" name={`choice-${index}`} checked={answers[index] === 'yes'} disabled={busy} onChange={() => setAnswers((old) => old.map((item, at) => at === index ? 'yes' : item))} />
                       Sutinku
                     </label>
                     <label className="flex cursor-pointer items-center gap-2">
-                      <input type="radio" name={`choice-${index}`} checked={answers[index] === 'no'} onChange={() => setAnswers((old) => old.map((item, at) => at === index ? 'no' : item))} />
+                      <input type="radio" name={`choice-${index}`} checked={answers[index] === 'no'} disabled={busy} onChange={() => setAnswers((old) => old.map((item, at) => at === index ? 'no' : item))} />
                       Nesutinku
                     </label>
                   </div>

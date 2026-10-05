@@ -33,7 +33,7 @@ describe('employee staff-document form', () => {
       token: 'secret', answers: Array(10).fill('yes'),
       address: 'Vilniaus g. 1, Vilnius', personalCode: '39001010013',
     });
-    expect(screen.queryByLabelText('Asmens kodas')).toBeNull();
+    expect(await screen.findByText(/Jūsų pateikta forma išsaugota/)).toBeTruthy();
   });
 
   it('does not re-ask for address and personal code when the school already entered them', async () => {

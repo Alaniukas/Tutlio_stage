@@ -3,6 +3,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { SCHOOL_CONTRACTS_BUCKET } from './_lib/schoolContractPdfPath.js';
 import { staffPdfPathsForRetention, STAFF_DOCUMENT_RETENTION_DAYS } from './_lib/schoolStaffDocuments.js';
+import { retryPendingStaffConsentPdfs } from './_lib/schoolStaffConsentPdf.js';
 
 async function listFiles(supabase: SupabaseClient, folder: string, depth = 0): Promise<string[]> {
   if (depth > 4) throw new Error('Unexpected staff document folder depth');
@@ -24,6 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return res.status(500).json({ error: 'Server misconfigured' });
   const supabase = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  const pendingPdfs = await retryPendingStaffConsentPdfs(supabase, 5);
   const cutoff = new Date(Date.now() - STAFF_DOCUMENT_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const fields = 'id, organization_id, signed_at, staff_revoked_at';
   const [signed, revoked] = await Promise.all([
@@ -68,5 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       errors.push(`${row.id}: ${error?.message || 'failed'}`);
     }
   }
-  return res.status(errors.length ? 500 : 200).json({ success: errors.length === 0, due: due.size, deleted, errors });
+  return res.status(errors.length ? 500 : 200).json({
+    success: errors.length === 0, due: due.size, deleted, errors, pendingPdfs,
+  });
 }

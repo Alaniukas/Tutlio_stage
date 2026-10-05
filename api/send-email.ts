@@ -2515,6 +2515,39 @@ function schoolContractExtraAccepted(d: any, locale: Locale) {
   };
 }
 
+function schoolStaffConsentPdfFailed(d: any, _locale: Locale) {
+  const sourceLabel = d.source === 'cron_retry'
+    ? 'automatinis pakartotinis bandymas (cron)'
+    : 'darbuotojo formos pateikimas';
+  return {
+    subject: `⚠ Darbuotojo sutikimo PDF nepavyko: ${String(d.employeeName || 'darbuotojas')}`,
+    html: wrap(
+      `<div class="header" style="${headerInlineStyle('#dc2626', '#b91c1c')}">
+        <h2 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Darbuotojo PDF generavimas nepavyko</h2>
+      </div>
+      <div class="body">
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Darbuotojas matė sėkmės pranešimą, bet po visų bandymų nepavyko sugeneruoti PDF dokumentų.
+        </p>
+        <table style="width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;">
+          ${td('Mokykla', esc(d.schoolName || '—'))}
+          ${td('Darbuotojas', esc(d.employeeName || '—'))}
+          ${td('Sutarties nr.', esc(d.contractNumber || '—'))}
+          ${td('Šaltinis', esc(sourceLabel))}
+          ${td('Consent ID', esc(d.consentId || '—'))}
+        </table>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Patikrinkite Railway DOCX converter ir rankiniu būdu peržiūrėkite dokumentą admin sąraše. Cron bandys generuoti dar kartą, bet reikia rankinio patikrinimo.
+        </p>
+        <div style="text-align:center; margin-top:24px;">
+          ${outlookEmailButton(d.adminUrl, 'Atidaryti darbuotojų dokumentus', '#b91c1c', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+        </div>
+      </div>${footerFor('lt')}`,
+      'lt',
+    ),
+  };
+}
+
 function schoolStaffConsentChoicesRequest(d: any, _locale: Locale) {
   return {
     subject: `${String(d.schoolName || 'Mokykla')}: užpildykite darbuotojo dokumentų formą`,
@@ -3865,6 +3898,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'school_teacher_contract_sign_request': emailContent = schoolTeacherContractSignRequest(data, locale); break;
       case 'school_teacher_contract_fully_signed': emailContent = schoolTeacherContractFullySigned(data, locale); break;
       case 'school_staff_consent_choices_request': emailContent = schoolStaffConsentChoicesRequest(data, locale); break;
+      case 'school_staff_consent_pdf_failed': emailContent = schoolStaffConsentPdfFailed(data, locale); break;
       case 'school_contract_completion_admin': emailContent = schoolContractCompletionAdmin(data, locale); break;
       case 'school_contract_parent_signed_admin': emailContent = schoolContractParentSignedAdmin(data, locale); break;
       case 'payment_received_tutor': emailContent = paymentReceivedTutor(data, locale); break;

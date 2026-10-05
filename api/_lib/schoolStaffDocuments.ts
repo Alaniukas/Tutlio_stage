@@ -62,6 +62,11 @@ export function staffPersonalDetailsStoragePath(organizationId: string, confiden
   return `${organizationId}/contracts/${confidentialityId}/staff-personal-details.json`;
 }
 
+/** Marks that Tutlio ops were emailed about a failed staff consent PDF render. */
+export function staffConsentPdfAlertPath(organizationId: string, consentId: string): string {
+  return `${organizationId}/contracts/${consentId}/staff-consent-pdf-alert.json`;
+}
+
 export function encodeStaffPersonalDetails(details: { address: string; personalCode: string }): Buffer {
   return Buffer.from(JSON.stringify({ address: details.address, personalCode: details.personalCode }), 'utf8');
 }
