@@ -1,10 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import {
   effectiveAvailabilityOnDate,
+  mergeTimeRanges,
   sliceTimeRangeBySessions,
 } from '@/lib/availabilityCalendarBlocks';
 
 describe('availabilityCalendarBlocks', () => {
+  it('unions overlapping, nested and touching free intervals without changing their source rows', () => {
+    const at = (hour: number) => new Date(2026, 9, 5, hour);
+    const ranges = [
+      { start: at(11), end: at(13) }, { start: at(10), end: at(12) },
+      { start: at(11), end: at(12) }, { start: at(13), end: at(14) },
+      { start: at(15), end: at(16) },
+    ];
+    const before = structuredClone(ranges);
+    expect(mergeTimeRanges(ranges)).toEqual([
+      { start: at(10), end: at(14) }, { start: at(15), end: at(16) },
+    ]);
+    expect(ranges).toEqual(before);
+  });
+
   it('excludes the configured break on both sides of a lesson, including outside the block', () => {
     const at = (hours: number, minutes = 0) => new Date(2026, 9, 5, hours, minutes);
     expect(sliceTimeRangeBySessions(

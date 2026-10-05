@@ -92,3 +92,20 @@ export function sliceTimeRangeBySessions<T extends { start: Date; end: Date }>(
 
   return freeBlocks;
 }
+
+/** Union free display intervals after removing bookings; legacy rules may overlap. */
+export function mergeTimeRanges<T extends { start: Date; end: Date }>(ranges: T[]): T[] {
+  const sorted = ranges
+    .filter(({ start, end }) => Number.isFinite(start.getTime()) && Number.isFinite(end.getTime()) && end > start)
+    .sort((a, b) => a.start.getTime() - b.start.getTime());
+  const merged: T[] = [];
+  for (const range of sorted) {
+    const previous = merged.at(-1);
+    if (previous && range.start <= previous.end) {
+      if (range.end > previous.end) previous.end = range.end;
+    } else {
+      merged.push({ ...range });
+    }
+  }
+  return merged;
+}

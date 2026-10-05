@@ -92,11 +92,17 @@ export function planRecurringSeriesPatches(
   });
 }
 
-/** Apply later occurrences first so unique (student, start) rows do not collide mid-shift. */
+/** Move the leading edge first so a shift in either direction cannot hit an unmoved row. */
 export function sortSeriesPatchesForApply(
   patches: Array<{ id: string; patch: Record<string, unknown> }>,
   rows: RecurringSeriesTimeRow[],
 ): Array<{ id: string; patch: Record<string, unknown> }> {
   const startById = new Map(rows.map((row) => [row.id, new Date(row.start_time).getTime()]));
-  return [...patches].sort((a, b) => (startById.get(b.id) ?? 0) - (startById.get(a.id) ?? 0));
+  const timePatch = patches.find(({ id, patch }) => typeof patch.start_time === 'string'
+    && new Date(patch.start_time).getTime() !== startById.get(id));
+  const movesEarlier = timePatch && new Date(String(timePatch.patch.start_time)).getTime()
+    < (startById.get(timePatch.id) ?? 0);
+  return [...patches].sort((a, b) => movesEarlier
+    ? (startById.get(a.id) ?? 0) - (startById.get(b.id) ?? 0)
+    : (startById.get(b.id) ?? 0) - (startById.get(a.id) ?? 0));
 }

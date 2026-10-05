@@ -82,7 +82,12 @@ import { Input } from '@/components/ui/input';
 import { DateInput } from '@/components/ui/date-input';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
-import { buildSameSlotPeerIdMap, hasOverlapWithExclusions } from '@/lib/calendarSessionOverlap';
+import { hasOverlapWithExclusions } from '@/lib/calendarSessionOverlap';
+import {
+  applyCalendarSeriesEdit,
+  CalendarSeriesConflictError,
+  loadFutureCalendarSeries,
+} from '@/lib/calendarSessionSeriesEdit';
 import TimeSpinner, { CompactTimeSelect, DateTimeSpinner } from '@/components/TimeSpinner';
 import AvailabilityManager from '@/components/AvailabilityManager';
 import RecurrenceFields from '@/components/RecurrenceFields';
@@ -3746,15 +3751,18 @@ export default function CalendarPage() {
         isGroupSession && selectedGroupSessions.length > 0
           ? new Set(selectedGroupSessions.map((s) => s.id))
           : null;
+      const applyToAllFuture = groupEditChoice === 'all_future' && (isGroupSession || !!selectedEvent.recurring_session_id);
 
-      if (timeChanged || durationChanged) {
-        const { data: overlapping } = await supabase
+      if ((timeChanged || durationChanged) && !applyToAllFuture) {
+        const { data: overlapping, error: overlapError } = await supabase
           .from('sessions')
-          .select('*')
+          .select('id, start_time, end_time')
           .eq('tutor_id', user.id)
           .neq('status', 'cancelled')
           .neq('id', selectedEvent.id)
-          .or(`start_time.lte.${newEnd.toISOString()},end_time.gte.${newStart.toISOString()}`);
+          .lt('start_time', newEnd.toISOString())
+          .gt('end_time', newStart.toISOString());
+        if (overlapError) throw new Error(overlapError.message);
 
         const hasRealOverlap = hasOverlapWithExclusions(
           newStart,
@@ -3770,8 +3778,6 @@ export default function CalendarPage() {
         }
       }
 
-      const applyToAllFuture = groupEditChoice === 'all_future' && (isGroupSession || !!selectedEvent.recurring_session_id);
-
       // Monthly packages (req 6): a package lesson can only be moved within the
       // same calendar month (anchored on its original start). One-off / trial
       // lessons (no package) are unconstrained.
@@ -3785,6 +3791,7 @@ export default function CalendarPage() {
       }
 
       let error: any = null;
+      let editedSessionIds = new Set([selectedEvent.id]);
 
       const editSessionPayload = {
         topic: editTopic,
@@ -3798,99 +3805,37 @@ export default function CalendarPage() {
       };
 
       if (applyToAllFuture) {
-        let futureQuery = supabase
-          .from('sessions')
-          .select('id, start_time, end_time')
-          .eq('tutor_id', user.id)
-          .gte('start_time', selectedEvent.start_time.toISOString())
-          .eq('status', 'active');
-
-        const recurringIds = isGroupSession
+        const groupRecurringIds = isGroupSession
           ? [...new Set(selectedGroupSessions
               .map((row) => row.recurring_session_id)
               .filter(Boolean) as string[])]
           : [];
-        if (recurringIds.length > 1) {
-          futureQuery = futureQuery.in('recurring_session_id', recurringIds);
-        } else if (selectedEvent.recurring_session_id) {
-          futureQuery = futureQuery.eq('recurring_session_id', selectedEvent.recurring_session_id);
-        } else {
-          futureQuery = futureQuery.eq('subject_id', selectedEvent.subject_id);
-        }
-
-        const { data: futureSessions, error: futureError } = await futureQuery;
-        if (futureError) {
-          error = futureError;
-        } else {
-          const futureList = futureSessions || [];
-          // If user isn't changing time/duration (e.g. edits price/comment/link only),
-          // do not run overlap checks — they can falsely treat group peer rows as conflicts.
-          if (!timeChanged && !durationChanged) {
-            for (const session of futureList) {
-              const { error: rowError } = await supabase
-                .from('sessions')
-                .update({ ...editSessionPayload })
-                .eq('id', session.id);
-              if (rowError) {
-                error = rowError;
-                break;
-              }
-            }
-          } else {
-            const shiftMs = newStart.getTime() - oldStart.getTime();
-            const sameSlotPeerIdsBySessionId = buildSameSlotPeerIdMap(futureList);
-
-            for (const session of futureList) {
-              const rowOldStart = new Date(session.start_time);
-              const rowNewStart = new Date(rowOldStart.getTime() + shiftMs);
-              const rowNewEnd = new Date(rowNewStart.getTime() + durMs);
-
-              const { data: overlapping } = await supabase
-                .from('sessions')
-                .select('id, start_time, end_time')
-                .eq('tutor_id', user.id)
-                .neq('status', 'cancelled')
-                .neq('id', session.id)
-                .or(`start_time.lte.${rowNewEnd.toISOString()},end_time.gte.${rowNewStart.toISOString()}`);
-
-              const sameSlotPeers = sameSlotPeerIdsBySessionId.get(session.id) ?? new Set();
-              const hasRealOverlap = hasOverlapWithExclusions(
-                rowNewStart,
-                rowNewEnd,
-                overlapping ?? [],
-                sameSlotPeers,
-              );
-
-              if (hasRealOverlap) {
-                error = new Error(`Laiko konfliktas ${format(rowOldStart, 'yyyy-MM-dd')}`);
-                break;
-              }
-
-              const { error: rowError } = await supabase.from('sessions').update({
-                start_time: rowNewStart.toISOString(),
-                end_time: rowNewEnd.toISOString(),
-                ...editSessionPayload,
-              }).eq('id', session.id);
-
-              if (rowError) {
-                error = rowError;
-                break;
-              }
-            }
-
-            if (!error && timeChanged && futureList.length > 0) {
-              await supabase
-                .from('sessions')
-                .update({
-                  reschedule_reason: rescheduleReason.trim(),
-                  reschedule_requested_by: effectiveRescheduleRequestedBy,
-                })
-                .in('id', futureList.map((s) => s.id))
-                .then(({ error: reschedErr }) => {
-                  if (reschedErr) console.warn('[Calendar] reschedule tracking columns not available:', reschedErr.message);
-                });
-            }
-          }
+        const recurringIds = groupRecurringIds.length
+          ? groupRecurringIds
+          : selectedEvent.recurring_session_id ? [selectedEvent.recurring_session_id] : [];
+        const futureList = await loadFutureCalendarSeries(supabase, {
+          tutorId: user.id,
+          from: oldStart,
+          recurringIds,
+          subjectId: selectedEvent.subject_id ?? null,
+        });
+        editedSessionIds = new Set(await applyCalendarSeriesEdit(supabase, {
+          tutorId: user.id,
+          rows: futureList,
+          edited: { id: selectedEvent.id, start_time: oldStart.toISOString(), end_time: oldEnd.toISOString() },
+          next: timeChanged || durationChanged
+            ? { start: newStart, end: newEnd }
+            : { start: oldStart, end: oldEnd },
+          fields: editSessionPayload,
+        }));
+        if (timeChanged) {
+          await supabase.from('sessions').update({
+            reschedule_reason: rescheduleReason.trim(),
+            reschedule_requested_by: effectiveRescheduleRequestedBy,
+          }).in('id', [...editedSessionIds])
+            .then(({ error: reschedErr }) => {
+              if (reschedErr) console.warn('[Calendar] reschedule tracking columns not available:', reschedErr.message);
+            });
         }
       } else if (isGroupSession) {
         const ids = isClassGroupSession
@@ -3899,6 +3844,7 @@ export default function CalendarPage() {
         if (!ids.length) {
           error = new Error(t('cal.errorGeneric'));
         } else {
+          editedSessionIds = new Set(ids);
           const { error: groupError } = await supabase.from('sessions').update({
             start_time: newStart.toISOString(),
             end_time: newEnd.toISOString(),
@@ -4099,13 +4045,7 @@ export default function CalendarPage() {
         };
 
         const matchesFutureEditScope = (s: Session) => {
-          if (!applyToAllFuture) return s.id === selectedEvent.id;
-          if (s.status !== 'active') return false;
-          if (s.start_time.getTime() < selectedEvent.start_time.getTime()) return false;
-          if (selectedEvent.recurring_session_id) {
-            return s.recurring_session_id === selectedEvent.recurring_session_id;
-          }
-          return s.subject_id === selectedEvent.subject_id;
+          return editedSessionIds.has(s.id);
         };
 
         const applySavedFieldsToSession = (s: Session): Session => {
@@ -4138,6 +4078,10 @@ export default function CalendarPage() {
       }
     } catch (err) {
       console.error(err);
+      alert(err instanceof CalendarSeriesConflictError
+        ? t('cal.createOverlapDates', { dates: `${format(err.start, 'yyyy-MM-dd HH:mm')} - ${format(err.end, 'HH:mm')}` })
+        : `${t('cal.failedToUpdate')}: ${err instanceof Error ? err.message : t('cal.errorGeneric')}`);
+      fetchData();
     }
     setSaving(false);
   };

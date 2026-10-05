@@ -8,6 +8,7 @@ import { invalidateCache } from '@/lib/dataCache';
 const state = vi.hoisted(() => ({
   orgLookupFails: false, blocked: false, insert: vi.fn(),
   availability: null as Record<string, unknown>[] | null,
+  subjects: null as Record<string, unknown>[] | null,
   occupied: [] as Record<string, unknown>[],
   busyLookupFails: false,
 }));
@@ -67,7 +68,7 @@ vi.mock('@/lib/supabase', () => {
         id: 'org-1', entity_type: 'company', features: {},
         enable_per_lesson: false, enable_monthly_billing: true,
       }];
-      if (table === 'subjects') return [{
+      if (table === 'subjects') return state.subjects ?? [{
         id: 'subject-1', tutor_id: 'tutor-1', name: 'Mathematics',
         price: 25, duration_minutes: 60, color: '#888888', grade_min: null, grade_max: null,
       }];
@@ -101,6 +102,7 @@ beforeEach(() => {
   state.blocked = false;
   state.insert.mockReset();
   state.availability = null;
+  state.subjects = null;
   state.occupied = [];
   state.busyLookupFails = false;
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: !state.busyLookupFails, json: async () => ({ slots: state.occupied }) })));
@@ -159,6 +161,62 @@ describe('student schedule billing policy lookup', () => {
     render(<MemoryRouter initialEntries={['/student/schedule']}><StudentSchedule /></MemoryRouter>);
 
     await waitFor(() => expect(screen.getByTestId('free-times').textContent).toBe('[["10:0","12:0"]]'));
+  });
+
+  it('shows overlapping free-time rules as one interval, including a nested legacy row', async () => {
+    const specific = {
+      id: 'specific', tutor_id: 'tutor-1', day_of_week: null, is_recurring: false,
+      start_time: '10:00', end_time: '12:00', specific_date: availabilityDate,
+    };
+    state.availability = [
+      specific,
+      { ...specific, id: 'overlapping', start_time: '11:00', end_time: '13:00' },
+      { ...specific, id: 'nested', start_time: '10:30', end_time: '11:30' },
+    ];
+    render(<MemoryRouter initialEntries={['/student/schedule']}><StudentSchedule /></MemoryRouter>);
+
+    await waitFor(() => expect(screen.getByTestId('free-times').textContent).toBe('[["10:0","13:0"]]'));
+  });
+
+  it('merges overlapping free-time remainders without covering an occupied lesson', async () => {
+    const specific = {
+      id: 'specific', tutor_id: 'tutor-1', day_of_week: null, is_recurring: false,
+      start_time: '10:00', end_time: '12:00', specific_date: availabilityDate,
+    };
+    state.availability = [
+      specific,
+      { ...specific, id: 'overlapping', start_time: '11:00', end_time: '13:00' },
+    ];
+    state.occupied = [{
+      id: 'another-child', subject_id: 'subject-1',
+      start_time: `${availabilityDate}T11:30:00`, end_time: `${availabilityDate}T12:00:00`,
+    }];
+    render(<MemoryRouter initialEntries={['/student/schedule']}><StudentSchedule /></MemoryRouter>);
+
+    await waitFor(() => expect(screen.getByTestId('busy-count').textContent).toBe('1'));
+    expect(screen.getByTestId('free-times').textContent).toBe('[["10:0","11:30"],["12:0","13:0"]]');
+  });
+
+  it('keeps subject boundaries when booking from a merged display interval', async () => {
+    const mathematics = {
+      id: 'subject-1', tutor_id: 'tutor-1', name: 'Mathematics',
+      price: 25, duration_minutes: 60, color: '#888888', grade_min: null, grade_max: null,
+    };
+    state.subjects = [mathematics, { ...mathematics, id: 'physics', name: 'Physics' }];
+    const specific = {
+      id: 'math-time', tutor_id: 'tutor-1', day_of_week: null, is_recurring: false,
+      start_time: '10:00', end_time: '11:00', specific_date: availabilityDate, subject_ids: ['subject-1'],
+    };
+    state.availability = [specific, {
+      ...specific, id: 'physics-time', start_time: '11:00', end_time: '13:00', subject_ids: ['physics'],
+    }];
+    render(<MemoryRouter initialEntries={['/student/schedule']}><StudentSchedule /></MemoryRouter>);
+
+    await waitFor(() => expect(screen.getByTestId('free-times').textContent).toBe('[["10:0","13:0"]]'));
+    await chooseAvailableTime();
+    expect(screen.queryByRole('button', { name: '11:00' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '12:00' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'stuSched.confirm' }).hasAttribute('disabled')).toBe(false);
   });
 
   it('blocks another child\'s lesson even when its subject is outside the grade filter', async () => {

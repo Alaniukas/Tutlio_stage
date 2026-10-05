@@ -50,6 +50,13 @@ describe('planRecurringSeriesPatches', () => {
     expect(ordered.map((row) => row.id)).toEqual(['b', 'a']);
   });
 
+  it('applies earlier rows first when the series moves into its previous occurrence', () => {
+    const patches = planRecurringSeriesPatches(rows, rows[0], {
+      start: new Date('2026-09-08T15:00:00.000Z'), end: new Date('2026-09-08T16:00:00.000Z'),
+    }, {});
+    expect(sortSeriesPatchesForApply(patches, rows).map(row => row.id)).toEqual(['a', 'b']);
+  });
+
   it('keeps weekly starts unique after a duration-or-clock shift', () => {
     const weekly = Array.from({ length: 8 }, (_, i) => {
       const start = new Date(Date.parse(tue15) + i * 7 * 24 * 60 * 60 * 1000);

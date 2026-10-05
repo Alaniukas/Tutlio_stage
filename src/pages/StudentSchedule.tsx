@@ -32,7 +32,7 @@ import {
     shouldShowPerLessonPaymentUi,
     shouldUsePackageForBooking,
 } from '@/lib/studentPaymentModel';
-import { effectiveAvailabilityOnDate, sliceTimeRangeBySessions } from '@/lib/availabilityCalendarBlocks';
+import { effectiveAvailabilityOnDate, mergeTimeRanges, sliceTimeRangeBySessions } from '@/lib/availabilityCalendarBlocks';
 import { uniqueTimeRanges } from '@/lib/availabilityBooking';
 import { consumeAvailabilityForCreatedSessions } from '@/lib/consumeSessionAvailability';
 import { formatLessonStripeChargeEur, formatMarketAmount, orgFeeProfile, type OrgFeeProfile } from '@/lib/stripeLessonPricing';
@@ -534,9 +534,9 @@ export default function StudentSchedule() {
             start_time: new Date(e.start.getTime() - breakBetweenLessons * 60000),
             end_time: e.end,
         }));
-        const freeBackground = uniqueTimeRanges(generatedBgEvents.flatMap(bg =>
+        const freeBackground = mergeTimeRanges(generatedBgEvents.flatMap(bg =>
             sliceTimeRangeBySessions(bg, busy),
-        ));
+        )).map(bg => ({ ...bg, isPast: isBefore(bg.end, now) }));
         return { memoizedEvents: generatedEvents, memoizedBgEvents: freeBackground };
     // NOTE: do NOT add `t` to deps — `useTranslation()` returns a fresh `t`
     // ref every render, which would trigger an infinite re-render loop here.
@@ -1390,12 +1390,6 @@ export default function StudentSchedule() {
         const dayEnd = new Date(selectedEvent.start);
         dayEnd.setHours(23, 59, 59, 999);
 
-        const dayBgEvents = bgEvents.filter(bg =>
-            (bg.start >= dayStart && bg.start <= dayEnd) ||
-            (bg.end >= dayStart && bg.end <= dayEnd) ||
-            (bg.start <= dayStart && bg.end >= dayEnd)
-        );
-
         // Occupied slots - other students + my own booked sessions
         const dayOccupied = events.filter(e =>
             e.occupied && (
@@ -1403,6 +1397,22 @@ export default function StudentSchedule() {
                 (e.end >= dayStart && e.end <= dayEnd) ||
                 (e.start <= dayStart && e.end >= dayEnd)
             )
+        );
+
+        // Display intervals are merged, but booking must retain each source rule's
+        // subject restrictions and boundaries.
+        const dateStr = format(dayStart, 'yyyy-MM-dd');
+        const occupiedForSlicing = dayOccupied.map(event => ({
+            start_time: new Date(event.start.getTime() - breakMs),
+            end_time: event.end,
+        }));
+        const dayBgEvents = uniqueTimeRanges(
+            effectiveAvailabilityOnDate(availability, dateStr, dayStart.getDay())
+                .filter(rule => !rule.subject_ids?.length || rule.subject_ids.includes(selectedSubjectId))
+                .flatMap(rule => sliceTimeRangeBySessions({
+                    start: new Date(`${dateStr}T${rule.start_time}`),
+                    end: new Date(`${dateStr}T${rule.end_time}`),
+                }, occupiedForSlicing)),
         );
 
         const slots: Date[] = [];
@@ -1465,7 +1475,7 @@ export default function StudentSchedule() {
         const uniqueSlots = Array.from(new Set(slots.map(s => s.getTime()))).map(t => new Date(t)).sort((a, b) => a.getTime() - b.getTime());
         setAvailableSlots(uniqueSlots);
         setSelectedTime(null);
-    }, [selectedSubjectId, selectedEvent, subjects, bgEvents, events, minBookingHours, breakBetweenLessons]);
+    }, [selectedSubjectId, selectedEvent, subjects, availability, events, minBookingHours, breakBetweenLessons]);
 
     const handleBook = async () => {
         if (!selectedEvent || !selectedTime || studentBookingDisabled) return;
