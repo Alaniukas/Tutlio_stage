@@ -3,6 +3,7 @@ import {
   sessionReminderDeliveryKey,
   sessionReminderDeliveryOutcome,
   reminderWasAlreadySent,
+  shouldMarkSessionReminderSent,
   validSessionReminderDeliveryKey,
 } from '../../api/_lib/sessionReminderDelivery';
 
@@ -74,5 +75,13 @@ describe('session reminder delivery keys', () => {
     expect(reminderWasAlreadySent({ statusCode: 409, name: 'invalid_idempotent_request' })).toBe(true);
     expect(reminderWasAlreadySent({ statusCode: 409, name: 'concurrent_idempotent_requests' })).toBe(false);
     expect(reminderWasAlreadySent({ statusCode: 500, name: 'invalid_idempotent_request' })).toBe(false);
+  });
+
+  it('marks reminder flags only after provider delivery or an intentional skip', () => {
+    expect(shouldMarkSessionReminderSent('sent', null)).toBe(true);
+    expect(shouldMarkSessionReminderSent('retry', 'school_contract_not_active')).toBe(false);
+    expect(shouldMarkSessionReminderSent('permanent_skip', 'parent_notification_preference')).toBe(true);
+    expect(shouldMarkSessionReminderSent('permanent_skip', 'already_sent_with_modified_payload')).toBe(true);
+    expect(shouldMarkSessionReminderSent('permanent_skip', 'school_join_material_policy')).toBe(false);
   });
 });

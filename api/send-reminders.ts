@@ -20,6 +20,7 @@ import { schoolMaterialRecipient } from './_lib/schoolMaterialPublications.js';
 import {
   sessionReminderDeliveryKey,
   sessionReminderDeliveryOutcome,
+  shouldMarkSessionReminderSent,
   type SessionReminderDeliveryOutcome,
 } from './_lib/sessionReminderDelivery.js';
 import {
@@ -43,20 +44,26 @@ export const SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT = 1000;
 /** Extra payer emails allowed to finish one school group slot after the soft cap. */
 export const SESSION_REMINDER_GROUP_BURST_ALLOWANCE = 120;
 
+type ConfirmedReminderOutcome = {
+  outcome: SessionReminderDeliveryOutcome;
+  reason: string | null;
+};
+
 async function confirmedReminderOutcome(
   response: Response,
   context: { sessionId: string; recipientKind: 'student' | 'payer' | 'tutor' },
-): Promise<SessionReminderDeliveryOutcome> {
+): Promise<ConfirmedReminderOutcome> {
   const body = await response.json().catch(() => null) as { reason?: unknown } | null;
+  const reason = typeof body?.reason === 'string' ? body.reason : null;
   const outcome = sessionReminderDeliveryOutcome(response.ok, body);
   if (outcome === 'retry') {
     console.warn('[send-reminders] reminder delivery not confirmed', {
       ...context,
       status: response.status,
-      reason: typeof body?.reason === 'string' ? body.reason : 'missing_provider_confirmation',
+      reason: reason || 'missing_provider_confirmation',
     });
   }
-  return outcome;
+  return { outcome, reason };
 }
 
 export function tutorReminderOccurrenceScope(session: {
@@ -263,11 +270,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 },
               }),
             });
-            const outcome = await confirmedReminderOutcome(resp, {
+            const { outcome, reason } = await confirmedReminderOutcome(resp, {
               sessionId: String(session.id),
               recipientKind: 'student',
             });
-            if (outcome !== 'retry') {
+            if (shouldMarkSessionReminderSent(outcome, reason)) {
               await supabase.from('sessions').update({ reminder_student_sent: true }).eq('id', session.id);
               if (outcome === 'sent') totalSent++;
             }
@@ -456,11 +463,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   },
                 }),
               });
-              const outcome = await confirmedReminderOutcome(resp, {
+              const { outcome, reason } = await confirmedReminderOutcome(resp, {
                 sessionId: String(session.id),
                 recipientKind: 'payer',
               });
-              if (outcome === 'retry') allParentHandled = false;
+              if (!shouldMarkSessionReminderSent(outcome, reason)) allParentHandled = false;
               if (outcome === 'sent') totalSent++;
             } catch (e) {
               allParentHandled = false;
@@ -537,11 +544,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 },
               }),
             });
-            const outcome = await confirmedReminderOutcome(resp, {
+            const { outcome, reason } = await confirmedReminderOutcome(resp, {
               sessionId: String(session.id),
               recipientKind: 'tutor',
             });
-            if (outcome !== 'retry') {
+            if (shouldMarkSessionReminderSent(outcome, reason)) {
               await markTutorOccurrenceSent();
               if (outcome === 'sent') totalSent++;
             }

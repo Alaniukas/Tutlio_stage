@@ -85,3 +85,16 @@ export function sessionReminderDeliveryOutcome(
   // remain pending and are retried on the next cron run.
   return 'retry';
 }
+
+/** Only provider-confirmed delivery or an intentional opt-out may stamp reminder flags. */
+export function shouldMarkSessionReminderSent(
+  outcome: SessionReminderDeliveryOutcome,
+  reason: unknown,
+): boolean {
+  if (outcome === 'sent') return true;
+  if (outcome !== 'permanent_skip') return false;
+  const normalized = typeof reason === 'string' ? reason : '';
+  return normalized === 'parent_notification_preference'
+    || normalized === 'tutor_notification_preference'
+    || normalized === 'already_sent_with_modified_payload';
+}
