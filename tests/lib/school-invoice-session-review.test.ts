@@ -61,6 +61,22 @@ describe('school invoice session review', () => {
     expect(schoolInvoiceContractReason(session, [{ ...contract, withdrawal_requested_at: '2026-09-14T13:30:00Z' }])).toBe('contract_review');
   });
 
+  it('includes a manually confirmed in-person group while preserving contract and invoice exclusions', () => {
+    const attended = { ...session, status: 'completed', status_confirmed_by: 'teacher',
+      tutor_joined_at: null, student_joined_at: null };
+    expect(reviewSchoolInvoiceSession(attended, [contract], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 12 });
+    expect(reviewSchoolInvoiceSession({ ...attended, status_confirmed_by: null }, [contract], undefined, false))
+      .toMatchObject({ included: false, reason: 'unconfirmed', canConfirm: true });
+    expect(reviewSchoolInvoiceSession(attended, [{ ...contract, start_within_14_status: 'no' }], undefined, false))
+      .toMatchObject({ included: false, reason: 'outside_contract' });
+    expect(reviewSchoolInvoiceSession(attended, [contract], undefined, true))
+      .toMatchObject({ included: false, reason: 'already_invoiced' });
+    expect(reviewSchoolInvoiceSession(attended, [contract], {
+      id: 1, session_reference_id: 's1', excluded: true, reason: 'Agreed waiver', created_at: '2026-09-28T10:00:00Z',
+    }, false)).toMatchObject({ included: false, reason: 'excluded' });
+  });
+
   it('bills lessons that already happened once the family later signs with immediate start', () => {
     const laterSign = { ...contract, accepted_at: '2026-09-24T07:29:00Z', start_within_14_status: 'yes' as const,
       unit_price_eur: 6, order_snapshot: { ...contract.order_snapshot, start_date: '2026-09-07', unit_price_eur: 6 } as any };

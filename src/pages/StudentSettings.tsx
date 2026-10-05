@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useTranslation } from '@/lib/i18n';
 import { buildPlatformPath } from '@/lib/platform';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
+import NotificationPreferencesSettings from '@/components/NotificationPreferencesSettings';
 import { authHeaders } from '@/lib/apiHelpers';
 import { isMoksloVaisiaiOrg } from '@/lib/marketMoney';
 import { isPendingChildName } from '@/lib/pendingChildName';
@@ -609,6 +610,7 @@ export default function StudentSettings() {
                     )}
                 </div>
 
+                <NotificationPreferencesSettings portal="student" />
                 <PwaInstallGuide />
 
                 <button onClick={handleLogout} className="w-full py-4 mt-6 rounded-3xl bg-gray-100 text-gray-700 font-bold text-sm hover:bg-gray-200 transition-colors flex items-center justify-center gap-2">

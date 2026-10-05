@@ -1,6 +1,10 @@
 // The two school emails that replace the parent portal for families without an
 // account: the post-acceptance invitation and the month-end invoice.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../api/_lib/userNotificationPreferences.js', () => ({
+  filterUserNotificationRecipients: async (_db: unknown, to: string | string[]) => Array.isArray(to) ? to : [to],
+}));
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 

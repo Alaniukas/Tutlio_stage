@@ -32,7 +32,8 @@ import {
     shouldShowPerLessonPaymentUi,
     shouldUsePackageForBooking,
 } from '@/lib/studentPaymentModel';
-import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
+import { effectiveAvailabilityOnDate, sliceTimeRangeBySessions } from '@/lib/availabilityCalendarBlocks';
+import { uniqueTimeRanges } from '@/lib/availabilityBooking';
 import { consumeAvailabilityForCreatedSessions } from '@/lib/consumeSessionAvailability';
 import { formatLessonStripeChargeEur, formatMarketAmount, orgFeeProfile, type OrgFeeProfile } from '@/lib/stripeLessonPricing';
 import { resolveOrgPayerFeeSplit, type OrgPayerFeeSplit } from '@/lib/orgPayerFeeSplit';
@@ -64,6 +65,8 @@ const locales = { lt: lt };
 const localizer = dateFnsLocalizer({ format, parse, startOfWeek, getDay, locales });
 
 interface Availability {
+  id: string;
+  tutor_id: string;
   day_of_week: number | null;
   start_time: string;
   end_time: string;
@@ -72,6 +75,7 @@ interface Availability {
   end_date?: string | null;
   start_date?: string | null;
   created_at?: string | null;
+  subject_ids?: string[] | null;
 }
 interface ExistingSession {
     id: string;
@@ -236,6 +240,9 @@ export default function StudentSchedule() {
     const [loadError, setLoadError] = useState<string | null>(null);
     const [loadingMore, setLoadingMore] = useState(false);
     const [loadedRanges, setLoadedRanges] = useState<Array<{ start: Date, end: Date }>>([]);
+    const [occupiedLoadedRanges, setOccupiedLoadedRanges] = useState<Array<{
+        start: Date; end: Date; tutorId: string; studentId: string;
+    }>>([]);
 
     // Dialog State
     const [selectedEvent, setSelectedEvent] = useState<SlotEvent | null>(null);
@@ -410,19 +417,19 @@ export default function StudentSchedule() {
             const dayOfWeek = d.getDay();
             const dateStr = format(d, 'yyyy-MM-dd');
 
-            const rules = availability.filter((a) => {
-                if (a.is_recurring && a.day_of_week !== null) {
-                    return recurringAvailabilityAppliesOnDate(a, dateStr, dayOfWeek);
-                }
-                if (!a.is_recurring && a.specific_date === dateStr) return true;
-                return false;
-            });
+            const rules = effectiveAvailabilityOnDate(availability, dateStr, dayOfWeek).filter(rule =>
+                !rule.subject_ids?.length || rule.subject_ids.some(id => subjects.some(subject => subject.id === id)),
+            );
 
             // Generate Background Events for free working hours
             rules.forEach(rule => {
                 const startDT = new Date(`${dateStr}T${rule.start_time}`);
                 const endDT = new Date(`${dateStr}T${rule.end_time}`);
-                if (startDT < endDT) {
+                const occupancyChecked = occupiedLoadedRanges.some(range =>
+                    range.tutorId === tutorId && range.studentId === studentId
+                    && startDT >= range.start && endDT <= range.end,
+                );
+                if (startDT < endDT && occupancyChecked) {
                     generatedBgEvents.push({
                         start: startDT,
                         end: endDT,
@@ -511,25 +518,30 @@ export default function StudentSchedule() {
             const sStart = new Date(s.start_time);
             const sEnd = new Date(s.end_time);
 
-            // Hide the occupied slot if it belongs to a subject that is outside the student's grade level
-            if (s.subject_id && !subjects.some(subj => subj.id === s.subject_id)) {
-                return;
-            }
-
             // Check if not already added by existingSessions
             const alreadyExists = existingSessions.some(mys => new Date(mys.start_time).getTime() === sStart.getTime() && mys.status !== 'cancelled');
             // Don't block group lessons that still have available spots
-            const isGroupWithSpots = s.available_spots != null && s.available_spots > 0;
+            const isGroupWithSpots = s.available_spots != null && s.available_spots > 0
+                && subjects.some(subject => subject.id === s.subject_id);
             if (!alreadyExists && !isGroupWithSpots) {
                 addOccupiedEvent(sStart, sEnd, false, s.id);
             }
         });
 
-        return { memoizedEvents: generatedEvents, memoizedBgEvents: generatedBgEvents };
+        // Every tutor lesson blocks time, including subjects outside this child's grade.
+        // Occupied event ends already include the break after the lesson.
+        const busy = generatedEvents.filter(e => e.occupied).map(e => ({
+            start_time: new Date(e.start.getTime() - breakBetweenLessons * 60000),
+            end_time: e.end,
+        }));
+        const freeBackground = uniqueTimeRanges(generatedBgEvents.flatMap(bg =>
+            sliceTimeRangeBySessions(bg, busy),
+        ));
+        return { memoizedEvents: generatedEvents, memoizedBgEvents: freeBackground };
     // NOTE: do NOT add `t` to deps — `useTranslation()` returns a fresh `t`
     // ref every render, which would trigger an infinite re-render loop here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [availability, existingSessions, occupiedSlots, minBookingHours, breakBetweenLessons, studentId, subjects, loadedRanges, isParentRoute, classGroupMeta]);
+    }, [availability, existingSessions, occupiedSlots, occupiedLoadedRanges, tutorId, minBookingHours, breakBetweenLessons, studentId, subjects, loadedRanges, isParentRoute, classGroupMeta]);
 
     useEffect(() => {
         // Always update events when memoized values change
@@ -573,7 +585,7 @@ export default function StudentSchedule() {
     }) => {
         try {
             const { data: { session } } = await supabase.auth.getSession();
-            if (!session?.access_token) return [];
+            if (!session?.access_token) throw new Error('Missing session for busy slots');
             const resp = await fetch('/api/get-occupied-slots', {
                 method: 'POST',
                 headers: {
@@ -589,13 +601,13 @@ export default function StudentSchedule() {
             });
             const json = await resp.json().catch(() => ({}));
             if (!resp.ok) {
-                console.error('[StudentSchedule] occupied slots API failed:', json);
-                return [];
+                throw new Error('Failed to load busy slots');
             }
-            return Array.isArray(json.slots) ? json.slots : [];
+            if (!Array.isArray(json.slots)) throw new Error('Invalid busy slots response');
+            return json.slots;
         } catch (e) {
             console.error('[StudentSchedule] occupied slots API error:', e);
-            return [];
+            throw e;
         }
     };
 
@@ -615,6 +627,7 @@ export default function StudentSchedule() {
     const fetchInitialData = async () => {
         if (!ctxUser) return;
         setLoadError(null);
+        setOccupiedLoadedRanges([]);
         setBillingPolicyResolved(false);
         setLoading(true);
         try {
@@ -980,10 +993,9 @@ export default function StudentSchedule() {
         }
         setSubjects(finalSubjects);
 
-        let filteredAvailability = (availabilityRes.data || []).filter((avail: any) => {
-            if (!avail.subject_ids || avail.subject_ids.length === 0) return true;
-            return avail.subject_ids.some((subjectId: string) => finalSubjects.some((s) => s.id === subjectId));
-        });
+        // Preserve date overrides even when their subjects are outside this
+        // child's catalogue. Filter subjects after choosing the day's rules.
+        let filteredAvailability = availabilityRes.data || [];
 
         // Hide availability from unlicensed tutors in orgs that use license system
         let tutorFrozenByLicense = false;
@@ -1026,6 +1038,7 @@ export default function StudentSchedule() {
         let mySessionsData: ExistingSession[] = [];
         if (sessionsRes.error) {
             console.warn('[StudentSchedule] sessions (initial)', sessionsRes.error.code, sessionsRes.error.message);
+            throw sessionsRes.error;
         } else {
             mySessionsData = await enrichScheduleSessionsWithSubjects(
                 supabase,
@@ -1082,7 +1095,12 @@ export default function StudentSchedule() {
                 endISO: future,
             };
             setTimeout(() => {
-                void fetchOccupiedSlotsDeduped(occupiedParams).then((slots) => setOccupiedSlots(slots ?? []));
+                void fetchOccupiedSlotsDeduped(occupiedParams).then((slots) => {
+                    setOccupiedSlots(prev => dedupeSessionsById([...prev, ...slots]));
+                    setOccupiedLoadedRanges(prev => [...prev, {
+                        start: new Date(past), end: new Date(future), tutorId: st.tutor_id, studentId: st.id,
+                    }]);
+                }).catch(() => setLoadError(t('stuSched.calendarError')));
             }, 400);
         }
         });
@@ -1145,6 +1163,7 @@ export default function StudentSchedule() {
             let myNewSessions: ExistingSession[] = [];
             if (sessionsRes.error) {
                 console.warn('[StudentSchedule] sessions (range)', sessionsRes.error.code, sessionsRes.error.message);
+                throw sessionsRes.error;
             } else {
                 myNewSessions = await enrichScheduleSessionsWithSubjects(
                     supabase,
@@ -1201,16 +1220,11 @@ export default function StudentSchedule() {
                     startISO: past,
                     endISO: future,
                 }).then((otherNewSessions) => {
-                    setOccupiedSlots(prev => {
-                        const merged = [...prev];
-                        (otherNewSessions || []).forEach((newSlot: { id?: string }) => {
-                            if (newSlot.id && !merged.some(s => s.id === newSlot.id)) {
-                                merged.push(newSlot as (typeof merged)[number]);
-                            }
-                        });
-                        return merged;
-                    });
-                });
+                    setOccupiedSlots(prev => dedupeSessionsById([...prev, ...otherNewSessions]));
+                    setOccupiedLoadedRanges(prev => [...prev, {
+                        start: startDate, end: endDate, tutorId: resolvedTutorId, studentId: resolvedStudentId,
+                    }]);
+                }).catch(() => setLoadError(t('stuSched.calendarError')));
             }
 
             // Add this range to loaded ranges

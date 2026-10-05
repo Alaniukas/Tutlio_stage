@@ -46,7 +46,7 @@ describe('canonical DOCX monthly charges', () => {
     expect(bill.billed_session_ids).toEqual(['confirmed']);
     expect(bill.review_session_ids).toEqual(['auto', 'active']);
   });
-  it('does not treat a manual group completion stamp as proof the group actually ran', () => {
+  it('does not treat an actorless legacy group completion stamp as proof the group actually ran', () => {
     const groupSession = { ...session, class_group_id: 'group1', tutor_joined_at: null, student_joined_at: null,
       status_confirmed_at: '2026-08-10T11:05:00Z' };
     expect(hasSchoolOccurrenceEvidence(groupSession)).toBe(false);
@@ -54,6 +54,28 @@ describe('canonical DOCX monthly charges', () => {
     const bill = computeCanonicalSchoolMonthlyBill({ ...base, sessions: [groupSession] });
     expect(bill.billed_session_ids).toEqual([]);
     expect(bill.review_session_ids).toEqual(['one']);
+  });
+  it.each(['teacher', 'admin'])('bills an in-person group explicitly confirmed by its %s after the lesson ended', (actor) => {
+    const attended = { ...session, class_group_id: 'group1', tutor_joined_at: null, student_joined_at: null,
+      status_confirmed_at: session.end_time, status_confirmed_by: actor };
+    expect(hasSchoolOccurrenceEvidence(attended)).toBe(true);
+    expect(computeCanonicalSchoolMonthlyBill({ ...base, sessions: [attended] }))
+      .toMatchObject({ total_eur: 10, billed_session_ids: ['one'], review_session_ids: [] });
+    expect(canonicalSessionCharge({ ...attended, is_complimentary: true }, 'group')).toBe('free');
+    expect(canonicalSessionCharge({ ...attended, paid: true }, 'group')).toBe('review');
+    expect(canonicalSessionCharge({ ...attended, lesson_package_id: 'package' }, 'group')).toBe('review');
+  });
+  it.each([
+    { status_confirmed_at: null, end_time: session.end_time },
+    { status_confirmed_at: 'invalid', end_time: session.end_time },
+    { status_confirmed_at: '2026-08-10T10:59:59Z', end_time: session.end_time },
+    { status_confirmed_at: '2026-08-10T11:05:00Z', end_time: null },
+    { status_confirmed_at: '2026-08-10T11:05:00Z', end_time: 'invalid' },
+  ])('holds invalid or premature manual group attestations (%j)', (timestamps) => {
+    const attended = { ...session, class_group_id: 'group1', tutor_joined_at: null, student_joined_at: null,
+      status_confirmed_by: 'teacher', ...timestamps };
+    expect(hasSchoolOccurrenceEvidence(attended)).toBe(false);
+    expect(canonicalSessionCharge(attended, 'group')).toBe('review');
   });
   it('bills a completed lesson with student join evidence when tutor tracking and manual confirmation are missing', () => {
     const bill = computeCanonicalSchoolMonthlyBill({ ...base, sessions: [

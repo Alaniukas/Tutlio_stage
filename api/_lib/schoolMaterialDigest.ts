@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { shouldSkipNotificationForEmail, userNotificationPreference } from './userNotificationPreferences.js';
 import { resolveEmailOrgBranding, type OrgRowForEmailBranding } from './emailOrgBranding.js';
 import { resolveOrgEmailReplyTo } from './orgEmailReplyTo.js';
 import { notificationLocale } from './notificationLocale.js';
@@ -37,9 +38,14 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ '&'
 /** Optional private material mail waits for known preferences rather than failing open. */
 async function digestOptedOut(db: SupabaseClient, email: string, features: unknown): Promise<boolean> {
   if (parseOrgParentNotificationOptOut(features).includes('lesson_updates')) return true;
-  const parent = await db.from('parent_profiles').select('email_notification_opt_out,disable_lesson_reminders')
+  if (await shouldSkipNotificationForEmail(db, email, 'school_material_digest')) return true;
+  const parent = await db.from('parent_profiles').select('user_id,email_notification_opt_out,disable_lesson_reminders')
     .eq('email', email).limit(1).maybeSingle();
   if (parent.error) throw new Error('school_digest_preferences_unavailable');
+  if (parent.data?.user_id) {
+    const enabled = await userNotificationPreference(db, parent.data.user_id, 'school_materials');
+    if (enabled !== null) return !enabled;
+  }
   return parseParentNotificationOptOut(parent.data?.email_notification_opt_out, parent.data?.disable_lesson_reminders === true).includes('lesson_updates');
 }
 

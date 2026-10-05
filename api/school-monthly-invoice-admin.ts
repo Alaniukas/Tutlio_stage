@@ -70,7 +70,7 @@ type DraftContext = {
   payerChildNames?: string[];
 };
 
-const SESSION_DETAIL_SELECT = 'id, subject_id, tutor_id, start_time, end_time, status, price, class_group_id, school_billing_kind, student_joined_at, tutor_joined_at, status_confirmed_at, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, class_group:school_class_groups(name), subject:subjects(name, price), tutor:profiles!sessions_tutor_id_fkey!inner(full_name,organization_id)';
+const SESSION_DETAIL_SELECT = 'id, subject_id, tutor_id, start_time, end_time, status, price, class_group_id, school_billing_kind, student_joined_at, tutor_joined_at, status_confirmed_at, status_confirmed_by, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, class_group:school_class_groups(name), subject:subjects(name, price), tutor:profiles!sessions_tutor_id_fkey!inner(full_name,organization_id)';
 
 function composePayerDraft(drafts: DraftContext[]): DraftContext {
   const sorted = [...drafts].sort((a, b) => String(a.student.full_name || '').localeCompare(String(b.student.full_name || ''), 'lt'));
@@ -359,7 +359,7 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
   let groupEvidence = new Set<string>();
   if (groupIds.length) {
     const groupSessions = await fetchAllRows<any>((from, to) => supabase.from('sessions')
-      .select('id, class_group_id, start_time, status, student_joined_at, tutor_joined_at, status_confirmed_at, tutor:profiles!sessions_tutor_id_fkey!inner(organization_id)')
+      .select('id, class_group_id, start_time, end_time, status, student_joined_at, tutor_joined_at, status_confirmed_at, status_confirmed_by, tutor:profiles!sessions_tutor_id_fkey!inner(organization_id)')
       .eq('tutor.organization_id', organizationId).in('class_group_id', groupIds)
       .gte('start_time', fromIso).lte('start_time', untilIso)
       .order('start_time').order('id').range(from, to));

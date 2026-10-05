@@ -4,6 +4,12 @@ import { buildCompanyNavItems } from '@/components/CompanyLayout';
 const translate = (key: string) => key;
 
 describe('organization sidebar navigation', () => {
+  it('lets restricted admin seats reach their personal settings without organization settings access', () => {
+    const items = buildCompanyNavItems(false, '/company', translate, false, false, true, false, false, false, false, true);
+    expect(items.find(item => item.href === '/company/notification-settings')).toMatchObject({ permission: null });
+    expect(items.at(-1)?.href).toBe('/company/instructions');
+    expect(buildCompanyNavItems(false, '/company', translate, false).some(item => item.href === '/company/notification-settings')).toBe(false);
+  });
   it('hides dynamic pricing for schools and keeps instructions last', () => {
     const paths = buildCompanyNavItems(true, '/school', translate).map((item) => item.href);
 

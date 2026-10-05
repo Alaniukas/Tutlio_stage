@@ -68,6 +68,23 @@ describe('school invoice attendance review', () => {
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
   });
 
+  it('clears the billing warning after explicitly confirming a completed in-person group as attended', async () => {
+    let attested = false;
+    confirm.mockImplementationOnce(async () => { attested = true; });
+    const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({ sessions: [{ ...session,
+      included: attested, reason: attested ? 'payable' : 'unconfirmed' }],
+      payerEmail: 'parent@example.com', canEditBilling: true, canEditAttendance: true }) }));
+    mount(fetcher);
+    fireEvent.click(screen.getByRole('button', { name: 'school.invoice.review.open' }));
+    await screen.findByText('school.invoice.review.unconfirmed');
+    fireEvent.click(screen.getByRole('button', { name: 'school.invoice.review.attended' }));
+    await screen.findByText('school.invoice.review.reason.payable');
+    expect(confirm).toHaveBeenCalledWith({ sessionId: 'lesson1', currentStatus: 'completed', status: 'completed',
+      startTime: session.startTime, endTime: session.endTime });
+    expect(screen.queryByText('school.invoice.review.unconfirmed')).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it('warns about a missing payer and hides mutation controls for a read-only seat', async () => {
     mount(vi.fn(async () => ({ ok: true, json: async () => ({ sessions: [session], payerEmail: '', canEditBilling: false, canEditAttendance: false }) })));
     fireEvent.click(screen.getByRole('button', { name: 'school.invoice.review.open' }));

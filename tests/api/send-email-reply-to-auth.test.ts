@@ -69,3 +69,6 @@ it('uses the verified organization for a browser-triggered email', async () => {
   expect((await sendForOrg('org-1')).status).toBe(200);
   expect(mocks.send.mock.calls[0][0].replyTo).toEqual(['other-admin@example.com']);
 });
+vi.mock('../../api/_lib/userNotificationPreferences.js', () => ({
+  filterUserNotificationRecipients: async (_db: unknown, to: string | string[]) => Array.isArray(to) ? to : [to],
+}));

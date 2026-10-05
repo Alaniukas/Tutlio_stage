@@ -17,6 +17,7 @@ import { isPlMarket } from '@/lib/market';
 import { formatPln } from '@/lib/formatPln';
 import { tutorPlanPriceLabels } from '@/lib/pricingDisplay';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
+import NotificationPreferencesSettings from '@/components/NotificationPreferencesSettings';
 import OrgTutorPolicyModal from '@/components/OrgTutorPolicyModal';
 
 interface TutorProfile {
@@ -744,6 +745,7 @@ export default function SettingsPage() {
           </div>
         )}
 
+        <NotificationPreferencesSettings portal="tutor" />
         <PwaInstallGuide />
       </div>
     </Layout>

@@ -49,6 +49,8 @@ interface FindTutorModalProps {
   busyIntervals?: BusyInterval[];
   /** Hides slot prices from the admin (org feature flag hide_admin_lesson_prices). */
   hidePrices?: boolean;
+  /** Org admins with session-edit permission may search without tutor breaks. */
+  allowBreakOverride?: boolean;
   /** Student's saved availability — seeds the preferred day/time windows on open. */
   initialPreferredWindows?: Array<{ dayOfWeek: number; startTime: string; endTime: string }>;
   /** Identifies the child whose lesson times are being selected. */
@@ -110,6 +112,7 @@ export default function FindTutorModal({
   frequencyEnabled,
   busyIntervals = [],
   hidePrices,
+  allowBreakOverride = false,
   initialPreferredWindows,
   contextLabel,
   confirmSelection = false,
@@ -135,25 +138,27 @@ export default function FindTutorModal({
   const [searched, setSearched] = useState(false);
   const [tutors, setTutors] = useState<Record<string, TutorOption>>({});
   const [selectedSlotKeys, setSelectedSlotKeys] = useState<Set<string>>(new Set());
+  const [ignoreTutorBreaks, setIgnoreTutorBreaks] = useState(false);
+  const breakMinutesByTutor = useMemo(() => Object.fromEntries(
+    Object.entries(tutors).map(([id, tutor]) => [id, allowBreakOverride && ignoreTutorBreaks ? 0 : tutor.breakMinutes]),
+  ), [tutors, allowBreakOverride, ignoreTutorBreaks]);
 
   useEffect(() => {
     if (busyIntervals.length === 0) return;
-    const breakMinutesByTutor = Object.fromEntries(
-      Object.entries(tutors).map(([id, tutor]) => [id, tutor.breakMinutes]),
-    );
     setResults((current) => subtractBusyFromMatchSlots(
       current,
       expandBusyByBreak(busyIntervals, breakMinutesByTutor),
     ));
-  }, [busyIntervals, tutors]);
+  }, [busyIntervals, breakMinutesByTutor]);
 
   useEffect(() => {
-    if (isOpen) return;
+    if (isOpen && (allowBreakOverride || !ignoreTutorBreaks)) return;
+    setIgnoreTutorBreaks(false);
     setResults([]);
     setSearched(false);
     setLoading(false);
     setSelectedSlotKeys(new Set());
-  }, [isOpen]);
+  }, [isOpen, allowBreakOverride, ignoreTutorBreaks]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -318,9 +323,6 @@ export default function FindTutorModal({
           .range(pageFrom, pageTo)),
       ]);
 
-      const breakMinutesByTutor = Object.fromEntries(
-        Object.entries(tutors).map(([id, tutor]) => [id, tutor.breakMinutes]),
-      );
       const busy: BusyInterval[] = expandBusyByBreak(
         sessions.map((s) => ({
           tutor_id: s.tutor_id,
@@ -796,6 +798,24 @@ export default function FindTutorModal({
             </div>
           </div>
           </>
+          )}
+
+          {allowBreakOverride && (
+            <label className="flex items-center gap-2.5 rounded-xl border border-gray-200 px-3 py-2.5 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={ignoreTutorBreaks}
+                disabled={loading}
+                onChange={(event) => {
+                  setIgnoreTutorBreaks(event.target.checked);
+                  setResults([]);
+                  setSearched(false);
+                  setSelectedSlotKeys(new Set());
+                }}
+                className="h-4 w-4 shrink-0 accent-indigo-600"
+              />
+              {t('findLesson.showWithoutBreaks')}
+            </label>
           )}
 
           <Button className="w-full rounded-xl bg-indigo-600 hover:bg-indigo-700" disabled={loading} onClick={handleSearch}>

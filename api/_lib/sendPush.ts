@@ -2,6 +2,7 @@ import webpush from 'web-push';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { t } from './i18n.js';
 import { applySchoolTerminology, type SchoolTerminology } from '../../src/lib/i18n/schoolTerminology.js';
+import { shouldSkipUserNotification } from './userNotificationPreferences.js';
 
 const VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
@@ -227,6 +228,7 @@ export async function sendPushForUserId(userId: string, type: string, data: any)
 
   const sb = serviceSupabase();
   if (!sb) return 0;
+  if (await shouldSkipUserNotification(sb, userId, type)) return 0;
 
   const { data: profile } = await sb
     .from('profiles')
@@ -319,6 +321,7 @@ export async function sendPushForEmail(
     }
 
     if (!userId) continue;
+    if (await shouldSkipUserNotification(sb, userId, type)) continue;
 
     const payload = builder(data, locale);
     if (!payload) continue;

@@ -196,6 +196,52 @@ describe('school monthly invoice review API', () => {
       sessions: [{ included: true, reason: 'payable', statusConfirmedAt: null }] });
     expect(state.writes).toEqual([]);
   });
+  it.each(['teacher1', 'admin1'])('previews and issues an in-person group lesson manually confirmed by %s', async (actor) => {
+    Object.assign(state.tables.sessions[0], { tutor_joined_at: null, student_joined_at: null, status_confirmed_by: actor });
+    const preview = await request({ action: 'preview' });
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({ totalEur: 12, reviewSessionIds: [],
+      sessions: [{ id: 'lesson1', included: true, reason: 'payable', status: 'completed' }] });
+    expect(state.writes).toEqual([]);
+    vi.mocked(allocateInvoiceNumber).mockResolvedValue('PAM-801');
+    vi.mocked(sendSchoolMonthlyInvoiceEmail).mockResolvedValue({ sent: true } as any);
+    const send = await request({ action: 'send', previewToken: preview.body.previewToken });
+    expect(send.status).toBe(200);
+    expect(state.tables.school_monthly_invoices[0]).toMatchObject({ total_eur: 12, billed_session_ids: ['lesson1'] });
+    expect(state.tables.sessions[0].status_confirmed_by).toBe(actor);
+  });
+  it.each(['no_show', 'active'])('bills a %s group reservation using another attendee manual confirmation', async (status) => {
+    Object.assign(state.tables.sessions[0], { status, status_confirmed_at: null, status_confirmed_by: null,
+      tutor_joined_at: null, student_joined_at: null });
+    state.tables.sessions.push({ ...state.tables.sessions[0], id: 'attendee', student_id: 'child2',
+      status: 'completed', status_confirmed_at: '2026-09-14T14:05:00Z', status_confirmed_by: 'teacher1' });
+    const preview = await request({ action: 'preview' });
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({ totalEur: 12, reviewSessionIds: [],
+      sessions: [{ id: 'lesson1', status, included: true, reason: 'payable', statusConfirmedAt: null }] });
+    expect(preview.body.sessions).toHaveLength(1);
+    expect(state.tables.sessions[0].status).toBe(status);
+    expect(state.writes).toEqual([]);
+  });
+  it.each(['legacy stamp', 'different group', 'different occurrence', 'different organization'])('holds group billing when the only completion evidence is a %s', async (scope) => {
+    Object.assign(state.tables.sessions[0], { tutor_joined_at: null, student_joined_at: null,
+      status_confirmed_at: state.tables.sessions[0].end_time, status_confirmed_by: null });
+    const other = { ...state.tables.sessions[0], id: 'other-attendee', student_id: 'child2',
+      status_confirmed_by: scope === 'legacy stamp' ? null : 'teacher1' };
+    if (scope === 'different group') other.class_group_id = 'other-group';
+    if (scope === 'different occurrence') Object.assign(other, { start_time: '2026-09-15T13:00:00Z',
+      end_time: '2026-09-15T14:00:00Z', status_confirmed_at: '2026-09-15T14:05:00Z' });
+    if (scope === 'different organization') other.tutor = { full_name: 'Other Teacher', organization_id: 'other-org' };
+    state.tables.sessions.push(other);
+    const review = await request();
+    expect(review.status).toBe(200);
+    expect(review.body).toMatchObject({ reviewSessionIds: ['lesson1'],
+      sessions: [{ id: 'lesson1', included: false, reason: 'unconfirmed', canConfirm: true }] });
+    expect((await request({ action: 'preview' })).status).toBe(400);
+    expect((await request({ action: 'send', previewToken: 'no-billable-lessons' })).status).toBe(400);
+    expect(allocateInvoiceNumber).not.toHaveBeenCalled();
+    expect(state.writes).toEqual([]);
+  });
   it('bills a reserved group place using another completed attendee student join without changing the absent child attendance', async () => {
     Object.assign(state.tables.sessions[0], { status: 'no_show', status_confirmed_at: null, tutor_joined_at: null });
     state.tables.sessions.push({ ...state.tables.sessions[0], id: 'attendee', student_id: 'child2',

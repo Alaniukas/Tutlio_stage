@@ -52,6 +52,7 @@ const CalendarPage = lazy(() => import('@/pages/Calendar'));
 const StudentsPage = lazy(() => import('@/pages/Students'));
 const WaitlistPage = lazy(() => import('@/pages/Waitlist'));
 const SettingsPage = lazy(() => import('@/pages/Settings'));
+const NotificationPreferencesSettings = lazy(() => import('@/components/NotificationPreferencesSettings'));
 const LessonSettingsPage = lazy(() => import('@/pages/LessonSettings'));
 const FinancePage = lazy(() => import('@/pages/Finance'));
 const InvoicesPage = lazy(() => import('@/pages/Invoices'));
@@ -584,6 +585,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/instructions" element={<CompanyInstructions />} />
             <Route path="/company/dynamic-pricing" element={<OrgPermissionRoute permission="settings.view" editPermission="settings.edit"><CompanyDynamicPricing /></OrgPermissionRoute>} />
             <Route path="/company/settings" element={<OrgPermissionRoute permission="settings.view" editPermission="settings.edit"><CompanySettings /></OrgPermissionRoute>} />
+            <Route path="/company/notification-settings" element={<OrgPermissionRoute><NotificationPreferencesSettings portal="org_admin" /></OrgPermissionRoute>} />
             <Route path="/company/finance" element={<OrgPermissionRoute permission="finance.view" editPermission="finance.edit"><CompanyFinanceHub /></OrgPermissionRoute>} />
             <Route path="/company/contracts" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyContracts /></OrgPermissionRoute>} />
             <Route path="/company/team" element={<OrgPermissionRoute permission="team.view" editPermission="team.edit"><CompanyTeam /></OrgPermissionRoute>} />
@@ -604,6 +606,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/instructions" element={<CompanyInstructions />} />
             <Route path="/school/dynamic-pricing" element={<Navigate to="/school" replace />} />
             <Route path="/school/settings" element={<OrgPermissionRoute permission="settings.view" editPermission="settings.edit"><CompanySettings /></OrgPermissionRoute>} />
+            <Route path="/school/notification-settings" element={<OrgPermissionRoute><NotificationPreferencesSettings portal="org_admin" /></OrgPermissionRoute>} />
             <Route path="/school/finance" element={<OrgPermissionRoute permission="finance.view" editPermission="finance.edit"><CompanyFinanceHub /></OrgPermissionRoute>} />
             <Route path="/school/contracts" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyContracts /></OrgPermissionRoute>} />
             <Route path="/school/staff-documents" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyStaffDocuments /></OrgPermissionRoute>} />

@@ -10,6 +10,8 @@ const movedStart = '2026-10-01T16:00:00.000Z';
 async function database() {
   const db = new PGlite();
   await db.exec(`
+    CREATE ROLE anon;
+    CREATE ROLE authenticated;
     CREATE TABLE sessions (
       id uuid PRIMARY KEY,
       start_time timestamptz NOT NULL,

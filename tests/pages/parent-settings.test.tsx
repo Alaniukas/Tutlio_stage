@@ -14,9 +14,9 @@ vi.mock('@/contexts/UserContext', () => ({
 vi.mock('@/lib/supabase', () => ({
   supabase: {
     auth: { updateUser: vi.fn(), signOut: vi.fn() },
-    rpc: (_name: string, args: { p_opt_out?: unknown }) => {
-      updateMock(args.p_opt_out);
-      return Promise.resolve({ data: args.p_opt_out, error: null });
+    rpc: (_name: string, args: { p_category?: unknown; p_enabled?: boolean }) => {
+      updateMock(args);
+      return Promise.resolve({ data: args.p_enabled, error: null });
     },
     from: () => ({
       select: () => ({
@@ -46,10 +46,14 @@ vi.mock('@/components/ParentLayout', () => ({
 
 vi.mock('@/components/PwaInstallGuide', () => ({ default: () => null }));
 
-global.fetch = vi.fn().mockResolvedValue({
+global.fetch = vi.fn().mockImplementation(async (url: string) => ({
   ok: true,
-  json: async () => ({ isMoksloVaisiai: false, children: [] }),
-}) as unknown as typeof fetch;
+  json: async () => url.includes('/api/notification-preferences') ? { choices: [
+    { key: 'lesson_reminders', enabled: true }, { key: 'lesson_updates', enabled: true },
+    { key: 'attendance_updates', enabled: true }, { key: 'payment_reminders', enabled: true },
+    { key: 'messages', enabled: false },
+  ] } : ({ isMoksloVaisiai: false, children: [] }),
+})) as unknown as typeof fetch;
 
 import ParentSettings from '@/pages/ParentSettings';
 
@@ -78,8 +82,8 @@ describe('ParentSettings', () => {
 
     fireEvent.click(lessonUpdates);
 
-    await waitFor(() => expect(updateMock).toHaveBeenCalledWith(['lesson_updates']));
+    await waitFor(() => expect(updateMock).toHaveBeenCalledWith({ p_category: 'lesson_updates', p_enabled: false }));
     await waitFor(() => expect((lessonUpdates as HTMLInputElement).checked).toBe(false));
-    expect(screen.getAllByRole('checkbox')).toHaveLength(4);
+    expect(screen.getAllByRole('checkbox')).toHaveLength(5);
   });
 });

@@ -18,6 +18,7 @@ export type CanonicalBillableSession = ExtraLessonsBillableSession & {
   end_time?: string | null;
   tutor_joined_at?: string | null;
   status_confirmed_at?: string | null;
+  status_confirmed_by?: string | null;
   cancelled_by?: string | null;
   cancelled_at?: string | null;
   cancellation_reason_code?: string | null;
@@ -34,13 +35,21 @@ export function groupOccurrenceKey(session: Pick<CanonicalBillableSession, 'clas
   return `${session.class_group_id || ''}:${new Date(session.start_time).toISOString()}`;
 }
 
-/** Join tracking or a confirmed absence; manual completion alone does not prove a group ran. */
+/** Join tracking or an explicit outcome confirmation; actorless legacy group stamps are insufficient. */
 export function hasSchoolOccurrenceEvidence(session: CanonicalBillableSession): boolean {
   if (!['completed', 'no_show'].includes(session.status)) return false;
   if (session.tutor_joined_at) return true;
   if (session.status === 'completed' && session.student_joined_at) return true;
   if (session.status === 'no_show' && session.status_confirmed_at) return true;
-  if (session.status === 'completed' && session.status_confirmed_at && !session.class_group_id) return true;
+  if (session.status === 'completed' && session.status_confirmed_at) {
+    if (!session.class_group_id) return true;
+    const confirmedAt = Date.parse(session.status_confirmed_at);
+    const endedAt = Date.parse(session.end_time || '');
+    // In-person groups have no join tracking. A teacher/admin attestation after
+    // the lesson ended proves delivery; the historical end-time backfill does not.
+    return Boolean(session.status_confirmed_by) && Number.isFinite(confirmedAt)
+      && Number.isFinite(endedAt) && confirmedAt >= endedAt;
+  }
   return false;
 }
 

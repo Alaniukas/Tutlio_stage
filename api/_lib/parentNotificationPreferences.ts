@@ -1,4 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { notificationKeyForType } from '../../src/lib/notificationPreferences.js';
+import { userNotificationPreference } from './userNotificationPreferences.js';
 import {
   parentNotificationKeyForEmailType,
   parseOrgParentNotificationOptOut,
@@ -65,7 +67,7 @@ export async function shouldSkipParentNotification(
 
   const { data, error } = await supabase
     .from('parent_profiles')
-    .select('email_notification_opt_out, disable_lesson_reminders')
+    .select('user_id, email_notification_opt_out, disable_lesson_reminders')
     .eq('email', email)
     .limit(1)
     .maybeSingle();
@@ -75,6 +77,12 @@ export async function shouldSkipParentNotification(
     data.email_notification_opt_out,
     data.disable_lesson_reminders === true,
   );
+  if (key === 'lesson_reminders' && optOut.includes(key)) return true;
+  const personalKey = notificationKeyForType(emailType);
+  if (data.user_id && personalKey) {
+    const enabled = await userNotificationPreference(supabase, data.user_id, personalKey);
+    if (enabled !== null) return !enabled;
+  }
   return optOut.includes(key);
 }
 

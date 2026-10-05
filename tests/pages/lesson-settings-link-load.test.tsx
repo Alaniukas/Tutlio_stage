@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import LessonSettingsPage from '@/pages/LessonSettings';
 
 const testState = vi.hoisted(() => ({
@@ -59,7 +60,7 @@ describe('tutor personal meeting link loading', () => {
 
   it('keeps editing and saving disabled after a failed read, then restores the saved link on retry', async () => {
     testState.profileReads.push({ data: null, error: new Error('Network timeout') });
-    render(<LessonSettingsPage />);
+    render(<MemoryRouter><LessonSettingsPage /></MemoryRouter>);
 
     const linkInput = screen.getByPlaceholderText('https://meet.google.com/xxx-xxxx-xxx') as HTMLInputElement;
     await screen.findByRole('alert');
@@ -84,7 +85,7 @@ describe('tutor personal meeting link loading', () => {
       data: { personal_meeting_link: 'https://meet.google.com/old-room', organization_id: null },
       error: null,
     });
-    render(<LessonSettingsPage />);
+    render(<MemoryRouter><LessonSettingsPage /></MemoryRouter>);
     const linkInput = screen.getByPlaceholderText('https://meet.google.com/xxx-xxxx-xxx') as HTMLInputElement;
     await waitFor(() => expect(linkInput.value).toBe('https://meet.google.com/old-room'));
 
@@ -102,7 +103,7 @@ describe('tutor personal meeting link loading', () => {
       { data: null, error: new Error('Read timeout') },
     );
     testState.updateError = new Error('Write timeout');
-    render(<LessonSettingsPage />);
+    render(<MemoryRouter><LessonSettingsPage /></MemoryRouter>);
     const linkInput = screen.getByPlaceholderText('https://meet.google.com/xxx-xxxx-xxx') as HTMLInputElement;
     await waitFor(() => expect(linkInput.value).toBe('https://meet.google.com/saved-room'));
 

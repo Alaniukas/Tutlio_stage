@@ -127,6 +127,20 @@ it.each(['optout','membership','recipient','flag'])('retires confirmed invalid e
   expect(send).not.toHaveBeenCalled(); expect(await prepare(db)).toEqual([]);
 });
 
+it('rechecks the linked student preference before sending a previously queued digest', async () => {
+  const userId = uid(401);
+  const db = await database({ students: [{ id: childA, organization_id: org, full_name: 'Child A',
+    email: 'child@school.test', linked_user_id: userId, enrollment_status: 'active' }] });
+  const [id] = await prepare(db);
+  await db.pg.query('INSERT INTO user_notification_preferences(user_id,category,enabled) VALUES($1,$2,false)', [userId, 'school_materials']);
+  const send = vi.fn(async () => ({ id: 'unexpected' }));
+
+  expect(await deliverSchoolMaterialDigest(db.client, id, send)).toBe('deferred');
+  expect((await delivery(db, id)).state).toBe('skipped');
+  expect((await db.pg.query<any>('SELECT state FROM school_material_digest_entries')).rows[0].state).toBe('skipped');
+  expect(send).not.toHaveBeenCalled();
+});
+
 it('defers unknown Drive or preference errors without retiring entries or starting the provider window', async () => {
   const db = await database(); const [id] = await prepare(db); const send = vi.fn(async () => ({ id: 'unexpected' }));
   state.allowed.mockRejectedValueOnce(new Error('Drive temporarily unavailable'));

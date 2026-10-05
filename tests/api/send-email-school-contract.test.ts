@@ -4,6 +4,10 @@
 // contactEmail (e.g. irminta@) over the school's main email (info@).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../api/_lib/userNotificationPreferences.js', () => ({
+  filterUserNotificationRecipients: async (_db: unknown, to: string | string[]) => Array.isArray(to) ? to : [to],
+}));
+
 const { sendMock, pushMock } = vi.hoisted(() => ({
   sendMock: vi.fn(),
   pushMock: vi.fn().mockResolvedValue(undefined),

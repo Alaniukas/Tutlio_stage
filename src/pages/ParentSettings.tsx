@@ -7,28 +7,18 @@ import {
   EyeOff,
   Check,
   LogOut,
-  Bell,
   AlertTriangle,
   UserPlus,
   Loader2,
-  CalendarClock,
-  CalendarSync,
-  UserRoundX,
-  CreditCard,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
+import NotificationPreferencesSettings from '@/components/NotificationPreferencesSettings';
 import { parentFullNameForUserDeduped } from '@/lib/preload';
 import { getCached } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { isPendingChildName } from '@/lib/pendingChildName';
-import {
-  isParentNotificationEnabled,
-  parseParentNotificationOptOut,
-  setParentNotificationEnabled,
-  type ParentNotificationKey,
-} from '@/lib/parentNotificationPreferences';
 
 type MvChild = {
   studentId: string;
@@ -78,8 +68,6 @@ export default function ParentSettings() {
   const [successPass, setSuccessPass] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [notificationOptOut, setNotificationOptOut] = useState<ParentNotificationKey[]>([]);
-  const [savingNotification, setSavingNotification] = useState<ParentNotificationKey | null>(null);
   const [mvChildrenLoading, setMvChildrenLoading] = useState(true);
   const [isMvParent, setIsMvParent] = useState(false);
   const [mvChildren, setMvChildren] = useState<MvChild[] | null>(null);
@@ -143,22 +131,7 @@ export default function ParentSettings() {
 
     void (async () => {
       setEmail(ctxUser.email || '');
-      const [fromProfile] = await Promise.all([
-        parentFullNameForUserDeduped(ctxUser.id),
-        supabase
-          .from('parent_profiles')
-          .select('disable_lesson_reminders, email_notification_opt_out')
-          .eq('user_id', ctxUser.id)
-          .maybeSingle()
-          .then(({ data }) => {
-            if (!cancelled && data) {
-              setNotificationOptOut(parseParentNotificationOptOut(
-                data.email_notification_opt_out,
-                data.disable_lesson_reminders === true,
-              ));
-            }
-          }),
-      ]);
+      const fromProfile = await parentFullNameForUserDeduped(ctxUser.id);
       if (cancelled) return;
 
       const fromRpc = pickNonEmpty(fromProfile ?? undefined);
@@ -223,19 +196,6 @@ export default function ParentSettings() {
     }
     await supabase.auth.signOut();
     navigate('/login');
-  };
-
-  const saveNotificationPreference = async (key: ParentNotificationKey, enabled: boolean) => {
-    if (!ctxUser || savingNotification) return;
-    setSavingNotification(key);
-    setError(null);
-    const next = setParentNotificationEnabled(notificationOptOut, key, enabled);
-    const { data: saved, error: err } = await supabase.rpc('set_parent_notification_preferences', {
-      p_opt_out: next,
-    });
-    if (err) setError(t('parent.notificationsSaveError'));
-    else setNotificationOptOut(parseParentNotificationOptOut(saved));
-    setSavingNotification(null);
   };
 
   const handleAddChild = async () => {
@@ -652,40 +612,7 @@ export default function ParentSettings() {
           </div>
         )}
 
-        <div className="bg-white rounded-3xl p-5 shadow-sm border border-orange-100/40">
-          <div className="flex items-center gap-2 mb-1">
-            <Bell className="w-5 h-5 text-orange-500" />
-            <h2 className="font-bold text-gray-900">{t('parent.notificationsTitle')}</h2>
-          </div>
-          <p className="text-xs text-gray-500 mb-4 leading-relaxed">{t('parent.notificationsDesc')}</p>
-          <div className="divide-y divide-gray-100">
-            {([
-              ['lesson_reminders', CalendarClock, 'parent.lessonRemindersLabel', 'parent.lessonRemindersDesc'],
-              ['lesson_updates', CalendarSync, 'parent.lessonUpdatesLabel', 'parent.lessonUpdatesDesc'],
-              ['attendance_updates', UserRoundX, 'parent.attendanceUpdatesLabel', 'parent.attendanceUpdatesDesc'],
-              ['payment_reminders', CreditCard, 'parent.paymentRemindersLabel', 'parent.paymentRemindersDesc'],
-            ] as const).map(([key, Icon, labelKey, descriptionKey]) => {
-              const enabled = isParentNotificationEnabled(notificationOptOut, key);
-              return (
-                <label key={key} className="flex items-start gap-3 py-3 cursor-pointer first:pt-1 last:pb-0">
-                  <input
-                    type="checkbox"
-                    checked={enabled}
-                    disabled={savingNotification !== null}
-                    onChange={(event) => void saveNotificationPreference(key, event.target.checked)}
-                    className="mt-0.5 h-5 w-5 shrink-0 rounded border-gray-300 text-orange-500 accent-orange-500 focus:ring-orange-400 disabled:opacity-50"
-                  />
-                  <Icon className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-gray-900">{t(labelKey)}</span>
-                    <span className="block text-xs text-gray-400 leading-relaxed">{t(descriptionKey)}</span>
-                  </span>
-                  {savingNotification === key && <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-orange-500" />}
-                </label>
-              );
-            })}
-          </div>
-        </div>
+        <NotificationPreferencesSettings portal="parent" />
 
         <PwaInstallGuide />
 

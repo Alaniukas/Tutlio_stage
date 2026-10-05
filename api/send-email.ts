@@ -56,6 +56,7 @@ import {
 import { checkSchoolSessionStudentAccess } from './_lib/schoolContractAccess.js';
 import { filterParentNotificationRecipients, shouldSkipParentNotification } from './_lib/parentNotificationPreferences.js';
 import { shouldSkipTutorNotification } from './_lib/tutorNotificationPreferences.js';
+import { filterUserNotificationRecipients } from './_lib/userNotificationPreferences.js';
 import { allowsPerLessonBilling } from './_lib/perLessonBillingEligibility.js';
 import { resolveOrgEmailReplyTo } from './_lib/orgEmailReplyTo.js';
 
@@ -3503,6 +3504,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           serviceKey,
           supabaseServiceRoleClientOptions(),
         );
+        const personalRecipients = await filterUserNotificationRecipients(preferenceClient, to, type);
+        if (!personalRecipients.length) {
+          return res.status(200).json({ success: true, skipped: true, reason: 'user_notification_preference' });
+        }
+        to = Array.isArray(to) ? personalRecipients : personalRecipients[0];
         if (Array.isArray(to)) {
           to = await filterParentNotificationRecipients(preferenceClient, to, type, rawData);
         }

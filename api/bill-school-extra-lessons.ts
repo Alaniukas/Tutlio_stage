@@ -218,7 +218,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       loadedSessions = await readAllSchoolBillingRows((afterId) => {
       let query = supabase
       .from('sessions')
-      .select('id, student_id, tutor_id, start_time, end_time, status, student_joined_at, tutor_joined_at, status_confirmed_at, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, school_billing_kind, class_group_id, subject_id, tutor:profiles!sessions_tutor_id_fkey!inner(organization_id)')
+      .select('id, student_id, tutor_id, start_time, end_time, status, student_joined_at, tutor_joined_at, status_confirmed_at, status_confirmed_by, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, school_billing_kind, class_group_id, subject_id, tutor:profiles!sessions_tutor_id_fkey!inner(organization_id)')
       .eq('tutor.organization_id', contract.organization_id)
       .gte('start_time', wallClockToUtc(start, '00:00:00').toISOString())
       .lte('start_time', new Date(wallClockToUtc(end, '23:59:59').getTime() + 999).toISOString())

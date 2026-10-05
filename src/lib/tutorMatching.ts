@@ -10,7 +10,7 @@
  * cover, with the student's primary tutor ranked first.
  */
 import { addDays, format, getISOWeek, getISOWeekYear, startOfDay, endOfDay } from 'date-fns';
-import { recurringAvailabilityAppliesOnDate } from './availabilityRecurring';
+import { effectiveAvailabilityOnDate } from './availabilityCalendarBlocks';
 
 export interface AvailabilityRule {
   tutor_id: string;
@@ -119,13 +119,7 @@ export function computeTutorSlots(
       : [{ dayOfWeek, startTime: params.timeFrom, endTime: params.timeTo }];
     if (preferredWindows.length === 0) continue;
 
-    for (const avail of availability) {
-      const isRecurring = avail.is_recurring !== false; // default true
-      const applies = isRecurring
-        ? recurringAvailabilityAppliesOnDate(avail, dateStr, dayOfWeek)
-        : avail.specific_date === dateStr;
-      if (!applies) continue;
-
+    for (const avail of effectiveAvailabilityOnDate(availability, dateStr, dayOfWeek)) {
       const tutorSubs = tutorSubjectMap[avail.tutor_id];
       if (!tutorSubs || tutorSubs.length === 0) continue;
 

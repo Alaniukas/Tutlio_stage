@@ -22,16 +22,26 @@ export type SessionTimeSlice = {
   status?: string | null;
 };
 
+type AvailabilityDateRule = {
+  tutor_id: string;
+  is_recurring?: boolean | null;
+  specific_date?: string | null;
+  day_of_week: number | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  created_at?: string | null;
+};
+
 /** One-time rows for a date override recurring rules for the same tutor on that day. */
-export function effectiveAvailabilityOnDate(
-  availability: AvailabilityCalendarRow[],
+export function effectiveAvailabilityOnDate<T extends AvailabilityDateRule>(
+  availability: T[],
   dateStr: string,
   dayOfWeek: number,
-): AvailabilityCalendarRow[] {
-  const specific = availability.filter((a) => !a.is_recurring && a.specific_date === dateStr);
+): T[] {
+  const specific = availability.filter((a) => a.is_recurring === false && a.specific_date === dateStr);
   const tutorsWithOverride = new Set(specific.map((a) => a.tutor_id));
   const recurring = availability.filter((a) => {
-    if (!a.is_recurring || a.day_of_week === null) return false;
+    if (a.is_recurring === false || a.day_of_week === null) return false;
     if (tutorsWithOverride.has(a.tutor_id)) return false;
     return recurringAvailabilityAppliesOnDate(a, dateStr, dayOfWeek);
   });
@@ -41,7 +51,9 @@ export function effectiveAvailabilityOnDate(
 export function sliceTimeRangeBySessions<T extends { start: Date; end: Date }>(
   block: T,
   sessions: SessionTimeSlice[],
+  breakMinutes = 0,
 ): T[] {
+  const breakMs = Math.max(0, Number(breakMinutes) || 0) * 60_000;
   let freeBlocks: T[] = [block];
   const overlapping = sessions.flatMap((session) => {
     if (session.status === 'cancelled') return [];
@@ -54,9 +66,11 @@ export function sliceTimeRangeBySessions<T extends { start: Date; end: Date }>(
       : new Date(session.end_time);
 
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return [];
-    if (start >= block.end || end <= block.start) return [];
+    const busyStart = new Date(start.getTime() - breakMs);
+    const busyEnd = new Date(end.getTime() + breakMs);
+    if (busyStart >= block.end || busyEnd <= block.start) return [];
 
-    return [{ start, end }];
+    return [{ start: busyStart, end: busyEnd }];
   });
 
   for (const session of overlapping) {

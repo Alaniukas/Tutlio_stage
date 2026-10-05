@@ -57,6 +57,11 @@ describe('session reminder delivery keys', () => {
     expect(sessionReminderDeliveryOutcome(true, {
       success: true,
       skipped: true,
+      reason: 'user_notification_preference',
+    })).toBe('permanent_skip');
+    expect(sessionReminderDeliveryOutcome(true, {
+      success: true,
+      skipped: true,
       reason: 'parent_notification_preference',
     })).toBe('permanent_skip');
     expect(sessionReminderDeliveryOutcome(true, {
@@ -81,6 +86,7 @@ describe('session reminder delivery keys', () => {
     expect(shouldMarkSessionReminderSent('sent', null)).toBe(true);
     expect(shouldMarkSessionReminderSent('retry', 'school_contract_not_active')).toBe(false);
     expect(shouldMarkSessionReminderSent('permanent_skip', 'parent_notification_preference')).toBe(true);
+    expect(shouldMarkSessionReminderSent('permanent_skip', 'user_notification_preference')).toBe(true);
     expect(shouldMarkSessionReminderSent('permanent_skip', 'already_sent_with_modified_payload')).toBe(true);
     expect(shouldMarkSessionReminderSent('permanent_skip', 'school_join_material_policy')).toBe(false);
   });

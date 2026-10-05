@@ -289,6 +289,7 @@ const TVARKARASTIS_CALENDAR_SESSION_SELECT = `
 interface OrgTutor {
   id: string;
   full_name: string;
+  break_between_lessons?: number | null;
   email: string | null;
   personal_meeting_link?: string | null;
   /** false = explicit „nelicencijuotas“ ribotam org planui; kitaip laisvas naudoti be licencijos režimu */
@@ -899,7 +900,7 @@ export default function CompanyTvarkarastis() {
       const filteredTutors = await getOrgVisibleTutors(
         supabase as any,
         organizationId,
-        'id, full_name, email, has_active_license, personal_meeting_link',
+        'id, full_name, email, has_active_license, personal_meeting_link, break_between_lessons',
       );
       const tutorIds = filteredTutors.map((t: any) => t.id);
       setOrgTutors(filteredTutors as OrgTutor[]);
@@ -1180,6 +1181,7 @@ export default function CompanyTvarkarastis() {
     );
 
     const blocks: any[] = [];
+    const breaksByTutor = new Map(orgTutors.map((tutor) => [tutor.id, tutor.break_between_lessons ?? 0]));
 
     const tutorSessions = (tutorId: string) =>
       mergedCalendarSessions
@@ -1205,6 +1207,7 @@ export default function CompanyTvarkarastis() {
         const slices = sliceTimeRangeBySessions(
           { start: blockStart, end: blockEnd },
           tutorSessions(avail.tutor_id),
+          breaksByTutor.get(avail.tutor_id) ?? 0,
         );
 
         slices.forEach((slice, index) => {
@@ -1222,7 +1225,7 @@ export default function CompanyTvarkarastis() {
     }
 
     return blocks;
-  }, [filteredAvailability, currentDate, currentView, showOnlySessions, mergedCalendarSessions, locale]);
+  }, [filteredAvailability, currentDate, currentView, showOnlySessions, mergedCalendarSessions, locale, orgTutors]);
 
   /** Trial (bandomoji) lessons get a distinct highlight in the calendar. */
   const trialSubjectIds = useMemo(
@@ -5767,6 +5770,7 @@ export default function CompanyTvarkarastis() {
         onClose={() => setFindLessonOpen(false)}
         orgId={organizationId}
         orgAdminMode={!proKlaseAdminUi}
+        allowBreakOverride={canEditSessions}
         students={!proKlaseAdminUi ? students.map((s) => ({ id: s.id, full_name: s.full_name })) : undefined}
         frequencyEnabled={proKlaseAdminUi && hasFeature('tutor_frequency_search')}
         hidePrices={hideAdminPrices}

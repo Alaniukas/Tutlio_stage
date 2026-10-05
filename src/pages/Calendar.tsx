@@ -1103,6 +1103,7 @@ export default function CalendarPage() {
         const freeBlocks = sliceTimeRangeBySessions(
           { start: slotStart, end: slotEnd },
           sessions.filter((s) => s.status !== 'cancelled'),
+          ctxProfile?.break_between_lessons ?? 0,
         );
 
         // Add the resulting sliced blocks as background events
@@ -1128,7 +1129,7 @@ export default function CalendarPage() {
       });
     }
     return generated;
-  }, [availability, ctxUser?.id, currentDate, currentView, sessions, locale]);
+  }, [availability, ctxUser?.id, ctxProfile?.break_between_lessons, currentDate, currentView, sessions, locale]);
 
   // Helper function to merge group lesson sessions
   const classGroupMeta = useMemo(() => buildClassGroupMetaMap(classGroups), [classGroups]);

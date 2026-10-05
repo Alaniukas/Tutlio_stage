@@ -77,6 +77,7 @@ export function buildCompanyNavItems(
   showRecordings = false,
   showStaffDocuments = false,
   showConsultations = false,
+  showPersonalSettings = false,
 ): CompanyNavItem[] {
   const base: CompanyNavItem[] = [
     { href: `${orgBasePath}`, label: t('companyNav.overview'), icon: LayoutDashboard, exact: true, permission: 'dashboard.view', section: 'work' },
@@ -111,6 +112,9 @@ export function buildCompanyNavItems(
     base.push({ href: `${orgBasePath}/dynamic-pricing`, label: t('companyNav.dynamicPricing'), icon: BadgeEuro, permission: 'settings.view', section: 'manage' });
   }
   base.push({ href: `${orgBasePath}/team`, label: t('companyNav.team'), icon: ShieldCheck, permission: 'team.view', section: 'manage' });
+  if (showPersonalSettings) {
+    base.push({ href: `${orgBasePath}/notification-settings`, label: t('settings.title'), icon: Settings, permission: null, section: 'manage' });
+  }
   if (showInstructions) {
     base.push({ href: `${orgBasePath}/instructions`, label: t('companyNav.instructions'), icon: HelpCircle, permission: null, section: 'help' });
   }
@@ -193,6 +197,7 @@ export default function CompanyLayout() {
         SCHOOL_LESSON_RECORDINGS_NAV_READY && isSchool && hasFeature('school_lesson_recordings'),
         isSchool && isStaffDocumentsOrg(organizationId) && hasFeature('school_staff_documents'),
         isSchool && hasFeature('school_family_portal'),
+        !can('settings.view'),
       )
       .filter((item) => item.permission === null || can(item.permission)),
     [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage, showInstructions, can, hasFeature, organizationId],
@@ -397,7 +402,8 @@ export default function CompanyLayout() {
             </main>
             <PwaInstallPrompt
               settingsPath={
-                showInstructions ? `${orgBasePath}/instructions` : `${orgBasePath}/settings`
+                showInstructions ? `${orgBasePath}/instructions`
+                  : can('settings.view') ? `${orgBasePath}/settings` : `${orgBasePath}/notification-settings`
               }
             />
           </div>

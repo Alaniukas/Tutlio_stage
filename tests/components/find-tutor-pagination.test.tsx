@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes } from 'react';
+import type { ComponentProps, InputHTMLAttributes } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import FindTutorModal from '@/components/FindTutorModal';
@@ -12,6 +12,7 @@ const testState = vi.hoisted(() => ({
   failedTable: null as string | null,
   failureFrom: 1000,
   subjectsRead: false,
+  tutorBreakMinutes: 0,
 }));
 
 vi.mock('@/lib/i18n', () => ({
@@ -29,7 +30,7 @@ vi.mock('@/components/ui/time-input', () => ({
 vi.mock('@/lib/orgVisibleTutors', () => ({
   getOrgVisibleTutors: async () => [
     { id: 'expired-tutor', full_name: 'September Tutor', break_between_lessons: 0 },
-    { id: 'october-tutor', full_name: 'October Tutor', break_between_lessons: 0 },
+    { id: 'october-tutor', full_name: 'October Tutor', break_between_lessons: testState.tutorBreakMinutes },
   ],
 }));
 vi.mock('@/lib/supabase', () => ({
@@ -87,14 +88,15 @@ vi.mock('@/lib/supabase', () => ({
 
 const localTime = (hour: number) => new Date(2026, 9, 1, hour).toISOString();
 
-async function openOctoberSearch() {
+async function openOctoberSearch(options: Partial<ComponentProps<typeof FindTutorModal>> = {}) {
   const onPickSlot = vi.fn();
-  render(<FindTutorModal isOpen orgId="pro-klase" onClose={vi.fn()} onPickSlot={onPickSlot} orgAdminMode />);
+  const props = { isOpen: true, orgId: 'pro-klase', onClose: vi.fn(), onPickSlot, orgAdminMode: true, ...options };
+  const view = render(<FindTutorModal {...props} />);
   await waitFor(() => expect(testState.subjectsRead).toBe(true));
   for (const input of screen.getAllByTestId('search-date')) {
     fireEvent.change(input, { target: { value: '2026-10-01' } });
   }
-  return { onPickSlot, search: screen.getByRole('button', { name: 'findLesson.search' }) as HTMLButtonElement };
+  return { onPickSlot, view, props, search: screen.getByRole('button', { name: 'findLesson.search' }) as HTMLButtonElement };
 }
 
 describe('FindTutorModal paginated availability search', () => {
@@ -105,6 +107,7 @@ describe('FindTutorModal paginated availability search', () => {
     testState.serverCap = 1000;
     testState.failedTable = null;
     testState.subjectsRead = false;
+    testState.tutorBreakMinutes = 0;
     testState.availability = Array.from({ length: 1334 }, (_, index) => ({
       id: String(index).padStart(5, '0'),
       tutor_id: index === 1000 ? 'october-tutor' : 'expired-tutor',
@@ -173,5 +176,91 @@ describe('FindTutorModal paginated availability search', () => {
     fireEvent.click(search);
     await screen.findByRole('button', { name: /Matematika.*16:00.*18:00/ });
     expect(search.disabled).toBe(false);
+  });
+
+  function useBackToBackFixture() {
+    testState.tutorBreakMinutes = 10;
+    testState.availability = [{
+      ...testState.availability[1000], start_time: '18:00', end_time: '19:00',
+      is_recurring: false, specific_date: '2026-10-01', day_of_week: null,
+    }];
+    testState.sessions = [{
+      id: 'existing-lesson', tutor_id: 'october-tutor',
+      start_time: localTime(19), end_time: localTime(20), status: 'scheduled',
+    }];
+  }
+
+  it.each([true, false])('offers a back-to-back lesson only after the admin enables the override (simple search: %s)', async (orgAdminMode) => {
+    useBackToBackFixture();
+    const { search, onPickSlot } = await openOctoberSearch({
+      allowBreakOverride: true, orgAdminMode, frequencyEnabled: !orgAdminMode,
+      initialPreferredWindows: [{ dayOfWeek: 4, startTime: '18:00', endTime: '20:00' }],
+    });
+    const override = screen.getByRole('checkbox', { name: 'findLesson.showWithoutBreaks' }) as HTMLInputElement;
+    expect(override.checked).toBe(false);
+    fireEvent.click(search);
+    await screen.findByText('findLesson.noResults');
+
+    fireEvent.click(override);
+    expect(screen.queryByText('findLesson.noResults')).toBeNull();
+    fireEvent.click(search);
+    const available = await screen.findByRole('button', { name: /Matematika.*18:00.*19:00/ });
+    fireEvent.click(available);
+    expect(onPickSlot).toHaveBeenCalledWith(expect.objectContaining({
+      start: new Date(2026, 9, 1, 18), end: new Date(2026, 9, 1, 19),
+    }), undefined);
+
+    fireEvent.click(override);
+    expect(screen.queryByRole('button', { name: /Matematika/ })).toBeNull();
+    fireEvent.click(search);
+    await screen.findByText('findLesson.noResults');
+  });
+
+  it('keeps the break rule and hides the override unless the caller grants admin access', async () => {
+    useBackToBackFixture();
+    const { search } = await openOctoberSearch();
+    expect(screen.queryByRole('checkbox', { name: 'findLesson.showWithoutBreaks' })).toBeNull();
+    fireEvent.click(search);
+    await screen.findByText('findLesson.noResults');
+  });
+
+  it('still excludes actual overlaps when searching without breaks', async () => {
+    useBackToBackFixture();
+    testState.sessions[0].start_time = new Date(2026, 9, 1, 18, 50).toISOString();
+    const { search } = await openOctoberSearch({ allowBreakOverride: true });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'findLesson.showWithoutBreaks' }));
+    fireEvent.click(search);
+    await screen.findByText('findLesson.noResults');
+    expect(screen.queryByRole('button', { name: /Matematika/ })).toBeNull();
+  });
+
+  it('applies the override to newly booked adjacent lessons while removing newly booked overlaps', async () => {
+    useBackToBackFixture();
+    const { search, view, props } = await openOctoberSearch({ allowBreakOverride: true });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'findLesson.showWithoutBreaks' }));
+    fireEvent.click(search);
+    await screen.findByRole('button', { name: /Matematika.*18:00.*19:00/ });
+    view.rerender(<FindTutorModal {...props} busyIntervals={[{
+      tutor_id: 'october-tutor', start: new Date(2026, 9, 1, 17), end: new Date(2026, 9, 1, 18),
+    }]} />);
+    expect(screen.getByRole('button', { name: /Matematika.*18:00.*19:00/ })).toBeTruthy();
+
+    view.rerender(<FindTutorModal {...props} busyIntervals={[{
+      tutor_id: 'october-tutor', start: new Date(2026, 9, 1, 18), end: new Date(2026, 9, 1, 19),
+    }]} />);
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Matematika/ })).toBeNull());
+  });
+
+  it.each(['close', 'revoke'])('resets the override and clears results after %s', async (reason) => {
+    useBackToBackFixture();
+    const { search, view, props } = await openOctoberSearch({ allowBreakOverride: true });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'findLesson.showWithoutBreaks' }));
+    fireEvent.click(search);
+    await screen.findByRole('button', { name: /Matematika.*18:00.*19:00/ });
+
+    view.rerender(<FindTutorModal {...props} isOpen={reason !== 'close'} allowBreakOverride={reason !== 'revoke'} />);
+    view.rerender(<FindTutorModal {...props} />);
+    expect((screen.getByRole('checkbox', { name: 'findLesson.showWithoutBreaks' }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByRole('button', { name: /Matematika/ })).toBeNull();
   });
 });

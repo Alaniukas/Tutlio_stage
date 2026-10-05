@@ -2,6 +2,10 @@
 // account: the school variant must lead with the join link and must not push
 // them into the parent portal (or towards registering).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../api/_lib/userNotificationPreferences.js', () => ({
+  filterUserNotificationRecipients: async (_db: unknown, to: string | string[]) => Array.isArray(to) ? to : [to],
+}));
 import { sessionReminderDeliveryKey } from '../../api/_lib/sessionReminderDelivery';
 
 const { sendMock, pushMock, contractAccess } = vi.hoisted(() => ({

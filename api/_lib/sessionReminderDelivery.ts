@@ -76,6 +76,7 @@ export function sessionReminderDeliveryOutcome(
     && payload.skipped === true
     && (payload.reason === 'parent_notification_preference'
       || payload.reason === 'tutor_notification_preference'
+      || payload.reason === 'user_notification_preference'
       || payload.reason === 'already_sent_with_modified_payload')
   ) {
     return 'permanent_skip';
@@ -96,5 +97,6 @@ export function shouldMarkSessionReminderSent(
   const normalized = typeof reason === 'string' ? reason : '';
   return normalized === 'parent_notification_preference'
     || normalized === 'tutor_notification_preference'
+    || normalized === 'user_notification_preference'
     || normalized === 'already_sent_with_modified_payload';
 }

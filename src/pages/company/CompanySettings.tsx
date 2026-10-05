@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Settings, Save, Trash2, Plus, BookOpen, Clock, Euro, Pencil, Users, Eye, AlertTriangle, Mail, Globe, Building2 } from 'lucide-react';
 import Toast from '@/components/Toast';
+import NotificationPreferencesSettings from '@/components/NotificationPreferencesSettings';
 import { useTranslation } from '@/lib/i18n';
 import {
   EMPTY_ORG_LESSON_SCOPE,
@@ -980,6 +981,7 @@ export default function CompanySettings() {
         </div>
 
         <div className="space-y-4">
+          <NotificationPreferencesSettings portal="org_admin" />
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center flex-shrink-0">

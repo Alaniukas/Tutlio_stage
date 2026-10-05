@@ -8,8 +8,10 @@ export async function schoolMaterialDigestDatabase(seed: Record<string, Record<s
   await pg.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
     CREATE TABLE organizations(id uuid PRIMARY KEY,name text,entity_type text,features jsonb,preferred_locale text,logo_url text,brand_color text,brand_color_secondary text);
     CREATE TABLE students(id uuid PRIMARY KEY,organization_id uuid,full_name text,email text,linked_user_id uuid,detached_at timestamptz,enrollment_status text,
-      payer_email text,payer_name text,parent_secondary_email text,parent_secondary_name text);
-    CREATE TABLE parent_profiles(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),email text,email_notification_opt_out jsonb,disable_lesson_reminders boolean);
+      payer_email text,payer_name text,parent_secondary_email text,parent_secondary_name text,parent_user_id uuid);
+    CREATE TABLE profiles(id uuid PRIMARY KEY,email text);
+    CREATE TABLE parent_profiles(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),user_id uuid,email text,email_notification_opt_out jsonb,disable_lesson_reminders boolean);
+    CREATE TABLE user_notification_preferences(user_id uuid,category text,enabled boolean,PRIMARY KEY(user_id,category));
   `);
   const migration = readFileSync('supabase/migrations/20260928190300_school_material_publications_digest.sql', 'utf8');
   await pg.exec(migration.slice(0, migration.indexOf('ALTER TABLE public.school_material_publications ENABLE ROW')));
@@ -74,6 +76,7 @@ export async function schoolMaterialDigestDatabase(seed: Record<string, Record<s
       if (expression === 'is.null') return [`${column(field)} IS NULL`];
       if (expression === 'not.is.null') return [`${column(field)} IS NOT NULL`];
       if (expression.startsWith('eq.')) return [`${column(field)}=${parameter(expression.slice(3))}`];
+      if (expression.startsWith('ilike.')) return [`${column(field)} ILIKE ${parameter(expression.slice(6))}`];
       if (expression.startsWith('lte.')) return [`${column(field)}<=${parameter(expression.slice(4))}`];
       if (expression.startsWith('gt.')) return [`${column(field)}>${parameter(expression.slice(3))}`];
       if (expression.startsWith('in.(')) return [`${column(field)} IN (${expression.slice(4,-1).split(',').map(part => parameter(part.replace(/^"|"$/g, ''))).join(',')})`];

@@ -7,8 +7,14 @@ vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
     let insert: any;
     let afterId: string | null = null;
     let excludeCancelled = false;
+    let sessionColumns: string[] | null = null;
     const query: any = {
-      select: () => query, not: () => query, is: () => query,
+      select: (columns?: string) => {
+        if (table === 'sessions' && columns && columns !== '*') {
+          sessionColumns = columns.split(/,(?![^(]*\))/).map((column) => column.trim().split(/[:(]/)[0]);
+        }
+        return query;
+      }, not: () => query, is: () => query,
       order: () => query, limit: () => query, in: () => query,
       gt: (_key: string, value: string) => { afterId = value; return query; },
       eq: (key: string, value: any) => { state.filters.push([table, key, value]); return query; },
@@ -18,12 +24,16 @@ vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
       insert: (row: any) => { insert = row; state.inserts.push(row); return query; },
       maybeSingle: async () => ({ data: table === 'school_monthly_invoices' ? state.existingInvoice : null, error: null }),
       single: async () => ({ data: { id: 'invoice', ...insert }, error: null }),
-      then: (resolve: any) => resolve({ data: afterId ? []
-        : table === 'school_contracts' ? state.contracts
-        : table === 'school_discount_agreements' ? state.discounts
-        : table === 'school_session_billing_decisions' ? state.billingDecisions
-        : table === 'school_monthly_invoices' ? state.issuedInvoices.filter((row) => !excludeCancelled || row.payment_status !== 'cancelled') : state.sessions,
-      error: table === 'sessions' ? state.sessionError : table === 'school_session_billing_decisions' ? state.billingReviewError : null }),
+      then: (resolve: any) => {
+        const rows = afterId ? []
+          : table === 'school_contracts' ? state.contracts
+          : table === 'school_discount_agreements' ? state.discounts
+          : table === 'school_session_billing_decisions' ? state.billingDecisions
+          : table === 'school_monthly_invoices' ? state.issuedInvoices.filter((row) => !excludeCancelled || row.payment_status !== 'cancelled') : state.sessions;
+        return resolve({ data: sessionColumns
+          ? rows.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => sessionColumns!.includes(key)))) : rows,
+        error: table === 'sessions' ? state.sessionError : table === 'school_session_billing_decisions' ? state.billingReviewError : null });
+      },
     };
     return query;
   },
@@ -90,13 +100,15 @@ describe('monthly school billing allocation', () => {
     ]) expect((await run(query)).status).toHaveBeenCalledWith(400);
     expect(state.inserts).toHaveLength(0); expect(state.emails).toBe(0);
   });
-  it.each(['tutor join', 'student join'])('uses %s evidence for canonical actual group charges per child and caches the shared group read', async (evidence) => {
+  it.each(['tutor join', 'student join', 'manual attendance'])('uses %s evidence for canonical actual group charges per child and caches the shared group read', async (evidence) => {
     const canonical = { ...contract('first', 'group', 'g1', 'math'), organization_id: '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17', filled_body: EXTRA_LESSONS_LEGAL_BODY };
     state.contracts = [canonical, { ...canonical, id: 'second', student_id: 'student2' }];
     state.sessions = [
       { id: 'a', student_id: 'student', class_group_id: 'g1', subject_id: 'math', start_time: '2026-08-10T10:00:00Z', status: 'completed',
         tutor_joined_at: evidence === 'tutor join' ? '2026-08-10T10:00:00Z' : null,
-        student_joined_at: evidence === 'student join' ? '2026-08-10T10:05:00Z' : null, school_billing_kind: 'base' },
+        student_joined_at: evidence === 'student join' ? '2026-08-10T10:05:00Z' : null,
+        end_time: '2026-08-10T11:00:00Z', status_confirmed_at: evidence === 'manual attendance' ? '2026-08-10T11:05:00Z' : null,
+        status_confirmed_by: evidence === 'manual attendance' ? 'teacher' : null, school_billing_kind: 'base' },
       { id: 'b', student_id: 'student2', class_group_id: 'g1', subject_id: 'math', start_time: '2026-08-10T10:00:00Z', status: 'no_show', school_billing_kind: 'base' },
     ];
     const response = await run();
@@ -105,6 +117,21 @@ describe('monthly school billing allocation', () => {
       ['first', 10, 'actual', ['a'], '2026-09-08'], ['second', 10, 'actual', ['b'], '2026-09-08'],
     ]);
     expect(state.filters.filter(([table, key]) => table === 'sessions' && key === 'class_group_id')).toHaveLength(2); // data page + empty page, once for both children.
+    expect(state.sessions[1].status).toBe('no_show');
+  });
+
+  it('holds an actorless legacy group completion stamp instead of invoicing it automatically', async () => {
+    state.contracts = [{ ...contract('first', 'group', 'g1', 'math'),
+      organization_id: '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17', filled_body: EXTRA_LESSONS_LEGAL_BODY }];
+    state.sessions = [{ id: 'legacy', student_id: 'student', class_group_id: 'g1', subject_id: 'math',
+      start_time: '2026-08-10T10:00:00Z', end_time: '2026-08-10T11:00:00Z', status: 'completed',
+      status_confirmed_at: '2026-08-10T11:00:00Z', status_confirmed_by: null }];
+    const response = await run();
+    expect(response.status).toHaveBeenCalledWith(409);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      review: [{ contract_id: 'first', reason: 'unconfirmed_session_outcomes', session_ids: ['legacy'] }],
+    }));
+    expect(state.inserts).toEqual([]); expect(state.emails).toBe(0);
   });
 
   it('freezes a parent-approved contract discount even if its UI feature was later disabled', async () => {

@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+
+vi.mock('../../api/_lib/userNotificationPreferences.js', () => ({
+  filterUserNotificationRecipients: async (_db: unknown, to: string | string[]) => Array.isArray(to) ? to : [to],
+}));
 const state=vi.hoisted(()=>({features:{school_family_portal:true} as Record<string,unknown>,entityType:'school',send:vi.fn(),push:vi.fn()}));
 vi.mock('@supabase/supabase-js',()=>({createClient:()=>({from(table:string){
   const result=()=>({data:table==='organizations'?{name:'Family QA School',entity_type:state.entityType,features:state.features,preferred_locale:'en'}:null,error:null});

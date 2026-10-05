@@ -5,6 +5,31 @@ import {
 } from '@/lib/availabilityCalendarBlocks';
 
 describe('availabilityCalendarBlocks', () => {
+  it('excludes the configured break on both sides of a lesson, including outside the block', () => {
+    const at = (hours: number, minutes = 0) => new Date(2026, 9, 5, hours, minutes);
+    expect(sliceTimeRangeBySessions(
+      { start: at(18), end: at(19) },
+      [{ start_time: at(19), end_time: at(20), status: 'active' }],
+      10,
+    )).toEqual([{ start: at(18), end: at(18, 50) }]);
+
+    expect(sliceTimeRangeBySessions(
+      { start: at(18, 10), end: at(20) },
+      [{ start_time: at(17, 10), end_time: at(18, 10), status: 'active' }],
+      10,
+    )).toEqual([{ start: at(18, 20), end: at(20) }]);
+  });
+
+  it('does not reserve breaks around cancelled lessons', () => {
+    const start = new Date(2026, 9, 5, 18);
+    const end = new Date(2026, 9, 5, 19);
+    expect(sliceTimeRangeBySessions(
+      { start, end },
+      [{ start_time: end, end_time: new Date(2026, 9, 5, 20), status: 'cancelled' }],
+      10,
+    )).toEqual([{ start, end }]);
+  });
+
   it('prefers date-specific rows over recurring for the same tutor', () => {
     const availability = [
       {

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { startOfDay, format } from 'date-fns';
+import { expandBusyByBreak } from '../../src/lib/sessionBreakConflict';
+import { sliceTimeRangeBySessions } from '../../src/lib/availabilityCalendarBlocks';
 import {
   computeTutorSlots,
   groupAndRankTutors,
@@ -33,6 +35,47 @@ describe('computeTutorSlots', () => {
     end_time: '17:00',
     is_recurring: true,
   };
+
+  it('uses the calendar date override instead of offering the wider recurring schedule', () => {
+    const oneTime: AvailabilityRule = {
+      ...recurring,
+      is_recurring: false,
+      day_of_week: null,
+      specific_date: params.dateFrom,
+      start_time: '13:00',
+      end_time: '15:00',
+    };
+    const otherTutor = { ...recurring, tutor_id: 't2' };
+    const otherSubject = { ...subjMath, tutor_id: 't2' };
+    const slots = computeTutorSlots([recurring, oneTime, otherTutor], [], [subjMath, otherSubject], NAMES, params);
+    expect(slots.filter(s => s.tutorId === 't1').map(s => [format(s.start, 'HH:mm'), format(s.end, 'HH:mm')]))
+      .toEqual([['13:00', '15:00']]);
+    expect(slots.filter(s => s.tutorId === 't2').map(s => [format(s.start, 'HH:mm'), format(s.end, 'HH:mm')]))
+      .toEqual([['09:00', '17:00']]);
+
+    const otherDate = { ...oneTime, specific_date: '2020-01-01' };
+    expect(computeTutorSlots([recurring, otherDate], [], [subjMath], NAMES, params)[0].start.getHours()).toBe(9);
+  });
+
+  it('does not fall back to recurring subjects excluded by the date override', () => {
+    const override: AvailabilityRule = {
+      ...recurring, is_recurring: false, day_of_week: null,
+      specific_date: params.dateFrom, subject_ids: ['phys'],
+    };
+    expect(computeTutorSlots([recurring, override], [], [subjMath], NAMES, params)).toEqual([]);
+  });
+
+  it('explains the video: an apparent one-hour gap cannot fit a 60-minute lesson plus a 10-minute break', () => {
+    const at = (h: number, m = 0) => { const date = new Date(day); date.setHours(h, m, 0, 0); return date; };
+    const busy = [{ tutor_id: 't1', start: at(19), end: at(20) }];
+    const rule = { ...recurring, start_time: '17:00', end_time: '20:00' };
+    const preference = { ...params, timeFrom: '18:00', timeTo: '20:00' };
+    expect(sliceTimeRangeBySessions({ start: at(18), end: at(20) }, [
+      { start_time: at(19), end_time: at(20), status: 'active' },
+    ], 10)).toEqual([{ start: at(18), end: at(18, 50) }]);
+    expect(computeTutorSlots([rule], expandBusyByBreak(busy, { t1: 10 }), [subjMath], NAMES, preference)).toEqual([]);
+    expect(computeTutorSlots([rule], busy, [subjMath], NAMES, preference)).toHaveLength(1);
+  });
 
   it('honours multiple weekday-specific preferred time windows', () => {
     const monday = dayInfo('2026-07-06');

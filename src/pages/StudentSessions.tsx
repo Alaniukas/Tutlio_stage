@@ -11,7 +11,7 @@ import { startPerlasPayment } from '@/lib/perlasPay';
 import { getCached, setCache, dedupeAsync, invalidateCache } from '@/lib/dataCache';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
-import { format, isAfter, differenceInHours, addDays, getDay } from 'date-fns';
+import { format, isAfter, differenceInHours, addDays } from 'date-fns';
 import { sessionFilesListOptions, sessionsToScanForFilesTab } from '@/lib/sessionStorageList';
 import { useTranslation } from '@/lib/i18n';
 import { Clock, CheckCircle, XCircle, CalendarDays, RefreshCw, ShieldAlert, ListOrdered, Mail, Video, ChevronLeft, ChevronRight, CreditCard, Loader2, Package, Users, FileText, Landmark, Trash2 } from 'lucide-react';
@@ -26,7 +26,7 @@ import { DateInput } from '@/components/ui/date-input';
 import { Label } from '@/components/ui/label';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
+import { bookableAvailabilitySlotsOnDate } from '@/lib/availabilityBooking';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isWaitlistHiddenForOrg, orgFeeProfile, type OrgFeeProfile } from '@/lib/marketMoney';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
@@ -1082,59 +1082,32 @@ export default function StudentSessions() {
             const originalDateStr = format(new Date(session.start_time), 'yyyy-MM-dd');
             const originalStartTime = new Date(session.start_time).getTime();
 
-            const [{ data: av }, { data: tutorProfile }] = await Promise.all([
+            const [{ data: av, error: availabilityError }, { data: tutorProfile, error: profileError }] = await Promise.all([
                 supabase.from('availability').select('*').eq('tutor_id', tutorId),
                 supabase.from('profiles').select('min_booking_hours, break_between_lessons').eq('id', tutorId).single(),
             ]);
+            if (availabilityError) throw availabilityError;
+            if (profileError) throw profileError;
 
             const minHours = tutorProfile?.min_booking_hours ?? minBookingHours;
             const breakMs = (tutorProfile?.break_between_lessons ?? 0) * 60000;
             const minBookingTime = new Date(new Date().getTime() + minHours * 3600000);
 
-            let occupied: { start_time: string; end_time: string }[] = [];
-            try {
-                const rangeStart = new Date().toISOString();
-                const rangeEnd = addDays(new Date(), 60).toISOString();
-                const res = await fetch(`/api/tutor-slots?tutorId=${tutorId}&start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}&local=1`);
-                if (res.ok) {
-                    const contentType = res.headers.get('content-type');
-                    if (contentType && contentType.indexOf('application/json') !== -1) {
-                        const data = await res.json();
-                        occupied = (data || []) as { start_time: string; end_time: string }[];
-                    }
-                }
-            } catch (e) {
-                console.error('Failed to fetch busy slots:', e);
-            }
+            const rangeStart = new Date().toISOString();
+            const rangeEnd = addDays(new Date(), 60).toISOString();
+            const res = await fetch(`/api/tutor-slots?tutorId=${tutorId}&start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}&local=1`);
+            if (!res.ok) throw new Error('Failed to fetch busy slots');
+            const occupied = await res.json();
+            if (!Array.isArray(occupied)) throw new Error('Invalid busy slots response');
 
             const slots: { date: string; label: string; slots: { start: Date; end: Date }[] }[] = [];
             for (let i = 0; i <= 60; i++) {
                 const day = addDays(new Date(), i);
-                const dow = getDay(day);
                 const dateStr = format(day, 'yyyy-MM-dd');
-                const rules = (av || []).filter((a) =>
-                    (a.is_recurring && a.day_of_week !== null && recurringAvailabilityAppliesOnDate(a, dateStr, dow)) ||
-                    (!a.is_recurring && a.specific_date === dateStr)
-                );
-                const daySlots: { start: Date; end: Date }[] = [];
-                for (const rule of rules) {
-                    const [sh, sm] = rule.start_time.split(':').map(Number);
-                    const [eh, em] = rule.end_time.split(':').map(Number);
-                    let cursor = new Date(day); cursor.setHours(sh, sm, 0, 0);
-                    const winEnd = new Date(day); winEnd.setHours(eh, em, 0, 0);
-                    while (cursor.getTime() + durationMs <= winEnd.getTime()) {
-                        const slotEnd = new Date(cursor.getTime() + durationMs);
-                        if (cursor >= minBookingTime && cursor.getTime() !== originalStartTime) {
-                            const busy = (occupied || []).some(s => {
-                                const os = new Date(s.start_time).getTime();
-                                const oe = new Date(s.end_time).getTime() + breakMs;
-                                return cursor.getTime() < oe && slotEnd.getTime() > os;
-                            });
-                            if (!busy) daySlots.push({ start: new Date(cursor), end: slotEnd });
-                        }
-                        cursor = new Date(cursor.getTime() + 30 * 60000);
-                    }
-                }
+                const daySlots = bookableAvailabilitySlotsOnDate(av || [], dateStr, occupied, {
+                    durationMs, earliest: minBookingTime, breakMs, excludeStart: originalStartTime,
+                    subjectId: session.subject_id ?? undefined,
+                });
                 if (daySlots.length > 0) slots.push({ date: dateStr, label: format(day, 'EEEE, d MMMM', { locale: dateFnsLocale }), slots: daySlots });
             }
 
@@ -1144,6 +1117,7 @@ export default function StudentSessions() {
             setRescheduleError(false);
         } catch (err) {
             console.error('Failed to load reschedule slots:', err);
+            setAvailableSlots([]);
             setRescheduleError(true);
         } finally {
             setRescheduleLoading(false);

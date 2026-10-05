@@ -152,8 +152,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (session.status !== 'active' && !evidenceOnly && !correction) {
       return json(res, 409, { error: 'already_finalized', currentStatus: session.status });
     }
+    // The historical school backfill stamped completed group rows without an
+    // actor. A fresh explicit click must be able to attest those in-person lessons.
+    const replaceLegacyGroupStamp = evidenceOnly && schoolManualRequest
+      && status === 'completed' && Boolean(session.class_group_id)
+      && Boolean(session.status_confirmed_at) && !session.status_confirmed_by;
     if (evidenceOnly) {
-      if (session.status_confirmed_at) {
+      if (session.status_confirmed_at && !replaceLegacyGroupStamp) {
         const attendanceAlert = await recordExistingSchoolAttendance(supabase, session, session.status_confirmed_by || userId, session.status_confirmed_at);
         return json(res, 200, { success: true, sessionId, status, alreadyConfirmed: true, statusConfirmedAt: session.status_confirmed_at,
           ...(attendanceAlert?.pending ? { attendanceAlertPending: true } : {}) });
@@ -182,7 +187,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     let update = supabase.from('sessions').update(patch).eq('id', sessionId).eq('status', session.status);
-    if (evidenceOnly) update = update.is('status_confirmed_at', null);
+    if (replaceLegacyGroupStamp) {
+      update = update.eq('status_confirmed_at', session.status_confirmed_at).is('status_confirmed_by', null);
+    } else if (evidenceOnly) update = update.is('status_confirmed_at', null);
     const { data: updated, error: updateErr } = await update.select('id').maybeSingle();
     if (updateErr) {
       return json(res, 500, { error: 'Update failed', details: updateErr.message });

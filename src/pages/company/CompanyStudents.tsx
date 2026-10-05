@@ -7223,6 +7223,7 @@ export default function CompanyStudents() {
           }}
           orgId={orgId}
           frequencyEnabled
+          allowBreakOverride={can('sessions.edit')}
           confirmSelection
           contextLabel={searchContextLabel}
           onConfirmSlots={(slots) => {
@@ -7286,6 +7287,7 @@ export default function CompanyStudents() {
               onClose={() => setFindLessonOpen(false)}
               orgId={orgId}
               primaryTutorId={selectedStudent?.tutor_id ?? null}
+              allowBreakOverride={can('sessions.edit')}
               frequencyEnabled={isMvOrg || pkFeat('tutor_frequency_search')}
               hidePrices={pkFeat('hide_admin_lesson_prices')}
               confirmSelection

@@ -1,15 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const state = vi.hoisted(() => ({ userId: 'admin', admin: null as any, session: null as any, tutorOrganizationId: 'org', entityType: 'school', writes: [] as any[], conflict: false, emptyRepresentation: false,
+const state = vi.hoisted(() => ({ userId: 'admin', admin: null as any, session: null as any, tutorOrganizationId: 'org', entityType: 'school', writes: [] as any[], conflict: false, emptyRepresentation: false, concurrentPatch: null as any,
   move: vi.fn(), refund: vi.fn(), clearWaitlist: vi.fn(), sync: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
   auth: { getUser: async () => ({ data: { user: state.userId ? { id: state.userId } : null }, error: null }) },
   from(table: string) {
     let patch: any;
-    const query: any = { select: () => query, eq: () => query, is: () => query,
+    const filters: Array<[string, unknown]> = [];
+    const query: any = { select: () => query,
+      eq: (key: string, value: unknown) => { filters.push([key, value]); return query; },
+      is: (key: string, value: unknown) => { filters.push([key, value]); return query; },
       update: (value: any) => { patch = value; return query; },
       maybeSingle: async () => {
         if (table === 'sessions' && patch) {
           if (state.conflict) return { data: null, error: null };
+          if (state.concurrentPatch) {
+            Object.assign(state.session, state.concurrentPatch); state.concurrentPatch = null;
+          }
+          if (!filters.every(([key, value]) => (state.session[key] ?? null) === value)) return { data: null, error: null };
           state.writes.push(patch); Object.assign(state.session, patch);
           return { data: state.emptyRepresentation ? null : { id: state.session.id }, error: null };
         }
@@ -22,8 +29,10 @@ vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
 vi.mock('../../api/_lib/orgAdminAccess.js', () => ({ getOrgAdminAccessByUserId: async () => state.admin }));
 vi.mock('../../api/_lib/google-calendar.js', () => ({ syncSessionToGoogle: state.sync }));
 vi.mock('../../api/_lib/sessionStatusConfirmation.js', () => ({ movePackageCountersToCompleted: state.move, returnPackageCounterToAvailable: state.refund, deleteSessionWaitlists: state.clearWaitlist }));
+vi.mock('../../api/_lib/schoolGroupAttendance.js', () => ({ recordExistingSchoolAttendance: vi.fn(async () => undefined) }));
 import handler from '../../api/confirm-session-status';
 import { PRO_KLASE_ORG_ID } from '../../api/_lib/marketMoney';
+import { hasSchoolOccurrenceEvidence } from '../../src/lib/schoolCanonicalBilling';
 
 async function run(body: Record<string, unknown> = { confirmExisting: true }) {
   const response: any = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
@@ -35,7 +44,7 @@ beforeEach(() => {
   state.userId = 'admin'; state.admin = { organizationId: 'org', role: 'admin', permissions: { 'sessions.edit': true } };
   state.session = { id: 'session', tutor_id: 'teacher', status: 'completed', start_time: '2020-01-01T10:00:00Z', end_time: '2020-01-01T11:00:00Z', status_confirmed_at: null };
   state.tutorOrganizationId = 'org';
-  state.entityType = 'school'; state.writes = []; state.conflict = false; state.emptyRepresentation = false;
+  state.entityType = 'school'; state.writes = []; state.conflict = false; state.emptyRepresentation = false; state.concurrentPatch = null;
   state.move.mockClear(); state.refund.mockClear(); state.clearWaitlist.mockClear(); state.sync.mockClear();
 });
 
@@ -51,6 +60,7 @@ describe('explicit school historical outcome confirmation', () => {
     expect(state.writes).toEqual([{ status: 'completed', status_confirmed_at: expect.any(String), status_confirmed_by: 'admin' }]);
   });
   it('rejects students, view-only admins and administrators of another organization', async () => {
+    Object.assign(state.session, { class_group_id: 'group', status_confirmed_at: state.session.end_time, status_confirmed_by: null });
     for (const admin of [null, { organizationId: 'org', role: 'custom', permissions: { 'sessions.view': true, 'sessions.edit': false } }, { organizationId: 'other', role: 'owner', permissions: {} }]) {
       state.admin = admin;
       expect((await run()).status).toHaveBeenCalledWith(403);
@@ -71,9 +81,32 @@ describe('explicit school historical outcome confirmation', () => {
     expect(state.writes).toHaveLength(0);
   });
   it('preserves the first attesting actor and timestamp on repeat confirmation', async () => {
+    state.session.class_group_id = 'group'; state.session.status_confirmed_by = 'teacher';
     state.session.status_confirmed_at = '2020-01-02T11:00:00Z';
     expect((await run()).json).toHaveBeenCalledWith(expect.objectContaining({ alreadyConfirmed: true, statusConfirmedAt: '2020-01-02T11:00:00Z' }));
     expect(state.writes).toHaveLength(0);
+    expect(state.session.status_confirmed_by).toBe('teacher');
+  });
+  it.each(['admin', 'teacher'])('lets the %s explicitly attest a legacy group stamp without repeating package effects', async (actor) => {
+    state.userId = actor;
+    if (actor === 'teacher') state.admin = null;
+    Object.assign(state.session, { class_group_id: 'group', status_confirmed_at: state.session.end_time, status_confirmed_by: null });
+    expect(hasSchoolOccurrenceEvidence(state.session)).toBe(false);
+    expect((await run({})).status).toHaveBeenCalledWith(200);
+    expect(state.session).toMatchObject({ status: 'completed', status_confirmed_by: actor });
+    expect(state.session.status_confirmed_at).not.toBe(state.session.end_time);
+    expect(hasSchoolOccurrenceEvidence(state.session)).toBe(true);
+    expect(state.writes).toHaveLength(1);
+    expect(state.move).not.toHaveBeenCalled(); expect(state.refund).not.toHaveBeenCalled();
+    expect(state.clearWaitlist).not.toHaveBeenCalled(); expect(state.sync).not.toHaveBeenCalled();
+  });
+  it('does not overwrite another actor who confirms a legacy group row concurrently', async () => {
+    Object.assign(state.session, { class_group_id: 'group', status_confirmed_at: state.session.end_time, status_confirmed_by: null });
+    state.concurrentPatch = { status_confirmed_at: '2020-01-02T11:00:00Z', status_confirmed_by: 'teacher' };
+    expect((await run({})).status).toHaveBeenCalledWith(409);
+    expect(state.session).toMatchObject({ status_confirmed_at: '2020-01-02T11:00:00Z', status_confirmed_by: 'teacher' });
+    expect(state.writes).toHaveLength(0);
+    expect(state.move).not.toHaveBeenCalled(); expect(state.sync).not.toHaveBeenCalled();
   });
   it('does not repeat side effects if the row changes between reading and writing', async () => {
     state.session.status = 'active'; state.conflict = true;

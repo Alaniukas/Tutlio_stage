@@ -18,6 +18,8 @@ import TimeSpinner from '@/components/TimeSpinner';
 import Toast from '@/components/Toast';
 import { useTranslation } from '@/lib/i18n';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
+import { sliceTimeRangeBySessions, type SessionTimeSlice } from '@/lib/availabilityCalendarBlocks';
+import { format } from 'date-fns';
 
 interface AvailabilitySlot {
   id: string;
@@ -82,6 +84,9 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
   ], [t]);
 
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
+  const [occupiedSessions, setOccupiedSessions] = useState<SessionTimeSlice[]>([]);
+  const [breakMinutes, setBreakMinutes] = useState(0);
+  const [loadError, setLoadError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
@@ -106,6 +111,17 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
   const [editStartDate, setEditStartDate] = useState('');
   const [editEndDate, setEditEndDate] = useState('');
   const [editPublicBookable, setEditPublicBookable] = useState(false);
+
+  // Keep the source rows for editing and for cancellation/deletion to reveal
+  // the original availability. Only the displayed date-specific time is sliced.
+  const specificSlots = useMemo(() => slots.flatMap(slot => {
+    if (slot.is_recurring || !slot.specific_date) return [];
+    const freeRanges = sliceTimeRangeBySessions({
+      start: new Date(`${slot.specific_date}T${slot.start_time}`),
+      end: new Date(`${slot.specific_date}T${slot.end_time}`),
+    }, occupiedSessions, breakMinutes);
+    return freeRanges.length > 0 || editingSlotId === slot.id ? [{ slot, freeRanges }] : [];
+  }), [slots, occupiedSessions, breakMinutes, editingSlotId]);
 
   const syncAvailabilityToGoogle = async (userId: string) => {
     try {
@@ -141,29 +157,51 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
 
   const fetchAvailability = async () => {
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    setLoadError(false);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select(
-        'stripe_account_id, organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments',
-      )
-      .eq('id', user.id)
-      .single();
-    const manualOk = tutorUsesManualStudentPayments(profileData);
-    setStripeConnected(!!profileData?.stripe_account_id || manualOk);
-    setIsOrgTutor(!!profileData?.organization_id);
-
-    const { data, error } = await supabase
-      .from('availability')
-      .select('*')
-      .eq('tutor_id', user.id)
-      .order('day_of_week', { ascending: true });
-
-    if (error) console.error('Error fetching availability:', error);
-    else setSlots(data as AvailabilitySlot[] || []);
-    setLoading(false);
+      const [{ data: profileData, error: profileError }, { data, error }] = await Promise.all([
+        supabase.from('profiles').select(
+          'stripe_account_id, organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, break_between_lessons',
+        ).eq('id', user.id).single(),
+        supabase.from('availability').select('*').eq('tutor_id', user.id)
+          .order('day_of_week', { ascending: true }),
+      ]);
+      if (profileError) throw profileError;
+      if (error) throw error;
+      const loadedSlots = (data || []) as AvailabilitySlot[];
+      const dates = loadedSlots.flatMap(s => !s.is_recurring && s.specific_date ? [s.specific_date] : []).sort();
+      const sessions: SessionTimeSlice[] = [];
+      if (dates.length > 0) {
+        const start = new Date(`${dates[0]}T00:00:00`);
+        const end = new Date(`${dates[dates.length - 1]}T00:00:00`);
+        end.setDate(end.getDate() + 1);
+        const pageSize = 500;
+        for (let offset = 0; ; offset += pageSize) {
+          const { data: page, error: sessionsError } = await supabase.from('sessions')
+            .select('id, start_time, end_time, status')
+            .eq('tutor_id', user.id).neq('status', 'cancelled')
+            .lt('start_time', end.toISOString()).gt('end_time', start.toISOString())
+            .order('id', { ascending: true }).range(offset, offset + pageSize - 1);
+          if (sessionsError) throw sessionsError;
+          sessions.push(...(page || []));
+          if (!page || page.length < pageSize) break;
+        }
+      }
+      const manualOk = tutorUsesManualStudentPayments(profileData);
+      setStripeConnected(!!profileData?.stripe_account_id || manualOk);
+      setIsOrgTutor(!!profileData?.organization_id);
+      setBreakMinutes(profileData?.break_between_lessons ?? 0);
+      setOccupiedSessions(sessions);
+      setSlots(loadedSlots);
+    } catch (error) {
+      console.error('Error fetching availability:', error);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const addRecurringSlot = async () => {
@@ -718,15 +756,17 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
 
           <div className="space-y-2">
             <h3 className="font-medium text-sm text-gray-700">{t('avail.specificDays')}</h3>
-            {slots.filter((s) => !s.is_recurring).length === 0 ? (
+            {loading ? (
+              <p className="text-muted-foreground text-sm">{t('common.loading')}</p>
+            ) : loadError ? (
+              <p className="text-sm text-red-600">{t('common.error')}</p>
+            ) : specificSlots.length === 0 ? (
               <div className="text-center py-8 text-gray-400">
                 <p className="text-sm">{t('avail.noSpecificDays')}</p>
               </div>
             ) : (
               <div className="grid gap-2">
-                {slots
-                  .filter((s) => !s.is_recurring)
-                  .map((slot) => (
+                {specificSlots.map(({ slot, freeRanges }) => (
                     <div
                       key={slot.id}
                       className="p-3 bg-white border border-gray-100 rounded-xl shadow-sm"
@@ -779,9 +819,11 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-gray-800">{slot.specific_date}</p>
                             <div className="flex flex-wrap items-center gap-1 mt-0.5">
-                              <span className="text-xs text-gray-500 bg-gray-50 px-2 py-0.5 rounded-lg">
-                                {slot.start_time.slice(0, 5)} – {slot.end_time.slice(0, 5)}
-                              </span>
+                              {freeRanges.map(range => (
+                                <span key={range.start.getTime()} className="text-xs text-gray-500 bg-gray-50 px-2 py-0.5 rounded-lg">
+                                  {format(range.start, 'HH:mm')} – {format(range.end, 'HH:mm')}
+                                </span>
+                              ))}
                               {slot.public_bookable && (
                                 <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg">
                                   {t('avail.publicBookableBadge')}
