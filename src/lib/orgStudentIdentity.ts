@@ -22,8 +22,28 @@ export type OrgStudentPickerRow = OrgStudentIdentityRow & {
 export const ORG_STUDENT_PICKER_SELECT =
   'id, full_name, email, tutor_id, grade, linked_user_id, organization_id, payer_name, payer_email';
 
-function normalizeStudentIdentityName(fullName: string | null | undefined): string {
+export function normalizeOrgStudentIdentityName(fullName: string | null | undefined): string {
   return String(fullName ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function normalizeStudentIdentityName(fullName: string | null | undefined): string {
+  return normalizeOrgStudentIdentityName(fullName);
+}
+
+/** Same org child contact: registered student email + full name (case/space insensitive). */
+export function sameOrgStudentRegisteredContact(
+  a: OrgStudentIdentityRow,
+  b: OrgStudentIdentityRow,
+): boolean {
+  const orgA = a.organization_id ?? 'no-org';
+  const orgB = b.organization_id ?? 'no-org';
+  if (orgA !== orgB) return false;
+  const nameA = normalizeStudentIdentityName(a.full_name);
+  const nameB = normalizeStudentIdentityName(b.full_name);
+  if (!nameA || nameA !== nameB) return false;
+  const emailA = String(a.email ?? '').trim().toLowerCase();
+  const emailB = String(b.email ?? '').trim().toLowerCase();
+  return Boolean(emailA && emailB && emailA === emailB);
 }
 
 /**
@@ -51,7 +71,10 @@ export function sameOrgStudentIdentity(
   a: OrgStudentIdentityRow,
   b: OrgStudentIdentityRow,
 ): boolean {
-  return orgStudentIdentityGroupKey(a) === orgStudentIdentityGroupKey(b);
+  if (orgStudentIdentityGroupKey(a) === orgStudentIdentityGroupKey(b)) return true;
+  // One tutor row may use payer_email (billing) while another only has linked_user_id
+  // or student email after pairing / registration — still the same child.
+  return sameOrgStudentRegisteredContact(a, b);
 }
 
 /**

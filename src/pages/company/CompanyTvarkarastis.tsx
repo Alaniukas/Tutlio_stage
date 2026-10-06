@@ -827,7 +827,7 @@ export default function CompanyTvarkarastis() {
     const availabilityData = await dedupeAsync(`org_availability:${organizationId}:${tutorIds.join(',')}`, () =>
       fetchAllRows<any>((from, to) => supabase
         .from('availability')
-        .select('id, tutor_id, is_recurring, day_of_week, start_time, end_time, specific_date, end_date, subject_ids, created_by_role, link_url, notes')
+        .select('*')
         .in('tutor_id', tutorIds)
         .order('id', { ascending: true })
         .range(from, to), 2_000),
@@ -887,7 +887,8 @@ export default function CompanyTvarkarastis() {
     if (!organizationId || !scheduleCacheKey) return;
     const cached = getCached<any>(scheduleCacheKey);
     if (cached?.orgTutors?.length) {
-      setOrgTutors(cached.orgTutors as OrgTutor[]);
+      const cachedTutors = cached.orgTutors as OrgTutor[];
+      setOrgTutors(cachedTutors);
       setAvailability(cached.availability || []);
       setSubjects(cached.subjects || []);
       setStudents(cached.students || []);
@@ -895,6 +896,13 @@ export default function CompanyTvarkarastis() {
       setDynamicPricingRules(cached.dynamicPricingRules || []);
       setOrgUsesLicenses(Boolean(cached.orgUsesLicenses));
       setLoading(false);
+      // Meta cache can hold stale/empty availability after a failed narrow select — always refresh.
+      if (!isSchoolOrgView && cachedTutors.length > 0) {
+        void loadAvailabilityForTutors(
+          cachedTutors.map((tutor) => tutor.id),
+          cachedTutors,
+        );
+      }
       return;
     }
     setLoading(true);

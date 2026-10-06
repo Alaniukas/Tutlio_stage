@@ -90,6 +90,27 @@ describe('orgStudentIdentity', () => {
     ).toBe(false);
   });
 
+  it('matches payer-billing row with linked-only tutor row when student email matches', () => {
+    const withPayer = {
+      id: 'with-payer',
+      organization_id: 'mk',
+      full_name: 'Greta Bespalovaitė',
+      email: 'gretabespalovaite@gmail.com',
+      payer_email: 'bespaloviene.indre@gmail.com',
+      tutor_id: 'pijus',
+    };
+    const linkedOnly = {
+      id: 'linked-only',
+      organization_id: 'mk',
+      full_name: 'Greta Bespalovaitė',
+      email: 'gretabespalovaite@gmail.com',
+      linked_user_id: 'auth-user',
+      tutor_id: 'kristina',
+    };
+    expect(orgStudentIdentityGroupKey(withPayer)).not.toBe(orgStudentIdentityGroupKey(linkedOnly));
+    expect(sameOrgStudentIdentity(withPayer, linkedOnly)).toBe(true);
+  });
+
   it('shows grade in picker label when set', () => {
     expect(formatStudentPickerLabel('Jonas', '5 klasė')).toBe('Jonas (5 klasė)');
     expect(formatStudentPickerLabel('Jonas', null)).toBe('Jonas');
