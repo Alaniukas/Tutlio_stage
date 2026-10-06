@@ -116,17 +116,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const students = await loadOrganizationStudents(db, organizationId);
-    const studentIds = students.map((row: any) => String(row.id));
     if (req.query.summary === 'overdue-packages') {
       if (!hasOrgAdminPermission(auth.access.role, auth.access.permissions, 'finance.view')) {
         return json(res, 403, { error: 'Forbidden' });
       }
-      if (studentIds.length === 0) return json(res, 200, { packages: [] });
       const packageRes = await db.from('lesson_packages')
         .select(`${PACKAGE_SELECT}, students!inner(full_name)`)
         .eq('pool_organization_id', organizationId)
-        .in('student_id', studentIds)
         .eq('paid', false)
         .neq('payment_status', 'cancelled')
         .order('billing_period_start', { ascending: true });
@@ -144,6 +140,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }));
       return json(res, 200, { packages });
     }
+
+    const students = await loadOrganizationStudents(db, organizationId);
+    const studentIds = students.map((row: any) => String(row.id));
 
     if (req.query.summary === 'trial-followup') {
       if (studentIds.length === 0) return json(res, 200, { studentIds: [] });

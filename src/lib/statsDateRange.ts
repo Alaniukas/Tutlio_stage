@@ -30,3 +30,25 @@ export function statsDateRangeKey(range: { start: Date; end: Date }): string {
   const { startIso, endIso } = normalizeStatsDateRange(range.start, range.end);
   return `${startIso}|${endIso}`;
 }
+
+export type StatsPeriodMode = 'historical' | 'forward' | 'spanning';
+
+/** Whether the selected stats window is past-only, future-only, or includes today. */
+export function resolveStatsPeriodMode(
+  range: { start: Date; end: Date },
+  now: Date = new Date(),
+): StatsPeriodMode {
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date(now);
+  todayEnd.setHours(23, 59, 59, 999);
+
+  const rangeStart = new Date(range.start);
+  rangeStart.setHours(0, 0, 0, 0);
+  const rangeEnd = new Date(range.end);
+  rangeEnd.setHours(23, 59, 59, 999);
+
+  if (rangeStart > todayEnd) return 'forward';
+  if (rangeEnd < todayStart) return 'historical';
+  return 'spanning';
+}

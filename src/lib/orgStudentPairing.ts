@@ -1,5 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { sameOrgStudentIdentity } from '@/lib/orgStudentIdentity.js';
+import {
+  normalizeOrgStudentIdentityName,
+  sameOrgStudentIdentity,
+  sameOrgStudentRegisteredContact,
+} from '@/lib/orgStudentIdentity.js';
 import { reassignOpenLessonsToTutor } from '@/lib/reassignStudentTutorLessons.js';
 
 export const generateStudentInviteCode = () =>
@@ -40,19 +44,77 @@ async function loadOrgStudentIdentitySiblings(
   supabase: SupabaseClient,
   student: StudentPairingRow,
 ): Promise<StudentPairingRow[]> {
-  const payerEmail = String(student.payer_email ?? '').trim();
   const orgId = student.organization_id;
-  if (!payerEmail || !orgId || !String(student.full_name ?? '').trim()) return [];
+  const name = normalizeOrgStudentIdentityName(student.full_name);
+  if (!orgId || !name) return [];
+
+  const byId = new Map<string, StudentPairingRow>();
+  const addRows = (rows: StudentPairingRow[]) => {
+    for (const row of rows) {
+      if (row.id === student.id) continue;
+      if (!sameOrgStudentIdentity(student, row)) continue;
+      byId.set(row.id, row);
+    }
+  };
+
+  const payerEmail = String(student.payer_email ?? '').trim();
+  if (payerEmail) {
+    const { data, error } = await supabase
+      .from('students')
+      .select(PAIRING_SELECT)
+      .eq('organization_id', orgId)
+      .eq('payer_email', payerEmail);
+    if (error) throw new Error(error.message || 'Failed to load student tutor pairings.');
+    addRows((data || []) as StudentPairingRow[]);
+  }
+
+  const studentEmail = String(student.email ?? '').trim().toLowerCase();
+  if (studentEmail) {
+    const { data, error } = await supabase
+      .from('students')
+      .select(PAIRING_SELECT)
+      .eq('organization_id', orgId)
+      .ilike('email', studentEmail);
+    if (error) throw new Error(error.message || 'Failed to load student tutor pairings.');
+    addRows((data || []) as StudentPairingRow[]);
+  }
+
+  return [...byId.values()];
+}
+
+async function findExistingTutorPairingByContact(
+  supabase: SupabaseClient,
+  student: StudentPairingRow,
+  tutorId: string,
+): Promise<StudentPairingRow | null> {
+  const orgId = student.organization_id;
+  const studentEmail = String(student.email ?? '').trim().toLowerCase();
+  const name = normalizeOrgStudentIdentityName(student.full_name);
+  if (!orgId || !studentEmail || !name) return null;
 
   const { data, error } = await supabase
     .from('students')
     .select(PAIRING_SELECT)
     .eq('organization_id', orgId)
-    .eq('payer_email', payerEmail);
+    .eq('tutor_id', tutorId)
+    .ilike('email', studentEmail);
   if (error) throw new Error(error.message || 'Failed to load student tutor pairings.');
-  return (data || []).filter((row) => (
-    row.id !== student.id && sameOrgStudentIdentity(student, row as StudentPairingRow)
-  )) as StudentPairingRow[];
+
+  return ((data || []) as StudentPairingRow[]).find((row) =>
+    sameOrgStudentRegisteredContact(student, row),
+  ) ?? null;
+}
+
+function pickPayerFieldsFromSiblings(
+  siblings: StudentPairingRow[],
+  fallback: StudentPairingRow,
+): Pick<StudentPairingRow, 'payer_name' | 'payer_email' | 'payer_phone'> {
+  const donor = siblings.find((row) => String(row.payer_email ?? '').trim()) ?? fallback;
+  return {
+    payer_name: donor.payer_name || null,
+    payer_email: donor.payer_email || null,
+    payer_phone: donor.payer_phone || null,
+  };
 }
 
 /**
@@ -130,8 +192,17 @@ export async function ensureStudentPairedWithTutor(
     if (copyError) throw new Error(copyError.message || 'Failed to copy student administration notes.');
   };
 
-  const existingPairing = siblings.find((s) => s.tutor_id === tutorId);
+  const existingPairing = siblings.find((s) => s.tutor_id === tutorId)
+    ?? await findExistingTutorPairingByContact(supabase, student, tutorId);
   if (existingPairing) {
+    const payerFields = pickPayerFieldsFromSiblings(siblings, student);
+    if (!String(existingPairing.payer_email ?? '').trim() && payerFields.payer_email) {
+      const { error: payerErr } = await supabase
+        .from('students')
+        .update(payerFields)
+        .eq('id', existingPairing.id);
+      if (payerErr) throw new Error(payerErr.message || 'Failed to copy payer contact onto student row.');
+    }
     await copyNotes(existingPairing);
     return existingPairing.id;
   }
@@ -154,6 +225,8 @@ export async function ensureStudentPairedWithTutor(
     }
   }
 
+  const payerFields = pickPayerFieldsFromSiblings(siblings, student);
+
   const { data: created, error: insertErr } = await supabase
     .from('students')
     .insert({
@@ -163,9 +236,9 @@ export async function ensureStudentPairedWithTutor(
       email: student.email,
       phone: (student.phone || '').trim() || null,
       grade: student.grade,
-      payer_name: student.payer_name || null,
-      payer_email: student.payer_email || null,
-      payer_phone: student.payer_phone || null,
+      payer_name: payerFields.payer_name,
+      payer_email: payerFields.payer_email,
+      payer_phone: payerFields.payer_phone,
       child_birth_date: student.child_birth_date || null,
       payment_model: student.payment_model || null,
       preferred_availability: student.preferred_availability ?? null,

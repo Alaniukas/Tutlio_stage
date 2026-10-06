@@ -8,6 +8,7 @@ import { isProKlaseOrg, orgFeeProfile } from '@/lib/marketMoney';
 import { sumOrgTutorLessonsPayEur } from '@/lib/orgTutorLessonPay';
 import { countProKlaseRealizedSessions } from '@/lib/proKlaseTutorPay';
 import {
+  companyConductedSessionOptions,
   countConductedOrgSessions,
   filterConductedOrgSessions,
 } from '@/lib/orgTutorConductedSessions';
@@ -348,8 +349,8 @@ export async function preloadOrgAdminData() {
         .order('created_at', { ascending: false }),
     ]);
 
-    const { getOrgVisibleTutors } = await import('@/lib/orgVisibleTutors');
-    const visibleTutors = await getOrgVisibleTutors(
+    const { getOrgVisibleTutorsDeduped } = await import('@/lib/orgVisibleTutors');
+    const visibleTutors = await getOrgVisibleTutorsDeduped(
       supabase,
       orgId,
       'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, personal_meeting_link, teaching_notes, has_active_license',
@@ -471,16 +472,30 @@ async function preloadDashboard(
     const monthEnd = endOfMonth(new Date()).toISOString();
     const now = new Date();
 
-    const { data: monthSessions } = await supabase
-      .from('sessions')
-      .select('price, status, payment_status, paid, start_time, end_time, is_complimentary, exclude_from_lesson_count')
-      .in('tutor_id', tutorIds)
-      .gte('start_time', monthStart)
-      .lte('start_time', monthEnd)
-      .neq('status', 'cancelled')
-      .limit(5000);
+    const monthSessions = (rawSessions || [])
+      .filter((s: any) => {
+        const start = String(s.start_time || '');
+        return start >= monthStart && start <= monthEnd && s.status !== 'cancelled';
+      })
+      .map((s: any) => ({
+        price: s.price,
+        status: s.status,
+        payment_status: s.payment_status,
+        paid: s.paid,
+        start_time: s.start_time,
+        end_time: s.end_time,
+        is_complimentary: s.is_complimentary,
+        exclude_from_lesson_count: s.exclude_from_lesson_count,
+      }));
 
-    const monthMetrics = orgDashboardMonthMetrics(monthSessions || [], now);
+    const monthMetrics = orgDashboardMonthMetrics(
+      monthSessions,
+      now,
+      companyConductedSessionOptions({
+        organizationId: orgId,
+        entityType: org?.entity_type || 'company',
+      }),
+    );
 
     const licensedApprox = (tutorProfiles || []).filter((p: any) => p.has_active_license !== false).length;
     setCache('company_dashboard', {
@@ -505,13 +520,17 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
     const { startIso, endIso } = normalizeStatsDateRange(defaultRange.start, defaultRange.end);
     const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, exclude_from_lesson_count, lesson_package_id, subject_id, tutor_pay_eur_snapshot, status_confirmed_at, subjects(is_trial)')
+      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, exclude_from_lesson_count, lesson_package_id, subject_id, tutor_pay_eur_snapshot, status_confirmed_at, end_time, subjects(is_trial)')
       .in('tutor_id', tutorIds)
       .gte('start_time', startIso)
       .lte('start_time', endIso);
 
     const proKlaseOrgKey = orgId || tutorProfiles[0]?.organization_id;
     const proKlase = isProKlaseOrg(proKlaseOrgKey);
+    const conductedSessionOptions = companyConductedSessionOptions({
+      organizationId: proKlaseOrgKey,
+      entityType: 'company',
+    });
     const proKlaseFeeProfile = proKlase ? orgFeeProfile(proKlaseOrgKey) : null;
     let packagesByTutor = new Map<string, number>();
     if (proKlase) {
@@ -566,7 +585,7 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
         };
       }
 
-      const conducted = filterConductedOrgSessions(tutorSessions);
+      const conducted = filterConductedOrgSessions(tutorSessions, conductedSessionOptions);
       const earnings = conducted.reduce((sum: number, s: any) => sum + (Number(s.price) || 0), 0);
       const netEarnings = sumOrgTutorLessonsPayEur(
         conducted,
@@ -576,7 +595,7 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
       );
       return {
         id: tutor.id, full_name: tutor.full_name,
-        completedSessions: countConductedOrgSessions(conducted),
+        completedSessions: countConductedOrgSessions(conducted, conductedSessionOptions),
         cancelledByTutor: cancellation.cancelledByTutor,
         cancelledByStudent: cancellation.cancelledByStudent,
         cancelledByAdmin: cancellation.cancelledByAdmin,

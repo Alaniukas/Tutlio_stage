@@ -92,6 +92,7 @@ import {
 } from '@/lib/orgTrialPolicy';
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/lib/orgUi';
+import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
 import {
   buildRecurringSessionCounts,
   calendarSessionTitlePrefix,
@@ -159,7 +160,7 @@ import TimeSpinner, { DateTimeSpinner } from '@/components/TimeSpinner';
 import { cn } from '@/lib/utils';
 import AssignStudentFreeSlotDialog from '@/components/AssignStudentFreeSlotDialog';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
-import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { getOrgVisibleTutorsDeduped } from '@/lib/orgVisibleTutors';
 import {
   ChevronLeft,
   ChevronRight,
@@ -292,6 +293,7 @@ interface OrgTutor {
   break_between_lessons?: number | null;
   email: string | null;
   personal_meeting_link?: string | null;
+  teaching_notes?: string | null;
   /** false = explicit „nelicencijuotas“ ribotam org planui; kitaip laisvas naudoti be licencijos režimu */
   has_active_license?: boolean | null;
 }
@@ -822,12 +824,14 @@ export default function CompanyTvarkarastis() {
   ) => {
     if (!organizationId || tutorIds.length === 0) return [];
     const tutorNameById = new Map(tutorRows.map((t) => [t.id, t.full_name || '']));
-    const availabilityData = await fetchAllRows<any>((from, to) => supabase
-      .from('availability')
-      .select('*')
-      .in('tutor_id', tutorIds)
-      .order('id', { ascending: true })
-      .range(from, to));
+    const availabilityData = await dedupeAsync(`org_availability:${organizationId}:${tutorIds.join(',')}`, () =>
+      fetchAllRows<any>((from, to) => supabase
+        .from('availability')
+        .select('*')
+        .in('tutor_id', tutorIds)
+        .order('id', { ascending: true })
+        .range(from, to), 2_000),
+    );
     const mappedAvailability = (availabilityData || []).map((row: any) => ({
       ...row,
       tutor: { full_name: tutorNameById.get(row.tutor_id) || '' },
@@ -883,7 +887,8 @@ export default function CompanyTvarkarastis() {
     if (!organizationId || !scheduleCacheKey) return;
     const cached = getCached<any>(scheduleCacheKey);
     if (cached?.orgTutors?.length) {
-      setOrgTutors(cached.orgTutors as OrgTutor[]);
+      const cachedTutors = cached.orgTutors as OrgTutor[];
+      setOrgTutors(cachedTutors);
       setAvailability(cached.availability || []);
       setSubjects(cached.subjects || []);
       setStudents(cached.students || []);
@@ -891,16 +896,23 @@ export default function CompanyTvarkarastis() {
       setDynamicPricingRules(cached.dynamicPricingRules || []);
       setOrgUsesLicenses(Boolean(cached.orgUsesLicenses));
       setLoading(false);
+      // Meta cache can hold stale/empty availability after a failed narrow select — always refresh.
+      if (!isSchoolOrgView && cachedTutors.length > 0) {
+        void loadAvailabilityForTutors(
+          cachedTutors.map((tutor) => tutor.id),
+          cachedTutors,
+        );
+      }
       return;
     }
     setLoading(true);
 
     try {
       await dedupeAsync(`schedule-meta:${organizationId}`, async () => {
-      const filteredTutors = await getOrgVisibleTutors(
+      const filteredTutors = await getOrgVisibleTutorsDeduped(
         supabase as any,
         organizationId,
-        'id, full_name, email, has_active_license, personal_meeting_link, break_between_lessons',
+        'id, full_name, email, has_active_license, personal_meeting_link, break_between_lessons, teaching_notes',
       );
       const tutorIds = filteredTutors.map((t: any) => t.id);
       setOrgTutors(filteredTutors as OrgTutor[]);
@@ -3493,21 +3505,23 @@ export default function CompanyTvarkarastis() {
                     <p className="text-xs text-gray-500 py-2">{t('compSch.searchNotFound')}</p>
                   ) : (
                     filteredOrgTutorsForList.map(tutor => (
-                      <div key={tutor.id} className="flex items-center space-x-2">
+                      <div key={tutor.id} className="flex items-start gap-2">
                         <Checkbox
                           id={`tutor-${tutor.id}`}
                           checked={selectedTutorIds.includes(tutor.id)}
                           onChange={() => toggleTutorFilter(tutor.id)}
+                          className="mt-0.5"
                         />
                         <label
                           htmlFor={`tutor-${tutor.id}`}
                           title={isTutorLicenseBlockedForOrgBooking(tutor.id) ? t('compSch.tutorNotLicensed') : undefined}
                           className={cn(
-                            'text-sm cursor-pointer leading-tight',
+                            'flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-sm cursor-pointer leading-tight',
                             isTutorLicenseBlockedForOrgBooking(tutor.id) && 'text-gray-400 opacity-70',
                           )}
                         >
-                          {tutor.full_name}
+                          <span className="truncate">{tutor.full_name}</span>
+                          {isProKlase && <TutorTeachingNotesBadge notes={tutor.teaching_notes} />}
                         </label>
                       </div>
                     ))

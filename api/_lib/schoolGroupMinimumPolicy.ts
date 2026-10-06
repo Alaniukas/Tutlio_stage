@@ -180,14 +180,14 @@ export async function suspendSchoolGroupIfBelowMinimum(
     // An agreement may be accepted after the group was paused. Keep its
     // contract state in step with the group without restarting the pause or
     // notifying families again.
-    const reason = `Grupė sustabdyta, kol joje bus bent ${minimumStudentCount} aktyvūs mokiniai.`;
+    const reason = `Grupė sustabdyta, kol bus bent ${minimumStudentCount} pasirašytų sutarčių.`;
     const suspendedContractCount = await pauseActiveGroupContracts(supabase, context, now, reason, null);
     await materializeClassGroupNow(supabase, params.groupId, params.organizationId);
     return { groupSuspended: true, groupJustSuspended: false, groupName: context.group.name, activeStudentCount, suspendedContractCount, notificationsSent: 0, notificationsAttempted: 0, minimumStudentCount };
   }
 
   const nowIso = now.toISOString();
-  const reason = `Aktyvių mokinių skaičius grupėje sumažėjo iki ${activeStudentCount}. Grupinis užsiėmimas vyksta tik nuo ${minimumStudentCount} mokinių.`;
+  const reason = `Grupė sustabdyta: reikia bent ${minimumStudentCount} pasirašytų sutarčių (dabar ${activeStudentCount}).`;
   const suspendedContractCount = await pauseActiveGroupContracts(supabase, context, now, reason, params.adminUserId);
   const { error: groupError } = await supabase.from('school_class_groups').update({
     suspension_started_at: nowIso,

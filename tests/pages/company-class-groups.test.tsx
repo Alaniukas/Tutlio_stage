@@ -111,6 +111,49 @@ describe('CompanyClassGroups edit modal', () => {
     expect(screen.queryByText('Grupių funkcija neįjungta šiai organizacijai.')).toBeNull();
   });
 
+  it('shows which members are waiting for a signed contract on a suspended group', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        groups: [{
+          ...group,
+          name: 'Ieva Šimkonytė Matematika 5 klasė',
+          minimum_active_students: 2,
+          suspension_started_at: '2026-09-18T08:00:00.000Z',
+          suspension_reason: 'Aktyvių mokinių skaičius grupėje sumažėjo iki 1. Grupinis užsiėmimas vyksta tik nuo 3 mokinių.',
+          members: [
+            { student_id: 's1', student: { full_name: 'Kairiūnas Sara' } },
+            { student_id: 's2', student: { full_name: 'Baltranaitė Deimilė Austėja' } },
+            { student_id: 's3', student: { full_name: 'Palskė Neda' } },
+          ],
+          extra_lessons_contracts: [
+            { id: 'c1', student_id: 's1', signing_status: 'signed' },
+            { id: 'c2', student_id: 's2', signing_status: 'sent' },
+            { id: 'c3', student_id: 's3', signing_status: 'draft' },
+          ],
+        }],
+      }),
+    });
+
+    render(
+      <OrgEntityProvider value="school">
+        <MemoryRouter initialEntries={['/school/groups']}>
+          <CompanyClassGroups />
+        </MemoryRouter>
+      </OrgEntityProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Ieva Šimkonytė Matematika 5 klasė')).toBeTruthy();
+    });
+    expect(screen.getByText(/Grupė nevyksta: reikia bent 2 pasirašytų sutarčių \(dabar 1\)\./)).toBeTruthy();
+    expect(screen.getByText(/Laukia tėvų patvirtinimo: Baltranaitė Deimilė Austėja/)).toBeTruthy();
+    expect(screen.getByText(/Be sutarties pasiūlymo: Palskė Neda/)).toBeTruthy();
+    expect(screen.getByText(/Kairiūnas Sara/)).toBeTruthy();
+    expect(screen.getByText(/sutartis pasirašyta/)).toBeTruthy();
+    expect(screen.queryByText(/Grupinis užsiėmimas vyksta tik nuo 3 mokinių/)).toBeNull();
+  });
+
   it('renders the groups page without raw i18n keys', async () => {
     render(
       <OrgEntityProvider value="school">

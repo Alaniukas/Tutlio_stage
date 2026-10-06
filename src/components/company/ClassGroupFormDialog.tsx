@@ -33,6 +33,10 @@ import {
   type SchoolClassGroupSlot,
   type SchoolMemberSlot,
 } from '@/lib/schoolClassGroups';
+import {
+  buildSchoolGroupActivationSummary,
+  schoolGroupMemberActivationLabelKey,
+} from '@/lib/schoolGroupMemberActivation';
 
 export type ClassGroupStudentOption = {
   id: string;
@@ -135,6 +139,15 @@ export default function ClassGroupFormDialog(props: {
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const memberActivationById = useMemo(() => {
+    if (!props.group) return new Map<string, string>();
+    const summary = buildSchoolGroupActivationSummary(props.group, props.group.extra_lessons_contracts || []);
+    return new Map(summary.members.map((member) => [
+      member.studentId,
+      t(schoolGroupMemberActivationLabelKey(member.kind)),
+    ]));
+  }, [props.group, t]);
 
   useEffect(() => {
     if (!props.open) return;
@@ -431,7 +444,12 @@ export default function ClassGroupFormDialog(props: {
                 <p className="text-xs text-gray-500">{t('school.groups.emptyMembers')}</p>
               ) : selectedStudents.map((student) => (
                 <span key={student.id} className="inline-flex items-center gap-1 rounded-full bg-white border px-2 py-0.5 text-xs text-gray-800">
-                  {student.full_name}
+                  <span>
+                    {student.full_name}
+                    {memberActivationById.has(student.id) ? (
+                      <span className="text-gray-500"> · {memberActivationById.get(student.id)}</span>
+                    ) : null}
+                  </span>
                   {props.canEditMembers && (
                     <button
                       type="button"
