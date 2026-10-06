@@ -463,7 +463,7 @@ Tai **nėra** atskira lentelė ir **nėra** sutartis prie kiekvienos pamokos. Ta
 
 **Grupės priminimai mokytojui:** `api/send-reminders.ts` siunčia vieną laišką vienam grupės užsiėmimo laikui, nors `sessions` turi po eilutę kiekvienam mokiniui. Po sėkmės visos tos grupės/laiko eilutės pažymimos `reminder_tutor_sent`; studento, tėvų ir mokytojo priminimai dar turi Resend idempotency raktus nuo persidengiančių cron paleidimų. Tėvų priminimai grupėje eina greta (`api/_lib/sessionReminderQueue.ts`), o cron vienu paleidimu gali išsiųsti iki 1000 laiškų (+ burst vienai grupei), kad nepraleistų dalies mokinių toje pačioje pamokoje.
 
-**Grupės kaina ir sustabdymas be laiško tėvams:** materializuojant klasės grupės užsiėmimus `sessions.price` imama iš patvirtintos papildomų užsiėmimų sutarties `unit_price_eur` (jei eilutė dar su kaina 0, kitas suderinimas ją užpildo; ranka įrašyta nenulinė kaina lieka). Kai grupė sustabdoma, nes aktyvių mokinių liko mažiau nei minimumas, sutartys pristabdomos, bet šeimoms `school_group_suspended` laiškas nesiunčiamas: tai vidinis perskirstymas, kol pasirašomos kitos sutartys. Nuolaidos priedai (`school_discount_agreements`) rodomi prie atitinkamos sutarties kortelės su būsena (laukia / patvirtinta / nebegalioja / atšaukta).
+**Grupės kaina ir sustabdymas be laiško tėvams:** materializuojant klasės grupės užsiėmimus `sessions.price` imama iš patvirtintos papildomų užsiėmimų sutarties `unit_price_eur` (jei eilutė dar su kaina 0, kitas suderinimas ją užpildo; ranka įrašyta nenulinė kaina lieka). Kai grupė sustabdoma, nes aktyvių mokinių liko mažiau nei minimumas, sutartys pristabdomos, bet šeimoms `school_group_suspended` laiškas nesiunčiamas: tai vidinis perskirstymas, kol pasirašomos kitos sutartys. **Admin UI `/school/groups`:** `GET /api/school-class-groups` prideda `extra_lessons_contracts`; kortelė ir redagavimo modalas rodo kiekvieno nario būseną (`sutartis pasirašyta` / `laukia tėvų patvirtinimo` / `be sutarties pasiūlymo`) ir aiškų sustabdymo paaiškinimą pagal dabartinį `minimum_active_students`, ne seną `suspension_reason` tekstą (`schoolGroupMemberActivation.ts`, `CompanyClassGroups.tsx`). Nuolaidos priedai (`school_discount_agreements`) rodomi prie atitinkamos sutarties kortelės su būsena (laukia / patvirtinta / nebegalioja / atšaukta).
 
 **Faktinis lankomumas be patvirtintos papildomų pamokų sutarties:** mokytojas gali pažymėti pasibaigusio grupės užsiėmimo lankomumą ir mokiniui, kuriam dėl nepatvirtintos sutarties nėra `sessions` eilutės. `api/school-group-attendance.ts` tikrina mokytoją, organizaciją, grupės narystę ir tikrą užsiėmimo laiką; toks faktas saugomas atskirai nuo pamokų materializavimo, sutarčių patvirtinimo ir sąskaitų (`school_group_attendance_attestations`, migracija `20260930105900_school_group_attendance_attestations.sql`). Kalendoriuje rodoma „Sutartis nepatvirtinta“, o mokyklos Apžvalgoje - istorinis pranešimas apie dalyvavimą be patvirtintos sutarties. Vėlesnis sutarties patvirtinimas šio fakto nepanaikina. Esamų `sessions` eilučių lankomumas žymimas per `confirm-session-status`.
 
@@ -600,8 +600,9 @@ Vizuali regresija: `tests/browser/org-tutor-invoice-privacy/README.md`. Atskiram
 | Neapmokėto paketo redagavimas | `pendingPackageEdit.ts` — 7 d. langas, tik `pending`; API `update-pending-package.ts` (expirina seną Stripe checkout), `resend-package-email.ts`. QA seed: `scripts/seed-proklase-package-edit-qa.mjs` |
 | Neapmokėti pooled mėnesio paketai | `expire-packages` cron **ne**expirina `paid=false` eilutes — skola lieka mokama. `pay-package` / `sendPendingPackageEmail` reaktyvuoja legacy `expired` → `pending` (`src/lib/pooledPackageOverdue.ts`). Admin Apžvalga: `?summary=overdue-packages` + priminimas (`resend-package-email`). UI žymė **Vėluoja** kai `billing_period_end` praeityje. |
 | Tutor no-show | admin cancel su `cancellation_reason_code=tutor_no_show` → −30€, paketas grąžinamas |
+| Dalykai / klasės prie vardo tvarkaraštyje | `profiles.teaching_notes` (redaguojama `CompanyTutors` → „Dalykai ir klasės“); `/company/schedule` filtre rodoma `TutorTeachingNotesBadge` (pvz. „MAT 1-12“). Ta pati pastaba jau rodoma `FindTutorModal` ir korepetitorių sąraše. |
 
-**Testai:** `tests/lib/proKlaseTutorPay.test.ts`, `tests/api/proklase-invoice.test.ts`, `tests/lib/session-complimentary.test.ts`, `tests/lib/proklase-legal.test.ts`, `tests/lib/pending-package-edit.test.ts`, `tests/api/update-pending-package.test.ts`
+**Testai:** `tests/lib/proKlaseTutorPay.test.ts`, `tests/api/proklase-invoice.test.ts`, `tests/lib/session-complimentary.test.ts`, `tests/lib/proklase-legal.test.ts`, `tests/lib/pending-package-edit.test.ts`, `tests/api/update-pending-package.test.ts`, `tests/pages/company-tvarkarastis-teaching-notes.test.ts`
 
 ### Mano Korepetitorius — atlygis pagal dalyką
 
@@ -611,7 +612,9 @@ Numatytasis atlygis lieka `profiles.company_commission_percent` (€ / pamoka). 
 
 **Svarbu:** taikoma **tik** šiai org. Pro Klasė ir kitos įmonės naudoja vieną tarifą (Pro Klasė — atskiras `proKlaseSessionPayEur`: bandomoji / no-show). Skaičiavimas: `orgTutorSessionPayEur()` / `sumOrgTutorLessonsPayEur()` (`src/lib/orgTutorLessonPay.ts`) — sąskaitos (`generate-invoice.ts`, `CreateInvoiceModal`), statistika, `OrgTutorFinanceSummary`.
 
-**Testai:** `tests/lib/org-tutor-lesson-pay.test.ts`. Migracija: `20260902190000_tutor_pay_by_subject.sql`.
+**Statistika vs tvarkaraštis:** bendra taisyklė `companyConductedSessionOptions()` (`orgTutorConductedSessions.ts`) — `includeEndedActive` tik company org be rankinio patvirtinimo (MK, kitos agentūros); **ne** school, **ne** Pro Klasė, **ne** `tutor_lesson_status_confirmation`. Naudoja `CompanyStats`, `CompanyTutors`, `preload` stats/dashboard. Sąskaitos (`generate-invoice`) vis tiek ima tik `completed`/`no_show` — teisinga finansine prasme; cron 90 d. lookback užbaigia praleistas eilutes. Kalendorius / `/company/sessions` chip'ai jau seniau skaičiavo `active`+praėjęs `end_time` (`session-stats.ts`). 2026-10-06 prod: 8 MK rugsėjo `active` eilutės backfill'intos į `completed`.
+
+**Testai:** `tests/lib/org-tutor-lesson-pay.test.ts`, `tests/lib/org-tutor-conducted-sessions.test.ts`. Migracija: `20260902190000_tutor_pay_by_subject.sql`.
 
 **Mokyklų mokytojų atlygis ir sąskaitos:** mokytojo atlygis yra atskiras nuo vaikų sutarties kainos ir `sessions.price`. Grupės vaikų `sessions` eilutės nėra atskiri mokytojui apmokami užsiėmimai. `schoolTutorPayOccurrences()` / `sumSchoolTutorPayEur()` (`src/lib/schoolTutorLessonPay.ts`) skaičiuoja **vieną atlygį už pravestą užsiėmimą**, ne už mokinių skaičių. Tas pats skaičiavimas: mokytojo kortelė, Finansai, mokytojo S.F. ir `/school/stats`. Grupiniam užsiėmimui taikomas `profiles.company_commission_percent`; individualiam — `company_individual_commission_percent` (tuščias naudoja grupinį). **Laisvi vaikai + Demo Mokykla:** kanoninis **45 € / užsiėmimas** (`LAISVI_VAIKIAI_DEFAULT_TUTOR_PAY_EUR`, `resolveSchoolTutorGroupPayRate()`); keičiama per `CompanyTutors` / org numatytąjį `CompanySettings`. Migracija `20261001120000_laisvi_vaikai_tutor_pay_45.sql` nustato 45 € aktyviems mokytojams prod/test DB. Istorinis `tutor_pay_eur_snapshot` turi pirmenybę. Jei snapshot'ai nesutampa — reikia admin peržiūros prieš sąskaitą. Migracija `20261001100000_school_teacher_individual_pay.sql`.
 
@@ -785,6 +788,7 @@ npm run security:pencheck
 | Slaptažodis (visi QA) | `TutlioQaDemo2026!` |
 | Rankinis QA | `test_proklase.md` (kitas PC, visos instrukcijos) |
 | Kliento laiškai | **`alaniukasa@gmail.com`** (naujo mokinio email / payer / tėvai) |
+| Statistikos prognozė į priekį | `node scripts/seed-proklase-forward-stats-qa.mjs` — 8 `active` pamokos **kitam kalendoriniam mėnesiui** (IDs `…051`–`…058`, korep. `…003`, mokiniai Lukas/Gabija/Nojus). Po seed: `/company/stats` → filtras **Kitas mėnuo**. Pakartotinai saugu (upsert). |
 
 **Demo Mokykla** — tik testavimui, org ID `c3a00000-7e57-4000-8000-000000000001`
 
@@ -809,6 +813,7 @@ npm run security:pencheck
 | `scripts/seed-school-extra-lessons-qa.mjs` | Extra-lessons sutarčių QA (laiškai `alaniukasa@gmail.com`) |
 | `scripts/seed-school-extra-lessons-legal-qa.mjs` | 14 d. atsisakymas / click-wrap QA (laiškai `alaniukasa@gmail.com`) |
 | `scripts/seed-proklase-package-edit-qa.mjs` | Pro Klasė pending package edit QA |
+| `scripts/seed-proklase-forward-stats-qa.mjs` | Pro Klasė: būsimos pamokos statistikos prognozės QA (`/company/stats`, Kitas mėnuo) |
 | `scripts/seed-school-contract-completion-test.mjs` | Sutarčių completion testiniai duomenys |
 | `scripts/seed-demo-school-unconfirmed-attendance-qa.mjs` | Demo Mokykla: 4 sistemos matomi neatvykimai (relatyvios datos) + 09.03 istorija be join įrodymų; įjungia school flag'us |
 
@@ -858,6 +863,8 @@ npm run security:pencheck
 35. **Org admin laisvo laiko INSERT/UPDATE timeout** — `availability` RLS politika su `profiles`/`organizations` subquery kiekvienam org korepetitoriui (ypač Pro Klasė su `org_admin_calendar_full_control`) viršijo PostgREST `statement_timeout` (`canceling statement due to statement timeout`). Tai **universalus** org admin kelias (`CompanyTvarkarastis` → `handleSaveAvailability` / `handleCreateAvailability`), ne Pro Klasė logika. Pataisa: migracija `20261005105541_org_calendar_availability_permissions.sql` (`private.org_admin_availability_tutor_ids()`, `row_security=off`). UI saugo be `.select('id')` — pakanka `error` tikrinimo. Testas: `tests/db/org-admin-availability.test.ts`.
 36. **Org admin laisvas laikas DB susikuria, bet kalendoriuje nematomas** — `refreshSchedule()` kvietė `fetchScheduleMeta()`, kuris ant cache hit grąžindavo **seną** `availability` masyvą; `loadAvailabilityForTutors` vėl nebuvo kviečiamas, nes `availability.length > 0`. Po sėkmingo create/edit adminas matydavo „nieko neįvyko“ ir spaudė dar kartą (dubliatai DB, pvz. Pro Klasė Rimantas 2026-10-06). Pataisa: `refreshSchedule` perkrauna availability iš DB + toast (`avail.addSuccess` / `avail.updateSuccess`); create modal po sėkmės perkelia kalendorių į slot datą.
 37. **Mokyklų tėvų registracija ir sibling susiejimas** — `register-parent` mokykloms automatiškai pririša visus aktyvius vaikus su tuo pačiu `payer_email` / `parent_secondary_email`. Kai įjungta `school_family_portal` arba `school_family_accounts_setup`, registracija ir „Pakviesti tėvą“ esamai paskyrai upsertina `school_family_guardians` iš pasirašytos metinės sutarties (`api/_lib/schoolParentSiblingLink.ts`, `bindSchoolFamilyGuardianForRegisteredParent`). Antras vaikas jau užsiregistravusiam tėvui: `linkExistingSchoolParentByEmail`, ne `already_registered` skip. Šeimos portalo įjungimui admin API reikalauja tik medžiagos bazės (`baselineReady`).
+38. **Org statistika mažesnė nei kalendoriuje (MK ir kitos company org)** — dažniausia priežastis: pasibaigusios pamokos vis dar `status=active`, nes `auto-complete-sessions` anksčiau žiūrėjo tik 7 d. atgal ir nebegrįžo prie senų eilučių. Statistika / `generate-invoice` ima tik `completed`/`no_show`; kalendorius vizualiai rodo ir pasibaigusias `active`. Tikrinti: `SELECT status, count(*) FROM sessions ... WHERE end_time < now() GROUP BY status`. Pataisa: cron lookback 90 d. + `orgTutorConductedSessions` `includeEndedActive` company stats be rankinio patvirtinimo; istorinėms eilutėms — `UPDATE sessions SET status='completed' WHERE status='active' AND end_time < now()` (ne school su `tutor_lesson_status_confirmation` / Laisvi vaikai).
+39. **Org admin load burst'ai** — `getOrgVisibleTutorsDeduped()` (`orgVisibleTutors.ts`) sujungia Layout preload + Dashboard + Stats + Tvarkaraštis tutor list kvietimus. `CompanyDashboard` — 2 session query (metrikos 2 m. + sąrašai nuo −30 d.), Pro Klasė overdue API fone. `CompanyStats` — stale-while-revalidate iš `company_stats:{orgId}` cache. `preloadDashboard` naudoja jau įkrautas sesijas, ne antrą mėnesio query. `fetchAllRows(query, maxRows)` — School apžvalgos sutartys/SF/grupės capped. School sibling paieška — SQL `.or(payer_email, parent_secondary_email)`, ne visas org sąrašas.
 
 ---
 
@@ -874,7 +881,7 @@ npm run security:pencheck
 | Mokytojų sutartys (WIP) | `CompanyStaffContracts.tsx`, `schoolContractParty.ts`, `school-contract-teacher-invite.ts` |
 | Darbuotojų dokumentai (konfidencialumas / sutikimas) | `CompanyStaffDocuments.tsx`, `api/school-staff-documents.ts`, `api/school-staff-consent.ts`, `api/school-staff-consent-pdf-retry.ts`, `api/_lib/schoolStaffDocuments.ts`, `api/_lib/schoolStaffConsentPdf.ts` |
 | Nepatvirtintas lankomumas | `schoolJoinNoShow.ts` (`isUnconfirmedDetectedStudentAbsence`), `schoolSessionMonitoring.ts` |
-| Klasės grupės | `CompanyClassGroups.tsx`, `ClassGroupFormDialog.tsx`, `schoolClassGroups.ts`, `api/school-class-groups.ts`, `api/_lib/schoolClassGroupMaterialize.ts` |
+| Klasės grupės | `CompanyClassGroups.tsx`, `ClassGroupFormDialog.tsx`, `schoolClassGroups.ts`, `schoolGroupMemberActivation.ts`, `api/school-class-groups.ts`, `api/_lib/schoolClassGroupMaterialize.ts` |
 | Mokyklos terminologija (mokytojas / užsiėmimas) | `src/lib/i18n/schoolTerminology.ts`, `terminologyStore.ts`, `hooks/useSchoolTerminology.ts`, `useParentHasSchoolOrg.ts`, `useOrgTerminologyMode.ts`, `api/send-email.ts` (school laiškai) |
 | „Prisijungti“ langas (tėvai / mokiniai) | `components/JoinLessonButton.tsx`, `lib/attendance.ts` |
 | Mokytojo grupės lankomumas (kalendorius) | `SchoolGroupRosterAttendanceControls.tsx`, `schoolAttendanceUi.ts`, `schoolGroupAttendance.ts`, `Calendar.tsx` |
@@ -898,7 +905,7 @@ npm run security:pencheck
 | Org korep kvietimas | `CompanyTutors.tsx`, `api/invite-tutor.ts` |
 | Embedded prenumerata | `EmbeddedSubscriptionCheckoutDialog.tsx`, `create-subscription-checkout.ts` |
 | Tutor kalendorius / laisvas laikas | `Calendar.tsx`, `AvailabilityManager.tsx`, `calendarSessionEventStyle.ts` |
-| Org admin tvarkaraštis (school/company) | `CompanyTvarkarastis.tsx`, `orgScheduleFetchWindow.ts`, `dataCache.ts` (`companyTvarkarastisCacheKey`) |
+| Org admin tvarkaraštis (school/company) | `CompanyTvarkarastis.tsx`, `orgScheduleFetchWindow.ts`, `dataCache.ts` (`companyTvarkarastisCacheKey`); Pro Klasė: korepetitorių filtre `TutorTeachingNotesBadge` iš `profiles.teaching_notes` |
 | Org admin laisvo laiko RLS | `20261005105541_org_calendar_availability_permissions.sql`, `tests/db/org-admin-availability.test.ts`, `CompanyTvarkarastis.tsx` (`handleSaveAvailability`) |
 | Org admin tutor filtrai (scroll) | `orgUi.ts` |
 | Org email branding | `api/_lib/emailOrgBranding.ts`, `api/send-email.ts`, `src/lib/email.ts` |
@@ -942,4 +949,4 @@ npm run security:pencheck
 
 ---
 
-*Paskutinis atnaujinimas: 2026-10-06: Laisvi vaikai prod įjungti `school_family_accounts_setup`, `school_family_portal`, `school_compact_notifications`; material baseline `completed_at` užbaigtas; esami 5 tėvų backfill (sibling link + guardian bind). Masinis kvietimas: `/school/students` → **Šeimos paskyros** (neribotas pasirinkimas viename puslapyje; API apdoroja visus `studentIds` iš eilės).*
+*Paskutinis atnaujinimas: 2026-10-06: org admin load optimizacijos (deduped tutor list, dashboard session merge, stats SWR cache, school dashboard caps) — žr. §19 #39.*

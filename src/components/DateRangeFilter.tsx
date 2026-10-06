@@ -9,6 +9,8 @@ import {
   startOfMonth,
   endOfMonth,
   subMonths,
+  addMonths,
+  addWeeks,
   format,
 } from 'date-fns';
 import { Calendar, X, Search } from 'lucide-react';
@@ -26,6 +28,10 @@ interface DateRangeFilterProps {
   onApplyRange?: (start: Date, end: Date) => void;
   /** Merge with default Card styles (e.g. padding, shadow). */
   className?: string;
+  /** Allow picking dates after today (stats forecast). */
+  allowFuture?: boolean;
+  /** Show next week / next month quick presets. */
+  showFuturePresets?: boolean;
 }
 
 export function DateRangeFilter({
@@ -37,6 +43,8 @@ export function DateRangeFilter({
   onSearch,
   onApplyRange,
   className,
+  allowFuture = false,
+  showFuturePresets = false,
 }: DateRangeFilterProps) {
   const applyRange = (start: Date, end: Date) => {
     onStartDateChange(start);
@@ -76,6 +84,27 @@ export function DateRangeFilter({
         applyRange(subMonths(today, 3), today);
       },
     },
+    ...(showFuturePresets
+      ? [
+          {
+            label: t('dateFilter.nextWeek'),
+            onClick: () => {
+              const nextWeek = addWeeks(today, 1);
+              applyRange(
+                startOfWeek(nextWeek, { weekStartsOn: 1 }),
+                endOfWeek(nextWeek, { weekStartsOn: 1 }),
+              );
+            },
+          },
+          {
+            label: t('dateFilter.nextMonth'),
+            onClick: () => {
+              const nextMonth = addMonths(today, 1);
+              applyRange(startOfMonth(nextMonth), endOfMonth(nextMonth));
+            },
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -117,7 +146,7 @@ export function DateRangeFilter({
           <Label htmlFor="start-date">{t('dateFilter.fromDate')}</Label>
           <DateInput
             id="start-date"
-            max={maxDate}
+            max={allowFuture ? undefined : maxDate}
             value={startDate ? format(startDate, 'yyyy-MM-dd') : ''}
             onChange={(e) => {
               const value = e.target.value;
@@ -129,7 +158,7 @@ export function DateRangeFilter({
           <Label htmlFor="end-date">{t('dateFilter.toDate')}</Label>
           <DateInput
             id="end-date"
-            max={maxDate}
+            max={allowFuture ? undefined : maxDate}
             value={endDate ? format(endDate, 'yyyy-MM-dd') : ''}
             onChange={(e) => {
               const value = e.target.value;

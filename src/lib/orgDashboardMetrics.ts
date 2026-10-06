@@ -4,6 +4,7 @@
  */
 
 import { isSessionActuallyPaid } from '@/lib/sessionPaymentDisplay';
+import { isConductedOrgSession, type ConductedOrgSessionOptions } from '@/lib/orgTutorConductedSessions';
 
 export type OrgDashboardSession = {
   status?: string | null;
@@ -35,6 +36,7 @@ function billablePrice(session: OrgDashboardSession): number {
 export function orgDashboardMonthMetrics(
   sessions: OrgDashboardSession[],
   now: Date = new Date(),
+  conductedOptions: ConductedOrgSessionOptions = {},
 ): {
   occurredCount: number;
   plannedCount: number;
@@ -49,7 +51,10 @@ export function orgDashboardMonthMetrics(
     const status = String(session.status || '');
     if (status === 'cancelled' || status === 'canceled') continue;
 
-    if (session.exclude_from_lesson_count !== true && isOccurredOrgSession(status)) {
+    if (
+      session.exclude_from_lesson_count !== true
+      && isConductedOrgSession(status, session, { ...conductedOptions, now })
+    ) {
       occurredCount += 1;
     }
 

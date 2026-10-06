@@ -60,6 +60,19 @@ describe('orgDashboardMonthMetrics', () => {
     expect(metrics.paidRevenueEur).toBe(0);
   });
 
+  it('counts ended active lessons for auto-complete company org dashboards', () => {
+    const metrics = orgDashboardMonthMetrics(
+      [
+        { status: 'completed', paid: false, payment_status: 'pending', price: 28, end_time: '2026-09-10T10:00:00+03:00' },
+        { status: 'active', paid: false, payment_status: 'pending', price: 28, end_time: '2026-09-11T10:00:00+03:00' },
+      ],
+      now,
+      { includeEndedActive: true },
+    );
+
+    expect(metrics.occurredCount).toBe(2);
+  });
+
   it('keeps transferred payment revenue but excludes its duplicate lesson count', () => {
     const metrics = orgDashboardMonthMetrics(
       [

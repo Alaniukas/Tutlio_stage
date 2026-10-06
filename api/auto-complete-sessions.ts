@@ -68,8 +68,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // - their end time has already passed
     // - are not yet marked as completed
     // - are not cancelled
-    // Only look back 7 days — anything older is likely stale
-    const lookback = new Date(Date.now() - 7 * 24 * 3600000).toISOString();
+    // Look back 90 days so a missed cron window does not leave lessons stuck active forever.
+    const lookback = new Date(Date.now() - 90 * 24 * 3600000).toISOString();
     const { data: sessions, error } = await supabase
       .from('sessions')
       .select('id, tutor_id, start_time, end_time, status, paid, payment_status, lesson_package_id, subject_id, meeting_link, student_joined_at, tutor_joined_at')

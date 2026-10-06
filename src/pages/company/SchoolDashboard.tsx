@@ -23,7 +23,7 @@ import { deriveAttendance, isAttendanceFlagged } from '@/lib/attendance';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useTranslation } from '@/lib/i18n';
-import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { getOrgVisibleTutorsDeduped } from '@/lib/orgVisibleTutors';
 import {
   isSchoolParentConfirmationPending,
   buildSchoolAdminActionQueue,
@@ -194,7 +194,7 @@ export default function SchoolDashboard() {
       const queryStart = attentionStart.getTime() < monthStart.getTime() ? attentionStart : monthStart;
       const queryEnd = endOfSchoolDay(addCalendarDays(now, 14));
 
-      const tutorsPromise = getOrgVisibleTutors(
+      const tutorsPromise = getOrgVisibleTutorsDeduped(
         supabase as any,
         organizationId,
         'id, full_name, email',
@@ -207,7 +207,7 @@ export default function SchoolDashboard() {
             .is('staff_document_type', null)
             .is('archived_at', null)
             .order('created_at', { ascending: false })
-            .range(from, to))
+            .range(from, to), 400)
         : Promise.resolve([]);
       const invoicesPromise = can('finance.view')
         ? fetchAllRows<any>((from, to) => supabase
@@ -217,7 +217,7 @@ export default function SchoolDashboard() {
             .eq('payment_status', 'pending')
             .order('due_date', { ascending: true })
             .order('id')
-            .range(from, to))
+            .range(from, to), 200)
         : Promise.resolve([]);
       const groupsPromise = can('sessions.view')
         ? fetchAllRows<any>((from, to) => supabase
@@ -225,7 +225,7 @@ export default function SchoolDashboard() {
             .select('id, name, tutor_id, minimum_active_students, admin_action_required, admin_action_note, admin_action_requested_at, updated_at, suspension_started_at, suspension_until, suspension_resumed_at, suspension_reason')
             .eq('organization_id', organizationId)
             .order('updated_at', { ascending: false })
-            .range(from, to))
+            .range(from, to), 150)
         : Promise.resolve([]);
 
       const [tutors, contractRows, invoiceRows, groupRows] = await Promise.all([
