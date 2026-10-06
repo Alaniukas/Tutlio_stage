@@ -22,7 +22,7 @@ it('requires an explicit shared-login confirmation and sends only the reviewed c
   fireEvent.click(screen.getByRole('button', { name: copy.title }));
   await screen.findByText('Child one');
   expect((screen.getByRole('checkbox', { name: 'Child one' }) as HTMLInputElement).disabled).toBe(true);
-  expect(screen.getByText('Parent: Verified Parent, verified@example.test')).toBeTruthy();
+  expect(screen.getAllByText(/verified@example\.test/).length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole('button', { name: copy.split }));
   const confirm = screen.getByRole('button', { name: copy.split });
   expect((confirm as HTMLButtonElement).disabled).toBe(true);
@@ -34,7 +34,7 @@ it('requires an explicit shared-login confirmation and sends only the reviewed c
   expect(JSON.parse(write[1]!.body as string)).toEqual({ action: 'split_shared', studentId: 'one', confirmed: true });
 });
 
-it('limits selection to five eligible children and leaves blocked children untouched', async () => {
+it('allows selecting every eligible child on the page and keeps blocked children disabled', async () => {
   const children = Array.from({ length: 6 }, (_, index) => row(String(index + 1)));
   const fetcher = vi.fn(async (_url: string, init?: RequestInit) => init?.method === 'POST'
     ? reply({ success: true, results: [] }) : reply({ rows: [...children, row('blocked', ['annual_contract_required'])], nextCursor: null }));
@@ -42,13 +42,39 @@ it('limits selection to five eligible children and leaves blocked children untou
   render(<SchoolFamilyAccountsDialog canEdit />);
   fireEvent.click(screen.getByRole('button', { name: copy.title }));
   await screen.findByText('Child 1');
-  for (let index = 1; index <= 5; index++) fireEvent.click(screen.getByRole('checkbox', { name: `Child ${index}` }));
-  expect((screen.getByRole('checkbox', { name: 'Child 6' }) as HTMLInputElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('checkbox', { name: copy.selectAllPage }));
+  expect((screen.getByRole('checkbox', { name: 'Child 6' }) as HTMLInputElement).checked).toBe(true);
   expect((screen.getByRole('checkbox', { name: 'Child blocked' }) as HTMLInputElement).disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: copy.createInvite }));
   await waitFor(() => expect(fetcher.mock.calls.some(call => call[1]?.method === 'POST')).toBe(true));
   const write = fetcher.mock.calls.find(call => call[1]?.method === 'POST')!;
-  expect(JSON.parse(write[1]!.body as string)).toEqual({ action: 'provision', studentIds: ['1', '2', '3', '4', '5'] });
+  expect(JSON.parse(write[1]!.body as string)).toEqual({ action: 'provision', studentIds: ['1', '2', '3', '4', '5', '6'] });
+});
+
+it('selects all eligible children or only signed-contract children from the toolbar', async () => {
+  const children = [
+    row('signed-1'),
+    row('signed-2'),
+    row('unsigned', ['annual_contract_required']),
+  ];
+  children[0].verified = true;
+  children[1].verified = true;
+  children[2].verified = false;
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => init?.method === 'POST'
+    ? reply({ success: true, results: [] }) : reply({ rows: children, nextCursor: null }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<SchoolFamilyAccountsDialog canEdit />);
+  fireEvent.click(screen.getByRole('button', { name: copy.title }));
+  await screen.findByText('Child signed-1');
+  fireEvent.click(screen.getByRole('checkbox', { name: copy.selectAllPage }));
+  expect((screen.getByRole('checkbox', { name: 'Child signed-1' }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole('checkbox', { name: 'Child signed-2' }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole('checkbox', { name: 'Child unsigned' }) as HTMLInputElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: copy.clearSelection }));
+  expect((screen.getByRole('checkbox', { name: 'Child signed-1' }) as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: copy.selectSigned }));
+  expect((screen.getByRole('checkbox', { name: 'Child signed-1' }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole('checkbox', { name: 'Child signed-2' }) as HTMLInputElement).checked).toBe(true);
 });
 
 it('shows account state to viewers without exposing mutation actions', async () => {
@@ -60,8 +86,8 @@ it('shows account state to viewers without exposing mutation actions', async () 
   expect(screen.queryByRole('button', { name: copy.verify })).toBeNull();
   expect(screen.queryByRole('button', { name: copy.split })).toBeNull();
   expect((screen.getByRole('checkbox', { name: 'Child one' }) as HTMLInputElement).disabled).toBe(true);
-  expect(screen.getAllByText(copy.created)).toHaveLength(2);
   expect(screen.getAllByText(copy.invited)).toHaveLength(2);
-  expect(screen.getAllByText(copy.activated)).toHaveLength(2);
   expect(screen.getAllByText(copy.firstLogin)).toHaveLength(2);
+  expect(screen.queryByText(copy.created)).toBeNull();
+  expect(screen.queryByText(copy.activated)).toBeNull();
 });

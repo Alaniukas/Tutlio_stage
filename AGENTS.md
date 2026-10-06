@@ -942,4 +942,4 @@ npm run security:pencheck
 
 ---
 
-*Paskutinis atnaujinimas: 2026-10-06: Pro Klasė neapmokėti pooled mėnesio paketai nebegalioja automatiškai; admin Apžvalgoje rodomi vėluojantys su priminimo mygtuku.*
+*Paskutinis atnaujinimas: 2026-10-06: Laisvi vaikai prod įjungti `school_family_accounts_setup`, `school_family_portal`, `school_compact_notifications`; material baseline `completed_at` užbaigtas; esami 5 tėvų backfill (sibling link + guardian bind). Masinis kvietimas: `/school/students` → **Šeimos paskyros** (neribotas pasirinkimas viename puslapyje; API apdoroja visus `studentIds` iš eilės).*

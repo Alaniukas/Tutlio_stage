@@ -1,13 +1,60 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Users, Loader2, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Check, Loader2, RefreshCw, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
-import { schoolFamilyAccountCopy, schoolFamilyAccountError } from '@/lib/schoolFamilyAccountCopy';
+import { schoolFamilyAccountCopy, schoolFamilyAccountError, type SchoolFamilyAccountCopy } from '@/lib/schoolFamilyAccountCopy';
 import type { SchoolFamilyAccountState, SchoolFamilyPreviewRow } from '../../../api/_lib/schoolFamilyAccounts';
+
+function isSelectableRow(row: SchoolFamilyPreviewRow, canEdit: boolean, busy: boolean): boolean {
+  return canEdit && !busy && row.blockedReasons.length === 0;
+}
+
+function isSignedContractRow(row: SchoolFamilyPreviewRow): boolean {
+  return row.verified && row.blockedReasons.length === 0;
+}
+
+function pickStudentIds(rows: SchoolFamilyPreviewRow[], filter: (row: SchoolFamilyPreviewRow) => boolean): string[] {
+  return rows.filter(filter).map((row) => row.studentId);
+}
+
+function AccountStatusPanel({
+  label,
+  account,
+  copy,
+}: {
+  label: string;
+  account: SchoolFamilyAccountState;
+  copy: SchoolFamilyAccountCopy;
+}) {
+  const invited = Boolean(account.invitedAt || account.hasLoggedIn);
+  const steps = [
+    { name: copy.invited, done: invited },
+    { name: copy.firstLogin, done: account.hasLoggedIn },
+  ];
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</p>
+      {account.login ? <p className="text-sm text-gray-900 break-all">{account.login}</p> : null}
+      <div className="flex flex-wrap gap-2">
+        {steps.map(({ name, done }) => (
+          <span
+            key={name}
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+              done ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100' : 'bg-white text-gray-400 ring-1 ring-gray-200'
+            }`}
+          >
+            {done ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden /> : null}
+            {name}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function SchoolFamilyAccountsDialog({ canEdit, onChanged }: { canEdit: boolean; onChanged?: () => void }) {
   const { t, locale } = useTranslation();
@@ -31,6 +78,15 @@ export default function SchoolFamilyAccountsDialog({ canEdit, onChanged }: { can
   const [confirmed, setConfirmed] = useState(false);
   const [split, setSplit] = useState<SchoolFamilyPreviewRow | null>(null);
   const [splitConfirmed, setSplitConfirmed] = useState(false);
+
+  const selectableRows = useMemo(
+    () => rows.filter((row) => isSelectableRow(row, canEdit, busy)),
+    [rows, canEdit, busy],
+  );
+  const signedRows = useMemo(() => selectableRows.filter(isSignedContractRow), [selectableRows]);
+  const allSelectableSelected = selectableRows.length > 0
+    && selectableRows.every((row) => selected.includes(row.studentId));
+  const someSelected = selected.length > 0;
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -70,16 +126,19 @@ export default function SchoolFamilyAccountsDialog({ canEdit, onChanged }: { can
     event.preventDefault(); if (!confirmed || busy) return;
     void act({ action: 'verify_guardian', studentId: review!.studentId, contractId, guardianName, guardianEmail, personalCode, confirmed });
   };
-  const accountState = (account: SchoolFamilyAccountState, label: string) => (
-    <div className="min-w-0 text-xs text-gray-600 space-y-1">
-      <p className="font-medium text-gray-900">{label}: <span className="break-all font-normal">{account.login || copy.none}</span></p>
-      <dl className="grid grid-cols-2 gap-x-2 gap-y-1">
-        {[[copy.created, !!account.createdAt], [copy.invited, !!account.invitedAt], [copy.activated, !!account.activatedAt], [copy.firstLogin, account.hasLoggedIn]].map(([name, done]) => (
-          <div key={String(name)} className="flex items-center gap-1"><dt>{name}</dt><dd className={done ? 'text-emerald-700' : 'text-gray-400'}>{done ? '✓' : copy.none}</dd></div>
-        ))}
-      </dl>
-    </div>
-  );
+  const toggleRow = (studentId: string, checked: boolean) => {
+    setSelected((value) => {
+      if (!checked) return value.filter((id) => id !== studentId);
+      if (value.includes(studentId)) return value;
+      return [...value, studentId];
+    });
+  };
+  const toggleAllOnPage = (checked: boolean) => {
+    setSelected(checked ? pickStudentIds(rows, (row) => isSelectableRow(row, canEdit, busy)) : []);
+  };
+  const selectSignedOnPage = () => {
+    setSelected(pickStudentIds(rows, (row) => isSelectableRow(row, canEdit, busy) && isSignedContractRow(row)));
+  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -88,9 +147,12 @@ export default function SchoolFamilyAccountsDialog({ canEdit, onChanged }: { can
         <DialogHeader><DialogTitle>{copy.title}</DialogTitle><DialogDescription>{copy.intro}</DialogDescription></DialogHeader>
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" variant="outline" size="sm" disabled={loading || busy} onClick={() => void load()} aria-label={t('school.recordings.refresh')}><RefreshCw className="h-4 w-4" /></Button>
-          {canEdit && <><Button type="button" size="sm" disabled={loading || busy || !selected.length} onClick={() => void act({ action: 'provision', studentIds: selected })}>{copy.createInvite}</Button>
-            <Button type="button" variant="outline" size="sm" disabled={loading || busy || !selected.length} onClick={() => void act({ action: 'resend', studentIds: selected })}>{copy.resend}</Button></>}
+          {canEdit && <>
+            <Button type="button" size="sm" disabled={loading || busy || !selected.length} onClick={() => void act({ action: 'provision', studentIds: selected })}>{copy.createInvite}</Button>
+            <Button type="button" variant="outline" size="sm" disabled={loading || busy || !selected.length} onClick={() => void act({ action: 'resend', studentIds: selected })}>{copy.resend}</Button>
+          </>}
           <span className="text-xs text-gray-500">{copy.batchHint}</span>
+          {someSelected && <span className="text-xs font-medium text-indigo-700">{copy.selectedCount.replace('{count}', String(selected.length))}</span>}
           {(busy || loading) && <Loader2 className="h-4 w-4 animate-spin" />}
         </div>
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
@@ -109,19 +171,59 @@ export default function SchoolFamilyAccountsDialog({ canEdit, onChanged }: { can
         </form> : split ? <div className="rounded-xl border p-4 space-y-3">
           <h3 className="font-semibold">{copy.split}: {split.studentName}</h3><label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={splitConfirmed} onChange={(event) => setSplitConfirmed(event.target.checked)} className="mt-1" />{copy.confirmSplit}</label>
           <div className="flex gap-2"><Button type="button" disabled={busy || !splitConfirmed} onClick={() => void act({ action: 'split_shared', studentId: split.studentId, confirmed: splitConfirmed })}>{copy.split}</Button><Button type="button" variant="outline" disabled={busy} onClick={() => setSplit(null)}>{t('common.cancel')}</Button></div>
-        </div> : <div className="divide-y rounded-xl border">
-          {rows.map((row) => <div key={row.studentId} className="grid gap-3 p-4 lg:grid-cols-[minmax(170px,1fr)_1fr_1fr]">
-            <div className="space-y-2"><label className="flex items-center gap-2 font-medium"><input type="checkbox" checked={selected.includes(row.studentId)} disabled={!canEdit || busy || row.blockedReasons.length > 0 || (selected.length >= 5 && !selected.includes(row.studentId))} onChange={(event) => setSelected((value) => event.target.checked ? [...value, row.studentId] : value.filter((id) => id !== row.studentId))} />{row.studentName}</label>
-              <p className="text-xs text-gray-600 break-all">{copy.studentEmail}: {row.studentEmail || copy.none}</p>
-              <p className="text-xs text-gray-600 break-all">{copy.guardian}: {row.guardianName || copy.none}, {row.guardianEmail || copy.none}</p>
-              {row.blockedReasons.map((reason) => <p key={reason} className="text-xs text-amber-800">{schoolFamilyAccountError(reason, copy)}</p>)}
-              {canEdit && row.annualContracts.length > 0 && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => openReview(row)}>{copy.verify}</Button>}
-              {canEdit && row.verified && row.blockedReasons.some((reason) => reason.includes('shared_identity')) && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => { setSplit(row); setSplitConfirmed(false); }}>{copy.split}</Button>}
-            </div>
-            {accountState(row.parent, copy.guardian)}{accountState(row.student, copy.child)}
-          </div>)}
-          {!rows.length && !loading && <p className="p-4 text-sm text-gray-500">{t('compStu.noStudents')}</p>}
-        </div>}
+        </div> : <>
+          {canEdit && rows.length > 0 && <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-gray-50 px-3 py-2 text-sm">
+            <label className="inline-flex items-center gap-2 font-medium text-gray-800">
+              <input
+                type="checkbox"
+                aria-label={copy.selectAllPage}
+                checked={allSelectableSelected}
+                disabled={loading || busy || !selectableRows.length}
+                onChange={(event) => toggleAllOnPage(event.target.checked)}
+              />
+              {copy.selectAllPage}
+            </label>
+            <Button type="button" variant="outline" size="sm" disabled={loading || busy || !signedRows.length} onClick={selectSignedOnPage}>{copy.selectSigned}</Button>
+            <Button type="button" variant="ghost" size="sm" disabled={loading || busy || !someSelected} onClick={() => setSelected([])}>{copy.clearSelection}</Button>
+          </div>}
+          <div className="space-y-3">
+            {rows.map((row) => {
+              const selectable = isSelectableRow(row, canEdit, busy);
+              const checked = selected.includes(row.studentId);
+              return (
+                <article key={row.studentId} className={`rounded-xl border p-4 space-y-3 ${checked ? 'border-indigo-300 bg-indigo-50/30' : 'border-gray-200 bg-white'}`}>
+                  <div className="flex gap-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1 shrink-0"
+                      aria-label={row.studentName}
+                      checked={checked}
+                      disabled={!selectable}
+                      onChange={(event) => toggleRow(row.studentId, event.target.checked)}
+                    />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <h3 className="font-semibold text-gray-900">{row.studentName}</h3>
+                      <dl className="grid gap-2 text-xs text-gray-600 sm:grid-cols-2">
+                        <div><dt className="font-medium text-gray-500">{copy.studentEmail}</dt><dd className="break-all">{row.studentEmail || '—'}</dd></div>
+                        <div><dt className="font-medium text-gray-500">{copy.guardian}</dt><dd className="break-all">{[row.guardianName, row.guardianEmail].filter(Boolean).join(' · ') || '—'}</dd></div>
+                      </dl>
+                      {row.blockedReasons.map((reason) => <p key={reason} className="text-xs text-amber-800">{schoolFamilyAccountError(reason, copy)}</p>)}
+                      {canEdit && <div className="flex flex-wrap gap-2">
+                        {row.annualContracts.length > 0 && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => openReview(row)}>{copy.verify}</Button>}
+                        {row.verified && row.blockedReasons.some((reason) => reason.includes('shared_identity')) && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => { setSplit(row); setSplitConfirmed(false); }}>{copy.split}</Button>}
+                      </div>}
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <AccountStatusPanel label={copy.guardian} account={row.parent} copy={copy} />
+                    <AccountStatusPanel label={copy.child} account={row.student} copy={copy} />
+                  </div>
+                </article>
+              );
+            })}
+            {!rows.length && !loading && <p className="rounded-xl border p-4 text-sm text-gray-500">{t('compStu.noStudents')}</p>}
+          </div>
+        </>}
         <div className="flex justify-between"><Button type="button" variant="outline" disabled={!previous.length || loading || busy} onClick={() => { const value = [...previous]; setCursor(value.pop() || ''); setPrevious(value); }}>{t('compSch.previous')}</Button><Button type="button" variant="outline" disabled={!next || loading || busy} onClick={() => { setPrevious((value) => [...value, cursor]); setCursor(next!); }}>{t('compSch.next')}</Button></div>
       </DialogContent>
     </Dialog>

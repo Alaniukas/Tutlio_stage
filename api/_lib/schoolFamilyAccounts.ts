@@ -17,7 +17,7 @@ import {
 } from './schoolFamilyGuardianAccess.js';
 
 export const SCHOOL_FAMILY_PAGE_SIZE = 25;
-export const SCHOOL_FAMILY_BATCH_SIZE = 5;
+/** Legacy export kept for tests; batch size is no longer capped in the API. */
 export const SCHOOL_FAMILY_TOKEN_PREFIX = 'sf1.';
 const STUDENT_SELECT = 'id,full_name,email,organization_id,linked_user_id,parent_user_id,payer_name,payer_email,enrollment_status,detached_at';
 const CONTRACT_SELECT = 'id,student_id,contract_number,kind,signing_status,archived_at,terminated_at,created_at';

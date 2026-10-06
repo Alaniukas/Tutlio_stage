@@ -4,7 +4,7 @@ import { requireOrgAdminAccess } from './_lib/orgAdminAccess.js';
 import { schoolFamilyAccountsSetupEnabled } from './_lib/schoolFamilyGuardianAccess.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import {
-  SCHOOL_FAMILY_BATCH_SIZE, schoolFamilyAccountsPreview, runSchoolFamilyAccountWorkflow,
+  schoolFamilyAccountsPreview, runSchoolFamilyAccountWorkflow,
   verifySchoolFamilyGuardian, type SchoolFamilyOrganization,
   splitSchoolFamilySharedIdentity,
 } from './_lib/schoolFamilyAccounts.js';
@@ -48,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (action !== 'provision' && action !== 'resend') return res.status(400).json({ error: 'invalid_action' });
     const studentIds = Array.isArray(body.studentIds) ? [...new Set(body.studentIds.filter((id): id is string => typeof id === 'string'))] : [];
-    if (!studentIds.length || studentIds.length > SCHOOL_FAMILY_BATCH_SIZE || studentIds.some((id) => !UUID.test(id))) return res.status(400).json({ error: 'invalid_batch' });
+    if (!studentIds.length || studentIds.some((id) => !UUID.test(id))) return res.status(400).json({ error: 'invalid_batch' });
     const results = [];
     const invitedAccounts = new Set<string>();
     for (const studentId of studentIds) {
