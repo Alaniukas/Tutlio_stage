@@ -3,9 +3,12 @@ import { formatInvoiceSeriesHeading, formatStoredInvoiceNumber } from '../../api
 import {
   buildEducationNotes,
   buildLessonDetails,
+  countStudentIdentityInvoiceGroups,
   groupSessionsByStudent,
+  groupSessionsByStudentIdentity,
   orgHasPvmEducationInvoice,
 } from '../../api/_lib/pvmEducationInvoice';
+import { MANO_KOREPETITORIUS_ORG_ID } from '../../src/lib/marketMoney';
 import { generateInvoicePdf } from '../../api/_lib/invoicePdf';
 
 describe('invoice numbering', () => {
@@ -46,6 +49,32 @@ describe('PVM education invoice content', () => {
     ]);
     expect(groups).toHaveLength(2);
     expect(groups.find((g) => g[0].student_id === 'a')).toHaveLength(2);
+  });
+
+  it('groups one invoice per child identity across duplicate student rows and subjects', () => {
+    const sessions = [
+      {
+        student_id: 'row-math',
+        organization_id: MANO_KOREPETITORIUS_ORG_ID,
+        students: { full_name: 'Greta B.', payer_email: 'parent@example.test', organization_id: MANO_KOREPETITORIUS_ORG_ID },
+        subjects: { name: 'Matematika' },
+      },
+      {
+        student_id: 'row-english',
+        organization_id: MANO_KOREPETITORIUS_ORG_ID,
+        students: { full_name: 'Greta B.', payer_email: 'parent@example.test', organization_id: MANO_KOREPETITORIUS_ORG_ID },
+        subjects: { name: 'Anglų k.' },
+      },
+      {
+        student_id: 'row-sibling',
+        organization_id: MANO_KOREPETITORIUS_ORG_ID,
+        students: { full_name: 'Pijus B.', payer_email: 'parent@example.test', organization_id: MANO_KOREPETITORIUS_ORG_ID },
+        subjects: { name: 'Matematika' },
+      },
+    ];
+    expect(groupSessionsByStudentIdentity(sessions)).toHaveLength(2);
+    expect(countStudentIdentityInvoiceGroups(sessions)).toBe(2);
+    expect(groupSessionsByStudentIdentity(sessions)[0]).toHaveLength(2);
   });
 
   it('builds lesson details with datetime and price', () => {

@@ -42,6 +42,7 @@ import { orgTutorSessionPayEur } from '@/lib/orgTutorLessonPay';
 import { isManoKorepetitoriusOrg } from '@/lib/marketMoney';
 import { ORG_TUTOR_CARD_LIST_SCROLL_CLASS } from '@/lib/orgUi';
 import { isInvoiceProfileComplete } from '@/lib/invoiceProfileReady';
+import { downloadInvoicePdfFile, downloadInvoicesAsZip } from '@/lib/downloadInvoicesZip';
 
 interface Invoice {
   id: string;
@@ -52,6 +53,7 @@ interface Invoice {
   pdf_meta?: { currency?: string } | null;
   status: 'issued' | 'paid' | 'cancelled';
   issued_by_user_id: string;
+  organization_id?: string | null;
   created_at: string;
   billing_batch_id?: string | null;
   billing_batches?: { paid: boolean } | null;
@@ -92,6 +94,7 @@ export default function CompanyInvoices() {
   const [orgBuyerNames, setOrgBuyerNames] = useState<Set<string>>(new Set());
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadingAllList, setDownloadingAllList] = useState(false);
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set());
   const [tutors, setTutors] = useState<{ id: string; full_name: string }[]>(
     ic?.tutors ?? []
   );
@@ -422,6 +425,43 @@ export default function CompanyInvoices() {
     sortAsc,
   ]);
 
+  const downloadableFilteredInvoices = useMemo(
+    () => filteredInvoices.filter((inv) => inv.origin !== 'external'),
+    [filteredInvoices],
+  );
+
+  const selectedDownloadableInvoices = useMemo(
+    () => downloadableFilteredInvoices.filter((inv) => selectedInvoiceIds.has(inv.id)),
+    [downloadableFilteredInvoices, selectedInvoiceIds],
+  );
+
+  const allDownloadableSelected =
+    downloadableFilteredInvoices.length > 0
+    && downloadableFilteredInvoices.every((inv) => selectedInvoiceIds.has(inv.id));
+
+  useEffect(() => {
+    const visibleIds = new Set(filteredInvoices.map((inv) => inv.id));
+    setSelectedInvoiceIds((prev) => {
+      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [filteredInvoices]);
+
+  const toggleInvoiceSelection = (invoiceId: string, checked: boolean) => {
+    setSelectedInvoiceIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(invoiceId);
+      else next.delete(invoiceId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllDownloadable = (checked: boolean) => {
+    setSelectedInvoiceIds(
+      checked ? new Set(downloadableFilteredInvoices.map((inv) => inv.id)) : new Set(),
+    );
+  };
+
   const handleReserveExternal = async () => {
     setReserving(true);
     setReserveError(null);
@@ -452,24 +492,20 @@ export default function CompanyInvoices() {
     }
   };
 
-  const handleDownloadAllVisible = async () => {
-    if (filteredInvoices.length === 0) return;
+  const handleDownloadSelected = async () => {
+    if (selectedDownloadableInvoices.length === 0) return;
     setDownloadingAllList(true);
     try {
-      const headers = await authHeaders();
-      for (const inv of filteredInvoices) {
-        if (inv.origin === 'external') continue;
-        const res = await fetch(`/api/invoice-pdf?id=${inv.id}`, { headers });
-        if (!res.ok) continue;
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        const safeName = (inv.invoice_number || inv.id).replace(/[/\\?%*:|"<>]/g, '-');
-        a.download = `${safeName}.pdf`;
-        a.click();
-        URL.revokeObjectURL(url);
-        await new Promise((r) => setTimeout(r, 350));
+      const { downloaded, failedIds } = await downloadInvoicesAsZip(selectedDownloadableInvoices, {
+        authHeaders: await authHeaders(),
+      });
+      if (downloaded === 0) {
+        setInvoiceToast({ message: t('common.error'), type: 'error' });
+      } else if (failedIds.length > 0) {
+        setInvoiceToast({
+          message: `${t('invoices.downloadSelected', { count: String(downloaded) })} (${failedIds.length} nepavyko)`,
+          type: 'error',
+        });
       }
     } finally {
       setDownloadingAllList(false);
@@ -477,19 +513,12 @@ export default function CompanyInvoices() {
   };
 
   const handleDownloadPdf = async (invoiceId: string) => {
+    const target = invoices.find((inv) => inv.id === invoiceId);
+    if (!target) return;
     setDownloadingId(invoiceId);
     try {
-      const res = await fetch(`/api/invoice-pdf?id=${invoiceId}`, {
-        headers: await authHeaders(),
-      });
-      if (!res.ok) throw new Error('Download failed');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `invoice-${invoiceId}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const ok = await downloadInvoicePdfFile(target, await authHeaders());
+      if (!ok) throw new Error('Download failed');
     } catch (err) {
       console.error('[CompanyInvoices] download error:', err);
     } finally {
@@ -998,28 +1027,16 @@ export default function CompanyInvoices() {
                 onClick={async () => {
                   setDownloadingBundle(true);
                   try {
-                    const failedPdfIds: string[] = [];
-                    for (const invId of lastGeneratedInvoiceIds) {
-                      try {
-                        const resp = await fetch(`/api/invoice-pdf?id=${encodeURIComponent(invId)}`, { headers: await authHeaders() });
-                        if (!resp.ok || !resp.headers.get('content-type')?.includes('application/pdf')) {
-                          throw new Error('PDF is unavailable');
-                        }
-                        const blob = await resp.blob();
-                        if (blob.size === 0) throw new Error('PDF is empty');
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `invoice-${invId}.pdf`;
-                        a.click();
-                        URL.revokeObjectURL(url);
-                      } catch (error) {
-                        console.error('[CompanyInvoices] invoice PDF download failed:', invId, error);
-                        failedPdfIds.push(invId);
-                      }
-                    }
-                    if (failedPdfIds.length > 0) {
-                      setTutorGenerationError(`${t('common.error')} PDF: ${failedPdfIds.join(', ')}`);
+                    const bundleRows = lastGeneratedInvoiceIds
+                      .map((invId) => invoices.find((inv) => inv.id === invId))
+                      .filter((inv): inv is Invoice => Boolean(inv));
+                    const { downloaded, failedIds } = await downloadInvoicesAsZip(bundleRows, {
+                      authHeaders: await authHeaders(),
+                    });
+                    if (downloaded === 0) {
+                      setTutorGenerationError(t('common.error'));
+                    } else if (failedIds.length > 0) {
+                      setTutorGenerationError(`${t('common.error')} PDF: ${failedIds.join(', ')}`);
                     }
                   } catch (err) {
                     console.error('[CompanyInvoices] bundle download error:', err);
@@ -1185,7 +1202,7 @@ export default function CompanyInvoices() {
                 </div>
               </div>
             </div>
-            <div className="flex gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => setSortAsc((prev) => !prev)}
@@ -1194,19 +1211,30 @@ export default function CompanyInvoices() {
                 <ArrowUpDown className="w-3 h-3" />
                 {sortAsc ? t('invoices.sortOldestFirst') : t('invoices.sortNewestFirst')}
               </button>
+              {downloadableFilteredInvoices.length > 0 ? (
+                <label className="flex items-center gap-2 text-xs font-medium text-gray-600 cursor-pointer px-1">
+                  <input
+                    type="checkbox"
+                    checked={allDownloadableSelected}
+                    onChange={(e) => toggleSelectAllDownloadable(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  {t('invoices.selectAll')}
+                </label>
+              ) : null}
               <Button
                 variant="outline"
                 size="sm"
                 className="rounded-xl gap-2 shrink-0"
-                disabled={downloadingAllList || filteredInvoices.length === 0}
-                onClick={() => void handleDownloadAllVisible()}
+                disabled={downloadingAllList || selectedDownloadableInvoices.length === 0}
+                onClick={() => void handleDownloadSelected()}
               >
                 {downloadingAllList ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   <Download className="w-4 h-4" />
                 )}
-                {t('invoices.downloadAllFiltered', { count: String(filteredInvoices.length) })}
+                {t('invoices.downloadSelected', { count: String(selectedDownloadableInvoices.length) })}
               </Button>
             </div>
           </div>
@@ -1238,6 +1266,17 @@ export default function CompanyInvoices() {
                     className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors"
                   >
                     <div className="flex items-center gap-4 min-w-0">
+                      {inv.origin !== 'external' ? (
+                        <input
+                          type="checkbox"
+                          checked={selectedInvoiceIds.has(inv.id)}
+                          onChange={(e) => toggleInvoiceSelection(inv.id, e.target.checked)}
+                          className="rounded border-gray-300 shrink-0"
+                          aria-label={inv.invoice_number}
+                        />
+                      ) : (
+                        <span className="w-4 shrink-0" aria-hidden />
+                      )}
                       <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
                         <FileText className="w-5 h-5 text-indigo-600" />
                       </div>

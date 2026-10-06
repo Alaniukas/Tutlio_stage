@@ -20,6 +20,7 @@ import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 import { orgHasPvmEducationInvoice } from './_lib/pvmEducationInvoice.js';
+import { formatInvoiceDownloadFilename } from '../src/lib/invoiceDownloadFilename.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -218,7 +219,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: invoices, error: invoicesError } = await supabase
       .from('invoices')
-      .select('id, invoice_number, pdf_storage_path, pdf_meta')
+      .select('id, invoice_number, issue_date, organization_id, pdf_storage_path, pdf_meta')
       .eq('billing_batch_id', batch.id)
       .neq('status', 'cancelled')
       .order('created_at', { ascending: true });
@@ -252,7 +253,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data: blob, error } = await supabase.storage.from('invoices').download(inv.pdf_storage_path);
       if (error || !blob) return json(res, 502, { error: 'Nepavyko įkelti sąskaitos PDF' });
       attachments.push({
-          filename: `${inv.invoice_number || 'saskaita'}.pdf`,
+          filename: formatInvoiceDownloadFilename({
+            invoiceNumber: inv.invoice_number,
+            issueDate: inv.issue_date,
+            organizationId: inv.organization_id,
+          }),
           content: Buffer.from(await blob.arrayBuffer()).toString('base64'),
       });
     }

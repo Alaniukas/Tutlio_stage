@@ -24,7 +24,7 @@ import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { allocateInvoiceNumber, formatInvoiceSeriesHeading } from './_lib/invoiceNumber.js';
 import {
   buildPvmPdfMeta,
-  groupSessionsByStudent,
+  groupSessionsByStudentIdentity,
   orgHasPvmEducationInvoice,
 } from './_lib/pvmEducationInvoice.js';
 import { isInvoiceProfileComplete, ORG_INVOICE_PROFILE_INCOMPLETE } from './_lib/invoiceProfileReady.js';
@@ -208,7 +208,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const sessionSelect = `
         id, tutor_id, class_group_id, price, start_time, end_time, subject_id, student_id, status, no_show_reason, is_complimentary, status_confirmed_at, tutor_pay_eur_snapshot,
-        students!inner(id, full_name, email, payer_email, payer_name, payer_phone, grade),
+        students!inner(id, full_name, email, payer_email, payer_name, payer_phone, grade, organization_id),
         subjects(name, is_trial, is_group)
       `;
 
@@ -327,7 +327,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const baseSelect = `
           id, tutor_id, student_id, subject_id, total_price, total_lessons, paid_at, created_at,
           paid, payment_method, manual_sales_invoice_id,
-          students!inner(id, full_name, email, payer_email, payer_name, payer_phone, grade),
+          students!inner(id, full_name, email, payer_email, payer_name, payer_phone, grade, organization_id),
           subjects(name),
           lesson_package_items(subject_id, total_lessons, total_price, position, subjects!inner(name))
         `;
@@ -642,7 +642,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Group sessions and create invoices
     const groups = pvmEducationInvoice && !isOrgTutor
-      ? groupSessionsByStudent(sessions).map((sess, i) => ({ key: `student-${i}`, sessions: sess }))
+      ? groupSessionsByStudentIdentity(
+          sessions.map((s: { students?: unknown; organization_id?: string | null }) => ({
+            ...s,
+            organization_id: profile.organization_id ?? (Array.isArray(s.students)
+              ? (s.students[0] as { organization_id?: string | null })?.organization_id
+              : (s.students as { organization_id?: string | null } | null)?.organization_id) ?? null,
+          })),
+        ).map((sess, i) => ({ key: `student-${i}`, sessions: sess }))
       : groupSessions(sessions, groupingType);
     const createdInvoices: string[] = [];
     const pdfGenerationFailedIds: string[] = [];

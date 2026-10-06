@@ -7,6 +7,10 @@ import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { formatInvoiceSeriesHeading } from './_lib/invoiceNumber.js';
+import {
+  formatInvoiceDownloadFilename,
+  invoiceDownloadContentDisposition,
+} from '../src/lib/invoiceDownloadFilename.js';
 import { parsePvmPdfMeta } from './_lib/pvmEducationInvoice.js';
 import {
   CLASSIC_LT_TUTOR_LAYOUT,
@@ -56,6 +60,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(403).json({ error: 'Forbidden' });
     }
     res.setHeader('Cache-Control', 'private, no-store');
+    const downloadFilename = formatInvoiceDownloadFilename({
+      invoiceNumber: invoice.invoice_number,
+      issueDate: invoice.issue_date,
+      organizationId: invoice.organization_id,
+    });
 
     if ((invoice as { origin?: string }).origin === 'external') {
       return res.status(400).json({ error: 'External reserved invoices have no PDF' });
@@ -82,7 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!dlErr && fileData) {
         const buffer = Buffer.from(await fileData.arrayBuffer());
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename="${invoice.invoice_number}.pdf"`);
+        res.setHeader('Content-Disposition', invoiceDownloadContentDisposition(downloadFilename));
         return res.status(200).send(buffer);
       }
     }
@@ -204,7 +213,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const buffer = Buffer.from(pdfBytes);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${invoice.invoice_number}.pdf"`);
+    res.setHeader('Content-Disposition', invoiceDownloadContentDisposition(downloadFilename));
     return res.status(200).send(buffer);
   } catch (err: any) {
     console.error('[invoice-pdf] Error:', err);

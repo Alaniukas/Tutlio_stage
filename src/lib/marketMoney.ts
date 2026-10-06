@@ -65,6 +65,8 @@ export const PRO_KLASE_QA_ORG_ID = 'b0a00000-7e57-4000-8000-000000000001';
 /** Production MB Mano korepetitorius (slug `mb-mano-korepetitorius`). */
 export const MANO_KOREPETITORIUS_ORG_ID = '2c4e4c2a-4e12-44ca-b327-d605bbb0d50b';
 export const MANO_KOREPETITORIUS_SLUG = 'mb-mano-korepetitorius';
+/** QA DEMO įmonė (slug `manokorepetitorius`) — tik MK S.F. atsisiuntimo vardų QA. */
+export const MANO_KOREPETITORIUS_QA_ORG_ID = 'c1a00000-7e57-4000-8000-000000000001';
 
 /** Production VšĮ Laisvi vaikai (slug `laisvi-vaikai`). */
 export const LAISVI_VAIKIAI_ORG_ID = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';

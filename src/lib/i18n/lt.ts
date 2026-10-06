@@ -4567,6 +4567,7 @@ export const lt: Record<string, string> = {
   'invoices.checkingIssuedStatus': 'Tikrinama, ar už šį laikotarpį jau išrašyta S.F...',
   'invoices.downloadAll': 'Atsisiųsti visas ({count})',
   'invoices.downloadAllFiltered': 'Atsisiųsti visas matomas ({count})',
+  'invoices.downloadSelected': 'Atsisiųsti pasirinktas ({count})',
   'invoices.filterByMonthLabel': 'Laikotarpis',
   'invoices.periodFilterLabel': 'Laikotarpis',
   'invoices.periodModeMonth': 'Mėnuo',
