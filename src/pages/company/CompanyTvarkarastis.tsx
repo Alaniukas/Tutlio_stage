@@ -1040,9 +1040,15 @@ export default function CompanyTvarkarastis() {
   };
 
   const refreshSchedule = useCallback(async () => {
-    await fetchScheduleMeta();
     await loadSessionsForWindow({ background: true });
-  }, [loadSessionsForWindow]);
+    // Never reuse schedule meta cache here — it keeps stale availability after create/edit.
+    if (organizationId && orgTutors.length > 0 && !(isSchoolOrgView && showOnlySessions)) {
+      await loadAvailabilityForTutors(
+        orgTutors.map((tutor) => tutor.id),
+        orgTutors,
+      );
+    }
+  }, [isSchoolOrgView, loadSessionsForWindow, organizationId, orgTutors, showOnlySessions]);
 
   const refreshCalendarSessionsOnly = useCallback(async () => {
     await loadSessionsForWindow({ background: true });
@@ -2806,27 +2812,26 @@ export default function CompanyTvarkarastis() {
         payload.end_date = null;
       }
 
-      const { data: availUpd, error } = await supabase
+      const { error } = await supabase
         .from('availability')
         .update(payload)
-        .eq('id', editingAvailability.id)
-        .select('id');
-      if (!error && availUpd && availUpd.length > 0) {
-        const timeRange = `${normalizeTimeHMS(availEditStart).slice(0, 5)}–${normalizeTimeHMS(availEditEnd).slice(0, 5)}`;
-        const schedHtml = editingAvailability.is_recurring
-          ? t('compSch.recurringAvailHtml', { weekday: weekdayLongFromDow(parseInt(availEditDayOfWeek, 10), dateFnsLocale), timeRange, dateRange: recurringAvailDateRangeLabel(availEditStartDate, availEditEndDate, t) })
-          : t('compSch.oneTimeAvailHtml', { date: availEditSpecificDate || '', timeRange });
-        void emailOrgTutorAvailabilityNotice(editingAvailability.tutor_id, 'updated', schedHtml);
-        setIsAvailabilityEditOpen(false);
-        setEditingAvailability(null);
-        refreshSchedule();
-      } else {
-        alert(error?.message || t('compSch.availSaveFailed'));
-      }
-    } catch (err) {
+        .eq('id', editingAvailability.id);
+      if (error) throw error;
+      const timeRange = `${normalizeTimeHMS(availEditStart).slice(0, 5)}–${normalizeTimeHMS(availEditEnd).slice(0, 5)}`;
+      const schedHtml = editingAvailability.is_recurring
+        ? t('compSch.recurringAvailHtml', { weekday: weekdayLongFromDow(parseInt(availEditDayOfWeek, 10), dateFnsLocale), timeRange, dateRange: recurringAvailDateRangeLabel(availEditStartDate, availEditEndDate, t) })
+        : t('compSch.oneTimeAvailHtml', { date: availEditSpecificDate || '', timeRange });
+      void emailOrgTutorAvailabilityNotice(editingAvailability.tutor_id, 'updated', schedHtml);
+      setIsAvailabilityEditOpen(false);
+      setEditingAvailability(null);
+      await refreshSchedule();
+      setScheduleToast({ message: t('avail.updateSuccess'), type: 'success' });
+    } catch (err: any) {
       console.error(err);
+      alert(err?.message || t('compSch.availSaveFailed'));
+    } finally {
+      setAvailEditSaving(false);
     }
-    setAvailEditSaving(false);
   };
 
   const handleDeleteAvailability = async () => {
@@ -2854,7 +2859,8 @@ export default function CompanyTvarkarastis() {
       }
       setIsAvailabilityEditOpen(false);
       setEditingAvailability(null);
-      refreshSchedule();
+      await refreshSchedule();
+      setScheduleToast({ message: t('avail.deleteSuccess'), type: 'success' });
     } catch (err) {
       console.error(err);
       alert(t('compSch.availSaveFailed'));
@@ -2897,11 +2903,20 @@ export default function CompanyTvarkarastis() {
       setCreateAvailTutorId('');
       setCreateAvailStart('09:00');
       setCreateAvailEnd('11:00');
-      refreshSchedule();
+      const focusDate = createAvailIsRecurring
+        ? (createAvailStartDate || format(new Date(), 'yyyy-MM-dd'))
+        : (createAvailSpecificDate || format(new Date(), 'yyyy-MM-dd'));
+      if (focusDate) {
+        const parsed = parseISO(focusDate);
+        if (!Number.isNaN(parsed.getTime())) setCurrentDate(parsed);
+      }
+      await refreshSchedule();
+      setScheduleToast({ message: t('avail.addSuccess'), type: 'success' });
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
+    } finally {
+      setCreateAvailSaving(false);
     }
-    setCreateAvailSaving(false);
   };
 
   const handleCreateSessionFromAvailability = async () => {

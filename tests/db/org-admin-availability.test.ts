@@ -15,14 +15,17 @@ beforeAll(async () => {
       SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
     CREATE TABLE organizations(id uuid PRIMARY KEY, features jsonb NOT NULL DEFAULT '{}');
     CREATE TABLE profiles(id uuid PRIMARY KEY, organization_id uuid);
-    CREATE TABLE organization_admins(user_id uuid, organization_id uuid, status text DEFAULT 'active', permissions jsonb DEFAULT '{}');
+    CREATE TABLE organization_admins(user_id uuid, organization_id uuid, status text DEFAULT 'active', role text DEFAULT 'admin', permissions jsonb DEFAULT '{}');
     CREATE TABLE availability(id uuid PRIMARY KEY, tutor_id uuid, start_time time, end_time time);
     CREATE FUNCTION public.write_blocked_by_org_suspension() RETURNS boolean LANGUAGE sql STABLE AS $$
       SELECT COALESCE(NULLIF(current_setting('test.write_blocked', true), ''), 'false')::boolean $$;
     CREATE FUNCTION private.org_admin_permission_gate(required text[]) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER AS $$
       SELECT NOT EXISTS (SELECT 1 FROM organization_admins WHERE user_id=auth.uid())
         OR EXISTS (SELECT 1 FROM organization_admins WHERE user_id=auth.uid() AND status='active'
-          AND EXISTS(SELECT 1 FROM unnest(required) AS permission_key WHERE permissions @> jsonb_build_object(permission_key, true))) $$;
+          AND (
+            role = 'owner'
+            OR EXISTS(SELECT 1 FROM unnest(required) AS permission_key WHERE permissions @> jsonb_build_object(permission_key, true))
+          )) $$;
     -- Fail if the old nested profiles/organizations RLS lookup runs at all.
     CREATE FUNCTION private.unexpected_family_rls() RETURNS boolean LANGUAGE plpgsql AS $$
       BEGIN RAISE EXCEPTION 'Nested family RLS executed'; END $$;
@@ -53,7 +56,8 @@ beforeAll(async () => {
       ('${id(21)}','${id(2)}','active','{"sessions.edit":true}'),
       ('${id(22)}','${id(3)}','active','{"sessions.edit":true}'),
       ('${id(23)}','${id(1)}','active','{"sessions.view":true}'),
-      ('${id(24)}','${id(1)}','revoked','{"sessions.edit":true}');
+      ('${id(24)}','${id(1)}','revoked','{"sessions.edit":true}'),
+      ('${id(25)}','${id(1)}','active','owner','{}');
   `);
   await db.exec(migration);
 }, 30_000);
@@ -99,8 +103,13 @@ describe('PostgreSQL organization admin availability permissions', () => {
       .rejects.toThrow(/row-level security/);
   });
 
+  it('allows owner role with empty permissions json', async () => {
+    expect(await asUser(id(25), `UPDATE availability SET end_time='20:10' WHERE id='${id(31)}' RETURNING id`))
+      .toEqual([{ id: id(31) }]);
+  });
+
   it('preserves edit permissions, membership revocation and suspension checks', async () => {
-    for (const user of [23, 24, 25]) {
+    for (const user of [23, 24]) {
       expect(await asUser(id(user), `UPDATE availability SET end_time='21:00' WHERE id='${id(31)}' RETURNING id`)).toEqual([]);
     }
     await db.exec("SELECT set_config('test.write_blocked', 'true', false)");

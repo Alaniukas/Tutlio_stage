@@ -374,14 +374,17 @@ if (hasFeature('school_contract_esign')) { /* GoSign flow */ }
 
 ### Vizualūs skirtumai kalendoriuje
 
-**Failas:** `src/lib/calendarSessionEventStyle.ts` — naudojamas `Calendar.tsx` ir `CompanyTvarkarastis.tsx`
+**Failai:** `src/lib/calendarSessionEventStyle.ts`, `src/lib/calendarGridSessions.ts` — naudojami `Calendar.tsx` ir `CompanyTvarkarastis.tsx`
 
 | Tipas | Stilius |
 |-------|---------|
+| Solo tutor suplanuota (būsima) | `subjects.color` pagal `subject_id` |
 | Bandomoji | violetinė |
 | Įvykusi neapmokėta | amber |
 | Kompensacinė (`is_makeup`) | violetinė su ↻ |
 | Tutor no-show atšaukta | raudona punktyrinė ⊘ |
+
+**Solo tutor UX:** kalendoriaus juostoje rodomas tik mokinio vardas (dalykas — spalva); create modale individualiai pirma **Mokinys**, tada **Dalykas**. Pasirinkus dalyką po slot drag, trukmė auto perskaičiuojama iš `subjects.duration_minutes` (`createDurationTouched` tik rankiniam „Trukmė (min)“ redagavimui). Atšaukta pamoka to paties `start_time` nerodoma, jei tame slote jau yra kita eilutė (`filterCalendarGridSessions`).
 
 ### Org admin UI (tutor filtrai)
 
@@ -851,6 +854,8 @@ npm run security:pencheck
 32. **Tuščias / lėtas org tvarkaraštis (`/school/schedule`, `CompanyTvarkarastis`)** — nebekrauna ~270 d. × visų mokytojų vienu metu. Sesijos imamos tik matomam langui (`orgScheduleFetchWindow.ts` pagal day/week/month + 7 d. padding), kalendoriui lengvas `TVARKARASTIS_CALENDAR_SESSION_SELECT`, pilna eilutė tik paspaudus (`TVARKARASTIS_SESSION_SELECT`). Mokykloms numatytai `showOnlySessions=true` (tik užimti laikai, be laisvo laiko skaičiavimo). Fono refresh nebepaleidžia viso puslapio spinnerio — tik `sessionsLoading` overlay. Detalės modalui jau kraunamos on-click. Jei vis tiek tuščia: filtre spausti **Visi** arba hard refresh.
 33. **Pamokos priminimas po perkėlimo** — `reminder_*_sent` turi būti nulinami kiekvienam `start_time` / `end_time` pakeitimui. `student_reschedule_session` RPC ir mokyklų grupių triggeris tai daro; universali apsauga — DB triggeris `sessions_reset_reminders_on_reschedule` (`20261005120000_session_reminder_reset_on_reschedule.sql`). Be jo kalendoriaus / org admin perkėlimas (`Calendar.tsx`, `CompanyTvarkarastis.tsx`, `Students.tsx`) gali palikti seną `reminder_student_sent=true` ir cron nebesiųs naujo laiško naujam laikui. `send-reminders.ts` žymi flag'ą tik per `shouldMarkSessionReminderSent()` (Resend `id` arba sąmoningas opt-out / idempotency 409), ne bet kokį 2xx.
 34. **Darbuotojo sutikimo „Nepavyko išsaugoti“** — `school-contracts` bucket'as turi leisti `application/json` (`20261005140000_school_contracts_allow_json_staff_details.sql`). Be to `staff-personal-details.json` / alert marker upload krenta, o senas POST blokuodavo atsakymų įrašymą. Sutikimo POST pirma rašo `staff_consent_answers`, stash yra best-effort.
+35. **Org admin laisvo laiko INSERT/UPDATE timeout** — `availability` RLS politika su `profiles`/`organizations` subquery kiekvienam org korepetitoriui (ypač Pro Klasė su `org_admin_calendar_full_control`) viršijo PostgREST `statement_timeout` (`canceling statement due to statement timeout`). Tai **universalus** org admin kelias (`CompanyTvarkarastis` → `handleSaveAvailability` / `handleCreateAvailability`), ne Pro Klasė logika. Pataisa: migracija `20261005105541_org_calendar_availability_permissions.sql` (`private.org_admin_availability_tutor_ids()`, `row_security=off`). UI saugo be `.select('id')` — pakanka `error` tikrinimo. Testas: `tests/db/org-admin-availability.test.ts`.
+36. **Org admin laisvas laikas DB susikuria, bet kalendoriuje nematomas** — `refreshSchedule()` kvietė `fetchScheduleMeta()`, kuris ant cache hit grąžindavo **seną** `availability` masyvą; `loadAvailabilityForTutors` vėl nebuvo kviečiamas, nes `availability.length > 0`. Po sėkmingo create/edit adminas matydavo „nieko neįvyko“ ir spaudė dar kartą (dubliatai DB, pvz. Pro Klasė Rimantas 2026-10-06). Pataisa: `refreshSchedule` perkrauna availability iš DB + toast (`avail.addSuccess` / `avail.updateSuccess`); create modal po sėkmės perkelia kalendorių į slot datą.
 
 ---
 
@@ -892,6 +897,7 @@ npm run security:pencheck
 | Embedded prenumerata | `EmbeddedSubscriptionCheckoutDialog.tsx`, `create-subscription-checkout.ts` |
 | Tutor kalendorius / laisvas laikas | `Calendar.tsx`, `AvailabilityManager.tsx`, `calendarSessionEventStyle.ts` |
 | Org admin tvarkaraštis (school/company) | `CompanyTvarkarastis.tsx`, `orgScheduleFetchWindow.ts`, `dataCache.ts` (`companyTvarkarastisCacheKey`) |
+| Org admin laisvo laiko RLS | `20261005105541_org_calendar_availability_permissions.sql`, `tests/db/org-admin-availability.test.ts`, `CompanyTvarkarastis.tsx` (`handleSaveAvailability`) |
 | Org admin tutor filtrai (scroll) | `orgUi.ts` |
 | Org email branding | `api/_lib/emailOrgBranding.ts`, `api/send-email.ts`, `src/lib/email.ts` |
 | Stripe webhook | `api/stripe-webhook.ts` |
@@ -934,4 +940,4 @@ npm run security:pencheck
 
 ---
 
-*Paskutinis atnaujinimas: 2026-10-05: Darbuotojų sutikimo POST saugo atsakymus prieš JSON stash; susitarimo PDF įrašomas prieš sutikimo PDF; `school-staff-consent-pdf-retry` cron kas 5 min.*
+*Paskutinis atnaujinimas: 2026-10-06: Org admin laisvo laiko refresh — `refreshSchedule` nebekrauna stale cache; solo tutor kalendorius — mokinio vardas + dalyko spalva.*

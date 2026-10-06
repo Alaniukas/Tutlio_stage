@@ -157,6 +157,7 @@ import {
   isMvRecurringScheduledLesson,
   MOKSLO_VAISIAI_CALENDAR_COLORS,
 } from '@/lib/calendarSessionEventStyle';
+import { filterCalendarGridSessions } from '@/lib/calendarGridSessions';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { effectiveSessionOutcome, orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import {
@@ -1233,12 +1234,12 @@ export default function CalendarPage() {
     return attendanceOnlyGroupOccurrences(classGroups, sessions, { start, end, tutorId: ctxUser?.id || '' });
   }, [isSchoolTutor, showClassGroups, classGroups, sessions, currentDate, currentView, locale, ctxUser?.id]);
 
-  const calendarGridSessions = useMemo(
-    () => [...mergedSessions, ...attendanceOnlyCalendarEvents].filter((session) =>
+  const calendarGridSessions = useMemo(() => {
+    const merged = [...mergedSessions, ...attendanceOnlyCalendarEvents].filter((session) =>
       isUsableCalendarDateRange(session.start_time, session.end_time),
-    ),
-    [mergedSessions, attendanceOnlyCalendarEvents],
-  );
+    );
+    return filterCalendarGridSessions(merged);
+  }, [mergedSessions, attendanceOnlyCalendarEvents]);
 
   const allEvents = useMemo(() => {
     return [...calendarGridSessions, ...backgroundEvents].filter((ev) =>
@@ -1455,7 +1456,7 @@ export default function CalendarPage() {
       setSelectedSlot({ start, end });
       setStartTime(format(start, "yyyy-MM-dd'T'HH:mm"));
       setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
-      setCreateDurationTouched(true);
+      setCreateDurationTouched(false);
       setSelectedStudentId('');
       setSelectedSubjectId('');
       setMeetingLink('');
@@ -1507,7 +1508,7 @@ export default function CalendarPage() {
     setSelectedSlot(pendingSlot);
     setStartTime(format(pendingSlot.start, "yyyy-MM-dd'T'HH:mm"));
     setEndTime(format(pendingSlot.end, "yyyy-MM-dd'T'HH:mm"));
-    setCreateDurationTouched(true);
+    setCreateDurationTouched(false);
     setSelectedStudentId('');
     setSelectedSubjectId('');
     setMeetingLink('');
@@ -4817,7 +4818,9 @@ export default function CalendarPage() {
       };
     }
 
-    const subj = subjects.find((s) => s.name === event.topic);
+    const subj =
+      subjects.find((s) => s.id === event.subject_id)
+      ?? subjects.find((s) => s.name === event.topic);
     const isTrial = event.subjects?.is_trial === true;
     const endAt = new Date(event.end ?? event.end_time);
     const isMovedLesson =
@@ -4831,8 +4834,9 @@ export default function CalendarPage() {
         recurringCounts: recurringSessionCounts,
       });
 
+    const outcome = effectiveSessionOutcome(event, requiresStatusConfirmation);
     const eventStyle = getCalendarSessionEventStyle({
-      status: effectiveSessionOutcome(event, requiresStatusConfirmation),
+      status: outcome,
       paid: event.paid,
       payment_status: event.payment_status,
       endAt,
@@ -4845,10 +4849,19 @@ export default function CalendarPage() {
       useMoksloVaisiaiPalette: isMoksloVaisiaiCalendar,
       defaultColor: subj?.color || '#6366f1',
     });
+    const useSubjectColor =
+      !orgPolicy.isOrgTutor
+      && !isSchoolBilledSession(event)
+      && !isMoksloVaisiaiCalendar
+      && !isTrial
+      && outcome === 'active'
+      && endAt.getTime() > Date.now()
+      && subj?.color;
 
     return {
       style: {
         ...eventStyle,
+        ...(useSubjectColor ? { backgroundColor: subj.color, color: '#fff' } : {}),
         borderRadius: '8px',
         pointerEvents: 'auto' as const,
       },
@@ -5227,8 +5240,8 @@ export default function CalendarPage() {
                 if (event._attendanceOnly) return `${event._classGroupName} · ${t('schoolDash.attendance')}`;
 
                 const name = calendarTitleForSession(event, t('cal.unknown'));
-                const topic = calendarSessionTopicSuffix(name, event.topic);
                 const skipPaymentUi = orgPolicy.isOrgTutor || isSchoolBilledSession(event);
+                const topic = skipPaymentUi ? calendarSessionTopicSuffix(name, event.topic) : '';
 
                 let statusText = '';
                 if (event.status === 'cancelled') {
@@ -5338,6 +5351,7 @@ export default function CalendarPage() {
           setNewSessionId(null);
           setSelectedStudentIds([]);
           setCreateIsTrial(false);
+          setCreateDurationTouched(false);
         }
       }}>
         <DialogContent className="w-[95vw] sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
@@ -5349,109 +5363,108 @@ export default function CalendarPage() {
             <DialogDescription>{t('cal.fillLessonInfo')}</DialogDescription>
           </DialogHeader>
           <div className="grid gap-5 py-4">
-            {/* Subject - MOVED TO TOP so user selects subject first */}
-            {filteredSubjects.length > 0 && (
-              <div className="space-y-2">
-                <Label>{t('compStu.subjectLabel')} *</Label>
-                <Select value={selectedSubjectId} onValueChange={handleSubjectChange}>
-                  <SelectTrigger className="rounded-xl">
-                    <SelectValue placeholder={t('cal.selectSubjectPlaceholder')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredSubjects.map((subj) => (
-                      <SelectItem key={subj.id} value={subj.id}>
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="w-2.5 h-2.5 rounded-full"
-                            style={{ backgroundColor: subj.color }}
-                          />
-                          {subj.name}
-                          {subj.is_group && subj.max_students && (
-                            <span className="text-xs text-violet-600 font-semibold">
-                              {t('cal.groupMaxSeats', { max: String(subj.max_students) })}
-                            </span>
-                          )}
-                          {subj.grade_min && subj.grade_max && (
-                            <span className="text-xs text-emerald-600">
-                              ({subj.grade_min}-{subj.grade_max === 13 ? t('lessonSet.gradeUniversity') : `${subj.grade_max} ${t('lessonSet.gradeShort')}`})
-                            </span>
-                          )}
-                          · {subj.duration_minutes}min
-                          {!orgPolicy.hideMoney && <> · {fmt(subj.price)}</>}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {/* Student Selection - Different UI for group lessons */}
             {(() => {
-              const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
+              const selectedSubject = subjects.find((s) => s.id === selectedSubjectId);
               const isGroupLesson = selectedSubject?.is_group;
               const isSharedIndividual = isLaisviVaikai && !isGroupLesson;
               const maxStudents = isSharedIndividual ? 2 : (selectedSubject?.max_students || 1);
+              const studentFirst = !isGroupLesson && !isSharedIndividual;
 
-              if (isGroupLesson || isSharedIndividual) {
-                return (
-                  <div className="space-y-2">
-                    <Label>{isSharedIndividual ? 'Mokiniai (1-2)' : t('cal.studentsRequired', { max: String(maxStudents) })}</Label>
-                    <div className="border border-gray-200 rounded-xl p-3 space-y-2 max-h-60 overflow-y-auto">
-                      {schoolLessonStudents.length === 0 ? (
-                        <p className="text-sm text-gray-400 text-center py-2">{t('cal.noStudents')}</p>
-                      ) : (
-                        sortStudentsByFullName(schoolLessonStudents).map((student) => (
-                          <label key={student.id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded-lg cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={selectedStudentIds.includes(student.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  if (selectedStudentIds.length < maxStudents) {
-                                    setSelectedStudentIds([...selectedStudentIds, student.id]);
-                                    if (!selectedStudentId) handleStudentChange(student.id);
-                                  }
-                                } else {
-                                  setSelectedStudentIds(selectedStudentIds.filter(id => id !== student.id));
-                                  if (selectedStudentId === student.id) {
-                                    const nextPrimary = selectedStudentIds.find((id) => id !== student.id) || '';
-                                    setSelectedStudentId(nextPrimary);
-                                  }
-                                }
-                              }}
-                              disabled={!selectedStudentIds.includes(student.id) && selectedStudentIds.length >= maxStudents}
-                              className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              const subjectField = filteredSubjects.length > 0 ? (
+                <div className="space-y-2">
+                  <Label>{t('compStu.subjectLabel')} *</Label>
+                  <Select value={selectedSubjectId} onValueChange={handleSubjectChange}>
+                    <SelectTrigger className="rounded-xl">
+                      <SelectValue placeholder={t('cal.selectSubjectPlaceholder')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredSubjects.map((subj) => (
+                        <SelectItem key={subj.id} value={subj.id}>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="w-2.5 h-2.5 rounded-full"
+                              style={{ backgroundColor: subj.color }}
                             />
-                            <span className="text-sm">{student.full_name}</span>
-                          </label>
-                        ))
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500">
-                      {t('cal.selectedCount', { count: String(selectedStudentIds.length), max: String(maxStudents) })}
-                    </p>
+                            {subj.name}
+                            {subj.is_group && subj.max_students && (
+                              <span className="text-xs text-violet-600 font-semibold">
+                                {t('cal.groupMaxSeats', { max: String(subj.max_students) })}
+                              </span>
+                            )}
+                            {subj.grade_min && subj.grade_max && (
+                              <span className="text-xs text-emerald-600">
+                                ({subj.grade_min}-{subj.grade_max === 13 ? t('lessonSet.gradeUniversity') : `${subj.grade_max} ${t('lessonSet.gradeShort')}`})
+                              </span>
+                            )}
+                            · {subj.duration_minutes}min
+                            {!orgPolicy.hideMoney && <> · {fmt(subj.price)}</>}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null;
+
+              const studentField = isGroupLesson || isSharedIndividual ? (
+                <div className="space-y-2">
+                  <Label>{isSharedIndividual ? 'Mokiniai (1-2)' : t('cal.studentsRequired', { max: String(maxStudents) })}</Label>
+                  <div className="border border-gray-200 rounded-xl p-3 space-y-2 max-h-60 overflow-y-auto">
+                    {schoolLessonStudents.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-2">{t('cal.noStudents')}</p>
+                    ) : (
+                      sortStudentsByFullName(schoolLessonStudents).map((student) => (
+                        <label key={student.id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded-lg cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedStudentIds.includes(student.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                if (selectedStudentIds.length < maxStudents) {
+                                  setSelectedStudentIds([...selectedStudentIds, student.id]);
+                                  if (!selectedStudentId) handleStudentChange(student.id);
+                                }
+                              } else {
+                                setSelectedStudentIds(selectedStudentIds.filter(id => id !== student.id));
+                                if (selectedStudentId === student.id) {
+                                  const nextPrimary = selectedStudentIds.find((id) => id !== student.id) || '';
+                                  setSelectedStudentId(nextPrimary);
+                                }
+                              }
+                            }}
+                            disabled={!selectedStudentIds.includes(student.id) && selectedStudentIds.length >= maxStudents}
+                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <span className="text-sm">{student.full_name}</span>
+                        </label>
+                      ))
+                    )}
                   </div>
-                );
-              } else {
-                return (
-                  <div className="space-y-2">
-                    <Label>{t('cal.studentRequired')}</Label>
-                    <Select value={selectedStudentId} onValueChange={handleStudentChange}>
-                      <SelectTrigger className="rounded-xl">
-                        <SelectValue placeholder={t('cal.selectStudentPlaceholder')} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {sortStudentsByFullName(schoolLessonStudents).map((student) => (
-                          <SelectItem key={student.id} value={student.id}>
-                            {student.full_name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                );
-              }
+                  <p className="text-xs text-gray-500">
+                    {t('cal.selectedCount', { count: String(selectedStudentIds.length), max: String(maxStudents) })}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label>{t('cal.studentRequired')}</Label>
+                  <Select value={selectedStudentId} onValueChange={handleStudentChange}>
+                    <SelectTrigger className="rounded-xl">
+                      <SelectValue placeholder={t('cal.selectStudentPlaceholder')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sortStudentsByFullName(schoolLessonStudents).map((student) => (
+                        <SelectItem key={student.id} value={student.id}>
+                          {student.full_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+
+              return studentFirst
+                ? <>{studentField}{subjectField}</>
+                : <>{subjectField}{studentField}</>;
             })()}
 
             {/* Start time */}
