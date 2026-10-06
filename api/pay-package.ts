@@ -21,6 +21,10 @@ import {
     expireConnectCheckoutSession,
     retrieveConnectCheckoutSessionWithScope,
 } from './_lib/stripeDirectCharge.js';
+import {
+    isPayableUnpaidPooledPackage,
+    reactivateUnpaidPooledPackageUpdate,
+} from '../src/lib/pooledPackageOverdue.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -75,10 +79,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             market = 'default';
             currency = 'eur';
         }
-        if (pkg.pool_organization_id && (
-            !pkg.active || (pkg.expires_at && new Date(pkg.expires_at).getTime() <= Date.now())
-        )) {
-            return res.status(409).send(errorPage('Paketas nebegalioja', 'Kreipkitės į administraciją dėl naujo paketo.'));
+        if (pkg.pool_organization_id) {
+            if (!isPayableUnpaidPooledPackage(pkg)) {
+                return res.status(409).send(errorPage('Paketas nebegalioja', 'Kreipkitės į administraciją dėl naujo paketo.'));
+            }
+            if (!pkg.active || pkg.payment_status === 'expired') {
+                const reactivated = await supabase
+                    .from('lesson_packages')
+                    .update(reactivateUnpaidPooledPackageUpdate())
+                    .eq('id', packageId)
+                    .eq('paid', false)
+                    .neq('payment_status', 'cancelled')
+                    .select('id')
+                    .maybeSingle();
+                if (reactivated.error || !reactivated.data) {
+                    return res.status(409).send(errorPage('Paketas nebegalioja', 'Kreipkitės į administraciją dėl naujo paketo.'));
+                }
+                pkg.active = true;
+                pkg.payment_status = 'pending';
+            }
         }
 
         const tutor = pkg.profiles as any;

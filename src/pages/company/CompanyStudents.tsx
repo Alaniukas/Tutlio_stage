@@ -178,6 +178,7 @@ import {
 import { parseTrialLessonPricing, trialLessonPrice } from '@/lib/trialLessonPricing';
 import { formatLocalYmd, monthlyPackagePeriodFrom } from '@/lib/monthlyPackagePlan';
 import { canEditPendingPackage } from '@/lib/pendingPackageEdit';
+import { isOverdueUnpaidPooledPackage, isPayableUnpaidPooledPackage } from '@/lib/pooledPackageOverdue';
 import { displayStudentGrade, normalizeStudentGrade1to12, proKlaseGradeSelectValue } from '@/lib/studentGrade';
 import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
 import { proKlaseSchoolYearEndDate } from '@/lib/proKlaseBooking';
@@ -7058,6 +7059,8 @@ export default function CompanyStudents() {
                       {studentPackages.map((pkg: any) => {
                         const items = Array.isArray(pkg.lesson_package_items) ? pkg.lesson_package_items : [];
                         const isMulti = items.length > 1;
+                        const overdueUnpaid = isOverdueUnpaidPooledPackage(pkg);
+                        const payableUnpaid = isPayableUnpaidPooledPackage(pkg) && !pkg.paid;
                         return (
                         <div key={pkg.id} className="flex flex-col gap-2 p-3 bg-gray-50 rounded-xl text-sm">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -7080,17 +7083,20 @@ export default function CompanyStudents() {
                             </div>
                             <div className="flex items-center gap-2 flex-wrap ml-auto">
                               <span className="text-xs text-gray-500">{t('compStu.remaining', { count: String(pkg.available_lessons) })}</span>
-                            {pkg.expires_at && (
-                              <span className={`text-xs px-2 py-0.5 rounded-full ${new Date(pkg.expires_at) < new Date() ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
-                                {new Date(pkg.expires_at) < new Date()
-                                  ? t('package.expired')
-                                  : t('package.expiresAt', { date: new Date(pkg.expires_at).toLocaleDateString() })}
+                            {pkg.billing_period_end && (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                                {pkg.billing_period_start?.slice(0, 7) || pkg.billing_period_end.slice(0, 7)}
                               </span>
                             )}
-                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${pkg.payment_status === 'paid' ? 'bg-green-50 text-green-700' : pkg.payment_status === 'expired' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
-                              {pkg.payment_status === 'paid' ? t('compStu.paid') : pkg.payment_status === 'expired' ? t('package.expired') : t('compStu.pendingStatus')}
+                            {overdueUnpaid && (
+                              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-50 text-red-700">
+                                {t('package.overdueUnpaid')}
+                              </span>
+                            )}
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${pkg.payment_status === 'paid' ? 'bg-green-50 text-green-700' : overdueUnpaid ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
+                              {pkg.payment_status === 'paid' ? t('compStu.paid') : overdueUnpaid ? t('package.overdueUnpaid') : t('compStu.pendingStatus')}
                             </span>
-                            {pkg.payment_status === 'pending' && !pkg.paid && (
+                            {payableUnpaid && (
                               <>
                                 {!pkg.pool_organization_id && canEditPendingPackage(pkg) && (
                                   <Button

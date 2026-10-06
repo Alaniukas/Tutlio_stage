@@ -228,7 +228,7 @@ describe('GET /api/parent-pending-packages', () => {
     expect(result.body.packages.map((row: any) => row.id)).toEqual(['package-1']);
   });
 
-  it('excludes paid and cancelled offers and inactive or expired pools', async () => {
+  it('excludes paid and cancelled offers but keeps unpaid pooled debt payable', async () => {
     mocks.tables.lesson_packages.push(
       packageRow({ id: 'paid', paid: true }),
       packageRow({ id: 'cancelled', payment_status: 'cancelled' }),
@@ -236,7 +236,7 @@ describe('GET /api/parent-pending-packages', () => {
       packageRow({ id: 'expired-pool', expires_at: '2000-01-01T00:00:00.000Z' }),
     );
     const { result } = await run();
-    expect(result.body.packages.map((row: any) => row.id)).toEqual(['package-1']);
+    expect(result.body.packages.map((row: any) => row.id)).toEqual(['package-1', 'inactive-pool', 'expired-pool']);
   });
 
   it('hides detached pooled anchors while preserving ordinary linked-child debt', async () => {
@@ -285,9 +285,7 @@ describe('GET /api/parent-pending-packages', () => {
       ...Array.from({ length: 120 }, (_, index) => packageRow({
         id: `ineligible-${index}`,
         created_at: new Date(Date.parse('2026-09-01T00:00:00Z') + index * 60_000).toISOString(),
-        ...(index % 3 === 0 ? { active: false }
-          : index % 3 === 1 ? { expires_at: '2000-01-01T00:00:00.000Z' }
-            : { pool_organization_id: 'other-organization' }),
+        pool_organization_id: 'other-organization',
       })),
     ];
     const { result } = await run();

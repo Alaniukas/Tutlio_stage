@@ -2979,6 +2979,7 @@ export const ee: Record<string, string> = {
   'compStu.inviteSentNowSuccess': 'Kutse saadetud.',
   'compStu.inviteSentNowFailed': 'Kutse saatmine ebaõnnestus.',
   'compStu.inviteSkippedAlreadyRegistered': 'See konto on juba aktiivne. Registreerimiskirja ei saadetud – kasutaja peab sisse logima.',
+  'compStu.inviteLinkedExistingParent': 'Olemasolev konto on seotud selle lapse ja kõigi sama maksja e-postiga õdede-vendadega.',
   'compStu.noInviteRecipient': 'Puudub e-post kutse saatmiseks.',
   'compStu.inviteMissingCode': 'Sellel õpilasel puudub kutsekood.',
   'compStu.sendInvoice': 'Saada arve',

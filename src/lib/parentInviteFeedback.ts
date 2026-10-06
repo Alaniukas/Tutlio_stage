@@ -1,10 +1,12 @@
 export type ParentInviteResponse = {
   sent?: number;
+  linked?: number;
   error?: string;
   results?: {
     email: string;
     ok: boolean;
     skipped?: boolean;
+    linkedExisting?: boolean;
     reason?: string;
     error?: string;
   }[];
@@ -19,7 +21,9 @@ export function parentInviteProblem(
   const messages: string[] = [];
 
   for (const result of response.results ?? []) {
-    if (result.skipped && result.reason === 'already_registered') {
+    if (result.linkedExisting) {
+      messages.push(`${result.email}: ${t('compStu.inviteLinkedExistingParent')}`);
+    } else if (result.skipped && result.reason === 'already_registered') {
       messages.push(`${result.email}: ${t('compStu.inviteSkippedAlreadyRegistered')}`);
     } else if (!result.ok) {
       messages.push(`${result.email}: ${t('compStu.parentInviteEmailFailed')}`);

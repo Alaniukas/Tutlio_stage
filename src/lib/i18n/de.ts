@@ -2931,6 +2931,7 @@ export const de: Record<string, string> = {
   'compStu.inviteSentNowSuccess': 'Einladung gesendet.',
   'compStu.inviteSentNowFailed': 'Einladung konnte nicht gesendet werden.',
   'compStu.inviteSkippedAlreadyRegistered': 'Dieses Konto ist bereits aktiv. Es wurde keine Registrierungs-E-Mail gesendet – der Nutzer soll sich anmelden.',
+  'compStu.inviteLinkedExistingParent': 'Das bestehende Konto wurde mit diesem Kind und allen Geschwistern mit derselben Zahler-E-Mail verknüpft.',
   'compStu.noInviteRecipient': 'Keine E-Mail-Adresse zum Senden der Einladung vorhanden.',
   'compStu.inviteMissingCode': 'Für diesen Schüler fehlt der Einladungscode.',
   'compStu.sendPackageTitle': 'Stundenpaket senden',

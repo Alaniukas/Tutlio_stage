@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isPayableUnpaidPooledPackage, reactivateUnpaidPooledPackageUpdate } from '../../src/lib/pooledPackageOverdue.js';
 
 type SendArgs = {
   supabase: SupabaseClient;
@@ -21,7 +22,7 @@ export async function sendPendingPackagePaymentEmail(args: SendArgs): Promise<{ 
     .from('lesson_packages')
     .select(`
       id, tutor_id, student_id, total_lessons, price_per_lesson, total_price, paid, payment_status,
-      payment_method, manual_sales_invoice_id,
+      active, pool_organization_id, payment_method, manual_sales_invoice_id,
       students!inner(full_name, email, payer_email, payer_name),
       profiles!lesson_packages_tutor_id_fkey(full_name, organization_id, manual_payment_bank_details),
       lesson_package_items(subject_id, total_lessons, price_per_lesson, total_price, position, subjects!inner(name))
@@ -41,6 +42,21 @@ export async function sendPendingPackagePaymentEmail(args: SendArgs): Promise<{ 
   }
   if (pkg.payment_status === 'cancelled') {
     return { ok: false, status: 400, error: 'Paketas atšauktas — sukurkite naują' };
+  }
+  const pooled = Boolean((pkg as { pool_organization_id?: string | null }).pool_organization_id);
+  if (pooled && isPayableUnpaidPooledPackage(pkg as { paid?: boolean; payment_status?: string; pool_organization_id?: string | null })) {
+    const needsReactivation = !(pkg as { active?: boolean }).active || pkg.payment_status === 'expired';
+    if (needsReactivation) {
+      const reactivated = await supabase
+        .from('lesson_packages')
+        .update(reactivateUnpaidPooledPackageUpdate())
+        .eq('id', packageId)
+        .eq('paid', false)
+        .neq('payment_status', 'cancelled');
+      if (reactivated.error) {
+        return { ok: false, status: 500, error: 'Nepavyko atnaujinti paketo būsenos', details: reactivated.error.message };
+      }
+    }
   }
 
   const student = pkg.students as any;

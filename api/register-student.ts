@@ -5,7 +5,7 @@
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-import { insertParentInviteAndSendEmail } from './_lib/parentInvite.js';
+import { insertParentInviteAndSendEmail, parentInviteDelivered } from './_lib/parentInvite.js';
 import { inviteEmailLocale, orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
 import { studentRegistrationDetails } from './_lib/studentRegistrationDetails.js';
 import { provisionMvFamilyAccounts } from './_lib/mvProvisionFamilyAccounts.js';
@@ -323,7 +323,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         parentInviteError = inviteRes.error;
       } else if ('skipped' in inviteRes) {
         parentInviteSkipped = true;
-      } else {
+      } else if ('linkedExisting' in inviteRes) {
+        parentInviteSkipped = true;
+      } else if (parentInviteDelivered(inviteRes)) {
         parentInviteCode = inviteRes.code;
         parentInviteSent = inviteRes.emailSent;
         if (!inviteRes.emailSent) {

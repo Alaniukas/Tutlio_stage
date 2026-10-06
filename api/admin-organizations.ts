@@ -481,9 +481,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (features?.school_family_portal === true && before.features?.school_family_portal !== true) {
         const readiness = await supabase.rpc('school_family_portal_readiness', { p_organization_id: idParam });
         if (readiness.error) return res.status(503).json({ error: 'School family setup is unavailable. Apply the reviewed migrations first.' });
-        if (readiness.data?.baselineReady !== true || readiness.data?.pendingCount !== 0) {
+        if (readiness.data?.baselineReady !== true) {
           return res.status(409).json({
-            error: 'Prepare existing material links and verify all eligible family accounts before enabling the family portal.',
+            error: 'Capture the existing lesson-material baseline before enabling the family portal.',
             readiness: readiness.data,
           });
         }

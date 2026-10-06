@@ -2360,6 +2360,7 @@ export const se: Record<string, string> = {
   'compStu.inviteSentNowSuccess': 'Inbjudan skickad.',
   'compStu.inviteSentNowFailed': 'Kunde inte skicka inbjudan.',
   'compStu.inviteSkippedAlreadyRegistered': 'Kontot är redan aktivt. Ingen registreringsmejl skickades – användaren ska logga in.',
+  'compStu.inviteLinkedExistingParent': 'Befintligt konto har kopplats till detta barn och alla syskon med samma betalarens e-post.',
   'compStu.noInviteRecipient': 'Ingen e-postadress tillgänglig för att skicka inbjudan.',
   'compStu.inviteMissingCode': 'Inbjudningskod saknas för denna elev.',
   'compStu.sendInvoice': 'Skicka månadsfaktura för en period',

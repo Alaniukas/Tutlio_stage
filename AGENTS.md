@@ -598,6 +598,7 @@ Vizuali regresija: `tests/browser/org-tutor-invoice-privacy/README.md`. Atskiram
 | PVM pastaba ant S.F. | `api/_lib/proKlaseInvoice.ts` — `PVM neapmokestinama pagal LR PVMĮ 22 str.` kai Pro Klasė yra pardavėjas |
 | Legal PDF | `src/lib/proKlaseLegal.ts` — `public/legal/proklase-paslaugu-teikimo-salygos.pdf`, `proklase-privatumo-politika.pdf`; tėvų registracijoje privalomas abu checkbox (`parentLegalAcceptanceMissing`) |
 | Neapmokėto paketo redagavimas | `pendingPackageEdit.ts` — 7 d. langas, tik `pending`; API `update-pending-package.ts` (expirina seną Stripe checkout), `resend-package-email.ts`. QA seed: `scripts/seed-proklase-package-edit-qa.mjs` |
+| Neapmokėti pooled mėnesio paketai | `expire-packages` cron **ne**expirina `paid=false` eilutes — skola lieka mokama. `pay-package` / `sendPendingPackageEmail` reaktyvuoja legacy `expired` → `pending` (`src/lib/pooledPackageOverdue.ts`). Admin Apžvalga: `?summary=overdue-packages` + priminimas (`resend-package-email`). UI žymė **Vėluoja** kai `billing_period_end` praeityje. |
 | Tutor no-show | admin cancel su `cancellation_reason_code=tutor_no_show` → −30€, paketas grąžinamas |
 
 **Testai:** `tests/lib/proKlaseTutorPay.test.ts`, `tests/api/proklase-invoice.test.ts`, `tests/lib/session-complimentary.test.ts`, `tests/lib/proklase-legal.test.ts`, `tests/lib/pending-package-edit.test.ts`, `tests/api/update-pending-package.test.ts`
@@ -856,6 +857,7 @@ npm run security:pencheck
 34. **Darbuotojo sutikimo „Nepavyko išsaugoti“** — `school-contracts` bucket'as turi leisti `application/json` (`20261005140000_school_contracts_allow_json_staff_details.sql`). Be to `staff-personal-details.json` / alert marker upload krenta, o senas POST blokuodavo atsakymų įrašymą. Sutikimo POST pirma rašo `staff_consent_answers`, stash yra best-effort.
 35. **Org admin laisvo laiko INSERT/UPDATE timeout** — `availability` RLS politika su `profiles`/`organizations` subquery kiekvienam org korepetitoriui (ypač Pro Klasė su `org_admin_calendar_full_control`) viršijo PostgREST `statement_timeout` (`canceling statement due to statement timeout`). Tai **universalus** org admin kelias (`CompanyTvarkarastis` → `handleSaveAvailability` / `handleCreateAvailability`), ne Pro Klasė logika. Pataisa: migracija `20261005105541_org_calendar_availability_permissions.sql` (`private.org_admin_availability_tutor_ids()`, `row_security=off`). UI saugo be `.select('id')` — pakanka `error` tikrinimo. Testas: `tests/db/org-admin-availability.test.ts`.
 36. **Org admin laisvas laikas DB susikuria, bet kalendoriuje nematomas** — `refreshSchedule()` kvietė `fetchScheduleMeta()`, kuris ant cache hit grąžindavo **seną** `availability` masyvą; `loadAvailabilityForTutors` vėl nebuvo kviečiamas, nes `availability.length > 0`. Po sėkmingo create/edit adminas matydavo „nieko neįvyko“ ir spaudė dar kartą (dubliatai DB, pvz. Pro Klasė Rimantas 2026-10-06). Pataisa: `refreshSchedule` perkrauna availability iš DB + toast (`avail.addSuccess` / `avail.updateSuccess`); create modal po sėkmės perkelia kalendorių į slot datą.
+37. **Mokyklų tėvų registracija ir sibling susiejimas** — `register-parent` mokykloms automatiškai pririša visus aktyvius vaikus su tuo pačiu `payer_email` / `parent_secondary_email`. Kai įjungta `school_family_portal` arba `school_family_accounts_setup`, registracija ir „Pakviesti tėvą“ esamai paskyrai upsertina `school_family_guardians` iš pasirašytos metinės sutarties (`api/_lib/schoolParentSiblingLink.ts`, `bindSchoolFamilyGuardianForRegisteredParent`). Antras vaikas jau užsiregistravusiam tėvui: `linkExistingSchoolParentByEmail`, ne `already_registered` skip. Šeimos portalo įjungimui admin API reikalauja tik medžiagos bazės (`baselineReady`).
 
 ---
 
@@ -940,4 +942,4 @@ npm run security:pencheck
 
 ---
 
-*Paskutinis atnaujinimas: 2026-10-06: Org admin laisvo laiko refresh — `refreshSchedule` nebekrauna stale cache; solo tutor kalendorius — mokinio vardas + dalyko spalva.*
+*Paskutinis atnaujinimas: 2026-10-06: Pro Klasė neapmokėti pooled mėnesio paketai nebegalioja automatiškai; admin Apžvalgoje rodomi vėluojantys su priminimo mygtuku.*

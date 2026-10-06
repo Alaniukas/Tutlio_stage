@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
-import { insertParentInviteAndSendEmail } from './_lib/parentInvite.js';
+import { insertParentInviteAndSendEmail, parentInviteDelivered } from './_lib/parentInvite.js';
 import { inviteEmailLocale, orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
@@ -144,6 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       error?: string;
       code?: string;
       skipped?: boolean;
+      linkedExisting?: boolean;
       reason?: string;
     }[] = [];
 
@@ -171,8 +172,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
       if ('error' in r) {
         results.push({ email: t.email, ok: false, error: r.error });
+      } else if ('linkedExisting' in r && r.linkedExisting) {
+        results.push({ email: t.email, ok: true, linkedExisting: true });
       } else if ('skipped' in r) {
         results.push({ email: t.email, ok: true, skipped: true, reason: r.reason });
+      } else if (!parentInviteDelivered(r)) {
+        results.push({ email: t.email, ok: false, error: 'Invite failed' });
       } else if (!r.emailSent) {
         results.push({
           email: t.email,
@@ -193,7 +198,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return json(res, 200, {
       success: true,
-      sent: results.filter((x) => x.ok && !x.skipped).length,
+      sent: results.filter((x) => x.ok && !x.skipped && !x.linkedExisting).length,
+      linked: results.filter((x) => x.linkedExisting).length,
       skipped: results.filter((x) => x.skipped).length,
       results,
     });

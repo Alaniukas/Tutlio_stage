@@ -2048,6 +2048,7 @@ export const no: Record<string, string> = {
   'compStu.inviteSentNowSuccess': 'Invitasjon sendt.',
   'compStu.inviteSentNowFailed': 'Kunne ikke sende invitasjon.',
   'compStu.inviteSkippedAlreadyRegistered': 'Kontoen er allerede aktiv. Ingen registrerings-e-post ble sendt – brukeren må logge inn.',
+  'compStu.inviteLinkedExistingParent': 'Eksisterende konto er koblet til dette barnet og alle søsken med samme betaler-e-post.',
   'compStu.noInviteRecipient': 'Ingen e-post tilgjengelig for å sende invitasjon.',
   'compStu.inviteMissingCode': 'Invitasjonskoden mangler for denne eleven.',
   'compStu.sendInvoice': 'Send faktura',

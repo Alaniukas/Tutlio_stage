@@ -5,6 +5,7 @@ import { isProKlaseOrg } from './_lib/marketMoney.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { orgStudentIdentityGroupKey } from '../src/lib/orgStudentIdentity.js';
 import { proKlaseTrialFollowupStudentIds } from '../src/lib/proKlasePackageStatus.js';
+import { isOverdueUnpaidPooledPackage, isPayableUnpaidPooledPackage } from '../src/lib/pooledPackageOverdue.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -117,6 +118,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const students = await loadOrganizationStudents(db, organizationId);
     const studentIds = students.map((row: any) => String(row.id));
+    if (req.query.summary === 'overdue-packages') {
+      if (!hasOrgAdminPermission(auth.access.role, auth.access.permissions, 'finance.view')) {
+        return json(res, 403, { error: 'Forbidden' });
+      }
+      if (studentIds.length === 0) return json(res, 200, { packages: [] });
+      const packageRes = await db.from('lesson_packages')
+        .select(`${PACKAGE_SELECT}, students!inner(full_name)`)
+        .eq('pool_organization_id', organizationId)
+        .in('student_id', studentIds)
+        .eq('paid', false)
+        .neq('payment_status', 'cancelled')
+        .order('billing_period_start', { ascending: true });
+      if (packageRes.error) throw new Error(packageRes.error.message);
+      const packages = (packageRes.data || [])
+        .filter((pkg: any) => isPayableUnpaidPooledPackage(pkg) && isOverdueUnpaidPooledPackage(pkg))
+        .map((pkg: any) => ({
+          id: pkg.id,
+          studentId: pkg.student_id,
+          studentName: (Array.isArray(pkg.students) ? pkg.students[0]?.full_name : pkg.students?.full_name) || '',
+          totalPrice: Number(pkg.total_price) || 0,
+          billingPeriodStart: pkg.billing_period_start,
+          billingPeriodEnd: pkg.billing_period_end,
+          paymentStatus: pkg.payment_status,
+        }));
+      return json(res, 200, { packages });
+    }
+
     if (req.query.summary === 'trial-followup') {
       if (studentIds.length === 0) return json(res, 200, { studentIds: [] });
       const thirtyDaysAgo = new Date();
@@ -154,8 +182,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const packages = (packageRes.data || []).filter((pkg: any) => {
       const belongsToOrg = pkg.pool_organization_id === organizationId
         || organizationTutorIds.has(String(pkg.tutor_id || ''));
-      const visibleState = pkg.active !== false || pkg.payment_status === 'pending';
-      return belongsToOrg && visibleState && pkg.payment_status !== 'cancelled';
+      const visibleState = pkg.payment_status !== 'cancelled'
+        && (isPayableUnpaidPooledPackage(pkg) || pkg.active !== false);
+      return belongsToOrg && visibleState;
     });
     return json(res, 200, { packages });
   } catch (error: any) {

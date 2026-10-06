@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildPublicAppUrl } from './public-origin.js';
 import { sendParentInviteEmail } from './sendParentInviteEmail.js';
 import { parentRegistrationAlreadyActive } from './registrationInviteGate.js';
+import { linkExistingSchoolParentByEmail } from './schoolParentSiblingLink.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -19,7 +20,14 @@ export type ParentInviteSource = 'student_self' | 'school_admin';
 export type ParentInviteResult =
   | { token: string; code: string; emailSent: boolean; emailError?: string }
   | { skipped: true; reason: 'already_registered' }
+  | { linkedExisting: true; studentIds: string[]; emailSent: false }
   | { error: string };
+
+export function parentInviteDelivered(
+  result: ParentInviteResult,
+): result is { token: string; code: string; emailSent: boolean; emailError?: string } {
+  return !('error' in result) && !('skipped' in result) && !('linkedExisting' in result);
+}
 
 export async function insertParentInviteAndSendEmail(opts: {
   supabase: SupabaseClient;
@@ -61,12 +69,6 @@ export async function insertParentInviteAndSendEmail(opts: {
     return { error: 'Invalid parent email' };
   }
 
-  if (await parentRegistrationAlreadyActive(supabase, trimmedEmail)) {
-    return { skipped: true, reason: 'already_registered' };
-  }
-
-  const origin = (appUrl || 'https://tutlio.lt').replace(/\/$/, '');
-
   let orgRow = org ?? null;
   let orgId = organizationId ?? null;
   if (!orgId && studentId) {
@@ -77,6 +79,16 @@ export async function insertParentInviteAndSendEmail(opts: {
       .maybeSingle();
     orgId = (st?.organization_id as string | null) || null;
   }
+
+  if (await parentRegistrationAlreadyActive(supabase, trimmedEmail)) {
+    const linked = await linkExistingSchoolParentByEmail(supabase, studentId, trimmedEmail);
+    if (linked.linked) {
+      return { linkedExisting: true, studentIds: linked.studentIds, emailSent: false };
+    }
+    return { skipped: true, reason: 'already_registered' };
+  }
+
+  const origin = (appUrl || 'https://tutlio.lt').replace(/\/$/, '');
   if (orgId && !orgRow) {
     const { data: fetched } = await supabase
       .from('organizations')

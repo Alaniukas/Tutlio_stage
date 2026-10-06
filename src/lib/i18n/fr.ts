@@ -3016,6 +3016,7 @@ export const fr: Record<string, string> = {
   'compStu.inviteSentNowSuccess': 'Invitation envoyée.',
   'compStu.inviteSentNowFailed': 'Échec de l\'envoi de l\'invitation.',
   'compStu.inviteSkippedAlreadyRegistered': 'Ce compte est déjà actif. Aucun e-mail d\'inscription n\'a été envoyé — l\'utilisateur doit se connecter.',
+  'compStu.inviteLinkedExistingParent': 'Le compte existant a été relié à cet enfant et à tous les frères et sœurs ayant le même e-mail payeur.',
   'compStu.noInviteRecipient': 'Aucun e-mail disponible pour envoyer l\'invitation.',
   'compStu.inviteMissingCode': 'Le code d\'invitation est manquant pour cet élève.',
   'compStu.sendPackageTitle': 'Envoyer un forfait de cours',

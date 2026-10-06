@@ -92,6 +92,32 @@ export function signedSchoolFamilyEvidence(
   return { evidence: candidates[0] };
 }
 
+/** Parent self-serve registration and school admin invites bind verified guardians from signed contracts. */
+export async function bindSchoolFamilyGuardianForRegisteredParent(
+  db: SupabaseClient,
+  organizationId: string,
+  studentId: string,
+  guardianUserId: string,
+  parentEmail: string,
+): Promise<{ bound: boolean; reason?: string }> {
+  const context = await evidenceContext(db, organizationId, [studentId]);
+  const existing = context.guardians.find((row) => row.student_id === studentId);
+  const selected = signedSchoolFamilyEvidence(organizationId, studentId, context.contracts, context.signatures, existing);
+  if (!selected.evidence) return { bound: false, reason: selected.reason || 'guardian_verification_required' };
+  if (normalizeSchoolFamilyEmail(selected.evidence.guardian_email) !== normalizeSchoolFamilyEmail(parentEmail)) {
+    return { bound: false, reason: 'guardian_email_mismatch' };
+  }
+  const evidence = { ...selected.evidence, guardian_user_id: guardianUserId };
+  const guardian = await db.from('school_family_guardians').upsert(evidence, { onConflict: 'organization_id,student_id' });
+  if (guardian.error) return { bound: false, reason: 'school_family_setup_required' };
+  const account = await db.from('school_family_accounts').upsert(
+    { organization_id: organizationId, user_id: guardianUserId, role: 'parent' },
+    { onConflict: 'organization_id,user_id,role', ignoreDuplicates: true },
+  );
+  if (account.error) return { bound: false, reason: 'school_family_setup_required' };
+  return { bound: true };
+}
+
 async function evidenceContext(db: SupabaseClient, orgId: string, studentIds: string[]) {
   const contracts: AnnualContract[] = [];
   for (let offset = 0; ; offset += 200) {

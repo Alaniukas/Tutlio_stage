@@ -2218,6 +2218,7 @@ export const dk: Record<string, string> = {
   'compStu.inviteSentNowSuccess': 'Invitation sendt.',
   'compStu.inviteSentNowFailed': 'Kunne ikke sende invitation.',
   'compStu.inviteSkippedAlreadyRegistered': 'Denne konto er allerede aktiv. Der blev ikke sendt en registreringsmail – brugeren skal logge ind.',
+  'compStu.inviteLinkedExistingParent': 'Eksisterende konto er knyttet til dette barn og alle søskende med samme betaler-e-mail.',
   'compStu.noInviteRecipient': 'Ingen e-mail tilgængelig til at sende invitation.',
   'compStu.inviteMissingCode': 'Invitationskode mangler for denne elev.',
   'compStu.sendInvoice': 'Send faktura',

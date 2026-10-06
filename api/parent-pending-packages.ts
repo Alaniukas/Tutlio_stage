@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from './types.js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { isPayableUnpaidPooledPackage } from '../src/lib/pooledPackageOverdue.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Pooled rows cannot be read directly by the browser: they contain private
@@ -98,8 +99,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const student = studentById.get(row.student_id);
       if (!student) return false;
       if (row.pool_organization_id == null) return true;
-      return row.pool_organization_id === student.organization_id && student.detached_at == null && row.active === true
-        && (!row.expires_at || new Date(row.expires_at).getTime() > Date.now());
+      return row.pool_organization_id === student.organization_id
+        && student.detached_at == null
+        && isPayableUnpaidPooledPackage(row);
     };
     const eligiblePackages: PendingPackage[] = [];
     // Apply the display limit after eligibility, so expired or inactive pools

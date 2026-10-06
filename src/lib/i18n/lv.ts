@@ -3718,6 +3718,7 @@ export const lv: Record<string, string> = {
   'compStu.inviteSentNowSuccess': 'Uzaicinājums nosūtīts.',
   'compStu.inviteSentNowFailed': 'Neizdevās nosūtīt uzaicinājumu.',
   'compStu.inviteSkippedAlreadyRegistered': 'Šis konts jau ir aktīvs. Reģistrācijas e-pasts netika nosūtīts — lietotājam jāpiesakās.',
+  'compStu.inviteLinkedExistingParent': 'Esošais konts ir saistīts ar šo bērnu un visiem brāļiem/māsām ar to pašu maksātāja e-pastu.',
   'compStu.noInviteRecipient': 'Nav e-pasta, kuram nosūtīt uzaicinājumu.',
   'compStu.inviteMissingCode': 'Šim skolēnam trūkst uzaicinājuma koda.',
   'compStu.sendInvoice': 'Nosūtīt rēķinu',

@@ -160,6 +160,15 @@ export default function CompanyDashboard() {
   const [noShowTarget, setNoShowTarget] = useState<OrgAttentionRow | null>(null);
   const [markingNoShow, setMarkingNoShow] = useState(false);
   const [remindingTutorSessionId, setRemindingTutorSessionId] = useState<string | null>(null);
+  const [overduePackages, setOverduePackages] = useState<Array<{
+    id: string;
+    studentId: string;
+    studentName: string;
+    totalPrice: number;
+    billingPeriodStart: string | null;
+    billingPeriodEnd: string | null;
+  }>>([]);
+  const [resendingOverduePackageId, setResendingOverduePackageId] = useState<string | null>(null);
   const [cancelledList, setCancelledList] = useState<OrgSessionRow[]>(cached?.cancelledList ?? []);
   const [recentPayments, setRecentPayments] = useState<RecentOrgPayment[]>(cached?.recentPayments ?? []);
   const [tutorPayMap, setTutorPayMap] = useState<Map<string, TutorPay>>(
@@ -206,6 +215,24 @@ export default function CompanyDashboard() {
         orgFeatures.trial_followup_alert === true;
       setOrgIdForDismiss(organizationId);
       setOrgName(org?.name || '');
+      if (isProKlaseOrg(organizationId)) {
+        try {
+          const overdueRes = await fetch('/api/proklase-student-packages?summary=overdue-packages', {
+            headers: await authHeaders(),
+          });
+          const overdueBody = await overdueRes.json().catch(() => ({}));
+          setOverduePackages(
+            overdueRes.ok && Array.isArray((overdueBody as { packages?: unknown }).packages)
+              ? (overdueBody as { packages: typeof overduePackages }).packages
+              : [],
+          );
+        } catch (error) {
+          console.error('Error loading overdue pooled packages:', error);
+          setOverduePackages([]);
+        }
+      } else {
+        setOverduePackages([]);
+      }
       const cap = Number(org?.tutor_license_count) || 0;
       setTutorLicenseCap(cap);
 
@@ -638,7 +665,7 @@ export default function CompanyDashboard() {
       : [
           {
             label: t('companyDash.needsAttention'),
-            value: attentionList.length,
+            value: attentionList.length + overduePackages.length,
             sub: t('companyDash.entries'),
             icon: <AlertCircle className="w-5 h-5" />,
             iconBg: 'bg-amber-100',
@@ -646,7 +673,7 @@ export default function CompanyDashboard() {
           },
           {
             label: t('companyDash.paymentFollowups'),
-            value: attentionList.filter((s) => s.reasons.includes('payment')).length,
+            value: attentionList.filter((s) => s.reasons.includes('payment')).length + overduePackages.length,
             sub: t('companyDash.entries'),
             icon: <CreditCard className="w-5 h-5" />,
             iconBg: 'bg-emerald-100',
@@ -713,6 +740,24 @@ export default function CompanyDashboard() {
       alert(t('cal.confirmStatusError', { msg: error instanceof Error ? error.message : String(error) }));
     } finally {
       setMarkingNoShow(false);
+    }
+  };
+
+  const handleResendOverduePackage = async (packageId: string) => {
+    setResendingOverduePackageId(packageId);
+    try {
+      const resp = await fetch('/api/resend-package-email', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ packageId }),
+      });
+      const result = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error((result as { error?: string }).error || String(resp.status));
+      await loadData();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : String(error));
+    } finally {
+      setResendingOverduePackageId(null);
     }
   };
 
@@ -837,14 +882,14 @@ export default function CompanyDashboard() {
                 </div>
                 <div className="flex items-center gap-1">
                   <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded-md">
-                    {companyAttentionRowsReady ? visibleCompanyAttention.length : attentionList.length}{' '}
+                    {(companyAttentionRowsReady ? visibleCompanyAttention.length : attentionList.length) + overduePackages.length}{' '}
                     {t('companyDash.entries')}
                   </span>
                 </div>
               </div>
-              {attentionList.length === 0 ? (
+              {attentionList.length === 0 && overduePackages.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-8">{t('companyDash.noAttention')}</p>
-              ) : companyAttentionRowsReady && visibleCompanyAttention.length === 0 ? (
+              ) : companyAttentionRowsReady && visibleCompanyAttention.length === 0 && overduePackages.length === 0 ? (
                 <div className="text-center py-8 space-y-2">
                   <p className="text-sm text-gray-500">{t('dash.allRowsHiddenHint')}</p>
                   {companyAttentionRowsKey && (
@@ -859,6 +904,39 @@ export default function CompanyDashboard() {
                 </div>
               ) : (
                 <div className="space-y-2">
+                  {overduePackages.map((pkg) => (
+                    <div
+                      key={pkg.id}
+                      className="relative rounded-xl border border-red-100/80 bg-red-50/30 p-3 pl-5"
+                    >
+                      <div className="absolute bottom-3 left-2 top-3 w-1 rounded-full bg-red-500" />
+                      <div className="flex items-start gap-2">
+                        <div className="min-w-0 flex-1 py-1">
+                          <p className="truncate text-sm font-semibold text-gray-900">
+                            {pkg.studentName || t('common.student')}
+                          </p>
+                          <p className="mt-0.5 text-xs leading-relaxed text-gray-500">
+                            {pkg.billingPeriodStart?.slice(0, 7) || '—'}
+                            {' · '}
+                            <span className="font-medium text-red-700">{t('package.overdueUnpaid')}</span>
+                            {' · '}
+                            {fmt(pkg.totalPrice)}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={resendingOverduePackageId === pkg.id}
+                          onClick={() => void handleResendOverduePackage(pkg.id)}
+                          className="flex min-h-[44px] flex-shrink-0 touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-50 disabled:opacity-50"
+                        >
+                          <Mail className="w-3.5 h-3.5" />
+                          {resendingOverduePackageId === pkg.id
+                            ? t('companyDash.packageReminderSending')
+                            : t('companyDash.sendPackageReminder')}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                   {visibleCompanyAttention.map((s) => {
                     const tp = tutorPayMap.get(s.tutor_id);
                     const start = new Date(s.start_time);

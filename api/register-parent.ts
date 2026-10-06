@@ -4,6 +4,16 @@ import { isAuthEmailAlreadyRegistered } from './_lib/findAuthUserByEmail.js';
 import { isAcceptedFlag, parentLegalAcceptanceMissing, usesProKlaseLegalDocs } from './_lib/proKlaseLegal.js';
 import { sendProKlaseRegistrationWelcomeEmail } from './_lib/sendProKlaseRegistrationWelcomeEmail.js';
 import { normalizeStudentGrade1to12 } from './_lib/studentGrade.js';
+import {
+  listActiveSchoolStudentsByPayerEmail,
+  loadSchoolOrganization,
+  markParentInvitesUsed,
+  schoolAutoLinkSiblingsEnabled,
+  schoolFamilyAccessEnabled,
+  unusedInviteIdsForEmail,
+  upsertParentStudentLink,
+} from './_lib/schoolParentSiblingLink.js';
+import { bindSchoolFamilyGuardianForRegisteredParent } from './_lib/schoolFamilyAccounts.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -115,12 +125,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : new Date().toISOString();
 
     const normalizedEmail = invite.parent_email.trim().toLowerCase();
-    const autoLinkSiblings = usesProKlaseLegalDocs(orgId);
+    const org = await loadSchoolOrganization(supabase, orgId);
+    const autoLinkProKlaseSiblings = usesProKlaseLegalDocs(orgId);
+    const autoLinkSchoolSiblings = schoolAutoLinkSiblingsEnabled(org?.entity_type);
 
     // Read sibling invitations before creating the Auth user so a failed
     // lookup can be retried without leaving a partially registered account.
     let pendingInvites: Array<{ id: string; student_id: string; parent_email: string }> = [];
-    if (autoLinkSiblings) {
+    if (autoLinkProKlaseSiblings) {
       const { data, error } = await supabase
         .from('parent_invites')
         .select('id, student_id, parent_email')
@@ -162,12 +174,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const parentProfileId = await linkParent(supabase, authData.user.id, fullName.trim(), invite.student_id, normalizedEmail, childInfo, {
         acceptedAt: usesProKlaseLegalDocs(orgId) ? acceptedAt : null,
       });
+      const linkedStudentIds = [invite.student_id];
       const linkedInviteIds = [invite.id];
 
       // A family can receive one invite for each child. Registering from the first
       // invite must attach the remaining children without applying this child's
       // grade or birth date to their records.
-      if (autoLinkSiblings) {
+      if (autoLinkProKlaseSiblings) {
         for (const pending of pendingInvites) {
           if (pending.id === invite.id) continue;
           // ILIKE treats '_' and '%' as wildcards; require an exact email match.
@@ -186,16 +199,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             setParentUserId: !sibling.parent_user_id || sibling.parent_user_id === authData.user.id,
           });
           linkedInviteIds.push(pending.id);
+          linkedStudentIds.push(pending.student_id);
+        }
+      } else if (autoLinkSchoolSiblings && orgId) {
+        const siblings = await listActiveSchoolStudentsByPayerEmail(supabase, orgId, normalizedEmail);
+        for (const sibling of siblings) {
+          if (sibling.id === invite.student_id) continue;
+          await upsertParentStudentLink(supabase, parentProfileId, authData.user.id, sibling.id, {
+            setParentUserId: !sibling.parent_user_id || sibling.parent_user_id === authData.user.id,
+          });
+          linkedStudentIds.push(sibling.id);
+        }
+        linkedInviteIds.push(...await unusedInviteIdsForEmail(supabase, normalizedEmail, linkedStudentIds));
+      }
+
+      if (autoLinkSchoolSiblings && orgId && schoolFamilyAccessEnabled(org?.features)) {
+        for (const studentId of [...new Set(linkedStudentIds)]) {
+          await bindSchoolFamilyGuardianForRegisteredParent(
+            supabase,
+            orgId,
+            studentId,
+            authData.user.id,
+            normalizedEmail,
+          );
         }
       }
 
       // Mark invitations used only after every child was linked. This is one DB
       // statement, so a failed sibling link cannot consume the first invitation.
-      const { error: inviteErr } = await supabase
-        .from('parent_invites')
-        .update({ used: true })
-        .in('id', linkedInviteIds);
-      if (inviteErr) throw inviteErr;
+      await markParentInvitesUsed(supabase, [...new Set(linkedInviteIds)]);
     } catch (linkErr) {
       // These FKs cascade the new profile/links and null out parent_user_id.
       // Removing only the user created above lets this invitation be retried.

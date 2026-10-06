@@ -2214,6 +2214,7 @@ export const fi: Record<string, string> = {
   'compStu.inviteSentNowSuccess': 'Kutsu lähetetty.',
   'compStu.inviteSentNowFailed': 'Kutsun lähettäminen epäonnistui.',
   'compStu.inviteSkippedAlreadyRegistered': 'Tämä tili on jo aktiivinen. Rekisteröintiviestiä ei lähetetty – käyttäjän tulee kirjautua sisään.',
+  'compStu.inviteLinkedExistingParent': 'Olemassa oleva tili on yhdistetty tähän lapseen ja kaikkiin saman maksajan sähköpostin sisaruksiin.',
   'compStu.noInviteRecipient': 'Kutsun lähettämiseen ei ole sähköpostia.',
   'compStu.inviteMissingCode': 'Tältä oppilaalta puuttuu kutsukoodi.',
   'compStu.sendInvoice': 'Lähetä lasku',

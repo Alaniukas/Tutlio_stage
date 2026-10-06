@@ -23,7 +23,7 @@ beforeEach(() => {
     const data = table === 'lesson_packages' ? mock.pkg : table === 'organizations' ? mock.org : mock.items;
     const filters: Array<[string, unknown]> = [];
     const q: any = { then: (resolve: any) => Promise.resolve({ data, error: null }).then(resolve) };
-    for (const method of ['select','single','order','update']) q[method] = vi.fn(() => q);
+    for (const method of ['select','single','order','update','neq']) q[method] = vi.fn(() => q);
     q.eq = vi.fn((column: string, value: unknown) => { filters.push([column, value]); return q; });
     q.maybeSingle = vi.fn(async () => ({ data: table === 'lesson_packages'
       ? mock.checkoutClaim && filters.every(([column, value]) => mock.checkoutClaim[column] === value) ? mock.checkoutClaim : null
@@ -96,14 +96,17 @@ describe('pooled package payment', () => {
     mock.pkg.students.payment_payer = payer;
     expect((await pay()).redirect).toHaveBeenCalledWith(303, 'https://checkout.stripe.com/test');
   });
-  it('does not collect payment for an inactive pooled offer', async () => {
+  it('reactivates an inactive unpaid pooled offer before checkout', async () => {
     mock.pkg.active = false;
-    expect((await pay()).status).toHaveBeenCalledWith(409);
-    expect(mock.create).not.toHaveBeenCalled();
+    mock.pkg.payment_status = 'expired';
+    mock.checkoutClaim = { id: 'pool', paid: false, payment_status: 'pending', active: true };
+    expect((await pay()).redirect).toHaveBeenCalledWith(303, 'https://checkout.stripe.com/test');
+    expect(mock.create).toHaveBeenCalled();
   });
-  it('never collects payment for an expired package', async () => {
-    mock.pkg.expires_at = '2000-01-01T00:00Z';
-    expect((await pay()).status).toHaveBeenCalledWith(409);
+  it('blocks cancelled pooled offers even when inactive', async () => {
+    mock.pkg.active = false;
+    mock.pkg.payment_status = 'cancelled';
+    expect((await pay()).status).toHaveBeenCalledWith(200);
     expect(mock.create).not.toHaveBeenCalled();
   });
   it('replaces a still-open auto-locale checkout before redirecting to payment', async () => {

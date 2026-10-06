@@ -3011,6 +3011,7 @@ export const es: Record<string, string> = {
   'compStu.inviteSentNowSuccess': 'Invitación enviada.',
   'compStu.inviteSentNowFailed': 'Error al enviar invitación.',
   'compStu.inviteSkippedAlreadyRegistered': 'Esta cuenta ya está activa. No se envió el correo de registro: el usuario debe iniciar sesión.',
+  'compStu.inviteLinkedExistingParent': 'La cuenta existente se ha vinculado a este alumno y a todos los hermanos con el mismo correo del pagador.',
   'compStu.noInviteRecipient': 'No hay correo disponible para enviar la invitación.',
   'compStu.inviteMissingCode': 'Falta el código de invitación para este alumno.',
   'compStu.sendPackageTitle': 'Enviar paquete de clases',

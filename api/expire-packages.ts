@@ -14,10 +14,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const now = new Date().toISOString();
 
+  // Unpaid offers stay payable as debt. Only paid packages lose their booking window.
   const { data: expired, error } = await supabase
     .from('lesson_packages')
-    .update({ active: false, payment_status: 'expired' })
+    .update({ active: false })
     .eq('active', true)
+    .eq('paid', true)
     .not('expires_at', 'is', null)
     .lt('expires_at', now)
     .select('id');

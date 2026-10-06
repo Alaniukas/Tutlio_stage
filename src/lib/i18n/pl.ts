@@ -2250,6 +2250,7 @@ export const pl: Record<string, string> = {
   'compStu.inviteSentNowSuccess': 'Zaproszenie wysłane.',
   'compStu.inviteSentNowFailed': 'Nie udało się wysłać zaproszenia.',
   'compStu.inviteSkippedAlreadyRegistered': 'To konto jest już aktywne. Nie wysłano e-maila rejestracyjnego — użytkownik powinien się zalogować.',
+  'compStu.inviteLinkedExistingParent': 'Istniejące konto zostało powiązane z tym dzieckiem i wszystkimi rodzeństwem z tym samym e-mailem płatnika.',
   'compStu.noInviteRecipient': 'Brak e-maila do wysłania zaproszenia.',
   'compStu.inviteMissingCode': 'Brak kodu zaproszenia dla tego ucznia.',
   'compStu.sendInvoice': 'Wyślij fakturę',
