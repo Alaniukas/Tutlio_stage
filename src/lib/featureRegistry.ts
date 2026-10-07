@@ -634,9 +634,9 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     name: 'Pamokų įrašai (Drive) ir grupių prieiga',
     nameEn: 'Lesson recordings (Drive) and group access',
     description:
-      'Kiekvienai klasei priskiriamas privatus Google Drive aplankas. Jo vaizdo įrašus ir prie jų išsaugotas pokalbių išklotines (.sbv, .txt arba tekstinius Drive failus su „Chat“ / „Chat transcript“ pavadinimo pabaiga) per Tutlio mato tik tos grupės mokytojas, mokiniai, tėvai ir įgalioti administratoriai. Pokalbio išklotinė rodoma po atitinkamu vaizdo įrašu. Reikia serverio Google service-account prieigos.',
+      'Kiekvienai klasei priskiriamas privatus Google Drive aplankas. Jo vaizdo įrašus ir prie jų išsaugotas pokalbių išklotines (.sbv, .txt arba tekstinius Drive failus su „Chat“ / „Chat transcript“ pavadinimo pabaiga) per Tutlio mato tik tos grupės mokytojas, mokiniai, tėvai ir įgalioti administratoriai. Pokalbio išklotinė rodoma po atitinkamu vaizdo įrašu. Serverio Google service-account turi turėti prieigą, o Google Drive turi leisti atsisiųsti patį pokalbio failą.',
     descriptionEn:
-      'Each class gets a private Google Drive folder. Its videos and matching saved written chats (.sbv, .txt or plain-text Drive files ending in “Chat” / “Chat transcript”) are available through Tutlio only to that group’s teacher, students, parents, and authorized administrators. Chat history appears below the matching video. Requires server-side Google service-account access.',
+      'Each class gets a private Google Drive folder. Its videos and matching saved written chats (.sbv, .txt or plain-text Drive files ending in “Chat” / “Chat transcript”) are available through Tutlio only to that group’s teacher, students, parents, and authorized administrators. Chat history appears below the matching video. Requires server-side Google service-account access and Google Drive permission to download the chat file itself.',
     category: 'integrations',
     defaultValue: false,
     requiresSetup: true,

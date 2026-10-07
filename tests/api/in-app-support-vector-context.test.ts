@@ -37,6 +37,9 @@ describe('in-app support vector context', () => {
     expect(allowed).toContain('Pokalbio išklotinė');
     expect(allowed).toContain('without an extension');
     expect(allowed).toContain('– Chat transcript');
+    expect(allowed).toContain('– Recording');
+    expect(allowed).toContain('capabilities.canDownload=false');
+    expect(allowed).toContain('Folder visibility alone does not prove chat content is downloadable');
     expect(allowed).toContain('over conflicting older');
     for (const restricted of [
       { ...scope, enabledFeatureIds: [] },
