@@ -1,8 +1,33 @@
+import { orgStudentIdentityGroupKey } from '../../src/lib/orgStudentIdentity.js';
+
 export type PvmLessonDetail = {
   subject: string;
   price: number;
   datetime: string;
 };
+
+type PvmSessionStudent = {
+  id?: string;
+  full_name?: string | null;
+  email?: string | null;
+  payer_email?: string | null;
+  organization_id?: string | null;
+};
+
+export function pvmSessionStudentIdentityKey(session: {
+  student_id?: string | null;
+  students?: PvmSessionStudent | PvmSessionStudent[] | null;
+  organization_id?: string | null;
+}): string {
+  const student = Array.isArray(session.students) ? session.students[0] : session.students;
+  return orgStudentIdentityGroupKey({
+    id: String(session.student_id || student?.id || ''),
+    full_name: student?.full_name,
+    email: student?.email,
+    payer_email: student?.payer_email,
+    organization_id: session.organization_id ?? student?.organization_id ?? null,
+  });
+}
 
 export type PvmInvoicePdfMeta = {
   layout: 'pvm_education';
@@ -69,6 +94,34 @@ export function groupSessionsByStudent<T extends { student_id?: string | null }>
     else map.set(key, [s]);
   }
   return [...map.values()];
+}
+
+/** One PVM S.F. per child identity (payer + name), even across tutor rows / subjects. */
+export function groupSessionsByStudentIdentity<
+  T extends {
+    student_id?: string | null;
+    students?: PvmSessionStudent | PvmSessionStudent[] | null;
+    organization_id?: string | null;
+  },
+>(sessions: T[]): T[][] {
+  const map = new Map<string, T[]>();
+  for (const s of sessions) {
+    const key = pvmSessionStudentIdentityKey(s);
+    const list = map.get(key);
+    if (list) list.push(s);
+    else map.set(key, [s]);
+  }
+  return [...map.values()];
+}
+
+export function countStudentIdentityInvoiceGroups<
+  T extends {
+    student_id?: string | null;
+    students?: PvmSessionStudent | PvmSessionStudent[] | null;
+    organization_id?: string | null;
+  },
+>(sessions: T[]): number {
+  return groupSessionsByStudentIdentity(sessions).length;
 }
 
 export function buildPvmPdfMeta(

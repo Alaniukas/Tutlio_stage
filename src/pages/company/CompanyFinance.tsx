@@ -22,6 +22,7 @@ import { format } from 'date-fns';
 import OrgPayerFeeSplitSettings from '@/components/company/OrgPayerFeeSplitSettings';
 import { isInvoiceProfileComplete } from '@/lib/invoiceProfileReady';
 import { isManoKorepetitoriusOrg } from '@/lib/marketMoney';
+import { orgStudentIdentityGroupKey } from '@/lib/orgStudentIdentity';
 import { isMonthlyBillingOnlyStudent } from '@/lib/studentPaymentModel';
 import { requireMonthlyInvoiceDelivery } from '@/lib/monthlyInvoiceDelivery';
 import SchoolMonthlyInvoiceDialog, { type SchoolMonthlyInvoiceStudentOption } from '@/components/school/SchoolMonthlyInvoiceDialog';
@@ -394,37 +395,30 @@ export default function CompanyFinance() {
           return;
         }
       }
-      const groupedByTutor = invoiceUnpaidSessions.reduce(
-        (acc: Record<string, { sessionIds: string[]; packageIds: string[] }>, s: any) => {
-          const tid = s.tutor_id;
-          if (!acc[tid]) acc[tid] = { sessionIds: [], packageIds: [] };
-          if (s.invoice_row_kind === 'package') acc[tid].packageIds.push(s.id);
-          else acc[tid].sessionIds.push(s.id);
-          return acc;
-        },
-        {}
-      );
+      const sessionIds = invoiceUnpaidSessions
+        .filter((s: any) => s.invoice_row_kind !== 'package')
+        .map((s: any) => s.id);
+      const targetTutorIds = invoiceScope === 'all_tutors'
+        ? orgTutors.map(tu => tu.id)
+        : invoiceTutorIds;
 
-      const tutorIds = Object.keys(groupedByTutor);
-      let sentBatchCount = 0;
-
-      for (const tutorId of tutorIds) {
-        const response = await fetch('/api/create-monthly-invoice', {
-          method: 'POST',
-          headers: await authHeaders(),
-          body: JSON.stringify({
-            tutorId,
-            periodStartDate: invoicePeriodStart,
-            periodEndDate: invoicePeriodEnd,
-            paymentDeadlineDays: invoiceDeadlineDays,
-            sessionIds: groupedByTutor[tutorId].sessionIds,
-            includeSalesInvoice: invoiceIncludeSalesInvoice,
+      const response = await fetch('/api/create-monthly-invoice', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          ...(orgId ? { organizationId: orgId, tutorIds: targetTutorIds } : {
+            tutorId: targetTutorIds[0] || invoiceUnpaidSessions[0]?.tutor_id,
           }),
-        });
-        const json = await response.json();
-        if (!response.ok) throw new Error(json.error || t('common.error'));
-        sentBatchCount += requireMonthlyInvoiceDelivery(json, t('common.error'));
-      }
+          periodStartDate: invoicePeriodStart,
+          periodEndDate: invoicePeriodEnd,
+          paymentDeadlineDays: invoiceDeadlineDays,
+          sessionIds,
+          includeSalesInvoice: invoiceIncludeSalesInvoice,
+        }),
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || t('common.error'));
+      const sentBatchCount = requireMonthlyInvoiceDelivery(json, t('common.error'));
 
       setToastMessage({ message: t('invoice.invoicesSent', {
         batchCount: sentBatchCount,
@@ -892,7 +886,13 @@ export default function CompanyFinance() {
             ) : (() => {
               const grouped = invoiceUnpaidSessions.reduce<Record<string, { name: string; sessions: any[] }>>((acc, s: any) => {
                 const studentName = s.students?.full_name || s.student_name || '–';
-                const key = s.student_id || studentName;
+                const key = orgStudentIdentityGroupKey({
+                  id: s.student_id,
+                  full_name: studentName,
+                  email: s.students?.email,
+                  payer_email: s.students?.payer_email,
+                  organization_id: orgId,
+                });
                 if (!acc[key]) acc[key] = { name: studentName, sessions: [] };
                 acc[key].sessions.push(s);
                 return acc;

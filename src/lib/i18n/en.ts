@@ -4560,6 +4560,7 @@ export const en: Record<string, string> = {
   'invoices.checkingIssuedStatus': 'Checking if invoices are already issued for this period...',
   'invoices.downloadAll': 'Download all ({count})',
   'invoices.downloadAllFiltered': 'Download all visible ({count})',
+  'invoices.downloadSelected': 'Download selected ({count})',
   'invoices.filterByMonthLabel': 'Period',
   'invoices.periodFilterLabel': 'Period',
   'invoices.periodModeMonth': 'Month',
