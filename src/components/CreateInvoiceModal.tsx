@@ -19,6 +19,7 @@ import { proKlaseSessionPayEur } from '@/lib/proKlaseTutorPay';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isInvoiceProfileComplete, ORG_INVOICE_PROFILE_INCOMPLETE } from '@/lib/invoiceProfileReady';
 import { schoolTutorPayOccurrences } from '@/lib/schoolTutorLessonPay';
+import { schoolTutorInvoiceLineDescription } from '@/lib/schoolTutorInvoiceLines';
 import { resolveSchoolTutorGroupPayRate } from '@/lib/schoolTutorDefaultPay';
 import { fetchSchoolTutorAttendancePayRows } from '@/lib/schoolTutorAttendancePay';
 import { orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
@@ -594,18 +595,19 @@ export default function CreateInvoiceModal({
 
           {!previewMode ? (
             <>
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                <p className="text-sm text-blue-900">
-                  {isOrgTutor
-                    ? billingTutorId
-                      ? t('invoiceCreate.orgAdminTutorInfo')
-                      : t('invoiceCreate.orgTutorInfo')
-                    : orgTutors && orgTutors.length > 0
-                      ? t('invoiceCreate.orgAdminInfo')
-                      : t('invoiceCreate.selectPeriodInfo')}
-                </p>
-                {schoolPayMode && <p className="text-xs text-blue-800 mt-2">{t('orgFinance.schoolPayPriceIndependence')}</p>}
-              </div>
+              {!schoolPayMode && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                  <p className="text-sm text-blue-900">
+                    {isOrgTutor
+                      ? billingTutorId
+                        ? t('invoiceCreate.orgAdminTutorInfo')
+                        : t('invoiceCreate.orgTutorInfo')
+                      : orgTutors && orgTutors.length > 0
+                        ? t('invoiceCreate.orgAdminInfo')
+                        : t('invoiceCreate.selectPeriodInfo')}
+                  </p>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -803,7 +805,9 @@ export default function CreateInvoiceModal({
                       : null;
                   const lineTitle = isPkg
                     ? `${t('invoice.packageRowLabel')}${subject?.name ? ` · ${subject.name}` : ''}${session.total_lessons != null ? ` (${session.total_lessons})` : ''}`
-                    : subject?.name || '-';
+                    : session._schoolMeeting
+                      ? schoolTutorInvoiceLineDescription(session, { includeDate: false })
+                      : subject?.name || '-';
                   return (
                     <div key={session.id} className="flex justify-between items-center p-3 bg-white border border-gray-200 rounded-lg text-sm">
                       <div className="min-w-0">

@@ -1,3 +1,4 @@
+import { isAttendanceFlagged } from './attendance.js';
 import { isUnconfirmedAutomaticNoShow, isUnconfirmedDetectedStudentAbsence } from './schoolJoinNoShow.js';
 import { effectiveSessionOutcome } from './sessionStatusConfirmation.js';
 
@@ -124,6 +125,30 @@ export function schoolMeetingOccurrences<T extends SchoolMeetingRow>(
 /** Group before filtering outcomes: an absent child does not create a second paid lesson. */
 export function schoolMeetings<T extends SchoolMeetingRow>(rows: T[], options: SchoolOutcomeOptions = {}): T[] {
   return schoolMeetingOccurrences(rows, options).map(occurrence => occurrence.row);
+}
+
+/** School dashboard “Reikia dėmesio”: live join gaps and detected absences until an outcome is confirmed. */
+export function isSchoolDashboardAttendanceAttention(
+  row: Row,
+  now: Date = new Date(),
+): boolean {
+  if (row.status_confirmed_at || row.status === 'cancelled' || row.status === 'completed') return false;
+  if (isUnconfirmedDetectedStudentAbsence(row, now)) return true;
+  const startTime = row.start_time;
+  if (!startTime) return false;
+  return isAttendanceFlagged({ ...row, start_time: startTime }, now);
+}
+
+/** Past meetings that still need an admin/tutor outcome and are not already confirmed. */
+export function isSchoolDashboardNotHeldAttention(
+  row: Row,
+  now: Date = new Date(),
+): boolean {
+  if (row.status_confirmed_at) return false;
+  if (row.status === 'cancelled' || row.status === 'no_show') return true;
+  if (row.status !== 'active') return false;
+  const end = Date.parse(row.end_time || row.start_time || '');
+  return Number.isFinite(end) && end < now.getTime();
 }
 export function schoolMeetingCounts(rows: SchoolMeetingRow[], options: SchoolOutcomeOptions = {}) {
   const result = { completed: 0, no_show: 0, cancelled: 0, active: 0 };

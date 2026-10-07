@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, Download } from 'lucide-react';
 import { authHeaders } from '@/lib/apiHelpers';
+import { downloadSchoolContractsZip } from '@/lib/schoolContractsZipExport';
+import { useTranslation } from '@/lib/i18n';
 import { schoolContractPdfStoragePath } from '@/lib/schoolContractPdfPath';
 import { uploadContractFile } from '@/lib/contractStorage';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
@@ -71,10 +74,13 @@ function countLabel(count: number, singular: string, plural: string, genitive: s
 type PreviewData = { documents: StaffDocument[]; organizationId: string };
 
 export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit: boolean; previewData?: PreviewData }) {
+  const { t: tr } = useTranslation();
   const [documents, setDocuments] = useState<StaffDocument[]>(previewData?.documents || []);
   const [organizationId, setOrganizationId] = useState(previewData?.organizationId || '');
   const [loading, setLoading] = useState(!previewData);
   const [busy, setBusy] = useState(false);
+  const [exportingZip, setExportingZip] = useState(false);
+  const [newEmployeeFormOpen, setNewEmployeeFormOpen] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
@@ -302,6 +308,37 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
     } catch (cause: any) { tab?.close(); setError(cause?.message || 'Nepavyko atidaryti PDF.'); }
   };
 
+  const exportStaffDocumentsZip = async () => {
+    if (!visible.length || previewData) return;
+    setExportingZip(true);
+    setError('');
+    try {
+      const result = await downloadSchoolContractsZip(
+        { staffDocumentIds: visible.map((document) => document.id) },
+        { authHeaders: await authHeaders(), scope: 'employees' },
+      );
+      if (result.downloaded === 0) {
+        setError(tr('school.contractZipExportEmpty'));
+        return;
+      }
+      if (result.failedIds.length > 0) {
+        setMessage(tr('school.contractZipExportPartial', {
+          downloaded: String(result.downloaded),
+          failed: String(result.failedIds.length),
+        }));
+        return;
+      }
+      setMessage(tr('school.contractZipExportDoneEmployees', {
+        employees: String(result.employeeCount),
+        files: String(result.downloaded),
+      }));
+    } catch (cause: any) {
+      setError(cause?.message || tr('school.contractZipExportFail'));
+    } finally {
+      setExportingZip(false);
+    }
+  };
+
   const exportSummary = () => {
     const header = ['Darbuotojas', 'El. paštas', 'Darbo sutarties Nr.', 'Dokumentas', 'Būsena', 'Išsiųsta', 'Pasirašyta'];
     const rows = visible.map((document) => [document.counterparty_name, document.counterparty_email,
@@ -346,8 +383,23 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
       {message && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{message}</p>}
 
       {canEdit && organizationId && <section className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="font-semibold">Naujo darbuotojo dokumentai</h2>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          className="flex w-full items-start justify-between gap-3 text-left"
+          onClick={() => setNewEmployeeFormOpen((open) => !open)}
+          aria-expanded={newEmployeeFormOpen}
+        >
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="font-semibold">Naujo darbuotojo dokumentai</h2>
+              <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${newEmployeeFormOpen ? 'rotate-180' : ''}`} aria-hidden />
+            </div>
+            <p className="mt-1 text-xs text-slate-600">
+              Sukurti konfidencialumo susitarimą ir asmens duomenų sutikimą naujam darbuotojui.
+            </p>
+          </div>
+        </button>
+        {newEmployeeFormOpen && <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="text-sm">Vardas, pavardė<input className="mt-1 w-full rounded-md border p-2" value={name} onChange={(event) => setName(event.target.value)} /></label>
           <label className="text-sm">El. paštas<input type="email" className="mt-1 w-full rounded-md border p-2" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
           <label className="text-sm">Darbo sutarties Nr. {preparedFile ? '(nebūtina)' : ''}<input className="mt-1 w-full rounded-md border p-2" value={employmentContractNumber} onChange={(event) => setEmploymentContractNumber(event.target.value)} /></label>
@@ -388,14 +440,25 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
             <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={preparedIncludesAnnex} onChange={(event) => setPreparedIncludesAnnex(event.target.checked)} /> PDF yra ir susitarimas, ir konfidencialios informacijos sąrašo priedas</label>
             <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={preparedDetailsConfirmed} onChange={(event) => setPreparedDetailsConfirmed(event.target.checked)} /> Įkeltame PDF jau įrašyti darbuotojo adresas ir asmens kodas. Tutlio įkelto PDF papildomai nepildo.</label>
           </>}
-        </div>
-        <button disabled={busy || loading || !organizationId} onClick={() => void create()} className="mt-4 rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? 'Kuriama ir siunčiama…' : 'Sukurti du dokumentus'}</button>
+        </div>}
+        {newEmployeeFormOpen && (
+          <button disabled={busy || loading || !organizationId} onClick={() => void create()} className="mt-4 rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? 'Kuriama ir siunčiama…' : 'Sukurti du dokumentus'}</button>
+        )}
       </section>}
 
       {(loading || organizationId) && <section className="rounded-xl border border-slate-200 bg-white p-5">
         <div className="flex flex-wrap items-center gap-3">
           <input className="min-w-[220px] flex-1 rounded-md border p-2 text-sm" placeholder="Ieškoti darbuotojo" value={search} onChange={(event) => setSearch(event.target.value)} />
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={unsignedOnly} onChange={(event) => setUnsignedOnly(event.target.checked)} /> Nepasirašyti</label>
+          <button
+            type="button"
+            onClick={() => void exportStaffDocumentsZip()}
+            disabled={exportingZip || !visible.length}
+            className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm disabled:opacity-50"
+          >
+            <Download className="h-4 w-4" />
+            {exportingZip ? tr('school.exportingContractsZip') : tr('school.exportContractsZipByEmployee')}
+          </button>
           <button onClick={exportSummary} disabled={!visible.length} className="rounded-md border px-3 py-2 text-sm disabled:opacity-50">Atsisiųsti suvestinę CSV</button>
           {canEdit && <button onClick={() => void action('remind-unsigned')} disabled={busy} className="rounded-md border px-3 py-2 text-sm disabled:opacity-50">Priminti visiems nepasirašiusiems</button>}
         </div>

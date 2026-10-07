@@ -5,6 +5,7 @@ import { Clock, User, Users, AlertCircle } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import type { Session } from '@/lib/session-stats';
 import { sessionPaymentDisplayKind } from '@/lib/sessionPaymentDisplay';
+import { SchoolAttendanceMarkingLabel } from '@/components/SchoolAttendanceMarkingLabel';
 
 interface SessionListProps {
   sessions: Session[];
@@ -12,6 +13,7 @@ interface SessionListProps {
   showStudent?: boolean;
   showTutor?: boolean;
   showPaymentStatus?: boolean;
+  showAttendanceMarking?: boolean;
   onSessionClick?: (session: Session) => void;
 }
 
@@ -21,6 +23,7 @@ export function SessionList({
   showStudent = false,
   showTutor = false,
   showPaymentStatus = false,
+  showAttendanceMarking = false,
   onSessionClick,
 }: SessionListProps) {
   const { t, dateFnsLocale } = useTranslation();
@@ -80,6 +83,10 @@ export function SessionList({
 
               {session.topic && (
                 <p className="text-sm text-muted-foreground">{session.topic}</p>
+              )}
+
+              {showAttendanceMarking && (
+                <SchoolAttendanceMarkingLabel session={session} />
               )}
 
               {isCancelled && (

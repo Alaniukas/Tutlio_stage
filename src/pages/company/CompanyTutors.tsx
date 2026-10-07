@@ -50,6 +50,7 @@ import { isPlMarket } from '@/lib/market';
 import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
 import { meetingLinkFromTutorRows, meetingLinkWasPersisted, tutorMeetingLinkUpdatePatch } from '@/lib/meetingLink';
 import { buildTutorPayUpdatePatch } from '@/lib/orgTutorDefaultPay';
+import { schoolTutorActivityByTutorId } from '@/lib/schoolTutorActivity';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -73,6 +74,8 @@ interface Tutor {
   has_active_license?: boolean;
   /** Earliest accepted invite timestamp — used for school tutor list sorting. */
   joined_at?: string | null;
+  schoolLastActivityAt?: string | null;
+  schoolUnconfirmedAttendance?: number;
 }
 
 type SchoolTutorSort = 'alpha' | 'newest' | 'oldest';
@@ -791,7 +794,49 @@ export default function CompanyTutors() {
     }));
     if (generation !== loadDataGenerationRef.current) return;
 
-    setTutors(tutorsWithJoinedAt);
+    let tutorsForState = tutorsWithJoinedAt;
+    if (orgEntityType === 'school' && visibleTutors.length > 0) {
+      try {
+        const statsNow = schoolDate();
+        const monthStart = schoolDate(statsNow);
+        monthStart.setDate(1);
+        monthStart.setHours(0, 0, 0, 0);
+        const monthEnd = schoolDate(statsNow);
+        const tutorIds = visibleTutors.map((tutor) => tutor.id);
+        const sessionRows = await fetchAllRows<any>((from, to) => supabase
+          .from('sessions')
+          .select('id, tutor_id, class_group_id, start_time, end_time, status, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, no_show_reason, subjects(is_group), students!inner(organization_id)')
+          .in('tutor_id', tutorIds)
+          .eq('students.organization_id', adminRow.organization_id)
+          .gte('start_time', monthStart.toISOString())
+          .lte('start_time', monthEnd.toISOString())
+          .order('start_time')
+          .order('id')
+          .range(from, to));
+        const outcomeOptions = {
+          requireConfirmation: orgRequiresTutorStatusConfirmation(adminRow.organization_id, {
+            tutor_lesson_status_confirmation: hasFeature('tutor_lesson_status_confirmation'),
+          }),
+          countStoredCompleted: orgRequiresTutorStatusConfirmation(adminRow.organization_id, {
+            tutor_lesson_status_confirmation: hasFeature('tutor_lesson_status_confirmation'),
+          }),
+        };
+        const activityByTutor = schoolTutorActivityByTutorId(sessionRows, statsNow, outcomeOptions);
+        tutorsForState = tutorsWithJoinedAt.map((tutor) => {
+          const activity = activityByTutor.get(tutor.id);
+          if (!activity) return tutor;
+          return {
+            ...tutor,
+            schoolLastActivityAt: activity.lastActivityAt,
+            schoolUnconfirmedAttendance: activity.unconfirmedAttendance,
+          };
+        });
+      } catch (error) {
+        console.error('[CompanyTutors] school tutor activity load failed:', error);
+      }
+    }
+
+    setTutors(tutorsForState);
 
     const catalogOptions: { key: string; preset: SubjectPreset }[] = [];
     const rawTpl = (orgData as { org_subject_templates?: unknown } | null)?.org_subject_templates;
@@ -844,7 +889,7 @@ export default function CompanyTutors() {
     setCache(COMPANY_TUTORS_CACHE_KEY, {
       orgId: adminRow.organization_id,
       tutorLicenseCount: effectiveLicenseCount,
-      tutors: tutorsWithJoinedAt,
+      tutors: tutorsForState,
       invites: enriched,
     });
     } catch (err) {
@@ -1151,7 +1196,7 @@ export default function CompanyTutors() {
       id: r.id, tutor_id: r.tutor_id, org_subject_template_id: r.org_subject_template_id,
       price: Number(r.price), duration_minutes: r.duration_minutes,
     })));
-    setSelectedTutor({ ...tutorRow, subjects: subjects || [], sessionCount, earnings,
+    setSelectedTutor({ ...tutor, ...tutorRow, subjects: subjects || [], sessionCount, earnings,
       schoolKnownPayCount: schoolKnownPay?.length, schoolUnresolvedPayCount,
       schoolStatsPeriod: isSchoolView ? {
         start: format(oneYearAgo, 'yyyy-MM-dd'), end: format(schoolDate(statsNow), 'yyyy-MM-dd'),
@@ -1656,6 +1701,21 @@ export default function CompanyTutors() {
                       <TutorTeachingNotesBadge notes={tutor.teaching_notes} />
                     </div>
                     <p className="text-xs text-gray-500 truncate">{tutor.email}</p>
+                    {isSchoolView ? (
+                      <div className="mt-1 space-y-0.5 text-[11px] leading-snug text-gray-500">
+                        {(tutor.schoolUnconfirmedAttendance ?? 0) > 0 ? (
+                          <p className="font-medium text-amber-700">
+                            {t('school.tutors.unconfirmedMonth', { count: String(tutor.schoolUnconfirmedAttendance) })}
+                          </p>
+                        ) : null}
+                        <p>
+                          {t('school.tutors.lastActivity')}:{' '}
+                          {tutor.schoolLastActivityAt
+                            ? format(new Date(tutor.schoolLastActivityAt), 'yyyy-MM-dd HH:mm')
+                            : t('school.tutors.lastActivityNone')}
+                        </p>
+                      </div>
+                    ) : null}
                     {tutor.personal_meeting_link ? (
                       <p className="flex items-center gap-1 text-[11px] text-emerald-700 truncate mt-0.5">
                         <Link2 className="w-3 h-3 shrink-0" />
@@ -1959,6 +2019,21 @@ export default function CompanyTutors() {
                 <p className="text-xs text-gray-500">
                   {t('orgFinance.dateRange')}: {selectedTutor.schoolStatsPeriod.start} – {selectedTutor.schoolStatsPeriod.end}
                 </p>
+              )}
+              {isSchoolView && (
+                <div className="rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2 text-sm space-y-1">
+                  {(selectedTutor.schoolUnconfirmedAttendance ?? 0) > 0 ? (
+                    <p className="font-medium text-amber-700">
+                      {t('school.tutors.unconfirmedMonth', { count: String(selectedTutor.schoolUnconfirmedAttendance) })}
+                    </p>
+                  ) : null}
+                  <p className="text-gray-600">
+                    {t('school.tutors.lastActivity')}:{' '}
+                    {selectedTutor.schoolLastActivityAt
+                      ? format(new Date(selectedTutor.schoolLastActivityAt), 'yyyy-MM-dd HH:mm')
+                      : t('school.tutors.lastActivityNone')}
+                  </p>
+                </div>
               )}
               {isSchoolView && Boolean(selectedTutor.schoolUnresolvedPayCount) && (
                 <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">

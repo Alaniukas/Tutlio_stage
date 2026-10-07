@@ -631,4 +631,8 @@ export const DRAFT_LOCALE_ALANO_FALLBACK_KEYS = new Set<string>([
   'stats.unpaidPastHint',
   'stats.clickToFilter',
   'schoolsLanding.blogPost1Date',
+  'compStu.viewAllSessions',
+  'att.marking.system',
+  'att.marking.teacher',
+  'att.marking.admin',
 ]);

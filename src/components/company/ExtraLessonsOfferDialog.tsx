@@ -120,6 +120,8 @@ export default function ExtraLessonsOfferDialog(props: {
     contractNumber: string;
     emailSent?: boolean;
     emailTo?: string | null;
+    draft?: boolean;
+    pdfReady?: boolean;
   }) => void;
 }) {
   const { t } = useTranslation();
@@ -265,7 +267,7 @@ export default function ExtraLessonsOfferDialog(props: {
   const previewMonthly = indicativeMonthlyPrice(Number(baseLessons) || 0, Number(unitPrice) || 0);
   const scheduleLabel = useMemo(() => formatScheduleLabel(slots), [slots]);
 
-  const submit = async () => {
+  const submitOffer = async (send: boolean) => {
     setBusy(true);
     setError(null);
     const group = props.groups.find((g) => g.id === groupId);
@@ -296,11 +298,24 @@ export default function ExtraLessonsOfferDialog(props: {
         body: JSON.stringify({
           student_id: studentId,
           ...order,
-          send: true,
+          send,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (!send && data.contractId) {
+          props.onCreated({
+            acceptUrl: data.acceptUrl,
+            contractNumber: data.contractNumber,
+            emailSent: false,
+            emailTo: null,
+            draft: true,
+            pdfReady: data.pdfReady === true,
+          });
+          props.onOpenChange(false);
+          setBusy(false);
+          return;
+        }
         setError(
           data.code === EXTRA_LESSONS_PDF_FAILED_CODE || data.code === 'missing_payer_email'
             ? (data.code === EXTRA_LESSONS_PDF_FAILED_CODE ? t('school.extra.pdfFailed') : t('school.extra.needPayerEmail'))
@@ -314,6 +329,8 @@ export default function ExtraLessonsOfferDialog(props: {
         contractNumber: data.contractNumber,
         emailSent: data.emailSent === true,
         emailTo: data.emailTo || null,
+        draft: send === false || data.draft === true,
+        pdfReady: data.pdfReady !== false,
       });
       props.onOpenChange(false);
     } catch {
@@ -495,9 +512,16 @@ export default function ExtraLessonsOfferDialog(props: {
           <p className="text-sm text-gray-600">Orientacinė mėnesio kaina: <strong>{previewMonthly.toFixed(2)} €</strong></p>
           {busy && <p className="text-sm text-gray-600">{t('school.extra.preparing')}</p>}
         </div>
-        <DialogFooter>
+        <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
           <Button variant="outline" onClick={() => props.onOpenChange(false)} disabled={busy}>Atšaukti</Button>
-          <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={busy || !studentId || !(Number(unitPrice) > 0)} onClick={submit}>
+          <Button
+            variant="outline"
+            disabled={busy || !studentId || !(Number(unitPrice) > 0)}
+            onClick={() => { void submitOffer(false); }}
+          >
+            {busy ? 'Ruošiama…' : t('school.extra.saveDraft')}
+          </Button>
+          <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={busy || !studentId || !(Number(unitPrice) > 0)} onClick={() => { void submitOffer(true); }}>
             {busy ? 'Ruošiama…' : 'Siųsti tėvams'}
           </Button>
         </DialogFooter>

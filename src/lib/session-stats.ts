@@ -17,6 +17,8 @@ export interface Session {
   student_joined_at?: string | null;
   tutor_joined_at?: string | null;
   status_confirmed_at?: string | null;
+  status_confirmed_by?: string | null;
+  no_show_reason?: string | null;
   student?: {
     full_name: string;
     email?: string;

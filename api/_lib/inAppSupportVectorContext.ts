@@ -3,6 +3,7 @@ import { openai } from '@ai-sdk/openai';
 import { embed } from 'ai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { InAppSupportCustomerContext } from './inAppSupportCustomerContext.js';
+import { buildSupportMenuLabels } from '../../src/lib/supportNavigationLanguage.js';
 import { deployedInAppSupportGuides } from './inAppSupportKnowledgeDocuments.js';
 
 export const IN_APP_SUPPORT_EMBEDDING_MODEL = 'text-embedding-3-small';
@@ -36,8 +37,16 @@ function cleanRetrievedRows(value: unknown): string[] {
 export function renderInAppSupportRetrievedContext(
   customer: InAppSupportCustomerContext,
   retrieved: Pick<InAppSupportRetrievedContext, 'knowledge' | 'memories'>,
+  locale = 'en',
 ): string {
-  const sections = [customer.functionContext];
+  const sections = [
+    customer.functionContext,
+    buildSupportMenuLabels({
+      portal: customer.portal,
+      entityType: customer.entityType,
+      locale,
+    }),
+  ];
   const deployedGuides = deployedInAppSupportGuides(customer);
   if (deployedGuides.length > 0) {
     sections.push([

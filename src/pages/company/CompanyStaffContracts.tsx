@@ -18,7 +18,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Plus, FileText, Send, Trash2, PenLine, LockKeyhole } from 'lucide-react';
+import { Plus, FileText, Send, Trash2, PenLine, LockKeyhole, Download } from 'lucide-react';
+import { downloadSchoolContractsZip } from '@/lib/schoolContractsZipExport';
 import { useTranslation } from '@/lib/i18n';
 import { schoolContractPdfStoragePath } from '@/lib/schoolContractPdfPath';
 import { uploadContractFile } from '@/lib/contractStorage';
@@ -93,6 +94,7 @@ export default function CompanyStaffContracts(props: {
   const [selectedTeacherId, setSelectedTeacherId] = useState('');
   const [teacherOptions, setTeacherOptions] = useState<TeacherContractOption[]>(availableTeachers || []);
   const [teachersLoading, setTeachersLoading] = useState(false);
+  const [exportingZip, setExportingZip] = useState(false);
 
   useEffect(() => {
     if (availableTeachers) {
@@ -208,6 +210,36 @@ export default function CompanyStaffContracts(props: {
     setInviteOpen(contract);
   };
 
+  const exportTeacherContractsZip = async () => {
+    if (!contracts.length) return;
+    setExportingZip(true);
+    try {
+      const result = await downloadSchoolContractsZip(
+        { teacherContractIds: contracts.map((contract) => contract.id) },
+        { authHeaders: await authHeaders(), scope: 'employees' },
+      );
+      if (result.downloaded === 0) {
+        onToast(tr('school.contractZipExportEmpty'), 'error');
+        return;
+      }
+      if (result.failedIds.length > 0) {
+        onToast(tr('school.contractZipExportPartial', {
+          downloaded: String(result.downloaded),
+          failed: String(result.failedIds.length),
+        }), 'success');
+        return;
+      }
+      onToast(tr('school.contractZipExportDoneEmployees', {
+        employees: String(result.employeeCount),
+        files: String(result.downloaded),
+      }), 'success');
+    } catch (error: any) {
+      onToast(error?.message || tr('school.contractZipExportFail'), 'error');
+    } finally {
+      setExportingZip(false);
+    }
+  };
+
   const sendInvite = async () => {
     const contract = inviteOpen;
     if (!contract) return;
@@ -250,9 +282,20 @@ export default function CompanyStaffContracts(props: {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-sm text-gray-600 max-w-2xl">{tr('school.teacherContractsHint')}</p>
-        <Button onClick={() => { resetCreate(); setCreateOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
-          <Plus className="w-4 h-4 mr-2" /> {tr('school.newTeacherContract')}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void exportTeacherContractsZip()}
+            disabled={exportingZip || !contracts.length}
+          >
+            <Download className="w-4 h-4 mr-2" />
+            {exportingZip ? tr('school.exportingContractsZip') : tr('school.exportContractsZipByEmployee')}
+          </Button>
+          <Button onClick={() => { resetCreate(); setCreateOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
+            <Plus className="w-4 h-4 mr-2" /> {tr('school.newTeacherContract')}
+          </Button>
+        </div>
       </div>
       <div className="flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-4 text-sm text-emerald-950">
         <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />

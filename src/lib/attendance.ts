@@ -74,8 +74,11 @@ export function isAttendanceFlagged(
   session: AttendanceReviewSession,
   now: Date = new Date(),
 ): boolean {
+  if (session.status_confirmed_at) return false;
   if (!(session.meeting_link || '').trim()) return false;
-  if (session.status === 'cancelled' || session.status === 'no_show') return false;
+  if (session.status === 'cancelled' || session.status === 'no_show' || session.status === 'completed') {
+    return false;
+  }
   return deriveAttendance(session, now).flagged;
 }
 

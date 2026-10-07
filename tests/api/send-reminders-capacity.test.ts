@@ -514,6 +514,7 @@ describe('session reminder capacity behavior', () => {
   });
 
   it('adds the school homework and recordings links to the student reminder', async () => {
+    vi.stubEnv('APP_URL', 'https://tutlio.lt');
     const session = futureSession();
     session.student.organization_id = 'school-1';
     session.tutor.organization_id = 'school-1';

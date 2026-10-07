@@ -161,8 +161,9 @@ describe('school_monthly_invoice', () => {
     const {html}=await sendEmail('school_monthly_invoice',{
       schoolName:'Demo Mokykla',studentName:'Vaikas',periodLabel:'2026 m. spalis',
       invoiceAmount:'84.00',creditAppliedAmount:'12.00',totalAmount:'72.00',dueDate:'2026-11-07',payUrl:'https://example.com/pay',
+      creditSources:[{monthLabel:'2026 m. rugpjūčio',amount:'12.00'}],
     });
-    expect(html).toContain('Užskaityta ankstesnė permoka');
+    expect(html).toContain('Permoka iš 2026 m. rugpjūčio');
     expect(html).toContain('84'); expect(html).toContain('12'); expect(html).toContain('Apmokėti 72');
   });
   it('explains full credit settlement without requesting another payment',async()=>{

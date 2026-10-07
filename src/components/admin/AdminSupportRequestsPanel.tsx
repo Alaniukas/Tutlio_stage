@@ -426,7 +426,7 @@ export default function AdminSupportRequestsPanel({
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold', selected.category === 'bug' ? 'border-rose-500/20 bg-rose-500/10 text-rose-300' : 'border-amber-500/20 bg-amber-500/10 text-amber-300')}>
                       {selected.category === 'bug' ? <Bug className="h-3.5 w-3.5" /> : <Lightbulb className="h-3.5 w-3.5" />}
-                      {selected.category === 'bug' ? 'Klaida' : 'Funkcijos pasiūlymas'}
+                      {selected.category === 'bug' ? 'Klaida' : 'Pasiūlymas'}
                     </span>
                     <StatusBadge status={selected.status} category={selected.category} />
                     <span className="font-mono text-[11px] text-slate-500">{reference(selected.id)}</span>

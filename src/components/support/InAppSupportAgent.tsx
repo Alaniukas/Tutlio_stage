@@ -20,7 +20,9 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useBodyScrollLock, useVisualViewport } from '@/hooks/useVisualViewport';
+import { useVisualViewport } from '@/hooks/useVisualViewport';
+import { useUser } from '@/contexts/UserContext';
+import { resolveAccessToken } from '@/lib/authSession';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import {
@@ -42,6 +44,10 @@ import {
 import { readInAppSupportConversationResponse } from '@/lib/inAppSupportStream';
 import { getSupportDiagnostics } from '@/lib/supportDiagnostics';
 import SupportRobotIcon from './SupportRobotIcon';
+import {
+  IN_APP_SUPPORT_PANEL_WIDTH_PX,
+  inAppSupportLauncherInsets,
+} from '@/lib/inAppSupportLauncher';
 import type { SupportPopoverAnchor } from './InAppSupportProvider';
 
 type Stage = 'category' | 'chat' | 'success';
@@ -107,7 +113,8 @@ type Copy = {
   page: string;
   privacy: string;
   privacyShort: string;
-  successTitle: string;
+  successTitleBug: string;
+  successTitleFeature: string;
   successBody: string;
   trackStatus: string;
   myTickets: string;
@@ -135,8 +142,7 @@ type Copy = {
   sendCommandHint: string;
   sendCommandError: string;
   emailNotice: string;
-  sendInfoLabel: string;
-  privacyInfoLabel: string;
+  helpInfoLabel: string;
   notificationError: string;
   clarificationPlaceholder: string;
   clarificationAction: string;
@@ -193,7 +199,8 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     page: 'Current page',
     privacy: 'Your account, page, browser, screen size, recent safe clicks and navigation, and failed request metadata are attached automatically. Support may inspect matching server errors. A short ticket summary goes to the private Trello board. Automatic diagnostics do not record form values or screen contents. Never include passwords, login codes, or full payment-card details.',
     privacyShort: 'Account, device, recent safe actions, and failed requests are added automatically. Never share passwords or login codes.',
-    successTitle: 'Your ticket has been registered',
+    successTitleBug: 'Your bug report has been registered',
+    successTitleFeature: 'Your feature request has been registered',
     successBody: 'You can track its status here. We will email you when the status or deadline changes.',
     trackStatus: 'Track ticket status',
     myTickets: 'My tickets',
@@ -221,8 +228,7 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     sendCommandHint: 'A clear send command is required. “Yes” by itself will not submit the report.',
     sendCommandError: 'Please type “send it” or use the Send button when you want me to notify the team.',
     emailNotice: 'Sending registers your ticket, adds it to the team backlog, and emails you a link to track its status.',
-    sendInfoLabel: 'How sending works',
-    privacyInfoLabel: 'Privacy and automatic context',
+    helpInfoLabel: 'Help, privacy, and sending',
     notificationError: 'Your report was saved, but I could not notify the team by email yet. Please send it again so I can retry the notification safely.',
     clarificationPlaceholder: 'Answer the missing detail here…',
     clarificationAction: 'Add detail and check again',
@@ -275,12 +281,13 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     sectionImages: 'Ekrano nuotraukos',
     automaticContext: 'Pridedama automatiškai',
     page: 'Dabartinis puslapis',
-    privacy: 'Automatiškai pridedama paskyra, puslapis, naršyklė, ekrano dydis, paskutiniai saugūs paspaudimai ir puslapių perėjimai bei nepavykusių užklausų duomenys. Komanda gali peržiūrėti susijusias serverio klaidas. Trumpa ticketo santrauka patenka į privačią Trello lentą. Automatinė diagnostika nerenka formų reikšmių ar ekrano turinio. Nerašykite slaptažodžių, prisijungimo kodų ar visų kortelės duomenų.',
+    privacy: 'Automatiškai pridedama paskyra, puslapis, naršyklė, ekrano dydis, paskutiniai saugūs paspaudimai ir puslapių perėjimai bei nepavykusių užklausų duomenys. Komanda gali peržiūrėti susijusias serverio klaidas. Trumpa pranešimo santrauka patenka į privačią Trello lentą. Automatinė diagnostika nerenka formų reikšmių ar ekrano turinio. Nerašykite slaptažodžių, prisijungimo kodų ar visų kortelės duomenų.',
     privacyShort: 'Automatiškai pridedami paskyros, įrenginio, saugių veiksmų ir nepavykusių užklausų duomenys. Nesidalinkite slaptažodžiais ar prisijungimo kodais.',
-    successTitle: 'Jūsų ticketas užregistruotas',
-    successBody: 'Jo būseną galite stebėti čia. Pakeitus būseną ar terminą, informuosime el. paštu.',
-    trackStatus: 'Stebėti ticketo būseną',
-    myTickets: 'Mano ticketai',
+    successTitleBug: 'Klaida užregistruota',
+    successTitleFeature: 'Pasiūlymas užregistruotas',
+    successBody: 'Būseną galite stebėti čia. Pakeitus būseną ar terminą, informuosime el. paštu.',
+    trackStatus: 'Stebėti būseną',
+    myTickets: 'Mano klaidos ir pasiūlymai',
     reference: 'Numeris',
     done: 'Baigti',
     requiredError: 'Prieš tęsdami pridėkite šiek tiek daugiau informacijos.',
@@ -304,9 +311,8 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     sendCommandPlaceholder: 'Patvirtinimui parašykite „siųsti“',
     sendCommandHint: 'Reikalinga aiški siuntimo komanda. Vien žodis „taip“ pranešimo neišsiųs.',
     sendCommandError: 'Kai norėsite informuoti komandą, parašykite „siųsti“ arba paspauskite siuntimo mygtuką.',
-    emailNotice: 'Išsiuntus ticketas užregistruojamas, patenka į komandos darbų sąrašą, o jūs gaunate el. laišką su būsenos nuoroda.',
-    sendInfoLabel: 'Kaip veikia siuntimas',
-    privacyInfoLabel: 'Privatumas ir automatinis kontekstas',
+    emailNotice: 'Išsiuntus pranešimas užregistruojamas, patenka į komandos darbų sąrašą, o jūs gaunate el. laišką su būsenos nuoroda.',
+    helpInfoLabel: 'Pagalba, privatumas ir siuntimas',
     notificationError: 'Pranešimas išsaugotas, bet komandos dar nepavyko informuoti el. paštu. Išsiųskite dar kartą, kad galėčiau saugiai pakartoti pranešimą.',
     clarificationPlaceholder: 'Čia atsakykite į trūkstamą klausimą…',
     clarificationAction: 'Pridėti informaciją ir tikrinti dar kartą',
@@ -361,7 +367,8 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     page: 'Bieżąca strona',
     privacy: 'Automatycznie dołączamy konto, stronę, przeglądarkę, rozmiar ekranu, ostatnie bezpieczne kliknięcia i przejścia oraz dane o nieudanych żądaniach. Zespół może sprawdzić powiązane błędy serwera. Krótkie podsumowanie zgłoszenia trafia na prywatną tablicę Trello. Automatyczna diagnostyka nie zapisuje wartości formularzy ani zawartości ekranu. Nie wpisuj haseł, kodów logowania ani pełnych danych karty.',
     privacyShort: 'Automatycznie dodajemy dane konta, urządzenia, bezpiecznych działań i nieudanych żądań. Nie udostępniaj haseł ani kodów logowania.',
-    successTitle: 'Twoje zgłoszenie zostało zarejestrowane',
+    successTitleBug: 'Zgłoszenie błędu zostało zarejestrowane',
+    successTitleFeature: 'Propozycja funkcji została zarejestrowana',
     successBody: 'Możesz tu śledzić jego status. Wyślemy e-mail, gdy status lub termin się zmieni.',
     trackStatus: 'Śledź status zgłoszenia',
     myTickets: 'Moje zgłoszenia',
@@ -389,8 +396,7 @@ const COPY: Record<'en' | 'lt' | 'pl', Copy> = {
     sendCommandHint: 'Wymagane jest jednoznaczne polecenie wysłania. Samo „tak” nie wyśle zgłoszenia.',
     sendCommandError: 'Gdy zechcesz powiadomić zespół, wpisz „wyślij” albo użyj przycisku wysyłania.',
     emailNotice: 'Wysłanie zarejestruje zgłoszenie, doda je do listy zadań zespołu i wyśle Ci e-mail z linkiem do śledzenia statusu.',
-    sendInfoLabel: 'Jak działa wysyłanie',
-    privacyInfoLabel: 'Prywatność i kontekst automatyczny',
+    helpInfoLabel: 'Pomoc, prywatność i wysyłanie',
     notificationError: 'Zgłoszenie zostało zapisane, ale nie udało się jeszcze powiadomić zespołu e-mailem. Wyślij je ponownie, abym mógł bezpiecznie ponowić powiadomienie.',
     clarificationPlaceholder: 'Odpowiedz tutaj na brakujące pytanie…',
     clarificationAction: 'Dodaj szczegół i sprawdź ponownie',
@@ -489,6 +495,7 @@ export function InAppSupportPageContent({
   compact?: boolean;
 }) {
   const location = useLocation();
+  const { user } = useUser();
   const { locale } = useTranslation();
   const language = locale === 'lt' || locale === 'pl' ? locale : 'en';
   const copy = COPY[language];
@@ -598,9 +605,13 @@ export function InAppSupportPageContent({
     setStreamingReply('');
     setIntakeLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      let accessToken = await resolveAccessToken();
+      if (!accessToken && user) {
+        await new Promise((resolve) => { window.setTimeout(resolve, 120); });
+        accessToken = await resolveAccessToken();
+      }
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
       else if (demoMode) headers['x-in-app-support-preview'] = '1';
       else throw new Error('Missing authenticated session.');
 
@@ -629,7 +640,7 @@ export function InAppSupportPageContent({
           locale,
         }),
       });
-      const next = await readInAppSupportConversationResponse(response, setStreamingReply);
+      const next = await readInAppSupportConversationResponse(response, setStreamingReply, { locale });
       const nextDraft: Draft = {
         ...draft,
         title: next.title,
@@ -660,7 +671,8 @@ export function InAppSupportPageContent({
         );
       }
     } catch (conversationError) {
-      console.warn('[in-app-support-agent] Conversation unavailable:', conversationError);
+      const detail = conversationError instanceof Error ? conversationError.message : String(conversationError);
+      console.warn('[in-app-support-agent] Conversation unavailable:', detail, conversationError);
       const unavailable = language === 'lt'
         ? 'Atsiprašau, šiuo metu negaliu apdoroti šios žinutės. Jūsų tekstas liko pokalbyje - po akimirkos pabandykite išsiųsti jį dar kartą.'
         : language === 'pl'
@@ -815,7 +827,9 @@ export function InAppSupportPageContent({
                 <div className="grid h-20 w-20 place-items-center rounded-[28px] bg-emerald-100 text-emerald-700 shadow-sm">
                   <CheckCircle2 className="h-10 w-10" />
                 </div>
-                <h3 className="mt-6 text-xl font-black text-slate-950">{copy.successTitle}</h3>
+                <h3 className="mt-6 text-xl font-black text-slate-950">
+                  {category === 'feature' ? copy.successTitleFeature : copy.successTitleBug}
+                </h3>
                 <p className="mt-2 max-w-md text-sm leading-6 text-slate-600">{copy.successBody}</p>
                 <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-3">
                   <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-indigo-500">{copy.reference}</p>
@@ -998,10 +1012,13 @@ export function InAppSupportPageContent({
                   {showComposer && !agentReady && <span className="mr-1 text-[10px] text-slate-400">Enter · Shift+Enter</span>}
                   <TooltipProvider delayDuration={100}>
                     <SupportInfoTooltip
-                      label={copy.sendInfoLabel}
-                      content={`${inAppSupportSendGuidance(locale)}${agentReady ? ` ${copy.sendCommandHint} ${copy.emailNotice}` : ''}`}
+                      label={copy.helpInfoLabel}
+                      content={[
+                        inAppSupportSendGuidance(locale),
+                        agentReady ? `${copy.sendCommandHint} ${copy.emailNotice}` : '',
+                        copy.privacy,
+                      ].filter(Boolean).join(' ')}
                     />
-                    <SupportInfoTooltip label={copy.privacyInfoLabel} content={copy.privacy} tone="emerald" />
                   </TooltipProvider>
                 </div>
               </div>
@@ -1038,6 +1055,7 @@ export function InAppSupportPreview() {
         <InAppSupportPopover
           anchor={{ left: 16, right: 240, top: 812, bottom: 856 }}
           demoMode
+          pathname="/finance"
           sourcePath="/finance?tab=invoices"
           onClose={() => setOpen(false)}
         />
@@ -1048,28 +1066,23 @@ export function InAppSupportPreview() {
 
 export function InAppSupportPopover({
   open = true,
-  anchor,
+  anchor: _anchor,
   demoMode = false,
   sourcePath,
+  pathname = '/',
   onClose,
 }: {
   open?: boolean;
   anchor: SupportPopoverAnchor | null;
   demoMode?: boolean;
   sourcePath?: string;
+  pathname?: string;
   onClose: () => void;
 }) {
-  const width = 560;
   const visualViewport = useVisualViewport();
-  const viewportWidth = visualViewport.width;
-  const viewportHeight = visualViewport.height;
-  const desktop = viewportWidth >= 1024;
-  const left = desktop
-    ? Math.max(16, Math.min((anchor?.right ?? 16) + 12, viewportWidth - width - 16))
-    : 8;
-  const bottom = desktop ? Math.max(16, viewportHeight - (anchor?.bottom ?? viewportHeight - 16)) : 8;
-
-  useBodyScrollLock(open && !desktop);
+  const viewportWidth = Math.max(visualViewport.width, 320);
+  const panelWidth = Math.min(IN_APP_SUPPORT_PANEL_WIDTH_PX, viewportWidth - 16);
+  const launcherInsets = inAppSupportLauncherInsets(pathname);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1081,22 +1094,28 @@ export function InAppSupportPopover({
 
   return (
     <div
-      className={cn('fixed inset-0 z-[220]', !open && 'hidden')}
+      className={cn(
+        'pointer-events-none fixed inset-0 z-[220]',
+        !open && 'invisible',
+      )}
       role="dialog"
-      aria-modal="true"
+      aria-modal="false"
       aria-hidden={!open}
     >
       <div className="absolute inset-0 bg-transparent" data-testid="support-agent-backdrop" aria-hidden="true" />
       <div
+        data-testid="in-app-support-panel"
         className={cn(
-          'absolute overflow-hidden bg-white',
-          desktop
-            ? 'h-[min(780px,calc(100dvh-2rem))] w-[560px] rounded-2xl shadow-[0_28px_90px_-24px_rgba(15,23,42,0.55)]'
-            : 'inset-x-0 top-0 h-dvh w-screen max-w-[100vw] rounded-none shadow-none',
+          'pointer-events-auto absolute overflow-hidden rounded-2xl bg-white shadow-[0_24px_70px_-20px_rgba(15,23,42,0.45)]',
+          'right-2 sm:right-4',
+          !open && 'pointer-events-none',
         )}
-        style={desktop
-          ? { left, bottom }
-          : { top: visualViewport.offsetTop, height: visualViewport.height }}
+        style={{
+          width: panelWidth,
+          bottom: launcherInsets.panelBottom,
+          maxHeight: launcherInsets.panelMaxHeight,
+          height: launcherInsets.panelMaxHeight,
+        }}
       >
         <InAppSupportPageContent
           compact

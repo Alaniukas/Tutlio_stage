@@ -41,6 +41,8 @@ export type SchoolInvoiceReviewSession = {
   endTime: string;
   status: string;
   statusConfirmedAt: string | null;
+  statusConfirmedBy: string | null;
+  tutorId: string | null;
   subjectName: string;
   tutorName: string;
   unitPriceEur: number;
@@ -491,7 +493,7 @@ export function schoolInvoiceContractReason(
 }
 
 export function reviewSchoolInvoiceSession(
-  session: CanonicalBillableSession & SchoolInvoiceActivity & { tutor?: any; price?: number | null },
+  session: CanonicalBillableSession & SchoolInvoiceActivity & { tutor_id?: string | null; tutor?: any; price?: number | null },
   contracts: SchoolInvoiceContractWindow[],
   decision: SchoolSessionBillingDecision | undefined,
   alreadyInvoiced: boolean,
@@ -507,6 +509,8 @@ export function reviewSchoolInvoiceSession(
       endTime: session.end_time || '',
       status: session.status,
       statusConfirmedAt: session.status_confirmed_at || null,
+      statusConfirmedBy: session.status_confirmed_by || null,
+      tutorId: session.tutor_id || null,
       subjectName: schoolInvoiceSessionActivityName(session, contracts, studentFullName),
       tutorName: String(tutor?.full_name || 'mokytojas'),
       unitPriceEur: 0,
@@ -533,6 +537,8 @@ export function reviewSchoolInvoiceSession(
     endTime: session.end_time || '',
     status: session.status,
     statusConfirmedAt: session.status_confirmed_at || null,
+    statusConfirmedBy: session.status_confirmed_by || null,
+    tutorId: session.tutor_id || null,
     subjectName: schoolInvoiceSessionActivityName(session, contracts, studentFullName),
     tutorName: String(tutor?.full_name || 'mokytojas'),
     unitPriceEur: resolveSchoolInvoiceUnitPrice(session, contracts, studentFullName),

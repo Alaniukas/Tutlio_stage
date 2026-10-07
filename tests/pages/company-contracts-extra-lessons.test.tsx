@@ -78,9 +78,9 @@ vi.mock('@/lib/dataCache', () => ({
   invalidateCache: vi.fn(),
 }));
 
+vi.mock('@/lib/authSession', () => ({ resolveAuthUser: vi.fn(async () => ({ id: 'admin-1' })) }));
 vi.mock('@/lib/supabase', () => ({
   supabase: {
-    auth: { getUser: vi.fn(async () => ({ data: { user: null } })) },
     from: testState.from,
   },
 }));
@@ -98,14 +98,23 @@ describe('CompanyContracts extra-lessons list', () => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     window.HTMLElement.prototype.hasPointerCapture = vi.fn();
     window.HTMLElement.prototype.releasePointerCapture = vi.fn();
-    testState.from.mockImplementation(() => {
-      const query: Record<string, unknown> = {};
-      const self = () => query;
-      query.select = self;
-      query.eq = self;
-      query.is = self;
-      query.order = () => Promise.resolve({ data: testState.cache.contractSummaries, error: null });
-      query.in = () => Promise.resolve({ data: extraContractsFixture(), error: null });
+    testState.from.mockImplementation((table: string) => {
+      const query: any = {
+        select: () => query,
+        eq: () => query,
+        is: () => query,
+        in: () => query,
+        order: () => query,
+        then: (resolve: any, reject: any) => {
+          if (table === 'school_contracts') {
+            return Promise.resolve({ data: extraContractsFixture(), error: null }).then(resolve, reject);
+          }
+          if (table === 'school_discount_agreements') {
+            return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+          }
+          return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+        },
+      };
       return query;
     });
     testState.cache.contractSummaries = extraContractsFixture();

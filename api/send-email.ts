@@ -2674,6 +2674,7 @@ function schoolMonthlyInvoice(d: any, locale: Locale) {
   const extraLessons = Number(d.extraLessons || 0);
   const fullyDiscounted = Number(d.totalAmount || 0) === 0 && Number(d.discountAmount || 0) > 0;
   const creditApplied = Number(d.creditAppliedAmount || 0);
+  const creditSources = Array.isArray(d.creditSources) ? d.creditSources : [];
   const fullyCredited = Number(d.totalAmount || 0) === 0 && creditApplied > 0;
   const detailedLines = Array.isArray(d.lines) ? d.lines : [];
   const detailRows = detailedLines.map((line: any) => {
@@ -2699,7 +2700,12 @@ function schoolMonthlyInvoice(d: any, locale: Locale) {
       ? td('Pradinė suma', emailMoney(d.subtotalAmount, locale)) + td('Nuolaida', `<span style="color:#047857;">-${emailMoney(d.discountAmount, locale)}</span>`)
       : '',
     creditApplied > 0 ? td('Sąskaitos suma', emailMoney(d.invoiceAmount, locale))
-      + td('Užskaityta ankstesnė permoka', `<span style="color:#047857;">-${emailMoney(creditApplied, locale)}</span>`) : '',
+      + (creditSources.length
+        ? creditSources.map((source: any) => td(
+          source.monthLabel ? `Permoka iš ${source.monthLabel}` : 'Užskaityta ankstesnė permoka',
+          `<span style="color:#047857;">-${emailMoney(source.amount, locale)}</span>`,
+        )).join('')
+        : td('Užskaityta ankstesnė permoka', `<span style="color:#047857;">-${emailMoney(creditApplied, locale)}</span>`)) : '',
     td('Mokėtina suma', `<strong>${emailMoney(d.totalAmount, locale)}</strong>`),
     fullyDiscounted || fullyCredited ? '' : td('Apmokėti iki', String(d.dueDate || '—'), false),
   ].join('');
@@ -2777,6 +2783,43 @@ function schoolContractExtraTerminated(d: any, locale: Locale) {
           </table>
         </div>
       </div>${footerFor(locale)}`, locale),
+  };
+}
+
+function schoolGroupMinimumRiskWarning(d: any, _locale: Locale) {
+  const groupsUrl = String(d.groupsUrl || `${getAppUrl().replace(/\/$/, '')}/school/groups`).trim();
+  const calendarUrl = String(d.calendarUrl || `${getAppUrl().replace(/\/$/, '')}/calendar`).trim();
+  const actionUrl = d.isTutorRecipient ? calendarUrl : groupsUrl;
+  const actionLabel = d.isTutorRecipient ? 'Atidaryti kalendorių' : 'Peržiūrėti grupes';
+  return {
+    subject: `Grupė gali neįvykti: ${d.groupName || 'grupė'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#d97706', '#b45309')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Grupė gali neįvykti</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki${d.tutorName && d.isTutorRecipient ? `, ${esc(d.tutorName)}` : ''},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.65;">
+          Grupės <strong>${esc(d.groupName || '')}</strong> artėjantis užsiėmimas gali neįvykti, nes dar neužpildytas minimalus aktyvių mokinių skaičius.
+          Kol trūksta pasirašytų sutarčių, pamoka gali būti atšaukta arba nevykti.
+        </p>
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${td('Grupė', esc(d.groupName || '—'))}
+            ${td('Artėjantis užsiėmimas', esc(d.occurrenceLabel || '—'))}
+            ${td('Į minimumą įskaičiuojama', `${esc(d.eligibleCount ?? '—')} / ${esc(d.minimumStudentCount ?? 3)}`)}
+          </table>
+        </div>
+        <p style="color:#6b7280; font-size:13px; line-height:1.6;">
+          Patikrinkite grupės sudėtį ir sutarčių būsenas prieš ruošiantis užsiėmimui.
+        </p>
+        <div style="text-align:center; margin-top:20px;">
+          ${outlookEmailButton(actionUrl, actionLabel, '#d97706', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+        </div>
+      </div>${footerFor('lt')}`,
+      'lt',
+    ),
   };
 }
 
@@ -3941,6 +3984,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'school_monthly_invoice': emailContent = schoolMonthlyInvoice(data, locale); break;
       case 'school_contract_extra_withdrawn': emailContent = schoolContractExtraWithdrawn(data, locale); break;
       case 'school_contract_extra_terminated': emailContent = schoolContractExtraTerminated(data, locale); break;
+      case 'school_group_minimum_risk_warning': emailContent = schoolGroupMinimumRiskWarning(data, locale); break;
       case 'school_group_suspended': emailContent = schoolGroupSuspended(data, locale); break;
       case 'school_contract_fee_due': emailContent = schoolContractFeeDue(data, locale); break;
       case 'school_installment_request': emailContent = schoolInstallmentRequest(data, locale); break;

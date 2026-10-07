@@ -81,10 +81,40 @@ describe('in-app support AI conversation stream', () => {
     expect(events.at(-1).conversation).toMatchObject({ responseKind, reply: output.reply, ready: false, missingTopics: [] });
     expect(events.at(-1).conversation.reply).not.toContain('?');
   });
+  it('works when only GEMINI_API_KEY is configured', async () => {
+    vi.stubEnv('OPENAI_API_KEY', '');
+    vi.stubEnv('GEMINI_API_KEY', 'test-gemini-key');
+    const { res, result } = response();
+    await handler({
+      method: 'POST',
+      headers: { 'x-in-app-support-preview': '1' },
+      body: {
+        mode: 'conversation',
+        submitRequested: false,
+        category: 'feature',
+        latestMessage: 'Where are student contacts?',
+        conversation: [
+          { role: 'assistant', content: 'What would you like to improve?' },
+          { role: 'user', content: 'Where are student contacts?' },
+        ],
+        draft: completedConversation,
+        attachmentNames: [],
+        page: '/students',
+        locale: 'en',
+      },
+    } as any, res as any);
+
+    expect(result.statusCode).toBe(200);
+    expect(mocks.streamText).toHaveBeenCalledWith(expect.objectContaining({
+      model: expect.anything(),
+    }));
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv('NODE_ENV', 'development');
     vi.stubEnv('VERCEL_ENV', 'development');
+    vi.stubEnv('GEMINI_API_KEY', '');
     vi.stubEnv('OPENAI_API_KEY', 'test-key');
     mocks.streamText.mockReturnValue({
       partialOutputStream: (async function* () {
@@ -193,6 +223,54 @@ describe('in-app support AI conversation stream', () => {
         missingTopics: ['actualOutcome'],
       },
     });
+  });
+
+  it('falls back to bundled student-contact guidance when the model turn fails', async () => {
+    mocks.streamText.mockReturnValueOnce({
+      partialOutputStream: (async function* () {})(),
+      output: Promise.reject(new Error('Invalid AI conversation output.')),
+    });
+
+    const { res, result } = response();
+    await handler({
+      method: 'POST',
+      headers: { 'x-in-app-support-preview': '1' },
+      body: {
+        mode: 'conversation',
+        submitRequested: false,
+        category: 'feature',
+        latestMessage: 'kur galiu surasti savo mokiniu kontaktus?',
+        conversation: [
+          { role: 'assistant', content: 'Ką norėtumėte patobulinti?' },
+          { role: 'user', content: 'kur galiu surasti savo mokiniu kontaktus?' },
+        ],
+        draft: {
+          title: '',
+          context: '',
+          steps: [],
+          expectedOutcome: '',
+          actualOutcome: '',
+          impact: null,
+          impactDetails: '',
+        },
+        attachmentNames: [],
+        page: '/students',
+        locale: 'lt',
+      },
+    } as any, res as any);
+
+    expect(result.statusCode).toBe(200);
+    const events = result.chunks.join('').trim().split('\n').map((line) => JSON.parse(line));
+    expect(events.at(-1)).toMatchObject({
+      type: 'result',
+      conversation: {
+        responseKind: 'answer',
+        ready: false,
+        missingTopics: [],
+      },
+    });
+    expect(events.at(-1).conversation.reply).toContain('Mokiniai');
+    expect(events.at(-1).conversation.reply).not.toMatch(/\/students/);
   });
 
   it('preserves known draft facts and does not ask for them again when model output drops them', async () => {

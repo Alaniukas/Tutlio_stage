@@ -220,9 +220,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       acceptUrl,
       order,
     });
+    const sentPatch: Record<string, unknown> = { sent_at: new Date().toISOString() };
+    if (contract.signing_status === 'draft') sentPatch.signing_status = 'sent';
     await supabase
       .from('school_contracts')
-      .update({ sent_at: new Date().toISOString() })
+      .update(sentPatch)
       .eq('id', contract.id);
     return res.status(200).json({
       ok: true,
@@ -410,6 +412,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const origin = appOrigin(req);
   const acceptUrl = extraLessonsAcceptUrl(origin, token);
 
+  const saveAsDraft = body.send === false;
   let pdfPath: string | null = null;
   try {
     const rendered = await renderAndStoreExtraLessonsPdf(supabase, {
@@ -421,13 +424,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     pdfPath = rendered.uploadedPath;
     if (pdfPath) {
+      const statusPatch = saveAsDraft
+        ? { pdf_url: pdfPath, signing_status: 'draft', sent_at: null }
+        : { pdf_url: pdfPath, signing_status: 'sent', sent_at: new Date().toISOString() };
       const { error: pdfSaveError } = await supabase
         .from('school_contracts')
-        .update({
-          pdf_url: pdfPath,
-          signing_status: 'sent',
-          sent_at: new Date().toISOString(),
-        })
+        .update(statusPatch)
         .eq('id', created.id);
       if (pdfSaveError) {
         pdfPath = null;
@@ -438,7 +440,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('[extra-lessons-contract-offer] pdf', (e as Error).message);
   }
 
-  if (!pdfPath) {
+  if (!pdfPath && !saveAsDraft) {
     await discardIncompleteExtraLessonsOffer(supabase, created.id);
     return res.status(503).json({
       error: EXTRA_LESSONS_PDF_FAILED_ERROR,
@@ -447,7 +449,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
-  if (order.group_id && order.recording_access === undefined) {
+  if (!saveAsDraft && order.group_id && order.recording_access === undefined) {
     await supabase.from('school_class_group_members').upsert([{
       group_id: order.group_id,
       student_id: studentId,
@@ -475,6 +477,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   void isInternalRequest;
   return res.status(200).json({
     ok: true,
+    draft: saveAsDraft,
     contractId: created.id,
     contractNumber: created.contract_number,
     acceptUrl,
@@ -482,5 +485,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     emailSent,
     emailTo: payerEmail || null,
     emailError,
+    pdfReady: Boolean(pdfPath),
   });
 }

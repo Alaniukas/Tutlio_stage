@@ -28,7 +28,7 @@ const COPY = {
     empty: 'Užklausų dar nėra.',
     failed: 'Nepavyko įkelti užklausų. Bandykite dar kartą.',
     bug: 'Klaida',
-    feature: 'Funkcijos pasiūlymas',
+    feature: 'Pasiūlymas',
     registered: 'Užregistruota',
     in_progress: 'Vykdoma',
     resolved: 'Išspręsta',

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Pencil, Plus, Search } from 'lucide-react';
+import { CalendarClock, ChevronDown, Pencil, Plus, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +30,8 @@ import {
   scheduleLabelFromGroupSlots,
   type SchoolClassGroupRecord,
 } from '@/lib/schoolClassGroups';
+
+const GROUPS_PAGE_SIZE = 20;
 
 function formatLtDate(iso: string): string {
   const d = String(iso || '').slice(0, 10);
@@ -112,6 +114,8 @@ export default function CompanyClassGroups() {
   const [editing, setEditing] = useState<SchoolClassGroupRecord | null>(null);
   const [tutorFilter, setTutorFilter] = useState<string>('all');
   const [query, setQuery] = useState('');
+  const [visibleGroupLimit, setVisibleGroupLimit] = useState(GROUPS_PAGE_SIZE);
+  const [visibleIndividualLimit, setVisibleIndividualLimit] = useState(GROUPS_PAGE_SIZE);
   const [orgId, setOrgId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [materializeWarning, setMaterializeWarning] = useState<string | null>(null);
@@ -233,9 +237,19 @@ export default function CompanyClassGroups() {
     [groups, tutorFilter, query, tutorNameById],
   );
 
+  useEffect(() => {
+    setVisibleGroupLimit(GROUPS_PAGE_SIZE);
+    setVisibleIndividualLimit(GROUPS_PAGE_SIZE);
+  }, [tutorFilter, query]);
+
+  const visibleGroups = useMemo(
+    () => filteredGroups.slice(0, visibleGroupLimit),
+    [filteredGroups, visibleGroupLimit],
+  );
+
   const sections = useMemo(
-    () => groupClassGroupsByTutor(filteredGroups, (id) => tutorNameById.get(id) || staff),
-    [filteredGroups, tutorNameById, staff],
+    () => groupClassGroupsByTutor(visibleGroups, (id) => tutorNameById.get(id) || staff),
+    [visibleGroups, tutorNameById, staff],
   );
 
   const filteredIndividualSessions = useMemo(
@@ -243,6 +257,11 @@ export default function CompanyClassGroups() {
       (tutorFilter === 'all' || session.tutor_id === tutorFilter)
       && individualSessionMatchesQuery(session, query, tutorNameById.get(session.tutor_id))),
     [individualSessions, tutorFilter, query, tutorNameById],
+  );
+
+  const visibleIndividualSessions = useMemo(
+    () => filteredIndividualSessions.slice(0, visibleIndividualLimit),
+    [filteredIndividualSessions, visibleIndividualLimit],
   );
 
   const showTutorTools = isOrgAdmin && tutorFilterOptions.length > 1;
@@ -456,7 +475,21 @@ export default function CompanyClassGroups() {
             </section>
           ))
         ) : (
-          <div className="space-y-3">{filteredGroups.map(renderCard)}</div>
+          <div className="space-y-3">{visibleGroups.map(renderCard)}</div>
+        )}
+        {filteredGroups.length > visibleGroupLimit && (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full rounded-xl"
+            onClick={() => setVisibleGroupLimit((prev) => prev + GROUPS_PAGE_SIZE)}
+          >
+            <ChevronDown className="mr-2 h-4 w-4" />
+            {t('school.groups.loadMore', {
+              shown: String(visibleGroupLimit),
+              total: String(filteredGroups.length),
+            })}
+          </Button>
         )}
       </div>
 
@@ -475,7 +508,7 @@ export default function CompanyClassGroups() {
             </Link>
           </div>
           <div className="space-y-2">
-            {filteredIndividualSessions.map((session) => (
+            {visibleIndividualSessions.map((session) => (
               <div key={session.id} className="rounded-xl border bg-white px-4 py-3">
                 <div className="font-medium text-gray-900">
                   {session.student?.full_name || t('cal.unknown')}
@@ -493,6 +526,20 @@ export default function CompanyClassGroups() {
               </div>
             ))}
           </div>
+          {filteredIndividualSessions.length > visibleIndividualLimit && (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full rounded-xl"
+              onClick={() => setVisibleIndividualLimit((prev) => prev + GROUPS_PAGE_SIZE)}
+            >
+              <ChevronDown className="mr-2 h-4 w-4" />
+              {t('school.groups.loadMoreIndividual', {
+                shown: String(visibleIndividualLimit),
+                total: String(filteredIndividualSessions.length),
+              })}
+            </Button>
+          )}
         </section>
       )}
 

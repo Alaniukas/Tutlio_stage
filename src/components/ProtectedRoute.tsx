@@ -101,7 +101,21 @@ export default function ProtectedRoute() {
 
       setStatus('loading');
 
-      const portals = await resolveAccountPortals(ctxUser.id);
+      let portals: Awaited<ReturnType<typeof resolveAccountPortals>>;
+      try {
+        portals = await Promise.race([
+          resolveAccountPortals(ctxUser.id),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('Auth guard timeout')), 2500);
+          }),
+        ]);
+      } catch {
+        if (ctxProfile?.organization_id || tutorHasPlatformSubscriptionAccess(ctxProfile)) {
+          if (!cancelled) { resolvedForUserRef.current = ctxUser.id; setStatus('tutor'); }
+          return;
+        }
+        portals = { tutor: true, student: false, parent: false, orgAdmin: false };
+      }
       if (portals.orgAdmin && !portals.tutor) {
         if (!cancelled) { resolvedForUserRef.current = ctxUser.id; setStatus('org_admin'); }
         return;

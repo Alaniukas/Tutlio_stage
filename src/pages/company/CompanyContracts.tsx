@@ -1,7 +1,8 @@
 import { matchesSchoolConsent, type SchoolConsentFilter } from '@/lib/schoolConsentFilter';
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import mammoth from 'mammoth';
 import { supabase } from '@/lib/supabase';
+import { resolveAuthUser } from '@/lib/authSession';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { Button } from '@/components/ui/button';
@@ -24,7 +25,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine, Settings, Save, Search, Download, MoreVertical, AlertTriangle, Ban, BadgePercent, PauseCircle, PlayCircle } from 'lucide-react';
+import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine, Settings, Save, Search, Download, MoreVertical, AlertTriangle, Ban, BadgePercent, PauseCircle, PlayCircle, ChevronDown } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { sendEmail } from '@/lib/email';
 import { useTranslation } from '@/lib/i18n';
@@ -53,6 +54,7 @@ import {
 } from '@/lib/schoolContractFilters';
 import { buildSchoolContractExportRows, schoolContractsExportFilename } from '@/lib/schoolContractsExport';
 import { downloadSchoolContractsXlsx } from '@/lib/schoolContractsXlsxExport';
+import { downloadSchoolContractsByPayerZip } from '@/lib/schoolContractsZipExport';
 import { fetchOrganizationRow } from '@/lib/orgLookup';
 import ExtraLessonsOfferDialog, { type ExtraLessonsTaughtSubject } from '@/components/company/ExtraLessonsOfferDialog';
 import CompanyStaffContracts from '@/pages/company/CompanyStaffContracts';
@@ -64,6 +66,20 @@ import { isSchoolContractSuspended } from '@/lib/schoolContractLifecycle';
 import SchoolContractTerminationDialog, {
   type SchoolContractTerminationImpact,
 } from '@/components/company/SchoolContractTerminationDialog';
+import {
+  CONTRACTS_PAGE_SIZE,
+  fetchAllFilteredContracts,
+  fetchContractSummaries,
+  fetchContractsByIds,
+  filterContractSummaries,
+  paginateIds,
+  type ContractSummaryRow,
+} from '@/lib/schoolContractsPagination';
+import {
+  contractServiceEndDate,
+  contractServiceStartDate,
+  formatContractValidityLabel,
+} from '@/lib/schoolContractValidity';
 
 interface Student {
   id: string;
@@ -135,6 +151,8 @@ interface Contract {
     schedule_label?: string | null;
     group_name?: string | null;
     tutor_name?: string | null;
+    start_date?: string | null;
+    end_date?: string | null;
   } | null;
   class_group_id?: string | null;
   suspension_scope?: 'individual' | 'group_under_minimum' | null;
@@ -171,13 +189,18 @@ function discountAgreementValueLabel(agreement: ContractDiscountAgreement): stri
   return agreement.discount_type === 'percent' ? `${formatted} %` : `${formatted} €`;
 }
 
-async function loadDiscountAgreementsByContract(organizationId: string): Promise<Map<string, ContractDiscountAgreement[]>> {
+async function loadDiscountAgreementsByContractIds(
+  organizationId: string,
+  contractIds?: string[],
+): Promise<Map<string, ContractDiscountAgreement[]>> {
   const byContract = new Map<string, ContractDiscountAgreement[]>();
-  const { data, error } = await supabase
+  let query = supabase
     .from('school_discount_agreements')
     .select('id, contract_id, agreement_number, activity_label, discount_type, discount_value, valid_from, valid_until, status, pdf_path, created_at')
     .eq('organization_id', organizationId)
     .order('created_at', { ascending: false });
+  if (contractIds?.length) query = query.in('contract_id', contractIds);
+  const { data, error } = await query;
   if (error) {
     console.error('[CompanyContracts] discount agreements failed:', error.message);
     return byContract;
@@ -318,7 +341,11 @@ export default function CompanyContracts() {
   );
   const [savingSigningSettings, setSavingSigningSettings] = useState(false);
   const [templates, setTemplates] = useState<Template[]>(cc?.templates ?? []);
+  const [contractSummaries, setContractSummaries] = useState<ContractSummaryRow[]>(cc?.contractSummaries ?? []);
   const [contracts, setContracts] = useState<Contract[]>(cc?.contracts ?? []);
+  const [teacherContracts, setTeacherContracts] = useState<Contract[]>(cc?.teacherContracts ?? []);
+  const [contractsPage, setContractsPage] = useState(cc?.contractsPage ?? 0);
+  const [pageContractsLoading, setPageContractsLoading] = useState(false);
   const [students, setStudents] = useState<Student[]>(cc?.students ?? []);
   const [loading, setLoading] = useState(!cc);
   const [loadError, setLoadError] = useState(false);
@@ -369,6 +396,8 @@ export default function CompanyContracts() {
   const [contractKindFilter, setContractKindFilter] = useState<SchoolContractKindFilter>('all');
   const [contractSearch, setContractSearch] = useState('');
   const [exportingContracts, setExportingContracts] = useState(false);
+  const [exportingContractsZip, setExportingContractsZip] = useState(false);
+  const [signingSettingsOpen, setSigningSettingsOpen] = useState(false);
   const [terminationContract, setTerminationContract] = useState<Contract | null>(null);
   const [terminationReason, setTerminationReason] = useState('');
   const [terminationBusy, setTerminationBusy] = useState(false);
@@ -382,7 +411,13 @@ export default function CompanyContracts() {
   const [suspensionBusy, setSuspensionBusy] = useState(false);
   const [discountContract, setDiscountContract] = useState<Contract | null>(null);
 
-  useEffect(() => { if (!getCached(CONTRACTS_CACHE_KEY)) load(); }, []);
+  useEffect(() => {
+    const cached = getCached<any>(CONTRACTS_CACHE_KEY);
+    if (!cached || !Array.isArray(cached.contractSummaries)) {
+      if (cached) invalidateCache(CONTRACTS_CACHE_KEY);
+      void load();
+    }
+  }, []);
   useEffect(() => {
     if (!isSchoolView || !eSignEnabled) {
       setTab((current) => current === 'teachers' ? 'contracts' : current);
@@ -399,8 +434,7 @@ export default function CompanyContracts() {
     if (!getCached(CONTRACTS_CACHE_KEY)) setLoading(true);
     setLoadError(false);
     try {
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError) throw userError;
+    const user = await resolveAuthUser();
     if (!user) throw new Error('Missing authenticated user');
 
     const { data: admin, error: adminError } = await supabase
@@ -429,21 +463,27 @@ export default function CompanyContracts() {
     setESignEnabled(features.school_contract_esign === true);
     setSigningSettings(nextSigningSettings);
 
-    const [tRes, cRes, sRes] = await Promise.all([
+    const [tRes, summaryRes, teacherRes, sRes] = await Promise.all([
       supabase.from('school_contract_templates').select('*').eq('organization_id', admin.organization_id).order('created_at', { ascending: false }),
-      supabase.from('school_contracts').select(CONTRACTS_SELECT).eq('organization_id', admin.organization_id).is('staff_document_type', null).is('archived_at', null).order('created_at', { ascending: false }).limit(2000),
+      fetchContractSummaries(supabase, admin.organization_id),
+      supabase.from('school_contracts').select(CONTRACTS_SELECT).eq('organization_id', admin.organization_id).eq('party_kind', 'teacher').is('staff_document_type', null).is('archived_at', null).order('created_at', { ascending: false }),
       supabase.from('students').select('id, full_name, email, phone, grade, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent').eq('organization_id', admin.organization_id).order('full_name'),
     ]);
 
-    for (const result of [tRes, cRes, sRes]) {
-      if (result.error) throw result.error;
-    }
+    if (tRes.error) throw tRes.error;
+    if (summaryRes.error) throw summaryRes.error;
+    if (teacherRes.error) throw teacherRes.error;
+    if (sRes.error) throw sRes.error;
 
     const tData = tRes.data || [];
-    const cData = withDiscountAgreements(cRes.data || [], await loadDiscountAgreementsByContract(admin.organization_id));
+    const summaryData = (summaryRes.data || []).filter((row) => row.party_kind !== 'teacher');
+    const teacherData = (teacherRes.data || []) as Contract[];
     const sData = sRes.data || [];
     setTemplates(tData);
-    setContracts(cData);
+    setContractSummaries(summaryData);
+    setTeacherContracts(teacherData);
+    setContracts([]);
+    setContractsPage(0);
     setStudents(sData);
     setCache(CONTRACTS_CACHE_KEY, {
       orgId: admin.organization_id,
@@ -453,7 +493,10 @@ export default function CompanyContracts() {
       eSignEnabled: features.school_contract_esign === true,
       signingSettings: nextSigningSettings,
       templates: tData,
-      contracts: cData,
+      contractSummaries: summaryData,
+      teacherContracts: teacherData,
+      contracts: [],
+      contractsPage: 0,
       students: sData,
     });
     } catch (err) {
@@ -473,23 +516,17 @@ export default function CompanyContracts() {
    */
   const refreshContractsSilently = async () => {
     if (!orgId) return;
-    const { data, error } = await supabase
-      .from('school_contracts')
-      .select(CONTRACTS_SELECT)
-      .eq('organization_id', orgId)
-      .is('staff_document_type', null)
-      .is('archived_at', null)
-      .order('created_at', { ascending: false });
+    const { data: summaries, error } = await fetchContractSummaries(supabase, orgId);
     if (error) {
       console.error('[CompanyContracts] background contract refresh failed:', error.message);
       setLoadError(true);
       return;
     }
-    const nextContracts = withDiscountAgreements((data || []) as Contract[], await loadDiscountAgreementsByContract(orgId));
-    setContracts(nextContracts);
+    const nextSummaries = (summaries || []).filter((row) => row.party_kind !== 'teacher');
+    setContractSummaries(nextSummaries);
     setLoadError(false);
     const cached = getCached<any>(CONTRACTS_CACHE_KEY);
-    if (cached) setCache(CONTRACTS_CACHE_KEY, { ...cached, contracts: nextContracts });
+    if (cached) setCache(CONTRACTS_CACHE_KEY, { ...cached, contractSummaries: nextSummaries });
   };
 
   useEffect(() => {
@@ -504,7 +541,7 @@ export default function CompanyContracts() {
     window.addEventListener('message', onMessage);
     window.addEventListener('storage', onStorage);
     window.addEventListener('focus', refresh);
-    const hasPending = contracts.some((contract) =>
+    const hasPending = contractSummaries.some((contract) =>
       ['sent', 'awaiting_school_signature', 'signed_by_school'].includes(contract.signing_status),
     );
     const timer = hasPending ? window.setInterval(refresh, 30_000) : undefined;
@@ -514,7 +551,64 @@ export default function CompanyContracts() {
       window.removeEventListener('focus', refresh);
       if (timer) window.clearInterval(timer);
     };
-  }, [orgId, contracts.map((contract) => `${contract.id}:${contract.signing_status}`).join('|')]);
+  }, [orgId, contractSummaries.map((contract) => `${contract.id}:${contract.signing_status}`).join('|')]);
+
+  useEffect(() => {
+    setContractsPage(0);
+  }, [contractFilter, contractKindFilter, contractSearch, consentFilter]);
+
+  const studentSummaries = useMemo(
+    () => contractSummaries.filter((row) => row.party_kind !== 'teacher'),
+    [contractSummaries],
+  );
+
+  const filteredSummaries = useMemo(() => {
+    let rows = studentSummaries;
+    if (isSchoolView) {
+      rows = rows.filter((row) => matchesSchoolConsent(consentFilter, row as Contract));
+    }
+    return filterContractSummaries(rows, {
+      isSchoolView,
+      contractFilter,
+      contractKindFilter,
+      contractSearch,
+      filterOptions: { eSignEnabled },
+    });
+  }, [studentSummaries, isSchoolView, consentFilter, contractFilter, contractKindFilter, contractSearch, eSignEnabled]);
+
+  const contractsPagination = useMemo(
+    () => paginateIds(filteredSummaries, contractsPage),
+    [filteredSummaries, contractsPage],
+  );
+
+  const loadContractsPage = useCallback(async (pageRowIds: string[]) => {
+    if (!orgId) return;
+    if (!pageRowIds.length) {
+      setContracts([]);
+      return;
+    }
+    setPageContractsLoading(true);
+    const { data, error } = await fetchContractsByIds<Contract>(supabase, orgId, pageRowIds);
+    if (error) {
+      console.error('[CompanyContracts] page load failed:', error.message);
+      setLoadError(true);
+      setPageContractsLoading(false);
+      return;
+    }
+    const nextContracts = withDiscountAgreements(
+      data,
+      await loadDiscountAgreementsByContractIds(orgId, pageRowIds),
+    );
+    setContracts(nextContracts);
+    setPageContractsLoading(false);
+    const cached = getCached<any>(CONTRACTS_CACHE_KEY);
+    if (cached) setCache(CONTRACTS_CACHE_KEY, { ...cached, contracts: nextContracts, contractsPage });
+  }, [orgId, contractsPage]);
+
+  useEffect(() => {
+    const ids = contractsPagination.pageRows.map((row) => row.id);
+    void loadContractsPage(ids);
+  }, [orgId, contractsPagination.pageRows.map((row) => row.id).join('|'), loadContractsPage]);
 
   const saveSigningSettings = async () => {
     if (!orgId) return;
@@ -2114,38 +2208,33 @@ export default function CompanyContracts() {
     }
   };
 
-  // Diacritics-insensitive match (Vėgėlė findable as "vegele" and vice versa).
-  const searchable = (value: string) => normalizePdfText(value).toLowerCase();
-  // Teacher contracts use the same table but have a different party and flow.
-  // Keep them out of the student/parent list so they cannot be mistaken for
-  // an education contract or enter the school finance workflow.
-  const studentContracts = contracts.filter((contract) => contract.party_kind !== 'teacher');
-  const teacherContracts = contracts.filter((contract) => contract.party_kind === 'teacher' && !contract.staff_document_type);
-  const contractFilterCounts = countContractsByFilter(studentContracts, isSchoolView, { eSignEnabled });
-  const visibleContracts = studentContracts.filter((c) => {
-    if (isSchoolView) {
-      if (!matchesSchoolConsent(consentFilter, c)) return false;
-      if (!matchesContractFilter(contractFilter as SchoolContractFilter, c, isSchoolView, { eSignEnabled })) return false;
-      if (!matchesContractKindFilter(contractKindFilter, c.kind)) return false;
-    } else {
-      if (contractFilter === 'signed' && c.signing_status !== 'signed') return false;
-      if (contractFilter === 'unsigned' && c.signing_status === 'signed') return false;
-    }
-    const q = searchable(contractSearch.trim());
-    if (!q) return true;
-    const haystack = searchable(
-      [c.student?.full_name, c.student?.payer_name, c.student?.parent_secondary_name, c.contract_number]
-        .filter(Boolean)
-        .join(' '),
-    );
-    return haystack.includes(q);
-  });
+  const contractFilterCounts = countContractsByFilter(studentSummaries as Contract[], isSchoolView, { eSignEnabled });
+  const visibleContracts = useMemo(() => {
+    const pageIds = new Set(contractsPagination.pageRows.map((row) => row.id));
+    return contracts.filter((contract) => pageIds.has(contract.id));
+  }, [contracts, contractsPagination.pageRows]);
+  const filteredContractTotal = contractsPagination.total;
+  const contractsPageCount = contractsPagination.pageCount;
+  const safeContractsPage = contractsPagination.safePage;
 
   const exportContractsXlsx = async () => {
-    if (!isSchoolView || visibleContracts.length === 0) return;
+    if (!isSchoolView || !orgId || filteredSummaries.length === 0) return;
     setExportingContracts(true);
     try {
-      const rows = buildSchoolContractExportRows(visibleContracts, tr, isSchoolView);
+      const { data: exportContracts, error } = await fetchAllFilteredContracts<Contract>(
+        supabase,
+        orgId,
+        filteredSummaries.map((row) => row.id),
+      );
+      if (error) throw error;
+      const rows = buildSchoolContractExportRows(
+        withDiscountAgreements(
+          exportContracts,
+          await loadDiscountAgreementsByContractIds(orgId, exportContracts.map((row) => row.id)),
+        ),
+        tr,
+        isSchoolView,
+      );
       const date = new Date().toISOString().slice(0, 10);
       const filename = schoolContractsExportFilename(contractFilter, contractSearch, date);
       await downloadSchoolContractsXlsx(rows, tr, filename, orgName);
@@ -2153,6 +2242,55 @@ export default function CompanyContracts() {
       setToast({ message: e?.message || tr('school.contractExportFail'), type: 'error' });
     } finally {
       setExportingContracts(false);
+    }
+  };
+
+  const exportContractsZip = async () => {
+    if (!isSchoolView || !orgId || filteredSummaries.length === 0) return;
+    setExportingContractsZip(true);
+    try {
+      const { data: exportContracts, error } = await fetchAllFilteredContracts<Contract>(
+        supabase,
+        orgId,
+        filteredSummaries.map((row) => row.id),
+      );
+      if (error) throw error;
+      const rows = exportContracts.map((contract) => ({
+        id: contract.id,
+        contractNumber: contract.contract_number,
+        kind: contract.kind,
+        studentId: contract.student_id,
+        studentName: contract.student?.full_name,
+        payerName: contract.student?.payer_name,
+        payerEmail: contract.student?.payer_email,
+        pdfPath: currentContractPdfPath(contract),
+      }));
+      const result = await downloadSchoolContractsByPayerZip(rows, { authHeaders: await authHeaders() });
+      if (result.downloaded === 0) {
+        setToast({ message: tr('school.contractZipExportEmpty'), type: 'error' });
+        return;
+      }
+      if (result.failedIds.length > 0) {
+        setToast({
+          message: tr('school.contractZipExportPartial', {
+            downloaded: String(result.downloaded),
+            failed: String(result.failedIds.length),
+          }),
+          type: 'success',
+        });
+        return;
+      }
+      setToast({
+        message: tr('school.contractZipExportDone', {
+          payers: String(result.payerCount),
+          files: String(result.downloaded),
+        }),
+        type: 'success',
+      });
+    } catch (e: any) {
+      setToast({ message: e?.message || tr('school.contractZipExportFail'), type: 'error' });
+    } finally {
+      setExportingContractsZip(false);
     }
   };
 
@@ -2278,63 +2416,73 @@ export default function CompanyContracts() {
         {isSchoolView && (
           <section className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
             <div className="flex items-start justify-between gap-4 flex-wrap">
-              <div>
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left"
+                onClick={() => setSigningSettingsOpen((open) => !open)}
+                aria-expanded={signingSettingsOpen}
+              >
                 <div className="flex items-center gap-2">
                   <Settings className="h-4 w-4 text-indigo-700" />
                   <h2 className="font-semibold text-gray-900">El. pasirašymo nustatymai</h2>
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${eSignEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'}`}>
                     {eSignEnabled ? 'GoSign aktyvus' : 'GoSign neaktyvus'}
                   </span>
+                  <ChevronDown className={`h-4 w-4 text-gray-500 transition-transform ${signingSettingsOpen ? 'rotate-180' : ''}`} aria-hidden />
                 </div>
                 <p className="mt-1 text-xs text-gray-600">
                   Šis el. paštas naudojamas visam sutarčių pasirašymo srautui. Paskirtis, vieta ir kontaktas įrašomi į elektroninio parašo metaduomenis.
                 </p>
-              </div>
-              <Button
-                size="sm"
-                onClick={saveSigningSettings}
-                disabled={savingSigningSettings}
-                className="bg-indigo-600 hover:bg-indigo-700"
-              >
-                <Save className="mr-1.5 h-3.5 w-3.5" />
-                {savingSigningSettings ? 'Saugoma…' : 'Išsaugoti nustatymus'}
-              </Button>
+              </button>
+              {signingSettingsOpen && (
+                <Button
+                  size="sm"
+                  onClick={saveSigningSettings}
+                  disabled={savingSigningSettings}
+                  className="bg-indigo-600 hover:bg-indigo-700"
+                >
+                  <Save className="mr-1.5 h-3.5 w-3.5" />
+                  {savingSigningSettings ? 'Saugoma…' : 'Išsaugoti nustatymus'}
+                </Button>
+              )}
             </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>Sutarčių srauto el. paštas</Label>
-                <Input
-                  type="email"
-                  value={signingSettings.email}
-                  onChange={(event) => setSigningSettings((current) => ({ ...current, email: event.target.value }))}
-                  placeholder={orgEmail || 'sutartys@organizacija.lt'}
-                />
+            {signingSettingsOpen && (
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>Sutarčių srauto el. paštas</Label>
+                  <Input
+                    type="email"
+                    value={signingSettings.email}
+                    onChange={(event) => setSigningSettings((current) => ({ ...current, email: event.target.value }))}
+                    placeholder={orgEmail || 'sutartys@organizacija.lt'}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>El. parašo paskirtis</Label>
+                  <Input
+                    value={signingSettings.reason}
+                    onChange={(event) => setSigningSettings((current) => ({ ...current, reason: event.target.value }))}
+                    placeholder="Ugdymo sutarties pasirašymas"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Pasirašymo vieta</Label>
+                  <Input
+                    value={signingSettings.location}
+                    onChange={(event) => setSigningSettings((current) => ({ ...current, location: event.target.value }))}
+                    placeholder="Pvz. Vilnius"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Parašo kontaktas</Label>
+                  <Input
+                    value={signingSettings.contact}
+                    onChange={(event) => setSigningSettings((current) => ({ ...current, contact: event.target.value }))}
+                    placeholder={signingSettings.email || orgEmail}
+                  />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label>El. parašo paskirtis</Label>
-                <Input
-                  value={signingSettings.reason}
-                  onChange={(event) => setSigningSettings((current) => ({ ...current, reason: event.target.value }))}
-                  placeholder="Ugdymo sutarties pasirašymas"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Pasirašymo vieta</Label>
-                <Input
-                  value={signingSettings.location}
-                  onChange={(event) => setSigningSettings((current) => ({ ...current, location: event.target.value }))}
-                  placeholder="Pvz. Vilnius"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Parašo kontaktas</Label>
-                <Input
-                  value={signingSettings.contact}
-                  onChange={(event) => setSigningSettings((current) => ({ ...current, contact: event.target.value }))}
-                  placeholder={signingSettings.email || orgEmail}
-                />
-              </div>
-            </div>
+            )}
           </section>
         )}
 
@@ -2349,8 +2497,8 @@ export default function CompanyContracts() {
           <div className="flex items-center justify-center py-20">
             <div className="w-8 h-8 border-2 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
           </div>
-        ) : loadError && ((tab === 'contracts' && studentContracts.length === 0) || (tab === 'templates' && templates.length === 0)) ? null : tab === 'contracts' ? (
-          studentContracts.length === 0 ? (
+        ) : loadError && ((tab === 'contracts' && studentSummaries.length === 0) || (tab === 'templates' && templates.length === 0)) ? null : tab === 'contracts' ? (
+          studentSummaries.length === 0 ? (
             <div className="text-center py-20">
               <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-500">{tr('school.noContracts')}</p>
@@ -2380,12 +2528,12 @@ export default function CompanyContracts() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">{tr('school.filterKindAll')} ({studentContracts.length})</SelectItem>
+                      <SelectItem value="all">{tr('school.filterKindAll')} ({studentSummaries.length})</SelectItem>
                       <SelectItem value="annual">
-                        {tr('school.filterKindAnnual')} ({studentContracts.filter((c) => matchesContractKindFilter('annual', c.kind)).length})
+                        {tr('school.filterKindAnnual')} ({studentSummaries.filter((c) => matchesContractKindFilter('annual', c.kind)).length})
                       </SelectItem>
                       <SelectItem value="extra_lessons">
-                        {tr('school.filterKindExtra')} ({studentContracts.filter((c) => matchesContractKindFilter('extra_lessons', c.kind)).length})
+                        {tr('school.filterKindExtra')} ({studentSummaries.filter((c) => matchesContractKindFilter('extra_lessons', c.kind)).length})
                       </SelectItem>
                     </SelectContent>
                   </Select>
@@ -2418,8 +2566,8 @@ export default function CompanyContracts() {
                 ) : (
                   <div className="bg-gray-100 rounded-lg p-1 flex gap-1 flex-wrap">
                     {([
-                      ['all', tr('school.filterAll'), studentContracts.length],
-                      ['unsigned', tr('school.filterUnsigned'), studentContracts.length - contractFilterCounts.signed],
+                      ['all', tr('school.filterAll'), studentSummaries.length],
+                      ['unsigned', tr('school.filterUnsigned'), studentSummaries.length - contractFilterCounts.signed],
                       ['signed', tr('school.filterSigned'), contractFilterCounts.signed],
                     ] as const).map(([key, label, count]) => (
                       <button
@@ -2442,19 +2590,31 @@ export default function CompanyContracts() {
                   />
                 </div>
                 {isSchoolView && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0 rounded-xl"
-                    onClick={() => void exportContractsXlsx()}
-                    disabled={exportingContracts || visibleContracts.length === 0}
-                  >
-                    <Download className="w-4 h-4 mr-1.5" />
-                    {exportingContracts ? tr('school.exportingExcel') : tr('school.exportExcel')}
-                  </Button>
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 rounded-xl"
+                      onClick={() => void exportContractsXlsx()}
+                      disabled={exportingContracts || exportingContractsZip || filteredContractTotal === 0}
+                    >
+                      <Download className="w-4 h-4 mr-1.5" />
+                      {exportingContracts ? tr('school.exportingExcel') : tr('school.exportExcel')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 rounded-xl"
+                      onClick={() => void exportContractsZip()}
+                      disabled={exportingContractsZip || exportingContracts || filteredContractTotal === 0}
+                    >
+                      <Download className="w-4 h-4 mr-1.5" />
+                      {exportingContractsZip ? tr('school.exportingContractsZip') : tr('school.exportContractsZip')}
+                    </Button>
+                  </>
                 )}
               </div>
-              {visibleContracts.length === 0 ? (
+              {filteredContractTotal === 0 ? (
                 <p className="text-center text-gray-500 py-12">{tr('school.noContractsFiltered')}</p>
               ) : (
             <div className="grid gap-3">
@@ -2496,7 +2656,7 @@ export default function CompanyContracts() {
                           </span>
                         )}
                       </div>
-                      {isExtraLessonsContractKind(c.kind) && !c.pdf_url && (
+                      {isExtraLessonsContractKind(c.kind) && !c.pdf_url && c.signing_status !== 'draft' && (
                         <div role="alert" className="mt-2 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
                           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                           <p>{tr('school.extra.pdfMissing')}</p>
@@ -2512,6 +2672,16 @@ export default function CompanyContracts() {
                             {c.additional_fee_purpose ? ` (${c.additional_fee_purpose})` : ''}
                           </span>
                         )}
+                        {(() => {
+                          const validity = formatContractValidityLabel(
+                            contractServiceStartDate(c),
+                            contractServiceEndDate(c),
+                            (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString('lt-LT'),
+                          );
+                          return validity ? (
+                            <span className="ml-3">{tr('school.contractValidFrom')} {validity}</span>
+                          ) : null;
+                        })()}
                         {c.sent_at && <span className="ml-3">{tr('school.sent')} {new Date(c.sent_at).toLocaleDateString('lt-LT')}</span>}
                         {c.signed_at && <span className="ml-3">{tr('school.signed')} {new Date(c.signed_at).toLocaleDateString('lt-LT')}</span>}
                         {(c.terminated_at || c.withdrawal_requested_at) && (
@@ -2619,8 +2789,11 @@ export default function CompanyContracts() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-gray-100">
-                      {c.signing_status === 'draft' && !isExtraLessonsContractKind(c.kind) && (
-                        <Button size="sm" onClick={() => sendContract(c)}>
+                      {c.signing_status === 'draft' && (
+                        <Button size="sm" onClick={() => {
+                          if (isExtraLessonsContractKind(c.kind)) void resendContract(c);
+                          else void sendContract(c);
+                        }}>
                           <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.send')}
                         </Button>
                       )}
@@ -2779,6 +2952,39 @@ export default function CompanyContracts() {
                 </div>
               ))}
             </div>
+              )}
+              {filteredContractTotal > CONTRACTS_PAGE_SIZE && (
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <p className="text-sm text-gray-500">
+                    {tr('school.contractsPageOf', {
+                      from: filteredContractTotal === 0 ? 0 : safeContractsPage * CONTRACTS_PAGE_SIZE + 1,
+                      to: Math.min((safeContractsPage + 1) * CONTRACTS_PAGE_SIZE, filteredContractTotal),
+                      total: filteredContractTotal,
+                    })}
+                    {pageContractsLoading ? ` · ${tr('school.contractsLoadingPage')}` : ''}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={safeContractsPage <= 0 || pageContractsLoading}
+                      onClick={() => setContractsPage((page) => Math.max(0, page - 1))}
+                    >
+                      {tr('school.contractsPrevPage')}
+                    </Button>
+                    <span className="text-sm text-gray-600">
+                      {safeContractsPage + 1} / {contractsPageCount}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={safeContractsPage >= contractsPageCount - 1 || pageContractsLoading}
+                      onClick={() => setContractsPage((page) => page + 1)}
+                    >
+                      {tr('school.contractsNextPage')}
+                    </Button>
+                  </div>
+                </div>
               )}
             </>
           )
@@ -3629,7 +3835,14 @@ export default function CompanyContracts() {
         individualSubjects={extraIndividualSubjects}
         onCreated={(info) => {
           const mail = info.emailTo ? ` ${info.emailTo}` : '';
-          if (info.emailSent) {
+          if (info.draft) {
+            setToast({
+              message: info.pdfReady
+                ? `${tr('school.extra.draftSaved')} · ${info.contractNumber}`
+                : `${tr('school.extra.draftSavedNoPdf')} · ${info.contractNumber}`,
+              type: info.pdfReady ? 'success' : 'warning',
+            });
+          } else if (info.emailSent) {
             setToast({ message: `${tr('school.extra.emailSentTo')}${mail} · ${info.contractNumber}`, type: 'success' });
           } else {
             setToast({ message: `${tr('school.extra.emailFailed')} ${info.contractNumber}`, type: 'warning' });

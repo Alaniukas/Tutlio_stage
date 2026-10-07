@@ -42,7 +42,9 @@ function fakeDb(): any {
 }
 const base = { tutor_id: 'teacher', student_id: 'student', class_group_id: 'group', subject_id: 'math', status: 'completed',
   start_time: '2026-09-15T06:00:00Z', end_time: '2026-09-15T07:00:00Z', tutor_pay_eur_snapshot: 45,
-  subjects: { name: 'Math', is_group: false }, students: { full_name: 'Student', organization_id: 'school' } };
+  subjects: { name: 'Math', is_group: true },
+  class_group: { name: 'Matematika 5 kl.' },
+  students: { full_name: 'Student', organization_id: 'school' } };
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-30T12:00:00Z'));
   state.writes = []; state.filters = []; state.cap = 500; state.allocations = 0; state.orgError = false;
@@ -195,6 +197,9 @@ describe('school teacher invoices by meeting', () => {
     const lines = state.writes.find(write => write.table === 'invoice_line_items')!.value;
     expect(lines).toHaveLength(1); expect(lines[0]).toMatchObject({ quantity: 1, total_price: 45 });
     expect(lines[0].session_ids).toHaveLength(6);
+    expect(lines[0].description).toMatch(/Grupinis užsiėmimas: Matematika 5 kl\./);
+    expect(lines[0].description).not.toMatch(/pamoka/i);
+    if (groupingType === 'per_payment') expect(lines[0].description).toContain('2026-09-15');
     expect(state.writes.some(write => write.table === 'sessions' || write.table === 'school_contracts')).toBe(false);
   });
   it('accepts complete grouped preview coverage with pending/cancelled siblings and ignores their old rates', async () => {

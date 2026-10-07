@@ -19,6 +19,7 @@ import { snapshotFromRow } from './_lib/extraLessonsContractShared.js';
 import { sendSchoolMonthlyInvoiceEmail, type SchoolMonthlyInvoiceRow } from './_lib/schoolMonthlyInvoiceEmail.js';
 import { publicAppOrigin } from './_lib/publicLinkToken.js';
 import { computeCanonicalSchoolMonthlyBill, groupOccurrenceKey, hasSchoolOccurrenceEvidence, schoolContractBillingModel, schoolInvoiceDueDate } from '../src/lib/schoolCanonicalBilling.js';
+import { parseSchoolOrgCalendar, type SchoolOrgCalendarSettings } from '../src/lib/schoolOrgCalendar.js';
 import { schoolContractSuspensionOverlapsPeriod } from '../src/lib/schoolContractLifecycle.js';
 import { latestSchoolBillingDecisions } from '../src/lib/schoolInvoiceSessionReview.js';
 import { isSchoolConsultationsOrg } from '../src/lib/schoolConsultationsOrg.js';
@@ -36,6 +37,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
   );
+  const orgCalendarCache = new Map<string, SchoolOrgCalendarSettings>();
+  const loadOrgCalendar = async (organizationId: string) => {
+    const cached = orgCalendarCache.get(organizationId);
+    if (cached) return cached;
+    const { data } = await supabase.from('organizations').select('features').eq('id', organizationId).maybeSingle();
+    const calendar = parseSchoolOrgCalendar(data?.features);
+    orgCalendarCache.set(organizationId, calendar);
+    return calendar;
+  };
 
   const dryRun = req.query?.dryRun === 'true' || req.body?.dryRun === true;
   const requestedOrg = req.query?.organizationId ?? req.body?.organizationId;
@@ -343,7 +353,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       billed_session_ids: actualBill?.billed_session_ids || [],
       payment_status: discounted.totalEur === 0 ? 'paid' : 'pending',
       paid_at: discounted.totalEur === 0 ? new Date().toISOString() : null,
-      due_date: model === 'actual' ? schoolInvoiceDueDate(new Date()) : due.toISOString().slice(0, 10),
+      due_date: model === 'actual'
+        ? schoolInvoiceDueDate(new Date(), 5, await loadOrgCalendar(contract.organization_id))
+        : due.toISOString().slice(0, 10),
     }).select('*').single();
     if (insErr || !inserted) {
       console.error('[bill-school-extra-lessons]', insErr?.message || 'insert failed');

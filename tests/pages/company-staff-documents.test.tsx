@@ -18,6 +18,10 @@ import CompanyStaffDocuments, { CompanyStaffDocumentsContent, type StaffDocument
 
 const ORG_ID = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
 
+async function openNewEmployeeForm() {
+  fireEvent.click(await screen.findByRole('button', { name: /Naujo darbuotojo dokumentai/i }));
+}
+
 describe('school staff document upload form', () => {
   beforeEach(() => {
     uploadMock.mockReset();
@@ -36,7 +40,7 @@ describe('school staff document upload form', () => {
     }));
     render(<CompanyStaffDocuments />);
 
-    await screen.findByRole('button', { name: 'Sukurti du dokumentus' });
+    await openNewEmployeeForm();
     fireEvent.change(screen.getByLabelText('Vardas, pavardė'), { target: { value: 'Vardas Pavardė' } });
     fireEvent.change(screen.getByLabelText('El. paštas'), { target: { value: 'employee@example.com' } });
     const file = new File(['%PDF-prepared'], 'agreement-and-annex.pdf', { type: 'application/pdf' });
@@ -109,7 +113,7 @@ describe('school staff document upload form', () => {
         : { ok: true, json: async () => ({ emailed: true }) };
     }));
     render(<CompanyStaffDocuments />);
-    await screen.findByRole('button', { name: 'Sukurti du dokumentus' });
+    await openNewEmployeeForm();
     fireEvent.change(screen.getByLabelText('Vardas, pavardė'), { target: { value: 'Vardas Pavardė' } });
     fireEvent.change(screen.getByLabelText('El. paštas'), { target: { value: 'employee@example.com' } });
     fireEvent.change(screen.getByLabelText(/Savitas PDF vietoj Tutlio šablono/), {
@@ -135,7 +139,7 @@ describe('school staff document upload form', () => {
       return { ok: true, json: async () => ({ emailed: true }) };
     }));
     render(<CompanyStaffDocuments />);
-    await screen.findByRole('button', { name: 'Sukurti du dokumentus' });
+    await openNewEmployeeForm();
     fireEvent.change(screen.getByLabelText('Vardas, pavardė'), { target: { value: 'Alina Armonienė' } });
     fireEvent.change(screen.getByLabelText('El. paštas'), { target: { value: 'alina@example.com' } });
     fireEvent.change(screen.getByLabelText(/Darbo sutarties Nr/), { target: { value: '10' } });
@@ -160,7 +164,7 @@ describe('school staff document upload form', () => {
       return { ok: true, json: async () => ({ emailed: true }) };
     }));
     render(<CompanyStaffDocuments />);
-    await screen.findByRole('button', { name: 'Sukurti du dokumentus' });
+    await openNewEmployeeForm();
     fireEvent.change(screen.getByLabelText('Vardas, pavardė'), { target: { value: 'Vardas Pavardė' } });
     fireEvent.change(screen.getByLabelText('El. paštas'), { target: { value: 'employee@example.com' } });
     fireEvent.change(screen.getByLabelText(/Darbo sutarties Nr/), { target: { value: 'DS-42' } });

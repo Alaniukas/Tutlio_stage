@@ -20,6 +20,17 @@ describe('school dashboard action queues', () => {
     expect(isSchoolParentConfirmationPending({ kind: 'annual', signing_status: 'signed' })).toBe(false);
     expect(isSchoolParentConfirmationPending({ kind: 'extra_lessons', signing_status: 'sent', accepted_at: null })).toBe(true);
     expect(isSchoolParentConfirmationPending({ kind: 'extra_lessons', signing_status: 'sent', accepted_at: '2026-09-10T10:00:00Z' })).toBe(false);
+    expect(isSchoolParentConfirmationPending({
+      kind: 'extra_lessons',
+      signing_status: 'sent',
+      accepted_at: null,
+      withdrawal_requested_at: '2026-09-12T10:00:00Z',
+    })).toBe(false);
+    expect(isSchoolParentConfirmationPending({
+      kind: 'annual',
+      signing_status: 'sent',
+      terminated_at: '2026-09-12T10:00:00Z',
+    })).toBe(false);
   });
 
   it('labels the pending parent action clearly', () => {
@@ -81,6 +92,24 @@ describe('school dashboard action queues', () => {
     ]));
   });
 
+  it('warns when a group is below minimum before an upcoming slot', () => {
+    const actions = buildSchoolAdminActionQueue({
+      now: new Date('2026-10-06T10:00:00.000Z'),
+      contracts: [],
+      invoices: [],
+      sessions: [],
+      groups: [{
+        id: 'group-risk',
+        name: 'Lietuvių 8 klasė',
+        minimum_active_students: 2,
+        duration_minutes: 45,
+        slots: [{ weekday: 3, start_time: '16:00', end_time: '16:45' }],
+        minimum_status: { eligible_student_count: 1, unconfirmed_student_ids: ['s2'] },
+      }],
+    });
+    expect(actions.some((item) => item.id === 'group-at-risk:group-risk')).toBe(true);
+  });
+
   it('keeps a group below the three-student minimum in the admin queue', () => {
     const actions = buildSchoolAdminActionQueue({
       contracts: [],
@@ -117,6 +146,23 @@ describe('school dashboard action queues', () => {
       sessions: [],
     });
     expect(actions.some((item) => item.id === 'contract-document:contract-doc')).toBe(true);
+  });
+
+  it('drops terminated or withdrawn contracts from the admin queue', () => {
+    const actions = buildSchoolAdminActionQueue({
+      now: new Date('2026-09-18T12:00:00.000Z'),
+      contracts: [{
+        id: 'contract-ended',
+        kind: 'extra_lessons',
+        signing_status: 'sent',
+        sent_at: '2026-09-01T10:00:00.000Z',
+        student_name: 'Jonas',
+        withdrawal_requested_at: '2026-09-10T10:00:00.000Z',
+      }],
+      invoices: [],
+      sessions: [],
+    });
+    expect(actions.some((item) => item.id.startsWith('contract-'))).toBe(false);
   });
 
   it('queues unconfirmed attendance only when the system saw the child miss a held lesson', () => {

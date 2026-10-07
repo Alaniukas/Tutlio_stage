@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { SupportTicketsList, type SupportTicketSummary } from '@/components/support/SupportTicketsList';
 import { loginHrefWithNext } from '@/lib/auth-redirects';
+import { finishGuardedLoad, resolveAccessToken } from '@/lib/authSession';
 import { useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
 
-function SupportTicketsContent() {
+function SupportTicketsContent({ accessToken }: { accessToken: string | null }) {
   const location = useLocation();
   const { locale } = useTranslation();
   const language = locale === 'lt' || locale === 'pl' ? locale : 'en';
@@ -17,35 +18,37 @@ function SupportTicketsContent() {
 
   useEffect(() => {
     const controller = new AbortController();
-    let active = true;
+    let cancelled = false;
     const load = async () => {
       setLoading(true);
       setError(false);
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.access_token) throw new Error('Missing authenticated session.');
-        const ticketQuery = selectedReference && /^[0-9a-f-]{36}$/i.test(selectedReference)
-          ? `?ticket=${encodeURIComponent(selectedReference)}`
-          : '';
-        const response = await fetch(`/api/my-support-requests${ticketQuery}`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-          signal: controller.signal,
-        });
-        const result = await response.json().catch(() => null) as { requests?: SupportTicketSummary[] } | null;
-        if (!response.ok || !Array.isArray(result?.requests)) throw new Error('Could not load support requests.');
-        if (active) setTickets(result.requests);
-      } catch (loadError) {
-        if (active && !(loadError instanceof DOMException && loadError.name === 'AbortError')) setError(true);
-      } finally {
-        if (active) setLoading(false);
-      }
+      await finishGuardedLoad({
+        isCancelled: () => cancelled,
+        setLoading,
+        run: async () => {
+          const token = accessToken || await resolveAccessToken();
+          if (!token) throw new Error('Missing authenticated session.');
+          const ticketQuery = selectedReference && /^[0-9a-f-]{36}$/i.test(selectedReference)
+            ? `?ticket=${encodeURIComponent(selectedReference)}`
+            : '';
+          const response = await fetch(`/api/my-support-requests${ticketQuery}`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal,
+          });
+          const result = await response.json().catch(() => null) as { requests?: SupportTicketSummary[] } | null;
+          if (!response.ok || !Array.isArray(result?.requests)) throw new Error('Could not load support requests.');
+          if (!cancelled) setTickets(result.requests);
+        },
+      }).catch((loadError) => {
+        if (!cancelled && !(loadError instanceof DOMException && loadError.name === 'AbortError')) setError(true);
+      });
     };
     void load();
     return () => {
-      active = false;
+      cancelled = true;
       controller.abort();
     };
-  }, [refreshVersion, selectedReference]);
+  }, [refreshVersion, selectedReference, accessToken]);
 
   return (
     <SupportTicketsList
@@ -64,23 +67,36 @@ function SupportTicketsContent() {
 export default function SupportTickets() {
   const location = useLocation();
   const [authState, setAuthState] = useState<'loading' | 'signed_in' | 'signed_out'>('loading');
+  const [accessToken, setAccessToken] = useState<string | null>(null);
   const [authRevision, setAuthRevision] = useState(0);
 
   useEffect(() => {
     let active = true;
     let authEventSeen = false;
+    const applySession = (session: { access_token?: string } | null) => {
+      if (!active) return;
+      const token = session?.access_token ?? null;
+      setAccessToken(token);
+      setAuthState(token ? 'signed_in' : 'signed_out');
+    };
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event !== 'SIGNED_OUT' && event !== 'SIGNED_IN' && event !== 'INITIAL_SESSION') return;
       authEventSeen = true;
       if (event === 'SIGNED_OUT') {
-        if (active) setAuthState('signed_out');
-      } else if (active) {
-        setAuthState(session?.access_token ? 'signed_in' : 'signed_out');
-        setAuthRevision((revision) => revision + 1);
+        if (active) {
+          setAccessToken(null);
+          setAuthState('signed_out');
+        }
+      } else {
+        applySession(session);
+        if (active) setAuthRevision((revision) => revision + 1);
       }
     });
-    void supabase.auth.getSession().then(({ data: { session } }) => {
-      if (active && !authEventSeen) setAuthState(session?.access_token ? 'signed_in' : 'signed_out');
+    void resolveAccessToken().then((token) => {
+      if (active && !authEventSeen) {
+        setAccessToken(token);
+        setAuthState(token ? 'signed_in' : 'signed_out');
+      }
     }).catch(() => {
       if (active && !authEventSeen) setAuthState('signed_out');
     });
@@ -94,5 +110,9 @@ export default function SupportTickets() {
   if (authState === 'signed_out') {
     return <Navigate to={loginHrefWithNext(`${location.pathname}${location.search}`)} replace />;
   }
-  return <main className="min-h-dvh bg-slate-50 px-3 py-6 sm:px-6 sm:py-10"><SupportTicketsContent key={authRevision} /></main>;
+  return (
+    <main className="min-h-dvh bg-slate-50 px-3 py-6 sm:px-6 sm:py-10">
+      <SupportTicketsContent key={authRevision} accessToken={accessToken} />
+    </main>
+  );
 }

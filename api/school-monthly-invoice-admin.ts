@@ -11,7 +11,7 @@ import { generateSchoolMonthlyInvoicePdf } from './_lib/schoolMonthlyInvoicePdf.
 import { sendSchoolMonthlyInvoiceEmail } from './_lib/schoolMonthlyInvoiceEmail.js';
 import { publicAppOrigin } from './_lib/publicLinkToken.js';
 import { availableSchoolInvoiceOverpayments, loadSchoolInvoiceOverpayments } from './_lib/schoolInvoiceOverpayments.js';
-import { schoolInvoiceCreditPreview, schoolOverpaymentRemaining, type SchoolInvoiceOverpayment } from '../src/lib/schoolInvoiceOverpayments.js';
+import { allocateSchoolInvoiceCredits, schoolInvoiceCreditPreview, schoolOverpaymentRemaining, schoolOverpaymentSourceMonthLabel, type SchoolInvoiceOverpayment } from '../src/lib/schoolInvoiceOverpayments.js';
 import {
   buildSchoolLessonInvoiceLines,
   invoiceLinesDiscountTotal,
@@ -21,6 +21,7 @@ import {
   type SchoolLessonInvoiceLine,
 } from '../src/lib/schoolMonthlyInvoiceLines.js';
 import { groupOccurrenceKey, hasSchoolOccurrenceEvidence, schoolInvoiceDueDate } from '../src/lib/schoolCanonicalBilling.js';
+import { parseSchoolOrgCalendar } from '../src/lib/schoolOrgCalendar.js';
 import { requireOrgAdminAccess } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { wallClockToUtc } from './_lib/recurringOccurrences.js';
@@ -283,9 +284,6 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
   if (!organizationId || !YMD.test(periodStart) || !YMD.test(periodEnd) || periodEnd < periodStart) {
     throw new Error('Pasirinkite teisingą sąskaitos laikotarpį.');
   }
-  const dueDate = YMD.test(String(body.dueDate || ''))
-    ? String(body.dueDate).slice(0, 10)
-    : schoolInvoiceDueDate(new Date());
   const supabase = serviceSupabase();
   const fromIso = wallClockToUtc(periodStart, '00:00:00').toISOString();
   const untilIso = new Date(wallClockToUtc(periodEnd, '23:59:59').getTime() + 999).toISOString();
@@ -312,6 +310,9 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
   const org = orgRes.data;
   const profile = profileRes.data;
   if (!org) throw new Error('Mokykla nerasta.');
+  const dueDate = YMD.test(String(body.dueDate || ''))
+    ? String(body.dueDate).slice(0, 10)
+    : schoolInvoiceDueDate(new Date(), 5, parseSchoolOrgCalendar(org.features));
 
   const studentIds = onlyStudentIds?.length
     ? onlyStudentIds
@@ -495,6 +496,7 @@ async function renderDraftPdf(draft: DraftContext, invoiceNumber: string, previe
     discountAmountEur: draft.discountAmountEur,
     totalEur: draft.totalEur,
     creditAppliedEur: draft.creditAppliedEur,
+    creditSources: allocateSchoolInvoiceCredits(draft.credits, draft.totalEur),
     discountNote: discountNotesForInvoice(draft.lines),
     issuedByName: typeof features.school_invoice_issued_by_name === 'string'
       ? features.school_invoice_issued_by_name
@@ -598,6 +600,7 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
     org: draft.org,
     contract: {},
     lines: lineRows,
+    creditSources: allocateSchoolInvoiceCredits(draft.credits, draft.totalEur),
   });
   return {
     invoiceId: invoice.id,
@@ -832,7 +835,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         totalEur: draft.totalEur,
         creditAppliedEur: draft.creditAppliedEur,
         amountDueEur: draft.amountDueEur,
-        credits: draft.credits.map((credit) => ({ sourceInvoiceNumber: credit.source?.invoice_number, availableEur: schoolOverpaymentRemaining(credit) })),
+        creditSources: allocateSchoolInvoiceCredits(draft.credits, draft.totalEur),
+        credits: draft.credits.map((credit) => ({
+          sourceInvoiceNumber: credit.source?.invoice_number,
+          sourceMonthLabel: schoolOverpaymentSourceMonthLabel(credit.source?.period_end || ''),
+          availableEur: schoolOverpaymentRemaining(credit),
+        })),
         reviewSessionIds: draft.reviewSessionIds,
         ...reviewData(draft),
       });

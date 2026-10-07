@@ -30,6 +30,10 @@ import {
 import { isInvoiceProfileComplete, ORG_INVOICE_PROFILE_INCOMPLETE } from './_lib/invoiceProfileReady.js';
 import { fetchAllRows } from '../src/lib/fetchAllRows.js';
 import { resolveSchoolTutorGroupPayRate } from '../src/lib/schoolTutorDefaultPay.js';
+import {
+  schoolTutorInvoiceLineDescription,
+  schoolTutorInvoiceLineGroupKey,
+} from '../src/lib/schoolTutorInvoiceLines.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -209,7 +213,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const sessionSelect = `
         id, tutor_id, class_group_id, price, start_time, end_time, subject_id, student_id, status, no_show_reason, is_complimentary, status_confirmed_at, tutor_pay_eur_snapshot,
         students!inner(id, full_name, email, payer_email, payer_name, payer_phone, grade, organization_id),
-        subjects(name, is_trial, is_group)
+        subjects(name, is_trial, is_group),
+        class_group:school_class_groups!sessions_class_group_id_fkey(name, calendar_name)
       `;
 
     let sessions: any[] = [];
@@ -675,6 +680,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         orgTutorRateEur,
         detailed: detailedLineItems,
         proKlasePay,
+        schoolTutorInvoice,
         lessonPayEur: orgTutorRateEur != null ? lessonPayEur : undefined,
       });
 
@@ -1005,6 +1011,7 @@ function buildLineItems(
     orgTutorRateEur: number | null;
     detailed?: boolean;
     proKlasePay?: boolean;
+    schoolTutorInvoice?: boolean;
     lessonPayEur?: (session: any) => number;
   }
 ): LineItemData[] {
@@ -1026,6 +1033,49 @@ function buildLineItems(
               sessionPrice: s.price,
               tutorPaySnapshot: s.tutor_pay_eur_snapshot,
             });
+
+    const schoolLineItem = (s: any, description: string) => {
+      const amount = linePay(s);
+      return {
+        description,
+        quantity: 1,
+        unitPrice: amount,
+        totalPrice: amount,
+        sessionIds: s.__schoolSessionIds || [s.id],
+        ...(s.__schoolAttendanceIds ? { attendanceIds: s.__schoolAttendanceIds } : {}),
+      };
+    };
+
+    if (opts?.schoolTutorInvoice) {
+      if (groupingType === 'per_payment') {
+        return sessions.map(s => schoolLineItem(
+          s,
+          schoolTutorInvoiceLineDescription(s, { includeDate: true }),
+        ));
+      }
+
+      const activityMap = new Map<string, { description: string; sessions: any[] }>();
+      for (const s of sessions) {
+        const key = schoolTutorInvoiceLineGroupKey(s);
+        const description = schoolTutorInvoiceLineDescription(s, { includeDate: false });
+        const bucket = activityMap.get(key) || { description, sessions: [] };
+        bucket.sessions.push(s);
+        activityMap.set(key, bucket);
+      }
+      return Array.from(activityMap.values()).map(group => {
+        const qty = group.sessions.length;
+        const totalPrice = group.sessions.reduce((sum, s) => sum + linePay(s), 0);
+        const unitPrice = qty > 0 ? Math.round((totalPrice / qty) * 100) / 100 : 0;
+        return {
+          description: group.description,
+          quantity: qty,
+          unitPrice,
+          totalPrice: Math.round(totalPrice * 100) / 100,
+          sessionIds: [...new Set(group.sessions.flatMap((s: any) => s.__schoolSessionIds || [s.id]))] as string[],
+          attendanceIds: [...new Set<string>(group.sessions.flatMap((s: any) => s.__schoolAttendanceIds || []))],
+        };
+      });
+    }
 
     if (groupingType === 'per_payment') {
       return sessions.map(s => {

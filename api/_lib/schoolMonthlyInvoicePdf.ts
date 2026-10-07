@@ -44,6 +44,7 @@ export type SchoolMonthlyInvoicePdfData = {
   discountAmountEur: number;
   totalEur: number;
   creditAppliedEur?: number;
+  creditSources?: Array<{ monthLabel: string; amountEur: number }>;
   discountNote?: string | null;
   issuedByName?: string | null;
   branding?: InvoicePdfBranding | null;
@@ -350,8 +351,11 @@ export async function generateSchoolMonthlyInvoicePdf(data: SchoolMonthlyInvoice
   }
 
   const creditApplied = Number(data.creditAppliedEur || 0);
+  const creditSources = data.creditSources?.length
+    ? data.creditSources
+    : creditApplied > 0 ? [{ monthLabel: '', amountEur: creditApplied }] : [];
   const noteHeight = data.discountNote ? wrap(`Nuolaidos pastaba: ${data.discountNote}`,font,8,TABLE_W).length * 11 + 24 : 0;
-  const summaryHeight = 92 + (creditApplied > 0 ? 32 : 0) + noteHeight + (data.dueDate ? 24 : 0);
+  const summaryHeight = 92 + (creditSources.length * 16) + noteHeight + (data.dueDate ? 24 : 0);
   if (y - summaryHeight < 135) continuationPage();
   y -= 17;
   const summaryX = 348;
@@ -361,13 +365,16 @@ export async function generateSchoolMonthlyInvoicePdf(data: SchoolMonthlyInvoice
   page.drawText('Nuolaida:', { x: summaryX, y, size: 8.5, font, color: black });
   page.drawText(`-${eur(data.discountAmountEur)}`, { x: 485, y, size: 8.5, font, color: black });
   const amountDue = Math.max(0, Math.round((data.totalEur - creditApplied) * 100)) / 100;
-  if (creditApplied > 0) {
+  if (creditSources.length) {
     y -= 16;
     page.drawText('Sąskaitos suma:', { x: summaryX, y, size: 8.5, font, color: black });
     page.drawText(eur(data.totalEur), { x: 485, y, size: 8.5, font, color: black });
-    y -= 16;
-    page.drawText('Užskaityta permoka:', { x: summaryX, y, size: 8.5, font, color: black });
-    page.drawText(`-${eur(creditApplied)}`, { x: 485, y, size: 8.5, font, color: black });
+    for (const source of creditSources) {
+      y -= 16;
+      const label = source.monthLabel ? `Permoka iš ${source.monthLabel}:` : 'Užskaityta permoka:';
+      page.drawText(label, { x: summaryX, y, size: 8.5, font, color: black });
+      page.drawText(`-${eur(source.amountEur)}`, { x: 485, y, size: 8.5, font, color: black });
+    }
   }
   y -= 19;
   page.drawText('MOKĖTI:', { x: summaryX, y, size: 10, font: bold, color: black });

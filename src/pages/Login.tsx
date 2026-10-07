@@ -24,6 +24,7 @@ import { setLastPortal } from '@/lib/pwaPortal';
 import { loadSavedLoginForm, persistLoginForm, readRememberMePreference } from '@/lib/loginCredentials';
 import { parseOrgLoginPortal } from '@/lib/orgLoginLinks';
 import { ORG_LOGIN_LOGO_IMG_CLASS, ORG_LOGIN_LOGO_WRAP_CLASS, ORG_LOGIN_LOGO_WRAP_CLASS_DARK } from '@/lib/orgLoginLogo';
+import { withLoginTimeout } from '@/lib/loginTimeout';
 
 // ─── SVG Illustrations ────────────────────────────────────────────────────────
 
@@ -441,10 +442,13 @@ export default function Login() {
         const loginPortal: LoginPortal | null =
           role === 'tutor' ? 'tutor' : role === 'student' ? 'student' : role === 'parent' ? 'parent' : null;
 
-        const portals = await resolveAccountPortals(data.user.id, {
-          email: data.user.email,
-          linkStudentByEmail: role === 'student',
-        });
+        const portals = await withLoginTimeout(
+          resolveAccountPortals(data.user.id, {
+            email: data.user.email,
+            linkStudentByEmail: role === 'student',
+          }),
+          'resolveAccountPortals',
+        );
 
         if (loginPortal && !canAccessLoginPortal(portals, loginPortal)) {
           const hasOrgToken = Boolean(String(data.user.user_metadata?.org_token || '').trim());
@@ -458,7 +462,10 @@ export default function Login() {
         }
 
         if (portals.orgAdmin && loginPortal !== 'tutor') {
-          const path = await getOrgAdminDashboardPath(supabase, data.user.id);
+          const path = await withLoginTimeout(
+            getOrgAdminDashboardPath(supabase, data.user.id),
+            'getOrgAdminDashboardPath',
+          );
           navigate(path);
           return;
         }
@@ -483,11 +490,14 @@ export default function Login() {
         }
 
       if (role === 'tutor') {
-        let { data: tutorData, error: tutorError } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('id', data.user.id)
-          .maybeSingle();
+        let { data: tutorData, error: tutorError } = await withLoginTimeout(
+          supabase
+            .from('profiles')
+            .select('id')
+            .eq('id', data.user.id)
+            .maybeSingle(),
+          'tutorProfileLookup',
+        );
         if (tutorError) {
           console.warn('[Login] Tutor profile lookup failed:', tutorError);
         }
@@ -500,11 +510,16 @@ export default function Login() {
         if (meta.org_token) {
           const metaOrgToken = String(meta.org_token).trim().toUpperCase();
           console.log('🔍 SIGNUP FLOW - SEARCHING FOR INVITE WITH TOKEN:', metaOrgToken);
-          const claimResult = await claimOrgInvite(metaOrgToken, data.session?.access_token);
+          const claimResult = await withLoginTimeout(
+            claimOrgInvite(metaOrgToken, data.session?.access_token),
+            'claimOrgInvite',
+          );
           console.log('🔍 SIGNUP FLOW - CLAIM RESULT:', claimResult);
           if (claimResult.organizationId) {
-            const { data: updated } = await supabase
-              .from('profiles').select('id').eq('id', data.user.id).maybeSingle();
+            const { data: updated } = await withLoginTimeout(
+              supabase.from('profiles').select('id').eq('id', data.user.id).maybeSingle(),
+              'tutorProfileAfterClaim',
+            );
             tutorData = updated;
           }
         } else if (!tutorData && meta.full_name) {
@@ -514,19 +529,24 @@ export default function Login() {
             setLoading(false);
             return;
           }
-          await supabase.from('profiles').upsert({
-            id: data.user.id,
-            full_name: meta.full_name,
-            phone: meta.phone || '',
-            email: data.user.email,
-          });
-          const { data: created } = await supabase
-            .from('profiles').select('id').eq('id', data.user.id).maybeSingle();
+          await withLoginTimeout(
+            supabase.from('profiles').upsert({
+              id: data.user.id,
+              full_name: meta.full_name,
+              phone: meta.phone || '',
+              email: data.user.email,
+            }),
+            'tutorProfileUpsert',
+          );
+          const { data: created } = await withLoginTimeout(
+            supabase.from('profiles').select('id').eq('id', data.user.id).maybeSingle(),
+            'tutorProfileAfterUpsert',
+          );
           tutorData = created;
         }
 
         if (!tutorData) {
-          const ensured = await ensureTutorProfile(data.user);
+          const ensured = await withLoginTimeout(ensureTutorProfile(data.user), 'ensureTutorProfile');
           tutorData = ensured ? { id: ensured.id } : null;
         }
 
@@ -550,6 +570,11 @@ export default function Login() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg === 'Login timeout' || /timeout/i.test(msg)) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (role === 'tutor' && session?.access_token) {
+          navigate(nextPath || '/dashboard');
+          return;
+        }
         setError(t('login.timeout'));
       } else {
         console.error('[Login] unexpected error:', err);

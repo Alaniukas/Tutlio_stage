@@ -91,6 +91,7 @@ import {
 } from '@/lib/sessionCommentDelivery';
 import { sessionCommentVisibilityLabelKey } from '@/lib/parentLessonComment';
 import SessionCreatedByBadge from '@/components/SessionCreatedByBadge';
+import { SchoolAttendanceMarkingLabel } from '@/components/SchoolAttendanceMarkingLabel';
 
 interface Session {
   id: string;
@@ -122,6 +123,7 @@ interface Session {
   tutor_joined_at?: string | null;
   student_joined_at?: string | null;
   status_confirmed_at?: string | null;
+  status_confirmed_by?: string | null;
   no_show_reason?: string | null;
   created_by_role?: string | null;
 }
@@ -151,7 +153,7 @@ const ORG_SESSION_LIST_SELECT =
   '*, student:students(full_name, admin_comment, admin_comment_visible_to_tutor), subjects(is_group)';
 
 const ORG_SESSION_STATS_SELECT =
-  'id, tutor_id, student_id, class_group_id, subject_id, status, start_time, end_time, topic, cancelled_by, cancellation_reason, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, no_show_reason, paid, payment_status, is_complimentary, price, student:students(full_name), subjects(is_group)';
+  'id, tutor_id, student_id, class_group_id, subject_id, status, start_time, end_time, topic, cancelled_by, cancellation_reason, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, status_confirmed_by, no_show_reason, paid, payment_status, is_complimentary, price, student:students(full_name), subjects(is_group)';
 
 function orgSessionDetailSelect(organizationId: string | null | undefined): string {
   if (isManoKorepetitoriusOrg(organizationId)) {
@@ -215,6 +217,7 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
     tutor_joined_at: row.tutor_joined_at ?? null,
     student_joined_at: row.student_joined_at ?? null,
     status_confirmed_at: row.status_confirmed_at ?? null,
+    status_confirmed_by: row.status_confirmed_by ?? null,
     no_show_reason: row.no_show_reason ?? null,
     created_by_role: row.created_by_role ?? null,
   };
@@ -354,6 +357,15 @@ export default function CompanySessions() {
       initialListLoadDone.current = true;
     });
   }, []);
+
+  useEffect(() => {
+    const studentParam = searchParams.get('student')?.trim() ?? '';
+    if (!studentParam) return;
+    setFilterStudent(studentParam);
+    setIsFilterActive(false);
+    setFilterStartDate(null);
+    setFilterEndDate(null);
+  }, [searchParams]);
 
   useEffect(() => {
     if (!initialListLoadDone.current) return;
@@ -1435,6 +1447,9 @@ export default function CompanySessions() {
                         <AttendanceBadge session={session} manualConfirmationRequired={supportsManualAttendance} />
                         <SessionCreatedByBadge createdByRole={session.created_by_role} />
                       </div>
+                      {supportsManualAttendance ? (
+                        <SchoolAttendanceMarkingLabel session={session} className="mt-1" />
+                      ) : null}
                     </div>
                     <div className="flex flex-col items-end gap-2 flex-shrink-0">
                       <div className="scale-90 origin-top-right">
@@ -1528,6 +1543,9 @@ export default function CompanySessions() {
                         />
                         <AttendanceBadge session={session} manualConfirmationRequired={supportsManualAttendance} />
                         <SessionCreatedByBadge createdByRole={session.created_by_role} className="mt-0.5" />
+                        {supportsManualAttendance ? (
+                          <SchoolAttendanceMarkingLabel session={session} className="mt-0.5" />
+                        ) : null}
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -1797,6 +1815,9 @@ export default function CompanySessions() {
                           pendingConfirmation={supportsManualAttendance}
                         />
                         <AttendanceBadge session={selectedSession} manualConfirmationRequired={supportsManualAttendance} />
+                        {supportsManualAttendance ? (
+                          <SchoolAttendanceMarkingLabel session={selectedSession} className="mt-1" />
+                        ) : null}
                       </div>
                     </div>
                     <div>
@@ -2127,9 +2148,6 @@ function SchoolSessionMonitoring({ sessions, requireConfirmation }: { sessions: 
           </div>
         ))}
       </div>
-      <p className="text-xs text-gray-500">
-        {t('schoolDash.attendanceExplanation')}
-      </p>
       {reasons.size > 0 ? (
         <details className="rounded-xl border bg-white p-4">
           <summary className="cursor-pointer font-medium">{t('schoolDash.failureReasons')}</summary>

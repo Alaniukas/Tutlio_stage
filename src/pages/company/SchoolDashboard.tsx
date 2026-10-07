@@ -19,7 +19,7 @@ import { useDismissibleDashboardItemIds } from '@/hooks/useDismissibleDashboardI
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { authHeaders } from '@/lib/apiHelpers';
-import { deriveAttendance, isAttendanceFlagged } from '@/lib/attendance';
+import { deriveAttendance } from '@/lib/attendance';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useTranslation } from '@/lib/i18n';
@@ -31,10 +31,13 @@ import {
   sumPendingSchoolInvoices,
 } from '@/lib/schoolDashboard';
 import {
+  isSchoolDashboardAttendanceAttention,
+  isSchoolDashboardNotHeldAttention,
   schoolActivitySummary,
   schoolMeetingOccurrences,
   type SchoolMeetingRow,
 } from '@/lib/schoolSessionMonitoring';
+import { schoolTutorActivityByTutorId } from '@/lib/schoolTutorActivity';
 import { schoolDate } from '@/lib/schoolTime';
 import { effectiveSessionOutcome, orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import { supabase } from '@/lib/supabase';
@@ -69,6 +72,8 @@ type PendingContract = {
   signing_status?: string | null;
   completion_submitted_at?: string | null;
   accepted_at?: string | null;
+  terminated_at?: string | null;
+  withdrawal_requested_at?: string | null;
   signatures?: Array<{ role?: string | null; status?: string | null }> | null;
   sent_at?: string | null;
   created_at?: string | null;
@@ -101,15 +106,20 @@ type DashboardData = {
     admin_action_requested_at?: string | null;
     updated_at?: string | null;
     tutor_name?: string | null;
+    tutor_id?: string | null;
+    duration_minutes?: number | null;
+    slots?: Array<{ weekday: number; start_time: string; end_time?: string | null }>;
+    minimum_status?: { eligible_student_count: number; unconfirmed_student_ids: string[] };
     suspension_started_at?: string | null;
     suspension_until?: string | null;
     suspension_resumed_at?: string | null;
     suspension_reason?: string | null;
     minimum_active_students?: number | null;
   }>;
+  tutors: Array<{ id: string; name: string }>;
 };
 
-const EMPTY_DATA: DashboardData = { sessions: [], contracts: [], invoices: [], groups: [] };
+const EMPTY_DATA: DashboardData = { sessions: [], contracts: [], invoices: [], groups: [], tutors: [] };
 
 function relatedOne<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
@@ -153,9 +163,13 @@ export default function SchoolDashboard() {
   const { t, dateFnsLocale } = useTranslation();
   const { fmt } = useMarketMoney();
   const { loading: accessLoading, membership, can } = useOrgAdminAccess();
-  const { hasFeature } = useOrgFeatures();
+  const { features } = useOrgFeatures();
+  const classGroupsEnabled = features.school_class_groups ?? false;
+  const canViewContracts = can('contracts.view');
+  const canViewFinance = can('finance.view');
+  const canViewSessions = can('sessions.view');
   const requireOutcomeConfirmation = orgRequiresTutorStatusConfirmation(membership?.organizationId)
-    || hasFeature('tutor_lesson_status_confirmation');
+    || (features.tutor_lesson_status_confirmation ?? false);
   const navigate = useNavigate();
   const requestId = useRef(0);
   const [loading, setLoading] = useState(true);
@@ -199,17 +213,17 @@ export default function SchoolDashboard() {
         organizationId,
         'id, full_name, email',
       );
-      const contractsPromise = can('contracts.view')
+      const contractsPromise = canViewContracts
         ? fetchAllRows<any>((from, to) => supabase
             .from('school_contracts')
-            .select('id, kind, signing_status, completion_submitted_at, accepted_at, sent_at, signed_at, created_at, pdf_url, signed_contract_url, student:students(full_name), signatures:school_contract_signatures(role, status)')
+            .select('id, kind, signing_status, completion_submitted_at, accepted_at, terminated_at, withdrawal_requested_at, sent_at, signed_at, created_at, pdf_url, signed_contract_url, student:students(full_name), signatures:school_contract_signatures(role, status)')
             .eq('organization_id', organizationId)
             .is('staff_document_type', null)
             .is('archived_at', null)
             .order('created_at', { ascending: false })
             .range(from, to), 400)
         : Promise.resolve([]);
-      const invoicesPromise = can('finance.view')
+      const invoicesPromise = canViewFinance
         ? fetchAllRows<any>((from, to) => supabase
             .from('school_monthly_invoices')
             .select('id, period_start, period_end, total_eur, payment_status, due_date, created_at, student:students(full_name)')
@@ -219,13 +233,21 @@ export default function SchoolDashboard() {
             .order('id')
             .range(from, to), 200)
         : Promise.resolve([]);
-      const groupsPromise = can('sessions.view')
-        ? fetchAllRows<any>((from, to) => supabase
-            .from('school_class_groups')
-            .select('id, name, tutor_id, minimum_active_students, admin_action_required, admin_action_note, admin_action_requested_at, updated_at, suspension_started_at, suspension_until, suspension_resumed_at, suspension_reason')
-            .eq('organization_id', organizationId)
-            .order('updated_at', { ascending: false })
-            .range(from, to), 150)
+      const groupsPromise = canViewSessions
+        ? (async () => {
+            if (classGroupsEnabled) {
+              const response = await fetch('/api/school-class-groups', { headers: await authHeaders() });
+              if (!response.ok) throw new Error('Failed to load class groups');
+              const payload = await response.json() as { groups?: any[] };
+              return (payload.groups || []).slice(0, 150);
+            }
+            return fetchAllRows<any>((from, to) => supabase
+              .from('school_class_groups')
+              .select('id, name, tutor_id, minimum_active_students, admin_action_required, admin_action_note, admin_action_requested_at, updated_at, suspension_started_at, suspension_until, suspension_resumed_at, suspension_reason')
+              .eq('organization_id', organizationId)
+              .order('updated_at', { ascending: false })
+              .range(from, to), 150);
+          })()
         : Promise.resolve([]);
 
       const [tutors, contractRows, invoiceRows, groupRows] = await Promise.all([
@@ -236,7 +258,7 @@ export default function SchoolDashboard() {
       ]);
       const tutorIds = tutors.map(tutor => tutor.id);
       const tutorNames = new Map(tutors.map(tutor => [tutor.id, tutor.full_name || t('role.staffSchool')]));
-      const sessionRows = can('sessions.view') && tutorIds.length > 0
+      const sessionRows = canViewSessions && tutorIds.length > 0
         ? await fetchAllRows<any>((from, to) => supabase
             .from('sessions')
             .select('id, class_group_id, tutor_id, student_id, subject_id, start_time, end_time, status, topic, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, cancellation_reason, no_show_reason, cancelled_by, cancelled_at, paid, price, created_at, tutor_comment, student:students(full_name), subjects(is_group)')
@@ -270,7 +292,11 @@ export default function SchoolDashboard() {
         })),
         groups: groupRows.map((row: any) => ({
           ...row,
-          tutor_name: tutorNames.get(row.tutor_id) || t('role.staffSchool'),
+          tutor_name: row.tutor?.full_name || tutorNames.get(row.tutor_id) || t('role.staffSchool'),
+        })),
+        tutors: tutors.map((tutor) => ({
+          id: tutor.id,
+          name: tutor.full_name || t('role.staffSchool'),
         })),
       });
     } catch (error) {
@@ -279,7 +305,7 @@ export default function SchoolDashboard() {
     } finally {
       if (currentRequest === requestId.current) setLoading(false);
     }
-  }, [accessLoading, can, membership?.organizationId, t]);
+  }, [accessLoading, canViewContracts, canViewFinance, canViewSessions, classGroupsEnabled, membership?.organizationId, t]);
 
   useEffect(() => {
     void loadData();
@@ -315,13 +341,21 @@ export default function SchoolDashboard() {
       })
       .sort((a, b) => Date.parse(a.row.start_time || '') - Date.parse(b.row.start_time || ''));
     const notHeld = schoolMeetingOccurrences(monthRows, outcomeOptions)
-      .filter(({ row }) => row.status === 'cancelled' || row.status === 'no_show'
-        || (row.status === 'active' && Date.parse(row.end_time || row.start_time || '') < now.getTime()))
+      .filter(({ row }) => isSchoolDashboardNotHeldAttention(row, now))
       .sort((a, b) => Date.parse(b.row.start_time || '') - Date.parse(a.row.start_time || ''))
       .slice(0, 8);
     const attention = data.sessions
-      .filter(row => isAttendanceFlagged(row, now))
+      .filter(row => isSchoolDashboardAttendanceAttention(row, now))
       .sort((a, b) => Date.parse(b.start_time) - Date.parse(a.start_time));
+    const activityByTutor = schoolTutorActivityByTutorId(monthRows, now, outcomeOptions);
+    const teacherActivity = data.tutors
+      .map((tutor) => {
+        const activity = activityByTutor.get(tutor.id) ?? { lastActivityAt: null, unconfirmedAttendance: 0 };
+        return { ...tutor, ...activity };
+      })
+      .filter((tutor) => tutor.unconfirmedAttendance > 0)
+      .sort((left, right) => right.unconfirmedAttendance - left.unconfirmedAttendance
+        || Date.parse(right.lastActivityAt || '') - Date.parse(left.lastActivityAt || ''));
     return {
       monthSummary,
       today: todayAll.slice(0, 8),
@@ -330,8 +364,9 @@ export default function SchoolDashboard() {
       upcomingCount: upcomingAll.length,
       notHeld,
       attention,
+      teacherActivity,
     };
-  }, [data.sessions, requireOutcomeConfirmation]);
+  }, [data.sessions, data.tutors, requireOutcomeConfirmation]);
 
   const pendingContracts = useMemo(
     () => data.contracts.filter(isSchoolParentConfirmationPending),
@@ -342,6 +377,14 @@ export default function SchoolDashboard() {
     sessions: data.sessions.map(session => ({
       ...session,
       status: effectiveSessionOutcome(session, requireOutcomeConfirmation) || session.status,
+    })),
+    groups: data.groups.map((group) => ({
+      ...group,
+      slots: (group.slots || []).map((slot) => ({
+        weekday: slot.weekday,
+        start_time: slot.start_time,
+        end_time: slot.end_time || slot.start_time,
+      })),
     })),
   }), [data, requireOutcomeConfirmation]);
   const adminActions = useMemo(() => buildSchoolAdminActionQueue(outcomeData), [outcomeData]);
@@ -557,6 +600,51 @@ export default function SchoolDashboard() {
 
         {can('sessions.view') && membership?.organizationId ? (
           <SchoolContractAttendanceAlerts organizationId={membership.organizationId} canReviewContracts={can('contracts.view')} />
+        ) : null}
+
+        {can('tutors.view') ? (
+          <section className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 sm:px-5">
+              <div className="flex items-center gap-2">
+                <Activity className="h-5 w-5 text-indigo-600" />
+                <div>
+                  <h2 className="font-semibold text-gray-950">{t('school.tutors.activityAttention')}</h2>
+                  <p className="text-xs text-gray-500">{t('school.tutors.activityAttentionHint')}</p>
+                </div>
+              </div>
+              <Link to="/school/tutors" className="text-xs font-semibold text-indigo-600 hover:text-indigo-800">
+                {t('role.staffSchoolPlural')}
+              </Link>
+            </div>
+            {derived.teacherActivity.length === 0 ? (
+              <div className="flex items-center gap-2 px-4 py-4 text-sm text-emerald-700 sm:px-5">
+                <CheckCircle2 className="h-4 w-4" /> {t('school.tutors.activityEmpty')}
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {derived.teacherActivity.slice(0, listLimit).map((teacher) => (
+                  <Link
+                    key={teacher.id}
+                    to="/school/tutors"
+                    className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-indigo-50/40 sm:px-5"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-950">{teacher.name}</p>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        {t('school.tutors.lastActivity')}:{' '}
+                        {teacher.lastActivityAt
+                          ? format(schoolDate(teacher.lastActivityAt), 'yyyy-MM-dd HH:mm')
+                          : t('school.tutors.lastActivityNone')}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                      {t('school.tutors.unconfirmedMonth', { count: String(teacher.unconfirmedAttendance) })}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
         ) : null}
 
         {can('sessions.view') ? (

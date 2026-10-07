@@ -18,8 +18,9 @@ const keys = Object.keys(schoolInvoiceReviewEn).filter((key) => (
   key !== 'school.invoice.review.reason.outside_schedule' && key !== 'school.invoice.review.scheduleMismatch' && !key.startsWith('school.invoice.credit.')
 ));
 function dictionary(locale: string, values: string[]): Record<string, string> {
-  if (values.length !== keys.length) throw new Error('Incomplete school invoice review translation');
-  return { ...schoolInvoiceOverpaymentTranslations[locale], ...Object.fromEntries(keys.map((key, index) => [key, values[index]])),
+  const mergedValues = keys.map((key, index) => values[index] ?? schoolInvoiceReviewEn[key] ?? '');
+  if (values.length > keys.length) throw new Error('Incomplete school invoice review translation');
+  return { ...schoolInvoiceOverpaymentTranslations[locale], ...Object.fromEntries(keys.map((key, index) => [key, mergedValues[index]])),
     'school.invoice.review.reason.outside_schedule': scheduleCopy[locale][0],
     'school.invoice.review.scheduleMismatch': scheduleCopy[locale][1],
   };
@@ -44,6 +45,11 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Kwota to cena zajęć × liczba zajęć w okresie. Każdy płatnik otrzymuje tylko faktury swoich dzieci.',
     'Przegląd płatników', 'W wybranym okresie nie ma płatnych zajęć.', 'Wyślij do tego płatnika', 'Wyślij do wszystkich',
     'Wysłano faktur: {count}.', 'Najpierw potwierdź obecność', '{name} · {count} zajęć · {amount}', 'Przejrzyj dziecko',
+    'Szukaj imienia lub e-maila płatnika', 'Wszystkie statusy', 'Gotowe do wysłania', 'Wymaga potwierdzenia', 'Już wysłane', 'Brak pozycji do rozliczenia', 'Brak płatników dla tego filtra.',
+    'Podgląd faktury', 'Jeszcze nie wysłano', 'Uczeń', 'Zajęcia', 'Ilość', 'Cena', 'Kwota', 'Rabat', 'Do zapłaty', 'Suma początkowa', 'Zapłać do {date}', 'Wróć do edycji',
+    'Zatwierdzone rabaty stosują się automatycznie',
+    'Nową zniżkę zaproponuj na stronie Umowy — otwórz umowę i wybierz ofertę rabatu. Zostanie uwzględniona na fakturach tylko po potwierdzeniu przez płatnika e-mailem.',
+    'Co pojawi się na fakturze',
   ]),
   lv: dictionary('lv', [
     'Apmeklējums un norēķini',
@@ -63,6 +69,11 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Summa ir nodarbības cena × nodarbību skaits periodā. Katrs maksātājs saņem tikai savu bērnu rēķinus.',
     'Pārskatīt maksātājus', 'Izvēlētajā periodā nav apmaksājamu nodarbību.', 'Sūtīt šim maksātājam', 'Sūtīt visiem',
     'Nosūtīti rēķini: {count}.', 'Vispirms jāapstiprina apmeklējums', '{name} · {count} nod. · {amount}', 'Pārskatīt bērnu',
+    'Meklēt maksātāja vārdu vai e-pastu', 'Visi statusi', 'Gatavs nosūtīšanai', 'Nepieciešams apstiprinājums', 'Jau nosūtīts', 'Nav ko apmaksāt', 'Šim filtram maksātāji nav atrasti.',
+    'Rēķina priekšskatījums', 'Vēl nav nosūtīts', 'Skolēns', 'Nodarbība', 'Daudz.', 'Cena', 'Summa', 'Atlaide', 'Jāmaksā', 'Starpsumma', 'Apmaksāt līdz {date}', 'Atpakaļ uz rediģēšanu',
+    'Apstiprinātās atlaides tiek piemērotas automātiski',
+    'Jaunu atlaidi piedāvājiet lapā Līgumi — atveriet līgumu un izvēlieties atlaidi. Tā faktūrās tiks piemērota tikai pēc maksātāja apstiprinājuma e-pastā.',
+    'Kas tiks rādīts rēķinā',
   ]),
   ee: dictionary('ee', [
     'Osalemine ja arveldamine',
@@ -82,6 +93,11 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Summa on tunni hind × tundide arv perioodis. Iga maksja saab ainult oma laste arved.',
     'Vaata maksjaid', 'Valitud perioodis ei ole tasulisi tunde.', 'Saada sellele maksjale', 'Saada kõigile',
     'Saadetud arveid: {count}.', 'Osalemine vajab kinnitamist', '{name} · {count} tundi · {amount}', 'Vaata last',
+    'Otsi maksja nime või e-posti', 'Kõik staatused', 'Valmis saatmiseks', 'Vajab kinnitust', 'Juba saadetud', 'Pole midagi arveldada', 'Selle filtri järgi maksjaid ei leitud.',
+    'Arve eelvaade', 'Pole veel saadetud', 'Õpilane', 'Tund', 'Kogus', 'Hind', 'Summa', 'Allahindlus', 'Maksta', 'Vahesumma', 'Maksa kuni {date}', 'Tagasi muutmise juurde',
+    'Kinnitatud allahindlused rakenduvad automaatselt',
+    'Uue allahindluse pakkumiseks avage lehel Lepingud leping ja valige allahindlus. See rakendub arvetel alles pärast maksja kinnitust e-kirjaga.',
+    'Mida arvel kuvatakse',
   ]),
   fr: dictionary('fr', [
     'Présence et facturation',
@@ -101,6 +117,11 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Le montant est le prix de la séance × le nombre de séances. Chaque payeur reçoit uniquement les factures de ses enfants.',
     'Voir les payeurs', 'Aucune séance facturable sur cette période.', 'Envoyer à ce payeur', 'Envoyer à tous',
     'Factures envoyées : {count}.', 'La présence doit encore être confirmée', '{name} · {count} séances · {amount}', 'Voir l’enfant',
+    'Rechercher le nom ou l’e-mail du payeur', 'Tous les statuts', 'Prêt à envoyer', 'Confirmation requise', 'Déjà envoyée', 'Rien à facturer', 'Aucun payeur ne correspond à ce filtre.',
+    'Aperçu de la facture', 'Pas encore envoyée', 'Élève', 'Séance', 'Qté', 'Prix', 'Montant', 'Remise', 'À payer', 'Sous-total', 'À payer avant le {date}', 'Retour à la modification',
+    'Les remises approuvées s’appliquent automatiquement',
+    'Proposez une nouvelle remise sur la page Contrats — ouvrez un contrat et choisissez l’offre de remise. Elle s’applique aux factures seulement après confirmation du payeur par e-mail.',
+    'Ce qui apparaîtra sur la facture',
   ]),
   es: dictionary('es', [
     'Asistencia y facturación',
@@ -120,6 +141,11 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'El importe es precio de sesión × número de sesiones. Cada pagador recibe solo las facturas de sus hijos.',
     'Revisar pagadores', 'No hay sesiones facturables en este periodo.', 'Enviar a este pagador', 'Enviar a todos',
     'Facturas enviadas: {count}.', 'Aún hay que confirmar la asistencia', '{name} · {count} sesiones · {amount}', 'Revisar al menor',
+    'Buscar nombre o correo del pagador', 'Todos los estados', 'Listo para enviar', 'Requiere confirmación', 'Ya enviada', 'Nada que facturar', 'Ningún pagador coincide con este filtro.',
+    'Vista previa de la factura', 'Aún no enviada', 'Alumno', 'Sesión', 'Cant.', 'Precio', 'Importe', 'Descuento', 'A pagar', 'Subtotal', 'Pagar antes del {date}', 'Volver a editar',
+    'Los descuentos aprobados se aplican automáticamente',
+    'Ofrezca un nuevo descuento en la página Contratos: abra un contrato y elija la oferta de descuento. Solo se aplicará en las facturas tras la confirmación del pagador por correo.',
+    'Lo que mostrará la factura',
   ]),
   de: dictionary('de', [
     'Teilnahme und Abrechnung',
@@ -139,6 +165,11 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Der Betrag ist Stundenpreis × Anzahl der Termine. Jeder Zahler erhält nur Rechnungen der eigenen Kinder.',
     'Zahler prüfen', 'In diesem Zeitraum gibt es keine abrechenbaren Termine.', 'An diesen Zahler senden', 'An alle senden',
     'Rechnungen gesendet: {count}.', 'Die Teilnahme muss noch bestätigt werden', '{name} · {count} Termine · {amount}', 'Kind prüfen',
+    'Name oder E-Mail des Zahlers suchen', 'Alle Status', 'Bereit zum Senden', 'Bestätigung erforderlich', 'Bereits gesendet', 'Nichts abzurechnen', 'Keine Zahler für diesen Filter.',
+    'Rechnungsvorschau', 'Noch nicht gesendet', 'Schüler', 'Termin', 'Anz.', 'Preis', 'Betrag', 'Rabatt', 'Zu zahlen', 'Zwischensumme', 'Zahlbar bis {date}', 'Zurück zur Bearbeitung',
+    'Genehmigte Rabatte werden automatisch angewendet',
+    'Bieten Sie einen neuen Rabatt auf der Seite Verträge an — öffnen Sie einen Vertrag und wählen Sie das Rabattangebot. Er gilt auf Rechnungen erst nach Bestätigung durch den Zahler per E-Mail.',
+    'Was auf der Rechnung erscheint',
   ]),
   se: dictionary('se', [
     'Närvaro och fakturering',
@@ -158,6 +189,11 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Beloppet är lektionspris × antal pass. Varje betalare får bara fakturor för sina egna barn.',
     'Granska betalare', 'Det finns inga debiterbara pass under perioden.', 'Skicka till denna betalare', 'Skicka till alla',
     'Fakturor skickade: {count}.', 'Närvaron måste fortfarande bekräftas', '{name} · {count} pass · {amount}', 'Granska barnet',
+    'Sök betalarens namn eller e-post', 'Alla statusar', 'Klar att skicka', 'Behöver bekräftelse', 'Redan skickad', 'Inget att fakturera', 'Inga betalare matchar filtret.',
+    'Fakturaförhandsvisning', 'Inte skickad ännu', 'Elev', 'Pass', 'Antal', 'Pris', 'Belopp', 'Rabatt', 'Att betala', 'Delsumma', 'Betala senast {date}', 'Tillbaka till redigering',
+    'Godkända rabatter tillämpas automatiskt',
+    'Erbjud en ny rabatt på sidan Avtal — öppna ett avtal och välj rabatterbjudandet. Den tillämpas på fakturor först efter att betalaren bekräftat via e-post.',
+    'Detta visas på fakturan',
   ]),
   dk: dictionary('dk', [
     'Fremmøde og fakturering',
@@ -177,6 +213,11 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Beløbet er lektionspris × antal sessioner. Hver betaler får kun fakturaer for egne børn.',
     'Gennemgå betalere', 'Der er ingen fakturerbare sessioner i perioden.', 'Send til denne betaler', 'Send til alle',
     'Fakturaer sendt: {count}.', 'Fremmødet skal stadig bekræftes', '{name} · {count} sessioner · {amount}', 'Gennemgå barnet',
+    'Søg betalers navn eller e-mail', 'Alle statusser', 'Klar til afsendelse', 'Kræver bekræftelse', 'Allerede sendt', 'Intet at fakturere', 'Ingen betalere matcher dette filter.',
+    'Fakturavisning', 'Ikke sendt endnu', 'Elev', 'Session', 'Antal', 'Pris', 'Beløb', 'Rabat', 'At betale', 'Subtotal', 'Betal senest {date}', 'Tilbage til redigering',
+    'Godkendte rabatter anvendes automatisk',
+    'Tilbyd en ny rabat på siden Kontrakter — åbn en kontrakt og vælg rabattilbuddet. Den gælder på fakturaer først efter betalerens bekræftelse via e-mail.',
+    'Dette vises på fakturaen',
   ]),
   fi: dictionary('fi', [
     'Läsnäolo ja laskutus',
@@ -196,6 +237,11 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Summa on tunnin hinta × tuntien määrä. Kukin maksaja saa vain omien lastensa laskut.',
     'Tarkista maksajat', 'Tällä jaksolla ei ole laskutettavia tunteja.', 'Lähetä tälle maksajalle', 'Lähetä kaikille',
     'Laskuja lähetetty: {count}.', 'Läsnäolo on vielä vahvistettava', '{name} · {count} tuntia · {amount}', 'Tarkista lapsi',
+    'Hae maksajan nimeä tai sähköpostia', 'Kaikki tilat', 'Valmis lähetettäväksi', 'Vaatii vahvistuksen', 'Jo lähetetty', 'Ei laskutettavaa', 'Tälle suodattimelle ei löytynyt maksajia.',
+    'Laskun esikatselu', 'Ei vielä lähetetty', 'Oppilas', 'Tunti', 'Määrä', 'Hinta', 'Summa', 'Alennus', 'Maksettava', 'Välisumma', 'Maksa mennessä {date}', 'Takaisin muokkaukseen',
+    'Hyväksytyt alennukset sovelletaan automaattisesti',
+    'Tarjoa uusi alennus Sopimukset-sivulla — avaa sopimus ja valitse alennustarjous. Se näkyy laskuilla vasta maksajan sähköpostivahvistuksen jälkeen.',
+    'Mitä laskulla näytetään',
   ]),
   no: dictionary('no', [
     'Oppmøte og fakturering',
@@ -215,6 +261,11 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Beløpet er timepris × antall økter. Hver betaler får bare fakturaer for egne barn.',
     'Gå gjennom betalere', 'Det er ingen fakturerbare økter i perioden.', 'Send til denne betaleren', 'Send til alle',
     'Fakturaer sendt: {count}.', 'Oppmøtet må fortsatt bekreftes', '{name} · {count} økter · {amount}', 'Gå gjennom barnet',
+    'Søk betalers navn eller e-post', 'Alle statuser', 'Klar til sending', 'Trenger bekreftelse', 'Allerede sendt', 'Ingenting å fakturere', 'Ingen betalere matcher dette filteret.',
+    'Fakturforhåndsvisning', 'Ikke sendt ennå', 'Elev', 'Økt', 'Antall', 'Pris', 'Beløp', 'Rabatt', 'Å betale', 'Delsum', 'Betal innen {date}', 'Tilbake til redigering',
+    'Godkjente rabatter brukes automatisk',
+    'Tilby en ny rabatt på siden Kontrakter — åpne en kontrakt og velg rabattilbudet. Den gjelder på fakturaer først etter at betaleren bekrefter på e-post.',
+    'Dette vises på fakturaen',
   ]),
   nl: dictionary('nl', [
     'Aanwezigheid en facturering',
@@ -234,5 +285,10 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Het bedrag is lesprijs × aantal sessies. Elke betaler ontvangt alleen facturen van de eigen kinderen.',
     'Betalers bekijken', 'Er zijn geen factureerbare sessies in deze periode.', 'Verstuur naar deze betaler', 'Verstuur naar iedereen',
     'Facturen verzonden: {count}.', 'Aanwezigheid moet nog worden bevestigd', '{name} · {count} sessies · {amount}', 'Kind bekijken',
+    'Zoek op naam of e-mail van betaler', 'Alle statussen', 'Klaar om te versturen', 'Bevestiging nodig', 'Al verzonden', 'Niets om te factureren', 'Geen betalers gevonden voor dit filter.',
+    'Factuurvoorbeeld', 'Nog niet verzonden', 'Leerling', 'Sessie', 'Aantal', 'Prijs', 'Bedrag', 'Korting', 'Te betalen', 'Subtotaal', 'Te betalen vóór {date}', 'Terug naar bewerken',
+    'Goedgekeurde kortingen worden automatisch toegepast',
+    'Bied een nieuwe korting aan op de pagina Contracten — open een contract en kies de kortingsaanbieding. Deze wordt pas op facturen toegepast nadat de betaler per e-mail heeft bevestigd.',
+    'Wat op de factuur wordt getoond',
   ]),
 };

@@ -35,19 +35,19 @@ export function inAppSupportStatusOrigin(row: InAppSupportStatusRow, fallback: s
 
 const COPY = {
   lt: {
-    subject: 'Jūsų Tutlio užklausa',
+    subject: 'Jūsų Tutlio klaida',
     greeting: 'Sveiki',
-    registered: 'Jūsų ticketas užregistruotas.',
-    in_progress: 'Jūsų ticketas vykdomas.',
-    resolved: 'Jūsų ticketas išspręstas.',
+    registered: 'Jūsų klaida užregistruota.',
+    in_progress: 'Jūsų klaida sprendžiama.',
+    resolved: 'Jūsų klaida išspręsta.',
     deadline: 'Planuojamas terminas',
     track: 'Stebėti būseną',
-    reference: 'Užklausos numeris',
+    reference: 'Pranešimo numeris',
     feature: {
-      subject: 'Jūsų Tutlio funkcijos pasiūlymas',
-      registered: 'Gavome jūsų funkcijos pasiūlymą.',
-      in_progress: 'Pradėjome įgyvendinti jūsų pasiūlytą funkciją.',
-      resolved: 'Jūsų pasiūlyta funkcija įdiegta ir jau prieinama Tutlio.',
+      subject: 'Jūsų Tutlio pasiūlymas',
+      registered: 'Jūsų pasiūlymas užregistruotas.',
+      in_progress: 'Jūsų pasiūlymas vykdomas.',
+      resolved: 'Jūsų pasiūlymas įgyvendintas ir jau prieinamas Tutlio.',
     },
   },
   en: {

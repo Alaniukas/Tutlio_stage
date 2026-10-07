@@ -314,6 +314,8 @@ export default function SchoolExtraLessonsAccept() {
     };
   }, [preview, missingOrderFields]);
 
+  const previewAbortRef = useRef<AbortController | null>(null);
+
   const orderPatch = useMemo((): Partial<ExtraLessonsOrderSnapshot> => ({
     service_name: serviceName,
     service_type: serviceType,
@@ -335,6 +337,7 @@ export default function SchoolExtraLessonsAccept() {
       return;
     }
     const controller = new AbortController();
+    previewAbortRef.current = controller;
     const timer = window.setTimeout(async () => {
       setPdfRefreshing(true);
       try {
@@ -363,11 +366,16 @@ export default function SchoolExtraLessonsAccept() {
         if (!controller.signal.aborted) setPdfRefreshing(false);
       }
     }, 900);
-    return () => { window.clearTimeout(timer); controller.abort(); };
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+      if (previewAbortRef.current === controller) previewAbortRef.current = null;
+    };
   }, [token, done, pending, orderPatch.service_name, orderPatch.service_type, orderPatch.platform, orderPatch.duration_minutes, orderPatch.start_date, orderPatch.end_date, orderPatch.schedule_label, orderPatch.base_lessons_per_month]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    previewAbortRef.current?.abort();
     if (!acceptedTerms || pending || submitting) return;
     setMissingOrderFields([]);
     if (preview) {

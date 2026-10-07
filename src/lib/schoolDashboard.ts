@@ -1,16 +1,24 @@
+import { isSchoolContractTerminated } from './schoolContractLifecycle.js';
 import { isUnconfirmedDetectedStudentAbsence } from './schoolJoinNoShow.js';
 import { isSchoolClassGroupSuspended, schoolGroupMinimumStudents } from './schoolGroupMinimumPolicy.js';
+import {
+  evaluateSchoolGroupMinimumRisk,
+  type SchoolGroupAtRiskInput,
+} from './schoolGroupMinimumAtRisk.js';
 
 export type SchoolDashboardContract = {
   kind?: string | null;
   signing_status?: string | null;
   completion_submitted_at?: string | null;
   accepted_at?: string | null;
+  terminated_at?: string | null;
+  withdrawal_requested_at?: string | null;
   signatures?: Array<{ role?: string | null; status?: string | null }> | null;
 };
 
 /** Parent still has to confirm data, sign, or accept an extra-lessons offer. */
 export function isSchoolParentConfirmationPending(contract: SchoolDashboardContract): boolean {
+  if (isSchoolContractTerminated(contract)) return false;
   if (contract.kind === 'extra_lessons') {
     return contract.signing_status === 'sent' && !contract.accepted_at;
   }
@@ -102,19 +110,13 @@ type ActionSession = {
   class_group_id?: string | null;
 };
 
-type ActionGroup = {
-  id: string;
-  name: string;
+type ActionGroup = SchoolGroupAtRiskInput & {
   admin_action_required?: boolean | null;
   admin_action_note?: string | null;
   admin_action_requested_at?: string | null;
   tutor_name?: string | null;
   updated_at?: string | null;
-  suspension_started_at?: string | null;
-  suspension_until?: string | null;
-  suspension_resumed_at?: string | null;
   suspension_reason?: string | null;
-  minimum_active_students?: number | null;
 };
 
 const instant = (value?: string | null) => {
@@ -136,6 +138,7 @@ export function buildSchoolAdminActionQueue(input: {
   const items: SchoolAdminActionItem[] = [];
 
   for (const contract of input.contracts) {
+    if (isSchoolContractTerminated(contract)) continue;
     const anchor = contract.sent_at || contract.created_at || now.toISOString();
     if (contract.signing_status === 'draft') {
       items.push({
@@ -250,13 +253,25 @@ export function buildSchoolAdminActionQueue(input: {
   }
 
   for (const group of input.groups || []) {
+    const minimumRisk = evaluateSchoolGroupMinimumRisk(group, now);
+    if (minimumRisk.atRisk && minimumRisk.occurrenceStart) {
+      items.push({
+        id: `group-at-risk:${group.id}`,
+        category: 'groups',
+        title: `Grupė gali neįvykti: ${group.name}`,
+        detail: `Artėjantis užsiėmimas — tik ${minimumRisk.eligibleCount} iš ${minimumRisk.minimum} reikalingų sutarčių.`,
+        href: '/school/groups',
+        occurredAt: minimumRisk.occurrenceStart.toISOString(),
+        priority: 2,
+      });
+    }
     if (isSchoolClassGroupSuspended(group)) {
       items.push({
         id: `group-minimum:${group.id}`,
         category: 'groups',
         title: `Sustabdyta grupė: ${group.name}`,
         detail: group.suspension_reason || `Grupėje liko mažiau nei ${schoolGroupMinimumStudents(group)} aktyvūs mokiniai.`,
-        href: '/school/contracts',
+        href: '/school/groups',
         occurredAt: group.suspension_started_at || group.updated_at || now.toISOString(),
         priority: 3,
       });

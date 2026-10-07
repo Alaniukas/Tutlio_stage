@@ -27,16 +27,32 @@ function parseEvent(line: string): InAppSupportConversationStreamEvent | null {
   return null;
 }
 
-function normalizedConversation(value: unknown): InAppSupportAiConversation | null {
+type InAppSupportConversationReadOptions = {
+  locale?: string;
+  entityType?: 'company' | 'school' | null;
+};
+
+function normalizedConversation(
+  value: unknown,
+  options?: InAppSupportConversationReadOptions,
+): InAppSupportAiConversation | null {
   const conversation = parseInAppSupportAiConversation(value);
   return conversation
-    ? { ...conversation, reply: normalizeInAppSupportAgentReply(conversation.reply) }
+    ? {
+      ...conversation,
+      reply: normalizeInAppSupportAgentReply(
+        conversation.reply,
+        options?.locale,
+        options?.entityType ?? null,
+      ),
+    }
     : null;
 }
 
 export async function readInAppSupportConversationResponse(
   response: Response,
   onReply: (content: string) => void,
+  options?: InAppSupportConversationReadOptions,
 ): Promise<InAppSupportAiConversation> {
   if (!response.ok) {
     const failure = await response.json().catch(() => null) as { error?: string } | null;
@@ -46,7 +62,7 @@ export async function readInAppSupportConversationResponse(
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('application/x-ndjson')) {
     const body = await response.json().catch(() => null) as { conversation?: unknown } | null;
-    const conversation = normalizedConversation(body?.conversation);
+    const conversation = normalizedConversation(body?.conversation, options);
     if (!conversation) throw new Error('AI conversation failed.');
     onReply(conversation.reply);
     return conversation;
@@ -57,17 +73,43 @@ export async function readInAppSupportConversationResponse(
   const decoder = new TextDecoder();
   let buffer = '';
   let finalConversation: InAppSupportAiConversation | null = null;
+  let lastStreamedReply = '';
 
   const consumeLine = (line: string) => {
     const event = parseEvent(line);
     if (!event) return;
     if (event.type === 'reply') {
-      const content = normalizeInAppSupportAgentReply(event.content);
-      if (content) onReply(content);
+      const content = normalizeInAppSupportAgentReply(
+        event.content,
+        options?.locale,
+        options?.entityType ?? null,
+      );
+      if (content) {
+        lastStreamedReply = content;
+        onReply(content);
+      }
       return;
     }
-    if (event.type === 'error') throw new Error(event.error || 'AI conversation failed.');
-    finalConversation = normalizedConversation(event.conversation);
+    if (event.type === 'error') {
+      if (lastStreamedReply) {
+        finalConversation = {
+          responseKind: 'answer',
+          reply: lastStreamedReply,
+          title: '',
+          context: '',
+          steps: [],
+          expectedOutcome: '',
+          actualOutcome: '',
+          impact: null,
+          impactDetails: '',
+          ready: false,
+          missingTopics: [],
+        };
+        return;
+      }
+      throw new Error(event.error || 'AI conversation failed.');
+    }
+    finalConversation = normalizedConversation(event.conversation, options);
   };
 
   while (true) {

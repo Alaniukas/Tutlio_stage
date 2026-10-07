@@ -7,7 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildSchoolMonthlyInvoicePayUrl } from './publicLinkToken.js';
 import { schoolMonthlyInvoiceIdempotencyKey } from './schoolMonthlyInvoiceDelivery.js';
-import { schoolInvoiceAmountDue } from '../../src/lib/schoolInvoiceOverpayments.js';
+import { schoolInvoiceAmountDue, type SchoolInvoiceCreditAllocation } from '../../src/lib/schoolInvoiceOverpayments.js';
 
 export type SchoolMonthlyInvoiceRow = {
   id: string;
@@ -63,6 +63,7 @@ export type SchoolMonthlyInvoiceEmailContext = {
   };
   contract: { contract_number?: string | null };
   lines?: SchoolMonthlyInvoiceEmailLine[];
+  creditSources?: SchoolInvoiceCreditAllocation[];
 };
 
 const LT_MONTHS_NOMINATIVE = [
@@ -102,7 +103,7 @@ export function schoolOrgCanTakeCardPayments(org: SchoolMonthlyInvoiceEmailConte
 /** Payload for the `school_monthly_invoice` email (pure — unit-tested). */
 export function buildSchoolMonthlyInvoiceEmailData(
   invoice: SchoolMonthlyInvoiceRow,
-  ctx: Pick<SchoolMonthlyInvoiceEmailContext, 'publicOrigin' | 'student' | 'org' | 'contract' | 'lines'>,
+  ctx: Pick<SchoolMonthlyInvoiceEmailContext, 'publicOrigin' | 'student' | 'org' | 'contract' | 'lines' | 'creditSources'>,
 ): Record<string, unknown> {
   const amountDue = schoolInvoiceAmountDue(invoice);
   const cardPayments = schoolOrgCanTakeCardPayments(ctx.org) && amountDue > 0;
@@ -129,6 +130,11 @@ export function buildSchoolMonthlyInvoiceEmailData(
     totalAmount: amountDue.toFixed(2),
     invoiceAmount: Number(invoice.total_eur || 0).toFixed(2),
     creditAppliedAmount: Number(invoice.credit_applied_eur || 0).toFixed(2),
+    creditSources: (ctx.creditSources || []).map((source) => ({
+      monthLabel: source.monthLabel,
+      amount: Number(source.amountEur || 0).toFixed(2),
+      sourceInvoiceNumber: source.sourceInvoiceNumber || '',
+    })),
     subtotalAmount: Number(invoice.subtotal_eur ?? invoice.total_eur ?? 0).toFixed(2),
     discountAmount: Number(invoice.discount_amount_eur || 0).toFixed(2),
     discountNote: invoice.discount_note || '',

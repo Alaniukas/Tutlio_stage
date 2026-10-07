@@ -1,20 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { addDays, endOfMonth, format, subMonths } from 'date-fns';
-import { ArrowLeft, Check, ExternalLink, FileCheck2, FileText, Loader2, Send, ShieldCheck, X } from 'lucide-react';
+import { ArrowLeft, Check, ExternalLink, FileCheck2, FileText, Loader2, Search, Send, ShieldCheck, X } from 'lucide-react';
 import { authHeaders } from '@/lib/apiHelpers';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 import { useTranslation } from '@/lib/i18n';
 import { LOCALE_FORMAT_TAGS } from '@/lib/i18n/locales';
 import type { SchoolInvoiceReviewSession } from '@/lib/schoolInvoiceSessionReview';
-import type { SchoolPayerInvoiceGroup } from '@/lib/schoolPayerInvoiceGroups';
+import { schoolStudentInvoiceSendable, type SchoolPayerInvoiceGroup } from '@/lib/schoolPayerInvoiceGroups';
 import { Button } from '@/components/ui/button';
 import { DateInput } from '@/components/ui/date-input';
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { MonthFilterInput } from '@/components/ui/month-filter-input';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import SchoolInvoiceOverpaymentsDialog from './SchoolInvoiceOverpaymentsDialog';
+import { SchoolAttendanceMarkingLabel } from '@/components/SchoolAttendanceMarkingLabel';
 
 export type SchoolMonthlyInvoiceStudentOption = {
   id: string;
@@ -46,6 +48,7 @@ export type SchoolMonthlyInvoicePreview = {
   discountAmountEur: number;
   totalEur: number;
   creditAppliedEur?: number;
+  creditSources?: Array<{ monthLabel: string; amountEur: number; sourceInvoiceNumber?: string | null }>;
   amountDueEur?: number;
   reviewSessionIds?: string[];
   organizationName?: string;
@@ -89,11 +92,11 @@ export function SchoolMonthlyInvoicePreviewCard({ preview }: { preview: SchoolMo
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700">{preview.organizationName || ''}</p>
-          <h3 className="mt-1 text-base font-bold text-slate-900">Sąskaitos peržiūra</h3>
+          <h3 className="mt-1 text-base font-bold text-slate-900">{t('school.invoice.preview.title')}</h3>
           <p className="mt-0.5 text-xs text-slate-500">{preview.periodLabel} · {preview.student.fullName}{preview.student.grade ? ` · ${preview.student.grade} klasė` : ''}</p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-          <FileCheck2 className="h-3.5 w-3.5" /> Dar neišsiųsta
+          <FileCheck2 className="h-3.5 w-3.5" /> {t('school.invoice.preview.draftBadge')}
         </span>
       </div>
 
@@ -101,13 +104,13 @@ export function SchoolMonthlyInvoicePreviewCard({ preview }: { preview: SchoolMo
         <table className="min-w-[780px] w-full border-collapse text-left text-xs">
           <thead>
             <tr className="border-b border-slate-200 bg-white text-[11px] uppercase tracking-wide text-slate-500">
-              <th className="px-4 py-3 font-semibold">Mokinys</th>
-              <th className="px-4 py-3 font-semibold">Užsiėmimas</th>
-              <th className="px-3 py-3 text-center font-semibold">Pamokų sk.</th>
-              <th className="px-3 py-3 text-right font-semibold">Kaina</th>
-              <th className="px-3 py-3 text-right font-semibold">Suma</th>
-              <th className="px-3 py-3 text-right font-semibold">Nuolaida</th>
-              <th className="px-4 py-3 text-right font-semibold">Mokėti</th>
+              <th className="px-4 py-3 font-semibold">{t('school.invoice.preview.student')}</th>
+              <th className="px-4 py-3 font-semibold">{t('school.invoice.preview.session')}</th>
+              <th className="px-3 py-3 text-center font-semibold">{t('school.invoice.preview.quantity')}</th>
+              <th className="px-3 py-3 text-right font-semibold">{t('school.invoice.preview.unitPrice')}</th>
+              <th className="px-3 py-3 text-right font-semibold">{t('school.invoice.preview.amount')}</th>
+              <th className="px-3 py-3 text-right font-semibold">{t('school.invoice.preview.discount')}</th>
+              <th className="px-4 py-3 text-right font-semibold">{t('school.invoice.preview.pay')}</th>
             </tr>
           </thead>
           <tbody>
@@ -128,18 +131,23 @@ export function SchoolMonthlyInvoicePreviewCard({ preview }: { preview: SchoolMo
 
       <div className="border-t border-slate-200 bg-slate-50 px-5 py-4">
         <div className="ml-auto grid max-w-sm grid-cols-[1fr_auto] gap-x-8 gap-y-2 text-sm">
-          <span className="text-slate-500">Pradinė suma</span>
+          <span className="text-slate-500">{t('school.invoice.preview.subtotal')}</span>
           <span className="text-right font-medium text-slate-800">{money(preview.subtotalEur)}</span>
-          <span className="text-slate-500">Nuolaida</span>
+          <span className="text-slate-500">{t('school.invoice.preview.discount')}</span>
           <span className="text-right font-semibold text-emerald-700">-{money(preview.discountAmountEur)}</span>
           {Boolean(preview.creditAppliedEur) && <>
             <span className="text-slate-500">{t('school.invoice.credit.total')}</span><span className="text-right font-medium">{money(preview.totalEur)}</span>
-            <span className="text-slate-500">{t('school.invoice.credit.applied')}</span><span className="text-right font-semibold text-emerald-700">-{money(preview.creditAppliedEur || 0)}</span>
+            {(preview.creditSources?.length ? preview.creditSources : [{ monthLabel: '', amountEur: preview.creditAppliedEur || 0 }]).map((source, index) => (
+              <Fragment key={`${source.monthLabel}-${index}`}>
+                <span className="text-slate-500">{source.monthLabel ? t('school.invoice.credit.fromMonth', { month: source.monthLabel }) : t('school.invoice.credit.applied')}</span>
+                <span className="text-right font-semibold text-emerald-700">-{money(source.amountEur)}</span>
+              </Fragment>
+            ))}
           </>}
-          <span className="border-t border-slate-300 pt-2 font-bold text-slate-900">Mokėti</span>
+          <span className="border-t border-slate-300 pt-2 font-bold text-slate-900">{t('school.invoice.preview.pay')}</span>
           <span className="border-t border-slate-300 pt-2 text-right text-lg font-bold text-slate-900">{money(preview.amountDueEur ?? preview.totalEur)}</span>
         </div>
-        <p className="mt-3 text-right text-xs text-slate-500">Apmokėti iki {preview.dueDate}</p>
+        <p className="mt-3 text-right text-xs text-slate-500">{t('school.invoice.preview.dueBy', { date: preview.dueDate })}</p>
       </div>
     </div>
   );
@@ -168,12 +176,52 @@ export default function SchoolMonthlyInvoiceDialog({
   const [decisionEditor, setDecisionEditor] = useState<{ sessionId: string; excluded: boolean } | null>(null);
   const [decisionReason, setDecisionReason] = useState('');
   const [batchPayers, setBatchPayers] = useState<SchoolPayerInvoiceGroup[] | null>(null);
+  const [payerSearch, setPayerSearch] = useState('');
+  const [payerStatusFilter, setPayerStatusFilter] = useState<'all' | 'ready' | 'blocked' | 'issued' | 'empty'>('all');
   const [sendingKey, setSendingKey] = useState<string | null>(null);
   const [singleChild, setSingleChild] = useState(!batch);
   const [overpaymentsOpen, setOverpaymentsOpen] = useState(false);
   const batchNeedsRefresh = useRef(false);
   const batchScrollTop = useRef(0);
   const contentRef = useRef<HTMLDivElement>(null);
+
+  const filteredBatchPayers = useMemo(() => {
+    if (!batchPayers) return null;
+    const needle = payerSearch.trim().toLocaleLowerCase('lt');
+    const matchesStudent = (row: SchoolPayerInvoiceGroup['students'][number]) => {
+      if (payerStatusFilter === 'ready') return schoolStudentInvoiceSendable(row);
+      if (payerStatusFilter === 'blocked') return row.reviewSessionIds.length > 0;
+      if (payerStatusFilter === 'issued') return row.alreadyIssued;
+      if (payerStatusFilter === 'empty') {
+        return row.lessonCount === 0 && !row.alreadyIssued && row.reviewSessionIds.length === 0;
+      }
+      return true;
+    };
+    return batchPayers.flatMap((group) => {
+      if (needle) {
+        const haystack = `${group.payerName} ${group.payerEmail}`.toLocaleLowerCase('lt');
+        if (!haystack.includes(needle)) return [];
+      }
+      const students = payerStatusFilter === 'all'
+        ? group.students
+        : group.students.filter(matchesStudent);
+      if (!students.length) return [];
+      const sendableStudentIds = students
+        .filter(schoolStudentInvoiceSendable)
+        .map((row) => row.studentId);
+      const totalEur = Math.round(students.reduce((sum, row) => sum + Number(row.totalEur || 0), 0) * 100) / 100;
+      const amountDueEur = Math.round(students.reduce((sum, row) => sum + Number(row.amountDueEur ?? row.totalEur ?? 0), 0) * 100) / 100;
+      const creditAppliedEur = Math.round(students.reduce((sum, row) => sum + Number(row.creditAppliedEur || 0), 0) * 100) / 100;
+      return [{
+        ...group,
+        students,
+        sendableStudentIds,
+        totalEur,
+        amountDueEur,
+        creditAppliedEur,
+      }];
+    });
+  }, [batchPayers, payerSearch, payerStatusFilter]);
 
   const payload = (action: 'review' | 'billing-decision' | 'preview' | 'send' | 'batch-preview' | 'send-batch', options?: {
     studentId?: string;
@@ -285,6 +333,8 @@ export default function SchoolMonthlyInvoiceDialog({
     setDecisionEditor(null);
     batchNeedsRefresh.current = false;
     batchScrollTop.current = 0;
+    setPayerSearch('');
+    setPayerStatusFilter('all');
   }, [open, batch, previewFixture]);
 
   useEffect(() => {
@@ -473,6 +523,16 @@ export default function SchoolMonthlyInvoiceDialog({
                         ? t('school.invoice.review.scheduleMismatch')
                         : t(`school.invoice.review.status.${session.status}`)}</p>
                       {session.reason === 'unconfirmed' && <p className="mt-1 text-amber-700">{t('school.invoice.review.unconfirmed')}</p>}
+                      <SchoolAttendanceMarkingLabel
+                        session={{
+                          tutor_id: session.tutorId,
+                          status: session.status,
+                          end_time: session.endTime,
+                          status_confirmed_at: session.statusConfirmedAt,
+                          status_confirmed_by: session.statusConfirmedBy,
+                        }}
+                        className="mt-1"
+                      />
                       {session.canConfirm && review.canEditAttendance && !previewFixture && (
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           <Button size="sm" variant="outline" disabled={loading} onClick={() => void confirmAttendance(session, 'completed')}>{t('school.invoice.review.attended')}</Button>
@@ -538,7 +598,7 @@ export default function SchoolMonthlyInvoiceDialog({
             )}
             {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <Button type="button" variant="outline" disabled={loading || !!previewFixture} onClick={() => setPreview(null)}>Grįžti redaguoti</Button>
+              <Button type="button" variant="outline" disabled={loading || !!previewFixture} onClick={() => setPreview(null)}>{t('school.invoice.preview.backToEdit')}</Button>
               <Button type="button" className="gap-2 bg-emerald-700 hover:bg-emerald-800" disabled={loading || (!previewFixture && (!review?.payerEmail || !review?.canEditBilling || !!preview.reviewSessionIds?.length))} onClick={() => void sendInvoice()}>
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 Išsiųsti sąskaitą
@@ -569,8 +629,40 @@ export default function SchoolMonthlyInvoiceDialog({
             </div>
             {batchPayers && (
               <div className="space-y-3">
-                {!batchPayers.length && <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{t('school.invoice.batch.empty')}</p>}
-                {batchPayers.map((group) => (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <div className="relative flex-1">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <Input
+                      value={payerSearch}
+                      onChange={(event) => setPayerSearch(event.target.value)}
+                      placeholder={t('school.invoice.batch.searchPayer')}
+                      className="rounded-xl pl-9"
+                      disabled={loading || !!sendingKey}
+                    />
+                  </div>
+                  <Select
+                    value={payerStatusFilter}
+                    onValueChange={(value) => setPayerStatusFilter(value as typeof payerStatusFilter)}
+                    disabled={loading || !!sendingKey}
+                  >
+                    <SelectTrigger className="w-full rounded-xl sm:w-56">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t('school.invoice.batch.filterAll')}</SelectItem>
+                      <SelectItem value="ready">{t('school.invoice.batch.filterReady')}</SelectItem>
+                      <SelectItem value="blocked">{t('school.invoice.batch.filterBlocked')}</SelectItem>
+                      <SelectItem value="issued">{t('school.invoice.batch.filterIssued')}</SelectItem>
+                      <SelectItem value="empty">{t('school.invoice.batch.filterEmpty')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {!filteredBatchPayers?.length && (
+                  <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                    {batchPayers.length ? t('school.invoice.batch.noMatches') : t('school.invoice.batch.empty')}
+                  </p>
+                )}
+                {filteredBatchPayers?.map((group) => (
                   <div key={group.payerKey} className="rounded-2xl border border-slate-200 bg-white p-4">
                     <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:flex-wrap">
                       <div className="w-full min-w-0 sm:w-auto sm:flex-1">
@@ -673,10 +765,9 @@ export default function SchoolMonthlyInvoiceDialog({
                 <div className="flex items-start gap-3">
                   <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" />
                   <div>
-                    <p className="text-sm font-semibold text-slate-900">Patvirtintos nuolaidos pritaikomos automatiškai</p>
+                    <p className="text-sm font-semibold text-slate-900">{t('school.invoice.discount.autoTitle')}</p>
                     <p className="mt-1 text-xs leading-5 text-slate-600">
-                      Naują procentinę arba konkrečios sumos nuolaidą suteikite Mokėjimų lange pasirinkę „Taikyti nuolaidą“.
-                      Ji sąskaitose bus skaičiuojama tik tada, kai mokėtojas el. laiške paspaus „Sutinku“.
+                      {t('school.invoice.discount.autoHelp')}
                     </p>
                   </div>
                 </div>
@@ -684,7 +775,7 @@ export default function SchoolMonthlyInvoiceDialog({
             </div>
 
             <aside className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5">
-              <p className="text-sm font-semibold text-emerald-950">Kas bus rodoma sąskaitoje</p>
+              <p className="text-sm font-semibold text-emerald-950">{t('school.invoice.preview.checklistTitle')}</p>
               <ul className="mt-3 space-y-2 text-sm text-emerald-900">
                 <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0" /> Kiekvieno užsiėmimo pradinė kaina ir suma.</li>
                 <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0" /> Atskira nuolaidos reikšmė bei galutinė suma „Mokėti“.</li>

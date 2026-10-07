@@ -78,6 +78,7 @@ function recurringAvailDateRangeLabel(
 import { authHeaders } from '@/lib/apiHelpers';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { isSchoolHolidayDisplayDay } from '@/lib/schoolOrgCalendar';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg, proKlaseOrgAdminContext, proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
@@ -450,7 +451,7 @@ export default function CompanyTvarkarastis() {
     format, parse, startOfWeek, getDay, locales: { [locale]: dateFnsLocale },
   }), [locale, dateFnsLocale]);
   const { fmt } = useMarketMoney();
-  const { loading: featuresLoading, hasFeature, organizationId } = useOrgFeatures();
+  const { loading: featuresLoading, hasFeature, organizationId, schoolOrgCalendar } = useOrgFeatures();
   const { isOwner, can: canOrgAdmin, loading: accessLoading } = useOrgAdminAccess();
   const orgEntityType = useOrgEntityType();
   const isSchoolOrgView = isSchoolOrg(orgEntityType);
@@ -1889,6 +1890,23 @@ export default function CompanyTvarkarastis() {
       },
     };
   };
+
+  const schoolHolidayDayPropGetter = useCallback((date: Date) => {
+    if (!isSchoolOrgView || featuresLoading || !schoolOrgCalendar) return {};
+    const ymd = format(date, 'yyyy-MM-dd');
+    if (!isSchoolHolidayDisplayDay(ymd, schoolOrgCalendar)) return {};
+    return {
+      className: 'school-org-holiday-day',
+      style: { backgroundColor: 'rgba(254, 226, 226, 0.45)' },
+    };
+  }, [isSchoolOrgView, featuresLoading, schoolOrgCalendar]);
+
+  const schoolHolidaySlotPropGetter = useCallback((date: Date) => {
+    if (!isSchoolOrgView || featuresLoading || !schoolOrgCalendar) return {};
+    const ymd = format(date, 'yyyy-MM-dd');
+    if (!isSchoolHolidayDisplayDay(ymd, schoolOrgCalendar)) return {};
+    return { style: { backgroundColor: 'rgba(254, 226, 226, 0.22)' } };
+  }, [isSchoolOrgView, featuresLoading, schoolOrgCalendar]);
 
   const openAvailabilityEditor = useCallback((avail: Availability, eventStart?: Date) => {
     setEditingAvailability(avail);
@@ -3676,6 +3694,8 @@ export default function CompanyTvarkarastis() {
                   selectable={canView && canEditSessions}
                   toolbar={false}
                   eventPropGetter={eventStyleGetter}
+                  dayPropGetter={isSchoolOrgView ? schoolHolidayDayPropGetter : undefined}
+                  slotPropGetter={isSchoolOrgView ? schoolHolidaySlotPropGetter : undefined}
                   culture={locale}
                   {...(currentView !== Views.MONTH
                     ? {
@@ -3706,6 +3726,12 @@ export default function CompanyTvarkarastis() {
 
         {/* Legend */}
         <div className="bg-gray-50 rounded-lg p-3 flex flex-wrap items-center gap-4 sm:gap-6 text-sm">
+          {isSchoolOrgView && (
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded bg-rose-200 ring-1 ring-rose-300" />
+              <span>{t('school.holidayCalendar.scheduleLegend')}</span>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 bg-green-500 rounded opacity-60"></div>
             <span>{t('compSch.freeTime')}</span>

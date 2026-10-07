@@ -29,7 +29,10 @@ const testState = vi.hoisted(() => ({
     },
     templates: [],
     students: [],
+    contractSummaries: [] as any[],
     contracts: [] as any[],
+    contractsPage: 0,
+    teacherContracts: [] as any[],
   },
 }));
 
@@ -39,9 +42,9 @@ vi.mock('@/lib/dataCache', () => ({
   invalidateCache: vi.fn(),
 }));
 
+vi.mock('@/lib/authSession', () => ({ resolveAuthUser: vi.fn(async () => ({ id: 'admin-1' })) }));
 vi.mock('@/lib/supabase', () => ({
   supabase: {
-    auth: { getUser: vi.fn(async () => ({ data: { user: null } })) },
     from: testState.from,
   },
 }));
@@ -53,12 +56,22 @@ describe('CompanyContracts list filter', () => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     window.HTMLElement.prototype.hasPointerCapture = vi.fn();
     window.HTMLElement.prototype.releasePointerCapture = vi.fn();
-    testState.from.mockImplementation(() => {
+    testState.from.mockImplementation((table: string) => {
       const query: any = {
         select: () => query,
         eq: () => query,
         is: () => query,
-        order: () => new Promise(() => undefined),
+        in: () => query,
+        order: () => query,
+        then: (resolve: any, reject: any) => {
+          if (table === 'school_contracts') {
+            return Promise.resolve({ data: testState.cache.contracts, error: null }).then(resolve, reject);
+          }
+          if (table === 'school_discount_agreements') {
+            return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+          }
+          return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+        },
       };
       return query;
     });
@@ -87,6 +100,8 @@ describe('CompanyContracts list filter', () => {
         student: { full_name: 'Petraitis Jonas', email: 'j@example.test', payer_name: 'Rasa Petraitienė', payer_email: 'r@example.test' },
       },
     ];
+    testState.cache.contractSummaries = testState.cache.contracts;
+    testState.cache.contractsPage = 0;
   });
 
   const statusFilterTrigger = () => screen.getByRole('combobox', { name: 'Sutarties būsena' });

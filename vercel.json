@@ -147,6 +147,10 @@
         "api/school-contract-file-url.ts": {
             "includeFiles": "{api/_lib/fonts/**,api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
         },
+        "api/school-contracts-export-zip.ts": {
+            "maxDuration": 120,
+            "includeFiles": "{api/_lib/fonts/**,api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
+        },
         "api/bill-school-extra-lessons.ts": {
             "maxDuration": 300,
             "includeFiles": "src/lib/**"

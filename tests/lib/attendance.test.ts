@@ -202,4 +202,16 @@ describe('isAttendanceFlagged', () => {
       meeting_link: 'https://meet.example.com/x',
     }, at(90))).toBe(false);
   });
+
+  it('is false once an outcome is confirmed even if status is still active', () => {
+    expect(isAttendanceFlagged({
+      start_time: START,
+      end_time: END,
+      status: 'active',
+      status_confirmed_at: iso(60),
+      meeting_link: 'https://meet.example.com/x',
+      tutor_joined_at: iso(0),
+      student_joined_at: null,
+    }, at(90))).toBe(false);
+  });
 });

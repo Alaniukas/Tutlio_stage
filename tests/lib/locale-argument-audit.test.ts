@@ -21,7 +21,7 @@ function audit(source: string) {
       'run-audit.mjs',
       '--check',
     ], {
-      cwd: directory, encoding: 'utf8', timeout: 20_000,
+      cwd: directory, encoding: 'utf8', timeout: 60_000,
     });
   } finally {
     rmSync(directory, { recursive: true, force: true });

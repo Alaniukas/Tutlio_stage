@@ -33,6 +33,7 @@ describe('in-app support vector context', () => {
   it('includes deployed chat guidance only for an enabled, authorized recording audience', () => {
     const scope = { ...customer, enabledFeatureIds: ['school_lesson_recordings'], allowedPermissions: ['recordings.view' as const] };
     const allowed = renderInAppSupportRetrievedContext(scope, { knowledge: ['Older documentation'], memories: [] });
+    expect(allowed).toContain('Verified menu labels for navigation answers');
     expect(allowed).toContain('Current deployed product guidance');
     expect(allowed).toContain('Pokalbio išklotinė');
     expect(allowed).toContain('without an extension');

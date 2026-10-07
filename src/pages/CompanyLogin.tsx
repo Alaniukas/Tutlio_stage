@@ -14,22 +14,7 @@ import { usePlatform } from '@/contexts/PlatformContext';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
 import { setLastPortal } from '@/lib/pwaPortal';
 import { loadSavedLoginForm, persistLoginForm, readRememberMePreference } from '@/lib/loginCredentials';
-
-const LOGIN_STEP_TIMEOUT_MS = 15000;
-
-async function withLoginTimeout<T>(thenable: PromiseLike<T>, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      Promise.resolve(thenable),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timeout`)), LOGIN_STEP_TIMEOUT_MS);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
+import { withLoginTimeout } from '@/lib/loginTimeout';
 
 export default function CompanyLogin() {
   const { t, locale } = useTranslation();

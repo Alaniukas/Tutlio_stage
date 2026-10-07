@@ -462,7 +462,6 @@ export default function OrgTutorFinanceSummary() {
             </p>
           </div>
         </div>
-        {schoolPayMode && <p className="text-xs text-gray-500 mt-2">{t('orgFinance.schoolPayPriceIndependence')}</p>}
 
         <div className="mt-4 space-y-3">
           <p className="text-sm font-medium text-gray-700">{t('common.period')}</p>

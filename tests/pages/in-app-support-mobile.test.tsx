@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe('in-app support mobile shell', () => {
-  it('uses the dynamic viewport without an inset card or tinted backdrop', () => {
+  it('uses a bottom-right popup that does not block the page behind it', () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
 
@@ -27,14 +27,14 @@ describe('in-app support mobile shell', () => {
       </MemoryRouter>,
     );
 
-    const panel = screen.getByLabelText('Tutlio pagalbos agentas').parentElement;
-    expect(panel?.classList.contains('inset-x-0')).toBe(true);
-    expect(panel?.classList.contains('h-dvh')).toBe(true);
-    expect(panel?.classList.contains('w-screen')).toBe(true);
-    expect(panel?.classList.contains('rounded-none')).toBe(true);
-    expect(panel?.classList.contains('shadow-none')).toBe(true);
-    expect(panel?.style.top).toBe('0px');
-    expect(panel?.style.height).toBe('844px');
+    const shell = screen.getByLabelText('Tutlio pagalbos agentas').closest('[role="dialog"]');
+    const panel = screen.getByTestId('in-app-support-panel');
+    expect(shell?.classList.contains('pointer-events-none')).toBe(true);
+    expect(panel.classList.contains('pointer-events-auto')).toBe(true);
+    expect(panel.classList.contains('right-2')).toBe(true);
+    expect(panel.classList.contains('rounded-2xl')).toBe(true);
+    expect(panel.style.width).toBe('374px');
+    expect(panel.style.bottom).toContain('92px');
     expect(screen.getByTestId('support-agent-backdrop').classList.contains('bg-transparent')).toBe(true);
   });
 
@@ -91,10 +91,10 @@ describe('in-app support mobile shell', () => {
     fireEvent.click(screen.getByRole('button', { name: /Pasiūlyti funkciją/ }));
 
     expect(document.querySelectorAll('[data-support-role="user"]')).toHaveLength(0);
-    const sendInfo = screen.getByRole('button', { name: 'Kaip veikia siuntimas' });
-    const privacyInfo = screen.getByRole('button', { name: 'Privatumas ir automatinis kontekstas' });
-    expect(sendInfo.getAttribute('title')).toContain('siųsti komandai');
-    expect(privacyInfo.getAttribute('title')).toContain('Nerašykite slaptažodžių');
+    const helpInfo = screen.getByRole('button', { name: 'Pagalba, privatumas ir siuntimas' });
+    expect(helpInfo.getAttribute('title')).toContain('siųsti komandai');
+    expect(helpInfo.getAttribute('title')).toContain('Nerašykite slaptažodžių');
+    expect(screen.queryByRole('button', { name: 'Privatumas ir automatinis kontekstas' })).toBeNull();
     expect(screen.queryByText(/Agentas perduos šį pokalbį Tutlio komandai/)).toBeNull();
   });
 

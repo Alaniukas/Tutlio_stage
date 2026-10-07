@@ -12,7 +12,8 @@ describe('Laisvi vaikai monthly invoice PDF', () => {
     const bytes=await generateSchoolMonthlyInvoicePdf({preview:true,invoiceNumber:'PAM-PERŽIŪRA',issueDate:'2026-10-07',periodLabel:'spalis 2026',
       studentName:'Demo mokinys',seller:{name:'Demo Mokykla'},buyer:{name:'Demo mokėtojas'},
       lines:Array.from({length:22},(_,index)=>({studentName:'Demo mokinys',activity:`Užsiėmimas ${index+1}`,quantity:1,unitPriceEur:6,originalAmountEur:6,amountEur:6})),
-      subtotalEur:132,discountAmountEur:0,totalEur:132,creditAppliedEur:12,dueDate:'2026-11-07'});
+      subtotalEur:132,discountAmountEur:0,totalEur:132,creditAppliedEur:12,
+      creditSources:[{monthLabel:'2026 m. rugpjūčio',amountEur:12}],dueDate:'2026-11-07'});
     const doc=await PDFDocument.load(bytes);
     expect(doc.getPageCount()).toBeGreaterThan(1);
   });

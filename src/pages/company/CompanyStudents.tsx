@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { extractStoragePath, openContractFileInNewTab } from '@/lib/contractStorage';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
@@ -3322,23 +3323,24 @@ export default function CompanyStudents() {
       : [selectedStudent.id];
     const manual = value !== 'auto';
     const freq = manual ? Number(value) : null;
-    let effective: number | null = freq;
-    for (const id of ids) {
-      const { data, error } = await supabase.rpc('set_student_pricing_frequency', {
-        p_student_id: id,
-        p_lessons_per_week: freq,
-      });
-      if (error) {
-        setToastMessage({ message: t('common.error'), type: 'error' });
-        return;
-      }
-      if (id === selectedStudent.id) effective = (data as number | null) ?? null;
+    // RPC updates every tutor row for the same child identity; one call is enough.
+    const { data, error } = await supabase.rpc('set_student_pricing_frequency', {
+      p_student_id: selectedStudent.id,
+      p_lessons_per_week: freq,
+    });
+    if (error) {
+      console.error('[CompanyStudents] set_student_pricing_frequency failed:', error);
+      setToastMessage({ message: t('common.error'), type: 'error' });
+      return;
     }
+    const effective = (data as number | null) ?? null;
     const patch = { pricing_lessons_per_week: effective, pricing_lessons_per_week_is_manual: manual };
     setSelectedStudent((current) => (current ? { ...current, ...patch } : current));
     setSelectedStudentGroup((current) => current.map((row) => ({ ...row, ...patch })));
     setStudents((current) => current.map((row) => (ids.includes(row.id) ? { ...row, ...patch } : row)));
+    invalidateCache('company_students');
     setToastMessage({ message: t('dynamicPricing.frequencySaved'), type: 'success' });
+    void fetchData();
   };
 
   const handleDetachStudent = async (id: string) => {
@@ -7187,7 +7189,18 @@ export default function CompanyStudents() {
 
                 {/* Sessions */}
                 <div className="rounded-2xl border border-gray-100 bg-white p-4">
-                  <h4 className="font-semibold mb-3 text-gray-900">{t('compStu.studentSessions')}</h4>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="font-semibold text-gray-900">{t('compStu.studentSessions')}</h4>
+                    {isSchoolView && selectedStudent && (
+                      <Link
+                        to={`/school/sessions?student=${encodeURIComponent(orgStudentIdentityGroupKey(selectedStudent))}`}
+                        className="text-sm font-medium text-primary hover:underline"
+                        onClick={() => setIsStudentModalOpen(false)}
+                      >
+                        {t('compStu.viewAllSessions')}
+                      </Link>
+                    )}
+                  </div>
                   {loadingModalSessions ? (
                     <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground text-sm">
                       <Loader2 className="h-5 w-5 animate-spin" />
@@ -7200,6 +7213,7 @@ export default function CompanyStudents() {
                       showStudent={false}
                       showTutor={true}
                       showPaymentStatus={true}
+                      showAttendanceMarking={isSchoolView}
                     />
                   )}
                 </div>

@@ -90,6 +90,7 @@ import {
 } from '@/lib/calendarSessionSeriesEdit';
 import TimeSpinner, { CompactTimeSelect, DateTimeSpinner } from '@/components/TimeSpinner';
 import AvailabilityManager from '@/components/AvailabilityManager';
+import SchoolGroupMinimumRiskBanner from '@/components/school/SchoolGroupMinimumRiskBanner';
 import RecurrenceFields from '@/components/RecurrenceFields';
 import SessionFiles from '@/components/SessionFiles';
 import WhiteboardButton from '@/components/WhiteboardButton';
@@ -5021,6 +5022,8 @@ export default function CalendarPage() {
           </div>
         </div>
       )}
+
+      <SchoolGroupMinimumRiskBanner enabled={isSchoolTutor && showClassGroups} />
 
       {/* Reminder: solo tutors only — hide while calendar loads (avoids flash) and when org tutor or Stripe+subjects OK */}
       {!loading &&

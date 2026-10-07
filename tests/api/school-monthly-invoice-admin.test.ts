@@ -122,7 +122,11 @@ describe('school monthly invoice review API', () => {
       source_invoice_id:'paid',amount_eur:5,reason:'Prior adjustment',created_at:'2026-08-31',source:{invoice_number:'PAM-OLD',period_end:'2026-08-31'},uses:[] }];
     const preview = await request({action:'preview'});
     expect(preview.body).toMatchObject({totalEur:12,discountAmountEur:0,creditAppliedEur:5,amountDueEur:7});
-    expect(generateSchoolMonthlyInvoicePdf).toHaveBeenCalledWith(expect.objectContaining({totalEur:12,creditAppliedEur:5,discountAmountEur:0}));
+    expect(generateSchoolMonthlyInvoicePdf).toHaveBeenCalledWith(expect.objectContaining({
+      totalEur:12,creditAppliedEur:5,discountAmountEur:0,
+      creditSources:[{monthLabel:'2026 m. rugpjūčio',amountEur:5,sourceInvoiceNumber:'PAM-OLD'}],
+    }));
+    expect(preview.body.creditSources).toEqual([{monthLabel:'2026 m. rugpjūčio',amountEur:5,sourceInvoiceNumber:'PAM-OLD'}]);
     const batch = await request({action:'batch-preview'});
     expect(batch.body.payers[0]).toMatchObject({totalEur:12,creditAppliedEur:5,amountDueEur:7});
     vi.mocked(allocateInvoiceNumber).mockResolvedValue('SF-CREDIT');

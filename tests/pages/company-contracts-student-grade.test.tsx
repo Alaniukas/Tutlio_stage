@@ -36,7 +36,10 @@ const testState = vi.hoisted(() => ({
         payer_email: 'tevas@example.test',
       },
     ],
-    contracts: [],
+    contractSummaries: [] as any[],
+    contracts: [] as any[],
+    contractsPage: 0,
+    teacherContracts: [] as any[],
   },
 }));
 
@@ -46,9 +49,9 @@ vi.mock('@/lib/dataCache', () => ({
   invalidateCache: vi.fn(),
 }));
 
+vi.mock('@/lib/authSession', () => ({ resolveAuthUser: vi.fn(async () => ({ id: 'admin-1' })) }));
 vi.mock('@/lib/supabase', () => ({
   supabase: {
-    auth: { getUser: vi.fn() },
     from: testState.from,
   },
 }));

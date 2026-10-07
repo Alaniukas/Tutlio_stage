@@ -19,6 +19,32 @@ const testState = vi.hoisted(() => ({
     },
     templates: [],
     students: [],
+    contractsPage: 0,
+    teacherContracts: [] as any[],
+    contractSummaries: [
+      {
+        id: 'contract-1',
+        organization_id: 'org-1',
+        template_id: null,
+        student_id: 'student-1',
+        filled_body: '',
+        annual_fee: 300,
+        signing_status: 'signed_by_school',
+        signed_at: null,
+        sent_at: '2026-07-10T10:00:00.000Z',
+        created_at: '2026-07-10T10:00:00.000Z',
+        signatures: [
+          { role: 'school', status: 'signed', signed_at: '2026-07-23T08:00:00.000Z', gosign_transaction_id: 'tx-1' },
+          { role: 'parent_primary', status: 'pending', signed_at: null, gosign_transaction_id: null },
+        ],
+        student: {
+          full_name: 'Manual mark student',
+          email: 'student@example.test',
+          payer_name: 'Brigita Testienė',
+          payer_email: 'parent@example.test',
+        },
+      },
+    ],
     contracts: [
       {
         id: 'contract-1',
@@ -52,9 +78,9 @@ vi.mock('@/lib/dataCache', () => ({
   invalidateCache: vi.fn(),
 }));
 
+vi.mock('@/lib/authSession', () => ({ resolveAuthUser: vi.fn(async () => ({ id: 'admin-1' })) }));
 vi.mock('@/lib/supabase', () => ({
   supabase: {
-    auth: { getUser: vi.fn(async () => ({ data: { user: null } })) },
     from: testState.from,
   },
 }));
@@ -66,12 +92,22 @@ vi.mock('@/lib/apiHelpers', () => ({
 describe('CompanyContracts manual e-sign mark', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    testState.from.mockImplementation(() => {
+    testState.from.mockImplementation((table: string) => {
       const query: any = {
         select: () => query,
         eq: () => query,
         is: () => query,
-        order: () => new Promise(() => undefined),
+        in: () => query,
+        order: () => query,
+        then: (resolve: any, reject: any) => {
+          if (table === 'school_contracts') {
+            return Promise.resolve({ data: testState.cache.contracts, error: null }).then(resolve, reject);
+          }
+          if (table === 'school_discount_agreements') {
+            return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+          }
+          return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+        },
       };
       return query;
     });

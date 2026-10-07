@@ -278,7 +278,7 @@ describe('SchoolExtraLessonsAccept', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.querySelector('p')?.textContent).toBe(message);
     expect(alert.nextElementSibling).toBe(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' }));
-    expect(document.activeElement).toBe(alert);
+    await waitFor(() => expect(document.activeElement).toBe(alert));
     expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole('radio', { name: 'Palaukti' }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole('radio', { name: 'Nesutinku' }) as HTMLInputElement).checked).toBe(true);

@@ -2,6 +2,7 @@ export const IN_APP_SUPPORT_MAX_ATTACHMENTS = 5;
 export const IN_APP_SUPPORT_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 export const IN_APP_SUPPORT_ATTACHMENT_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 import type { SupportDiagnostic } from './supportDiagnostics.js';
+import { humanizeSupportNavigationReply } from './supportNavigationLanguage.js';
 
 export type InAppSupportCategory = 'bug' | 'feature';
 export type InAppSupportImpact = 'blocking' | 'high' | 'medium' | 'low';
@@ -165,11 +166,12 @@ export function parseInAppSupportDiagnostics(value: unknown): SupportDiagnostic[
 }
 
 /** Keeps the agent's own copy aligned with Tutlio's punctuation style. */
-export function normalizeInAppSupportAgentReply(value: string): string {
-  return value
-    .replace(/\s*—\s*/g, ' - ')
-    .replace(/[ \t]{2,}/g, ' ')
-    .trim();
+export function normalizeInAppSupportAgentReply(
+  value: string,
+  locale = 'en',
+  entityType: 'company' | 'school' | null = null,
+): string {
+  return humanizeSupportNavigationReply(value, locale, entityType);
 }
 
 export function parseInAppSupportAiReview(value: unknown): InAppSupportAiReview | null {

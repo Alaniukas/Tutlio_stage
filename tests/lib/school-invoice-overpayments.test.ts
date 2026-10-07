@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { schoolInvoiceAmountDue, schoolInvoiceCreditPreview, schoolOverpaymentRemaining, type SchoolInvoiceOverpayment } from '../../src/lib/schoolInvoiceOverpayments';
+import { allocateSchoolInvoiceCredits, schoolInvoiceAmountDue, schoolInvoiceCreditPreview, schoolOverpaymentRemaining, schoolOverpaymentSourceMonthLabel, type SchoolInvoiceOverpayment } from '../../src/lib/schoolInvoiceOverpayments';
 import { schoolInvoiceOverpaymentTranslations } from '../../src/lib/i18n/schoolInvoiceOverpaymentTranslations';
 
 const credit = { amount_eur:12,uses:[{invoice_id:'next',amount_eur:10}],voided_at:null } as SchoolInvoiceOverpayment;
@@ -14,6 +14,20 @@ describe('school overpayment arithmetic',()=>{
     expect(schoolOverpaymentRemaining({...credit,uses:[{invoice_id:'next',amount_eur:10,released_at:'now'}]})).toBe(12);
     expect(schoolOverpaymentRemaining({...credit,voided_at:'now'})).toBe(0);
     expect(schoolInvoiceAmountDue({total_eur:'10.10',credit_applied_eur:'0.20'})).toBe(9.9);
+  });
+  it('labels the source month in genitive Lithuanian and allocates credits FIFO',()=>{
+    expect(schoolOverpaymentSourceMonthLabel('2026-08-31')).toBe('2026 m. rugpjūčio');
+    const credits = [
+      { id:'b',amount_eur:5,created_at:'2026-09-02',source:{period_end:'2026-08-31'},uses:[],voided_at:null},
+      { id:'a',amount_eur:12,created_at:'2026-09-01',source:{period_end:'2026-07-31'},uses:[],voided_at:null},
+    ] as SchoolInvoiceOverpayment[];
+    expect(allocateSchoolInvoiceCredits(credits,10)).toEqual([
+      { monthLabel:'2026 m. liepos',amountEur:10,sourceInvoiceNumber:null },
+    ]);
+    expect(allocateSchoolInvoiceCredits(credits,14)).toEqual([
+      { monthLabel:'2026 m. liepos',amountEur:12,sourceInvoiceNumber:null },
+      { monthLabel:'2026 m. rugpjūčio',amountEur:2,sourceInvoiceNumber:null },
+    ]);
   });
   it('provides matching localized labels for all 13 legacy locales',()=>{
     expect(Object.keys(schoolInvoiceOverpaymentTranslations)).toHaveLength(13);

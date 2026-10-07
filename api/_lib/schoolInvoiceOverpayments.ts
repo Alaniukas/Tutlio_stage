@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchAllRows } from '../../src/lib/fetchAllRows.js';
-import { schoolOverpaymentRemaining, type SchoolInvoiceOverpayment } from '../../src/lib/schoolInvoiceOverpayments.js';
+import { schoolOverpaymentRemaining, sortSchoolInvoiceOverpayments, type SchoolInvoiceOverpayment } from '../../src/lib/schoolInvoiceOverpayments.js';
 
 export const SCHOOL_OVERPAYMENTS_SELECT = '*, source:school_monthly_invoices!source_invoice_id(invoice_number,period_end), uses:school_invoice_overpayment_uses(invoice_id,amount_eur,released_at,invoice:school_monthly_invoices!invoice_id(invoice_number))';
 
@@ -16,6 +16,6 @@ export async function loadSchoolInvoiceOverpayments(db: SupabaseClient, organiza
 
 export function availableSchoolInvoiceOverpayments(credits: SchoolInvoiceOverpayment[], periodStart: string, payerEmail: string): SchoolInvoiceOverpayment[] {
   const email = payerEmail.trim().toLowerCase();
-  return credits.filter((credit) => email && credit.payer_email === email && credit.source?.period_end
-    && credit.source.period_end < periodStart && schoolOverpaymentRemaining(credit) > 0);
+  return sortSchoolInvoiceOverpayments(credits.filter((credit) => email && credit.payer_email === email && credit.source?.period_end
+    && credit.source.period_end < periodStart && schoolOverpaymentRemaining(credit) > 0));
 }

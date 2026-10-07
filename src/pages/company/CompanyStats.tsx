@@ -67,6 +67,7 @@ import {
   schoolActivitySummary,
   type SchoolActivitySummary,
 } from '@/lib/schoolSessionMonitoring';
+import { schoolTutorLastActivityAt } from '@/lib/schoolTutorActivity';
 
 interface TutorStat {
   id: string;
@@ -87,6 +88,7 @@ interface TutorStat {
   companyCommission: number;
   netEarnings: number;
   schoolUnresolvedPayCount?: number;
+  lastActivityAt?: string | null;
   plannedSessions: number;
   projectedRevenue: number;
   projectedCompanyCommission: number;
@@ -300,6 +302,7 @@ export default function CompanyStats() {
           companyCommission: 0,
           netEarnings: pay.payEur,
           schoolUnresolvedPayCount: pay.unresolvedCount,
+          lastActivityAt: schoolTutorLastActivityAt(tutorSessions),
           plannedSessions: activity.upcoming,
           projectedRevenue: 0,
           projectedCompanyCommission: 0,
@@ -968,10 +971,6 @@ function SchoolActivityStatsView({
         </div>
       ) : null}
 
-      <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-sm leading-6 text-blue-900">
-        {t('schoolStats.methodExplanation')}
-      </div>
-
       <section className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="border-b border-gray-100 px-5 py-4">
           <h2 className="font-semibold text-gray-900">{t('schoolStats.byTeacher')}</h2>
@@ -999,6 +998,11 @@ function SchoolActivityStatsView({
                     <SchoolTeacherMetric label={t('schoolStats.absentShort')} value={stat.attendanceAbsent} tone="text-rose-700" />
                     <SchoolTeacherMetric label={t('schoolStats.cancelledShort')} value={stat.totalCancelled} />
                     <SchoolTeacherMetric label={t('schoolStats.unconfirmedShort')} value={stat.attendanceUnconfirmed} tone="text-amber-700" />
+                    <SchoolTeacherMetric
+                      label={t('school.tutors.lastActivity')}
+                      value={stat.lastActivityAt ? format(new Date(stat.lastActivityAt), 'yyyy-MM-dd HH:mm') : '–'}
+                      tone="text-gray-700"
+                    />
                   </div>
                 </div>
               ))}
@@ -1017,7 +1021,8 @@ function SchoolActivityStatsView({
                     <th className="px-4 py-3 text-right">{t('schoolStats.attendanceShort')}</th>
                     <th className="px-4 py-3 text-right">{t('schoolStats.absentShort')}</th>
                     <th className="px-4 py-3 text-right">{t('schoolStats.cancelledShort')}</th>
-                    <th className="px-5 py-3 text-right">{t('schoolStats.unconfirmedShort')}</th>
+                    <th className="px-4 py-3 text-right">{t('schoolStats.unconfirmedShort')}</th>
+                    <th className="px-5 py-3 text-right">{t('school.tutors.lastActivity')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -1037,7 +1042,10 @@ function SchoolActivityStatsView({
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-rose-700">{stat.attendanceAbsent}</td>
                       <td className="px-4 py-3 text-right text-gray-700">{stat.totalCancelled}</td>
-                      <td className="px-5 py-3 text-right font-semibold text-amber-700">{stat.attendanceUnconfirmed}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-amber-700">{stat.attendanceUnconfirmed}</td>
+                      <td className="px-5 py-3 text-right text-gray-600">
+                        {stat.lastActivityAt ? format(new Date(stat.lastActivityAt), 'yyyy-MM-dd HH:mm') : '–'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

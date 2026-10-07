@@ -21,6 +21,28 @@ const testState = vi.hoisted(() => ({
     },
     templates: [],
     students: [],
+    contractsPage: 0,
+    teacherContracts: [],
+    contractSummaries: [
+      {
+        id: 'contract-1',
+        organization_id: 'org-1',
+        template_id: null,
+        student_id: 'student-1',
+        filled_body: '',
+        annual_fee: 300,
+        signing_status: 'signed_by_school',
+        signed_at: null,
+        sent_at: '2026-07-10T10:00:00.000Z',
+        created_at: '2026-07-10T10:00:00.000Z',
+        student: {
+          full_name: 'Spinner test student',
+          email: 'student@example.test',
+          payer_name: 'Parent',
+          payer_email: 'parent@example.test',
+        },
+      },
+    ],
     contracts: [
       {
         id: 'contract-1',
@@ -50,9 +72,9 @@ vi.mock('@/lib/dataCache', () => ({
   invalidateCache: vi.fn(),
 }));
 
+vi.mock('@/lib/authSession', () => ({ resolveAuthUser: vi.fn(async () => ({ id: 'admin-1' })) }));
 vi.mock('@/lib/supabase', () => ({
   supabase: {
-    auth: { getUser: vi.fn() },
     from: testState.from,
   },
 }));
@@ -62,12 +84,21 @@ describe('CompanyContracts background refresh', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     testState.from.mockImplementation((table: string) => {
-      if (table !== 'school_contracts') throw new Error(`Unexpected table: ${table}`);
       const query: any = {
         select: () => query,
         eq: () => query,
         is: () => query,
-        order: testState.order,
+        in: () => query,
+        order: table === 'school_contracts' ? testState.order : () => query,
+        then: (resolve: any, reject: any) => {
+          if (table === 'school_contracts') {
+            return Promise.resolve({ data: testState.cache.contracts, error: null }).then(resolve, reject);
+          }
+          if (table === 'school_discount_agreements') {
+            return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+          }
+          return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+        },
       };
       return query;
     });

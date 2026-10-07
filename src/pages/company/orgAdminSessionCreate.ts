@@ -207,12 +207,13 @@ async function persistRecurringPlanFrequency(
   studentIds: string[],
   lessonsPerWeek: number,
 ): Promise<void> {
-  if (!lessonsPerWeek || lessonsPerWeek < 1) return;
-  for (const studentId of studentIds) {
-    await supabase.rpc('set_student_pricing_frequency', {
-      p_student_id: studentId,
-      p_lessons_per_week: lessonsPerWeek,
-    });
+  if (!lessonsPerWeek || lessonsPerWeek < 1 || studentIds.length === 0) return;
+  const { error } = await supabase.rpc('set_student_pricing_frequency', {
+    p_student_id: studentIds[0],
+    p_lessons_per_week: lessonsPerWeek,
+  });
+  if (error) {
+    console.warn('[orgAdminSessionCreate] set_student_pricing_frequency failed:', error);
   }
 }
 

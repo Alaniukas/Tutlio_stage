@@ -10,6 +10,7 @@ import { isAuthLockAbort } from '@/lib/authSession';
 import { FEATURE_REGISTRY } from '@/lib/featureRegistry';
 import { parseOrgContactVisibility, type OrgContactVisibility } from '@/lib/orgContactVisibility';
 import { orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
+import { parseSchoolOrgCalendar, type SchoolOrgCalendarSettings } from '@/lib/schoolOrgCalendar';
 
 interface OrgFeaturesState {
   loading: boolean;
@@ -20,6 +21,7 @@ interface OrgFeaturesState {
   hasFeature: (featureId: string) => boolean;
   isOrgUser: boolean;
   contactVisibility: OrgContactVisibility | null;
+  schoolOrgCalendar: SchoolOrgCalendarSettings | null;
 }
 
 /**
@@ -127,6 +129,11 @@ export function useOrgFeatures(): OrgFeaturesState {
     return parseOrgContactVisibility(rawFeatures);
   }, [organizationId, rawFeatures]);
 
+  const schoolOrgCalendar = useMemo(() => {
+    if (entityType !== 'school' || !rawFeatures) return null;
+    return parseSchoolOrgCalendar(rawFeatures);
+  }, [entityType, rawFeatures]);
+
   return {
     loading,
     error,
@@ -136,6 +143,7 @@ export function useOrgFeatures(): OrgFeaturesState {
     hasFeature,
     isOrgUser: organizationId !== null,
     contactVisibility,
+    schoolOrgCalendar,
   };
 }
 

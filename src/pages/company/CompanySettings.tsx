@@ -50,6 +50,13 @@ import {
 } from '@/lib/parentNotificationPreferences';
 import { resolveDefaultTutorPayForSave } from '@/lib/orgTutorDefaultPay';
 import { parseTrialLessonPricing, trialPricingCopy, type TrialLessonPriceMode } from '@/lib/trialLessonPricing';
+import SchoolHolidayCalendarSettings from '@/components/school/SchoolHolidayCalendarSettings';
+import {
+  DEFAULT_SCHOOL_ORG_CALENDAR,
+  parseSchoolOrgCalendar,
+  serializeSchoolOrgCalendar,
+  type SchoolOrgCalendarSettings,
+} from '@/lib/schoolOrgCalendar';
 
 type TrialCommentMode = 'student_and_parent' | 'internal_only';
 
@@ -129,6 +136,9 @@ export default function CompanySettings() {
 
   const [orgFeaturesSnapshot, setOrgFeaturesSnapshot] = useState<Record<string, unknown>>(
     sc?.orgFeaturesSnapshot ?? {}
+  );
+  const [schoolOrgCalendar, setSchoolOrgCalendar] = useState<SchoolOrgCalendarSettings>(
+    sc?.schoolOrgCalendar ?? parseSchoolOrgCalendar(sc?.orgFeaturesSnapshot),
   );
   const showTrialSettings = !isSchoolOrgView;
   /** Dynamic pricing orgs don't need per-subject list prices. */
@@ -274,6 +284,7 @@ export default function CompanySettings() {
       nextLessonEditScope = parseOrgLessonEditScope(raw, legacy);
 
       setOrgFeaturesSnapshot(featObj);
+      setSchoolOrgCalendar(parseSchoolOrgCalendar(featObj));
       setContactTutorStudentEmail(cv.tutorSeesStudentEmail);
       setContactTutorStudentPhone(cv.tutorSeesStudentPhone);
       setContactStudentTutorEmail(cv.studentSeesTutorEmail);
@@ -823,6 +834,7 @@ export default function CompanySettings() {
       public_name: publicName.trim(),
       admin_email_opt_out: adminEmailOptOut,
       parent_email_opt_out: parentEmailOptOut,
+      ...(isSchoolOrgView ? { school_org_calendar: serializeSchoolOrgCalendar(schoolOrgCalendar) } : {}),
     };
 
     const { data: savedOrg, error } = await supabase
@@ -934,6 +946,7 @@ export default function CompanySettings() {
       orgLocale,
       orgTutors,
       subjects,
+      schoolOrgCalendar: isSchoolOrgView ? serializeSchoolOrgCalendar(schoolOrgCalendar) : DEFAULT_SCHOOL_ORG_CALENDAR,
     });
     invalidateCache('company_tutors');
 
@@ -1663,6 +1676,13 @@ export default function CompanySettings() {
                   </p>
                 )}
               </div>
+              )}
+
+              {isSchoolOrgView && (
+                <SchoolHolidayCalendarSettings
+                  value={schoolOrgCalendar}
+                  onChange={setSchoolOrgCalendar}
+                />
               )}
 
               <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('compSet.tutorPay')}</h2>

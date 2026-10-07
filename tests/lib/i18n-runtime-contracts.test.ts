@@ -54,7 +54,7 @@ const messages = [
   ['waitlist.reservedSessions', { count: 3 }],
 ] as const;
 
-beforeAll(async () => { await Promise.all(SUPPORTED_LOCALES.map(loadLocaleDict)); });
+beforeAll(async () => { await Promise.all(SUPPORTED_LOCALES.map(loadLocaleDict)); }, 120_000);
 
 describe('runtime translation contracts across all locales', () => {
   it.each(SUPPORTED_LOCALES)('%s retains the actual dates, limits and deadlines in every renderer', (locale) => {

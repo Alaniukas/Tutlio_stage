@@ -384,6 +384,12 @@ export const LT_ACTIVITY_KEY_OVERRIDES: Record<string, string> = {
   'cal.deleteConfirmFuture': 'Ar tikrai norite IŠTRINTI šį užsiėmimą IR VISUS ATEINANČIUS pasikartojančius užsiėmimus?\n\nTai ne atšaukimas — užsiėmimai bus visam laikui pašalinti iš sistemos.',
   'cal.deleteConfirmAll': 'Ar tikrai norite ištrinti visus likusius šios serijos suplanuotus ir atšauktus užsiėmimus? Įvykusių užsiėmimų istorija išlieka.',
   'orgFinance.schoolSummaryNote': 'Atlygis skaičiuojamas už pravestą užsiėmimą, ne už mokinių skaičių. Grupiniam ir individualiam užsiėmimui galima nustatyti skirtingą atlygį. Įvykęs užsiėmimas skaičiuojamas ir be patvirtinimo žymos. Taikomas išsaugotas užsiėmimo tarifas, o jei jo nėra - atitinkamas dabartinis atlygis. Atsiskaitymus tvarko mokykla.',
+  'school.groups.filterAll': 'Visi mokytojai',
+  'school.groups.loadMore': 'Rodyti daugiau ({shown} iš {total})',
+  'school.groups.loadMoreIndividual': 'Rodyti daugiau individualių ({shown} iš {total})',
+  'school.groups.deleteConfirm': 'Ištrinti grupę „{name}“? Visi būsimi užsiėmimai taip pat bus pašalinti.',
+  'compStu.studentSessions': 'Mokinio užsiėmimai',
+  'compStu.viewAllSessions': 'Peržiūrėti visus užsiėmimus',
 };
 
 export function applySchoolTerminology(

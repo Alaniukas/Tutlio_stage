@@ -93,7 +93,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (!requireCronAuth(req, res)) return;
 
-  const results: { session?: number; deadline?: any; afterLesson?: any; schoolInstallments?: any; lessonStatusConfirmations?: any } = {};
+  const results: {
+    session?: number;
+    deadline?: any;
+    afterLesson?: any;
+    schoolInstallments?: any;
+    lessonStatusConfirmations?: any;
+    schoolGroupMinimumWarnings?: any;
+  } = {};
   let totalSent = 0;
   let emailAttempts = 0;
 
@@ -595,6 +602,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (e) {
       console.error('[send-reminders] lesson-status-confirmation-reminders error:', e);
     }
+    try {
+      const groupRiskRes = await fetch(`${API_URL}/api/school-group-minimum-warnings`, { method: 'GET', headers: cronHeaders });
+      results.schoolGroupMinimumWarnings = groupRiskRes.ok ? await groupRiskRes.json().catch(() => ({})) : null;
+    } catch (e) {
+      console.error('[send-reminders] school-group-minimum-warnings error:', e);
+    }
 
     return res.status(200).json({
       message: 'Reminders run complete',
@@ -606,6 +619,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       paymentDeadlineWarnings: results.deadline,
       paymentAfterLessonReminders: results.afterLesson,
       schoolInstallmentReminders: results.schoolInstallments,
+      schoolGroupMinimumWarnings: results.schoolGroupMinimumWarnings,
     });
   } catch (err: any) {
     console.error('[send-reminders] error:', err);

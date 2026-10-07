@@ -53,7 +53,7 @@ describe('support ticket status emails', () => {
   it('confirms registration with an authenticated tracking link', () => {
     const email = buildInAppSupportStatusEmail(ticket, 'https://tutlio.lt');
     expect(email.subject).toContain('SUP-17EE7859');
-    expect(email.html).toContain('Jūsų ticketas užregistruotas');
+    expect(email.html).toContain('Jūsų klaida užregistruota');
     expect(email.trackingUrl).toBe('https://tutlio.lt/school/support/tickets?ticket=17ee7859-5c8a-4fba-9dbd-9259ccad28f4');
     expect(email.html).not.toContain('private=123');
   });
@@ -66,7 +66,7 @@ describe('support ticket status emails', () => {
   });
 
   it.each([
-    ['lt-LT', 'Gavome jūsų funkcijos pasiūlymą.', 'Pradėjome įgyvendinti jūsų pasiūlytą funkciją.', 'Jūsų pasiūlyta funkcija įdiegta ir jau prieinama Tutlio.'],
+    ['lt-LT', 'Jūsų pasiūlymas užregistruotas.', 'Jūsų pasiūlymas vykdomas.', 'Jūsų pasiūlymas įgyvendintas ir jau prieinamas Tutlio.'],
     ['en-US', 'Your feature request has been received.', 'We are implementing your requested feature.', 'Your requested feature has been implemented and is now available in Tutlio.'],
     ['pl', 'Otrzymaliśmy Twoją propozycję funkcji.', 'Pracujemy nad wdrożeniem zaproponowanej przez Ciebie funkcji.', 'Zaproponowana przez Ciebie funkcja została wdrożona i jest już dostępna w Tutlio.'],
     ['nl', 'Je functieverzoek is ontvangen.', 'We werken aan de implementatie van de door jou voorgestelde functie.', 'De door jou voorgestelde functie is geïmplementeerd en nu beschikbaar in Tutlio.'],

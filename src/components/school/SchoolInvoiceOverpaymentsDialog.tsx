@@ -3,7 +3,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
 import { schoolOverpaymentRemaining, type SchoolInvoiceOverpayment } from '@/lib/schoolInvoiceOverpayments';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -66,15 +66,19 @@ export default function SchoolInvoiceOverpaymentsDialog({ open, onOpenChange, or
     <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>{t('school.invoice.credit.title')}</DialogTitle>
-        <DialogDescription>{t('school.invoice.credit.help')}</DialogDescription>
       </DialogHeader>
       {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       {busy && <p role="status" className="text-sm text-slate-600">{t('common.loading')}</p>}
-      {data?.canEdit && <form className="space-y-3 rounded-xl border bg-slate-50 p-4" onSubmit={(event) => { event.preventDefault(); void save('register'); }}>
+      {data?.canEdit && !data.invoices.length && !busy && (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {t('school.invoice.credit.noPaidInvoices')}
+        </p>
+      )}
+      {data?.canEdit && data.invoices.length > 0 && <form className="space-y-3 rounded-xl border bg-slate-50 p-4" onSubmit={(event) => { event.preventDefault(); void save('register'); }}>
         <Label htmlFor="overpayment-source">{t('school.invoice.credit.source')}</Label>
         <select id="overpayment-source" className="w-full rounded-md border bg-white p-2 text-sm" value={invoiceId} disabled={busy}
           required onChange={(event) => { setInvoiceId(event.target.value); requestId.current = crypto.randomUUID(); }}>
-          <option value="">{t('school.invoice.credit.source')}</option>
+          <option value="">{t('school.invoice.credit.sourcePlaceholder')}</option>
           {data.invoices.map((invoice) => <option key={invoice.id} value={invoice.id}>
             {invoice.invoice_number || invoice.id} · {invoice.student?.full_name} · {money(invoice.paidCashEur)}
           </option>)}
@@ -89,6 +93,9 @@ export default function SchoolInvoiceOverpaymentsDialog({ open, onOpenChange, or
           || Math.abs(numericAmount * 100 - Math.round(numericAmount * 100)) > 1e-7
           || numericAmount > (source?.paidCashEur || 0) || reason.trim().length < 3}>{t('school.invoice.credit.save')}</Button>
       </form>}
+      {data?.canEdit && data.invoices.length > 0 && !source && amount && reason.trim().length >= 3 && (
+        <p className="text-sm text-amber-700">{t('school.invoice.credit.pickInvoice')}</p>
+      )}
       <h3 className="font-semibold">{t('school.invoice.credit.history')}</h3>
       {data && !data.credits.length && <p className="text-sm text-slate-500">{t('school.invoice.credit.empty')}</p>}
       {data?.credits.map((credit) => {

@@ -30,6 +30,16 @@ export function clearAuthUserCache(): void {
  * getSession over getUser (network + navigator lock). Lock-steal AbortError
  * returns the cache instead of throwing.
  */
+export async function resolveAccessToken(): Promise<string | null> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token ?? null;
+  } catch (err) {
+    if (isAuthLockAbort(err)) return null;
+    throw err;
+  }
+}
+
 export function resolveAuthUser(existingUser?: User | null): Promise<User | null> {
   if (existingUser) {
     cachedAuthUser = existingUser;
