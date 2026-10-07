@@ -10,6 +10,7 @@ import { supportTranslations } from './supportTranslations.js';
 import { nlQuiz } from './nlQuiz.js';
 
 export const nl: Record<string, string> = {
+  'school.contractsLoadFailed': 'De contracten konden niet worden geladen. Probeer het opnieuw.',
   ...studentNotesTranslations.nl,
   ...schoolFamilyMaterialTranslations.nl,
   ...schoolInvoiceReviewTranslations.nl,

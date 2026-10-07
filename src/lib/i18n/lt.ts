@@ -5,6 +5,7 @@ import { schoolConsultationsLt } from './schoolConsultationsTranslations.js';
 import { schoolInvoiceReviewLt } from './schoolInvoiceReviewTranslations.js';
 
 export const lt: Record<string, string> = {
+  'school.contractsLoadFailed': 'Nepavyko įkelti sutarčių. Bandykite dar kartą.',
   ...studentNotesTranslations.lt,
   'chat.registrationPending': 'Laukiama registracijos',
   'chat.registrationPendingHint': 'Žinutės galimos susiejus mokinio paskyrą. Paprašykite organizacijos administratoriaus patikrinti mokinio el. paštą ir paskyrą arba mokinio užbaigti registraciją.',

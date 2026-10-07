@@ -18,6 +18,7 @@ const seLegalTranslations: Record<string, string> = {
 };
 
 export const se: Record<string, string> = {
+  'school.contractsLoadFailed': 'Avtalen kunde inte laddas. Försök igen.',
   ...studentNotesTranslations.se,
   ...schoolFamilyMaterialTranslations.se,
   ...schoolInvoiceReviewTranslations.se,

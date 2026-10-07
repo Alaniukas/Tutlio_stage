@@ -124,6 +124,7 @@ const DK_DPA_HTML = [
 ].join('');
 
 export const dk: Record<string, string> = {
+  'school.contractsLoadFailed': 'Kontrakterne kunne ikke indlæses. Prøv igen.',
   ...studentNotesTranslations.dk,
   ...schoolFamilyMaterialTranslations.dk,
   ...schoolInvoiceReviewTranslations.dk,

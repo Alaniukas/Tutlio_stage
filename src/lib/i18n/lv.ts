@@ -9,6 +9,7 @@ import { supportTranslations } from './supportTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 
 export const lv: Record<string, string> = {
+  'school.contractsLoadFailed': 'Neizdevās ielādēt līgumus. Mēģiniet vēlreiz.',
   ...studentNotesTranslations.lv,
   ...schoolFamilyMaterialTranslations.lv,
   ...schoolInvoiceReviewTranslations.lv,

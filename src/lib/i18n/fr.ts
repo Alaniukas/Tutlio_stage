@@ -9,6 +9,7 @@ import { schoolTeacherContractTranslationsFr } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const fr: Record<string, string> = {
+  'school.contractsLoadFailed': 'Impossible de charger les contrats. Veuillez réessayer.',
   ...studentNotesTranslations.fr,
   ...schoolFamilyMaterialTranslations.fr,
   ...schoolInvoiceReviewTranslations.fr,

@@ -5,6 +5,7 @@ import { schoolConsultationsEn } from './schoolConsultationsTranslations.js';
 import { schoolInvoiceReviewEn } from './schoolInvoiceReviewTranslations.js';
 
 export const en: Record<string, string> = {
+  'school.contractsLoadFailed': 'Unable to load contracts. Please try again.',
   ...studentNotesTranslations.en,
   'chat.registrationPending': 'Registration pending',
   'chat.registrationPendingHint': 'Messaging is available after the student account is linked. Ask the organization administrator to confirm the student email and account, or ask the student to finish registration.',

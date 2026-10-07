@@ -8,6 +8,7 @@ import { schoolTeacherContractTranslationsPl } from './schoolTeacherContractTran
 import { schoolConsultationsPl } from './schoolConsultationsTranslations.js';
 
 export const pl: Record<string, string> = {
+  'school.contractsLoadFailed': 'Nie udało się wczytać umów. Spróbuj ponownie.',
   ...studentNotesTranslations.pl,
   ...schoolFamilyMaterialTranslations.pl,
   ...schoolInvoiceReviewTranslations.pl,

@@ -321,6 +321,7 @@ export default function CompanyContracts() {
   const [contracts, setContracts] = useState<Contract[]>(cc?.contracts ?? []);
   const [students, setStudents] = useState<Student[]>(cc?.students ?? []);
   const [loading, setLoading] = useState(!cc);
+  const [loadError, setLoadError] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
 
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -396,17 +397,20 @@ export default function CompanyContracts() {
 
   const load = async () => {
     if (!getCached(CONTRACTS_CACHE_KEY)) setLoading(true);
+    setLoadError(false);
     try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError) throw userError;
+    if (!user) throw new Error('Missing authenticated user');
 
-    const { data: admin } = await supabase
+    const { data: admin, error: adminError } = await supabase
       .from('organization_admins')
       .select('organization_id')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (!admin?.organization_id) return;
+    if (adminError) throw adminError;
+    if (!admin?.organization_id) throw new Error('Missing organization membership');
     setOrgId(admin.organization_id);
     const org = await fetchOrganizationRow<{
       name?: string;
@@ -431,6 +435,10 @@ export default function CompanyContracts() {
       supabase.from('students').select('id, full_name, email, phone, grade, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent').eq('organization_id', admin.organization_id).order('full_name'),
     ]);
 
+    for (const result of [tRes, cRes, sRes]) {
+      if (result.error) throw result.error;
+    }
+
     const tData = tRes.data || [];
     const cData = withDiscountAgreements(cRes.data || [], await loadDiscountAgreementsByContract(admin.organization_id));
     const sData = sRes.data || [];
@@ -450,6 +458,7 @@ export default function CompanyContracts() {
     });
     } catch (err) {
       console.error('[CompanyContracts] load failed:', err);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -473,10 +482,12 @@ export default function CompanyContracts() {
       .order('created_at', { ascending: false });
     if (error) {
       console.error('[CompanyContracts] background contract refresh failed:', error.message);
+      setLoadError(true);
       return;
     }
     const nextContracts = withDiscountAgreements((data || []) as Contract[], await loadDiscountAgreementsByContract(orgId));
     setContracts(nextContracts);
+    setLoadError(false);
     const cached = getCached<any>(CONTRACTS_CACHE_KEY);
     if (cached) setCache(CONTRACTS_CACHE_KEY, { ...cached, contracts: nextContracts });
   };
@@ -2327,11 +2338,18 @@ export default function CompanyContracts() {
           </section>
         )}
 
+        {loadError && (
+          <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900 flex flex-wrap items-center justify-between gap-3">
+            <p>{tr('school.contractsLoadFailed')}</p>
+            <Button variant="outline" onClick={reload}>{tr('stuSess.retryLoad')}</Button>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <div className="w-8 h-8 border-2 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
           </div>
-        ) : tab === 'contracts' ? (
+        ) : loadError && ((tab === 'contracts' && studentContracts.length === 0) || (tab === 'templates' && templates.length === 0)) ? null : tab === 'contracts' ? (
           studentContracts.length === 0 ? (
             <div className="text-center py-20">
               <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />

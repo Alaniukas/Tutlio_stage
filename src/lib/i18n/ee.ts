@@ -9,6 +9,7 @@ import { schoolTeacherContractTranslationsEe } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const ee: Record<string, string> = {
+  'school.contractsLoadFailed': 'Lepingute laadimine ebaõnnestus. Proovige uuesti.',
   ...studentNotesTranslations.ee,
   ...schoolFamilyMaterialTranslations.ee,
   ...schoolInvoiceReviewTranslations.ee,
