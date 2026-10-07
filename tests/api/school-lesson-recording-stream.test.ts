@@ -288,8 +288,9 @@ describe('GET /api/school-lesson-recording-stream', () => {
 
   it.each(['– Chat', '– Chat transcript'])('streams a bounded extensionless Meet %s file through the authorized proxy', async (suffix) => {
     const { chat, video, text } = withChat();
-    video.name = 'IT - Seniors - 2026/09/14 11:57 BST';
-    chat.name = `${video.name} ${suffix}`;
+    const meeting = 'IT - Seniors - 2026/09/14 11:57 BST';
+    video.name = `${meeting} – Recording`;
+    chat.name = `${meeting} ${suffix}`;
     chat.mimeType = 'text/plain';
     const res = mockRes();
     await handler({ method: 'GET', query: { t: 'chat' }, headers: {} } as any, res);

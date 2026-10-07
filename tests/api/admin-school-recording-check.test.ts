@@ -31,9 +31,10 @@ describe('read-only production recording check', () => {
       organizationId, kind: 'class_group' }] });
     mocks.from.mockReturnValue({ select: () => ({ eq: async () => ({ error: null,
       data: [{ group_id: groupId, drive_folder_id: 'PRIVATE-FOLDER' }] }) }) });
-    const chat = { id: 'chat', name: 'Lesson.sbv', mimeType: 'text/plain', size: 7 };
+    const chat = { id: 'chat', name: 'Lesson.sbv', mimeType: 'text/plain', size: 7,
+      parents: ['PRIVATE-FOLDER'], createdTime: new Date().toISOString(), canDownload: true };
     mocks.inventory.mockResolvedValue([chat]);
-    mocks.recordings.mockResolvedValue([{ id: 'video', chatFiles: [chat] }]);
+    mocks.recordings.mockResolvedValue([{ id: 'video', name: 'Lesson.mp4', mimeType: 'video/mp4', parents: ['PRIVATE-FOLDER'], chatFiles: [chat] }]);
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
       if (!init.headers || !('Cookie' in init.headers)) return new Response(null, { status: 401 });
       if (init.method === 'HEAD') return new Response(null, { status: 206 });
@@ -80,15 +81,18 @@ describe('read-only production recording check', () => {
     expect(result).toEqual({ status: 502, body: { error: 'Recording verification failed' } });
   });
   it('counts extensionless Meet chat files with the same eligibility rules as playback', async () => {
+    const chat = { id: 'chat', name: 'Lesson – Chat transcript', mimeType: 'text/plain', size: 7,
+      parents: ['PRIVATE-FOLDER'], createdTime: new Date().toISOString(), canDownload: true };
     mocks.inventory.mockResolvedValue([
-      { id: 'chat', name: 'Lesson – Chat transcript', mimeType: 'text/plain', size: 7 },
-      { id: 'unpaired', name: 'Other lesson – Chat', mimeType: 'text/plain', size: 7 },
+      chat,
+      { ...chat, id: 'unpaired', name: 'Other lesson – Chat' },
       { id: 'notes', name: 'Notes', mimeType: 'text/plain', size: 10 },
     ]);
-    mocks.recordings.mockResolvedValue([{ id: 'video', name: 'Lesson.mp4', chatFiles: [{ id: 'chat', size: 7 }] }]);
+    mocks.recordings.mockResolvedValue([{ id: 'video', name: 'Lesson – Recording', mimeType: 'video/mp4', parents: ['PRIVATE-FOLDER'], chatFiles: [chat] }]);
     const { res, result } = response();
     await handler(request(), res);
     expect(result.body.results[0]).toMatchObject({ chatFiles: 2, pairedChats: 1,
-      otherFiles: [{ name: 'Notes' }], unpairedNames: ['Other lesson – Chat'], recordingNames: ['Lesson.mp4'] });
+      otherFiles: [{ name: 'Notes' }], unpairedNames: ['Other lesson – Chat'], recordingNames: ['Lesson – Recording'] });
+    expect(result.body.results[0].chatMetadata[0]).toMatchObject({ canDownload: true, withinRetention: true, inAssignedFolder: true, matchesRetainedVideos: 1 });
   });
 });

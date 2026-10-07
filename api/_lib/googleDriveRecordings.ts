@@ -220,6 +220,7 @@ export async function getDriveFileMetadata(fileId: string): Promise<DriveRecordi
 }
 
 const CHAT_NAME_SUFFIX = /(?:[\s_\-\u2010-\u2015]+chat(?:\s+transcript)?|\s*\(chat(?:\s+transcript)?\))$/i;
+const RECORDING_NAME_SUFFIX = /(?:\s*[_\-\u2010-\u2015]\s*recording|\s*\(recording\))$/i;
 const VIDEO_NAME_EXTENSION = /\.(mp4|webm|mov|mkv|m4v|avi|3gp|ogv)$/i;
 
 /** Meet also saves plain-text chats without an extension, ending in “– Chat”. */
@@ -236,7 +237,8 @@ export function isDriveRecordingChatFile(file: DriveRecordingFile): boolean {
 }
 
 function recordingNameStem(name: string): string {
-  return name.normalize('NFC').trim().replace(VIDEO_NAME_EXTENSION, '').trim().toLowerCase();
+  return name.normalize('NFC').trim().replace(VIDEO_NAME_EXTENSION, '')
+    .replace(RECORDING_NAME_SUFFIX, '').trim().toLowerCase();
 }
 
 function chatNameStem(name: string): string {

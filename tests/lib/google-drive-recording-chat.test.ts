@@ -79,13 +79,18 @@ describe('Google Drive recording companion chats', () => {
   });
 
   it.each([
-    ['abc-defg-hij (2026-09-09 06:57 GMT+1)', '– Chat transcript'],
-    ['QA IT - Seniors - 2026/09/14 11:57 BST', '– Chat'],
-    ['QA IT - Seniors - 2026/09/07 11:50 BST', '– Chat'],
-  ])('pairs the extensionless Meet chat for %s', async (stem, suffix) => {
-    drivePages([{ files: [video({ name: `${stem}.mp4` }), chat({ name: `${stem} ${suffix}`, mimeType: 'text/plain' })] }]);
+    ['abc-defg-hij (2026-09-09 06:57 GMT+1)', '– Chat transcript', ''],
+    ['QA IT - Seniors - 2026/09/14 11:57 BST', '– Chat', ' – Recording'],
+    ['QA IT - Seniors - 2026/09/07 11:50 BST', '– Chat', ' – Recording.mp4'],
+  ])('pairs the extensionless Meet chat for %s', async (stem, suffix, videoSuffix) => {
+    drivePages([{ files: [video({ name: `${stem}${videoSuffix}` }), chat({ name: `${stem} ${suffix}`, mimeType: 'text/plain' })] }]);
     const recordings = await listDriveRecordings(folder);
     expect(recordings[0].chatFiles?.map((file) => file.id)).toEqual(['chat-12345']);
+  });
+
+  it('withholds chat when bare and Recording-suffixed videos refer to the same meeting', async () => {
+    drivePages([{ files: [video(), video({ id: 'duplicate', name: 'Matematika 2026-10-07 – Recording' }), chat()] }]);
+    expect((await listDriveRecordings(folder)).every((file) => !file.chatFiles?.length)).toBe(true);
   });
 
   it('preserves dotted meeting titles and extensionless video names when matching', () => {

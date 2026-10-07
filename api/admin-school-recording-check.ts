@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from './types.js';
 import { isInternalRequest } from './_lib/auth.js';
 import { serviceSupabase } from './_lib/extraLessonsContractShared.js';
-import { isDriveRecordingChatFile, listDriveRecordingFolderFiles, listDriveRecordings } from './_lib/googleDriveRecordings.js';
+import { isChatFileForRecording, isDriveRecordingChatFile, isRecordingWithinRetention, listDriveRecordingFolderFiles, listDriveRecordings } from './_lib/googleDriveRecordings.js';
 import { resolveRecordingViewerAccess } from './_lib/schoolRecordingAccess.js';
 import { createSchoolRecordingTicket, createSchoolRecordingViewerSession } from './_lib/schoolRecordingTicket.js';
 
@@ -51,6 +51,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .slice(0, 5).map(file => ({ name: file.name, mimeType: file.mimeType, bytes: file.size }));
       const pairs = recordings.flatMap((recording) => (recording.chatFiles || []).map((chat) => ({ recording, chat })));
       const unpaired = chats.filter((chat) => !pairs.some((pair) => pair.chat.id === chat.id));
+      const chatMetadata = chats.slice(0, 5).map((chat) => ({ name: chat.name, createdTime: chat.createdTime,
+        canDownload: chat.canDownload, withinRetention: isRecordingWithinRetention(chat.createdTime),
+        inAssignedFolder: chat.parents.includes(mapping.drive_folder_id),
+        matchesRetainedVideos: recordings.filter((recording) => isChatFileForRecording(chat, recording)).length }));
       const video = recordings[0] ? await probe(recordings[0].id, group.id, 'HEAD') : null;
       const checks = await Promise.all(pairs.slice(0, 2).map(async ({ recording, chat }) => {
         const [allowed, denied] = await Promise.all([
@@ -65,7 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
       }));
       return { groupId: group.id, configured: true, inventory: inventory.length, fileTypes, otherFiles, retainedVideos: recordings.length,
-        chatFiles: chats.length, pairedChats: pairs.length, videoStatus: video?.status ?? null, checks,
+        chatFiles: chats.length, chatMetadata, pairedChats: pairs.length, videoStatus: video?.status ?? null, checks,
         unpairedNames: unpaired.slice(0, 5).map((file) => file.name),
         ...(unpaired.length ? { recordingNames: recordings.slice(0, 5).map((file) => file.name) } : {}) };
     }));
