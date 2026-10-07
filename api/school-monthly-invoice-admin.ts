@@ -10,6 +10,8 @@ import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
 import { generateSchoolMonthlyInvoicePdf } from './_lib/schoolMonthlyInvoicePdf.js';
 import { sendSchoolMonthlyInvoiceEmail } from './_lib/schoolMonthlyInvoiceEmail.js';
 import { publicAppOrigin } from './_lib/publicLinkToken.js';
+import { availableSchoolInvoiceOverpayments, loadSchoolInvoiceOverpayments } from './_lib/schoolInvoiceOverpayments.js';
+import { schoolInvoiceCreditPreview, schoolOverpaymentRemaining, type SchoolInvoiceOverpayment } from '../src/lib/schoolInvoiceOverpayments.js';
 import {
   buildSchoolLessonInvoiceLines,
   invoiceLinesDiscountTotal,
@@ -60,6 +62,9 @@ type DraftContext = {
   subtotalEur: number;
   discountAmountEur: number;
   totalEur: number;
+  credits: SchoolInvoiceOverpayment[];
+  creditAppliedEur: number;
+  amountDueEur: number;
   periodStart: string;
   periodEnd: string;
   dueDate: string;
@@ -70,7 +75,7 @@ type DraftContext = {
   payerChildNames?: string[];
 };
 
-const SESSION_DETAIL_SELECT = 'id, subject_id, tutor_id, start_time, end_time, status, price, class_group_id, school_billing_kind, student_joined_at, tutor_joined_at, status_confirmed_at, status_confirmed_by, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, class_group:school_class_groups(name), subject:subjects(name, price), tutor:profiles!sessions_tutor_id_fkey!inner(full_name,organization_id)';
+const SESSION_DETAIL_SELECT = 'id, subject_id, tutor_id, start_time, original_start_time, end_time, status, price, class_group_id, school_billing_kind, student_joined_at, tutor_joined_at, status_confirmed_at, status_confirmed_by, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, class_group:school_class_groups(name), subject:subjects(name, price), tutor:profiles!sessions_tutor_id_fkey!inner(full_name,organization_id)';
 
 function composePayerDraft(drafts: DraftContext[]): DraftContext {
   const sorted = [...drafts].sort((a, b) => String(a.student.full_name || '').localeCompare(String(b.student.full_name || ''), 'lt'));
@@ -79,6 +84,8 @@ function composePayerDraft(drafts: DraftContext[]): DraftContext {
   const sessions = sorted.flatMap((row) => row.sessions);
   const reviewSessionIds = [...new Set(sorted.flatMap((row) => row.reviewSessionIds))];
   const payerChildNames = sorted.map((row) => String(row.student.full_name || '')).filter(Boolean);
+  const credits = [...new Map(sorted.flatMap((row) => row.credits).map((credit) => [credit.id, credit])).values()];
+  const credit = schoolInvoiceCreditPreview(credits, invoiceLinesTotal(lines));
   return {
     ...primary,
     lines,
@@ -87,7 +94,10 @@ function composePayerDraft(drafts: DraftContext[]): DraftContext {
     subtotalEur: invoiceLinesSubtotal(lines),
     discountAmountEur: invoiceLinesDiscountTotal(lines),
     totalEur: invoiceLinesTotal(lines),
-    payerStudentIds: sorted.map((row) => row.student.id),
+    credits,
+    creditAppliedEur: credit.appliedEur,
+    amountDueEur: credit.amountDueEur,
+    payerStudentIds: [...new Set(sorted.flatMap((row) => row.payerStudentIds || [row.student.id]))],
     payerChildNames,
   };
 }
@@ -104,6 +114,7 @@ function composeDraftContext(input: {
   storedContracts: any[];
   decisions: any[];
   invoices: any[];
+  overpayments: SchoolInvoiceOverpayment[];
   liveIndividualSubjectIds: Set<string>;
   groupEvidence: Set<string>;
   periodStart: string;
@@ -179,6 +190,8 @@ function composeDraftContext(input: {
   );
   const lines = buildSchoolLessonInvoiceLines(billable, persistent);
   if (!reviewSessions.length) return null;
+  const credits = availableSchoolInvoiceOverpayments(input.overpayments.filter((credit) => studentIds.includes(credit.student_id)), periodStart, String(student.payer_email || ''));
+  const credit = schoolInvoiceCreditPreview(credits, invoiceLinesTotal(lines));
   return {
     organizationId,
     student,
@@ -188,6 +201,9 @@ function composeDraftContext(input: {
     subtotalEur: invoiceLinesSubtotal(lines),
     discountAmountEur: invoiceLinesDiscountTotal(lines),
     totalEur: invoiceLinesTotal(lines),
+    credits,
+    creditAppliedEur: credit.appliedEur,
+    amountDueEur: credit.amountDueEur,
     periodStart,
     periodEnd,
     dueDate,
@@ -302,7 +318,7 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
     : [...new Set((allSessions || []).map((row) => String(row.student_id || '')).filter(Boolean))];
   if (!studentIds.length) return { drafts: [] };
 
-  const [studentsRes, discountsRes, discountAgreementsRes, contractsRes, decisionsRes, invoicesRes] = await Promise.all([
+  const [studentsRes, discountsRes, discountAgreementsRes, contractsRes, decisionsRes, invoicesRes, overpayments] = await Promise.all([
     supabase.from('students')
       .select('id, organization_id, full_name, grade, email, phone, payer_name, payer_email, payer_phone')
       .in('id', studentIds).eq('organization_id', organizationId),
@@ -327,6 +343,7 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
     supabase.from('school_monthly_invoices')
       .select('id, student_id, contract_id, period_start, period_end, billing_model, billed_session_ids, extra_session_ids, lines:school_monthly_invoice_lines(session_id,session_ids)')
       .in('student_id', studentIds).eq('organization_id', organizationId).neq('payment_status', 'cancelled'),
+    loadSchoolInvoiceOverpayments(supabase, organizationId, studentIds),
   ]);
   for (const result of [studentsRes, discountsRes, discountAgreementsRes, contractsRes, decisionsRes, invoicesRes]) if (result.error) {
     throw new Error(result.error.message.includes('school_session_billing_decisions')
@@ -336,7 +353,7 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
 
   const studentsById = new Map((studentsRes.data || []).map((row: any) => [String(row.id), row]));
   const allowedStudentIds = new Set(studentIds);
-  const sessions = (allSessions || []).filter((row) => allowedStudentIds.has(String(row.student_id || '')));
+  let sessions = (allSessions || []).filter((row) => allowedStudentIds.has(String(row.student_id || '')));
   const discounts = discountsRes.data || [];
   const discountAgreements = discountAgreementsRes.data || [];
   const contracts = contractsRes.data || [];
@@ -358,11 +375,21 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
   const groupIds = [...new Set(sessions.map((session: any) => session.class_group_id).filter(Boolean))];
   let groupEvidence = new Set<string>();
   if (groupIds.length) {
-    const groupSessions = await fetchAllRows<any>((from, to) => supabase.from('sessions')
-      .select('id, class_group_id, start_time, end_time, status, student_joined_at, tutor_joined_at, status_confirmed_at, status_confirmed_by, tutor:profiles!sessions_tutor_id_fkey!inner(organization_id)')
-      .eq('tutor.organization_id', organizationId).in('class_group_id', groupIds)
-      .gte('start_time', fromIso).lte('start_time', untilIso)
-      .order('start_time').order('id').range(from, to));
+    const [groupSessions, memberships] = await Promise.all([
+      fetchAllRows<any>((from, to) => supabase.from('sessions')
+        .select('id, class_group_id, start_time, end_time, status, student_joined_at, tutor_joined_at, status_confirmed_at, status_confirmed_by, tutor:profiles!sessions_tutor_id_fkey!inner(organization_id)')
+        .eq('tutor.organization_id', organizationId).in('class_group_id', groupIds)
+        .gte('start_time', fromIso).lte('start_time', untilIso)
+        .order('start_time').order('id').range(from, to)),
+      fetchAllRows<any>((from, to) => supabase.from('school_class_group_members')
+        .select('group_id, student_id, schedule_slots, group:school_class_groups!inner(organization_id)')
+        .eq('group.organization_id', organizationId).in('group_id', groupIds).in('student_id', studentIds)
+        .order('group_id').order('student_id').range(from, to)),
+    ]);
+    const memberSchedules = new Map(memberships.map((row) => [`${row.student_id}:${row.group_id}`, row.schedule_slots]));
+    sessions = sessions.map((session) => ({ ...session,
+      member_schedule_slots: memberSchedules.get(`${session.student_id}:${session.class_group_id}`),
+    }));
     groupEvidence = new Set((groupSessions || []).filter(hasSchoolOccurrenceEvidence).map(groupOccurrenceKey));
   }
 
@@ -378,6 +405,7 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
     storedContracts: contracts.filter((row: any) => ids.includes(String(row.student_id || ''))),
     decisions: decisions.filter((row: any) => ids.includes(String(row.student_id || ''))),
     invoices: invoices.filter((row: any) => ids.includes(String(row.student_id || ''))),
+    overpayments,
     liveIndividualSubjectIds,
     groupEvidence,
     periodStart,
@@ -418,6 +446,8 @@ function digestPayload(draft: DraftContext, userId: string) {
     periodEnd: draft.periodEnd,
     dueDate: draft.dueDate,
     payerEmail: String(draft.student.payer_email || '').trim(),
+    creditAppliedEur: draft.creditAppliedEur,
+    credits: draft.credits.map((credit) => ({ id: credit.id, remainingEur: schoolOverpaymentRemaining(credit) })).sort((a,b) => a.id.localeCompare(b.id)),
     sessions: draft.sessions.map((session) => ({ id: session.id, status: session.status,
       statusConfirmedAt: session.statusConfirmedAt, reason: session.reason, decisionId: session.decisionId })),
     lines: draft.lines.map((line) => ({
@@ -464,6 +494,7 @@ async function renderDraftPdf(draft: DraftContext, invoiceNumber: string, previe
     subtotalEur: draft.subtotalEur,
     discountAmountEur: draft.discountAmountEur,
     totalEur: draft.totalEur,
+    creditAppliedEur: draft.creditAppliedEur,
     discountNote: discountNotesForInvoice(draft.lines),
     issuedByName: typeof features.school_invoice_issued_by_name === 'string'
       ? features.school_invoice_issued_by_name
@@ -521,6 +552,8 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
     discount_amount_eur: draft.discountAmountEur,
     discount_note: discountNotesForInvoice(draft.lines),
     total_eur: draft.totalEur,
+    credit_preview_eur: draft.creditAppliedEur,
+    payer_student_ids: invoiceStudentIds,
     extra_session_ids: [],
     billing_model: 'actual',
     billed_session_ids: draft.lines.flatMap((line) => line.sessionIds),
@@ -607,6 +640,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           fullName: String(draft.student.full_name || ''),
           grade: draft.student.grade || null,
           totalEur: draft.totalEur,
+          creditAppliedEur: draft.creditAppliedEur,
+          amountDueEur: draft.amountDueEur,
           lessonCount: draft.lines.reduce((sum, line) => sum + line.quantity, 0),
           reviewSessionIds: draft.reviewSessionIds,
           reviewReasons: [...new Set(draft.sessions.flatMap((session) => (
@@ -623,10 +658,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const sendableDrafts = group.sendableStudentIds
           .map((studentId) => students.find((item) => item.row.studentId === studentId)?.draft)
           .filter((draft): draft is DraftContext => Boolean(draft));
-        const payerPreviewToken = sendableDrafts.length
-          ? previewDigest(digestPayload(composePayerDraft(sendableDrafts), auth.userId))
-          : undefined;
-        return { ...group, payerPreviewToken };
+        const payerDraft = sendableDrafts.length ? composePayerDraft(sendableDrafts) : null;
+        const payerPreviewToken = payerDraft ? previewDigest(digestPayload(payerDraft, auth.userId)) : undefined;
+        return { ...group, payerPreviewToken, creditAppliedEur: payerDraft?.creditAppliedEur || 0,
+          amountDueEur: payerDraft?.amountDueEur ?? group.totalEur };
       });
       if (body.action === 'batch-preview') {
         return res.status(200).json({
@@ -795,6 +830,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         subtotalEur: draft.subtotalEur,
         discountAmountEur: draft.discountAmountEur,
         totalEur: draft.totalEur,
+        creditAppliedEur: draft.creditAppliedEur,
+        amountDueEur: draft.amountDueEur,
+        credits: draft.credits.map((credit) => ({ sourceInvoiceNumber: credit.source?.invoice_number, availableEur: schoolOverpaymentRemaining(credit) })),
         reviewSessionIds: draft.reviewSessionIds,
         ...reviewData(draft),
       });

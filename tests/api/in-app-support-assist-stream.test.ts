@@ -65,6 +65,22 @@ function response() {
 }
 
 describe('in-app support AI conversation stream', () => {
+  it.each(['answer', 'handoff'] as const)('does not replace a %s with repetitive report-intake questions', async (responseKind) => {
+    const output = { ...completedConversation, responseKind, impact: null, impactDetails: '', ready: false,
+      reply: responseKind === 'answer' ? 'Open Chat history below the recording.' : 'I can prepare the existing facts for the team. Say "send it".',
+      missingTopics: [] };
+    mocks.streamText.mockReturnValueOnce({ partialOutputStream: (async function* () { yield { reply: output.reply }; }()),
+      output: Promise.resolve(output) });
+    const { res, result } = response();
+    await handler({ method: 'POST', headers: { 'x-in-app-support-preview': '1' }, body: {
+      mode: 'conversation', category: 'bug', locale: 'en', page: '/recordings', draft: output,
+      latestMessage: responseKind === 'answer' ? 'Where does the chat appear?' : 'Please ask a human, we are going in circles.',
+      conversation: [{ role: 'user', content: 'Where does the chat appear?' }],
+    } } as any, res as any);
+    const events = result.chunks.join('').trim().split('\n').map((line) => JSON.parse(line));
+    expect(events.at(-1).conversation).toMatchObject({ responseKind, reply: output.reply, ready: false, missingTopics: [] });
+    expect(events.at(-1).conversation.reply).not.toContain('?');
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv('NODE_ENV', 'development');

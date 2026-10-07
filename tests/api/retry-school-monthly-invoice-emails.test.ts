@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ rows: [] as any[], send: vi.fn() }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ from() {
   let after = false;
-  const query: any = { select: () => query, eq: () => query, is: () => query, order: () => query, limit: () => query,
+  const query: any = { select: () => query, eq: () => query, or: () => query, is: () => query, order: () => query, limit: () => query,
     gt: () => { after = true; return query; }, then: (resolve: any) => resolve({ data: after ? [] : state.rows, error: null }) };
   return query;
 } }) }));
@@ -20,6 +20,12 @@ async function run() {
 beforeEach(() => { state.rows = []; state.send.mockReset().mockResolvedValue({ sent: true }); });
 
 describe('school invoice retry outbox', () => {
+  it('retries an unsent invoice settled entirely by a carried overpayment',async()=>{
+    state.rows=[{...invoice,payment_status:'paid',paid_via:'credit',total_eur:10,credit_applied_eur:10}];
+    const result=await run();
+    expect(state.send).toHaveBeenCalledOnce();
+    expect(result.status).toHaveBeenCalledWith(200);
+  });
   it('retries an unsent invoice without recreating it', async () => {
     state.rows = [invoice];
     const result = await run();

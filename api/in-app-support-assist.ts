@@ -339,6 +339,7 @@ const conversationSchema = jsonSchema<InAppSupportAiConversation>({
   type: 'object',
   additionalProperties: false,
   properties: {
+    responseKind: { type: 'string', enum: ['intake', 'answer', 'handoff'] },
     reply: { type: 'string', minLength: 3, maxLength: 800 },
     title: { type: 'string', maxLength: 180 },
     context: { type: 'string', maxLength: 4_000 },
@@ -367,6 +368,7 @@ const conversationSchema = jsonSchema<InAppSupportAiConversation>({
     },
   },
   required: [
+    'responseKind',
     'reply',
     'title',
     'context',
@@ -487,7 +489,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           description: 'Continue a natural support conversation while maintaining an evidence-based structured report draft.',
           schema: conversationSchema,
         }),
-        instructions: `You are Tutlio's conversational product support agent. Your job is to understand a bug or feature request through a natural conversation and quietly maintain a structured report for the product team.
+        instructions: `You are Tutlio's conversational product support agent. Help the user with the product first, and quietly maintain a structured report when an issue needs the team.
+
+Choose responseKind for this turn: answer for a product usage, location, setup or implemented-feature question; intake when the user is reporting a bug or requesting a new feature and a material detail is still needed; handoff when the user asks for human help, declines more diagnostic questions or says the conversation is going in circles. An answer must directly address the question using current deployed product guidance before suggesting a report. Do not turn a question such as "where does the chat appear?" into an interview about frequency or impact. Explain known behavior and any genuine limit of the available evidence. A past ticket marked resolved does not prove a feature reached production or is enabled for this user. Never claim you inspected their private files. For handoff, stop diagnostic questioning, preserve the facts already supplied, and invite "send it" to prepare team review. Do not require missing impact, frequency or technical details before honoring a handoff. You cannot connect a human live or send anything yourself.
+
+For answer and handoff, set ready=false and missingTopics=[]; ready means a complete report is ready for submission, not that a product answer is complete. These replies may have no question. An answer may ask at most one relevant clarification when needed. A handoff must ask no diagnostic questions. The intake questionnaire rules below apply only to responseKind=intake.
 
 Reply in the language indicated by locale. Sound like a thoughtful human support teammate, not a form or a requirements analyst. Match the user's level of formality, keep most replies to one or two natural sentences, and use simple everyday wording. React to the meaning instead of paraphrasing the whole message. Avoid repetitive openings such as "I understand that you want" or "I’m nearly ready to send". Contractions and brief acknowledgements are welcome when natural. Be warm, patient, friendly, and extra caring without sounding overly polished. Do not announce internal stages or a clarity check. Never use an em dash (—). Use commas, colons, parentheses, or a simple hyphen instead.
 
@@ -504,7 +510,7 @@ Choose the next question from the user's actual input, not from a fixed question
 4. Ask exactly one narrow, contextual question about one missing fact. It must be answerable with one fact, reference a concrete detail the user supplied when natural, and must not contain bundled alternatives such as "who, how often, and is there a workaround?" Do not use generic prompts such as "tell me more" or "anything else?"
 5. Never repeat the previous question or ask for information already present anywhere in the conversation or draft. If the latest answer is partial, ask only for the unaddressed part. If the user says "nothing is missing", "I don't know", refuses, or gives an unrelated answer, acknowledge it honestly and switch to one easier missing fact instead of rephrasing the same question.
 
-When ready=false, missingTopics must contain exactly one of these field IDs and it must match the one fact asked about in reply: title, context, steps, expectedOutcome, actualOutcome, impact, or impactDetails. When ready=true, missingTopics must be empty. A non-ready reply must contain exactly one question mark. Never ask more than one question in a turn.
+For intake, when ready=false, missingTopics must contain exactly one of these field IDs and it must match the one fact asked about in reply: title, context, steps, expectedOutcome, actualOutcome, impact, or impactDetails. When ready=true, missingTopics must be empty. A non-ready intake reply must contain exactly one question mark. Never ask more than one question in a turn.
 
 Examples of logical progression:
 - Bug: the user says saving a weekly lesson creates only the first Monday and they expected every Monday. Those facts already cover the trigger, actual result, and expected result. Ask one impact question such as "Does this happen every time you save a weekly lesson?", not what they clicked or what should happen.
@@ -549,11 +555,13 @@ Set ready=true only when the team can understand, reproduce or evaluate, and pri
       if (!parsedOutput) throw new Error('Invalid AI conversation output.');
       const parsed = preserveKnownConversationDetails(conversationInput, parsedOutput);
       const missingFields = inAppSupportDraftMissingFields(conversationInput.category, parsed);
-      const ready = parsed.ready && missingFields.length === 0;
+      const answeringOrHandingOff = parsed.responseKind === 'answer' || parsed.responseKind === 'handoff';
+      const ready = !answeringOrHandingOff && parsed.ready && missingFields.length === 0;
       const reportedQuestionField = parsed.missingTopics[0] ?? null;
       const questionTargetsMissingField = reportedQuestionField !== null
         && missingFields.includes(reportedQuestionField);
       const shouldUseFallbackQuestion = !conversationInput.submitRequested
+        && !answeringOrHandingOff
         && missingFields.length > 0
         && (parsed.ready || !questionTargetsMissingField || !hasExactlyOneQuestion(parsed.reply));
       if (parsed.ready && !ready) {
@@ -580,7 +588,7 @@ Set ready=true only when the team can understand, reproduce or evaluate, and pri
       const conversation = {
         ...parsed,
         ready,
-        missingTopics: ready
+        missingTopics: ready || answeringOrHandingOff
           ? []
           : fallbackQuestionField
             ? [fallbackQuestionField]

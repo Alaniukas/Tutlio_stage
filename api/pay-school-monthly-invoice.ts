@@ -16,6 +16,7 @@ import { chargeCurrency } from './_lib/marketMoney.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { verifyPublicLinkToken } from './_lib/publicLinkToken.js';
 import { monthLabelLt } from './_lib/schoolMonthlyInvoiceEmail.js';
+import { schoolInvoiceAmountDue } from '../src/lib/schoolInvoiceOverpayments.js';
 import {
   directChargeOptions,
   expireConnectCheckoutSession,
@@ -72,7 +73,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const student = contract?.student;
     const org = invoice.org as any;
 
-    const totalEur = Math.round(Number(invoice.total_eur) * 100) / 100;
+    const totalEur = schoolInvoiceAmountDue(invoice);
     if (!(totalEur > 0)) {
       return res.status(400).send(errorPage('Klaida', 'Sąskaitos suma neteisinga. Kreipkitės į mokyklą.'));
     }

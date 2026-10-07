@@ -52,11 +52,11 @@ beforeAll(async () => {
       ('${id(2)}','{}'), ('${id(3)}','{"org_admin_calendar_full_control":true}');
     INSERT INTO profiles VALUES ('${id(11)}','${id(1)}'),('${id(12)}','${id(2)}'),('${id(13)}','${id(3)}');
     INSERT INTO organization_admins VALUES
-      ('${id(21)}','${id(1)}','active','{"sessions.edit":true}'),
-      ('${id(21)}','${id(2)}','active','{"sessions.edit":true}'),
-      ('${id(22)}','${id(3)}','active','{"sessions.edit":true}'),
-      ('${id(23)}','${id(1)}','active','{"sessions.view":true}'),
-      ('${id(24)}','${id(1)}','revoked','{"sessions.edit":true}'),
+      ('${id(21)}','${id(1)}','active','admin','{"sessions.edit":true}'),
+      ('${id(21)}','${id(2)}','active','admin','{"sessions.edit":true}'),
+      ('${id(22)}','${id(3)}','active','admin','{"sessions.edit":true}'),
+      ('${id(23)}','${id(1)}','active','admin','{"sessions.view":true}'),
+      ('${id(24)}','${id(1)}','revoked','admin','{"sessions.edit":true}'),
       ('${id(25)}','${id(1)}','active','owner','{}');
   `);
   await db.exec(migration);

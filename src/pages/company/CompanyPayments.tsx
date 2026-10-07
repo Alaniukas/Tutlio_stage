@@ -28,6 +28,7 @@ import { useTranslation } from '@/lib/i18n';
 import { useSchoolPaymentsData, type SchoolPaymentInstallment } from '@/hooks/useSchoolPaymentsData';
 import { format } from 'date-fns';
 import SchoolMonthlyInvoiceDialog from '@/components/school/SchoolMonthlyInvoiceDialog';
+import SchoolInvoiceOverpaymentsDialog from '@/components/school/SchoolInvoiceOverpaymentsDialog';
 import { schoolMonthlyInvoicesEnabled } from '@/lib/schoolConsultationsOrg';
 
 interface NewInstallmentRow {
@@ -61,6 +62,7 @@ export default function CompanyPayments() {
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [collapsedContracts, setCollapsedContracts] = useState<Record<string, boolean>>({});
   const [monthlyInvoiceOpen, setMonthlyInvoiceOpen] = useState(false);
+  const [overpaymentsOpen, setOverpaymentsOpen] = useState(false);
 
   const monthlyInvoicesEnabled = schoolMonthlyInvoicesEnabled(orgId, orgFeatures, 'school');
   const monthlyInvoiceStudents = useMemo(() => {
@@ -262,6 +264,7 @@ export default function CompanyPayments() {
               </div>
             </div>
             <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+              <Button type="button" variant="outline" disabled={!orgId} onClick={() => setOverpaymentsOpen(true)}>{t('school.invoice.credit.title')}</Button>
               <Button
                 type="button"
                 className="gap-2 bg-emerald-700 hover:bg-emerald-800"
@@ -459,6 +462,7 @@ export default function CompanyPayments() {
               reload();
             }}
           />
+          <SchoolInvoiceOverpaymentsDialog open={overpaymentsOpen} onOpenChange={setOverpaymentsOpen} organizationId={orgId} onChanged={reload} />
         </>
       )}
 

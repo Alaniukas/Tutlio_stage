@@ -1,4 +1,7 @@
+import { schoolInvoiceOverpaymentTranslations } from './schoolInvoiceOverpaymentTranslations.js';
+
 export const schoolInvoiceReviewLt: Record<string, string> = {
+  ...schoolInvoiceOverpaymentTranslations.lt,
   'school.invoice.review.title': 'Lankomumas ir apmokestinimas',
   'school.invoice.review.help': 'Patikrinkite kiekvieną užsiėmimą. Neatvykimas savaime nepanaikina grupės užsiėmimo mokesčio. Jei užsiėmimo nereikia apmokestinti, neįtraukite jo ir nurodykite priežastį.',
   'school.invoice.review.payer': 'Sąskaita bus siunčiama mokėtojui: {email}',
@@ -43,9 +46,12 @@ export const schoolInvoiceReviewLt: Record<string, string> = {
   'school.invoice.batch.blocked': 'Dar reikia patvirtinti lankomumą',
   'school.invoice.batch.childLine': '{name} · {count} užsiėm. · {amount}',
   'school.invoice.batch.reviewChild': 'Peržiūrėti vaiką',
+  'school.invoice.review.reason.outside_schedule': 'Neįtraukta: nepatenka į mokinio grafiką',
+  'school.invoice.review.scheduleMismatch': 'Laikas nepatenka į mokinio grafiką',
 };
 
 export const schoolInvoiceReviewEn: Record<string, string> = {
+  ...schoolInvoiceOverpaymentTranslations.en,
   'school.invoice.review.title': 'Attendance and billing',
   'school.invoice.review.help': 'Review each session. Absence alone does not waive a group session charge. Exclude a session from billing with a reason when no charge is due.',
   'school.invoice.review.payer': 'The invoice will be sent to the payer: {email}',
@@ -90,4 +96,6 @@ export const schoolInvoiceReviewEn: Record<string, string> = {
   'school.invoice.batch.blocked': 'Attendance still needs confirmation',
   'school.invoice.batch.childLine': '{name} · {count} sessions · {amount}',
   'school.invoice.batch.reviewChild': 'Review child',
+  'school.invoice.review.reason.outside_schedule': "Excluded: outside the student's schedule",
+  'school.invoice.review.scheduleMismatch': "This time is outside the student's schedule",
 };

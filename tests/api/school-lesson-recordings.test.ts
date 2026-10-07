@@ -186,6 +186,27 @@ describe('GET /api/school-lesson-recordings', () => {
     expect(mocks.createTicket).not.toHaveBeenCalled();
   });
 
+  it('returns companion chats only beside a visible recording with both file IDs signed', async () => {
+    mocks.listRecordings.mockResolvedValue([{
+      id: 'drive-file-id', name: 'Pamoka.mp4', createdTime: '2026-09-10T10:00:00Z',
+      chatFiles: [{ id: 'chat-file-id', name: 'Pamoka.sbv' }],
+    }]);
+    const res = mockRes();
+    await handler({ method: 'GET', query: { groupId: 'group-allowed' }, headers: {} } as any, res as any);
+    expect(res.getResult().body.groups[0].recordings[0].chatFiles).toEqual([{
+      id: 'chat-file-id', name: 'Pamoka.sbv', streamUrl: '/api/school-lesson-recording-stream?t=signed-playback-ticket',
+    }]);
+    expect(mocks.createTicket).toHaveBeenCalledWith({
+      userId: 'student-user', groupId: 'group-allowed', fileId: 'chat-file-id', recordingFileId: 'drive-file-id',
+    });
+    mocks.createTicket.mockClear();
+    mocks.slotScope.mockResolvedValue({ unrestricted: false, schedules: [] });
+    const denied = mockRes();
+    await handler({ method: 'GET', query: { groupId: 'group-allowed' }, headers: {} } as any, denied as any);
+    expect(denied.getResult().body.groups[0].recordings).toEqual([]);
+    expect(mocks.createTicket).not.toHaveBeenCalled();
+  });
+
   it('does not touch Drive when the viewer has no authorized groups', async () => {
     mocks.resolveAccess.mockResolvedValue({
       groups: [],

@@ -4435,6 +4435,7 @@ export const itOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "Nascondi finché non riapro questa pagina",
   "pwa.guideDontShowInSettings": "Non mostrare più nelle impostazioni",
   "whiteboard.loading": "Caricamento della lavagna...",
+  "whiteboard.loadFailed": "Impossibile caricare la lavagna. Riprova.",
   "whiteboard.notFound": "Lavagna non trovata",
   "whiteboard.closedAfterLesson": "La lavagna di questa lezione non è più disponibile (il periodo di accesso è terminato).",
   "whiteboard.unauthorized": "Non hai accesso a questa lavagna",

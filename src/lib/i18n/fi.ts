@@ -9,6 +9,7 @@ import { schoolTeacherContractTranslationsFi } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const fi: Record<string, string> = {
+  'school.contractsLoadFailed': 'Sopimusten lataaminen epäonnistui. Yritä uudelleen.',
   ...studentNotesTranslations.fi,
   ...schoolFamilyMaterialTranslations.fi,
   ...schoolInvoiceReviewTranslations.fi,
@@ -4816,6 +4817,7 @@ export const fi: Record<string, string> = {
   'whiteboard.closedAfterLesson': 'Tämän tunnin valkotaulu ei ole enää käytettävissä (käyttöjakso on päättynyt).',
   'whiteboard.exportPdf': 'Tallenna PDF-muodossa',
   'whiteboard.loading': 'Ladataan valkotaulua...',
+  "whiteboard.loadFailed": "Taulua ei voitu ladata. Yritä uudelleen.",
   'whiteboard.notFound': 'Valkotaulua ei löytynyt',
   'whiteboard.open': 'Avaa valkotaulu',
   'whiteboard.retry': 'Yritä uudelleen',
@@ -5427,7 +5429,9 @@ export const fi: Record<string, string> = {
   'school.groups.platform': "Alusta",
   'school.groups.duration': "Kesto (min)",
   'school.groups.minimumActiveStudents': "Aktiivisten oppilaiden vähimmäismäärä",
-  'school.groups.minimumActiveStudentsHint': "Tämä ryhmä ja sen sopimukset keskeytetään automaattisesti, kun aktiivisia oppilaita jää vähemmän.",
+  'school.groups.minimumActiveStudentsHint': "Vähimmäismäärään lasketaan vain aktiiviset oppilaat, joilla on vahvistettu, voimassa oleva lisätuntisopimus. Erikseen keskeytettyjä oppilaita ei lasketa. Ryhmä ja sen sopimukset keskeytetään automaattisesti, jos vähimmäismäärä alittuu.",
+  'school.groups.minimumStatus': "Ryhmän vähimmäismäärään lasketaan {n} oppilasta {total}:sta. Vähintään {minimum} tarvitaan.",
+  'school.groups.unconfirmedContracts': "Oppilaat ilman vahvistettua, voimassa olevaa sopimusta: {names}.",
   'school.groups.suspendedMinimum': "Keskeytetty: ryhmässä on alle {n} aktiivista oppilasta",
   'school.groups.meetingLink': "Tunnin linkki",
   'school.groups.slots': "Viikkoaikataulu",

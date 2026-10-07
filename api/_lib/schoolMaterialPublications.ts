@@ -42,7 +42,7 @@ export async function registerDrivePublications(db: SupabaseClient, input: {
 }): Promise<void> {
   if (!input.files.length) return;
   const privatePortal = schoolFamilyPortalEnabled(input.features);
-  const rows = input.files.map((file) => ({
+  const rows = input.files.flatMap((file) => [file, ...(file.chatFiles || [])]).map((file) => ({
     organization_id: input.organizationId, source: 'drive', target_id: input.targetId,
     file_id: file.id, source_version: file.modifiedTime || file.createdTime || 'unknown',
     label: file.name, source_created_at: file.createdTime,

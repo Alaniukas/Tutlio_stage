@@ -4394,6 +4394,7 @@ export const huOverrides: Record<string, string> = {
   "whiteboard.title": "Rajztábla",
   "whiteboard.open": "Rajztábla megnyitása",
   "whiteboard.loading": "Rajztábla betöltése...",
+  "whiteboard.loadFailed": "Nem sikerült betölteni a táblát. Próbáld újra.",
   "whiteboard.notFound": "A rajztábla nem található",
   "whiteboard.closedAfterLesson": "Ennek az órának a rajztáblája már nem érhető el (a hozzáférési időszak véget ért).",
   "whiteboard.unauthorized": "Ehhez a rajztáblához nincs hozzáférésed",

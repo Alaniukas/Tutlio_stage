@@ -102,7 +102,7 @@ const FEATURE_PERMISSION: Readonly<Record<string, OrgAdminPermission>> = {
   school_extra_lessons_contract: 'contracts.view',
   school_class_groups: 'sessions.view',
   school_join_no_show: 'sessions.view',
-  school_lesson_recordings: 'sessions.view',
+  school_lesson_recordings: 'recordings.view',
   pvm_education_invoice: 'finance.view',
 };
 

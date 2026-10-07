@@ -344,7 +344,7 @@ export function useWhiteboardSync(
   const broadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isRemoteUpdateRef = useRef(false);
   const excalidrawApiRef = useRef<ExcalidrawImperativeAPI | null>(null);
-  const saveInFlightRef = useRef(false);
+  const saveInFlightRef = useRef<Promise<boolean> | null>(null);
   const pendingBroadcastRef = useRef(false);
   const lastSavedPayloadRef = useRef<string>('');
   const saveCooldownUntilRef = useRef(0);
@@ -360,7 +360,12 @@ export function useWhiteboardSync(
   const uploadGlobalPauseUntilRef = useRef(0);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const changeVersionRef = useRef(0);
   const currentUserKey = useMemo(
     () => (currentUser ? `${currentUser.id}:${currentUser.name}` : ''),
     [currentUser?.id, currentUser?.name],
@@ -549,84 +554,88 @@ export function useWhiteboardSync(
     [uploadFileAssetIfNeeded],
   );
 
-  const saveScene = useCallback(async () => {
-    if (!sessionId || !excalidrawAPI || !currentUser) return;
+  const saveScene = useCallback(async (force = false): Promise<boolean> => {
+    if (!sessionId || !excalidrawAPI || !currentUser || !loadedRef.current) return false;
     if (!persistSceneToStorageRef.current) {
       wbDebug('skip scene persist (non-writer)');
-      return;
+      return false;
     }
-    const now = Date.now();
-    if (saveInFlightRef.current) return;
-    if (saveCooldownUntilRef.current > now) return;
-    if (uploadGlobalPauseUntilRef.current > now) return;
-
-    const elements = excalidrawAPI.getSceneElementsIncludingDeleted();
-    const appState = excalidrawAPI.getAppState();
-    const rawFiles = toPlainFiles(excalidrawAPI.getFiles());
-    const files = await prepareFilesForTransport(rawFiles);
-    const payload = {
-      revision: localRevisionRef.current,
-      elements,
-      appState: {
-        viewBackgroundColor: appState.viewBackgroundColor,
-        gridSize: appState.gridSize,
-        gridModeEnabled: appState.gridModeEnabled,
-      },
-      files,
-      updatedBy: currentUser.id,
-      updatedAt: new Date().toISOString(),
-    };
-
-    let serialized = '';
-    try {
-      serialized = JSON.stringify(payload);
-    } catch {
-      return;
+    // A manual save must wait for an autosave, then capture the latest scene.
+    // Lock before preparing images as well, so uploads cannot race each other.
+    while (saveInFlightRef.current) await saveInFlightRef.current;
+    if (!force && saveCooldownUntilRef.current > Date.now()) return false;
+    if (force) {
+      saveCooldownUntilRef.current = 0;
+      uploadGlobalPauseUntilRef.current = 0;
+      uploadErrorCooldownRef.current.clear();
     }
-
-    if (serialized === lastSavedPayloadRef.current) {
-      wbDebug('skip scene save (duplicate payload)', { bytes: serialized.length });
-      return;
-    }
-    if (serialized.length > MAX_SCENE_BYTES) {
-      wbDebug('skip scene save (payload too large)', { bytes: serialized.length });
-      saveCooldownUntilRef.current = Date.now() + SAVE_ERROR_COOLDOWN_MS;
-      return;
-    }
-
-    wbDebug('scene save start', { bytes: serialized.length });
-    const t0 = performance.now();
-    saveInFlightRef.current = true;
     setSaving(true);
+    setSaved(false);
+    setSaveError(false);
+    const savePromise = Promise.resolve().then(async () => {
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const changeVersion = changeVersionRef.current;
+        const elements = excalidrawAPI.getSceneElementsIncludingDeleted();
+        const appState = excalidrawAPI.getAppState();
+        const files = await prepareFilesForTransport(toPlainFiles(excalidrawAPI.getFiles()));
+        const scene = {
+          elements,
+          appState: {
+            viewBackgroundColor: appState.viewBackgroundColor,
+            gridSize: appState.gridSize,
+            gridModeEnabled: appState.gridModeEnabled,
+          },
+          files,
+        };
+        // Compare content only; updatedAt changes on every save attempt.
+        const sceneContent = JSON.stringify(scene);
+        if (sceneContent !== lastSavedPayloadRef.current) {
+          const serialized = JSON.stringify({
+            ...scene,
+            revision: localRevisionRef.current,
+            updatedBy: currentUser.id,
+            updatedAt: new Date().toISOString(),
+          });
+          const blob = new Blob([serialized], { type: 'application/json' });
+          if (blob.size > MAX_SCENE_BYTES) throw new Error('Whiteboard scene is too large to save');
+          const uploadPromise = supabase.storage.from(WHITEBOARD_BUCKET).upload(`${sessionId}/${SCENE_FILE}`, blob, {
+            upsert: true,
+            contentType: 'application/json',
+            // The scene is mutable: reopening must fetch its latest contents.
+            cacheControl: '0',
+          });
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => reject(new Error('Whiteboard save timeout')), SAVE_TIMEOUT_MS);
+          });
+          const result = await Promise.race([uploadPromise, timeoutPromise]);
+          if (result.error) throw result.error;
+          lastSavedPayloadRef.current = sceneContent;
+        }
+        uploadConsecutiveFailuresRef.current = 0;
+        setSaved(changeVersion === changeVersionRef.current);
+        if (saveMaxDelayTimerRef.current && changeVersion === changeVersionRef.current) {
+          clearTimeout(saveMaxDelayTimerRef.current);
+          saveMaxDelayTimerRef.current = null;
+        }
+        return true;
+      } catch (err) {
+        console.warn('[Whiteboard] scene save failed:', err);
+        setSaveError(true);
+        uploadConsecutiveFailuresRef.current++;
+        const cooldown = uploadConsecutiveFailuresRef.current >= MAX_CONSECUTIVE_UPLOAD_FAILURES
+          ? UPLOAD_GLOBAL_PAUSE_MS : SAVE_ERROR_COOLDOWN_MS;
+        saveCooldownUntilRef.current = Date.now() + cooldown;
+        return false;
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    });
+    saveInFlightRef.current = savePromise;
     try {
-      const blob = new Blob([serialized], { type: 'application/json' });
-      const uploadPromise = supabase.storage
-        .from(WHITEBOARD_BUCKET)
-        .upload(`${sessionId}/${SCENE_FILE}`, blob, { upsert: true, contentType: 'application/json' });
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Whiteboard save timeout')), SAVE_TIMEOUT_MS),
-      );
-      const result = await Promise.race([uploadPromise, timeoutPromise]) as Awaited<typeof uploadPromise>;
-      if (result?.error) throw result.error;
-      lastSavedPayloadRef.current = serialized;
-      uploadConsecutiveFailuresRef.current = 0;
-      wbDebug('scene saved', { ms: Math.round(performance.now() - t0), bytes: serialized.length });
-      if (saveMaxDelayTimerRef.current) {
-        clearTimeout(saveMaxDelayTimerRef.current);
-        saveMaxDelayTimerRef.current = null;
-      }
-    } catch (err) {
-      wbDebug('scene save failed', err);
-      uploadConsecutiveFailuresRef.current++;
-      if (uploadConsecutiveFailuresRef.current >= MAX_CONSECUTIVE_UPLOAD_FAILURES) {
-        uploadGlobalPauseUntilRef.current = Date.now() + UPLOAD_GLOBAL_PAUSE_MS;
-        saveCooldownUntilRef.current = Date.now() + UPLOAD_GLOBAL_PAUSE_MS;
-        console.warn('[Whiteboard] Too many save failures, pausing for', UPLOAD_GLOBAL_PAUSE_MS / 1000, 's');
-      } else {
-        saveCooldownUntilRef.current = Date.now() + SAVE_ERROR_COOLDOWN_MS;
-      }
+      return await savePromise;
     } finally {
-      saveInFlightRef.current = false;
+      saveInFlightRef.current = null;
       setSaving(false);
     }
   }, [sessionId, excalidrawAPI, currentUser?.id, prepareFilesForTransport]);
@@ -717,6 +726,8 @@ export function useWhiteboardSync(
       }
 
       if (persistSceneToStorageRef.current) {
+        changeVersionRef.current++;
+        setSaved(false);
         debouncedSaveRef.current();
       }
 
@@ -800,19 +811,32 @@ export function useWhiteboardSync(
 
   const loadScene = useCallback(async () => {
     if (!sessionId) return null;
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const downloadPromise = supabase.storage
         .from(WHITEBOARD_BUCKET)
-        .download(`${sessionId}/${SCENE_FILE}`);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Whiteboard load timeout')), SAVE_TIMEOUT_MS),
-      );
+        .download(`${sessionId}/${SCENE_FILE}`, {}, { cache: 'no-store', signal: controller.signal });
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          reject(new Error('Whiteboard load timeout'));
+        }, SAVE_TIMEOUT_MS);
+      });
       const { data, error } = await Promise.race([downloadPromise, timeoutPromise]) as Awaited<typeof downloadPromise>;
-      if (error || !data) return null;
+      if (error) {
+        // Only a missing object means a new board. A failed read must never
+        // open an empty board that can overwrite the previously saved scene.
+        if (String((error as any).statusCode) === '404' || (error as any).code === 'NoSuchKey') return null;
+        throw error;
+      }
+      if (!data) throw new Error('Whiteboard scene download returned no data');
       const text = await data.text();
-      return JSON.parse(text) as { elements: readonly any[]; appState?: any; files?: Record<string, WhiteboardFile> };
-    } catch {
-      return null;
+      const scene = JSON.parse(text) as { elements: readonly any[]; appState?: any; files?: Record<string, WhiteboardFile> };
+      if (!Array.isArray(scene.elements)) throw new Error('Invalid whiteboard scene');
+      return scene;
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
   }, [sessionId]);
 
@@ -1170,42 +1194,54 @@ export function useWhiteboardSync(
     if (!sessionId || !excalidrawAPI || loaded) return;
 
     let cancelled = false;
-    const loadFailSafe = setTimeout(() => {
-      if (!cancelled) setLoaded(true);
-    }, 8000);
     (async () => {
-      const scene = await loadScene();
-      if (cancelled || !scene) {
-        setLoaded(true);
-        return;
-      }
-      const hydratedFiles = await hydrateFilesFromStorage(scene.files || {});
-      const validFiles: Record<string, WhiteboardFile> = {};
-      for (const [fid, f] of Object.entries(hydratedFiles)) {
-        if (typeof f?.dataURL === 'string' && f.dataURL.startsWith(IMAGE_PREFIX)) {
-          validFiles[fid] = f;
+      try {
+        const scene = await loadScene();
+        if (cancelled) return;
+        if (scene) {
+          const hydratedFiles = await hydrateFilesFromStorage(scene.files || {});
+          if (cancelled) return;
+          const validFiles: Record<string, WhiteboardFile> = {};
+          for (const [fid, f] of Object.entries(hydratedFiles)) {
+            if (typeof f?.dataURL === 'string' && f.dataURL.startsWith(IMAGE_PREFIX)) {
+              validFiles[fid] = { ...f, id: f.id ?? fid };
+            }
+          }
+          for (const el of scene.elements) {
+            if (el.type === 'image' && !el.isDeleted && el.fileId && !validFiles[el.fileId]) {
+              throw new Error('Whiteboard image failed to load');
+            }
+          }
+          const validFilesArray = Object.values(validFiles);
+          if (validFilesArray.length > 0 && typeof excalidrawAPI.addFiles === 'function') {
+            excalidrawAPI.addFiles(validFilesArray);
+          }
+          excalidrawAPI.updateScene({
+            elements: scene.elements,
+            appState: scene.appState,
+            captureUpdate: CaptureUpdateAction.NEVER,
+          });
         }
+        loadedRef.current = true;
+        setLoadError(false);
+        setLoaded(true);
+        await flushQueuedPayloads();
+      } catch (err) {
+        if (cancelled) return;
+        console.warn('[Whiteboard] scene load failed:', err);
+        setLoadError(true);
       }
-      // Register files via addFiles() before updating scene
-      const validFilesArray = Object.values(validFiles);
-      if (validFilesArray.length > 0 && typeof excalidrawAPI.addFiles === 'function') {
-        excalidrawAPI.addFiles(validFilesArray);
-      }
-      excalidrawAPI.updateScene({
-        elements: scene.elements,
-        appState: scene.appState,
-        captureUpdate: CaptureUpdateAction.NEVER,
-      });
-      loadedRef.current = true;
-      setLoaded(true);
-      await flushQueuedPayloads();
     })();
 
     return () => {
       cancelled = true;
-      clearTimeout(loadFailSafe);
     };
-  }, [sessionId, excalidrawAPI, loaded, loadScene, flushQueuedPayloads, hydrateFilesFromStorage]);
+  }, [sessionId, excalidrawAPI, loaded, loadScene, flushQueuedPayloads, hydrateFilesFromStorage, loadAttempt]);
+
+  const retryLoadScene = useCallback(() => {
+    setLoadError(false);
+    setLoadAttempt((attempt) => attempt + 1);
+  }, []);
 
   const saveSceneRef = useRef(saveScene);
   useEffect(() => { saveSceneRef.current = saveScene; }, [saveScene]);
@@ -1248,6 +1284,8 @@ export function useWhiteboardSync(
     (elements: readonly any[], appState?: any, rawFiles?: Record<string, WhiteboardFile> | unknown) => {
       if (!loaded) return;
       if (isRemoteUpdateRef.current) return;
+      changeVersionRef.current++;
+      setSaved(false);
       const files = toPlainFiles(rawFiles);
       pendingBroadcastRef.current = true;
       scheduleStableBroadcast();
@@ -1269,5 +1307,5 @@ export function useWhiteboardSync(
     [broadcastUpdate, debouncedSave, loaded, scheduleStableBroadcast],
   );
 
-  return { participants, saving, loaded, onChange, saveScene };
+  return { participants, saving, saved, saveError, loadError, loaded, onChange, saveScene, retryLoadScene };
 }

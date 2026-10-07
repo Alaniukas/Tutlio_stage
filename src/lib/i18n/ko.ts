@@ -4393,6 +4393,7 @@ export const koOverrides: Record<string, string> = {
   "whiteboard.title": "화이트보드",
   "whiteboard.open": "화이트보드 열기",
   "whiteboard.loading": "화이트보드 불러오는 중...",
+  "whiteboard.loadFailed": "화이트보드를 불러올 수 없습니다. 다시 시도해 주세요.",
   "whiteboard.notFound": "화이트보드를 찾을 수 없습니다",
   "whiteboard.closedAfterLesson": "이 수업의 화이트보드를 더 이상 사용할 수 없습니다(접근 기간 종료).",
   "whiteboard.unauthorized": "이 화이트보드에 대한 접근 권한이 없습니다",

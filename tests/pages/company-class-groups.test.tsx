@@ -128,6 +128,32 @@ describe('CompanyClassGroups edit modal', () => {
     expect(screen.queryByText('school.groups.edit')).toBeNull();
   });
 
+  it('shows the current minimum and names unconfirmed members instead of the old suspension reason', async () => {
+    const oldReason = 'Aktyvių mokinių skaičius grupėje sumažėjo iki 1. Grupinis užsiėmimas vyksta tik nuo 3 mokinių.';
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ groups: [{
+      ...group,
+      minimum_active_students: 2,
+      suspension_started_at: '2026-09-01T08:00:00.000Z',
+      suspension_reason: oldReason,
+      minimum_status: { eligible_student_count: 1, unconfirmed_student_ids: ['s2', 's3'] },
+      members: [
+        { student_id: 's1', student: { full_name: 'Neda' } },
+        { student_id: 's2', student: { full_name: 'Sara' } },
+        { student_id: 's3', student: { full_name: 'Deimilė Austėja' } },
+      ],
+    }] }) });
+    render(
+      <OrgEntityProvider value="school">
+        <MemoryRouter initialEntries={['/school/groups']}>
+          <CompanyClassGroups />
+        </MemoryRouter>
+      </OrgEntityProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('Į grupės minimumą įskaičiuojama 1 iš 3 mokinių. Reikia bent 2.')).toBeTruthy());
+    expect(screen.getByText('Be patvirtintos galiojančios sutarties: Sara, Deimilė Austėja.')).toBeTruthy();
+    expect(screen.queryByText(oldReason)).toBeNull();
+  });
+
   it('shows groups without edit controls for a view-only admin', async () => {
     testState.canEditGroups = false;
     render(

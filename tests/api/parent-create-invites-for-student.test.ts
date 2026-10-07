@@ -8,7 +8,10 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ from: mocks.from }) }));
 vi.mock('../../api/_lib/auth.js', () => ({ verifyRequestAuth: mocks.auth }));
-vi.mock('../../api/_lib/parentInvite.js', () => ({ insertParentInviteAndSendEmail: mocks.invite }));
+vi.mock('../../api/_lib/parentInvite.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../api/_lib/parentInvite.js')>(),
+  insertParentInviteAndSendEmail: mocks.invite,
+}));
 vi.mock('../../api/_lib/orgAdminAccess.js', () => ({
   getOrgAdminAccessByUserId: async () => ({ organizationId: 'org-1', role: 'owner', permissions: {} }),
 }));

@@ -4433,6 +4433,7 @@ export const slOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "Skrij do naslednjega odprtja te strani",
   "pwa.guideDontShowInSettings": "Ne prikaži več v nastavitvah",
   "whiteboard.loading": "Nalaganje bele table...",
+  "whiteboard.loadFailed": "Table ni bilo mogoče naložiti. Poskusite znova.",
   "whiteboard.notFound": "Bele table ni mogoče najti",
   "whiteboard.closedAfterLesson": "Bela tabla te ure ni več na voljo (obdobje dostopa je poteklo).",
   "whiteboard.unauthorized": "Nimate dostopa do te bele table",

@@ -8,6 +8,7 @@ vi.mock('../../api/_lib/googleDriveRecordings.js', () => ({
 }));
 
 import { listHomeworkGroupRecordings } from '../../api/_lib/schoolHomeworkRecordings';
+import { verifySchoolHomeworkRecordingTicket, verifySchoolRecordingTicket } from '../../api/_lib/schoolRecordingTicket';
 
 function supabaseFixture(opts: {
   groups: Array<{ id: string; name: string; organization_id: string }>;
@@ -105,6 +106,24 @@ describe('listHomeworkGroupRecordings', () => {
     expect(result.groups[0].recordings[0].name).toBe('Pamoka.mp4');
     expect(result.groups[0].recordings[0].streamUrl).toMatch(/^\/api\/school-lesson-recording-stream\?t=/);
     expect(listDrive).toHaveBeenCalledWith('folder-1');
+  });
+
+  it.each([null, 'parent-user'])('binds a homework chat to its video and viewer %s', async (viewerUserId) => {
+    listDrive.mockResolvedValue([{ id: 'file-1', name: 'Pamoka.mp4', chatFiles: [{ id: 'chat-1', name: 'Pamoka.sbv' }] }]);
+    const result = await listHomeworkGroupRecordings(supabaseFixture({
+      groups: [{ id: 'g1', name: 'Matematika', organization_id: 'org-1' }],
+      mappings: [{ group_id: 'g1', organization_id: 'org-1', drive_folder_id: 'folder-1' }],
+    }), {
+      studentId: 'student-1', organizationId: 'org-1', memberGroupIds: ['g1'],
+      recordingsEnabled: true, listFiles: true, viewerUserId,
+    });
+    const ticket = new URL(result.groups[0].recordings[0].chatFiles[0].streamUrl, 'https://tutlio.lt').searchParams.get('t')!;
+    const verify = viewerUserId ? verifySchoolRecordingTicket : verifySchoolHomeworkRecordingTicket;
+    expect(verify(ticket)).toMatchObject({
+      ...(viewerUserId ? { userId: viewerUserId } : { studentId: 'student-1' }),
+      groupId: 'g1', fileId: 'chat-1', recordingFileId: 'file-1',
+    });
+    if (viewerUserId) expect(verifySchoolHomeworkRecordingTicket(ticket)).toBeNull();
   });
 
   it('lists a mapped individual recurring subject for that student', async () => {

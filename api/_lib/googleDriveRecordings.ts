@@ -5,6 +5,7 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 export const DEFAULT_RECORDING_RETENTION_DAYS = 30;
 export const DRIVE_STREAM_CHUNK_BYTES = 8 * 1024 * 1024;
+export const DRIVE_CHAT_MAX_BYTES = 1024 * 1024;
 
 interface ServiceAccountCredentials {
   client_email: string;
@@ -22,6 +23,7 @@ export interface DriveRecordingFile {
   parents: string[];
   canDownload: boolean;
   durationMillis: number | null;
+  chatFiles?: DriveRecordingFile[];
 }
 
 type GoogleDriveFilePayload = {
@@ -217,11 +219,40 @@ export async function getDriveFileMetadata(fileId: string): Promise<DriveRecordi
   return mapDriveFile(await response.json() as GoogleDriveFilePayload);
 }
 
-export async function listDriveRecordings(folderId: string): Promise<DriveRecordingFile[]> {
+/** Meet saves its written chat as SBV; schools can also keep a plain-text copy. */
+export function isDriveRecordingChatFile(file: DriveRecordingFile): boolean {
+  return /\.(sbv|txt)$/i.test(file.name)
+    && ['text/plain', 'application/octet-stream', 'text/x-subviewer', 'application/x-subviewer'].includes(file.mimeType)
+    && file.size !== null
+    && Number.isSafeInteger(file.size)
+    && file.size >= 0
+    && file.size <= DRIVE_CHAT_MAX_BYTES;
+}
+
+function recordingNameStem(name: string): string {
+  return name.replace(/\.[^.]+$/, '').normalize('NFC').trim().toLowerCase();
+}
+
+function chatNameStem(name: string): string {
+  return name.replace(/\.(sbv|txt)$/i, '')
+    .replace(/\.(mp4|webm|mov|mkv)$/i, '')
+    .replace(/(?:[\s_-]+chat|\s*\(chat\))$/i, '')
+    .normalize('NFC').trim().toLowerCase();
+}
+
+/** Exact names and the same folder prevent one lesson's chat reaching another audience. */
+export function isChatFileForRecording(chat: DriveRecordingFile, recording: DriveRecordingFile): boolean {
+  return isDriveRecordingChatFile(chat)
+    && recording.mimeType.startsWith('video/')
+    && chat.id !== recording.id
+    && chat.parents.some((parent) => recording.parents.includes(parent))
+    && chatNameStem(chat.name) === recordingNameStem(recording.name);
+}
+
+/** Read-only inventory, including companion files, for the assigned Drive folder. */
+export async function listDriveRecordingFolderFiles(folderId: string): Promise<DriveRecordingFile[]> {
   const safeId = extractGoogleDriveId(folderId);
   if (!safeId) throw new Error('Invalid Google Drive folder ID');
-  const cached = driveListCache.get(safeId);
-  if (cached && cached.expiresAt > Date.now()) return cached.files;
   const files: DriveRecordingFile[] = [];
   let pageToken = '';
   do {
@@ -240,13 +271,34 @@ export async function listDriveRecordings(folderId: string): Promise<DriveRecord
     files.push(...(payload.files || []).map(mapDriveFile));
     pageToken = payload.nextPageToken || '';
   } while (pageToken && files.length < 300);
+  return files;
+}
 
-  const listed = files.filter((file) =>
-    file.mimeType.startsWith('video/')
-    && file.canDownload
+export async function listDriveRecordings(folderId: string): Promise<DriveRecordingFile[]> {
+  const safeId = extractGoogleDriveId(folderId);
+  if (!safeId) throw new Error('Invalid Google Drive folder ID');
+  const cached = driveListCache.get(safeId);
+  if (cached && cached.expiresAt > Date.now()) return cached.files;
+  const files = await listDriveRecordingFolderFiles(safeId);
+  const eligible = files.filter((file) =>
+    file.canDownload
     && file.parents.includes(safeId)
     && isRecordingWithinRetention(file.createdTime),
   );
+  const listed = eligible.filter((file) => file.mimeType.startsWith('video/'));
+  const recordingsByName = new Map<string, DriveRecordingFile[]>();
+  for (const recording of listed) {
+    const stem = recordingNameStem(recording.name);
+    const matches = recordingsByName.get(stem) || [];
+    matches.push(recording);
+    recordingsByName.set(stem, matches);
+  }
+  for (const chat of eligible.filter(isDriveRecordingChatFile)) {
+    const matches = recordingsByName.get(chatNameStem(chat.name));
+    if (matches?.length !== 1) continue;
+    const recording = matches[0];
+    if (isChatFileForRecording(chat, recording)) (recording.chatFiles ||= []).push(chat);
+  }
   driveListCache.set(safeId, { expiresAt: Date.now() + DRIVE_LIST_CACHE_MS, files: listed });
   return listed;
 }

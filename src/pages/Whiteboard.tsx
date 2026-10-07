@@ -64,7 +64,7 @@ export default function WhiteboardPage() {
 
   const persistSceneToStorage = Boolean(session && user && user.id === session.tutor_id);
 
-  const { participants, saving, loaded, onChange, saveScene } = useWhiteboardSync(
+  const { participants, saving, saved, saveError, loadError, loaded, onChange, saveScene, retryLoadScene } = useWhiteboardSync(
     session?.id ?? null,
     excalidrawAPI,
     currentUser,
@@ -483,6 +483,11 @@ export default function WhiteboardPage() {
     }
   }, []);
 
+  const handleBack = useCallback(async () => {
+    if (persistSceneToStorage && loaded && !(await saveScene(true))) return;
+    navigate(-1);
+  }, [persistSceneToStorage, loaded, saveScene, navigate]);
+
   if (error) {
     const handleRetry = () => {
       setError(null);
@@ -542,7 +547,8 @@ export default function WhiteboardPage() {
       <header className="flex items-center justify-between px-3 py-2 bg-white border-b border-gray-200 flex-shrink-0 z-10">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate(-1)}
+            onClick={handleBack}
+            disabled={saving}
             className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -586,14 +592,17 @@ export default function WhiteboardPage() {
             </span>
           )}
 
-          <button
-            onClick={saveScene}
-            disabled={saving}
+          {saved && !saving && <span role="status" className="text-xs text-emerald-600">{t('common.saved')}</span>}
+          {saveError && !saving && <span role="alert" className="text-xs text-red-600">{t('common.saveFailed')}</span>}
+
+          {persistSceneToStorage && <button
+            onClick={() => saveScene(true)}
+            disabled={saving || !loaded}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50"
           >
             <Save className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">{t('whiteboard.save')}</span>
-          </button>
+          </button>}
 
           <button
             onClick={handleExportPdf}
@@ -613,7 +622,14 @@ export default function WhiteboardPage() {
       <div className="flex-1 relative">
         {!loaded && (
           <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-10">
-            <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+            {loadError ? (
+              <div className="text-center space-y-3">
+                <p role="alert" className="text-sm text-red-600">{t('whiteboard.loadFailed')}</p>
+                <button onClick={retryLoadScene} className="text-sm text-indigo-600 hover:underline">
+                  {t('whiteboard.retry')}
+                </button>
+              </div>
+            ) : <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />}
           </div>
         )}
         <ExcalidrawComp

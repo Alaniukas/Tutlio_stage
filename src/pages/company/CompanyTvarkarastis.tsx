@@ -188,6 +188,7 @@ import StatusBadge from '@/components/StatusBadge';
 import { effectiveSessionOutcome, orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import FindTutorModal from '@/components/FindTutorModal';
+import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
 import RecurrenceFields from '@/components/RecurrenceFields';
 import {
   orgAdminShowsConvertToRecurringFields,
@@ -292,6 +293,7 @@ interface OrgTutor {
   break_between_lessons?: number | null;
   email: string | null;
   personal_meeting_link?: string | null;
+  teaching_notes?: string | null;
   /** false = explicit „nelicencijuotas“ ribotam org planui; kitaip laisvas naudoti be licencijos režimu */
   has_active_license?: boolean | null;
 }
@@ -900,7 +902,7 @@ export default function CompanyTvarkarastis() {
       const filteredTutors = await getOrgVisibleTutors(
         supabase as any,
         organizationId,
-        'id, full_name, email, has_active_license, personal_meeting_link, break_between_lessons',
+        'id, full_name, email, teaching_notes, has_active_license, personal_meeting_link, break_between_lessons',
       );
       const tutorIds = filteredTutors.map((t: any) => t.id);
       setOrgTutors(filteredTutors as OrgTutor[]);
@@ -3493,21 +3495,23 @@ export default function CompanyTvarkarastis() {
                     <p className="text-xs text-gray-500 py-2">{t('compSch.searchNotFound')}</p>
                   ) : (
                     filteredOrgTutorsForList.map(tutor => (
-                      <div key={tutor.id} className="flex items-center space-x-2">
+                      <div key={tutor.id} className="flex items-start gap-2 min-w-0">
                         <Checkbox
                           id={`tutor-${tutor.id}`}
                           checked={selectedTutorIds.includes(tutor.id)}
                           onChange={() => toggleTutorFilter(tutor.id)}
+                          className="mt-0.5 shrink-0"
                         />
                         <label
                           htmlFor={`tutor-${tutor.id}`}
                           title={isTutorLicenseBlockedForOrgBooking(tutor.id) ? t('compSch.tutorNotLicensed') : undefined}
                           className={cn(
-                            'text-sm cursor-pointer leading-tight',
+                            'flex flex-1 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm cursor-pointer leading-tight',
                             isTutorLicenseBlockedForOrgBooking(tutor.id) && 'text-gray-400 opacity-70',
                           )}
                         >
-                          {tutor.full_name}
+                          <span className="max-w-full break-words">{tutor.full_name}</span>
+                          <TutorTeachingNotesBadge notes={tutor.teaching_notes} className="max-w-full" />
                         </label>
                       </div>
                     ))

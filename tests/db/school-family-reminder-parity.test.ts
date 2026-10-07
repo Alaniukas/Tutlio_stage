@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { schoolMaterialRecipient } from '../../api/_lib/schoolMaterialPublications';
 import { schoolFamilyPersonalCodeHash } from '../../api/_lib/schoolFamilyGuardianAccess';
+import { schoolFamilySessionReminderRecipient } from '../../api/_lib/schoolSessionReminderRecipient';
 const uid = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12,'0')}`;
 
 async function database() {
@@ -23,6 +24,7 @@ async function database() {
     CREATE TABLE recurring_individual_sessions(subject_id uuid,tutor_id uuid,student_id uuid,active boolean);
     CREATE TABLE storage.objects(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),bucket_id text,name text,created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now());`);
   await db.exec(readFileSync('supabase/migrations/20260928190300_school_material_publications_digest.sql','utf8'));
+  await db.exec(readFileSync('supabase/migrations/20261007114508_school_family_email_transition.sql','utf8'));
   return db;
 }
 
@@ -62,6 +64,20 @@ async function seed(db: PGlite, index: number, options: {features?:Record<string
 }
 const due=async(db:PGlite)=>(await db.query<{id:string}>('SELECT id::text FROM get_due_session_reminder_ids()')).rows.map(row=>row.id);
 const recipient=async(db:PGlite,child:string)=>schoolMaterialRecipient(postgresClient(db),(await db.query('SELECT * FROM students WHERE id=$1',[child])).rows[0] as any);
+const transitionFeatures = () => ({
+  school_family_portal: true,
+  school_family_email_transition_until: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+});
+async function reminderRecipient(db: PGlite, child: string) {
+  const student = (await db.query('SELECT * FROM students WHERE id=$1', [child])).rows[0] as any;
+  const features = (await db.query<{ features: Record<string, unknown> }>(
+    'SELECT features FROM organizations WHERE id=$1', [student.organization_id],
+  )).rows[0].features;
+  const lesson = (await db.query<{ start_time: Date }>(
+    'SELECT start_time FROM sessions WHERE student_id=$1', [child],
+  )).rows[0];
+  return schoolFamilySessionReminderRecipient(postgresClient(db), student, features, new Date(lesson.start_time));
+}
 
 it('selects one real child join email at 15 minutes even when legacy reminder hours are disabled',async()=>{
   const db=await database();try{
@@ -122,3 +138,113 @@ it('does not select a primary guardian whose current signed identity proof has c
     expect(await recipient(db,one.child)).toBeNull();expect(await due(db)).toEqual([]);
   }finally{await db.close();}
 },30000);
+
+it.each(['missing', 'unbound'])('keeps join mail available during onboarding with a %s guardian binding', async binding => {
+  const db = await database();
+  try {
+    const one = await seed(db, 1, {
+      features: transitionFeatures(), hours: 2, minutes: 90, guardian: binding !== 'missing',
+      ...(binding === 'missing' ? { email: '' } : {}),
+    });
+    if (binding === 'unbound') await db.query('UPDATE school_family_guardians SET guardian_user_id=NULL WHERE student_id=$1', [one.child]);
+    await db.query('UPDATE sessions SET reminder_payer_sent=NULL WHERE id=$1', [one.session]);
+    expect(await due(db)).toEqual([one.session]);
+    expect(await reminderRecipient(db, one.child)).toMatchObject({
+      contact: { email: 'mutable-payer@example.test', kind: 'payer' }, legacyFamilyFallback: true,
+    });
+    // Private homework/recording digests still require a live parent account.
+    expect(await recipient(db, one.child)).toBeNull();
+    await db.query('UPDATE sessions SET reminder_payer_sent=true WHERE id=$1', [one.session]);
+    expect(await due(db)).toEqual([]);
+  } finally { await db.close(); }
+}, 30000);
+
+it('moves a newly linked parent to the verified recipient and 15-minute window without extra copies', async () => {
+  const db = await database();
+  try {
+    const one = await seed(db, 1, { features: transitionFeatures(), hours: 2, minutes: 90 });
+    await db.query('UPDATE school_family_guardians SET guardian_user_id=NULL WHERE student_id=$1', [one.child]);
+    expect(await due(db)).toEqual([one.session]);
+    await db.query('UPDATE school_family_guardians SET guardian_user_id=$1 WHERE student_id=$2', [one.parent, one.child]);
+    expect(await due(db)).toEqual([]);
+    expect(await reminderRecipient(db, one.child)).toMatchObject({
+      contact: { email: 'verified-primary@example.test', userId: one.parent }, legacyFamilyFallback: false,
+    });
+    await db.query("UPDATE sessions SET start_time=now()+interval '10 minutes' WHERE id=$1", [one.session]);
+    expect(await due(db)).toEqual([one.session]);
+  } finally { await db.close(); }
+}, 30000);
+
+it('expires the exception by lesson start and rejects missing or invalid cutoffs without breaking the queue', async () => {
+  const db = await database();
+  try {
+    const one = await seed(db, 1, { features: transitionFeatures(), hours: 2, minutes: 30, guardian: false });
+    const start = new Date((await db.query<{ start_time: Date }>('SELECT start_time FROM sessions WHERE id=$1', [one.session])).rows[0].start_time);
+    for (const cutoff of [new Date(start.getTime() - 1).toISOString(), 'invalid', '2100-02-31T12:00:00.000Z', null]) {
+      await db.query('UPDATE organizations SET features=$1::jsonb WHERE id=$2', [
+        JSON.stringify({ school_family_portal: true, school_family_email_transition_until: cutoff }), one.org,
+      ]);
+      expect(await due(db)).toEqual([]);
+      expect(await reminderRecipient(db, one.child)).toEqual({ contact: null, legacyFamilyFallback: false });
+    }
+    await db.query('UPDATE organizations SET features=$1::jsonb WHERE id=$2', [
+      JSON.stringify({ school_family_portal: true, school_family_email_transition_until: start.toISOString() }), one.org,
+    ]);
+    expect(await due(db)).toEqual([one.session]);
+    expect((await reminderRecipient(db, one.child)).legacyFamilyFallback).toBe(true);
+  } finally { await db.close(); }
+}, 30000);
+
+it('does not use onboarding to bypass a registered parent whose access was revoked', async () => {
+  const db = await database();
+  try {
+    const one = await seed(db, 1, { features: transitionFeatures(), hours: 2 });
+    await db.query('UPDATE school_contracts SET terminated_at=now() WHERE id=$1', [one.annual]);
+    expect(await due(db)).toEqual([]);
+    expect(await reminderRecipient(db, one.child)).toEqual({ contact: null, legacyFamilyFallback: false });
+  } finally { await db.close(); }
+}, 30000);
+
+it('preserves disabled reminders, real-child delivery and queue privileges during onboarding', async () => {
+  const db = await database();
+  try {
+    await seed(db, 1, { features: transitionFeatures(), hours: 0, guardian: false });
+    const child = await seed(db, 2, { features: transitionFeatures(), email: 'child@example.test', hours: 2, minutes: 30, guardian: false });
+    expect(await due(db)).toEqual([]);
+    await db.query("UPDATE sessions SET start_time=now()+interval '10 minutes' WHERE id=$1", [child.session]);
+    expect(await due(db)).toEqual([child.session]);
+    expect(await reminderRecipient(db, child.child)).toMatchObject({
+      contact: { email: 'child@example.test', kind: 'student' }, legacyFamilyFallback: false,
+    });
+    const privileges = (await db.query<{ anonymous: boolean; authenticated: boolean; service: boolean }>(`
+      SELECT has_function_privilege('anon','get_due_session_reminder_ids(integer)','EXECUTE') AS anonymous,
+        has_function_privilege('authenticated','get_due_session_reminder_ids(integer)','EXECUTE') AS authenticated,
+        has_function_privilege('service_role','get_due_session_reminder_ids(integer)','EXECUTE') AS service
+    `)).rows[0];
+    expect(privileges).toEqual({ anonymous: false, authenticated: false, service: true });
+  } finally { await db.close(); }
+}, 30000);
+
+it('sets the agreed school cutoff without replacing other settings or an existing cutoff', async () => {
+  const db = await database();
+  try {
+    const schoolId = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
+    await db.query('INSERT INTO organizations VALUES($1,\'school\',$2::jsonb)', [
+      schoolId, JSON.stringify({ school_family_portal: true, contact_email: 'school@example.test' }),
+    ]);
+    const migration = readFileSync('supabase/migrations/20261007114508_school_family_email_transition.sql', 'utf8');
+    await db.exec(migration);
+    const features = async () => (await db.query<{ features: Record<string, unknown> }>(
+      'SELECT features FROM organizations WHERE id=$1', [schoolId],
+    )).rows[0].features;
+    expect(await features()).toEqual({
+      school_family_portal: true, contact_email: 'school@example.test',
+      school_family_email_transition_until: '2026-10-21T20:59:59.999Z',
+    });
+    await db.query('UPDATE organizations SET features=features||$1::jsonb WHERE id=$2', [
+      JSON.stringify({ school_family_email_transition_until: '2026-10-14T20:59:59.999Z' }), schoolId,
+    ]);
+    await db.exec(migration);
+    expect((await features()).school_family_email_transition_until).toBe('2026-10-14T20:59:59.999Z');
+  } finally { await db.close(); }
+}, 30000);

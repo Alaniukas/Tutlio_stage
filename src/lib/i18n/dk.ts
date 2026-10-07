@@ -124,6 +124,7 @@ const DK_DPA_HTML = [
 ].join('');
 
 export const dk: Record<string, string> = {
+  'school.contractsLoadFailed': 'Kontrakterne kunne ikke indlæses. Prøv igen.',
   ...studentNotesTranslations.dk,
   ...schoolFamilyMaterialTranslations.dk,
   ...schoolInvoiceReviewTranslations.dk,
@@ -4820,6 +4821,7 @@ export const dk: Record<string, string> = {
   'whiteboard.closedAfterLesson': 'Denne lektions whiteboard er ikke længere tilgængelig (adgangsperioden er udløbet).',
   'whiteboard.exportPdf': 'Gem som PDF',
   'whiteboard.loading': 'Indlæser whiteboard...',
+  "whiteboard.loadFailed": "Kunne ikke indlæse tavlen. Prøv igen.",
   'whiteboard.notFound': 'Whiteboard ikke fundet',
   'whiteboard.open': 'Åbn whiteboard',
   'whiteboard.retry': 'Prøv igen',
@@ -5479,7 +5481,9 @@ export const dk: Record<string, string> = {
   'school.groups.platform': "Platform",
   'school.groups.duration': "Varighed (min)",
   'school.groups.minimumActiveStudents': "Mindste antal aktive elever",
-  'school.groups.minimumActiveStudentsHint': "Denne gruppe og dens aftaler sættes automatisk på pause, når færre aktive elever er tilbage.",
+  'school.groups.minimumActiveStudentsHint': "Kun aktive elever med en bekræftet, gyldig aftale om ekstra lektioner tæller med i minimumsantallet. Individuelt pausede elever tæller ikke med. Gruppen og dens aftaler sættes automatisk på pause under minimumsantallet.",
+  'school.groups.minimumStatus': "{n} af {total} elever tæller med i gruppens minimumsantal. Der kræves mindst {minimum}.",
+  'school.groups.unconfirmedContracts': "Elever uden en bekræftet, gyldig aftale: {names}.",
   'school.groups.suspendedMinimum': "Sat på pause: færre end {n} aktive elever i gruppen",
   'school.groups.meetingLink': "Link til lektionen",
   'school.groups.slots': "Ugeskema",

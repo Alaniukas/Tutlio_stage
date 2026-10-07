@@ -10,6 +10,50 @@ const contract: SchoolInvoiceContractWindow = { id: 'c1', signing_status: 'signe
   order_snapshot: { service_type: 'group', group_id: 'group1', start_date: '2026-09-01', end_date: '2027-06-01', schedule_slots: [] } as any };
 
 describe('school invoice session review', () => {
+  const tuesdayContract = { ...contract, order_snapshot: { ...contract.order_snapshot,
+    schedule_slots: [{ weekday: 2, start_time: '12:30', end_time: '13:30' }] } as any };
+  const monday = { ...session, start_time: '2026-09-21T09:30:00Z', end_time: '2026-09-21T10:30:00Z',
+    status: 'completed', tutor_joined_at: '2026-09-21T09:29:00Z', group_occurred: true };
+
+  it('does not bill an unselected group day even with teacher or peer occurrence evidence', () => {
+    expect(reviewSchoolInvoiceSession(monday, [tuesdayContract], undefined, false))
+      .toMatchObject({ included: false, reason: 'outside_schedule', outsideSchedule: true, canConfirm: false });
+    const tuesday = { ...monday, start_time: '2026-09-22T09:30:00Z', end_time: '2026-09-22T10:30:00Z', status: 'no_show' };
+    expect(reviewSchoolInvoiceSession(tuesday, [tuesdayContract], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable', outsideSchedule: false });
+  });
+
+  it('uses a member selection without a contract and preserves a frozen historical schedule', () => {
+    const restricted = { ...monday, member_schedule_slots: [{ weekday: 2, start_time: '12:30' }] };
+    expect(reviewSchoolInvoiceSession(restricted, [], undefined, false)).toMatchObject({ reason: 'outside_schedule' });
+    const earlier = { ...contract, order_snapshot: { ...contract.order_snapshot,
+      schedule_slots: [{ weekday: 1, start_time: '12:30', end_time: '13:30' }] } as any };
+    expect(reviewSchoolInvoiceSession(restricted, [earlier], undefined, false)).toMatchObject({ included: true, reason: 'payable' });
+  });
+
+  it('allows a moved selected occurrence and blocks a moved unselected one', () => {
+    const moved = { ...monday, start_time: '2026-09-23T10:00:00Z', end_time: '2026-09-23T11:00:00Z' };
+    expect(reviewSchoolInvoiceSession({ ...moved, original_start_time: '2026-09-22T09:30:00Z' }, [tuesdayContract], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable' });
+    expect(reviewSchoolInvoiceSession({ ...moved, original_start_time: monday.start_time }, [tuesdayContract], undefined, false))
+      .toMatchObject({ included: false, reason: 'outside_schedule' });
+  });
+
+  it('flags a wrong day in an issued invoice without unlocking it', () => {
+    expect(reviewSchoolInvoiceSession(monday, [tuesdayContract], undefined, true))
+      .toMatchObject({ included: false, reason: 'already_invoiced', alreadyInvoiced: true, outsideSchedule: true, canConfirm: false });
+  });
+
+  it('matches a rescheduled selected occurrence before its group id is linked', () => {
+    const named = { ...tuesdayContract, order_snapshot: { ...tuesdayContract.order_snapshot,
+      group_name: 'Intermediate 1', tutor_name: 'Teacher One' } as any };
+    const moved = { ...monday, class_group_id: null, subject_id: null,
+      start_time: '2026-09-23T10:00:00Z', end_time: '2026-09-23T11:00:00Z',
+      original_start_time: '2026-09-22T09:30:00Z', tutor: { full_name: 'Teacher One' } };
+    expect(reviewSchoolInvoiceSession(moved, [named], undefined, false)).toMatchObject({ included: true, reason: 'payable' });
+    expect(schoolInvoiceBillableSubjectKey(moved, [named])).toBe('group1');
+  });
+
   it('uses group names even when a historical subject names another child, and keeps individual names', () => {
     const subject = { name: 'Anglų kalba individuali Nojus Gibieža' };
     expect(reviewSchoolInvoiceSession({ ...session, subject, class_group: { name: 'Intermediate 1 grupė' } },

@@ -9,6 +9,7 @@ import { supportTranslations } from './supportTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 
 export const lv: Record<string, string> = {
+  'school.contractsLoadFailed': 'Neizdevās ielādēt līgumus. Mēģiniet vēlreiz.',
   ...studentNotesTranslations.lv,
   ...schoolFamilyMaterialTranslations.lv,
   ...schoolInvoiceReviewTranslations.lv,
@@ -5421,6 +5422,7 @@ export const lv: Record<string, string> = {
   'whiteboard.closedAfterLesson': 'Šīs nodarbības tāfele vairs nav pieejama (piekļuves periods ir beidzies).',
   'whiteboard.exportPdf': 'Saglabāt kā PDF',
   'whiteboard.loading': 'Notiek tāfeles ielāde...',
+  "whiteboard.loadFailed": "Neizdevās ielādēt tāfeli. Mēģiniet vēlreiz.",
   'whiteboard.notFound': 'Tāfele nav atrasta',
   'whiteboard.open': 'Atvērt tāfeli',
   'whiteboard.retry': 'Mēģināt vēlreiz',
@@ -6028,7 +6030,9 @@ export const lv: Record<string, string> = {
   'school.groups.platform': "Platforma",
   'school.groups.duration': "Ilgums (min)",
   'school.groups.minimumActiveStudents': "Minimālais aktīvo skolēnu skaits",
-  'school.groups.minimumActiveStudentsHint': "Šī grupa un tās līgumi tiek automātiski apturēti, ja paliek mazāk aktīvo skolēnu.",
+  'school.groups.minimumActiveStudentsHint': "Minimumā ieskaita tikai aktīvus skolēnus ar apstiprinātu, derīgu papildu nodarbību līgumu. Individuāli apturētus skolēnus neieskaita. Grupa un tās līgumi tiek automātiski apturēti, ja minimums nav sasniegts.",
+  'school.groups.minimumStatus': "Grupas minimumā ieskaita {n} no {total} skolēniem. Nepieciešami vismaz {minimum}.",
+  'school.groups.unconfirmedContracts': "Skolēni bez apstiprināta, derīga līguma: {names}.",
   'school.groups.suspendedMinimum': "Apturēta: grupā ir mazāk nekā {n} aktīvo skolēnu",
   'school.groups.meetingLink': "Nodarbības saite",
   'school.groups.slots': "Nedēļas grafiks",

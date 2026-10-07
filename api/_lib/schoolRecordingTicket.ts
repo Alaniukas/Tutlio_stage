@@ -4,6 +4,7 @@ export interface SchoolRecordingTicket {
   userId: string;
   groupId: string;
   fileId: string;
+  recordingFileId?: string;
   expiresAt: number;
 }
 
@@ -12,6 +13,7 @@ export interface SchoolHomeworkRecordingTicket {
   studentId: string;
   groupId: string;
   fileId: string;
+  recordingFileId?: string;
   expiresAt: number;
 }
 
@@ -85,6 +87,7 @@ export function verifySchoolRecordingTicket(
       || typeof parsed.userId !== 'string'
       || typeof parsed.groupId !== 'string'
       || typeof parsed.fileId !== 'string'
+      || (parsed.recordingFileId !== undefined && (typeof parsed.recordingFileId !== 'string' || !parsed.recordingFileId))
       || typeof parsed.expiresAt !== 'number'
       || parsed.expiresAt <= Math.floor((options.nowMs ?? Date.now()) / 1000)
   ) return null;
@@ -120,6 +123,7 @@ export function verifySchoolHomeworkRecordingTicket(
     || typeof parsed.studentId !== 'string'
     || typeof parsed.groupId !== 'string'
     || typeof parsed.fileId !== 'string'
+    || (parsed.recordingFileId !== undefined && (typeof parsed.recordingFileId !== 'string' || !parsed.recordingFileId))
     || typeof parsed.expiresAt !== 'number'
     || parsed.expiresAt <= Math.floor((options.nowMs ?? Date.now()) / 1000)
   ) return null;

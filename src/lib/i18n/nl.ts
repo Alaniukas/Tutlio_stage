@@ -1,4 +1,5 @@
 import { studentNotesTranslations } from './studentNotesTranslations.js';
+import { companyPaymentReportTranslations } from './companyPaymentReportTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
@@ -10,6 +11,16 @@ import { supportTranslations } from './supportTranslations.js';
 import { nlQuiz } from './nlQuiz.js';
 
 export const nl: Record<string, string> = {
+  ...companyPaymentReportTranslations.nl,
+  'compStu.inviteLinkedExistingParent': 'Het bestaande account is gekoppeld aan dit kind en alle broers en zussen met hetzelfde e-mailadres van de betaler.',
+  'companyDash.sendPackageReminder': 'Herinnering sturen',
+  'companyDash.packageReminderSending': 'Verzenden…',
+  'package.overdueUnpaid': 'Achterstallig',
+  'school.recordings.chatTitle': 'Chatgeschiedenis',
+  'school.recordings.chatLoading': 'Chat laden…',
+  'school.recordings.chatError': 'De chat kon niet worden geladen. Vernieuw de lijst met opnamen en probeer het opnieuw.',
+  'school.recordings.chatEmpty': 'Het chatbestand is leeg.',
+  'school.contractsLoadFailed': 'De contracten konden niet worden geladen. Probeer het opnieuw.',
   ...studentNotesTranslations.nl,
   ...schoolFamilyMaterialTranslations.nl,
   ...schoolInvoiceReviewTranslations.nl,
@@ -5223,6 +5234,7 @@ export const nl: Record<string, string> = {
   "whiteboard.title": "Whiteboard",
   "whiteboard.open": "Whiteboard openen",
   "whiteboard.loading": "Whiteboard laden...",
+  "whiteboard.loadFailed": "Het whiteboard kon niet worden geladen. Probeer het opnieuw.",
   "whiteboard.notFound": "Whiteboard niet gevonden",
   "whiteboard.closedAfterLesson": "Het whiteboard van deze les is niet meer beschikbaar (de toegangsperiode is afgelopen).",
   "whiteboard.unauthorized": "Je hebt geen toegang tot dit whiteboard",
@@ -5582,7 +5594,9 @@ export const nl: Record<string, string> = {
   'school.groups.platform': "Platform",
   'school.groups.duration': "Duur (min)",
   'school.groups.minimumActiveStudents': "Minimumaantal actieve leerlingen",
-  'school.groups.minimumActiveStudentsHint': "Deze groep en de bijbehorende overeenkomsten worden automatisch gepauzeerd wanneer er minder actieve leerlingen overblijven.",
+  'school.groups.minimumActiveStudentsHint': "Alleen actieve leerlingen met een bevestigde, geldige overeenkomst voor extra lessen tellen mee voor het minimum. Individueel gepauzeerde leerlingen tellen niet mee. De groep en de overeenkomsten worden automatisch gepauzeerd onder het minimum.",
+  'school.groups.minimumStatus': "{n} van de {total} leerlingen tellen mee voor het groepsminimum. Er zijn er minstens {minimum} nodig.",
+  'school.groups.unconfirmedContracts': "Leerlingen zonder bevestigde, geldige overeenkomst: {names}.",
   'school.groups.suspendedMinimum': "Gepauzeerd: minder dan {n} actieve leerlingen in de groep",
   'school.groups.meetingLink': "Leslink",
   'school.groups.slots': "Weekrooster",

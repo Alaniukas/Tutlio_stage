@@ -4392,6 +4392,7 @@ export const elOverrides: Record<string, string> = {
   "whiteboard.title": "Πίνακας συνεργασίας",
   "whiteboard.open": "Άνοιγμα διαδραστικού πίνακα",
   "whiteboard.loading": "Φόρτωση πίνακα συνεργασίας…",
+  "whiteboard.loadFailed": "Δεν ήταν δυνατή η φόρτωση του πίνακα. Δοκιμάστε ξανά.",
   "whiteboard.notFound": "Ο πίνακας συνεργασίας δεν βρέθηκε",
   "whiteboard.closedAfterLesson": "Ο πίνακας συνεργασίας αυτού του μαθήματος δεν είναι πλέον διαθέσιμος (η περίοδος πρόσβασης έχει λήξει).",
   "whiteboard.unauthorized": "Δεν έχετε πρόσβαση σε αυτόν τον πίνακα συνεργασίας",

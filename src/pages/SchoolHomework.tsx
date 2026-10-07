@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } f
 import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
 import SchoolGroupMaterialLibrary from '@/components/school/SchoolGroupMaterialLibrary';
+import RecordingChatFiles, { type RecordingChatFile } from '@/components/school/RecordingChatFiles';
 import { Download, Loader2, Paperclip, Play, Trash2, Upload, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
@@ -51,6 +52,7 @@ type HomeworkRecording = {
   durationMillis: number | null;
   size: number | null;
   streamUrl: string;
+  chatFiles?: RecordingChatFile[];
 };
 
 type HomeworkRecordingGroup = {
@@ -227,6 +229,7 @@ function HomeworkGroupRecordings({
           >
             {unsupportedLabel}
           </video>
+          <RecordingChatFiles files={selected.chatFiles} />
         </div>
       )}
     </section>

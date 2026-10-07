@@ -39,6 +39,15 @@ describe('monthLabelLt', () => {
 });
 
 describe('buildSchoolMonthlyInvoiceEmailData', () => {
+  it('separates invoice value, overpayment allocation and the cash due', () => {
+    const context = { publicOrigin:'https://tutlio.lt',student,org,contract:{} };
+    const data = buildSchoolMonthlyInvoiceEmailData({...invoice,total_eur:84,credit_applied_eur:12},context);
+    expect(data).toMatchObject({ invoiceAmount:'84.00',creditAppliedAmount:'12.00',totalAmount:'72.00' });
+    expect(data.payUrl).toBeTruthy();
+    const settled = buildSchoolMonthlyInvoiceEmailData({...invoice,total_eur:10,credit_applied_eur:10,payment_status:'paid'},context);
+    expect(settled).toMatchObject({ invoiceAmount:'10.00',creditAppliedAmount:'10.00',totalAmount:'0.00' });
+    expect(settled.payUrl).toBeUndefined();
+  });
   it('formats amounts, prefers the contact email and links the pay endpoint when Stripe is connected', () => {
     const data = buildSchoolMonthlyInvoiceEmailData(invoice, { publicOrigin: 'https://tutlio.lt', student, org, contract: { contract_number: 'PP-1' } });
     expect(data).toMatchObject({

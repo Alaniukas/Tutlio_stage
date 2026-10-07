@@ -63,6 +63,26 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('monthly school billing allocation', () => {
+  it('limits a reduced group agreement to its own weekly slot before reviewing issued sessions', async () => {
+    const canonical = { ...contract('first', 'group', 'g1', 'math'),
+      organization_id: '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17', filled_body: EXTRA_LESSONS_LEGAL_BODY };
+    canonical.order_snapshot = { ...canonical.order_snapshot,
+      schedule_slots: [{ weekday: 2, start_time: '13:00', end_time: '14:00' }] } as any;
+    state.contracts = [canonical];
+    const groupSession = { student_id: 'student', class_group_id: 'g1', subject_id: 'math',
+      status: 'completed', tutor_joined_at: '2026-08-10T10:00:00Z' };
+    state.sessions = [
+      { ...groupSession, id: 'unselected', start_time: '2026-08-10T10:00:00Z', end_time: '2026-08-10T11:00:00Z' },
+      { ...groupSession, id: 'selected', start_time: '2026-08-11T10:00:00Z', end_time: '2026-08-11T11:00:00Z' },
+      { ...groupSession, id: 'moved', start_time: '2026-08-19T11:00:00Z', end_time: '2026-08-19T12:00:00Z', original_start_time: '2026-08-18T10:00:00Z' },
+    ];
+    state.issuedInvoices = [{ id: 'other', payment_status: 'pending', billed_session_ids: ['unselected'] }];
+    expect((await run({ dryRun: 'true' })).json).toHaveBeenCalledWith(expect.objectContaining({ held: 0,
+      planned: [expect.objectContaining({ total_eur: 20, billed_session_ids: ['selected', 'moved'] })] }));
+    expect(state.inserts).toEqual([]);
+    expect(state.emails).toBe(0);
+  });
+
   it('does not resend or recreate an explicitly cancelled contract invoice', async () => {
     state.contracts = [contract('first', 'individual', null, 'math')];
     state.existingInvoice = { id: 'cancelled', contract_id: 'first', payment_status: 'cancelled' };

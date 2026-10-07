@@ -4431,6 +4431,7 @@ export const ukOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "Приховати до наступного відкриття цієї сторінки",
   "pwa.guideDontShowInSettings": "Більше не показувати в налаштуваннях",
   "whiteboard.loading": "Завантажуємо дошку…",
+  "whiteboard.loadFailed": "Не вдалося завантажити дошку. Спробуйте ще раз.",
   "whiteboard.notFound": "Дошку не знайдено",
   "whiteboard.closedAfterLesson": "Дошка цього заняття більше недоступна: термін доступу минув.",
   "whiteboard.unauthorized": "У вас немає доступу до цієї дошки",

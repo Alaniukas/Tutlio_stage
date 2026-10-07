@@ -1,3 +1,6 @@
+import { schoolGroupSessionFollowsSchedule } from './schoolSessionSchedule.js';
+import type { SchoolMemberSlot } from './schoolClassGroups.js';
+
 /**
  * Monthly extra-lessons invoice: base credits from the signed contract
  * plus extra joined lessons beyond the allotment.
@@ -5,6 +8,7 @@
 export type ExtraLessonsBillableSession = {
   id: string;
   start_time: string;
+  original_start_time?: string | null;
   status: string;
   student_joined_at?: string | null;
   school_billing_kind?: 'base' | 'extra' | null;
@@ -22,6 +26,8 @@ export type ExtraLessonsBillingInput = {
   serviceStartYmd?: string | null;
   endedAtIso?: string | null;
   serviceEndYmd?: string | null;
+  /** Frozen weekly times for this child's group agreement, when recorded. */
+  groupScheduleSlots?: readonly SchoolMemberSlot[] | null;
 };
 
 export type ExtraLessonsBillingResult = {
@@ -93,6 +99,7 @@ export function computeExtraLessonsMonthlyBill(input: ExtraLessonsBillingInput):
   const baseLessons = Math.max(0, Math.round(Number(input.base_lessons_per_month) || 0));
   const extraIds = input.sessions
     .filter((s) => inPeriod(s.start_time, input.period_start, input.period_end)
+      && schoolGroupSessionFollowsSchedule(s, input.groupScheduleSlots)
       && (!input.serviceEndYmd || sessionYmdVilnius(s.start_time) <= input.serviceEndYmd)
       && isSessionInExtraLessonsServiceWindow(s.start_time, {
         serviceStartYmd: input.serviceStartYmd || '',

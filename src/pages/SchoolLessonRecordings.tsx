@@ -19,6 +19,7 @@ import StudentLayout from '@/components/StudentLayout';
 import ParentLayout from '@/components/ParentLayout';
 import RecordingAccessPanel from '@/components/school/RecordingAccessPanel';
 import SchoolMaterialBaselinePanel from '@/components/school/SchoolMaterialBaselinePanel';
+import RecordingChatFiles, { type RecordingChatFile } from '@/components/school/RecordingChatFiles';
 
 type Recording = {
   id: string;
@@ -27,6 +28,7 @@ type Recording = {
   durationMillis: number | null;
   size: number | null;
   streamUrl: string;
+  chatFiles?: RecordingChatFile[];
   slot?: { weekday: number; start_time: string } | null;
 };
 
@@ -92,17 +94,20 @@ function RecordingPlayer({
   unsupportedLabel: string;
 }) {
   return (
-    <video
-      key={recording.id}
-      className="w-full aspect-video rounded-lg bg-black"
-      controls
-      controlsList="nodownload"
-      preload="none"
-      src={recording.streamUrl}
-      onContextMenu={(event) => event.preventDefault()}
-    >
-      {unsupportedLabel}
-    </video>
+    <div className="space-y-3">
+      <video
+        key={recording.id}
+        className="w-full aspect-video rounded-lg bg-black"
+        controls
+        controlsList="nodownload"
+        preload="none"
+        src={recording.streamUrl}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        {unsupportedLabel}
+      </video>
+      <RecordingChatFiles files={recording.chatFiles} />
+    </div>
   );
 }
 

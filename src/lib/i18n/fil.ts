@@ -4435,6 +4435,7 @@ export const filOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "Itago hanggang buksan ko muli ang pahinang ito",
   "pwa.guideDontShowInSettings": "Huwag nang ipakita sa mga setting",
   "whiteboard.loading": "Nilo-load ang whiteboard...",
+  "whiteboard.loadFailed": "Hindi ma-load ang whiteboard. Pakisubukang muli.",
   "whiteboard.notFound": "Hindi mahanap ang whiteboard",
   "whiteboard.closedAfterLesson": "Hindi na available ang whiteboard ng sesyong ito (tapos na ang panahon ng access).",
   "whiteboard.unauthorized": "Wala kang access sa whiteboard na ito",

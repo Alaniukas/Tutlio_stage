@@ -3,6 +3,8 @@ export type SchoolPayerInvoiceStudentPreview = {
   fullName: string;
   grade?: string | null;
   totalEur: number;
+  creditAppliedEur?: number;
+  amountDueEur?: number;
   lessonCount: number;
   reviewSessionIds: string[];
   reviewReasons?: Array<'unconfirmed' | 'contract_review'>;
@@ -18,6 +20,8 @@ export type SchoolPayerInvoiceGroup = {
   payerEmail: string;
   students: SchoolPayerInvoiceStudentPreview[];
   totalEur: number;
+  creditAppliedEur?: number;
+  amountDueEur?: number;
   /** One combined S.F. per payer when all sendable siblings are ready. */
   sendableStudentIds: string[];
   payerPreviewToken?: string;

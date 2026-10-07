@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const materialize = vi.hoisted(() => vi.fn());
 vi.mock('../../api/_lib/schoolClassGroupMaterialize.js', () => ({ materializeClassGroupNow: materialize }));
-import { previewSchoolGroupContractExit, reconcileSchoolGroupMinimum, resumeSchoolGroupIfMinimumMet, suspendSchoolGroupIfBelowMinimum } from '../../api/_lib/schoolGroupMinimumPolicy';
+import { attachSchoolGroupMinimumStatus, previewSchoolGroupContractExit, reconcileSchoolGroupMinimum, resumeSchoolGroupIfMinimumMet, suspendSchoolGroupIfBelowMinimum } from '../../api/_lib/schoolGroupMinimumPolicy';
 import { groupSeed, schoolGroupDatabase } from '../fixtures/schoolGroupDatabase';
 
 const exit = (db: ReturnType<typeof schoolGroupDatabase>) => suspendSchoolGroupIfBelowMinimum({ headers: { host: 'test.invalid' } } as any, db.client, {
@@ -12,6 +12,56 @@ const exit = (db: ReturnType<typeof schoolGroupDatabase>) => suspendSchoolGroupI
 beforeEach(() => { materialize.mockReset().mockResolvedValue(null); });
 
 describe('per-group minimum policy', () => {
+  it('keeps a three-member roster paused until its second contract is confirmed when the minimum is two', async () => {
+    const seed = groupSeed(2);
+    seed.school_contracts.slice(1).forEach(contract => {
+      contract.signing_status = 'sent';
+      contract.accepted_at = null;
+    });
+    const db = schoolGroupDatabase(seed);
+    const reconcile = () => reconcileSchoolGroupMinimum({ headers: {} } as any, db.client, {
+      organizationId: 'school', groupId: 'group', actorUserId: 'admin',
+    });
+    const status = () => attachSchoolGroupMinimumStatus(db.client, 'school', [{
+      ...db.tables.school_class_groups[0], id: 'group', members: db.tables.school_class_group_members as Array<{ student_id: string }>,
+    }]);
+
+    await reconcile();
+    expect(db.tables.school_class_groups[0].suspension_started_at).toEqual(expect.any(String));
+    const requestCount = db.requests.length;
+    expect((await status())[0].minimum_status).toEqual({ eligible_student_count: 1, unconfirmed_student_ids: ['s2', 's3'] });
+    expect(db.requests.slice(requestCount).every(request => request.method === 'GET')).toBe(true);
+    await reconcile();
+    expect(db.tables.school_class_groups[0].suspension_resumed_at).toBeFalsy();
+
+    Object.assign(db.tables.school_contracts[1], { signing_status: 'signed', accepted_at: '2026-09-01T09:00:00.000Z' });
+    await reconcile();
+    expect(db.tables.school_class_groups[0].suspension_resumed_at).toEqual(expect.any(String));
+    expect(db.tables.school_contracts[0].suspension_resumed_at).toEqual(expect.any(String));
+    expect((await status())[0].minimum_status).toEqual({ eligible_student_count: 2, unconfirmed_student_ids: ['s3'] });
+  });
+
+  it('uses the live eligibility rules for staff counts and ignores other groups and organizations', async () => {
+    const seed = groupSeed();
+    seed.school_contracts[0].suspension_started_at = '2026-09-01';
+    seed.school_contracts[0].suspension_scope = 'group_under_minimum';
+    seed.school_contracts[1].suspension_started_at = '2026-09-01';
+    seed.school_contracts[1].suspension_scope = 'individual';
+    seed.school_contracts[2].order_snapshot = { end_date: '2020-01-01' };
+    seed.school_contracts.push(
+      { ...seed.school_contracts[0], id: 'duplicate' },
+      { ...seed.school_contracts[0], id: 'outsider', student_id: 's4' },
+      { ...seed.school_contracts[2], id: 'other-org', organization_id: 'other', order_snapshot: null },
+      { ...seed.school_contracts[2], id: 'other-group', class_group_id: 'other', order_snapshot: null },
+    );
+    const db = schoolGroupDatabase(seed);
+    const groups = await attachSchoolGroupMinimumStatus(db.client, 'school', [{
+      id: 'group', members: seed.school_class_group_members as Array<{ student_id: string }>,
+    }, { id: 'no-contracts' }]);
+    expect(groups[0].minimum_status).toEqual({ eligible_student_count: 1, unconfirmed_student_ids: ['s3'] });
+    expect(groups[1]).not.toHaveProperty('minimum_status');
+  });
+
   it('keeps two remaining real members running when their group minimum is two', async () => {
     const seed = groupSeed(2);
     seed.school_contracts[0].terminated_at = '2026-09-28T08:00:00.000Z';

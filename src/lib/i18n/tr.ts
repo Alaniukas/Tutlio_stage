@@ -4393,6 +4393,7 @@ export const trOverrides: Record<string, string> = {
   "whiteboard.title": "Beyaz tahta",
   "whiteboard.open": "Beyaz tahtayı aç",
   "whiteboard.loading": "Beyaz tahta yükleniyor...",
+  "whiteboard.loadFailed": "Beyaz tahta yüklenemedi. Lütfen tekrar deneyin.",
   "whiteboard.notFound": "Beyaz tahta bulunamadı",
   "whiteboard.closedAfterLesson": "Bu dersin beyaz tahtası artık kullanılamıyor (erişim süresi sona erdi).",
   "whiteboard.unauthorized": "Bu beyaz tahtaya erişiminiz yok",

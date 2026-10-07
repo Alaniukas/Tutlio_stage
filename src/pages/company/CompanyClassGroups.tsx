@@ -285,6 +285,9 @@ export default function CompanyClassGroups() {
   };
 
   const renderCard = (g: SchoolClassGroupRecord) => {
+    const unconfirmedIds = new Set(g.minimum_status?.unconfirmed_student_ids || []);
+    const unconfirmedNames = (g.members || []).filter(member => unconfirmedIds.has(member.student_id))
+      .map(member => member.student?.full_name).filter(Boolean).join(', ');
     const content = (
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -313,7 +316,16 @@ export default function CompanyClassGroups() {
           <div className="text-sm text-gray-500 mt-1">
             {t('school.groups.members')}: {(g.members || []).map((m) => m.student?.full_name).filter(Boolean).join(', ') || '—'}
           </div>
-          {isSchoolClassGroupSuspended(g) && g.suspension_reason ? (
+          {g.minimum_status ? (
+            <div className={`mt-1 text-sm ${isSchoolClassGroupSuspended(g) ? 'text-amber-700' : 'text-gray-600'}`}>
+              <p>{t('school.groups.minimumStatus', {
+                n: g.minimum_status.eligible_student_count,
+                total: new Set((g.members || []).map(member => member.student_id)).size,
+                minimum: schoolGroupMinimumStudents(g),
+              })}</p>
+              {unconfirmedNames && <p>{t('school.groups.unconfirmedContracts', { names: unconfirmedNames })}</p>}
+            </div>
+          ) : isSchoolClassGroupSuspended(g) && g.suspension_reason ? (
             <div className="mt-1 text-sm text-amber-700">{g.suspension_reason}</div>
           ) : null}
         </div>

@@ -9,6 +9,7 @@ import { schoolTeacherContractTranslationsEe } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const ee: Record<string, string> = {
+  'school.contractsLoadFailed': 'Lepingute laadimine ebaõnnestus. Proovige uuesti.',
   ...studentNotesTranslations.ee,
   ...schoolFamilyMaterialTranslations.ee,
   ...schoolInvoiceReviewTranslations.ee,
@@ -5401,6 +5402,7 @@ export const ee: Record<string, string> = {
   'whiteboard.closedAfterLesson': 'Selle tunni tahvel pole enam saadaval (juurdepääsuperiood on lõppenud).',
   'whiteboard.exportPdf': 'Salvesta PDF-ina',
   'whiteboard.loading': 'Tahvli laadimine...',
+  "whiteboard.loadFailed": "Tahvlit ei saanud laadida. Proovi uuesti.",
   'whiteboard.notFound': 'Tahvlit ei leitud',
   'whiteboard.open': 'Ava tahvel',
   'whiteboard.retry': 'Proovi uuesti',
@@ -6008,7 +6010,9 @@ export const ee: Record<string, string> = {
   'school.groups.platform': "Platvorm",
   'school.groups.duration': "Kestus (min)",
   'school.groups.minimumActiveStudents': "Aktiivsete õpilaste miinimumarv",
-  'school.groups.minimumActiveStudentsHint': "See rühm ja selle lepingud peatatakse automaatselt, kui aktiivseid õpilasi jääb vähemaks.",
+  'school.groups.minimumActiveStudentsHint': "Miinimumi hulka loetakse ainult aktiivsed õpilased, kellel on kinnitatud ja kehtiv lisatundide leping. Individuaalselt peatatud õpilasi ei arvestata. Rühm ja selle lepingud peatatakse automaatselt, kui miinimum ei ole täidetud.",
+  'school.groups.minimumStatus': "Rühma miinimumi hulka loetakse {n} õpilast {total}-st. Vaja on vähemalt {minimum}.",
+  'school.groups.unconfirmedContracts': "Kinnitatud ja kehtiva lepinguta õpilased: {names}.",
   'school.groups.suspendedMinimum': "Peatatud: rühmas on vähem kui {n} aktiivset õpilast",
   'school.groups.meetingLink': "Tunni link",
   'school.groups.slots': "Nädala ajakava",

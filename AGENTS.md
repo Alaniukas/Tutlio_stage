@@ -91,6 +91,8 @@ Maršrutai apibrėžti `src/App.tsx`.
 
 **Portalų nustatymas:** `src/lib/account-portal.ts` — pagal `organization_admins`, `students`, `parent_profiles`, `profiles`.
 
+**Org mokėjimų suvestinė:** `/company/payments` (`CompanyPaymentReport.tsx`), meniu „Mokėjimai“, teisė `finance.view`. `GET /api/company-payment-report` organizaciją ima tik iš autentifikuoto administratoriaus. Sąskaitos, paketai ir atskiri mokėjimai sujungiami pagal jų ryšius, ne pagal mokėtojo el. paštą; mokytojų atlygio sąskaitos neįtraukiamos. Laikotarpis pagal išrašymo / užsakymo arba apmokėjimo datą, papildomi tipo / būsenos / korepetitoriaus / paieškos filtrai. Excel ir CSV eksportuoja visas filtrą atitinkančias eilutes. Mokinio pamokų skaičiai, pirmoji pamoka, bandomosios ir pirmo paketo apmokėjimas apima visą istoriją (`companyPaymentReport.ts`). Neišsaugotos apmokėjimo datos lieka tuščios.
+
 ### School maršrutai (svarbiausi)
 
 | Kelias | Komponentas | Paskirtis |

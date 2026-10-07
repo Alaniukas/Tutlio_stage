@@ -84,6 +84,7 @@ const CompanySettings = lazy(() => import('@/pages/company/CompanySettings'));
 const CompanyContracts = lazy(() => import('@/pages/company/CompanyContracts'));
 const CompanyStaffDocuments = lazy(() => import('@/pages/company/CompanyStaffDocuments'));
 const CompanyFinanceHub = lazy(() => import('@/pages/company/CompanyFinanceHub'));
+const CompanyPaymentReport = lazy(() => import('@/pages/company/CompanyPaymentReport'));
 const CompanyInstructions = lazy(() => import('@/pages/company/CompanyInstructions'));
 const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicPricing'));
 const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
@@ -587,6 +588,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/settings" element={<OrgPermissionRoute permission="settings.view" editPermission="settings.edit"><CompanySettings /></OrgPermissionRoute>} />
             <Route path="/company/notification-settings" element={<OrgPermissionRoute><NotificationPreferencesSettings portal="org_admin" /></OrgPermissionRoute>} />
             <Route path="/company/finance" element={<OrgPermissionRoute permission="finance.view" editPermission="finance.edit"><CompanyFinanceHub /></OrgPermissionRoute>} />
+            <Route path="/company/payments" element={<OrgPermissionRoute permission="finance.view"><CompanyPaymentReport /></OrgPermissionRoute>} />
             <Route path="/company/contracts" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyContracts /></OrgPermissionRoute>} />
             <Route path="/company/team" element={<OrgPermissionRoute permission="team.view" editPermission="team.edit"><CompanyTeam /></OrgPermissionRoute>} />
             <Route path="/company/groups" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyClassGroups /></OrgPermissionRoute>} />

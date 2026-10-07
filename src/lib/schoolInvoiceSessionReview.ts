@@ -1,6 +1,8 @@
 import { extraLessonsServiceStartYmd, type ExtraLessonsOrderSnapshot, type ExtraLessonsScheduleSlot, type StartWithin14Status } from './extraLessonsContract.js';
 import { canonicalSessionCharge, hasSchoolOccurrenceEvidence, type CanonicalBillableSession } from './schoolCanonicalBilling.js';
 import { isSessionInExtraLessonsServiceWindow, sessionMatchesExtraLessonsContract, sessionYmdVilnius } from './schoolExtraLessonsBilling.js';
+import { schoolGroupSessionFollowsSchedule } from './schoolSessionSchedule.js';
+import type { SchoolMemberSlot } from './schoolClassGroups.js';
 
 export type SchoolInvoiceContractWindow = {
   id: string;
@@ -31,7 +33,7 @@ export type SchoolSessionBillingDecision = {
 };
 
 export type SchoolInvoiceReviewReason = 'payable' | 'unconfirmed' | 'free' | 'outside_contract' | 'suspended'
-  | 'contract_review' | 'excluded' | 'already_invoiced' | 'not_ended';
+  | 'outside_schedule' | 'contract_review' | 'excluded' | 'already_invoiced' | 'not_ended';
 
 export type SchoolInvoiceReviewSession = {
   id: string;
@@ -48,10 +50,15 @@ export type SchoolInvoiceReviewSession = {
   decisionId: string | number | null;
   alreadyInvoiced: boolean;
   canConfirm: boolean;
+  /** Also flag historical charges while preserving their issued-invoice lock. */
+  outsideSchedule?: boolean;
 };
 
 type SchoolInvoiceActivity = {
   start_time?: string;
+  original_start_time?: string | null;
+  /** Current member selection is a fallback only when no frozen schedule exists. */
+  member_schedule_slots?: SchoolMemberSlot[] | null;
   class_group_id?: string | null;
   subject_id?: string | null;
   class_group?: { name?: string | null } | Array<{ name?: string | null }> | null;
@@ -157,7 +164,7 @@ function groupContractLooselyMatchesSession(
   const sessionLabel = sessionGroupServiceLabel(session);
   if (sessionLabel && groupServiceLabelsMatch(sessionLabel, serviceLabel)) return true;
   if (!session.class_group_id && !session.subject_id) {
-    return sessionFitsGroupSchedule(session.start_time, order.schedule_slots);
+    return sessionFitsGroupSchedule(session.original_start_time || session.start_time, order.schedule_slots);
   }
   return false;
 }
@@ -439,13 +446,16 @@ export function schoolInvoiceContractReason(
   session: CanonicalBillableSession & SchoolInvoiceActivity,
   contracts: SchoolInvoiceContractWindow[],
   studentFullName?: string | null,
-): 'payable' | 'outside_contract' | 'suspended' | 'contract_review' {
+): 'payable' | 'outside_contract' | 'outside_schedule' | 'suspended' | 'contract_review' {
   const activeContracts = filterContractsForSchoolInvoiceReview(contracts);
   const matching = activeContracts.filter((contract) => schoolInvoiceSessionMatchesContract(session, contract, studentFullName));
   if (matching.some((contract) => !contract.order_snapshot)
     || activeContracts.some((contract) => contractNeedsAdminReview(contract))) return 'contract_review';
   // Older/direct school lessons do not necessarily have an extra-lessons agreement.
   if (!matching.length) {
+    if (session.class_group_id && !schoolGroupSessionFollowsSchedule(session, session.member_schedule_slots)) {
+      return 'outside_schedule';
+    }
     // A deleted subject cannot safely turn a signed agreement's lessons into
     // unrestricted direct charges. Leave other, explicitly matched services alone.
     const unresolvedIndividual = !session.class_group_id && activeContracts.some((contract) => (
@@ -457,6 +467,14 @@ export function schoolInvoiceContractReason(
     return unresolvedIndividual ? 'contract_review' : 'payable';
   }
   const canonical = pickCanonicalInvoiceContract(matchingBillableContracts(session, activeContracts, studentFullName));
+  const scheduleContract = canonical || pickCanonicalInvoiceContract(matching);
+  if (session.class_group_id || scheduleContract?.order_snapshot?.service_type === 'group') {
+    // Match the service before checking its schedule: otherwise an unselected
+    // group day can fall through as an unrestricted direct school charge.
+    const frozenSlots = scheduleContract?.order_snapshot?.schedule_slots;
+    const slots = frozenSlots?.length ? frozenSlots : session.member_schedule_slots;
+    if (!schoolGroupSessionFollowsSchedule(session, slots)) return 'outside_schedule';
+  }
   if (!canonical) {
     const evidenced = hasSchoolOccurrenceEvidence(session)
       || Boolean(session.class_group_id && session.group_occurred);
@@ -523,7 +541,9 @@ export function reviewSchoolInvoiceSession(
     exclusionReason: decision?.excluded ? decision.reason : null,
     decisionId: decision?.id ?? null,
     alreadyInvoiced,
-    canConfirm: !alreadyInvoiced && ended && ['active', 'completed', 'no_show'].includes(session.status),
+    outsideSchedule: contractReason === 'outside_schedule',
+    canConfirm: !alreadyInvoiced && contractReason !== 'outside_schedule' && ended
+      && ['active', 'completed', 'no_show'].includes(session.status),
   };
 }
 

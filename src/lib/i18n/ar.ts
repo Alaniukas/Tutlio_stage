@@ -4431,6 +4431,7 @@ export const arOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "إخفاء حتى أفتح هذه الصفحة مجددًا",
   "pwa.guideDontShowInSettings": "عدم العرض في الإعدادات مجددًا",
   "whiteboard.loading": "جارٍ تحميل السبورة...",
+  "whiteboard.loadFailed": "تعذر تحميل السبورة. يرجى المحاولة مرة أخرى.",
   "whiteboard.notFound": "السبورة غير موجودة",
   "whiteboard.closedAfterLesson": "لم تعد سبورة هذا الدرس متاحة (انتهت فترة الوصول).",
   "whiteboard.unauthorized": "ليس لديك صلاحية الوصول إلى هذه السبورة",

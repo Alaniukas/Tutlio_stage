@@ -4433,6 +4433,7 @@ export const csOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "Skrýt do příštího otevření této stránky",
   "pwa.guideDontShowInSettings": "Už nezobrazovat v nastavení",
   "whiteboard.loading": "Načítání tabule...",
+  "whiteboard.loadFailed": "Tabuli se nepodařilo načíst. Zkuste to znovu.",
   "whiteboard.notFound": "Tabule nebyla nalezena",
   "whiteboard.closedAfterLesson": "Tabule této lekce již není dostupná (doba přístupu skončila).",
   "whiteboard.unauthorized": "K této tabuli nemáte přístup",

@@ -2673,6 +2673,8 @@ function schoolMonthlyInvoice(d: any, locale: Locale) {
   const baseLessons = Number(d.baseLessons || 0);
   const extraLessons = Number(d.extraLessons || 0);
   const fullyDiscounted = Number(d.totalAmount || 0) === 0 && Number(d.discountAmount || 0) > 0;
+  const creditApplied = Number(d.creditAppliedAmount || 0);
+  const fullyCredited = Number(d.totalAmount || 0) === 0 && creditApplied > 0;
   const detailedLines = Array.isArray(d.lines) ? d.lines : [];
   const detailRows = detailedLines.map((line: any) => {
     const qty = Number(line.quantity || 0);
@@ -2696,11 +2698,15 @@ function schoolMonthlyInvoice(d: any, locale: Locale) {
     Number(d.discountAmount || 0) > 0
       ? td('Pradinė suma', emailMoney(d.subtotalAmount, locale)) + td('Nuolaida', `<span style="color:#047857;">-${emailMoney(d.discountAmount, locale)}</span>`)
       : '',
+    creditApplied > 0 ? td('Sąskaitos suma', emailMoney(d.invoiceAmount, locale))
+      + td('Užskaityta ankstesnė permoka', `<span style="color:#047857;">-${emailMoney(creditApplied, locale)}</span>`) : '',
     td('Mokėtina suma', `<strong>${emailMoney(d.totalAmount, locale)}</strong>`),
-    fullyDiscounted ? '' : td('Apmokėti iki', String(d.dueDate || '—'), false),
+    fullyDiscounted || fullyCredited ? '' : td('Apmokėti iki', String(d.dueDate || '—'), false),
   ].join('');
   const isDetailed = detailedLines.length > 0;
-  const payBlock = fullyDiscounted
+  const payBlock = fullyCredited
+    ? '<p style="color:#047857; font-size:14px; line-height:1.6;">Mokėtina suma padengta ankstesne permoka. Apmokėti nereikia.</p>'
+    : fullyDiscounted
     ? '<p style="color:#047857; font-size:14px; line-height:1.6;">Visa suma padengta nuolaida. Apmokėti nereikia.</p>'
     : d.payUrl
     ? `<div style="text-align:center; margin:24px 0 8px;">${outlookEmailButton(String(d.payUrl), `Apmokėti ${emailMoney(d.totalAmount, locale)}`, '#4f46e5', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>

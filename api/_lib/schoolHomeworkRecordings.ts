@@ -7,6 +7,7 @@ import { createSchoolHomeworkRecordingTicket, createSchoolRecordingTicket } from
 import { canStudentAccessSchoolGroupRecordings, recordingSlotScope, recordingSlotTags, recordingVisibleToScope } from './schoolRecordingSlotAccess.js';
 import { registerDrivePublications, schoolRecordingPublicationAllowsLegacyAccess } from './schoolMaterialPublications.js';
 import { schoolFamilyPortalEnabled } from './schoolFamilyGuardianAccess.js';
+import { recordingChatFiles } from './schoolRecordingChatFiles.js';
 
 export type HomeworkRecordingFile = {
   id: string;
@@ -15,6 +16,7 @@ export type HomeworkRecordingFile = {
   durationMillis: number | null;
   size: number | null;
   streamUrl: string;
+  chatFiles: ReturnType<typeof recordingChatFiles>;
 };
 
 export type HomeworkRecordingGroup = {
@@ -68,6 +70,9 @@ function mapRecordingFiles(
       durationMillis: file.durationMillis,
       size: file.size,
       streamUrl: `/api/school-lesson-recording-stream?t=${encodeURIComponent(ticket)}`,
+      chatFiles: recordingChatFiles(file, (values) => viewerUserId
+        ? createSchoolRecordingTicket({ userId: viewerUserId, groupId: targetId, ...values })
+        : createSchoolHomeworkRecordingTicket({ studentId, groupId: targetId, ...values })),
     };
   });
 }
@@ -200,6 +205,14 @@ export async function listHomeworkGroupRecordings(
           createdTime: file.createdTime, modifiedTime: file.modifiedTime, features: params.features,
         })));
         visible = visible.filter((_, index) => allowed[index]);
+        visible = await Promise.all(visible.map(async (file) => {
+          const chats = file.chatFiles || [];
+          const allowedChats = await Promise.all(chats.map((chat) => schoolRecordingPublicationAllowsLegacyAccess(supabase, {
+            organizationId: params.organizationId, targetId: group.id, fileId: chat.id,
+            createdTime: chat.createdTime, modifiedTime: chat.modifiedTime, features: params.features,
+          })));
+          return { ...file, chatFiles: chats.filter((_, index) => allowedChats[index]) };
+        }));
       }
       return {
         id: group.id,

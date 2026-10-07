@@ -18,7 +18,10 @@ vi.mock('../../api/_lib/schoolClassGroupMaterialize.js', () => ({
   materializeClassGroupNow: mocks.materialize,
   removeFutureClassGroupSessions: vi.fn(),
 }));
-vi.mock('../../api/_lib/schoolGroupMinimumPolicy.js', () => ({ reconcileSchoolGroupMinimum: mocks.reconcileMinimum }));
+vi.mock('../../api/_lib/schoolGroupMinimumPolicy.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../api/_lib/schoolGroupMinimumPolicy.js')>(),
+  reconcileSchoolGroupMinimum: mocks.reconcileMinimum,
+}));
 
 import handler from '../../api/school-class-groups';
 
@@ -57,6 +60,7 @@ function localDatabase(members = existingMembers()) {
     school_class_groups: [{ id: GROUP_ID, organization_id: ORG_ID, tutor_id: 'teacher-user' }],
     school_class_group_slots: SLOTS.map((slot) => ({ group_id: GROUP_ID, ...slot })),
     school_class_group_members: structuredClone(members),
+    school_contracts: [],
     session_recurrence_exclusions: [],
   };
   const memberWrites: Array<{ headers: Headers; rows: Row[] }> = [];
@@ -84,7 +88,16 @@ function localDatabase(members = existingMembers()) {
     ), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
     if (method === 'GET') {
-      const rows = tables[table].filter(matches);
+      const fields = url.searchParams.get('select') || '';
+      const rows = tables[table].filter(matches).map(row => {
+        if (table === 'school_class_groups' && fields.includes('members:')) {
+          return { ...row, members: tables.school_class_group_members.filter(member => member.group_id === row.id) };
+        }
+        if (table === 'school_contracts' && fields.includes('student:')) {
+          return { ...row, student: tables.students.find(student => student.id === row.student_id) || null };
+        }
+        return row;
+      });
       const offset = Number(url.searchParams.get('offset') || 0);
       const limit = Number(url.searchParams.get('limit') || rows.length);
       return response(rows.slice(offset, offset + limit));
@@ -177,6 +190,7 @@ describe('/api/school-class-groups membership writes', () => {
   it('gives teachers deletion exclusions only for their own visible groups', async () => {
     const db = localDatabase();
     db.tables.school_class_groups.push({ id: 'other-teacher-group', organization_id: ORG_ID, tutor_id: 'other-teacher' });
+    db.tables.school_contracts.push({ id: 'private-contract', organization_id: ORG_ID, class_group_id: 'other-teacher-group', kind: 'extra_lessons', student_id: 'private-student' });
     db.tables.session_recurrence_exclusions.push(
       { id: 'own-exclusion', class_group_id: GROUP_ID, student_id: null, scope: 'single', start_time: '2026-09-30T06:00:00Z' },
       { id: 'other-exclusion', class_group_id: 'other-teacher-group', student_id: 'private-student', scope: 'all', start_time: null },
@@ -193,6 +207,29 @@ describe('/api/school-class-groups membership writes', () => {
       recurrence_exclusions: [{ student_id: null, scope: 'single', start_time: '2026-09-30T06:00:00Z' }],
     })]);
     expect(JSON.stringify(result.body)).not.toContain('private-student');
+    expect(JSON.stringify(result.body)).not.toContain('private-contract');
+  });
+
+  it('explains one confirmed member and two pending contracts without returning contract details', async () => {
+    const db = localDatabase(existingMembers(3));
+    db.tables.school_class_groups[0].minimum_active_students = 2;
+    db.tables.school_contracts.push(...['student-1', 'student-2', 'student-3'].map((student_id, index) => ({
+      id: `contract-${index}`, organization_id: ORG_ID, class_group_id: GROUP_ID, kind: 'extra_lessons', student_id,
+      signing_status: index === 0 ? 'signed' : 'sent',
+      accepted_at: index === 0 ? '2026-09-01T08:00:00.000Z' : null,
+      suspension_started_at: index === 0 ? '2026-09-01T08:01:00.000Z' : null,
+      suspension_scope: index === 0 ? 'group_under_minimum' : null,
+      order_snapshot: { end_date: '2099-06-18', payer_email: 'private@example.invalid' },
+    })));
+    mocks.serviceSupabase.mockReturnValue(db.client);
+    const result = await request('GET', {});
+    expect(result.status).toBe(200);
+    expect(result.body?.groups).toEqual([expect.objectContaining({
+      minimum_active_students: 2,
+      minimum_status: { eligible_student_count: 1, unconfirmed_student_ids: ['student-2', 'student-3'] },
+    })]);
+    expect(JSON.stringify(result.body)).not.toContain('private@example.invalid');
+    expect(JSON.stringify(result.body)).not.toContain('contract-0');
   });
 
   it('adds a seventh member to six existing members without resetting enrollment dates', async () => {

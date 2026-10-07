@@ -14,7 +14,7 @@ import {
   removeFutureClassGroupSessions,
   type ReconcileResult,
 } from './_lib/schoolClassGroupMaterialize.js';
-import { reconcileSchoolGroupMinimum } from './_lib/schoolGroupMinimumPolicy.js';
+import { attachSchoolGroupMinimumStatus, reconcileSchoolGroupMinimum } from './_lib/schoolGroupMinimumPolicy.js';
 
 const GROUP_SELECT = '*, tutor:profiles!school_class_groups_tutor_id_fkey(full_name), slots:school_class_group_slots(*), members:school_class_group_members(student_id, enrolled_at, schedule_slots, recording_access, student:students(full_name, email, grade))';
 
@@ -211,17 +211,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const students = studentsResult.data || [];
     if (admin.ok) {
       try {
-        return res.status(200).json({ groups: await attachAttendanceExclusions(supabase, data || []), students });
+        const groups = await attachAttendanceExclusions(supabase, data || []);
+        return res.status(200).json({ groups: await attachSchoolGroupMinimumStatus(supabase, orgId, groups), students });
       } catch {
-        return res.status(503).json({ error: 'Could not load group attendance exclusions' });
+        return res.status(503).json({ error: 'Could not load group details' });
       }
     }
     if (profile?.organization_id === orgId) {
       const tutorGroups = (data || []).filter((g) => g.tutor_id === auth.userId);
       try {
-        return res.status(200).json({ groups: await attachAttendanceExclusions(supabase, tutorGroups), students });
+        const groups = await attachAttendanceExclusions(supabase, tutorGroups);
+        return res.status(200).json({ groups: await attachSchoolGroupMinimumStatus(supabase, orgId, groups), students });
       } catch {
-        return res.status(503).json({ error: 'Could not load group attendance exclusions' });
+        return res.status(503).json({ error: 'Could not load group details' });
       }
     }
     if (portalStudentIds.length) {

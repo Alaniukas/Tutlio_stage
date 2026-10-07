@@ -3,7 +3,10 @@ import type { VercelRequest, VercelResponse } from './types';
 import { serviceSupabase } from './_lib/extraLessonsContractShared.js';
 import {
   fetchDriveRecordingRange,
+  DRIVE_CHAT_MAX_BYTES,
   getDriveFileMetadata,
+  isChatFileForRecording,
+  isDriveRecordingChatFile,
   isRecordingWithinRetention,
   normalizeDriveByteRange,
 } from './_lib/googleDriveRecordings.js';
@@ -84,19 +87,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const file = await getDriveFileMetadata(fileId);
+    const isChat = isDriveRecordingChatFile(file);
     if (
-      !file.mimeType.startsWith('video/')
+      (!file.mimeType.startsWith('video/') && !isChat)
       || !file.canDownload
       || !file.parents.includes(mapping.drive_folder_id)
       || !isRecordingWithinRetention(file.createdTime)
     ) {
       return res.status(404).json({ error: 'Įrašas nerastas arba jo saugojimo terminas pasibaigė.' });
     }
-    if (homeworkTicket && !await schoolRecordingPublicationAllowsLegacyAccess(supabase, {
-      organizationId: group.organizationId, targetId: group.id, fileId,
-      createdTime: file.createdTime, modifiedTime: file.modifiedTime, features: group.features,
-    })) {
-      return res.status(403).json({ error: 'Prisijunkite prie mokyklos paskyros, kad galėtumėte peržiūrėti šį įrašą.' });
+    // Chat tickets bind both files. Slot and publication checks use the video,
+    // so an untagged or newly copied chat cannot widen the recording's audience.
+    let recording = file;
+    if (isChat) {
+      const recordingFileId = (homeworkTicket || loginTicket)!.recordingFileId;
+      if (!recordingFileId) return res.status(404).json({ error: 'Pokalbio įrašas nerastas.' });
+      recording = await getDriveFileMetadata(recordingFileId);
+      if (
+        !isChatFileForRecording(file, recording)
+        || !recording.canDownload
+        || !recording.parents.includes(mapping.drive_folder_id)
+        || !isRecordingWithinRetention(recording.createdTime)
+      ) return res.status(404).json({ error: 'Pokalbio įrašas nerastas.' });
+    }
+    if (homeworkTicket) {
+      const allowed = await Promise.all((isChat ? [recording, file] : [recording]).map((publication) =>
+        schoolRecordingPublicationAllowsLegacyAccess(supabase, {
+          organizationId: group.organizationId, targetId: group.id, fileId: publication.id,
+          createdTime: publication.createdTime, modifiedTime: publication.modifiedTime, features: group.features,
+        }),
+      ));
+      if (allowed.includes(false)) {
+        return res.status(403).json({ error: 'Prisijunkite prie mokyklos paskyros, kad galėtumėte peržiūrėti šį įrašą.' });
+      }
     }
     if (group.kind === 'class_group') {
       const [scope, tag] = await Promise.all([
@@ -107,11 +130,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           !homeworkTicket && (access?.adminOrganizationId === group.organizationId || group.tutorId === loginTicket?.userId),
           { organizationId: group.organizationId, features: group.features },
         ),
-        recordingSlotTag(supabase, group.sourceId, fileId),
+        recordingSlotTag(supabase, group.sourceId, recording.id),
       ]);
       if (!recordingVisibleToScope(scope, tag)) {
         return res.status(403).json({ error: 'Šis įrašas nėra skirtas vaiko lankomam grupės laikui.' });
       }
+    }
+    if (isChat) {
+      let content: Buffer | null = null;
+      if (req.method === 'GET' && file.size! > 0) {
+        const upstream = await fetchDriveRecordingRange(file.id, { start: 0, end: file.size! - 1 });
+        content = Buffer.from(await upstream.arrayBuffer());
+        if (content.byteLength !== file.size || content.byteLength > DRIVE_CHAT_MAX_BYTES) {
+          return res.status(502).json({ error: 'Nepavyko perskaityti pokalbio įrašo.' });
+        }
+      }
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Length', String(file.size));
+      res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+      if (req.method === 'HEAD') return res.status(200).end();
+      return res.status(200).send(content || Buffer.alloc(0));
     }
     if (!file.size) return res.status(422).json({ error: 'Google Drive nepateikė įrašo dydžio.' });
 

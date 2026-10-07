@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { MonthFilterInput } from '@/components/ui/month-filter-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import SchoolInvoiceOverpaymentsDialog from './SchoolInvoiceOverpaymentsDialog';
 
 export type SchoolMonthlyInvoiceStudentOption = {
   id: string;
@@ -44,6 +45,8 @@ export type SchoolMonthlyInvoicePreview = {
   subtotalEur: number;
   discountAmountEur: number;
   totalEur: number;
+  creditAppliedEur?: number;
+  amountDueEur?: number;
   reviewSessionIds?: string[];
   organizationName?: string;
   payerEmail?: string;
@@ -80,6 +83,7 @@ function discountText(line: SchoolMonthlyInvoicePreviewLine): string {
 }
 
 export function SchoolMonthlyInvoicePreviewCard({ preview }: { preview: SchoolMonthlyInvoicePreview }) {
+  const { t } = useTranslation();
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4">
@@ -128,8 +132,12 @@ export function SchoolMonthlyInvoicePreviewCard({ preview }: { preview: SchoolMo
           <span className="text-right font-medium text-slate-800">{money(preview.subtotalEur)}</span>
           <span className="text-slate-500">Nuolaida</span>
           <span className="text-right font-semibold text-emerald-700">-{money(preview.discountAmountEur)}</span>
+          {Boolean(preview.creditAppliedEur) && <>
+            <span className="text-slate-500">{t('school.invoice.credit.total')}</span><span className="text-right font-medium">{money(preview.totalEur)}</span>
+            <span className="text-slate-500">{t('school.invoice.credit.applied')}</span><span className="text-right font-semibold text-emerald-700">-{money(preview.creditAppliedEur || 0)}</span>
+          </>}
           <span className="border-t border-slate-300 pt-2 font-bold text-slate-900">Mokėti</span>
-          <span className="border-t border-slate-300 pt-2 text-right text-lg font-bold text-slate-900">{money(preview.totalEur)}</span>
+          <span className="border-t border-slate-300 pt-2 text-right text-lg font-bold text-slate-900">{money(preview.amountDueEur ?? preview.totalEur)}</span>
         </div>
         <p className="mt-3 text-right text-xs text-slate-500">Apmokėti iki {preview.dueDate}</p>
       </div>
@@ -162,6 +170,7 @@ export default function SchoolMonthlyInvoiceDialog({
   const [batchPayers, setBatchPayers] = useState<SchoolPayerInvoiceGroup[] | null>(null);
   const [sendingKey, setSendingKey] = useState<string | null>(null);
   const [singleChild, setSingleChild] = useState(!batch);
+  const [overpaymentsOpen, setOverpaymentsOpen] = useState(false);
   const batchNeedsRefresh = useRef(false);
   const batchScrollTop = useRef(0);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -256,6 +265,10 @@ export default function SchoolMonthlyInvoiceDialog({
     setPdfUrl(nextUrl);
     return () => URL.revokeObjectURL(nextUrl);
   }, [preview?.pdfBase64]);
+
+  useEffect(() => {
+    if (!open) setOverpaymentsOpen(false);
+  }, [open]);
 
   useEffect(() => {
     if (!open || previewFixture) return;
@@ -425,6 +438,7 @@ export default function SchoolMonthlyInvoiceDialog({
             <FileText className="h-5 w-5 text-emerald-700" />
             {batch && !singleChild ? t('school.invoice.batch.title') : 'Formuoti mėnesinę sąskaitą'}
           </DialogTitle>
+          <Button type="button" variant="outline" className="w-fit" disabled={loading || !!sendingKey} onClick={() => setOverpaymentsOpen(true)}>{t('school.invoice.credit.title')}</Button>
           <p className="text-sm text-slate-500">
             {batch && !singleChild
               ? t('school.invoice.batch.help')
@@ -455,7 +469,9 @@ export default function SchoolMonthlyInvoiceDialog({
                       <p className="mt-1 text-slate-500">{session.tutorName} · {money(session.unitPriceEur)}</p>
                     </td>
                     <td className="p-3">
-                      <p>{t(`school.invoice.review.status.${session.status}`)}</p>
+                      <p>{session.outsideSchedule || session.reason === 'outside_schedule'
+                        ? t('school.invoice.review.scheduleMismatch')
+                        : t(`school.invoice.review.status.${session.status}`)}</p>
                       {session.reason === 'unconfirmed' && <p className="mt-1 text-amber-700">{t('school.invoice.review.unconfirmed')}</p>}
                       {session.canConfirm && review.canEditAttendance && !previewFixture && (
                         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -466,8 +482,12 @@ export default function SchoolMonthlyInvoiceDialog({
                     </td>
                     <td className="p-3">
                       <p className={session.included ? 'font-medium text-emerald-700' : 'text-slate-600'}>{t(`school.invoice.review.reason.${session.reason}`)}</p>
+                      {session.outsideSchedule && session.alreadyInvoiced && (
+                        <p className="mt-1 text-amber-700">{t('school.invoice.review.scheduleMismatch')}</p>
+                      )}
                       {session.exclusionReason && <p className="mt-1 max-w-sm break-words text-slate-500">{session.exclusionReason}</p>}
-                      {review.canEditBilling && !session.alreadyInvoiced && session.reason !== 'not_ended' && !previewFixture && (
+                      {review.canEditBilling && !session.alreadyInvoiced && !session.outsideSchedule
+                        && session.reason !== 'outside_schedule' && session.reason !== 'not_ended' && !previewFixture && (
                         <Button className="mt-2" size="sm" variant="outline" disabled={loading} onClick={() => {
                           setDecisionEditor({ sessionId: session.id, excluded: session.reason !== 'excluded' });
                           setDecisionReason('');
@@ -556,7 +576,8 @@ export default function SchoolMonthlyInvoiceDialog({
                       <div className="w-full min-w-0 sm:w-auto sm:flex-1">
                         <p className="break-words font-semibold text-slate-900">{group.payerName}</p>
                         <p className="break-all text-xs text-slate-500">{group.payerEmail || t('school.invoice.review.noPayer')}</p>
-                        <p className="mt-1 text-sm font-medium text-emerald-800">{money(group.totalEur)}</p>
+                        <p className="mt-1 text-sm font-medium text-emerald-800">{money(group.amountDueEur ?? group.totalEur)}</p>
+                        {Boolean(group.creditAppliedEur) && <p className="text-xs text-emerald-700">{t('school.invoice.credit.applied')}: {money(group.creditAppliedEur || 0)}</p>}
                       </div>
                       <Button
                         type="button"
@@ -575,7 +596,7 @@ export default function SchoolMonthlyInvoiceDialog({
                             {t('school.invoice.batch.childLine', {
                               name: child.fullName,
                               count: String(child.lessonCount),
-                              amount: money(child.totalEur),
+                              amount: money(child.amountDueEur ?? child.totalEur),
                             })}
                             {child.reviewSessionIds.length ? <span className="ml-2 text-amber-700">{child.reviewReasons?.length
                               ? child.reviewReasons.map((reason) => t(`school.invoice.review.reason.${reason}`)).join(' · ')
@@ -686,6 +707,8 @@ export default function SchoolMonthlyInvoiceDialog({
           </div>
         )}
       </DialogContent>
+      <SchoolInvoiceOverpaymentsDialog open={open && overpaymentsOpen} onOpenChange={setOverpaymentsOpen} organizationId={organizationId}
+        onChanged={() => { setPreview(null); setReview(null); setBatchPayers(null); }} />
     </Dialog>
   );
 }

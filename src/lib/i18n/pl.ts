@@ -8,6 +8,7 @@ import { schoolTeacherContractTranslationsPl } from './schoolTeacherContractTran
 import { schoolConsultationsPl } from './schoolConsultationsTranslations.js';
 
 export const pl: Record<string, string> = {
+  'school.contractsLoadFailed': 'Nie udało się wczytać umów. Spróbuj ponownie.',
   ...studentNotesTranslations.pl,
   ...schoolFamilyMaterialTranslations.pl,
   ...schoolInvoiceReviewTranslations.pl,
@@ -5018,6 +5019,7 @@ export const pl: Record<string, string> = {
   'whiteboard.closedAfterLesson': 'Tablica tej lekcji nie jest już dostępna (okres dostępu się zakończył).',
   'whiteboard.exportPdf': 'Zapisz jako PDF',
   'whiteboard.loading': 'Ładowanie tablicy...',
+  "whiteboard.loadFailed": "Nie udało się wczytać tablicy. Spróbuj ponownie.",
   'whiteboard.notFound': 'Nie znaleziono tablicy',
   'whiteboard.open': 'Otwórz tablicę',
   'whiteboard.retry': 'Spróbuj ponownie',
@@ -5584,7 +5586,9 @@ export const pl: Record<string, string> = {
   'school.groups.platform': "Platforma",
   'school.groups.duration': "Czas trwania (min)",
   'school.groups.minimumActiveStudents': "Minimalna liczba aktywnych uczniów",
-  'school.groups.minimumActiveStudentsHint': "Ta grupa i jej umowy są automatycznie zawieszane, gdy pozostaje mniej aktywnych uczniów.",
+  'school.groups.minimumActiveStudentsHint': "Do minimum wliczają się tylko aktywni uczniowie z potwierdzoną, ważną umową na dodatkowe lekcje. Uczniowie z indywidualnym zawieszeniem nie są wliczani. Grupa i jej umowy są automatycznie zawieszane poniżej minimum.",
+  'school.groups.minimumStatus': "Do minimum grupy wlicza się {n} z {total} uczniów. Wymaganych jest co najmniej {minimum}.",
+  'school.groups.unconfirmedContracts': "Uczniowie bez potwierdzonej, ważnej umowy: {names}.",
   'school.groups.suspendedMinimum': "Zawieszona: w grupie jest mniej niż {n} aktywnych uczniów",
   'school.groups.meetingLink': "Link do zajęć",
   'school.groups.slots': "Harmonogram tygodniowy",

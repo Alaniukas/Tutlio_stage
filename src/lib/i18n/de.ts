@@ -9,6 +9,7 @@ import { schoolTeacherContractTranslationsDe } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const de: Record<string, string> = {
+  'school.contractsLoadFailed': 'Die Verträge konnten nicht geladen werden. Bitte versuchen Sie es erneut.',
   ...studentNotesTranslations.de,
   ...schoolFamilyMaterialTranslations.de,
   ...schoolInvoiceReviewTranslations.de,
@@ -4769,6 +4770,7 @@ export const de: Record<string, string> = {
   'whiteboard.closedAfterLesson': 'Das Whiteboard dieser Stunde ist nicht mehr verfügbar (der Zugriffszeitraum ist abgelaufen).',
   'whiteboard.exportPdf': 'Als PDF speichern',
   'whiteboard.loading': 'Whiteboard wird geladen...',
+  "whiteboard.loadFailed": "Die Tafel konnte nicht geladen werden. Bitte versuche es erneut.",
   'whiteboard.notFound': 'Whiteboard nicht gefunden',
   'whiteboard.open': 'Whiteboard öffnen',
   'whiteboard.retry': 'Erneut versuchen',
@@ -5427,7 +5429,9 @@ export const de: Record<string, string> = {
   'school.groups.platform': "Plattform",
   'school.groups.duration': "Dauer (Min.)",
   'school.groups.minimumActiveStudents': "Mindestanzahl aktiver Schüler",
-  'school.groups.minimumActiveStudentsHint': "Diese Gruppe und ihre Verträge werden automatisch pausiert, wenn weniger aktive Schüler verbleiben.",
+  'school.groups.minimumActiveStudentsHint': "Für die Mindestanzahl zählen nur aktive Schüler mit einem bestätigten, gültigen Vertrag für Zusatzstunden. Einzeln pausierte Schüler werden nicht mitgezählt. Unter der Mindestanzahl werden die Gruppe und ihre Verträge automatisch pausiert.",
+  'school.groups.minimumStatus': "{n} von {total} Schülern zählen für die Mindestanzahl der Gruppe. Erforderlich sind mindestens {minimum}.",
+  'school.groups.unconfirmedContracts': "Schüler ohne bestätigten, gültigen Vertrag: {names}.",
   'school.groups.suspendedMinimum': "Pausiert: weniger als {n} aktive Schüler in der Gruppe",
   'school.groups.meetingLink': "Unterrichtslink",
   'school.groups.slots': "Wochenplan",

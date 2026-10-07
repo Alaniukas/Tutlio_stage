@@ -43,6 +43,7 @@ export type SchoolMonthlyInvoicePdfData = {
   subtotalEur: number;
   discountAmountEur: number;
   totalEur: number;
+  creditAppliedEur?: number;
   discountNote?: string | null;
   issuedByName?: string | null;
   branding?: InvoicePdfBranding | null;
@@ -192,7 +193,7 @@ export async function generateSchoolMonthlyInvoicePdf(data: SchoolMonthlyInvoice
   doc.registerFontkit(fontkit);
   const font = await doc.embedFont(new Uint8Array(readFileSync(resolveInvoiceFontPath('regular'))), { subset: true });
   const bold = await doc.embedFont(new Uint8Array(readFileSync(resolveInvoiceFontPath('bold'))), { subset: true });
-  const page = doc.addPage([PAGE_W, PAGE_H]);
+  let page = doc.addPage([PAGE_W, PAGE_H]);
   const black = rgb(0, 0, 0);
 
   if (data.preview) {
@@ -306,17 +307,27 @@ export async function generateSchoolMonthlyInvoicePdf(data: SchoolMonthlyInvoice
   const headers = ['Mokinys', 'Užsiėmimas', 'Pamokų sk.', 'Kaina', 'Suma', 'Nuolaida', 'Mokėti'];
   let x = MARGIN;
   const headerH = 30;
-  headers.forEach((header, index) => {
-    drawCell(page, x, y - headerH, COLS[index], headerH);
-    cellText(page, header, x, y - headerH, COLS[index], headerH, bold, 7.1, true);
-    x += COLS[index];
-  });
-  y -= headerH;
+  const continuationPage = () => {
+    page = doc.addPage([PAGE_W, PAGE_H]);
+    y = PAGE_H - MARGIN;
+    page.drawText(data.preview ? 'PERŽIŪRA - SĄSKAITA DAR NEIŠSIŲSTA' : formatSchoolInvoiceNumberLabel(data.invoiceNumber), { x:MARGIN,y,size:10,font:bold,color:black });
+    y -= 26;
+  };
+  const tableHeader = () => {
+    x = MARGIN;
+    headers.forEach((header, index) => {
+      drawCell(page, x, y - headerH, COLS[index], headerH);
+      cellText(page, header, x, y - headerH, COLS[index], headerH, bold, 7.1, true);
+      x += COLS[index];
+    });
+    y -= headerH;
+  };
+  tableHeader();
 
   for (const line of data.lines) {
     const activityLines = wrap(line.activity, font, FONT_SIZE, COLS[1] - 8).length;
     const rowH = Math.max(28, activityLines * ROW_LINE + 9);
-    if (y - rowH < 145) break;
+    if (y - rowH < 145) { continuationPage(); tableHeader(); }
     const discountText = line.discountAmountEur
       ? `${line.discountLabel || ''}\n-${eur(line.discountAmountEur)}`.trim()
       : '-';
@@ -338,6 +349,10 @@ export async function generateSchoolMonthlyInvoicePdf(data: SchoolMonthlyInvoice
     y -= rowH;
   }
 
+  const creditApplied = Number(data.creditAppliedEur || 0);
+  const noteHeight = data.discountNote ? wrap(`Nuolaidos pastaba: ${data.discountNote}`,font,8,TABLE_W).length * 11 + 24 : 0;
+  const summaryHeight = 92 + (creditApplied > 0 ? 32 : 0) + noteHeight + (data.dueDate ? 24 : 0);
+  if (y - summaryHeight < 135) continuationPage();
   y -= 17;
   const summaryX = 348;
   page.drawText('Pradinė suma:', { x: summaryX, y, size: 8.5, font, color: black });
@@ -345,11 +360,20 @@ export async function generateSchoolMonthlyInvoicePdf(data: SchoolMonthlyInvoice
   y -= 16;
   page.drawText('Nuolaida:', { x: summaryX, y, size: 8.5, font, color: black });
   page.drawText(`-${eur(data.discountAmountEur)}`, { x: 485, y, size: 8.5, font, color: black });
+  const amountDue = Math.max(0, Math.round((data.totalEur - creditApplied) * 100)) / 100;
+  if (creditApplied > 0) {
+    y -= 16;
+    page.drawText('Sąskaitos suma:', { x: summaryX, y, size: 8.5, font, color: black });
+    page.drawText(eur(data.totalEur), { x: 485, y, size: 8.5, font, color: black });
+    y -= 16;
+    page.drawText('Užskaityta permoka:', { x: summaryX, y, size: 8.5, font, color: black });
+    page.drawText(`-${eur(creditApplied)}`, { x: 485, y, size: 8.5, font, color: black });
+  }
   y -= 19;
   page.drawText('MOKĖTI:', { x: summaryX, y, size: 10, font: bold, color: black });
-  page.drawText(eur(data.totalEur), { x: 485, y, size: 10, font: bold, color: black });
+  page.drawText(eur(amountDue), { x: 485, y, size: 10, font: bold, color: black });
   y -= 22;
-  page.drawText(`Suma žodžiais: ${amountInLithuanianWords(data.totalEur)}`, { x: MARGIN + 155, y, size: 8.5, font, color: black });
+  page.drawText(`Suma žodžiais: ${amountInLithuanianWords(amountDue)}`, { x: MARGIN + 155, y, size: 8.5, font, color: black });
 
   if (data.discountNote) {
     y -= 24;
@@ -382,5 +406,8 @@ export async function generateSchoolMonthlyInvoicePdf(data: SchoolMonthlyInvoice
     page.drawText(contact, { x: MARGIN, y: 37, size: 8, font, color: black });
   }
 
+  if (doc.getPageCount()>1) doc.getPages().forEach((invoicePage,index) => {
+    invoicePage.drawText(`${index+1} / ${doc.getPageCount()}`, {x:PAGE_W-MARGIN-30,y:20,size:8,font,color:black});
+  });
   return doc.save();
 }

@@ -113,7 +113,7 @@ function tableBuilder(table: string) {
     lt: () => builder,
     maybeSingle: async () => ({
       data: table === 'organizations' ? mocks.organization : null,
-      error: null,
+      error: mocks.lookupErrors[table] || null,
     }),
     then(resolve: (value: any) => unknown, reject: (reason: unknown) => unknown) {
       const error = mocks.lookupErrors[emailLookup && table === 'parent_profiles' ? 'parent_profiles_email' : table];
@@ -309,6 +309,86 @@ describe('session reminder capacity behavior', () => {
     const reminders = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body || '{}'))).filter(body => String(body.type || '').startsWith('session_reminder'));
     expect(reminders).toHaveLength(1);
     expect(reminders[0]).toMatchObject({ type: 'session_reminder_payer', to: 'payer@example.test', data: { schoolJoinOnly: true } });
+  });
+
+  it('sends one join-only legacy reminder during family onboarding at the configured hours', async () => {
+    const session = futureSession();
+    Object.assign(session.student, { email: '', organization_id: 'school-1', payer_email: 'payer@example.test', parent_secondary_email: 'second@example.test' });
+    session.tutor.organization_id = 'school-1';
+    session.reminder_tutor_sent = true;
+    mocks.organization = { entity_type: 'school', features: {
+      school_family_portal: true,
+      school_family_email_transition_until: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+    } };
+    mocks.sessions.push(session);
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handler(mockReq(), mockRes());
+
+    expect(reminderRequestBodies(fetchMock)).toMatchObject([{
+      type: 'session_reminder_payer', to: 'payer@example.test',
+      data: { schoolJoinOnly: true, schoolContractAccessRequired: true },
+    }]);
+    expect(reminderRequestBodies(fetchMock)).toHaveLength(1);
+    expect(mocks.updateCalls).toContainEqual({ reminder_payer_sent: true });
+  });
+
+  it('stops legacy delivery for a lesson after the onboarding cutoff', async () => {
+    const session = futureSession();
+    Object.assign(session.student, { email: '', organization_id: 'school-1', payer_email: 'payer@example.test' });
+    session.tutor.organization_id = 'school-1';
+    session.reminder_tutor_sent = true;
+    mocks.organization = { entity_type: 'school', features: {
+      school_family_portal: true,
+      school_family_email_transition_until: new Date(Date.now() + 20 * 60_000).toISOString(),
+    } };
+    mocks.sessions.push(session);
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handler(mockReq(), mockRes());
+
+    expect(reminderRequestBodies(fetchMock)).toEqual([]);
+    expect(mocks.updateCalls).not.toContainEqual({ reminder_payer_sent: true });
+  });
+
+  it('retains linked-parent fallback during onboarding when the student has no contact addresses', async () => {
+    registeredParentOnlySchoolSession();
+    Object.assign(mocks.organization!.features, {
+      school_family_portal: true,
+      school_family_email_transition_until: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+    });
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handler(mockReq(), mockRes());
+
+    expect(reminderRequestBodies(fetchMock)).toHaveLength(1);
+    expect(reminderRequestBodies(fetchMock)[0]).toMatchObject({ to: 'first@example.test', data: { schoolJoinOnly: true } });
+  });
+
+  it.each(['opt_out', 'delivery_failure', 'guardian_lookup_failure'])('keeps onboarding reminders consistent for %s', async mode => {
+    const session = futureSession();
+    Object.assign(session.student, { email: '', organization_id: 'school-1', payer_email: 'payer@example.test' });
+    session.tutor.organization_id = 'school-1';
+    session.reminder_tutor_sent = true;
+    mocks.organization = { entity_type: 'school', features: {
+      school_family_portal: true,
+      school_family_email_transition_until: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+    } };
+    mocks.sessions.push(session);
+    if (mode === 'opt_out') mocks.emailOptOuts.push({ email: 'payer@example.test' });
+    if (mode === 'guardian_lookup_failure') mocks.lookupErrors.school_family_guardians = { message: 'Temporary lookup failure' };
+    const fetchMock = vi.fn(async () => emailResponse(mode !== 'delivery_failure'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handler(mockReq(), mockRes());
+
+    if (mode === 'delivery_failure') expect(reminderRequestBodies(fetchMock)).toHaveLength(1);
+    else expect(reminderRequestBodies(fetchMock)).toEqual([]);
+    if (mode === 'opt_out') expect(mocks.updateCalls).toContainEqual({ reminder_payer_sent: true });
+    else expect(mocks.updateCalls).not.toContainEqual({ reminder_payer_sent: true });
   });
 
   it('chooses exactly one linked registered parent in stable order when student contacts are empty', async () => {

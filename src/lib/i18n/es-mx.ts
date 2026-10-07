@@ -4393,6 +4393,7 @@ export const esMxOverrides: Record<string, string> = {
   "whiteboard.title": "Pizarra",
   "whiteboard.open": "Abrir pizarra",
   "whiteboard.loading": "Cargando la pizarra...",
+  "whiteboard.loadFailed": "No se pudo cargar la pizarra. Inténtalo de nuevo.",
   "whiteboard.notFound": "Pizarra no encontrada",
   "whiteboard.closedAfterLesson": "La pizarra de esta clase ya no está disponible (el período de acceso ha terminado).",
   "whiteboard.unauthorized": "No tiene acceso a esta pizarra",

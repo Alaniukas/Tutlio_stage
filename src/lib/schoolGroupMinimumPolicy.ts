@@ -37,6 +37,12 @@ export type SchoolClassGroupSuspensionState = {
   suspension_resumed_at?: string | null;
 };
 
+/** Live staff-only explanation of the contract-based group minimum. */
+export type SchoolGroupMinimumStatus = {
+  eligible_student_count: number;
+  unconfirmed_student_ids: string[];
+};
+
 const SCHOOL_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Europe/Vilnius',
   year: 'numeric',

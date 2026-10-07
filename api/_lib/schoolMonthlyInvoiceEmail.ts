@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildSchoolMonthlyInvoicePayUrl } from './publicLinkToken.js';
 import { schoolMonthlyInvoiceIdempotencyKey } from './schoolMonthlyInvoiceDelivery.js';
+import { schoolInvoiceAmountDue } from '../../src/lib/schoolInvoiceOverpayments.js';
 
 export type SchoolMonthlyInvoiceRow = {
   id: string;
@@ -21,6 +22,7 @@ export type SchoolMonthlyInvoiceRow = {
   extra_lessons: number;
   extra_amount_eur: number | string;
   total_eur: number | string;
+  credit_applied_eur?: number | string;
   due_date: string | null;
   payment_status: string;
   invoice_email_sent_at?: string | null;
@@ -102,7 +104,8 @@ export function buildSchoolMonthlyInvoiceEmailData(
   invoice: SchoolMonthlyInvoiceRow,
   ctx: Pick<SchoolMonthlyInvoiceEmailContext, 'publicOrigin' | 'student' | 'org' | 'contract' | 'lines'>,
 ): Record<string, unknown> {
-  const cardPayments = schoolOrgCanTakeCardPayments(ctx.org) && Number(invoice.total_eur) > 0;
+  const amountDue = schoolInvoiceAmountDue(invoice);
+  const cardPayments = schoolOrgCanTakeCardPayments(ctx.org) && amountDue > 0;
   const lines = ctx.lines || invoice.lines || [];
   return {
     organizationId: ctx.org.id,
@@ -123,7 +126,9 @@ export function buildSchoolMonthlyInvoiceEmailData(
     baseAmount: Number(invoice.base_amount_eur || 0).toFixed(2),
     extraLessons: Number(invoice.extra_lessons || 0),
     extraAmount: Number(invoice.extra_amount_eur || 0).toFixed(2),
-    totalAmount: Number(invoice.total_eur || 0).toFixed(2),
+    totalAmount: amountDue.toFixed(2),
+    invoiceAmount: Number(invoice.total_eur || 0).toFixed(2),
+    creditAppliedAmount: Number(invoice.credit_applied_eur || 0).toFixed(2),
     subtotalAmount: Number(invoice.subtotal_eur ?? invoice.total_eur ?? 0).toFixed(2),
     discountAmount: Number(invoice.discount_amount_eur || 0).toFixed(2),
     discountNote: invoice.discount_note || '',
@@ -149,7 +154,7 @@ export async function sendSchoolMonthlyInvoiceEmail(
 ): Promise<{ sent: boolean; alreadySent?: boolean; reason?: string }> {
   if (invoice.invoice_email_sent_at) return { sent: false, alreadySent: true };
   if (invoice.payment_status !== 'pending'
-    && !(invoice.payment_status === 'paid' && Number(invoice.total_eur) === 0)) {
+    && !(invoice.payment_status === 'paid' && schoolInvoiceAmountDue(invoice) === 0)) {
     return { sent: false, alreadySent: true };
   }
   // Financial documents go to the payer, including when the child has their own inbox.

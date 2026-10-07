@@ -4,6 +4,11 @@ import { buildCompanyNavItems } from '@/components/CompanyLayout';
 const translate = (key: string) => key;
 
 describe('organization sidebar navigation', () => {
+  it('provides the company payment report to finance viewers while schools use their existing payment hub', () => {
+    expect(buildCompanyNavItems(false, '/company', translate, false).find(item => item.href === '/company/payments'))
+      .toMatchObject({ label: 'companyNav.payments', permission: 'finance.view' });
+    expect(buildCompanyNavItems(true, '/school', translate, false).some(item => item.href === '/school/payments')).toBe(false);
+  });
   it('lets restricted admin seats reach their personal settings without organization settings access', () => {
     const items = buildCompanyNavItems(false, '/company', translate, false, false, true, false, false, false, false, true);
     expect(items.find(item => item.href === '/company/notification-settings')).toMatchObject({ permission: null });

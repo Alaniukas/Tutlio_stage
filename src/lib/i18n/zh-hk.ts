@@ -4432,6 +4432,7 @@ export const zhHkOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "隱藏，直至我再次開啟此頁面",
   "pwa.guideDontShowInSettings": "不再於設定中顯示",
   "whiteboard.loading": "正在載入白板…",
+  "whiteboard.loadFailed": "無法載入白板，請再試一次。",
   "whiteboard.notFound": "找不到白板",
   "whiteboard.closedAfterLesson": "此課堂白板已無法使用，存取期限已結束。",
   "whiteboard.unauthorized": "你沒有權限存取此白板",

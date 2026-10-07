@@ -4434,6 +4434,7 @@ export const skOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "Skryť do ďalšieho otvorenia tejto stránky",
   "pwa.guideDontShowInSettings": "Už nezobrazovať v nastaveniach",
   "whiteboard.loading": "Interaktívna tabuľa sa načítava...",
+  "whiteboard.loadFailed": "Tabuľu sa nepodarilo načítať. Skúste to znova.",
   "whiteboard.notFound": "Interaktívna tabuľa sa nenašla",
   "whiteboard.closedAfterLesson": "Interaktívna tabuľa tejto hodiny už nie je dostupná (obdobie prístupu sa skončilo).",
   "whiteboard.unauthorized": "K tejto interaktívnej tabuli nemáte prístup",

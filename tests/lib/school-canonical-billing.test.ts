@@ -6,6 +6,17 @@ const base = { unit_price_eur: 10, base_lessons_per_month: 8, period_start: '202
 const session = { id: 'one', start_time: '2026-08-10T10:00:00Z', end_time: '2026-08-10T11:00:00Z', status: 'completed', tutor_joined_at: '2026-08-10T10:00:00Z', school_billing_kind: 'base' as const };
 
 describe('canonical DOCX monthly charges', () => {
+  it('bills only the child\'s selected group slot, including a rescheduled occurrence', () => {
+    const bill = computeCanonicalSchoolMonthlyBill({ ...base,
+      groupScheduleSlots: [{ weekday: 2, start_time: '13:00' }],
+      sessions: [session,
+        { ...session, id: 'tuesday', start_time: '2026-08-11T10:00:00Z', end_time: '2026-08-11T11:00:00Z' },
+        { ...session, id: 'moved-tuesday', start_time: '2026-08-19T10:00:00Z', end_time: '2026-08-19T11:00:00Z', original_start_time: '2026-08-18T10:00:00Z' },
+        { ...session, id: 'unselected-unconfirmed', status: 'active', tutor_joined_at: null },
+      ] });
+    expect(bill).toMatchObject({ total_eur: 20, base_lessons: 2, billed_session_ids: ['tuesday', 'moved-tuesday'], review_session_ids: [] });
+  });
+
   it('recognizes frozen canonical terms and never silently switches an unknown or custom agreement', () => {
     const organization_id = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
     expect(schoolContractBillingModel({ organization_id, filled_body: EXTRA_LESSONS_LEGAL_BODY })).toBe('actual');

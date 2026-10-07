@@ -4434,6 +4434,7 @@ export const bgOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "Скриване до следващото отваряне на тази страница",
   "pwa.guideDontShowInSettings": "Да не се показва повече в настройките",
   "whiteboard.loading": "Зареждане на бялата дъска...",
+  "whiteboard.loadFailed": "Дъската не можа да бъде заредена. Опитайте отново.",
   "whiteboard.notFound": "Бялата дъска не е намерена",
   "whiteboard.closedAfterLesson": "Бялата дъска за този урок вече не е достъпна (срокът за достъп е изтекъл).",
   "whiteboard.unauthorized": "Нямате достъп до тази бяла дъска",

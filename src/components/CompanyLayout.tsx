@@ -107,6 +107,9 @@ export function buildCompanyNavItems(
       base.push({ href: `${orgBasePath}/staff-documents`, label: 'Darbuotojų dokumentai', icon: FileText, permission: 'contracts.view', section: 'manage' });
     }
   }
+  if (!isSchool) {
+    base.push({ href: `${orgBasePath}/payments`, label: t('companyNav.payments'), icon: CreditCard, permission: 'finance.view', section: 'manage' });
+  }
   base.push({ href: `${orgBasePath}/finance`, label: t('companyNav.finance'), icon: CreditCard, permission: 'finance.view', section: 'manage' });
   if (showDynamicPricing) {
     base.push({ href: `${orgBasePath}/dynamic-pricing`, label: t('companyNav.dynamicPricing'), icon: BadgeEuro, permission: 'settings.view', section: 'manage' });

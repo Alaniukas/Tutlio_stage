@@ -47,4 +47,11 @@ describe('school accounting across group and individual lessons', () => {
       { ...receipt, id: 'e', paid_at: '2026-08-31T10:00:00Z' },
     ], '2026-09-01T00:00:00Z', '2026-09-30T23:59:59Z')).toBe(30.30);
   });
+  it('does not count a carried balance as a second cash receipt',()=>{
+    expect(sumSchoolReceipts([
+      {id:'original',total_eur:96,payment_status:'paid',paid_at:'2026-10-05'},
+      {id:'next',total_eur:84,credit_applied_eur:12,payment_status:'paid',paid_at:'2026-10-06'},
+      {id:'credit-only',total_eur:10,credit_applied_eur:10,payment_status:'paid',paid_at:'2026-10-07'},
+    ],'2026-10-01','2026-10-31')).toBe(168);
+  });
 });

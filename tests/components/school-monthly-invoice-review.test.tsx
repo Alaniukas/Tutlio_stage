@@ -26,6 +26,21 @@ function mount(fetcher: ReturnType<typeof vi.fn>) {
 }
 
 describe('school invoice attendance review', () => {
+  it.each([false, true])('shows an unselected time without attendance or exclusion actions (issued: %s)', async (issued) => {
+    mount(vi.fn(async () => ({ ok: true, json: async () => ({
+      sessions: [{ ...session, included: false, outsideSchedule: true,
+        reason: issued ? 'already_invoiced' : 'outside_schedule', alreadyInvoiced: issued, canConfirm: false }],
+      payerEmail: 'parent@example.com', canEditBilling: true, canEditAttendance: true,
+    }) })));
+    fireEvent.click(screen.getByRole('button', { name: 'school.invoice.review.open' }));
+    await screen.findByText(`school.invoice.review.reason.${issued ? 'already_invoiced' : 'outside_schedule'}`);
+    expect(screen.getAllByText('school.invoice.review.scheduleMismatch').length).toBeGreaterThan(0);
+    expect(screen.queryByText('school.invoice.review.status.completed')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'school.invoice.review.attended' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'school.invoice.review.exclude' })).toBeNull();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
   it.each(['payable', 'outside_contract', 'unconfirmed'])('shows the attendance warning only for the unconfirmed billing reason (%s)', async (reason) => {
     mount(vi.fn(async () => ({ ok: true, json: async () => ({
       sessions: [{ ...session, statusConfirmedAt: null, reason, included: reason === 'payable' }],

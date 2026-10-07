@@ -9,6 +9,7 @@ import { schoolTeacherContractTranslationsNo } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const no: Record<string, string> = {
+  'school.contractsLoadFailed': 'Kontraktene kunne ikke lastes inn. Prøv igjen.',
   ...studentNotesTranslations.no,
   ...schoolFamilyMaterialTranslations.no,
   ...schoolInvoiceReviewTranslations.no,
@@ -4650,6 +4651,7 @@ export const no: Record<string, string> = {
   'whiteboard.closedAfterLesson': 'Tavlen for denne timen er ikke lenger tilgjengelig (tilgangsperioden er utløpt).',
   'whiteboard.exportPdf': 'Lagre som PDF',
   'whiteboard.loading': 'Laster inn tavle...',
+  "whiteboard.loadFailed": "Kunne ikke laste tavlen. Prøv igjen.",
   'whiteboard.notFound': 'Fant ikke tavlen',
   'whiteboard.open': 'Åpne tavle',
   'whiteboard.retry': 'Prøv igjen',
@@ -5368,7 +5370,9 @@ export const no: Record<string, string> = {
   'school.groups.platform': "Plattform",
   'school.groups.duration': "Varighet (min)",
   'school.groups.minimumActiveStudents': "Minste antall aktive elever",
-  'school.groups.minimumActiveStudentsHint': "Denne gruppen og dens avtaler settes automatisk på pause når færre aktive elever er igjen.",
+  'school.groups.minimumActiveStudentsHint': "Bare aktive elever med en bekreftet, gyldig avtale om ekstra timer teller mot minimumsantallet. Individuelt pausede elever telles ikke med. Gruppen og dens avtaler settes automatisk på pause under minimumsantallet.",
+  'school.groups.minimumStatus': "{n} av {total} elever teller mot gruppens minimumsantall. Minst {minimum} kreves.",
+  'school.groups.unconfirmedContracts': "Elever uten en bekreftet, gyldig avtale: {names}.",
   'school.groups.suspendedMinimum': "Satt på pause: færre enn {n} aktive elever i gruppen",
   'school.groups.meetingLink': "Lenke til timen",
   'school.groups.slots': "Ukeplan",

@@ -67,6 +67,16 @@ beforeEach(() => {
 });
 
 describe('material publication access and preparation', () => {
+  it('registers companion chat versions with the same public-to-private publication rules', async () => {
+    const db = database();
+    const video = { ...recording('file'), chatFiles: [{ id: 'chat', name: 'file.sbv', createdTime: oldTime, modifiedTime: oldTime }] };
+    await registerDrivePublications(db.client, { organizationId: 'school', targetId: 'group', files: [video], features: {} });
+    expect(db.tables.school_material_publications.map((row) => row.file_id)).toEqual(['file', 'chat']);
+    expect(await schoolRecordingPublicationAllowsLegacyAccess(db.client, { ...input, fileId: 'chat' })).toBe(true);
+    video.chatFiles[0].modifiedTime = newTime;
+    await registerDrivePublications(db.client, { organizationId: 'school', targetId: 'group', files: [video], features: input.features });
+    expect(await schoolRecordingPublicationAllowsLegacyAccess(db.client, { ...input, fileId: 'chat', modifiedTime: newTime })).toBe(false);
+  });
   it('preserves an old allowed version, rejects unpublished or overwritten versions, and never reclassifies old grants', async () => {
     const db = database();
     await registerDrivePublications(db.client, { organizationId: 'school', targetId: 'group', files: [recording('file')], features: {} });

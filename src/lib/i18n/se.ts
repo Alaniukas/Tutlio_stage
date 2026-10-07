@@ -1,4 +1,5 @@
 import { studentNotesTranslations } from './studentNotesTranslations.js';
+import { companyPaymentReportTranslations } from './companyPaymentReportTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolInvoiceReviewTranslations } from './schoolInvoiceReviewOtherTranslations.js';
@@ -18,6 +19,15 @@ const seLegalTranslations: Record<string, string> = {
 };
 
 export const se: Record<string, string> = {
+  ...companyPaymentReportTranslations.se,
+  'companyDash.sendPackageReminder': 'Skicka påminnelse',
+  'companyDash.packageReminderSending': 'Skickar…',
+  'package.overdueUnpaid': 'Förfallen',
+  'school.recordings.chatTitle': 'Chatthistorik',
+  'school.recordings.chatLoading': 'Laddar chatt…',
+  'school.recordings.chatError': 'Chatten kunde inte laddas. Uppdatera listan med inspelningar och försök igen.',
+  'school.recordings.chatEmpty': 'Chattfilen är tom.',
+  'school.contractsLoadFailed': 'Avtalen kunde inte laddas. Försök igen.',
   ...studentNotesTranslations.se,
   ...schoolFamilyMaterialTranslations.se,
   ...schoolInvoiceReviewTranslations.se,
@@ -4986,6 +4996,7 @@ export const se: Record<string, string> = {
   'whiteboard.closedAfterLesson': 'Den här lektionens whiteboard är inte längre tillgänglig (åtkomstperioden har upphört).',
   'whiteboard.exportPdf': 'Spara som PDF',
   'whiteboard.loading': 'Laddar whiteboard...',
+  "whiteboard.loadFailed": "Det gick inte att ladda tavlan. Försök igen.",
   'whiteboard.notFound': 'Whiteboard hittades inte',
   'whiteboard.open': 'Öppna whiteboard',
   'whiteboard.retry': 'Försök igen',
@@ -5601,7 +5612,9 @@ export const se: Record<string, string> = {
   'school.groups.platform': "Plattform",
   'school.groups.duration': "Längd (min)",
   'school.groups.minimumActiveStudents': "Minsta antal aktiva elever",
-  'school.groups.minimumActiveStudentsHint': "Den här gruppen och dess avtal pausas automatiskt när färre aktiva elever återstår.",
+  'school.groups.minimumActiveStudentsHint': "Endast aktiva elever med ett bekräftat, giltigt avtal för extra lektioner räknas mot minimiantalet. Individuellt pausade elever räknas inte. Gruppen och dess avtal pausas automatiskt under minimiantalet.",
+  'school.groups.minimumStatus': "{n} av {total} elever räknas mot gruppens minimiantal. Minst {minimum} krävs.",
+  'school.groups.unconfirmedContracts': "Elever utan bekräftat, giltigt avtal: {names}.",
   'school.groups.suspendedMinimum': "Pausad: färre än {n} aktiva elever i gruppen",
   'school.groups.meetingLink': "Länk till lektionen",
   'school.groups.slots': "Veckoschema",

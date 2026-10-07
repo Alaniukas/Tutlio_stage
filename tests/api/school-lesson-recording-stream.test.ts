@@ -32,7 +32,8 @@ vi.mock('../../api/_lib/schoolRecordingSlotAccess.js', async (importOriginal) =>
   recordingSlotScope: mocks.slotScope,
   recordingSlotTag: mocks.slotTag,
 }));
-vi.mock('../../api/_lib/googleDriveRecordings.js', () => ({
+vi.mock('../../api/_lib/googleDriveRecordings.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../api/_lib/googleDriveRecordings')>(),
   getDriveFileMetadata: mocks.getMetadata,
   fetchDriveRecordingRange: mocks.fetchRange,
   isRecordingWithinRetention: () => true,
@@ -66,6 +67,20 @@ function mockRes() {
     getResult: () => ({ ...output, statusCode: response.statusCode || output.statusCode }),
   };
   return response;
+}
+
+function withChat(text = '00:00:01.000,00:00:02.000\nTeacher: x² + y² = z²') {
+  const video = {
+    id: 'file-a', name: 'Pamoka.mp4', mimeType: 'video/mp4',
+    createdTime: '2026-09-10T10:00:00Z', modifiedTime: '2026-09-10T10:00:00Z',
+    size: 1000, parents: ['folder-allowed'], canDownload: true,
+  };
+  const chat = { ...video, id: 'chat-a', name: 'Pamoka.sbv', mimeType: 'application/octet-stream', size: Buffer.byteLength(text) };
+  const ticket = { userId: 'student-user', groupId: 'group-a', fileId: 'chat-a', recordingFileId: 'file-a' };
+  mocks.verifyTicket.mockReturnValue(ticket);
+  mocks.getMetadata.mockImplementation(async (id) => id === 'chat-a' ? chat : video);
+  mocks.fetchRange.mockResolvedValue(new Response(text));
+  return { chat, video, ticket, text };
 }
 
 describe('GET /api/school-lesson-recording-stream', () => {
@@ -248,5 +263,71 @@ describe('GET /api/school-lesson-recording-stream', () => {
     expect(mocks.slotScope).toHaveBeenCalledTimes(2);
     expect(mocks.fetchRange).not.toHaveBeenCalled();
     expect(mocks.legacyPublication).not.toHaveBeenCalled();
+  });
+
+  it('serves the complete authorized SBV as private plain text and uses the video slot', async () => {
+    const { text, chat } = withChat('<script>alert(1)</script>\nTeacher: x² = 4');
+    const res = mockRes();
+    await handler({ method: 'GET', query: { t: 'chat' }, headers: {} } as any, res);
+    const result = res.getResult();
+    expect(result.statusCode).toBe(200);
+    expect(result.body?.toString()).toBe(text);
+    expect(result.headers).toMatchObject({ 'Content-Type': 'text/plain; charset=utf-8', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store, max-age=0' });
+    expect(mocks.fetchRange).toHaveBeenCalledWith('chat-a', { start: 0, end: chat.size - 1 });
+    expect(mocks.slotTag).toHaveBeenCalledWith(expect.anything(), 'group-a', 'file-a');
+  });
+
+  it('denies a copied chat URL without the matching viewer cookie', async () => {
+    withChat();
+    mocks.verifyViewerSession.mockReturnValue(null);
+    const res = mockRes();
+    await handler({ method: 'GET', query: { t: 'chat' }, headers: {} } as any, res);
+    expect(res.getResult().statusCode).toBe(401);
+    expect(mocks.getMetadata).not.toHaveBeenCalled();
+  });
+
+  it('applies the video day restriction to an untagged companion chat', async () => {
+    withChat();
+    mocks.slotScope.mockResolvedValue({ unrestricted: false, schedules: [[{ weekday: 4, start_time: '11:00' }]] });
+    mocks.slotTag.mockResolvedValue({ weekday: 2, start_time: '11:00' });
+    const res = mockRes();
+    await handler({ method: 'GET', query: { t: 'chat' }, headers: {} } as any, res);
+    expect(res.getResult().statusCode).toBe(403);
+    expect(mocks.fetchRange).not.toHaveBeenCalled();
+  });
+
+  it.each(['unbound', 'other-folder', 'other-name', 'oversized'])('rejects a %s chat before fetching its content', async (reason) => {
+    const { ticket, video, chat } = withChat();
+    if (reason === 'unbound') mocks.verifyTicket.mockReturnValue({ ...ticket, recordingFileId: undefined });
+    if (reason === 'other-folder') video.parents = ['another-folder'];
+    if (reason === 'other-name') video.name = 'Other lesson.mp4';
+    if (reason === 'oversized') chat.size = 1024 * 1024 + 1;
+    const res = mockRes();
+    await handler({ method: 'GET', query: { t: 'chat' }, headers: {} } as any, res);
+    expect(res.getResult().statusCode).toBe(404);
+    expect(mocks.fetchRange).not.toHaveBeenCalled();
+  });
+
+  it('revokes an existing chat ticket when the current group relationship is removed', async () => {
+    withChat();
+    const first = mockRes();
+    await handler({ method: 'HEAD', query: { t: 'chat' }, headers: {} } as any, first);
+    expect(first.getResult().statusCode).toBe(200);
+    mocks.resolveAccess.mockResolvedValue({ groups: [], organizationIds: [] });
+    const next = mockRes();
+    await handler({ method: 'GET', query: { t: 'chat' }, headers: {} } as any, next);
+    expect(next.getResult().statusCode).toBe(403);
+    expect(mocks.fetchRange).not.toHaveBeenCalled();
+  });
+
+  it('does not expose a new chat through a legacy homework link to an older allowed video', async () => {
+    const { ticket } = withChat();
+    mocks.verifyHomeworkTicket.mockReturnValue({ studentId: 'student-row', groupId: ticket.groupId, fileId: ticket.fileId, recordingFileId: ticket.recordingFileId });
+    mocks.legacyPublication.mockImplementation(async (_db, publication) => publication.fileId === 'file-a');
+    const res = mockRes();
+    await handler({ method: 'GET', query: { t: 'homework-chat' }, headers: {} } as any, res);
+    expect(res.getResult().statusCode).toBe(403);
+    expect(mocks.legacyPublication).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ fileId: 'chat-a' }));
+    expect(mocks.fetchRange).not.toHaveBeenCalled();
   });
 });

@@ -4393,6 +4393,7 @@ export const idOverrides: Record<string, string> = {
   "whiteboard.title": "Papan tulis",
   "whiteboard.open": "Buka papan tulis",
   "whiteboard.loading": "Memuat papan tulis...",
+  "whiteboard.loadFailed": "Papan tulis tidak dapat dimuat. Coba lagi.",
   "whiteboard.notFound": "Papan tulis tidak ditemukan",
   "whiteboard.closedAfterLesson": "Papan tulis sesi les ini tidak lagi tersedia (masa akses telah berakhir).",
   "whiteboard.unauthorized": "Anda tidak memiliki akses ke papan tulis ini",

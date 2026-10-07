@@ -1,13 +1,32 @@
 import { schoolInvoiceReviewEn } from './schoolInvoiceReviewTranslations.js';
+import { schoolInvoiceOverpaymentTranslations } from './schoolInvoiceOverpaymentTranslations.js';
 
-const keys = Object.keys(schoolInvoiceReviewEn);
-function dictionary(values: string[]): Record<string, string> {
+const scheduleCopy: Record<string, [string, string]> = {
+  pl: ['Wyłączono: poza harmonogramem ucznia', 'Ten termin jest poza harmonogramem ucznia'],
+  lv: ['Nav iekļauts: ārpus skolēna grafika', 'Šis laiks ir ārpus skolēna grafika'],
+  ee: ['Välja jäetud: väljaspool õpilase tunniplaani', 'See aeg on väljaspool õpilase tunniplaani'],
+  fr: ["Exclu : hors de l’emploi du temps de l’élève", "Ce créneau est hors de l’emploi du temps de l’élève"],
+  es: ['Excluida: fuera del horario del alumno', 'Esta hora está fuera del horario del alumno'],
+  de: ['Ausgeschlossen: außerhalb des Stundenplans des Schülers', 'Diese Zeit liegt außerhalb des Stundenplans des Schülers'],
+  se: ['Utesluten: utanför elevens schema', 'Den här tiden ligger utanför elevens schema'],
+  dk: ['Udeladt: uden for elevens skema', 'Dette tidspunkt ligger uden for elevens skema'],
+  fi: ['Ei sisälly: oppilaan aikataulun ulkopuolella', 'Tämä aika on oppilaan aikataulun ulkopuolella'],
+  no: ['Utelatt: utenfor elevens timeplan', 'Dette tidspunktet er utenfor elevens timeplan'],
+  nl: ['Uitgesloten: buiten het rooster van de leerling', 'Dit tijdstip valt buiten het rooster van de leerling'],
+};
+const keys = Object.keys(schoolInvoiceReviewEn).filter((key) => (
+  key !== 'school.invoice.review.reason.outside_schedule' && key !== 'school.invoice.review.scheduleMismatch' && !key.startsWith('school.invoice.credit.')
+));
+function dictionary(locale: string, values: string[]): Record<string, string> {
   if (values.length !== keys.length) throw new Error('Incomplete school invoice review translation');
-  return Object.fromEntries(keys.map((key, index) => [key, values[index]]));
+  return { ...schoolInvoiceOverpaymentTranslations[locale], ...Object.fromEntries(keys.map((key, index) => [key, values[index]])),
+    'school.invoice.review.reason.outside_schedule': scheduleCopy[locale][0],
+    'school.invoice.review.scheduleMismatch': scheduleCopy[locale][1],
+  };
 }
 
 export const schoolInvoiceReviewTranslations: Record<string, Record<string, string>> = {
-  pl: dictionary([
+  pl: dictionary('pl', [
     'Obecność i rozliczenie',
     'Sprawdź każde zajęcia. Nieobecność sama w sobie nie zwalnia z opłaty za zajęcia grupowe. Jeśli opłata nie jest należna, wyłącz zajęcia z faktury i podaj powód.',
     'Faktura zostanie wysłana do płatnika: {email}',
@@ -26,7 +45,7 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Przegląd płatników', 'W wybranym okresie nie ma płatnych zajęć.', 'Wyślij do tego płatnika', 'Wyślij do wszystkich',
     'Wysłano faktur: {count}.', 'Najpierw potwierdź obecność', '{name} · {count} zajęć · {amount}', 'Przejrzyj dziecko',
   ]),
-  lv: dictionary([
+  lv: dictionary('lv', [
     'Apmeklējums un norēķini',
     'Pārbaudiet katru nodarbību. Neierašanās pati par sevi neatceļ maksu par grupas nodarbību. Ja maksa nav jāmaksā, izslēdziet nodarbību no rēķina un norādiet iemeslu.',
     'Rēķins tiks nosūtīts maksātājam: {email}',
@@ -45,7 +64,7 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Pārskatīt maksātājus', 'Izvēlētajā periodā nav apmaksājamu nodarbību.', 'Sūtīt šim maksātājam', 'Sūtīt visiem',
     'Nosūtīti rēķini: {count}.', 'Vispirms jāapstiprina apmeklējums', '{name} · {count} nod. · {amount}', 'Pārskatīt bērnu',
   ]),
-  ee: dictionary([
+  ee: dictionary('ee', [
     'Osalemine ja arveldamine',
     'Vaadake iga tund üle. Puudumine ei tühista iseenesest rühmatunni tasu. Kui tasu ei tule maksta, jätke tund arvest välja ja lisage põhjus.',
     'Arve saadetakse maksjale: {email}',
@@ -64,7 +83,7 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Vaata maksjaid', 'Valitud perioodis ei ole tasulisi tunde.', 'Saada sellele maksjale', 'Saada kõigile',
     'Saadetud arveid: {count}.', 'Osalemine vajab kinnitamist', '{name} · {count} tundi · {amount}', 'Vaata last',
   ]),
-  fr: dictionary([
+  fr: dictionary('fr', [
     'Présence et facturation',
     'Vérifiez chaque séance. Une absence ne supprime pas à elle seule les frais d’une séance de groupe. Si aucun paiement n’est dû, excluez la séance de la facture en indiquant le motif.',
     'La facture sera envoyée au payeur : {email}',
@@ -83,7 +102,7 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Voir les payeurs', 'Aucune séance facturable sur cette période.', 'Envoyer à ce payeur', 'Envoyer à tous',
     'Factures envoyées : {count}.', 'La présence doit encore être confirmée', '{name} · {count} séances · {amount}', 'Voir l’enfant',
   ]),
-  es: dictionary([
+  es: dictionary('es', [
     'Asistencia y facturación',
     'Revise cada sesión. La ausencia por sí sola no elimina el cargo de una sesión grupal. Si no corresponde cobrar, excluya la sesión de la factura e indique el motivo.',
     'La factura se enviará al pagador: {email}',
@@ -102,7 +121,7 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Revisar pagadores', 'No hay sesiones facturables en este periodo.', 'Enviar a este pagador', 'Enviar a todos',
     'Facturas enviadas: {count}.', 'Aún hay que confirmar la asistencia', '{name} · {count} sesiones · {amount}', 'Revisar al menor',
   ]),
-  de: dictionary([
+  de: dictionary('de', [
     'Teilnahme und Abrechnung',
     'Prüfen Sie jeden Termin. Abwesenheit allein hebt die Gebühr für einen Gruppentermin nicht auf. Falls keine Gebühr anfällt, schließen Sie den Termin mit einer Begründung von der Rechnung aus.',
     'Die Rechnung wird an den Zahler gesendet: {email}',
@@ -121,7 +140,7 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Zahler prüfen', 'In diesem Zeitraum gibt es keine abrechenbaren Termine.', 'An diesen Zahler senden', 'An alle senden',
     'Rechnungen gesendet: {count}.', 'Die Teilnahme muss noch bestätigt werden', '{name} · {count} Termine · {amount}', 'Kind prüfen',
   ]),
-  se: dictionary([
+  se: dictionary('se', [
     'Närvaro och fakturering',
     'Granska varje pass. Frånvaro tar inte i sig bort avgiften för ett gruppass. Om ingen avgift ska tas ut, undanta passet från fakturan och ange orsaken.',
     'Fakturan skickas till betalaren: {email}',
@@ -140,7 +159,7 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Granska betalare', 'Det finns inga debiterbara pass under perioden.', 'Skicka till denna betalare', 'Skicka till alla',
     'Fakturor skickade: {count}.', 'Närvaron måste fortfarande bekräftas', '{name} · {count} pass · {amount}', 'Granska barnet',
   ]),
-  dk: dictionary([
+  dk: dictionary('dk', [
     'Fremmøde og fakturering',
     'Gennemgå hver session. Fravær fjerner ikke i sig selv gebyret for en gruppesession. Hvis der ikke skal opkræves betaling, udelad sessionen fra fakturaen og angiv en begrundelse.',
     'Fakturaen sendes til betaleren: {email}',
@@ -159,7 +178,7 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Gennemgå betalere', 'Der er ingen fakturerbare sessioner i perioden.', 'Send til denne betaler', 'Send til alle',
     'Fakturaer sendt: {count}.', 'Fremmødet skal stadig bekræftes', '{name} · {count} sessioner · {amount}', 'Gennemgå barnet',
   ]),
-  fi: dictionary([
+  fi: dictionary('fi', [
     'Läsnäolo ja laskutus',
     'Tarkista jokainen tunti. Poissaolo ei itsessään poista ryhmätunnin maksua. Jos maksua ei kuulu periä, jätä tunti pois laskulta ja kirjaa syy.',
     'Lasku lähetetään maksajalle: {email}',
@@ -178,7 +197,7 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Tarkista maksajat', 'Tällä jaksolla ei ole laskutettavia tunteja.', 'Lähetä tälle maksajalle', 'Lähetä kaikille',
     'Laskuja lähetetty: {count}.', 'Läsnäolo on vielä vahvistettava', '{name} · {count} tuntia · {amount}', 'Tarkista lapsi',
   ]),
-  no: dictionary([
+  no: dictionary('no', [
     'Oppmøte og fakturering',
     'Gå gjennom hver økt. Fravær alene fjerner ikke avgiften for en gruppeøkt. Hvis ingen betaling skal kreves, utelat økten fra fakturaen og oppgi årsaken.',
     'Fakturaen sendes til betaleren: {email}',
@@ -197,7 +216,7 @@ export const schoolInvoiceReviewTranslations: Record<string, Record<string, stri
     'Gå gjennom betalere', 'Det er ingen fakturerbare økter i perioden.', 'Send til denne betaleren', 'Send til alle',
     'Fakturaer sendt: {count}.', 'Oppmøtet må fortsatt bekreftes', '{name} · {count} økter · {amount}', 'Gå gjennom barnet',
   ]),
-  nl: dictionary([
+  nl: dictionary('nl', [
     'Aanwezigheid en facturering',
     'Controleer elke sessie. Afwezigheid alleen schrapt de kosten van een groepssessie niet. Als er geen kosten verschuldigd zijn, sluit de sessie uit van de factuur en vermeld de reden.',
     'De factuur wordt naar de betaler gestuurd: {email}',

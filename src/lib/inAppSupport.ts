@@ -66,6 +66,7 @@ export interface InAppSupportAiIntake {
 }
 
 export interface InAppSupportAiConversation {
+  responseKind?: 'intake' | 'answer' | 'handoff';
   reply: string;
   title: string;
   context: string;
@@ -246,6 +247,8 @@ export function parseInAppSupportAiConversation(value: unknown): InAppSupportAiC
   if (reply.length < 3 || typeof raw.ready !== 'boolean') return null;
 
   return {
+    ...(['intake', 'answer', 'handoff'].includes(String(raw.responseKind))
+      ? { responseKind: raw.responseKind as 'intake' | 'answer' | 'handoff' } : {}),
     reply,
     title,
     context,

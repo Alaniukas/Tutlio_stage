@@ -16,7 +16,7 @@ import { moksloVaisiaiRoutesLessonCommsToPayer } from './_lib/moksloVaisiaiLesso
 import { buildSchoolHomeworkUrl, publicAppOrigin } from './_lib/publicLinkToken.js';
 import { resolveSessionMeetingLink } from '../src/lib/meetingLink.js';
 import { schoolCompactNotificationsEnabled, schoolJoinContact } from '../src/lib/schoolNotificationPolicy.js';
-import { schoolMaterialRecipient } from './_lib/schoolMaterialPublications.js';
+import { schoolFamilySessionReminderRecipient } from './_lib/schoolSessionReminderRecipient.js';
 import {
   sessionReminderDeliveryKey,
   sessionReminderDeliveryOutcome,
@@ -209,10 +209,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const notificationOrg = await getOrgRow(studentOrgId);
         const compactSchoolNotifications = schoolCompactNotificationsEnabled(notificationOrg);
         const familyPortalNotifications = schoolFlowForSession && studentOrgFeatures?.school_family_portal === true;
-        if (familyPortalNotifications) reminderStudentHours = 0.25;
-        const compactJoinContact = compactSchoolNotifications
-          ? familyPortalNotifications ? await schoolMaterialRecipient(supabase, { ...student, organization_id: studentOrgId }) : schoolJoinContact(student)
-          : null;
+        let compactJoinContact = compactSchoolNotifications ? schoolJoinContact(student) : null;
+        let legacyFamilyJoinFallback = false;
+        if (compactSchoolNotifications && familyPortalNotifications) {
+          const recipient = await schoolFamilySessionReminderRecipient(
+            supabase, { ...student, organization_id: studentOrgId }, studentOrgFeatures, startTime,
+          );
+          compactJoinContact = recipient.contact;
+          legacyFamilyJoinFallback = recipient.legacyFamilyFallback;
+        }
+        if (familyPortalNotifications && !legacyFamilyJoinFallback) reminderStudentHours = 0.25;
         const homeworkUrl = schoolFlowForSession && student?.id
           ? buildSchoolHomeworkUrl(publicAppOrigin(), String(student.id))
           : undefined;
@@ -317,7 +323,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               await supabase.from('sessions').update({ reminder_payer_sent: true }).eq('id', session.id);
             } else if (compactJoinContact) {
               candidates.push({ email: compactJoinContact.email, name: compactJoinContact.name });
-            } else if (familyPortalNotifications) {
+            } else if (familyPortalNotifications && !legacyFamilyJoinFallback) {
               compactParentLookupFailed = true;
             } else {
               compactRegisteredParentFallback = true;

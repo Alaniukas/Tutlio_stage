@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { PDFDocument } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import {
   amountInLithuanianWords,
@@ -7,6 +8,14 @@ import {
 } from '../../api/_lib/schoolMonthlyInvoicePdf';
 
 describe('Laisvi vaikai monthly invoice PDF', () => {
+  it('keeps all invoice lines and moves the credit settlement summary to another page when needed',async()=>{
+    const bytes=await generateSchoolMonthlyInvoicePdf({preview:true,invoiceNumber:'PAM-PERŽIŪRA',issueDate:'2026-10-07',periodLabel:'spalis 2026',
+      studentName:'Demo mokinys',seller:{name:'Demo Mokykla'},buyer:{name:'Demo mokėtojas'},
+      lines:Array.from({length:22},(_,index)=>({studentName:'Demo mokinys',activity:`Užsiėmimas ${index+1}`,quantity:1,unitPriceEur:6,originalAmountEur:6,amountEur:6})),
+      subtotalEur:132,discountAmountEur:0,totalEur:132,creditAppliedEur:12,dueDate:'2026-11-07'});
+    const doc=await PDFDocument.load(bytes);
+    expect(doc.getPageCount()).toBeGreaterThan(1);
+  });
   it('spells the payable amount and cents in Lithuanian', () => {
     expect(amountInLithuanianWords(36)).toBe('trisdešimt šeši eurai 00 ct');
     expect(amountInLithuanianWords(11.25)).toBe('vienuolika eurų 25 ct');

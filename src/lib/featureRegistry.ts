@@ -634,9 +634,9 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     name: 'Pamokų įrašai (Drive) ir grupių prieiga',
     nameEn: 'Lesson recordings (Drive) and group access',
     description:
-      'Kiekvienai klasei priskiriamas privatus Google Drive aplankas. Jo įrašus per Tutlio mato tik tos grupės mokytojas, mokiniai, tėvai ir įgalioti administratoriai. Reikia serverio Google service-account prieigos.',
+      'Kiekvienai klasei priskiriamas privatus Google Drive aplankas. Jo vaizdo įrašus ir prie jų išsaugotas .sbv / .txt pokalbių išklotines per Tutlio mato tik tos grupės mokytojas, mokiniai, tėvai ir įgalioti administratoriai. Pokalbio išklotinė rodoma po atitinkamu vaizdo įrašu. Reikia serverio Google service-account prieigos.',
     descriptionEn:
-      'Each class gets a private Google Drive folder. Its recordings are streamed through Tutlio only to that group’s teacher, students, parents, and authorized administrators. Requires server-side Google service-account access.',
+      'Each class gets a private Google Drive folder. Its videos and matching saved .sbv / .txt written chats are available through Tutlio only to that group’s teacher, students, parents, and authorized administrators. Chat history appears below the matching video. Requires server-side Google service-account access.',
     category: 'integrations',
     defaultValue: false,
     requiresSetup: true,

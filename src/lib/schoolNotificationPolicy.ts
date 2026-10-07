@@ -20,6 +20,19 @@ export function schoolCompactNotificationsEnabled(organization: SchoolNotificati
       || organization.features?.school_family_portal === true);
 }
 
+/** An explicit UTC cutoff keeps the accountless join-email exception temporary. */
+export function schoolFamilyEmailTransitionActive(
+  features: Record<string, unknown> | null | undefined,
+  lessonStart: Date,
+): boolean {
+  const until = features?.school_family_email_transition_until;
+  if (features?.school_family_portal !== true || typeof until !== 'string'
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(until)) return false;
+  const cutoff = Date.parse(until);
+  return Number.isFinite(cutoff) && new Date(cutoff).toISOString() === until
+    && lessonStart.getTime() <= cutoff;
+}
+
 export function schoolJoinContact(student: {
   email?: string | null;
   full_name?: string | null;

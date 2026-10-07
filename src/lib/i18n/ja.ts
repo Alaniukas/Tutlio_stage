@@ -4434,6 +4434,7 @@ export const jaOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "次にこのページを開くまで非表示",
   "pwa.guideDontShowInSettings": "今後、設定画面に表示しない",
   "whiteboard.loading": "ホワイトボードを読み込み中…",
+  "whiteboard.loadFailed": "ホワイトボードを読み込めませんでした。もう一度お試しください。",
   "whiteboard.notFound": "ホワイトボードが見つかりません",
   "whiteboard.closedAfterLesson": "このレッスンのホワイトボードは利用期間が終了しています。",
   "whiteboard.unauthorized": "このホワイトボードへのアクセス権がありません",

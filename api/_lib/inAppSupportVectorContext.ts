@@ -3,6 +3,7 @@ import { openai } from '@ai-sdk/openai';
 import { embed } from 'ai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { InAppSupportCustomerContext } from './inAppSupportCustomerContext.js';
+import { deployedInAppSupportGuides } from './inAppSupportKnowledgeDocuments.js';
 
 export const IN_APP_SUPPORT_EMBEDDING_MODEL = 'text-embedding-3-small';
 const MAX_RETRIEVED_ITEMS = 4;
@@ -37,6 +38,15 @@ export function renderInAppSupportRetrievedContext(
   retrieved: Pick<InAppSupportRetrievedContext, 'knowledge' | 'memories'>,
 ): string {
   const sections = [customer.functionContext];
+  const deployedGuides = deployedInAppSupportGuides(customer);
+  if (deployedGuides.length > 0) {
+    sections.push([
+      '# Current deployed product guidance',
+      '- These guides are bundled with this running API deployment and refresh with every deployment.',
+      '- Use current deployed guidance over conflicting older retrieved excerpts or conversation memories. A resolved ticket alone does not verify deployment or account enablement.',
+      ...deployedGuides.map((document) => `## ${document.title}\n${document.content}`),
+    ].join('\n'));
+  }
   if (retrieved.knowledge.length > 0) {
     sections.push([
       '# Retrieved function documentation',

@@ -8,6 +8,7 @@ import {
   schoolGroupExitImpact,
   schoolGroupMinimumStudents,
   type SchoolGroupContractState,
+  type SchoolGroupMinimumStatus,
 } from '../../src/lib/schoolGroupMinimumPolicy.js';
 import { isSchoolContractSuspended } from '../../src/lib/schoolContractLifecycle.js';
 import { materializeClassGroupNow } from './schoolClassGroupMaterialize.js';
@@ -50,20 +51,67 @@ function relatedOne<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
 
-function rosterContracts(context: SchoolGroupMinimumContext, resumeContractId?: string | null): GroupContractRow[] {
+function rosterContracts(context: SchoolGroupMinimumContext, resumeContractId?: string | null, now = new Date()): GroupContractRow[] {
   const memberIds = new Set((context.group.members || []).map((member) => member.student_id));
   const resume = context.contracts.find((contract) => contract.id === resumeContractId);
-  if (resume?.student_id && isEligibleSchoolGroupContract(resume) && context.contracts.some(contract => (
-    contract.student_id === resume.student_id && isEligibleSchoolGroupContract(contract)
+  if (resume?.student_id && isEligibleSchoolGroupContract(resume, now) && context.contracts.some(contract => (
+    contract.student_id === resume.student_id && isEligibleSchoolGroupContract(contract, now)
     && contract.suspended_group_membership?.group_id === context.group.id
     && contract.suspended_group_membership.student_id === resume.student_id
   ))) {
     memberIds.add(resume.student_id);
   }
   return context.contracts.filter((contract) => contract.student_id && memberIds.has(contract.student_id)
-    && isEligibleSchoolGroupContract(contract)
+    && isEligibleSchoolGroupContract(contract, now)
     && contract.student?.organization_id === context.group.organization_id
     && !contract.student.detached_at && !isArchivedEnrollmentStatus(contract.student.enrollment_status));
+}
+
+/** Explain current eligibility without changing the group or exposing agreements to families. */
+export async function attachSchoolGroupMinimumStatus<T extends { id: string; members?: Array<{ student_id: string }> }>(
+  supabase: SupabaseClient,
+  organizationId: string,
+  groups: T[],
+  now = new Date(),
+): Promise<Array<T & { minimum_status?: SchoolGroupMinimumStatus }>> {
+  if (!groups.length) return [];
+  const contracts: GroupContractRow[] = [];
+  for (let offset = 0; ; offset += 500) {
+    const { data, error } = await supabase.from('school_contracts')
+      .select('id, student_id, class_group_id, signing_status, accepted_at, order_snapshot, archived_at, terminated_at, withdrawal_requested_at, suspension_started_at, suspension_until, suspension_resumed_at, suspension_scope, student:students(organization_id, detached_at, enrollment_status)')
+      .eq('organization_id', organizationId)
+      .eq('kind', 'extra_lessons')
+      .in('class_group_id', groups.map(group => group.id))
+      .order('id', { ascending: true }).range(offset, offset + 499);
+    if (error) throw new Error(error.message);
+    contracts.push(...(data || []).map((row: any) => ({ ...row, student: relatedOne(row.student) })));
+    if (!data || data.length < 500) break;
+  }
+  const byGroup = new Map<string, GroupContractRow[]>();
+  for (const contract of contracts) {
+    if (!contract.class_group_id) continue;
+    const rows = byGroup.get(contract.class_group_id) || [];
+    rows.push(contract);
+    byGroup.set(contract.class_group_id, rows);
+  }
+  return groups.map(group => {
+    const groupContracts = byGroup.get(group.id);
+    // Groups without the extra-lessons contract flow retain their existing UI.
+    if (!groupContracts?.length) return group;
+    const context: SchoolGroupMinimumContext = {
+      group: { id: group.id, organization_id: organizationId, name: '', members: group.members },
+      contracts: groupContracts,
+    };
+    const eligibleContracts = rosterContracts(context, null, now);
+    const confirmedIds = new Set(groupContracts.filter(contract => isEligibleSchoolGroupContract(contract, now))
+      .map(contract => contract.student_id));
+    return { ...group, minimum_status: {
+      // A contract paused with the whole group still counts toward its restart.
+      eligible_student_count: resumableSchoolGroupStudentIds(eligibleContracts, null, now).size,
+      unconfirmed_student_ids: [...new Set((group.members || []).map(member => member.student_id))]
+        .filter(studentId => !confirmedIds.has(studentId)),
+    } };
+  });
 }
 
 export async function loadSchoolGroupMinimumContext(

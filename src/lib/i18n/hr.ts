@@ -4435,6 +4435,7 @@ export const hrOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "Sakrij do sljedećeg otvaranja ove stranice",
   "pwa.guideDontShowInSettings": "Više ne prikazuj u postavkama",
   "whiteboard.loading": "Učitavanje bijele ploče...",
+  "whiteboard.loadFailed": "Nije moguće učitati ploču. Pokušajte ponovno.",
   "whiteboard.notFound": "Bijela ploča nije pronađena",
   "whiteboard.closedAfterLesson": "Bijela ploča ovog sata više nije dostupna (razdoblje pristupa je završilo).",
   "whiteboard.unauthorized": "Nemaš pristup ovoj bijeloj ploči",

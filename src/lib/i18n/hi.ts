@@ -4431,6 +4431,7 @@ export const hiOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "अगली बार यह पेज खोलने तक छिपाएँ",
   "pwa.guideDontShowInSettings": "सेटिंग में फिर न दिखाएँ",
   "whiteboard.loading": "व्हाइटबोर्ड लोड हो रहा है...",
+  "whiteboard.loadFailed": "व्हाइटबोर्ड लोड नहीं हो सका। कृपया फिर से कोशिश करें।",
   "whiteboard.notFound": "व्हाइटबोर्ड नहीं मिला",
   "whiteboard.closedAfterLesson": "इस क्लास का व्हाइटबोर्ड अब उपलब्ध नहीं है (एक्सेस अवधि समाप्त हो गई है)।",
   "whiteboard.unauthorized": "आपको इस व्हाइटबोर्ड का एक्सेस नहीं है",

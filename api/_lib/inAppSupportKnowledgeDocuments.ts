@@ -16,6 +16,24 @@ export interface InAppSupportKnowledgeDocument {
 
 const CORE_DOCUMENTS: InAppSupportKnowledgeDocument[] = [
   {
+    knowledgeKey: 'guide:school-recording-chats',
+    title: 'Where to find recorded lesson chats',
+    content: 'Open Recordings in the signed-in portal: /recordings for teachers, /school/recordings for school administrators, /student/recordings for students, or /parent/recordings for parents. Choose the class or individual subject. A matching Google Meet written-chat .sbv or .txt file appears below its video as Chat history (Pokalbio išklotinė in Lithuanian). Open that section to read the messages. Matching files in the already assigned private Drive folder appear automatically; the teacher, student and parent do not enable another setting. The school administrator assigns the folder and the Google service account must already have access. This is the written meeting chat, not a speech transcript. Tutlio cannot create a missing Google chat file or recover a chat Google did not save. Only retained videos and their matching, downloadable chat files are shown. If the video appears but Chat history is absent, explain the expected location, then offer team review of the saved file and its association with the video. Do not keep asking impact or frequency questions instead of answering where the chat should appear.',
+    portals: ['organization', 'tutor', 'student', 'parent'],
+    entityTypes: ['school'],
+    featureId: 'school_lesson_recordings',
+    requiredPermission: 'recordings.view',
+  },
+  {
+    knowledgeKey: 'guide:company-payments',
+    title: 'Organization payments report',
+    content: 'Company administrators with finance.view can open Payments at /company/payments. It combines customer invoices, trial payments and lesson packages, with date, payment type, status, tutor and search filters. The date basis can be issue/order date or payment date. CSV and Excel export every filtered row. First lesson, lesson counts, trial payment and first paid package show the student\'s full history. Historical payment dates that were never saved stay blank. Tutor remuneration invoices are excluded.',
+    portals: ['organization'],
+    entityTypes: ['company'],
+    featureId: null,
+    requiredPermission: 'finance.view',
+  },
+  {
     knowledgeKey: 'core:tutor-calendar',
     title: 'Tutor calendar and lessons',
     content: 'Tutors use their calendar to manage their own availability and lessons. Organization-specific rules can restrict lesson creation, status changes, cancellation, payment handling, or other actions, so those verified rules always override this general behavior.',
@@ -43,6 +61,21 @@ const CORE_DOCUMENTS: InAppSupportKnowledgeDocument[] = [
     requiredPermission: null,
   },
 ];
+
+/** Packaged with the API, so every deployment uses its own current guides. */
+export function deployedInAppSupportGuides(customer: {
+  portal: string;
+  entityType: string | null;
+  enabledFeatureIds: string[];
+  allowedPermissions: string[];
+}): InAppSupportKnowledgeDocument[] {
+  return CORE_DOCUMENTS.filter((document) =>
+    document.portals.includes(customer.portal)
+    && (!document.entityTypes.length || (customer.entityType !== null && document.entityTypes.includes(customer.entityType)))
+    && (!document.featureId || customer.enabledFeatureIds.includes(document.featureId))
+    && (customer.portal !== 'organization' || !document.requiredPermission
+      || customer.allowedPermissions.includes(document.requiredPermission)));
+}
 
 export function buildInAppSupportKnowledgeDocuments(): InAppSupportKnowledgeDocument[] {
   const features = Object.values(FEATURE_REGISTRY).map((feature): InAppSupportKnowledgeDocument => ({

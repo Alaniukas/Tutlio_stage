@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { schoolContractBillingModel } from '../../src/lib/schoolCanonicalBilling.js';
+import { schoolInvoiceAmountDue } from '../../src/lib/schoolInvoiceOverpayments.js';
 
 export const SCHOOL_INVOICE_RETRY_WINDOW_MS = 23 * 60 * 60 * 1000;
 export type SchoolInvoiceRenderedEmail = {
@@ -28,7 +29,7 @@ export async function deliverSchoolMonthlyInvoiceOnce(params: {
   const { supabase, invoiceId, organizationId } = params;
   const now = params.now || new Date();
   const { data: invoice, error: invoiceError } = await supabase.from('school_monthly_invoices')
-    .select('id, organization_id, payment_status, total_eur, invoice_email_sent_at, billing_model, contract:school_contracts(filled_body,order_snapshot), student:students(payer_email)')
+    .select('id, organization_id, payment_status, total_eur, credit_applied_eur, invoice_email_sent_at, billing_model, contract:school_contracts(filled_body,order_snapshot), student:students(payer_email)')
     .eq('id', invoiceId).eq('organization_id', organizationId).maybeSingle();
   if (invoiceError || !invoice) return { sent: false, reason: invoiceError?.message || 'invoice not found in organization' };
   if (invoice.invoice_email_sent_at) return { sent: false, alreadySent: true };
@@ -40,7 +41,7 @@ export async function deliverSchoolMonthlyInvoiceOnce(params: {
     }
   }
   if (invoice.payment_status !== 'pending'
-    && !(invoice.payment_status === 'paid' && Number(invoice.total_eur) === 0)) {
+    && !(invoice.payment_status === 'paid' && schoolInvoiceAmountDue(invoice) === 0)) {
     return { sent: false, reason: 'invoice is not pending' };
   }
   const student = Array.isArray(invoice.student) ? invoice.student[0] : invoice.student;

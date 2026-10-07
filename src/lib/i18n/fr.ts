@@ -9,6 +9,7 @@ import { schoolTeacherContractTranslationsFr } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const fr: Record<string, string> = {
+  'school.contractsLoadFailed': 'Impossible de charger les contrats. Veuillez réessayer.',
   ...studentNotesTranslations.fr,
   ...schoolFamilyMaterialTranslations.fr,
   ...schoolInvoiceReviewTranslations.fr,
@@ -4757,6 +4758,7 @@ export const fr: Record<string, string> = {
   'whiteboard.closedAfterLesson': 'Le tableau blanc de ce cours n\'est plus disponible (la période d\'accès est terminée).',
   'whiteboard.exportPdf': 'Enregistrer en PDF',
   'whiteboard.loading': 'Chargement du tableau blanc...',
+  "whiteboard.loadFailed": "Impossible de charger le tableau. Réessayez.",
   'whiteboard.notFound': 'Tableau blanc introuvable',
   'whiteboard.open': 'Ouvrir le tableau blanc',
   'whiteboard.retry': 'Réessayer',
@@ -5368,7 +5370,9 @@ export const fr: Record<string, string> = {
   'school.groups.platform': "Plateforme",
   'school.groups.duration': "Durée (min)",
   'school.groups.minimumActiveStudents': "Nombre minimum d’élèves actifs",
-  'school.groups.minimumActiveStudentsHint': "Ce groupe et ses contrats sont automatiquement suspendus lorsque le nombre d’élèves actifs est inférieur au minimum.",
+  'school.groups.minimumActiveStudentsHint': "Seuls les élèves actifs ayant un contrat de cours supplémentaires confirmé et valide comptent dans le minimum. Les élèves suspendus individuellement sont exclus. Le groupe et ses contrats sont automatiquement suspendus sous ce minimum.",
+  'school.groups.minimumStatus': "{n} élèves sur {total} comptent dans le minimum du groupe. Il en faut au moins {minimum}.",
+  'school.groups.unconfirmedContracts': "Élèves sans contrat confirmé et valide : {names}.",
   'school.groups.suspendedMinimum': "Suspendu : moins de {n} élèves actifs dans le groupe",
   'school.groups.meetingLink': "Lien du cours",
   'school.groups.slots': "Emploi du temps hebdomadaire",

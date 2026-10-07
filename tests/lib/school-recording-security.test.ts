@@ -53,6 +53,19 @@ describe('school recording playback security helpers', () => {
     expect(verifySchoolRecordingTicket(token, { signingSecret, nowMs: nowMs + 61_000 })).toBeNull();
   });
 
+  it('signs the companion video ID and refuses a changed parent video', () => {
+    const signingSecret = 'test-secret-that-is-not-used-outside-tests';
+    const token = createSchoolRecordingTicket(
+      { userId: 'user-1', groupId: 'group-1', fileId: 'chat-1', recordingFileId: 'video-1' },
+      { signingSecret },
+    );
+    expect(verifySchoolRecordingTicket(token, { signingSecret })?.recordingFileId).toBe('video-1');
+    const [encoded, signature] = token.split('.');
+    const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    const changed = Buffer.from(JSON.stringify({ ...payload, recordingFileId: 'video-2' })).toString('base64url');
+    expect(verifySchoolRecordingTicket(`${changed}.${signature}`, { signingSecret })).toBeNull();
+  });
+
   it('uses a separate signed HttpOnly-session value so a playback URL cannot act as a browser session', () => {
     const signingSecret = 'test-secret-that-is-not-used-outside-tests';
     const nowMs = Date.parse('2026-09-11T12:00:00Z');

@@ -4389,6 +4389,7 @@ export const ptBrOverrides: Record<string, string> = {
   "whiteboard.title": "Quadro branco",
   "whiteboard.open": "Abrir quadro branco",
   "whiteboard.loading": "Carregando quadro branco...",
+  "whiteboard.loadFailed": "Não foi possível carregar o quadro. Tente novamente.",
   "whiteboard.notFound": "Quadro branco não encontrado",
   "whiteboard.closedAfterLesson": "O quadro branco desta aula não está mais disponível (o período de acesso terminou).",
   "whiteboard.unauthorized": "Você não tem acesso a este quadro branco",

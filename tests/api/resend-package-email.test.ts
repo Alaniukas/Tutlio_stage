@@ -83,6 +83,6 @@ describe('POST /api/resend-package-email', () => {
       pool_email_claimed_at: null,
     }));
     expect(mocks.eq).toHaveBeenCalledWith('pool_organization_id', 'org-1');
-    expect(mocks.is).toHaveBeenCalledWith('pool_email_sent_at', null);
+    expect(mocks.eq).toHaveBeenCalledWith('id', 'pkg-1');
   });
 });

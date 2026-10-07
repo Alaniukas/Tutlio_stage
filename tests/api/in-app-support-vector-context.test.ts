@@ -15,6 +15,7 @@ vi.mock('@ai-sdk/openai', () => ({
 
 import {
   rememberInAppSupportTurn,
+  renderInAppSupportRetrievedContext,
   retrieveInAppSupportVectorContext,
 } from '../../api/_lib/inAppSupportVectorContext';
 
@@ -29,6 +30,20 @@ const customer = {
 };
 
 describe('in-app support vector context', () => {
+  it('includes deployed chat guidance only for an enabled, authorized recording audience', () => {
+    const scope = { ...customer, enabledFeatureIds: ['school_lesson_recordings'], allowedPermissions: ['recordings.view' as const] };
+    const allowed = renderInAppSupportRetrievedContext(scope, { knowledge: ['Older documentation'], memories: [] });
+    expect(allowed).toContain('Current deployed product guidance');
+    expect(allowed).toContain('Pokalbio išklotinė');
+    expect(allowed).toContain('over conflicting older');
+    for (const restricted of [
+      { ...scope, enabledFeatureIds: [] },
+      { ...scope, allowedPermissions: ['sessions.view' as const] },
+      { ...scope, entityType: 'company' as const },
+    ]) {
+      expect(renderInAppSupportRetrievedContext(restricted, { knowledge: [], memories: [] })).not.toContain('Pokalbio išklotinė');
+    }
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.embed.mockResolvedValue({ embedding: [0.1, 0.2, 0.3] });

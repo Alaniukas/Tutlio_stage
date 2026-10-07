@@ -157,6 +157,23 @@ describe('school_extra_first_lesson_invite', () => {
 });
 
 describe('school_monthly_invoice', () => {
+  it('shows a separate prior overpayment and the reduced payment amount',async()=>{
+    const {html}=await sendEmail('school_monthly_invoice',{
+      schoolName:'Demo Mokykla',studentName:'Vaikas',periodLabel:'2026 m. spalis',
+      invoiceAmount:'84.00',creditAppliedAmount:'12.00',totalAmount:'72.00',dueDate:'2026-11-07',payUrl:'https://example.com/pay',
+    });
+    expect(html).toContain('Užskaityta ankstesnė permoka');
+    expect(html).toContain('84'); expect(html).toContain('12'); expect(html).toContain('Apmokėti 72');
+  });
+  it('explains full credit settlement without requesting another payment',async()=>{
+    const {html}=await sendEmail('school_monthly_invoice',{
+      schoolName:'Demo Mokykla',studentName:'Vaikas',periodLabel:'2026 m. spalis',
+      invoiceAmount:'10.00',creditAppliedAmount:'10.00',totalAmount:'0.00',dueDate:'2026-11-07',
+    });
+    expect(html).toContain('padengta ankstesne permoka');
+    expect(html).not.toContain('Apmokėti iki');
+    expect(html).not.toContain('Apmokėjimo būdą nurodys');
+  });
   it('renders a distinct teal invoice for a red school while keeping its identity and payer recipient', async () => {
     const { subject, html } = await sendEmail('school_monthly_invoice', {
       organizationId: 'invoice-qa-school', schoolName: 'QA Mokykla', studentName: 'QA Mokinys', parentName: 'QA Mokėtojas',

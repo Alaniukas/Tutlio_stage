@@ -1,4 +1,5 @@
 import { usesBundledExtraLessonsDocx } from './extraLessonsContract.js';
+import { schoolGroupSessionFollowsSchedule } from './schoolSessionSchedule.js';
 import { isSessionInExtraLessonsServiceWindow, sessionYmdVilnius, type ExtraLessonsBillableSession, type ExtraLessonsBillingInput, type ExtraLessonsBillingResult } from './schoolExtraLessonsBilling.js';
 
 /** The frozen agreement, not today's template or organization flag, controls pricing. */
@@ -82,6 +83,7 @@ export function computeCanonicalSchoolMonthlyBill(input: Omit<ExtraLessonsBillin
   for (const session of input.sessions) {
     if (seen.has(session.id)) continue;
     seen.add(session.id);
+    if (input.service_type === 'group' && !schoolGroupSessionFollowsSchedule(session, input.groupScheduleSlots)) continue;
     const day = sessionYmdVilnius(session.start_time);
     if (!day || day < input.period_start || day > input.period_end
       || (input.serviceEndYmd && day > input.serviceEndYmd)

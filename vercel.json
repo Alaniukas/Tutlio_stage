@@ -5,6 +5,9 @@
     "devCommand": null,
     "trailingSlash": false,
     "functions": {
+        "api/admin-school-recording-check.ts": {
+            "maxDuration": 60
+        },
         "api/generate-invoice.ts": {
             "includeFiles": "api/_lib/fonts/**"
         },

@@ -8,6 +8,7 @@ import {
   recordingRetentionDays,
 } from './_lib/googleDriveRecordings.js';
 import { resolveRecordingViewerAccess } from './_lib/schoolRecordingAccess.js';
+import { recordingChatFiles } from './_lib/schoolRecordingChatFiles.js';
 import { recordingSlotScope, recordingSlotTags, recordingVisibleToScope } from './_lib/schoolRecordingSlotAccess.js';
 import { schoolMemberSlotKey } from '../src/lib/schoolClassGroups.js';
 import {
@@ -169,6 +170,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               size: file.size,
               ...(canManageGroup && classGroup ? { slot: tags.get(file.id) || null } : {}),
               streamUrl: `/api/school-lesson-recording-stream?t=${encodeURIComponent(ticket)}`,
+              chatFiles: recordingChatFiles(file, (values) => createSchoolRecordingTicket({
+                userId: auth.userId!, groupId: group.id, ...values,
+              })),
             };
           }),
           loadError: null,

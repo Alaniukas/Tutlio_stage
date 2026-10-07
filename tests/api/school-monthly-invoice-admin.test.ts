@@ -58,6 +58,7 @@ function query(table: string) {
     insert: (row: any) => {
       const items = (Array.isArray(row) ? row : [row]).map((item, index) => ({
         ...item,
+        ...(table === 'school_monthly_invoices' ? { credit_applied_eur:item.credit_preview_eur || 0 } : {}),
         id: item.id || `id-${state.writes.length + index + 1}`,
         created_at: item.created_at || new Date().toISOString(),
       }));
@@ -116,6 +117,77 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('school monthly invoice review API', () => {
+  it('shows an available prior overpayment in the PDF and final invoice without treating it as a discount', async () => {
+    state.tables.school_invoice_overpayments = [{ id:'credit',organization_id:'org1',student_id:'child1',payer_email:'parent@example.com',
+      source_invoice_id:'paid',amount_eur:5,reason:'Prior adjustment',created_at:'2026-08-31',source:{invoice_number:'PAM-OLD',period_end:'2026-08-31'},uses:[] }];
+    const preview = await request({action:'preview'});
+    expect(preview.body).toMatchObject({totalEur:12,discountAmountEur:0,creditAppliedEur:5,amountDueEur:7});
+    expect(generateSchoolMonthlyInvoicePdf).toHaveBeenCalledWith(expect.objectContaining({totalEur:12,creditAppliedEur:5,discountAmountEur:0}));
+    const batch = await request({action:'batch-preview'});
+    expect(batch.body.payers[0]).toMatchObject({totalEur:12,creditAppliedEur:5,amountDueEur:7});
+    vi.mocked(allocateInvoiceNumber).mockResolvedValue('SF-CREDIT');
+    vi.mocked(sendSchoolMonthlyInvoiceEmail).mockResolvedValue({sent:true});
+    expect((await request({action:'send',previewToken:preview.body.previewToken})).status).toBe(200);
+    expect(state.tables.school_monthly_invoices[0]).toMatchObject({total_eur:12,credit_preview_eur:5,credit_applied_eur:5,payer_student_ids:['child1']});
+    expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({credit_applied_eur:5}),expect.anything());
+  });
+  it('requires a new preview if an available overpayment is used elsewhere', async () => {
+    state.tables.school_invoice_overpayments = [{ id:'credit',organization_id:'org1',student_id:'child1',payer_email:'parent@example.com',
+      amount_eur:5,source:{period_end:'2026-08-31'},uses:[] }];
+    const preview = await request({action:'preview'});
+    state.tables.school_invoice_overpayments[0].uses = [{invoice_id:'another',amount_eur:5}];
+    const sent = await request({action:'send',previewToken:preview.body.previewToken});
+    expect(sent.status).toBe(409);
+    expect(sent.body.error).toContain('pasikeitė');
+    expect(state.writes).toEqual([]);
+  });
+  it('previews and sends three Tuesdays instead of all five historical group rows', async () => {
+    const original = state.tables.sessions[0];
+    state.tables.sessions = [15, 21, 22, 28, 29].map((day) => ({ ...original, id: `sep-${day}`, price: 6,
+      start_time: `2026-09-${day}T09:30:00Z`, end_time: `2026-09-${day}T10:30:00Z`,
+      class_group: { name: 'Intermediate 1' } }));
+    state.tables.school_contracts = [{ id: 'contract', organization_id: 'org1', student_id: 'child1',
+      kind: 'extra_lessons', signing_status: 'signed', class_group_id: 'group1', unit_price_eur: 6,
+      accepted_at: '2026-09-15T09:31:00Z', start_within_14_status: 'yes',
+      order_snapshot: { service_type: 'group', group_id: 'group1', start_date: '2026-09-14', end_date: '2027-06-01',
+        schedule_slots: [{ weekday: 2, start_time: '12:30', end_time: '13:30' }] } }];
+    const before = structuredClone(state.tables.sessions);
+    const preview = await request({ action: 'preview' });
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({ totalEur: 18, reviewSessionIds: [], lines: [{ quantity: 3, amountEur: 18 }] });
+    expect(preview.body.sessions.filter((row: any) => row.reason === 'outside_schedule').map((row: any) => row.id).sort()).toEqual(['sep-21', 'sep-28']);
+    const batch = await request({ action: 'batch-preview' });
+    expect(batch.body.payers[0].totalEur).toBe(18);
+    vi.mocked(allocateInvoiceNumber).mockResolvedValue('SF-NEW');
+    vi.mocked(sendSchoolMonthlyInvoiceEmail).mockResolvedValue({ sent: true } as any);
+    expect((await request({ action: 'send', previewToken: preview.body.previewToken })).status).toBe(200);
+    expect(state.tables.school_monthly_invoices[0]).toMatchObject({ total_eur: 18 });
+    expect([...state.tables.school_monthly_invoices[0].billed_session_ids].sort()).toEqual(['sep-15', 'sep-22', 'sep-29']);
+    expect(state.tables.sessions).toEqual(before);
+  });
+
+  it('loads a member\'s selected slot for a group without a frozen agreement', async () => {
+    state.tables.school_class_group_members = [{ group_id: 'group1', student_id: 'child1',
+      schedule_slots: [{ weekday: 2, start_time: '12:30' }], group: { organization_id: 'org1' } }];
+    const original = state.tables.sessions[0];
+    state.tables.sessions = [21, 22].map((day) => ({ ...original, id: `sep-${day}`,
+      start_time: `2026-09-${day}T09:30:00Z`, end_time: `2026-09-${day}T10:30:00Z` }));
+    const preview = await request({ action: 'preview' });
+    expect(preview.body).toMatchObject({ totalEur: 12, lines: [{ quantity: 1 }] });
+    expect(preview.body.sessions.find((row: any) => row.id === 'sep-21')).toMatchObject({ reason: 'outside_schedule' });
+    expect(state.writes).toEqual([]);
+  });
+
+  it('loads the original time of a rescheduled selected group occurrence', async () => {
+    state.tables.school_contracts = [{ id: 'contract', organization_id: 'org1', student_id: 'child1',
+      kind: 'extra_lessons', signing_status: 'signed', class_group_id: 'group1', accepted_at: '2026-09-01T00:00:00Z',
+      start_within_14_status: 'yes', order_snapshot: { service_type: 'group', group_id: 'group1', start_date: '2026-09-01',
+        schedule_slots: [{ weekday: 2, start_time: '12:30', end_time: '13:30' }] } }];
+    Object.assign(state.tables.sessions[0], { start_time: '2026-09-23T10:00:00Z', end_time: '2026-09-23T11:00:00Z',
+      original_start_time: '2026-09-22T09:30:00Z' });
+    expect((await request({ action: 'preview' })).body).toMatchObject({ totalEur: 12, lines: [{ quantity: 1 }] });
+  });
+
   it('restores eight group lessons after cancellation, uses the group name in the PDF, and issues only once', async () => {
     const original = state.tables.sessions[0];
     state.tables.sessions = Array.from({ length: 8 }, (_, index) => ({ ...original,

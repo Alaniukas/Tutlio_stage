@@ -4616,6 +4616,7 @@ export const roOverrides: Record<string, string> = {
   "whiteboard.title": "Tablă interactivă",
   "whiteboard.open": "Deschide tabla virtuală",
   "whiteboard.loading": "Se încarcă tabla interactivă...",
+  "whiteboard.loadFailed": "Tabla nu a putut fi încărcată. Încearcă din nou.",
   "whiteboard.notFound": "Tabla interactivă nu a fost găsită",
   "whiteboard.closedAfterLesson": "Tabla interactivă a acestei lecții nu mai este disponibilă (perioada de acces s-a încheiat).",
   "whiteboard.unauthorized": "Nu ai acces la această tablă interactivă",

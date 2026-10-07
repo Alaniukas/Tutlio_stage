@@ -4435,6 +4435,7 @@ export const thOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "ซ่อนจนกว่าจะเปิดหน้านี้อีกครั้ง",
   "pwa.guideDontShowInSettings": "ไม่แสดงในการตั้งค่าอีก",
   "whiteboard.loading": "กำลังโหลดไวต์บอร์ด...",
+  "whiteboard.loadFailed": "โหลดไวท์บอร์ดไม่สำเร็จ โปรดลองอีกครั้ง",
   "whiteboard.notFound": "ไม่พบไวต์บอร์ด",
   "whiteboard.closedAfterLesson": "ไวต์บอร์ดของคาบนี้ใช้งานไม่ได้แล้ว (หมดระยะเวลาเข้าถึง)",
   "whiteboard.unauthorized": "คุณไม่มีสิทธิ์เข้าถึงไวต์บอร์ดนี้",

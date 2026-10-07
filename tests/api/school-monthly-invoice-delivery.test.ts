@@ -29,6 +29,13 @@ function db(initial: any = null, opts: { stampError?: boolean; missingSchema?: b
 function run(client: any, send: any, override: any = {}) { return deliverSchoolMonthlyInvoiceOnce({ supabase: client, invoiceId: 'inv', organizationId: 'org', payload, send, now, ...override }); }
 
 describe('durable invoice delivery', () => {
+  it('delivers an invoice fully paid with a carried over balance', async () => {
+    const database=db(); Object.assign(database.state.invoice,{ total_eur:10,credit_applied_eur:10,payment_status:'paid',paid_via:'credit' });
+    const send=vi.fn().mockResolvedValue({id:'credit-email'});
+    expect(await run(database.client,send)).toEqual({sent:true,id:'credit-email'});
+    expect(await run(database.client,send)).toMatchObject({alreadySent:true});
+    expect(send).toHaveBeenCalledOnce();
+  });
   it('freezes the provider payload and returns without resending once stamped', async () => {
     const database = db(); const send = vi.fn().mockResolvedValue({ id: 'email' });
     expect(await run(database.client, send)).toEqual({ sent: true, id: 'email' });

@@ -77,6 +77,23 @@ beforeEach(() => {
 });
 
 describe('GET /api/pay-school-monthly-invoice', () => {
+  it('charges only the cash remainder after a previous overpayment and recalculates the fee', async () => {
+    db.invoice = { ...baseInvoice(), total_eur:84, credit_applied_eur:12 };
+    stripeMocks.create.mockResolvedValue({ id:'cs_credit',url:'https://checkout.stripe.com/cs_credit' });
+    const res = mockRes();
+    await handler(req({ invoice:INVOICE_ID,t:buildPublicLinkToken('monthly-invoice',INVOICE_ID) }),res as any);
+    expect(res.getResult().statusCode).toBe(303);
+    const params = stripeMocks.create.mock.calls[0][0];
+    expect(params.line_items[0].price_data.unit_amount).toBe(7200);
+    expect(params.payment_intent_data.application_fee_amount).toBe(schoolInstallmentCheckoutCents(72,'default').applicationFeeCents);
+  });
+  it('does not create a checkout for an invoice fully settled by credit', async () => {
+    db.invoice = { ...baseInvoice(), total_eur:12,credit_applied_eur:12,payment_status:'paid' };
+    const res = mockRes();
+    await handler(req({ invoice:INVOICE_ID,t:buildPublicLinkToken('monthly-invoice',INVOICE_ID) }),res as any);
+    expect(res.getResult().statusCode).toBe(200);
+    expect(stripeMocks.create).not.toHaveBeenCalled();
+  });
   it('rejects a missing or wrong token', async () => {
     const res = mockRes();
     await handler(req({ invoice: INVOICE_ID, t: 'wrong' }), res as any);

@@ -5027,6 +5027,7 @@ export const heOverrides: Record<string, string> = {
   "pwa.guideHideThisVisit": "הסתרה עד לפתיחת העמוד הזה שוב",
   "pwa.guideDontShowInSettings": "לא להציג יותר בהגדרות",
   "whiteboard.loading": "לוח הכתיבה נטען...",
+  "whiteboard.loadFailed": "לא ניתן לטעון את הלוח. נסו שוב.",
   "whiteboard.notFound": "לוח הכתיבה לא נמצא",
   "whiteboard.closedAfterLesson": "לוח הכתיבה של השיעור הזה כבר אינו זמין (תקופת הגישה הסתיימה).",
   "whiteboard.unauthorized": "אין לך גישה ללוח הכתיבה הזה",
