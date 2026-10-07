@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
@@ -9,6 +10,7 @@ import { schoolTeacherContractTranslationsFi } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const fi: Record<string, string> = {
+  ...organizationReleaseTranslations['fi'],
   'school.contractsLoadFailed': 'Sopimusten lataaminen epäonnistui. Yritä uudelleen.',
   ...studentNotesTranslations.fi,
   ...schoolFamilyMaterialTranslations.fi,

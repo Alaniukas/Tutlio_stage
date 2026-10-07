@@ -34,6 +34,7 @@ import {
   sumOrgTutorLessonsPayEur,
 } from '@/lib/orgTutorLessonPay';
 import {
+  companyConductedSessionOptions,
   countConductedOrgSessions,
   filterConductedOrgSessions,
 } from '@/lib/orgTutorConductedSessions';
@@ -1091,7 +1092,6 @@ export default function CompanyTutors() {
             + (isSchoolView ? ', students!inner(organization_id)' : ''))
           .eq('tutor_id', tutor.id);
         if (isSchoolView) query = query.eq('students.organization_id', orgId);
-        else query = query.in('status', ['completed', 'no_show']);
         return query
           .gte('start_time', oneYearAgo.toISOString())
           .lte('end_time', statsNow.toISOString())
@@ -1114,7 +1114,14 @@ export default function CompanyTutors() {
       .select('*')
       .eq('tutor_id', tutor.id);
 
-    const conducted = filterConductedOrgSessions(sessions);
+    const conductedSessionOptions = companyConductedSessionOptions({
+      organizationId: orgId,
+      entityType: isSchoolView ? 'school' : 'company',
+      requireConfirmation: orgRequiresTutorStatusConfirmation(orgId, {
+        tutor_lesson_status_confirmation: hasFeature('tutor_lesson_status_confirmation'),
+      }),
+    });
+    const conducted = filterConductedOrgSessions(sessions, conductedSessionOptions);
     const tutorRate = tutorRow.company_commission_percent ?? orgDefaults.company_commission_percent;
     const schoolGroupPayRate = resolveSchoolTutorGroupPayRate({
       tutorRate: tutorRow.company_commission_percent,
@@ -1129,7 +1136,7 @@ export default function CompanyTutors() {
     }) : null;
     const schoolKnownPay = schoolPay?.filter((occurrence) => occurrence.payEur !== null);
     const schoolUnresolvedPayCount = schoolPay?.filter((occurrence) => occurrence.payIssue).length;
-    const sessionCount = schoolPay ? schoolPay.length : countConductedOrgSessions(conducted);
+    const sessionCount = schoolPay ? schoolPay.length : countConductedOrgSessions(conducted, conductedSessionOptions);
     const earnings = schoolKnownPay
       ? Math.round(schoolKnownPay.reduce((sum, occurrence) => sum + (occurrence.payEur ?? 0), 0) * 100) / 100
       : isProKlaseAdmin

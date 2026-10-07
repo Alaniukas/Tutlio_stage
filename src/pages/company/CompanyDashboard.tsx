@@ -21,8 +21,10 @@ import StatusBadge from '@/components/StatusBadge';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import { useTranslation } from '@/lib/i18n';
 import { useDismissibleDashboardItemIds } from '@/hooks/useDismissibleDashboardItemIds';
-import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { getOrgVisibleTutorsDeduped } from '@/lib/orgVisibleTutors';
 import { fetchOrganizationRow } from '@/lib/orgLookup';
+import { resolveAuthUser } from '@/lib/authSession';
+import { orgAdminRowByUserDeduped } from '@/lib/preload';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isProKlaseOrg } from '@/lib/marketMoney';
 import { isProKlaseAwaitingOutcomeConfirmation } from '@/lib/proKlaseTutorPay';
@@ -180,21 +182,37 @@ export default function CompanyDashboard() {
     void loadData();
   }, []);
 
+  const loadOverduePackages = async (organizationId: string) => {
+    if (!isProKlaseOrg(organizationId) || !showFinanceTotals) {
+      setOverduePackages([]);
+      return;
+    }
+    try {
+      const overdueRes = await fetch('/api/proklase-student-packages?summary=overdue-packages', {
+        headers: await authHeaders(),
+      });
+      const overdueBody = await overdueRes.json().catch(() => ({}));
+      setOverduePackages(
+        overdueRes.ok && Array.isArray((overdueBody as { packages?: unknown }).packages)
+          ? (overdueBody as { packages: typeof overduePackages }).packages
+          : [],
+      );
+    } catch (error) {
+      console.error('Error loading overdue pooled packages:', error);
+      setOverduePackages([]);
+    }
+  };
+
   const loadData = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await resolveAuthUser();
       if (!user) {
         setLoading(false);
         return;
       }
 
-      const { data: adminRow } = await supabase
-        .from('organization_admins')
-        .select('organization_id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (!adminRow) {
+      const adminRow = await orgAdminRowByUserDeduped(user.id);
+      if (!adminRow?.organization_id) {
         setLoading(false);
         return;
       }
@@ -215,28 +233,11 @@ export default function CompanyDashboard() {
         orgFeatures.trial_followup_alert === true;
       setOrgIdForDismiss(organizationId);
       setOrgName(org?.name || '');
-      if (isProKlaseOrg(organizationId)) {
-        try {
-          const overdueRes = await fetch('/api/proklase-student-packages?summary=overdue-packages', {
-            headers: await authHeaders(),
-          });
-          const overdueBody = await overdueRes.json().catch(() => ({}));
-          setOverduePackages(
-            overdueRes.ok && Array.isArray((overdueBody as { packages?: unknown }).packages)
-              ? (overdueBody as { packages: typeof overduePackages }).packages
-              : [],
-          );
-        } catch (error) {
-          console.error('Error loading overdue pooled packages:', error);
-          setOverduePackages([]);
-        }
-      } else {
-        setOverduePackages([]);
-      }
+      void loadOverduePackages(organizationId);
       const cap = Number(org?.tutor_license_count) || 0;
       setTutorLicenseCap(cap);
 
-      const visibleTutors = await getOrgVisibleTutors(
+      const visibleTutors = await getOrgVisibleTutorsDeduped(
         supabase as any,
         organizationId,
         'id, email, has_active_license',
@@ -291,50 +292,46 @@ export default function CompanyDashboard() {
     );
       setTutorPayMap(tutorMap);
 
-      const monthStart = startOfMonth(new Date()).toISOString();
-      const monthEnd = endOfMonth(new Date()).toISOString();
-
-      const { data: monthSessions } = await supabase
-      .from('sessions')
-      .select('price, status, payment_status, paid, start_time, end_time, is_complimentary, exclude_from_lesson_count')
-      .in('tutor_id', tutorIds)
-      .gte('start_time', monthStart)
-      .lte('start_time', monthEnd)
-      .neq('status', 'cancelled')
-      .limit(5000);
-
       const now = new Date();
+      const monthStart = startOfMonth(now).toISOString();
+      const monthEnd = endOfMonth(now).toISOString();
       const next7days = addDays(now, 7);
+      const past30 = subDays(now, 30);
+      const twoYearsAgo = subDays(now, 730).toISOString();
 
-      const monthMetrics = orgDashboardMonthMetrics(monthSessions || [], now);
+      const [{ data: metricsSessions }, { data: sessionsData }] = await Promise.all([
+        supabase
+          .from('sessions')
+          .select('price, status, payment_status, paid, start_time, end_time, is_complimentary, exclude_from_lesson_count')
+          .in('tutor_id', tutorIds)
+          .gte('start_time', twoYearsAgo)
+          .neq('status', 'cancelled')
+          .limit(5000),
+        supabase
+          .from('sessions')
+          .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, status_reminder_last_sent_at, tutor_comment, student:students(full_name, payment_model)')
+          .in('tutor_id', tutorIds)
+          .gte('start_time', past30.toISOString())
+          .order('start_time', { ascending: true })
+          .limit(500),
+      ]);
+
+      const monthSessions = (metricsSessions || []).filter((s) => {
+        const start = String(s.start_time || '');
+        return start >= monthStart && start <= monthEnd;
+      });
+      const monthMetrics = orgDashboardMonthMetrics(monthSessions, now);
       setSessionsThisMonth(monthMetrics.occurredCount);
       setUpcomingSessions(monthMetrics.plannedCount);
       setEarningsThisMonth(monthMetrics.paidRevenueEur);
-
-      const twoYearsAgo = subDays(now, 730).toISOString();
-      const { data: allSessions } = await supabase
-      .from('sessions')
-      .select('price, status, payment_status, paid, is_complimentary, exclude_from_lesson_count')
-      .in('tutor_id', tutorIds)
-      .gte('start_time', twoYearsAgo)
-      .neq('status', 'cancelled')
-      .limit(5000);
-      const lifetimeMetrics = orgDashboardMonthMetrics(allSessions || [], now);
+      const lifetimeMetrics = orgDashboardMonthMetrics(metricsSessions || [], now);
       setEarningsTotal(lifetimeMetrics.paidRevenueEur);
-
-      const { data: sessionsData } = await supabase
-      .from('sessions')
-      .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, meeting_link, tutor_joined_at, student_joined_at, status_confirmed_at, status_reminder_last_sent_at, tutor_comment, student:students(full_name, payment_model)')
-      .in('tutor_id', tutorIds)
-      .order('start_time', { ascending: true })
-      .limit(800);
 
       const rows: OrgSessionRow[] = (sessionsData || []).map((r: any) => ({
       ...r,
       tutor_name: tutorMap.get(r.tutor_id)?.full_name || t('common.tutor'),
       student: Array.isArray(r.student) ? r.student[0] ?? null : r.student ?? null,
     }));
-      const past30 = subDays(now, 30);
       const nowMs = now.getTime();
       const attentionWindowMs = 6 * 3600000;
       const allowsIndividualPayment = (session: OrgSessionRow) =>

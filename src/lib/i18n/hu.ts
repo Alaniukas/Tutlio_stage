@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /**
@@ -7,6 +8,7 @@ import { en } from './en.js';
  * Dictionary coverage does not publish the locale or certify market readiness.
  */
 export const huOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['hu'],
   "findLesson.showWithoutBreaks": "Időpontok megjelenítése szünetek nélkül",
   "notifications.title": "Értesítések",
   "notifications.desc": "Válassza ki, mely jelzéseket szeretné e-mailben és push értesítésként megkapni. A lehetőségek a fiókjához igazodnak.",

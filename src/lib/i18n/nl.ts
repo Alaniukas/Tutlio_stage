@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations, schoolGroupActivationTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { companyPaymentReportTranslations } from './companyPaymentReportTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
@@ -11,6 +12,8 @@ import { supportTranslations } from './supportTranslations.js';
 import { nlQuiz } from './nlQuiz.js';
 
 export const nl: Record<string, string> = {
+  ...organizationReleaseTranslations['nl'],
+  ...schoolGroupActivationTranslations['nl'],
   ...companyPaymentReportTranslations.nl,
   'compStu.inviteLinkedExistingParent': 'Het bestaande account is gekoppeld aan dit kind en alle broers en zussen met hetzelfde e-mailadres van de betaler.',
   'companyDash.sendPackageReminder': 'Herinnering sturen',

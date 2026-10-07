@@ -1,7 +1,9 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** Hindi tutor/business draft. Scope and release limits: docs/HINDI_LOCALIZATION_REVIEW.md. */
 export const hiOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['hi'],
   "findLesson.showWithoutBreaks": "बिना विराम वाले समय दिखाएँ",
   "notifications.title": "सूचनाएँ",
   "notifications.desc": "चुनें कि आप ईमेल और पुश सूचनाओं से कौन-से अलर्ट प्राप्त करना चाहते हैं। विकल्प आपके खाते के अनुसार हैं।",

@@ -1,8 +1,10 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** Hong Kong Traditional Chinese draft. School/admin/full legal copy stays English.
  * Scope and release limits: docs/HONG_KONG_LOCALIZATION_REVIEW.md. */
 export const zhHkOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['zh-hk'],
   "findLesson.showWithoutBreaks": "顯示不預留休息時間的時段",
   "notifications.title": "通知",
   "notifications.desc": "選擇透過電郵和推播接收哪些提示。選項會按你的帳戶調整。",

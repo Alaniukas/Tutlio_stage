@@ -72,9 +72,9 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 async function expectInvoiceCount(count: number) {
-  await waitFor(() => expect(screen.getByRole('button', {
-    name: `invoices.downloadAllFiltered ${count}`,
-  })).toBeTruthy());
+  await waitFor(() => expect(screen.getAllByRole('checkbox', {
+    name: /^(SEP|OCT)-\d+$/,
+  })).toHaveLength(count));
 }
 
 describe('Company invoice period filters', () => {

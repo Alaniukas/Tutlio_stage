@@ -17,6 +17,10 @@ import ClassGroupFormDialog, {
 } from '@/components/company/ClassGroupFormDialog';
 import { usesLaisviStyleExtraLessonsPrefill } from '@/lib/laisviVaikaiExtraLessonsDefaults';
 import { isSchoolClassGroupSuspended, schoolGroupMinimumStudents } from '@/lib/schoolGroupMinimumPolicy';
+import {
+  buildSchoolGroupActivationSummary,
+  schoolGroupMemberActivationLabelKey,
+} from '@/lib/schoolGroupMemberActivation';
 import SchoolGroupMaterialLibrary from '@/components/school/SchoolGroupMaterialLibrary';
 import {
   classGroupCalendarLabel,
@@ -284,10 +288,13 @@ export default function CompanyClassGroups() {
     return true;
   };
 
+  const formatMemberNames = (names: string[]) => names.join(', ');
+
   const renderCard = (g: SchoolClassGroupRecord) => {
     const unconfirmedIds = new Set(g.minimum_status?.unconfirmed_student_ids || []);
     const unconfirmedNames = (g.members || []).filter(member => unconfirmedIds.has(member.student_id))
       .map(member => member.student?.full_name).filter(Boolean).join(', ');
+    const activation = buildSchoolGroupActivationSummary(g, g.extra_lessons_contracts || []);
     const content = (
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -313,8 +320,20 @@ export default function CompanyClassGroups() {
               {staff}: {tutorNameById.get(g.tutor_id) || '—'}
             </div>
           )}
-          <div className="text-sm text-gray-500 mt-1">
-            {t('school.groups.members')}: {(g.members || []).map((m) => m.student?.full_name).filter(Boolean).join(', ') || '—'}
+          <div className="text-sm text-gray-500 mt-1 space-y-0.5">
+            <div>{t('school.groups.members')}:</div>
+            {activation.members.length ? (
+              <ul className="list-none space-y-0.5">
+                {activation.members.map((member) => (
+                  <li key={member.studentId}>
+                    <span className="text-gray-700">{member.fullName}</span>
+                    <span className="text-gray-500"> · {t(schoolGroupMemberActivationLabelKey(member.kind))}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div>—</div>
+            )}
           </div>
           {g.minimum_status ? (
             <div className={`mt-1 text-sm ${isSchoolClassGroupSuspended(g) ? 'text-amber-700' : 'text-gray-600'}`}>
@@ -325,8 +344,24 @@ export default function CompanyClassGroups() {
               })}</p>
               {unconfirmedNames && <p>{t('school.groups.unconfirmedContracts', { names: unconfirmedNames })}</p>}
             </div>
-          ) : isSchoolClassGroupSuspended(g) && g.suspension_reason ? (
-            <div className="mt-1 text-sm text-amber-700">{g.suspension_reason}</div>
+          ) : null}
+          {isSchoolClassGroupSuspended(g) ? (
+            <div className="mt-2 space-y-1 text-sm text-amber-800">
+              <p>{t('school.groups.suspendedWhy', {
+                minimum: activation.minimum,
+                active: g.minimum_status?.eligible_student_count ?? activation.activeCount,
+              })}</p>
+              {activation.offerPending.length > 0 ? (
+                <p>{t('school.groups.suspendedOfferPending', {
+                  names: formatMemberNames(activation.offerPending.map((member) => member.fullName)),
+                })}</p>
+              ) : null}
+              {activation.waitingForContract.length > 0 ? (
+                <p>{t('school.groups.suspendedNoContract', {
+                  names: formatMemberNames(activation.waitingForContract.map((member) => member.fullName)),
+                })}</p>
+              ) : null}
+            </div>
           ) : null}
         </div>
         {canEditGroups && (

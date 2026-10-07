@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /**
@@ -6,6 +7,7 @@ import { en } from './en.js';
  * See docs/CROATIAN_LOCALIZATION_REVIEW.md before publishing this locale.
  */
 export const hrOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['hr'],
   "findLesson.showWithoutBreaks": "Prikaži termine bez stanki",
   "notifications.title": "Obavijesti",
   "notifications.desc": "Odaberite obavijesti koje želite primati e-poštom i putem push obavijesti. Opcije su prilagođene vašem računu.",

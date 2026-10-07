@@ -46,15 +46,17 @@ export async function listActiveSchoolStudentsByPayerEmail(
   orgId: string,
   payerEmail: string,
 ): Promise<Array<{ id: string; parent_user_id: string | null }>> {
+  const normalized = payerEmail.trim().toLowerCase();
   const { data, error } = await db
     .from('students')
     .select('id, parent_user_id, payer_email, parent_secondary_email, enrollment_status, detached_at')
     .eq('organization_id', orgId)
     .eq('enrollment_status', 'active')
-    .is('detached_at', null);
+    .is('detached_at', null)
+    .or(`payer_email.ilike.${normalized},parent_secondary_email.ilike.${normalized}`);
   if (error) throw error;
   return (data as StudentRow[] || [])
-    .filter((row) => payerEmailMatches(row, payerEmail))
+    .filter((row) => payerEmailMatches(row, normalized))
     .map((row) => ({ id: row.id, parent_user_id: row.parent_user_id }));
 }
 

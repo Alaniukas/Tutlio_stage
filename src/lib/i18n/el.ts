@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** Greek (el-GR) draft for tutors, tutoring businesses and connected student/parent flows.
@@ -5,6 +6,7 @@ import { en } from './en.js';
  * Review scope and release gates: docs/GREEK_LOCALIZATION_REVIEW.md.
  */
 export const elOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['el'],
   "findLesson.showWithoutBreaks": "Εμφάνιση ωρών χωρίς διαλείμματα",
   "notifications.title": "Ειδοποιήσεις",
   "notifications.desc": "Επιλέξτε ποιες ειδοποιήσεις λαμβάνετε μέσω email και ειδοποιήσεων push. Οι επιλογές προσαρμόζονται στον λογαριασμό σας.",

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { dedupeAsync } from './dataCache.js';
 import { inviteEmailsMatch, type OrgTutorInviteLink } from './tutorInviteClaim.js';
 
 export type OrgTutorRow = {
@@ -119,4 +120,13 @@ export async function getOrgVisibleTutors(
     ...classGroupTutorIds,
   ]);
   return filterConfirmedOrgTutors((profileRows || []) as unknown as OrgTutorRow[], adminIds, tutorIdSet);
+}
+
+/** Coalesces Layout preload + Dashboard + Stats bursts into one in-flight tutor list fetch. */
+export function getOrgVisibleTutorsDeduped(
+  supabase: SupabaseClient,
+  orgId: string,
+  select: string,
+): Promise<OrgTutorRow[]> {
+  return dedupeAsync(`org_visible_tutors:${orgId}:${select}`, () => getOrgVisibleTutors(supabase, orgId, select));
 }

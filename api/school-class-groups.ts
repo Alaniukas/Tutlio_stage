@@ -17,6 +17,43 @@ import {
 import { attachSchoolGroupMinimumStatus, reconcileSchoolGroupMinimum } from './_lib/schoolGroupMinimumPolicy.js';
 
 const GROUP_SELECT = '*, tutor:profiles!school_class_groups_tutor_id_fkey(full_name), slots:school_class_group_slots(*), members:school_class_group_members(student_id, enrolled_at, schedule_slots, recording_access, student:students(full_name, email, grade))';
+const GROUP_CONTRACT_SELECT = 'student_id, class_group_id, signing_status, archived_at, terminated_at, withdrawal_requested_at, suspension_started_at, suspension_until, suspension_resumed_at';
+
+async function attachGroupExtraContracts<T extends { id: string }>(
+  supabase: ReturnType<typeof serviceSupabase>,
+  orgId: string,
+  groups: T[],
+) {
+  const groupIds = groups.map((group) => group.id).filter(Boolean);
+  if (!groupIds.length) return groups.map((group) => ({ ...group, extra_lessons_contracts: [] }));
+  const { data, error } = await supabase.from('school_contracts')
+    .select(GROUP_CONTRACT_SELECT)
+    .eq('organization_id', orgId)
+    .eq('kind', 'extra_lessons')
+    .in('class_group_id', groupIds);
+  if (error) throw error;
+  const byGroup = new Map<string, NonNullable<typeof data>>();
+  for (const row of data || []) {
+    const groupId = String((row as { class_group_id?: string | null }).class_group_id || '');
+    if (!groupId) continue;
+    const bucket = byGroup.get(groupId) || [];
+    bucket.push(row);
+    byGroup.set(groupId, bucket);
+  }
+  return groups.map((group) => ({
+    ...group,
+    extra_lessons_contracts: (byGroup.get(group.id) || []).map(row => ({
+      student_id: row.student_id,
+      signing_status: row.signing_status,
+      archived_at: row.archived_at,
+      terminated_at: row.terminated_at,
+      withdrawal_requested_at: row.withdrawal_requested_at,
+      suspension_started_at: row.suspension_started_at,
+      suspension_until: row.suspension_until,
+      suspension_resumed_at: row.suspension_resumed_at,
+    })),
+  }));
+}
 
 async function attachAttendanceExclusions<T extends { id: string }>(
   supabase: ReturnType<typeof serviceSupabase>, groups: T[],
@@ -211,8 +248,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const students = studentsResult.data || [];
     if (admin.ok) {
       try {
-        const groups = await attachAttendanceExclusions(supabase, data || []);
-        return res.status(200).json({ groups: await attachSchoolGroupMinimumStatus(supabase, orgId, groups), students });
+        const groups = await attachGroupExtraContracts(supabase, orgId, data || []);
+        const withAttendance = await attachAttendanceExclusions(supabase, groups);
+        return res.status(200).json({ groups: await attachSchoolGroupMinimumStatus(supabase, orgId, withAttendance), students });
       } catch {
         return res.status(503).json({ error: 'Could not load group details' });
       }
@@ -220,8 +258,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (profile?.organization_id === orgId) {
       const tutorGroups = (data || []).filter((g) => g.tutor_id === auth.userId);
       try {
-        const groups = await attachAttendanceExclusions(supabase, tutorGroups);
-        return res.status(200).json({ groups: await attachSchoolGroupMinimumStatus(supabase, orgId, groups), students });
+        const groups = await attachGroupExtraContracts(supabase, orgId, tutorGroups);
+        const withAttendance = await attachAttendanceExclusions(supabase, groups);
+        return res.status(200).json({ groups: await attachSchoolGroupMinimumStatus(supabase, orgId, withAttendance), students });
       } catch {
         return res.status(503).json({ error: 'Could not load group details' });
       }

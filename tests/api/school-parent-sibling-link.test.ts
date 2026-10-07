@@ -40,11 +40,11 @@ describe('schoolParentSiblingLink', () => {
         select: () => chain,
         eq: () => chain,
         is: () => chain,
+        or: () => chain,
         then: (resolve: (value: unknown) => unknown) => resolve({
           data: [
             { id: 'child-1', parent_user_id: null, payer_email: 'parent@example.com', parent_secondary_email: null },
             { id: 'child-2', parent_user_id: null, payer_email: 'parent@example.com', parent_secondary_email: null },
-            { id: 'child-3', parent_user_id: null, payer_email: 'other@example.com', parent_secondary_email: null },
           ],
           error: null,
         }),
@@ -66,6 +66,7 @@ describe('schoolParentSiblingLink', () => {
         eq: (...args: unknown[]) => { filters[args[0] as string] = args[1]; return chain; },
         in: (...args: unknown[]) => { filters[args[0] as string] = args[1]; return chain; },
         is: () => chain,
+        or: () => chain,
         upsert: () => chain,
         update: () => chain,
         maybeSingle: async () => {

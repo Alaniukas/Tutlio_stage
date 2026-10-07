@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 /**
  * Thai draft for individual tutors, tutoring businesses, and connected portals.
  * Translation and review scope: docs/THAI_LOCALIZATION_REVIEW.md.
@@ -6,6 +7,7 @@
 import { en } from './en.js';
 
 export const thOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['th'],
   "findLesson.showWithoutBreaks": "แสดงเวลาโดยไม่เว้นช่วงพัก",
   "notifications.title": "การแจ้งเตือน",
   "notifications.desc": "เลือกการแจ้งเตือนที่ต้องการรับทางอีเมลและการแจ้งเตือนแบบพุช ตัวเลือกจะปรับให้เหมาะกับบัญชีของคุณ",

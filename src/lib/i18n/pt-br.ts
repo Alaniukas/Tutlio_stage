@@ -1,7 +1,9 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** Brazilian Portuguese tutor/business copy; deferred modules retain English. */
 export const ptBrOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['pt-br'],
   "findLesson.showWithoutBreaks": "Mostrar horários sem intervalos",
   "notifications.title": "Notificações",
   "notifications.desc": "Escolha os avisos que deseja receber por email e notificações push. As opções são adaptadas à sua conta.",

@@ -1,9 +1,11 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** Czech tutor/business translation draft. Dedicated school/admin and full legal
  * policies retain English. Publication is controlled by localeRelease.ts.
  * See docs/CZECH_LOCALIZATION_REVIEW.md for scope and review limits. */
 export const csOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['cs'],
   "findLesson.showWithoutBreaks": "Zobrazit časy bez přestávek",
   "notifications.title": "Oznámení",
   "notifications.desc": "Vyberte si upozornění, která chcete dostávat e-mailem a prostřednictvím push oznámení. Možnosti odpovídají vašemu účtu.",

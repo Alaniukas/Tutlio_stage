@@ -18,10 +18,11 @@ import {
 } from './_lib/soloManualStudentPayments.js';
 import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { formatInvoiceDownloadFilename } from '../src/lib/invoiceDownloadFilename.js';
 import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 import { proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
 import { isMonthlyBillingOnlyStudent } from '../src/lib/studentPaymentModel.js';
-import { orgHasPvmEducationInvoice } from './_lib/pvmEducationInvoice.js';
+import { countStudentIdentityInvoiceGroups, orgHasPvmEducationInvoice } from './_lib/pvmEducationInvoice.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -48,10 +49,10 @@ function resolveApiUrl(req: VercelRequest, path: string): string {
 
 async function loadInvoicePdfAttachment(
     invoiceId: string
-): Promise<{ invoiceNumber: string; pdfBase64: string } | null> {
+): Promise<{ invoiceNumber: string; downloadFilename: string; pdfBase64: string } | null> {
     const { data: inv } = await supabase
         .from('invoices')
-        .select('invoice_number, pdf_storage_path')
+        .select('invoice_number, issue_date, organization_id, pdf_storage_path')
         .eq('id', invoiceId)
         .maybeSingle();
     if (!inv?.pdf_storage_path) return null;
@@ -62,6 +63,11 @@ async function loadInvoicePdfAttachment(
     const arrayBuf = await blob.arrayBuffer();
     return {
         invoiceNumber: inv.invoice_number,
+        downloadFilename: formatInvoiceDownloadFilename({
+            invoiceNumber: inv.invoice_number,
+            issueDate: inv.issue_date,
+            organizationId: inv.organization_id,
+        }),
         pdfBase64: Buffer.from(arrayBuf).toString('base64'),
     };
 }
@@ -76,7 +82,7 @@ async function generateMonthlySalesInvoicePdf(
         sessionIds: string[];
         expectedInvoiceCount: number;
     }
-): Promise<Array<{ invoiceNumber: string; pdfBase64: string }> | null> {
+): Promise<Array<{ invoiceNumber: string; downloadFilename: string; pdfBase64: string }> | null> {
     try {
         const invRes = await postInternalJson(
             resolveApiUrl(req, '/api/generate-invoice'),
@@ -109,7 +115,7 @@ async function generateMonthlySalesInvoicePdf(
         // when their parent receives one payment request for the family.
         const attachments = await Promise.all(invoiceIds.map(loadInvoicePdfAttachment));
         return attachments.every((attachment) => attachment !== null)
-            ? attachments as Array<{ invoiceNumber: string; pdfBase64: string }>
+            ? attachments as Array<{ invoiceNumber: string; downloadFilename: string; pdfBase64: string }>
             : null;
     } catch (err) {
         console.error('[create-monthly-invoice] generate-invoice error:', err);
@@ -142,8 +148,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const currency = chargeCurrency(market);
     const appOrigin = publicOriginFromRequest(req);
 
-    const { tutorId, periodStartDate, periodEndDate, paymentDeadlineDays, sessionIds, includeSalesInvoice } = req.body as {
-        tutorId: string;
+    const { tutorId, organizationId, tutorIds, periodStartDate, periodEndDate, paymentDeadlineDays, sessionIds, includeSalesInvoice } = req.body as {
+        tutorId?: string;
+        /** Org admin: one payer batch across all tutors in the org */
+        organizationId?: string;
+        /** Scope for MK unresolved-lesson review when organizationId is set */
+        tutorIds?: string[];
         periodStartDate: string; // YYYY-MM-DD
         periodEndDate: string;   // YYYY-MM-DD
         paymentDeadlineDays: number;
@@ -152,8 +162,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         includeSalesInvoice?: boolean;
     };
     const shouldIncludeSalesInvoice = includeSalesInvoice !== false;
+    const orgWideInvoice = Boolean(organizationId?.trim());
 
-    if (!tutorId || !periodStartDate || !periodEndDate || !paymentDeadlineDays || !sessionIds?.length) {
+    if ((!tutorId && !orgWideInvoice) || !periodStartDate || !periodEndDate || !paymentDeadlineDays || !sessionIds?.length) {
         return res.status(400).json({ error: 'Missing required fields' });
     }
 
@@ -181,54 +192,138 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     try {
-        // 1. Fetch tutor data
-        const { data: tutor, error: tutorErr } = await supabase
-            .from('profiles')
-            .select(
-                'id, full_name, stripe_account_id, stripe_onboarding_complete, organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, manual_payment_bank_details',
-            )
-            .eq('id', tutorId)
-            .single();
+        const sessionSelect = `
+                id, price, start_time, tutor_id, student_id, subject_id, is_complimentary,
+                students!inner(id, full_name, email, payment_payer, payer_email, payer_name, organization_id),
+                subjects(name)
+            `;
 
-        if (tutorErr || !tutor) {
-            return res.status(404).json({ error: 'Korepetitorius nerastas', details: tutorErr?.message });
-        }
+        let tutor: {
+            id: string;
+            full_name: string | null;
+            stripe_account_id?: string | null;
+            stripe_onboarding_complete?: boolean | null;
+            organization_id: string | null;
+            subscription_plan?: string | null;
+            manual_subscription_exempt?: boolean | null;
+            enable_manual_student_payments?: boolean | null;
+            manual_payment_bank_details?: string | null;
+        };
+        let batchTutorId: string;
+        let resolvedOrganizationId: string | null = organizationId?.trim() || null;
+        let sessions: any[] | null = null;
+        let sessionsErr: { message?: string } | null = null;
 
-        if (!auth.isInternal) {
-            if (!auth.userId) return res.status(401).json({ error: 'Unauthorized' });
-            const seat = await getOrgAdminSeatByUserId(supabase, auth.userId);
-            if (seat) {
+        if (orgWideInvoice) {
+            if (!auth.isInternal) {
+                if (!auth.userId) return res.status(401).json({ error: 'Unauthorized' });
+                const seat = await getOrgAdminSeatByUserId(supabase, auth.userId);
                 if (
-                    seat.status !== 'active'
+                    !seat
+                    || seat.status !== 'active'
                     || !hasOrgAdminPermission(seat.role, seat.permissions, 'finance.edit')
-                    || !tutor.organization_id
-                    || seat.organizationId !== tutor.organization_id
+                    || seat.organizationId !== resolvedOrganizationId
                 ) {
                     return res.status(403).json({ error: 'Insufficient organization permission' });
                 }
-            } else if (auth.userId !== tutorId) {
-                return res.status(403).json({ error: 'Forbidden' });
             }
-        }
 
-        // 2. Fetch sessions
-        const { data: sessions, error: sessionsErr } = await supabase
-            .from('sessions')
-            .select(`
-                id, price, start_time, tutor_id, student_id, subject_id, is_complimentary,
-                students!inner(id, full_name, email, payment_payer, payer_email, payer_name),
-                subjects(name)
-            `)
-            .in('id', sessionIds)
-            .eq('tutor_id', tutorId)
-            .in('status', ['completed', 'no_show'])
-            .eq('paid', false)
-            .eq('is_complimentary', false)
-            .is('payment_batch_id', null)
-            .is('lesson_package_id', null)
-            .gte('start_time', periodStartDate + 'T00:00:00')
-            .lte('start_time', periodEndDate + 'T23:59:59')
-            .lte('end_time', new Date().toISOString());
+            let sessionQuery = supabase
+                .from('sessions')
+                .select(sessionSelect)
+                .in('id', sessionIds)
+                .in('status', ['completed', 'no_show'])
+                .eq('paid', false)
+                .eq('is_complimentary', false)
+                .is('payment_batch_id', null)
+                .is('lesson_package_id', null)
+                .gte('start_time', periodStartDate + 'T00:00:00')
+                .lte('start_time', periodEndDate + 'T23:59:59')
+                .lte('end_time', new Date().toISOString());
+            const { data: scopedSessions, error: scopedErr } = await sessionQuery;
+            if (scopedErr || !scopedSessions?.length) {
+                return res.status(400).json({ error: 'No eligible unpaid sessions found', details: scopedErr?.message });
+            }
+            if (scopedSessions.length !== new Set(sessionIds).size) {
+                return res.status(409).json({ error: 'Selected lessons changed; refresh the invoice preview' });
+            }
+
+            const { data: orgTutors, error: orgTutorsErr } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('organization_id', resolvedOrganizationId);
+            if (orgTutorsErr || !orgTutors?.length) {
+                return res.status(400).json({ error: 'Organization tutors not found' });
+            }
+            const allowedTutorIds = new Set(orgTutors.map((row: { id: string }) => row.id));
+            if (!scopedSessions.every((row: { tutor_id?: string | null }) => row.tutor_id && allowedTutorIds.has(row.tutor_id))) {
+                return res.status(409).json({ error: 'Selected lessons changed; refresh the invoice preview' });
+            }
+
+            batchTutorId = scopedSessions[0].tutor_id as string;
+            const { data: batchTutor, error: batchTutorErr } = await supabase
+                .from('profiles')
+                .select(
+                    'id, full_name, stripe_account_id, stripe_onboarding_complete, organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, manual_payment_bank_details',
+                )
+                .eq('id', batchTutorId)
+                .single();
+            if (batchTutorErr || !batchTutor) {
+                return res.status(404).json({ error: 'Korepetitorius nerastas', details: batchTutorErr?.message });
+            }
+            tutor = batchTutor;
+            resolvedOrganizationId = batchTutor.organization_id;
+            sessions = scopedSessions;
+            sessionsErr = null;
+        } else {
+            const { data: tutorRow, error: tutorErr } = await supabase
+                .from('profiles')
+                .select(
+                    'id, full_name, stripe_account_id, stripe_onboarding_complete, organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, manual_payment_bank_details',
+                )
+                .eq('id', tutorId)
+                .single();
+
+            if (tutorErr || !tutorRow) {
+                return res.status(404).json({ error: 'Korepetitorius nerastas', details: tutorErr?.message });
+            }
+            tutor = tutorRow;
+            batchTutorId = tutorId as string;
+            resolvedOrganizationId = tutor.organization_id;
+
+            if (!auth.isInternal) {
+                if (!auth.userId) return res.status(401).json({ error: 'Unauthorized' });
+                const seat = await getOrgAdminSeatByUserId(supabase, auth.userId);
+                if (seat) {
+                    if (
+                        seat.status !== 'active'
+                        || !hasOrgAdminPermission(seat.role, seat.permissions, 'finance.edit')
+                        || !tutor.organization_id
+                        || seat.organizationId !== tutor.organization_id
+                    ) {
+                        return res.status(403).json({ error: 'Insufficient organization permission' });
+                    }
+                } else if (auth.userId !== tutorId) {
+                    return res.status(403).json({ error: 'Forbidden' });
+                }
+            }
+
+            const result = await supabase
+                .from('sessions')
+                .select(sessionSelect)
+                .in('id', sessionIds)
+                .eq('tutor_id', tutorId)
+                .in('status', ['completed', 'no_show'])
+                .eq('paid', false)
+                .eq('is_complimentary', false)
+                .is('payment_batch_id', null)
+                .is('lesson_package_id', null)
+                .gte('start_time', periodStartDate + 'T00:00:00')
+                .lte('start_time', periodEndDate + 'T23:59:59')
+                .lte('end_time', new Date().toISOString());
+            sessions = result.data;
+            sessionsErr = result.error;
+        }
 
         if (sessionsErr || !sessions || sessions.length === 0) {
             return res.status(400).json({ error: 'No eligible unpaid sessions found', details: sessionsErr?.message });
@@ -264,21 +359,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // payer in this request would otherwise disappear from their invoice.
         // The auto-complete job only looks back seven days; after 24 hours the
         // admin must review the outcome before an invoice is sent.
-        if (isManoKorepetitoriusOrg(tutor.organization_id)) {
+        if (isManoKorepetitoriusOrg(resolvedOrganizationId)) {
             const { data: billingOwner, error: billingOwnerError } = await supabase
                 .from('organizations')
                 .select('enable_per_lesson, enable_monthly_billing')
-                .eq('id', tutor.organization_id)
+                .eq('id', resolvedOrganizationId)
                 .single();
             if (billingOwnerError || !billingOwner) {
                 return res.status(500).json({ error: 'Organization billing settings unavailable' });
             }
 
+            const reviewTutorIds = tutorIds?.length
+                ? tutorIds
+                : [...new Set(sessions.map((row: { tutor_id?: string | null }) => row.tutor_id).filter(Boolean))] as string[];
             const reviewCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
             const { data: unresolvedRows, error: unresolvedError } = await supabase
                 .from('sessions')
                 .select('id, students!inner(payment_model, payer_email, email)')
-                .eq('tutor_id', tutorId)
+                .in('tutor_id', reviewTutorIds.length > 0 ? reviewTutorIds : [batchTutorId])
                 .eq('status', 'active')
                 .eq('paid', false)
                 .eq('is_complimentary', false)
@@ -380,7 +478,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const { data: billingBatch, error: batchErr } = await supabase
                 .from('billing_batches')
                 .insert({
-                    tutor_id: tutorId,
+                    tutor_id: batchTutorId,
                     period_start_date: periodStartDate,
                     period_end_date: periodEndDate,
                     payment_deadline_days: paymentDeadlineDays,
@@ -468,13 +566,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             application_fee_amount: applicationFeeCents,
                             metadata: {
                                 tutlio_billing_batch_id: billingBatch.id,
-                                tutor_id: tutorId,
+                                tutor_id: batchTutorId,
                                 tutlio_school_org_absorbed: 'true',
                             },
                         },
                         metadata: {
                             tutlio_billing_batch_id: billingBatch.id,
-                            tutor_id: tutorId,
+                            tutor_id: batchTutorId,
                             tutlio_school_org_absorbed: 'true',
                         },
                         success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId as string)}`,
@@ -532,12 +630,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),
                             metadata: {
                                 tutlio_billing_batch_id: billingBatch.id,
-                                tutor_id: tutorId,
+                                tutor_id: batchTutorId,
                             },
                         },
                         metadata: {
                             tutlio_billing_batch_id: billingBatch.id,
-                            tutor_id: tutorId,
+                            tutor_id: batchTutorId,
                             ...checkoutBaseMetadata(baseCents / 100, market),
                         },
                         success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId)}`,
@@ -571,16 +669,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             // Generate S.F. PDF via shared generate-invoice (same path as lesson packages).
-            let sfAttachments: Array<{ invoiceNumber: string; pdfBase64: string }> | null = null;
+            let sfAttachments: Array<{ invoiceNumber: string; downloadFilename: string; pdfBase64: string }> | null = null;
             if (shouldIncludeSalesInvoice) {
-                console.log(`[create-monthly-invoice] Generating S.F. for batch ${billingBatch.id}, tutor ${tutorId}`);
+                console.log(`[create-monthly-invoice] Generating S.F. for batch ${billingBatch.id}, tutor ${batchTutorId}`);
                 const sfResult = await generateMonthlySalesInvoicePdf(req, {
-                    tutorId,
+                    tutorId: batchTutorId,
                     billingBatchId: billingBatch.id,
                     periodStartDate,
                     periodEndDate,
                     sessionIds: sessionIdsForBatch,
-                    expectedInvoiceCount: salesInvoicePerStudent ? new Set(payerSessions.map(s => s.student_id)).size : 1,
+                    expectedInvoiceCount: salesInvoicePerStudent
+                        ? countStudentIdentityInvoiceGroups(payerSessions.map((s) => ({
+                            ...s,
+                            organization_id: resolvedOrganizationId,
+                        })))
+                        : 1,
                 });
                 if (sfResult) {
                     sfAttachments = sfResult;
@@ -605,8 +708,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     );
                     const { data: fbInvoice } = await supabase.from('invoices').insert({
                         invoice_number: fbInvoiceNumber,
-                        issued_by_user_id: tutorId,
-                        organization_id: (tutor as any).organization_id ?? null,
+                        issued_by_user_id: batchTutorId,
+                        organization_id: resolvedOrganizationId ?? null,
                         seller_snapshot: {
                             name: ownerName || 'Korepetitorius',
                             ...(fallbackSellerTaxExemptionNote
@@ -740,7 +843,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     };
                     if (sfAttachments?.length) {
                         emailPayload.attachments = sfAttachments.map(attachment => ({
-                            filename: `${attachment.invoiceNumber}.pdf`, content: attachment.pdfBase64,
+                            filename: attachment.downloadFilename,
+                            content: attachment.pdfBase64,
                         }));
                     }
                     const emailUrl = resolveApiUrl(req, '/api/send-email');

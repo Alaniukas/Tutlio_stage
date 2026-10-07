@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /**
@@ -6,6 +7,7 @@ import { en } from './en.js';
  * retain English. See docs/MEXICAN_SPANISH_LOCALIZATION_REVIEW.md before release.
  */
 export const esMxOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['es-mx'],
   "findLesson.showWithoutBreaks": "Mostrar los horarios sin pausas",
   "notifications.title": "Notificaciones",
   "notifications.desc": "Elige qué avisos recibes por correo y notificaciones push. Las opciones se adaptan a tu cuenta.",

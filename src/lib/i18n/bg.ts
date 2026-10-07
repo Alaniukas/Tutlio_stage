@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** Bulgarian draft for tutors, tutoring businesses and connected user flows.
@@ -5,6 +6,7 @@ import { en } from './en.js';
  * Locale remains unpublished; see docs/BULGARIAN_LOCALIZATION_REVIEW.md.
  */
 export const bgOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['bg'],
   "findLesson.showWithoutBreaks": "Показване на часове без почивки",
   "notifications.title": "Известия",
   "notifications.desc": "Изберете кои известия да получавате по имейл и чрез push известия. Опциите са съобразени с вашия акаунт.",

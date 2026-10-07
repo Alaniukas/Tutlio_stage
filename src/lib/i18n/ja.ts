@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** Japanese tutor/business translation draft; see docs/JAPANESE_LOCALIZATION_REVIEW.md.
@@ -5,6 +6,7 @@ import { en } from './en.js';
  * Locale publication is controlled separately in locales.ts.
  */
 export const jaOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['ja'],
   "findLesson.showWithoutBreaks": "休憩時間を考慮せずに空き時間を表示",
   "notifications.title": "通知",
   "notifications.desc": "メールとプッシュ通知で受け取るお知らせを選択してください。選択肢はアカウントに合わせて表示されます。",

@@ -1,9 +1,11 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** Slovenian tutor/business draft. Separate school, admin and legal modules retain English.
  * Keep unpublished until the release checks in docs/SLOVENIAN_LOCALIZATION_REVIEW.md are complete.
  */
 export const slOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['sl'],
   "findLesson.showWithoutBreaks": "Prikaži termine brez odmorov",
   "notifications.title": "Obvestila",
   "notifications.desc": "Izberite obvestila, ki jih želite prejemati po e-pošti in s potisnimi obvestili. Možnosti so prilagojene vašemu računu.",

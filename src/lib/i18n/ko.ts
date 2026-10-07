@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /**
@@ -6,6 +7,7 @@ import { en } from './en.js';
  * See docs/KOREAN_LOCALIZATION_REVIEW.md before publishing this locale.
  */
 export const koOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['ko'],
   "findLesson.showWithoutBreaks": "휴식 시간 없이 시간대 보기",
   "notifications.title": "알림",
   "notifications.desc": "이메일과 푸시 알림으로 받을 알림을 선택하세요. 계정에 맞는 옵션이 표시됩니다.",

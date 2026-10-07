@@ -1,6 +1,7 @@
 import { isArchivedEnrollmentStatus, suggestSchoolYear } from './schoolStudentEnrollment.js';
 import { isSchoolRecordingAccessMode, type SchoolRecordingAccessMode } from './schoolRecordingPlan.js';
 import type { SchoolGroupMinimumStatus } from './schoolGroupMinimumPolicy.js';
+import type { SchoolGroupMemberContractState } from './schoolGroupMemberActivation.js';
 
 export type SchoolClassGroupSlot = {
   weekday: number;
@@ -89,6 +90,8 @@ export type SchoolClassGroupRecord = SchoolClassGroupDraft & {
   suspension_resumed_at?: string | null;
   /** Live contract eligibility returned only for authorized group staff. */
   minimum_status?: SchoolGroupMinimumStatus;
+  /** Extra-lessons contracts for this group (admin / teacher group list). */
+  extra_lessons_contracts?: SchoolGroupMemberContractState[];
   /** Embedded by /api/school-class-groups so the list can show the teacher without a second lookup. */
   tutor?: { full_name?: string | null } | null;
 };

@@ -43,8 +43,16 @@ function query(table: string) {
       }
       return { data: null, error: null };
     }
-    if (table === 'profiles') return { data: { id: 'tutor-1', full_name: 'Mokytojas', organization_id: MANO_ID,
-      enable_manual_student_payments: mocks.manualPayments }, error: null };
+    if (table === 'profiles') {
+      if (columns === 'id' && filters.id === 'tutor-2') {
+        return { data: { id: 'tutor-2' }, error: null };
+      }
+      if (columns === 'id') {
+        return { data: [{ id: 'tutor-1' }, { id: 'tutor-2' }], error: null };
+      }
+      return { data: { id: 'tutor-1', full_name: 'Mokytojas', organization_id: MANO_ID,
+        enable_manual_student_payments: mocks.manualPayments }, error: null };
+    }
     if (table === 'organizations') return { data: {
       name: 'Mano korepetitorius', entity_type: 'company', stripe_account_id: 'acct_test',
       stripe_onboarding_complete: true, enable_monthly_billing: true, enable_per_lesson: false,
@@ -78,11 +86,12 @@ function response() {
   return res;
 }
 
-async function send() {
+async function send(body: Record<string, unknown> = {}) {
   const res = response();
   await handler({ method: 'POST', headers: { host: 'tutlio.lt' }, body: {
     tutorId: 'tutor-1', periodStartDate: '2026-09-01', periodEndDate: '2026-09-30',
     paymentDeadlineDays: 14, sessionIds: mocks.sessions.map(s => s.id),
+    ...body,
   } } as any, res as any);
   return res;
 }
@@ -209,6 +218,31 @@ describe('monthly invoice creation and delivery', () => {
     expect(res.body.failures[0].stage).toBe('sessions');
     expect(mocks.checkout).not.toHaveBeenCalled();
     expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it('issues one child S.F. across duplicate student rows, tutors and subjects', async () => {
+    mocks.invoiceIds = ['invoice-1'];
+    mocks.sessions = [
+      {
+        id: 'lesson-0', student_id: 'row-math', tutor_id: 'tutor-1', status: 'completed',
+        price: 20, start_time: '2026-09-15T10:00:00Z',
+        students: { id: 'row-math', full_name: 'Greta B.', payer_name: 'Tėvas', payer_email: 'parent@example.test', organization_id: MANO_ID },
+        subjects: { name: 'Matematika' },
+      },
+      {
+        id: 'lesson-1', student_id: 'row-english', tutor_id: 'tutor-2', status: 'completed',
+        price: 25, start_time: '2026-09-16T10:00:00Z',
+        students: { id: 'row-english', full_name: 'Greta B.', payer_name: 'Tėvas', payer_email: 'parent@example.test', organization_id: MANO_ID },
+        subjects: { name: 'Anglų k.' },
+      },
+    ];
+    const res = await send({ organizationId: MANO_ID, tutorIds: ['tutor-1', 'tutor-2'], tutorId: undefined });
+    expect(res.statusCode).toBe(200);
+    const genCall = mocks.fetch.mock.calls.find(([url]) => url.endsWith('/api/generate-invoice'));
+    const payload = JSON.parse(genCall![1].body);
+    expect(payload.sessionIds).toEqual(['lesson-0', 'lesson-1']);
+    const email = JSON.parse(mocks.fetch.mock.calls.find(([url]) => url.endsWith('/api/send-email'))![1].body);
+    expect(email.attachments).toHaveLength(1);
   });
 
   it('returns a partial result when a later payer checkout fails', async () => {

@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
@@ -9,6 +10,7 @@ import { schoolTeacherContractTranslationsFr } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const fr: Record<string, string> = {
+  ...organizationReleaseTranslations['fr'],
   'school.contractsLoadFailed': 'Impossible de charger les contrats. Veuillez réessayer.',
   ...studentNotesTranslations.fr,
   ...schoolFamilyMaterialTranslations.fr,

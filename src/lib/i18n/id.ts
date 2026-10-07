@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /**
@@ -6,6 +7,7 @@ import { en } from './en.js';
  * See docs/INDONESIAN_LOCALIZATION_REVIEW.md before publication.
  */
 export const idOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['id'],
   "findLesson.showWithoutBreaks": "Tampilkan waktu tanpa jeda",
   "notifications.title": "Notifikasi",
   "notifications.desc": "Pilih pemberitahuan yang Anda terima melalui email dan notifikasi push. Opsi disesuaikan dengan akun Anda.",

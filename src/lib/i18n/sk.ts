@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** Slovak draft: tutor/business UI and connected student/parent flows.
@@ -5,6 +6,7 @@ import { en } from './en.js';
  * Review scope and source exceptions: docs/SLOVAK_LOCALIZATION_REVIEW.md.
  */
 export const skOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['sk'],
   "findLesson.showWithoutBreaks": "Zobraziť časy bez prestávok",
   "notifications.title": "Oznámenia",
   "notifications.desc": "Vyberte si upozornenia, ktoré chcete dostávať e-mailom a prostredníctvom push oznámení. Možnosti zodpovedajú vášmu účtu.",

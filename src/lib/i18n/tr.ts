@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 /**
  * Turkish draft for individual tutors, tutoring businesses, and connected portals.
  * See docs/TURKISH_LOCALIZATION_REVIEW.md for scope, source repairs, and release limits.
@@ -6,6 +7,7 @@
 import { en } from './en.js';
 
 export const trOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['tr'],
   "findLesson.showWithoutBreaks": "Molasız saatleri göster",
   "notifications.title": "Bildirimler",
   "notifications.desc": "E-posta ve anlık bildirim yoluyla hangi uyarıları alacağınızı seçin. Seçenekler hesabınıza göre düzenlenir.",

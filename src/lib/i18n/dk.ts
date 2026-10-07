@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
@@ -124,6 +125,7 @@ const DK_DPA_HTML = [
 ].join('');
 
 export const dk: Record<string, string> = {
+  ...organizationReleaseTranslations['dk'],
   'school.contractsLoadFailed': 'Kontrakterne kunne ikke indlæses. Prøv igen.',
   ...studentNotesTranslations.dk,
   ...schoolFamilyMaterialTranslations.dk,

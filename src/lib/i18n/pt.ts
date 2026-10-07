@@ -1,7 +1,9 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** European Portuguese tutor/business draft; release review: docs/PORTUGUESE_LOCALIZATION_REVIEW.md. */
 export const ptOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['pt'],
   "findLesson.showWithoutBreaks": "Mostrar horários sem intervalos",
   "notifications.title": "Notificações",
   "notifications.desc": "Escolha os avisos que deseja receber por email e notificações push. As opções são adaptadas à sua conta.",

@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
@@ -9,6 +10,7 @@ import { schoolTeacherContractTranslationsEe } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 
 export const ee: Record<string, string> = {
+  ...organizationReleaseTranslations['ee'],
   'school.contractsLoadFailed': 'Lepingute laadimine ebaõnnestus. Proovige uuesti.',
   ...studentNotesTranslations.ee,
   ...schoolFamilyMaterialTranslations.ee,

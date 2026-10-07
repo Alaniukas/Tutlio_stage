@@ -1,7 +1,9 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** Ukrainian tutor/business draft. Dedicated school, admin and full legal copy retains English. */
 export const ukOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['uk'],
   "findLesson.showWithoutBreaks": "Показати час без перерв",
   "notifications.title": "Сповіщення",
   "notifications.desc": "Виберіть, які сповіщення отримувати електронною поштою та через push. Варіанти відповідають вашому обліковому запису.",

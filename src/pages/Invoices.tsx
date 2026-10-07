@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { downloadInvoicePdfFile, downloadInvoicesAsZip } from '@/lib/downloadInvoicesZip';
 
 interface Invoice {
   pdf_meta?: unknown;
@@ -41,6 +42,7 @@ interface Invoice {
   status: 'issued' | 'paid' | 'cancelled';
   grouping_type: string;
   pdf_storage_path: string | null;
+  organization_id?: string | null;
   created_at: string;
   billing_batch_id?: string | null;
   billing_batches?: { paid: boolean } | null;
@@ -61,6 +63,7 @@ export default function InvoicesPage() {
   const [invoiceRangeEnd, setInvoiceRangeEnd] = useState('');
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadingAllList, setDownloadingAllList] = useState(false);
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set());
   const [listError, setListError] = useState<string | null>(null);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [remindingId, setRemindingId] = useState<string | null>(null);
@@ -201,6 +204,28 @@ export default function InvoicesPage() {
     return filtered;
   }, [invoices, invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd, sortAsc]);
 
+  const downloadableFilteredInvoices = useMemo(
+    () => filteredInvoices.filter((inv) => (inv as { origin?: string }).origin !== 'external'),
+    [filteredInvoices],
+  );
+
+  const selectedDownloadableInvoices = useMemo(
+    () => downloadableFilteredInvoices.filter((inv) => selectedInvoiceIds.has(inv.id)),
+    [downloadableFilteredInvoices, selectedInvoiceIds],
+  );
+
+  const allDownloadableSelected =
+    downloadableFilteredInvoices.length > 0
+    && downloadableFilteredInvoices.every((inv) => selectedInvoiceIds.has(inv.id));
+
+  useEffect(() => {
+    const visibleIds = new Set(filteredInvoices.map((inv) => inv.id));
+    setSelectedInvoiceIds((prev) => {
+      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [filteredInvoices]);
+
   useEffect(() => {
     if (!orgPolicy.isOrgTutor) fetchInvoices();
   }, [fetchInvoices, orgPolicy.isOrgTutor]);
@@ -209,44 +234,38 @@ export default function InvoicesPage() {
     return <Navigate to="/finance" replace />;
   }
 
-  const handleDownloadAllVisible = async () => {
-    if (filteredInvoices.length === 0) return;
+  const toggleInvoiceSelection = (invoiceId: string, checked: boolean) => {
+    setSelectedInvoiceIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(invoiceId);
+      else next.delete(invoiceId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllDownloadable = (checked: boolean) => {
+    setSelectedInvoiceIds(
+      checked ? new Set(downloadableFilteredInvoices.map((inv) => inv.id)) : new Set(),
+    );
+  };
+
+  const handleDownloadSelected = async () => {
+    if (selectedDownloadableInvoices.length === 0) return;
     setDownloadingAllList(true);
     try {
-      const headers = await authHeaders();
-      for (const inv of filteredInvoices) {
-        const res = await fetch(`/api/invoice-pdf?id=${inv.id}`, { headers });
-        if (!res.ok) continue;
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        const safeName = (inv.invoice_number || inv.id).replace(/[/\\?%*:|"<>]/g, '-');
-        a.download = `${safeName}.pdf`;
-        a.click();
-        URL.revokeObjectURL(url);
-        await new Promise((r) => setTimeout(r, 350));
-      }
+      await downloadInvoicesAsZip(selectedDownloadableInvoices, { authHeaders: await authHeaders() });
     } finally {
       setDownloadingAllList(false);
     }
   };
 
   const handleDownloadPdf = async (invoiceId: string) => {
+    const target = invoices.find((inv) => inv.id === invoiceId);
+    if (!target) return;
     setDownloadingId(invoiceId);
     try {
-      const res = await fetch(`/api/invoice-pdf?id=${invoiceId}`, {
-        headers: await authHeaders(),
-      });
-      if (!res.ok) throw new Error('Failed to download PDF');
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `invoice-${invoiceId}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const ok = await downloadInvoicePdfFile(target, await authHeaders());
+      if (!ok) throw new Error('Failed to download PDF');
     } catch (err) {
       console.error('[Invoices] download error:', err);
     } finally {
@@ -562,20 +581,33 @@ export default function InvoicesPage() {
                 </div>
               )}
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-xl gap-2 shrink-0"
-              disabled={downloadingAllList || filteredInvoices.length === 0}
-              onClick={() => void handleDownloadAllVisible()}
-            >
-              {downloadingAllList ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Download className="w-4 h-4" />
-              )}
-              {t('invoices.downloadAllFiltered', { count: String(filteredInvoices.length) })}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {downloadableFilteredInvoices.length > 0 ? (
+                <label className="flex items-center gap-2 text-xs font-medium text-gray-600 cursor-pointer px-1">
+                  <input
+                    type="checkbox"
+                    checked={allDownloadableSelected}
+                    onChange={(e) => toggleSelectAllDownloadable(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  {t('invoices.selectAll')}
+                </label>
+              ) : null}
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl gap-2 shrink-0"
+                disabled={downloadingAllList || selectedDownloadableInvoices.length === 0}
+                onClick={() => void handleDownloadSelected()}
+              >
+                {downloadingAllList ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                {t('invoices.downloadSelected', { count: String(selectedDownloadableInvoices.length) })}
+              </Button>
+            </div>
           </div>
 
           {loading ? (
@@ -600,6 +632,13 @@ export default function InvoicesPage() {
                   className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors"
                 >
                   <div className="flex items-center gap-4 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={selectedInvoiceIds.has(inv.id)}
+                      onChange={(e) => toggleInvoiceSelection(inv.id, e.target.checked)}
+                      className="rounded border-gray-300 shrink-0"
+                      aria-label={inv.invoice_number}
+                    />
                     <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
                       <FileText className="w-5 h-5 text-indigo-600" />
                     </div>

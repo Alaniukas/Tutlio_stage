@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 /**
  * Filipino (Philippines) draft for individual tutors and tutoring businesses.
  * Reviewed against the supplied translation guides; see docs/FILIPINO_LOCALIZATION_REVIEW.md.
@@ -6,6 +7,7 @@
 import { en } from './en.js';
 
 export const filOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['fil'],
   "findLesson.showWithoutBreaks": "Ipakita ang mga oras na walang pahinga",
   "notifications.title": "Mga abiso",
   "notifications.desc": "Piliin ang mga abisong matatanggap mo sa email at push notification. Ang mga pagpipilian ay naaayon sa iyong account.",

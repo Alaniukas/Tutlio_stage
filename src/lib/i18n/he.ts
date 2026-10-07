@@ -1,7 +1,9 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** Hebrew for Israel: tutor/business draft; dedicated school/admin/legal sections fall back to English. */
 export const heOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['he'],
   "findLesson.showWithoutBreaks": "הצגת שעות ללא הפסקות",
   "notifications.title": "התראות",
   "notifications.desc": "בחרו אילו התראות לקבל בדוא״ל ובהודעות דחיפה. האפשרויות מותאמות לחשבון שלכם.",

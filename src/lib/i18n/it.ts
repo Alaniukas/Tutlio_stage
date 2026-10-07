@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /**
@@ -6,6 +7,7 @@ import { en } from './en.js';
  * See docs/ITALIAN_LOCALIZATION_REVIEW.md before publishing this locale.
  */
 export const itOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['it'],
   "findLesson.showWithoutBreaks": "Mostra gli orari senza pause",
   "notifications.title": "Notifiche",
   "notifications.desc": "Scegli quali avvisi ricevere via email e tramite notifiche push. Le opzioni sono personalizzate per il tuo account.",

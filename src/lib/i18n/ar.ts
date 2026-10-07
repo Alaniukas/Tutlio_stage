@@ -1,7 +1,9 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** Modern Standard Arabic for individual tutors and tutoring businesses. */
 export const arOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['ar'],
   "findLesson.showWithoutBreaks": "عرض الأوقات دون فواصل",
   "notifications.title": "الإشعارات",
   "notifications.desc": "اختر التنبيهات التي تصلك عبر البريد الإلكتروني والإشعارات الفورية. تتناسب الخيارات مع حسابك.",

@@ -4,6 +4,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { dedupeAuthGetUser } from '@/lib/preload';
 import { fetchOrgTutorInvoicesDeduped } from '@/lib/fetchOrgTutorInvoicesDeduped';
 import { isOwnOrgTutorInvoice } from '@/lib/orgTutorInvoiceAccess';
+import { downloadInvoicePdfFile } from '@/lib/downloadInvoicesZip';
 import {
   Euro,
   TrendingUp,
@@ -64,6 +65,7 @@ interface Invoice {
   grouping_type: string;
   pdf_storage_path: string | null;
   issued_by_user_id: string;
+  organization_id?: string | null;
   billing_batch_id?: string | null;
   created_at: string;
 }
@@ -402,19 +404,12 @@ export default function OrgTutorFinanceSummary() {
   }, [fetchInvoices]);
 
   const handleDownloadPdf = async (invoiceId: string) => {
+    const target = invoices.find((inv) => inv.id === invoiceId);
+    if (!target) return;
     setDownloadingId(invoiceId);
     try {
-      const res = await fetch(`/api/invoice-pdf?id=${invoiceId}`, {
-        headers: await authHeaders(),
-      });
-      if (!res.ok) throw new Error('Failed to download PDF');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `invoice-${invoiceId}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const ok = await downloadInvoicePdfFile(target, await authHeaders());
+      if (!ok) throw new Error('Failed to download PDF');
     } catch (err) {
       console.error('[OrgTutorFinanceSummary] download:', err);
     } finally {

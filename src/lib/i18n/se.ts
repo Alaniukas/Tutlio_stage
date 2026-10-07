@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations, schoolGroupActivationTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { companyPaymentReportTranslations } from './companyPaymentReportTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
@@ -19,6 +20,8 @@ const seLegalTranslations: Record<string, string> = {
 };
 
 export const se: Record<string, string> = {
+  ...organizationReleaseTranslations['se'],
+  ...schoolGroupActivationTranslations['se'],
   ...companyPaymentReportTranslations.se,
   'companyDash.sendPackageReminder': 'Skicka påminnelse',
   'companyDash.packageReminderSending': 'Skickar…',

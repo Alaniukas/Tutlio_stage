@@ -92,6 +92,7 @@ import {
 } from '@/lib/orgTrialPolicy';
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/lib/orgUi';
+import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
 import {
   buildRecurringSessionCounts,
   calendarSessionTitlePrefix,
@@ -159,7 +160,7 @@ import TimeSpinner, { DateTimeSpinner } from '@/components/TimeSpinner';
 import { cn } from '@/lib/utils';
 import AssignStudentFreeSlotDialog from '@/components/AssignStudentFreeSlotDialog';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
-import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { getOrgVisibleTutorsDeduped } from '@/lib/orgVisibleTutors';
 import {
   ChevronLeft,
   ChevronRight,
@@ -188,7 +189,6 @@ import StatusBadge from '@/components/StatusBadge';
 import { effectiveSessionOutcome, orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import FindTutorModal from '@/components/FindTutorModal';
-import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
 import RecurrenceFields from '@/components/RecurrenceFields';
 import {
   orgAdminShowsConvertToRecurringFields,
@@ -824,12 +824,14 @@ export default function CompanyTvarkarastis() {
   ) => {
     if (!organizationId || tutorIds.length === 0) return [];
     const tutorNameById = new Map(tutorRows.map((t) => [t.id, t.full_name || '']));
-    const availabilityData = await fetchAllRows<any>((from, to) => supabase
-      .from('availability')
-      .select('*')
-      .in('tutor_id', tutorIds)
-      .order('id', { ascending: true })
-      .range(from, to));
+    const availabilityData = await dedupeAsync(`org_availability:${organizationId}:${tutorIds.join(',')}`, () =>
+      fetchAllRows<any>((from, to) => supabase
+        .from('availability')
+        .select('*')
+        .in('tutor_id', tutorIds)
+        .order('id', { ascending: true })
+        .range(from, to), 2_000),
+    );
     const mappedAvailability = (availabilityData || []).map((row: any) => ({
       ...row,
       tutor: { full_name: tutorNameById.get(row.tutor_id) || '' },
@@ -885,7 +887,8 @@ export default function CompanyTvarkarastis() {
     if (!organizationId || !scheduleCacheKey) return;
     const cached = getCached<any>(scheduleCacheKey);
     if (cached?.orgTutors?.length) {
-      setOrgTutors(cached.orgTutors as OrgTutor[]);
+      const cachedTutors = cached.orgTutors as OrgTutor[];
+      setOrgTutors(cachedTutors);
       setAvailability(cached.availability || []);
       setSubjects(cached.subjects || []);
       setStudents(cached.students || []);
@@ -893,16 +896,23 @@ export default function CompanyTvarkarastis() {
       setDynamicPricingRules(cached.dynamicPricingRules || []);
       setOrgUsesLicenses(Boolean(cached.orgUsesLicenses));
       setLoading(false);
+      // Meta cache can hold stale/empty availability after a failed narrow select — always refresh.
+      if (!isSchoolOrgView && cachedTutors.length > 0) {
+        void loadAvailabilityForTutors(
+          cachedTutors.map((tutor) => tutor.id),
+          cachedTutors,
+        );
+      }
       return;
     }
     setLoading(true);
 
     try {
       await dedupeAsync(`schedule-meta:${organizationId}`, async () => {
-      const filteredTutors = await getOrgVisibleTutors(
+      const filteredTutors = await getOrgVisibleTutorsDeduped(
         supabase as any,
         organizationId,
-        'id, full_name, email, teaching_notes, has_active_license, personal_meeting_link, break_between_lessons',
+        'id, full_name, email, has_active_license, personal_meeting_link, break_between_lessons, teaching_notes',
       );
       const tutorIds = filteredTutors.map((t: any) => t.id);
       setOrgTutors(filteredTutors as OrgTutor[]);

@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
@@ -9,6 +10,7 @@ import { supportTranslations } from './supportTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 
 export const lv: Record<string, string> = {
+  ...organizationReleaseTranslations['lv'],
   'school.contractsLoadFailed': 'Neizdevās ielādēt līgumus. Mēģiniet vēlreiz.',
   ...studentNotesTranslations.lv,
   ...schoolFamilyMaterialTranslations.lv,

@@ -1,3 +1,4 @@
+import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { en } from './en.js';
 
 /** Romanian draft for tutors, tutoring businesses and their student/parent flows.
@@ -5,6 +6,7 @@ import { en } from './en.js';
  * Review scope and release limits: docs/ROMANIAN_LOCALIZATION_REVIEW.md.
  */
 export const roOverrides: Record<string, string> = {
+  ...organizationReleaseTranslations['ro'],
   "findLesson.showWithoutBreaks": "Afișează orele fără pauze",
   "notifications.title": "Notificări",
   "notifications.desc": "Alege alertele pe care le primești prin e-mail și notificări push. Opțiunile sunt adaptate contului tău.",
