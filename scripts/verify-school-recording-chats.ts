@@ -9,8 +9,9 @@ function argument(name: string, fallback = ''): string {
 
 // Read credentials directly into memory. Never print them or write production data.
 const environment = parseEnv(readFileSync(argument('--env-file', '.env'), 'utf8'));
-const origin = new URL(argument('--production-url', 'https://tutlio.lt')).origin;
-assert(['https://tutlio.lt', 'https://tutlio.com', 'https://tutlio.pl'].includes(origin), 'Unexpected production origin.');
+const origin = new URL(argument('--production-url', 'https://www.tutlio.lt')).origin;
+assert(['https://tutlio.lt', 'https://tutlio.com', 'https://tutlio.pl',
+  'https://www.tutlio.lt', 'https://www.tutlio.com', 'https://www.tutlio.pl'].includes(origin), 'Unexpected production origin.');
 assert(environment.SUPABASE_SERVICE_ROLE_KEY, 'Internal authentication unavailable.');
 const url = new URL('/api/admin-school-recording-check', origin);
 url.searchParams.set('organizationId', argument('--organization'));
@@ -28,12 +29,16 @@ const result = await response.json() as {
 };
 console.log(JSON.stringify(result, null, 2));
 let verifiedChats = 0;
+let verifiedVideos = 0;
 for (const group of result.results) {
-  if (group.retainedVideos) assert.equal(group.videoStatus, 206, 'Live video access failed.');
+  if (group.retainedVideos) {
+    assert.equal(group.videoStatus, 206, 'Live video access failed.');
+    verifiedVideos += 1;
+  }
   for (const check of group.checks || []) {
     assert.equal(check.valid, true, 'Live chat stream or copied-link isolation failed.');
     verifiedChats += 1;
   }
 }
-console.log(JSON.stringify({ liveProductionVerification: true, verifiedChats }));
+console.log(JSON.stringify({ liveProductionVerification: verifiedChats > 0, verifiedVideos, verifiedChats }));
 if (!verifiedChats) process.exitCode = 2;

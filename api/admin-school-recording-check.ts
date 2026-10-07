@@ -28,7 +28,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .select('group_id,subject_id,drive_folder_id').eq('organization_id', organizationId);
     if (mappings.error) throw new Error('Folder lookup failed');
     const cookie = `tutlio_recording_viewer=${encodeURIComponent(createSchoolRecordingViewerSession(userId))}`;
-    const origin = new URL(process.env.APP_URL || 'https://tutlio.lt').origin;
+    const configuredOrigin = new URL(process.env.APP_URL || 'https://www.tutlio.lt').origin;
+    const origin = configuredOrigin === 'https://tutlio.lt' ? 'https://www.tutlio.lt' : configuredOrigin;
     const probe = (fileId: string, groupId: string, method: 'GET' | 'HEAD', recordingFileId?: string, signedIn = true) => {
       const ticket = createSchoolRecordingTicket({ userId, groupId, fileId, ...(recordingFileId ? { recordingFileId } : {}) });
       return fetch(`${origin}/api/school-lesson-recording-stream?t=${encodeURIComponent(ticket)}`, {
@@ -44,6 +45,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         listDriveRecordingFolderFiles(mapping.drive_folder_id), listDriveRecordings(mapping.drive_folder_id),
       ]);
       const chats = inventory.filter((file) => /\.(sbv|txt)$/i.test(file.name));
+      const fileTypes: Record<string, number> = {};
+      for (const file of inventory) fileTypes[file.mimeType] = (fileTypes[file.mimeType] || 0) + 1;
+      const otherFiles = inventory.filter(file => !file.mimeType.startsWith('video/') && !/\.(sbv|txt)$/i.test(file.name))
+        .slice(0, 5).map(file => ({ name: file.name, mimeType: file.mimeType, bytes: file.size }));
       const pairs = recordings.flatMap((recording) => (recording.chatFiles || []).map((chat) => ({ recording, chat })));
       const video = recordings[0] ? await probe(recordings[0].id, group.id, 'HEAD') : null;
       const checks = await Promise.all(pairs.slice(0, 2).map(async ({ recording, chat }) => {
@@ -58,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ...(allowed.ok ? { sha256: createHash('sha256').update(body).digest('hex') } : {}),
         };
       }));
-      return { groupId: group.id, configured: true, inventory: inventory.length, retainedVideos: recordings.length,
+      return { groupId: group.id, configured: true, inventory: inventory.length, fileTypes, otherFiles, retainedVideos: recordings.length,
         chatFiles: chats.length, pairedChats: pairs.length, videoStatus: video?.status ?? null, checks,
         unpairedNames: chats.filter((chat) => !pairs.some((pair) => pair.chat.id === chat.id)).slice(0, 5).map((file) => file.name) };
     }));

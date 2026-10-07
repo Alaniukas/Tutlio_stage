@@ -30,7 +30,7 @@ describe('read-only production recording check', () => {
       organizationId, kind: 'class_group' }] });
     mocks.from.mockReturnValue({ select: () => ({ eq: async () => ({ error: null,
       data: [{ group_id: groupId, drive_folder_id: 'PRIVATE-FOLDER' }] }) }) });
-    const chat = { id: 'chat', name: 'Lesson.sbv', size: 7 };
+    const chat = { id: 'chat', name: 'Lesson.sbv', mimeType: 'text/plain', size: 7 };
     mocks.inventory.mockResolvedValue([chat]);
     mocks.recordings.mockResolvedValue([{ id: 'video', chatFiles: [chat] }]);
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
@@ -62,7 +62,9 @@ describe('read-only production recording check', () => {
     await handler(request(), res);
     expect(result.status).toBe(200);
     expect(result.body.results[0]).toMatchObject({ videoStatus: 206, pairedChats: 1,
+      fileTypes: { 'text/plain': 1 },
       checks: [{ status: 200, copiedUrlStatus: 401, bytes: 7, valid: true }] });
+    expect(vi.mocked(fetch).mock.calls.every(([url]) => new URL(String(url)).origin === 'https://www.tutlio.lt')).toBe(true);
     expect(JSON.stringify(result.body)).not.toMatch(/PRIVATE|service-key|recording-secret|tutlio_recording_viewer/);
     expect(mocks.from).toHaveBeenCalledTimes(1);
     expect(mocks.from).toHaveBeenCalledWith('school_recording_drive_folders');
