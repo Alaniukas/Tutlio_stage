@@ -219,10 +219,16 @@ export async function getDriveFileMetadata(fileId: string): Promise<DriveRecordi
   return mapDriveFile(await response.json() as GoogleDriveFilePayload);
 }
 
-/** Meet saves its written chat as SBV; schools can also keep a plain-text copy. */
+const CHAT_NAME_SUFFIX = /(?:[\s_\-\u2010-\u2015]+chat(?:\s+transcript)?|\s*\(chat(?:\s+transcript)?\))$/i;
+const VIDEO_NAME_EXTENSION = /\.(mp4|webm|mov|mkv|m4v|avi|3gp|ogv)$/i;
+
+/** Meet also saves plain-text chats without an extension, ending in “– Chat”. */
 export function isDriveRecordingChatFile(file: DriveRecordingFile): boolean {
-  return /\.(sbv|txt)$/i.test(file.name)
-    && ['text/plain', 'application/octet-stream', 'text/x-subviewer', 'application/x-subviewer'].includes(file.mimeType)
+  const name = file.name.normalize('NFC').trim();
+  const supportedName = /\.(sbv|txt)$/i.test(name)
+    ? ['text/plain', 'application/octet-stream', 'text/x-subviewer', 'application/x-subviewer'].includes(file.mimeType)
+    : file.mimeType === 'text/plain' && CHAT_NAME_SUFFIX.test(name);
+  return supportedName
     && file.size !== null
     && Number.isSafeInteger(file.size)
     && file.size >= 0
@@ -230,14 +236,13 @@ export function isDriveRecordingChatFile(file: DriveRecordingFile): boolean {
 }
 
 function recordingNameStem(name: string): string {
-  return name.replace(/\.[^.]+$/, '').normalize('NFC').trim().toLowerCase();
+  return name.normalize('NFC').trim().replace(VIDEO_NAME_EXTENSION, '').trim().toLowerCase();
 }
 
 function chatNameStem(name: string): string {
-  return name.replace(/\.(sbv|txt)$/i, '')
-    .replace(/\.(mp4|webm|mov|mkv)$/i, '')
-    .replace(/(?:[\s_-]+chat|\s*\(chat\))$/i, '')
-    .normalize('NFC').trim().toLowerCase();
+  return name.normalize('NFC').trim().replace(/\.(sbv|txt)$/i, '')
+    .replace(CHAT_NAME_SUFFIX, '').trim()
+    .replace(VIDEO_NAME_EXTENSION, '').trim().toLowerCase();
 }
 
 /** Exact names and the same folder prevent one lesson's chat reaching another audience. */

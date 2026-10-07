@@ -35,6 +35,8 @@ describe('in-app support vector context', () => {
     const allowed = renderInAppSupportRetrievedContext(scope, { knowledge: ['Older documentation'], memories: [] });
     expect(allowed).toContain('Current deployed product guidance');
     expect(allowed).toContain('Pokalbio išklotinė');
+    expect(allowed).toContain('without an extension');
+    expect(allowed).toContain('– Chat transcript');
     expect(allowed).toContain('over conflicting older');
     for (const restricted of [
       { ...scope, enabledFeatureIds: [] },

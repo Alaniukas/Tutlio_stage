@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from './types.js';
 import { isInternalRequest } from './_lib/auth.js';
 import { serviceSupabase } from './_lib/extraLessonsContractShared.js';
-import { listDriveRecordingFolderFiles, listDriveRecordings } from './_lib/googleDriveRecordings.js';
+import { isDriveRecordingChatFile, listDriveRecordingFolderFiles, listDriveRecordings } from './_lib/googleDriveRecordings.js';
 import { resolveRecordingViewerAccess } from './_lib/schoolRecordingAccess.js';
 import { createSchoolRecordingTicket, createSchoolRecordingViewerSession } from './_lib/schoolRecordingTicket.js';
 
@@ -44,12 +44,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const [inventory, recordings] = await Promise.all([
         listDriveRecordingFolderFiles(mapping.drive_folder_id), listDriveRecordings(mapping.drive_folder_id),
       ]);
-      const chats = inventory.filter((file) => /\.(sbv|txt)$/i.test(file.name));
+      const chats = inventory.filter(isDriveRecordingChatFile);
       const fileTypes: Record<string, number> = {};
       for (const file of inventory) fileTypes[file.mimeType] = (fileTypes[file.mimeType] || 0) + 1;
-      const otherFiles = inventory.filter(file => !file.mimeType.startsWith('video/') && !/\.(sbv|txt)$/i.test(file.name))
+      const otherFiles = inventory.filter(file => !file.mimeType.startsWith('video/') && !isDriveRecordingChatFile(file))
         .slice(0, 5).map(file => ({ name: file.name, mimeType: file.mimeType, bytes: file.size }));
       const pairs = recordings.flatMap((recording) => (recording.chatFiles || []).map((chat) => ({ recording, chat })));
+      const unpaired = chats.filter((chat) => !pairs.some((pair) => pair.chat.id === chat.id));
       const video = recordings[0] ? await probe(recordings[0].id, group.id, 'HEAD') : null;
       const checks = await Promise.all(pairs.slice(0, 2).map(async ({ recording, chat }) => {
         const [allowed, denied] = await Promise.all([
@@ -65,7 +66,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }));
       return { groupId: group.id, configured: true, inventory: inventory.length, fileTypes, otherFiles, retainedVideos: recordings.length,
         chatFiles: chats.length, pairedChats: pairs.length, videoStatus: video?.status ?? null, checks,
-        unpairedNames: chats.filter((chat) => !pairs.some((pair) => pair.chat.id === chat.id)).slice(0, 5).map((file) => file.name) };
+        unpairedNames: unpaired.slice(0, 5).map((file) => file.name),
+        ...(unpaired.length ? { recordingNames: recordings.slice(0, 5).map((file) => file.name) } : {}) };
     }));
     return res.status(200).json({ groups: groups.length, truncated: groups.length > 5, results });
   } catch {

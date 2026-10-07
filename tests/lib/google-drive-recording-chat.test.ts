@@ -78,6 +78,31 @@ describe('Google Drive recording companion chats', () => {
     expect(result.every((file) => !file.chatFiles?.length)).toBe(true);
   });
 
+  it.each([
+    ['abc-defg-hij (2026-09-09 06:57 GMT+1)', '– Chat transcript'],
+    ['QA IT - Seniors - 2026/09/14 11:57 BST', '– Chat'],
+    ['QA IT - Seniors - 2026/09/07 11:50 BST', '– Chat'],
+  ])('pairs the extensionless Meet chat for %s', async (stem, suffix) => {
+    drivePages([{ files: [video({ name: `${stem}.mp4` }), chat({ name: `${stem} ${suffix}`, mimeType: 'text/plain' })] }]);
+    const recordings = await listDriveRecordings(folder);
+    expect(recordings[0].chatFiles?.map((file) => file.id)).toEqual(['chat-12345']);
+  });
+
+  it('preserves dotted meeting titles and extensionless video names when matching', () => {
+    const name = 'Ms. Jones 2026-10-07';
+    expect(isChatFileForRecording(chat({ name: `${name} – Chat`, mimeType: 'text/plain' }), video({ name }))).toBe(true);
+    expect(isChatFileForRecording(chat({ name: `${name}.mp4 – Chat transcript.txt`, mimeType: 'text/plain' }), video({ name: `${name}.mp4` }))).toBe(true);
+    expect(isChatFileForRecording(chat({ name: 'Ms. Other 2026-10-07 – Chat', mimeType: 'text/plain' }), video({ name }))).toBe(false);
+  });
+
+  it('requires an explicit chat suffix and plain MIME type for files without an extension', () => {
+    expect(isDriveRecordingChatFile(chat({ name: 'Lesson – Chat', mimeType: 'text/plain' }))).toBe(true);
+    expect(isDriveRecordingChatFile(chat({ name: 'Lesson – Chat transcript', mimeType: 'application/octet-stream' }))).toBe(false);
+    expect(isDriveRecordingChatFile(chat({ name: 'Lesson – Chat', mimeType: 'text/html' }))).toBe(false);
+    expect(isDriveRecordingChatFile(chat({ name: 'Lesson notes', mimeType: 'text/plain' }))).toBe(false);
+    expect(isDriveRecordingChatFile(chat({ name: 'Lesson – Chat transcript', mimeType: 'text/plain', size: DRIVE_CHAT_MAX_BYTES + 1 }))).toBe(false);
+  });
+
   it('refreshes cached metadata so a chat created after the video eventually appears', async () => {
     const requests = drivePages([{ files: [video()] }, { files: [video(), chat()] }]);
     expect((await listDriveRecordings(folder))[0].chatFiles).toBeUndefined();

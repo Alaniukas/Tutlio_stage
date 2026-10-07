@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ access: vi.fn(), inventory: vi.fn(), recordings: vi.fn(), from: vi.fn() }));
 vi.mock('../../api/_lib/extraLessonsContractShared.js', () => ({ serviceSupabase: () => ({ from: mocks.from }) }));
 vi.mock('../../api/_lib/schoolRecordingAccess.js', () => ({ resolveRecordingViewerAccess: mocks.access }));
-vi.mock('../../api/_lib/googleDriveRecordings.js', () => ({
+vi.mock('../../api/_lib/googleDriveRecordings.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../api/_lib/googleDriveRecordings')>(),
   listDriveRecordingFolderFiles: mocks.inventory, listDriveRecordings: mocks.recordings,
 }));
 import handler from '../../api/admin-school-recording-check';
@@ -77,5 +78,17 @@ describe('read-only production recording check', () => {
     mocks.inventory.mockRejectedValue(new Error('PRIVATE PROVIDER CREDENTIAL'));
     await handler(request(), res);
     expect(result).toEqual({ status: 502, body: { error: 'Recording verification failed' } });
+  });
+  it('counts extensionless Meet chat files with the same eligibility rules as playback', async () => {
+    mocks.inventory.mockResolvedValue([
+      { id: 'chat', name: 'Lesson – Chat transcript', mimeType: 'text/plain', size: 7 },
+      { id: 'unpaired', name: 'Other lesson – Chat', mimeType: 'text/plain', size: 7 },
+      { id: 'notes', name: 'Notes', mimeType: 'text/plain', size: 10 },
+    ]);
+    mocks.recordings.mockResolvedValue([{ id: 'video', name: 'Lesson.mp4', chatFiles: [{ id: 'chat', size: 7 }] }]);
+    const { res, result } = response();
+    await handler(request(), res);
+    expect(result.body.results[0]).toMatchObject({ chatFiles: 2, pairedChats: 1,
+      otherFiles: [{ name: 'Notes' }], unpairedNames: ['Other lesson – Chat'], recordingNames: ['Lesson.mp4'] });
   });
 });

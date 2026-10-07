@@ -286,6 +286,18 @@ describe('GET /api/school-lesson-recording-stream', () => {
     expect(mocks.getMetadata).not.toHaveBeenCalled();
   });
 
+  it.each(['– Chat', '– Chat transcript'])('streams a bounded extensionless Meet %s file through the authorized proxy', async (suffix) => {
+    const { chat, video, text } = withChat();
+    video.name = 'IT - Seniors - 2026/09/14 11:57 BST';
+    chat.name = `${video.name} ${suffix}`;
+    chat.mimeType = 'text/plain';
+    const res = mockRes();
+    await handler({ method: 'GET', query: { t: 'chat' }, headers: {} } as any, res);
+    expect(res.getResult().statusCode).toBe(200);
+    expect(res.getResult().body?.toString()).toBe(text);
+    expect(res.getResult().headers['Content-Type']).toBe('text/plain; charset=utf-8');
+  });
+
   it('applies the video day restriction to an untagged companion chat', async () => {
     withChat();
     mocks.slotScope.mockResolvedValue({ unrestricted: false, schedules: [[{ weekday: 4, start_time: '11:00' }]] });
