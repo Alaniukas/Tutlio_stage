@@ -9,7 +9,11 @@ import { schoolTeacherContractTranslationsLv } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 import { schoolConsultationsTranslations } from './schoolConsultationsTranslations.js';
 
+import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
+
 export const lv: Record<string, string> = {
+  ...tutorEnvironmentTranslations.lv,
+  'invoiceCreate.regenerateExistingConfirm': "Rēķini {nums} par šo periodu jau ir izveidoti. Vai tiešām vēlaties tos izveidot no jauna? Iepriekšējie neapmaksātie rēķini tiks atcelti, un jaunajos tiks iekļautas arī vēlāk ievadītās nodarbības.",
   ...organizationReleaseTranslations['lv'],
   'school.contractsLoadFailed': 'Neizdevās ielādēt līgumus. Mēģiniet vēlreiz.',
   ...studentNotesTranslations.lv,

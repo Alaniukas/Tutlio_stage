@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/lib/apiHelpers', () => ({ authHeaders: async () => ({ Authorization: 'Bearer mock' }) }));
 vi.mock('../../src/lib/i18n', () => ({ useTranslation: () => ({ t: (key: string) => key, locale: 'lt' }) }));
@@ -165,6 +165,53 @@ const batchGroup = {
 const invoiceReview = { sessions: [session], payerEmail: 'parent@example.com', canEditBilling: true, canEditAttendance: true };
 const invoicePreview = { ...invoiceReview, previewToken: 'child-preview', student: { id: 'child1', fullName: 'Child One' },
   periodLabel: 'August 2026', dueDate: '2026-10-12', lines: [], subtotalEur: 12, discountAmountEur: 0, totalEur: 12 };
+
+describe('school payer invoice regeneration confirmation', () => {
+  afterEach(() => vi.restoreAllMocks());
+  const regeneration = { invoiceIds: ['old-invoice'], invoiceNumbers: ['SF-OLD'] };
+  it('asks for one payer and all payers, and cancellation makes no send request', async () => {
+    const calls: any[] = [];
+    const fetcher = vi.fn(async (_url: string, init: any) => {
+      const body = JSON.parse(init.body); calls.push(body);
+      return { ok: true, json: async () => body.action === 'batch-preview'
+        ? { payers: [{ ...batchGroup, students: [{ ...batchGroup.students[0], regeneration }] }] }
+        : { sentCount: 1, skippedCount: 0 } };
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    mountBatch(fetcher);
+    fireEvent.click(screen.getByRole('button', { name: 'school.invoice.batch.preview' }));
+    await screen.findByText('Parent One');
+    expect(confirm).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'school.invoice.batch.sendPayer' }));
+    expect(confirm).toHaveBeenCalledWith('invoiceCreate.regenerateExistingConfirm');
+    expect(calls.some(body => body.action === 'send-batch')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'school.invoice.batch.sendAll' }));
+    await waitFor(() => expect(calls.some(body => body.action === 'send-batch')).toBe(true));
+    expect(calls.find(body => body.action === 'send-batch').regenerateInvoiceIds).toEqual(['old-invoice']);
+    expect(confirm).toHaveBeenCalledTimes(2);
+  });
+  it('asks before sending from the individual PDF preview', async () => {
+    const calls: any[] = [];
+    const fetcher = vi.fn(async (_url: string, init: any) => {
+      const body = JSON.parse(init.body); calls.push(body);
+      return { ok: true, json: async () => body.action === 'review' ? invoiceReview
+        : body.action === 'preview' ? { ...invoicePreview, regeneration }
+          : { emailSent: true, invoiceNumber: 'SF-NEW' } };
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    mount(fetcher);
+    fireEvent.click(screen.getByRole('button', { name: 'school.invoice.review.open' }));
+    await screen.findByText('Math');
+    fireEvent.click(screen.getByRole('button', { name: 'Formuoti peržiūrai' }));
+    await screen.findByText('Peržiūra paruošta');
+    expect(confirm).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Išsiųsti sąskaitą' }));
+    expect(calls.some(body => body.action === 'send')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Išsiųsti sąskaitą' }));
+    await waitFor(() => expect(calls.some(body => body.action === 'send')).toBe(true));
+    expect(calls.find(body => body.action === 'send').regenerateInvoiceIds).toEqual(['old-invoice']);
+  });
+});
 
 function mountBatch(fetcher: ReturnType<typeof vi.fn>, onOpenChange = vi.fn()) {
   vi.stubGlobal('fetch', fetcher);

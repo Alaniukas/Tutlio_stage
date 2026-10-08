@@ -12,17 +12,20 @@ export class SchoolTutorInvoiceSelectionError extends Error {}
 /** Attendance IDs and occurrence keys survive later materialization of child sessions. */
 export async function findSchoolAttendanceDuplicateInvoices(db: SupabaseClient, input: {
   organizationId: string; tutorId: string; meetingKeys: string[]; attendanceIds: string[];
+  periodStart?: string; periodEnd?: string;
 }) {
   const keys = new Set(input.meetingKeys);
   const invoices = await fetchAllRows<any>((from, to) => db.from('invoices')
-    .select('id,invoice_number,total_amount,pdf_meta').eq('organization_id', input.organizationId)
+    .select('id,invoice_number,total_amount,pdf_meta,status,period_start,period_end,billing_batch_id').eq('organization_id', input.organizationId)
     .neq('status', 'cancelled').order('id').range(from, to));
   const ownInvoices = invoices.filter(invoice => isOwnOrgTutorInvoice(invoice, input.tutorId)
     && invoice.pdf_meta?.layout === SCHOOL_TUTOR_INVOICE_LAYOUT
     && invoice.pdf_meta?.tutorId === input.tutorId);
   const ownIds = new Set(ownInvoices.map(invoice => invoice.id));
-  const duplicateIds = new Set<string>(ownInvoices.filter(invoice => Array.isArray(invoice.pdf_meta?.schoolMeetingKeys)
-    && invoice.pdf_meta.schoolMeetingKeys.some((key: string) => keys.has(key))).map(invoice => invoice.id));
+  const duplicateIds = new Set<string>(ownInvoices.filter(invoice =>
+    (input.periodStart && invoice.period_start === input.periodStart && invoice.period_end === input.periodEnd)
+    || (Array.isArray(invoice.pdf_meta?.schoolMeetingKeys)
+      && invoice.pdf_meta.schoolMeetingKeys.some((key: string) => keys.has(key)))).map(invoice => invoice.id));
   // Bound URL length as well as response size for large groups.
   for (let offset = 0; offset < input.attendanceIds.length; offset += 200) {
     const ids = input.attendanceIds.slice(offset, offset + 200);

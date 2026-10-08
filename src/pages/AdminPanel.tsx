@@ -12,6 +12,7 @@ import AdminEnterpriseContactsPanel from '@/components/admin/AdminEnterpriseCont
 import AdminBillingPanel from '@/components/admin/AdminBillingPanel';
 import AdminAttendancePanel from '@/components/admin/AdminAttendancePanel';
 import AdminSupportRequestsPanel from '@/components/admin/AdminSupportRequestsPanel';
+import AdminTutorEnvironmentsDialog from '@/components/admin/AdminTutorEnvironmentsDialog';
 import { fmtMoney } from '@/lib/marketMoney';
 import { isPlMarket } from '@/lib/market';
 import { normalizeUrl } from '@/lib/utils';
@@ -130,6 +131,7 @@ export default function AdminPanel() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailTutors, setDetailTutors] = useState<TutorRow[]>([]);
+  const [environmentTutor, setEnvironmentTutor] = useState<TutorRow | null>(null);
   const [detailArchivedTutors, setDetailArchivedTutors] = useState<ArchivedTutorRow[]>([]);
   const [detailStudents, setDetailStudents] = useState<StudentRow[]>([]);
   const [detailAudit, setDetailAudit] = useState<AuditRow[]>([]);
@@ -1324,6 +1326,9 @@ export default function AdminPanel() {
 
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
                   <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">{t('admin.tutorsCount', { count: detailTutors.length })}</h3>
+                  {environmentTutor && detailId && <AdminTutorEnvironmentsDialog key={environmentTutor.id}
+                    tutor={environmentTutor} organizationId={detailId} organizations={orgList}
+                    adminSecret={platformAdminSecret} onClose={() => setEnvironmentTutor(null)} />}
                   <ul className="space-y-2 text-sm text-slate-300 max-h-48 overflow-y-auto">
                     {detailTutors.map((tu) => (
                       <li key={tu.id} className="flex justify-between gap-2 border-b border-white/5 pb-2">
@@ -1342,6 +1347,11 @@ export default function AdminPanel() {
                             </a>
                           ) : null}
                         </div>
+                        <div className="flex shrink-0 flex-wrap items-start justify-end gap-2">
+                        <button type="button" onClick={() => setEnvironmentTutor(tu)}
+                          className="rounded-lg border border-indigo-500/30 px-2 py-1 text-xs text-indigo-300 hover:bg-indigo-500/10">
+                          {t('tutorEnv.admin.title')}
+                        </button>
                         <button
                           type="button"
                           onClick={() => void archiveTutorFromAdmin(tu)}
@@ -1350,6 +1360,7 @@ export default function AdminPanel() {
                         >
                           {archiveLoadingTutorId === tu.id ? 'Archyvuojama...' : 'Archyvuoti'}
                         </button>
+                        </div>
                       </li>
                     ))}
                   </ul>

@@ -7,6 +7,7 @@ import { buildPlatformPath } from '@/lib/platform';
 import { clearOrgBrandingCache } from '@/contexts/OrgBrandingContext';
 import { clearStudentPolicyCache } from '@/contexts/StudentPolicyContext';
 import ProfileLocaleSync from '@/components/ProfileLocaleSync';
+import { reloadAccountEnvironment } from '@/lib/tutorEnvironmentSession';
 
 interface UserProfile {
   id: string;
@@ -52,10 +53,12 @@ const PROFILE_SELECT_WITH_TRIAL = 'id, full_name, email, stripe_account_id, goog
 const PROFILE_SELECT_LEGACY = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, phone, stripe_onboarding_complete, preferred_locale, payment_timing, payment_deadline_hours';
 const PROFILE_SELECT_CORE = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, phone';
 
-export const UserProvider = ({ children }: { children: ReactNode }) => {
+export const UserProvider = ({ children, accountChangePath }: { children: ReactNode; accountChangePath?: string }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [accountChanging, setAccountChanging] = useState(false);
+  const activeUserIdRef = useRef<string | null>(null);
   const profileFetchInFlightRef = useRef<Map<string, Promise<UserProfile | null>>>(new Map());
   const initAuthInFlightRef = useRef(false);
 
@@ -151,7 +154,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const refetchProfile = useCallback(async () => {
     if (user) {
       const profileData = await fetchProfile(user.id);
-      setProfile(profileData);
+      if (activeUserIdRef.current === user.id) setProfile(profileData);
     }
   }, [fetchProfile, user]);
 
@@ -188,6 +191,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
         if (cancelled) return;
         if (currentUser) {
+          if (activeUserIdRef.current && activeUserIdRef.current !== currentUser.id) return;
+          activeUserIdRef.current = currentUser.id;
           rememberAuthUser(currentUser);
           setUser(currentUser);
         } else {
@@ -197,7 +202,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
         if (currentUser) {
           void fetchProfile(currentUser.id).then((profileData) => {
-            if (!cancelled && profileData) setProfile(profileData);
+            if (!cancelled && activeUserIdRef.current === currentUser.id && profileData) setProfile(profileData);
           });
         }
       } catch (err) {
@@ -222,9 +227,21 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
         const currentUser = session?.user ?? null;
 
+        if (currentUser && activeUserIdRef.current && currentUser.id !== activeUserIdRef.current) {
+          // Supabase broadcasts a session switch to other tabs. Never leave a
+          // previous account's forms/caches mounted under the new auth.uid().
+          setAccountChanging(true);
+          activeUserIdRef.current = currentUser.id;
+          setProfile(null);
+          rememberAuthUser(currentUser);
+          reloadAccountEnvironment(accountChangePath);
+          return;
+        }
+
         // Do NOT clear `user` to null on transient session restore races.
         // Only clear on confirmed SIGNED_OUT (see branch below).
         if (currentUser) {
+          activeUserIdRef.current = currentUser.id;
           rememberAuthUser(currentUser);
           setUser(currentUser);
         }
@@ -234,7 +251,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
           if (currentUser) {
             // Don't block UI on profile fetch.
             void fetchProfile(currentUser.id).then((profileData) => {
-              if (profileData) setProfile(profileData);
+              if (activeUserIdRef.current === currentUser.id && profileData) setProfile(profileData);
             });
             // Keep old profile if fetch fails (don't clear it)
           }
@@ -244,6 +261,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
           // and leave the UI stuck in "loading" on the previous page.
           console.warn('[UserContext] SIGNED_OUT received - redirecting');
           rememberAuthUser(null);
+          activeUserIdRef.current = null;
           setUser(null);
           setProfile(null);
           sessionStorage.removeItem('tutlio_logout_intent');
@@ -279,12 +297,16 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       cancelled = true;
       subscription.unsubscribe();
     };
-  }, [fetchProfile]);
+  }, [fetchProfile, accountChangePath]);
 
   return (
     <UserContext.Provider value={{ user, profile, loading, refetchProfile }}>
       <ProfileLocaleSync />
-      {children}
+      {accountChanging ? (
+        <div className="flex min-h-dvh items-center justify-center bg-white" role="status" aria-busy="true">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-200 border-t-indigo-600" />
+        </div>
+      ) : children}
     </UserContext.Provider>
   );
 };

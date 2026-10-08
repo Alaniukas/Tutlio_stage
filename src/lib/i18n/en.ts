@@ -4,7 +4,11 @@ import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolConsultationsEn } from './schoolConsultationsTranslations.js';
 import { schoolInvoiceReviewEn } from './schoolInvoiceReviewTranslations.js';
 
+import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
+
 export const en: Record<string, string> = {
+  ...tutorEnvironmentTranslations.en,
+  'invoiceCreate.regenerateExistingConfirm': "Invoices {nums} have already been generated for this period. Are you sure you want to regenerate them? The previous unpaid invoices will be cancelled and new ones calculated including lessons entered later.",
   'school.contractsLoadFailed': 'Unable to load contracts. Please try again.',
   ...studentNotesTranslations.en,
   'chat.registrationPending': 'Registration pending',

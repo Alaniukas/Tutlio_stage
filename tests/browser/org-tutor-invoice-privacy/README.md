@@ -14,7 +14,9 @@ The test covers Pro Klasė QA, a generic company, and a school with every featur
 flag off, at 1280 px and 390 px widths. It checks the legacy route redirect,
 own PDF download action, the correct organization as invoice buyer, preview
 and submission without customer invoice interference, empty lists containing
-only private invoices, and blocking a genuine own duplicate. Screenshots and
+only private invoices, and blocking a genuine own duplicate. School regeneration
+also checks the native confirmation: cancellation submits nothing, while approval
+includes the previous invoice and all current lessons. Screenshots and
 machine-readable results are saved under ignored `artifacts/invoice-privacy-qa`.
 The PDF response is a synthetic download fixture; actual PDF authorization is
 covered by the API and PostgreSQL tests below.

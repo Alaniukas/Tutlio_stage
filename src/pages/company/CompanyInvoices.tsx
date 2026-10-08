@@ -43,6 +43,7 @@ import { isManoKorepetitoriusOrg } from '@/lib/marketMoney';
 import { ORG_TUTOR_CARD_LIST_SCROLL_CLASS } from '@/lib/orgUi';
 import { isInvoiceProfileComplete } from '@/lib/invoiceProfileReady';
 import { downloadInvoicePdfFile, downloadInvoicesAsZip } from '@/lib/downloadInvoicesZip';
+import { confirmInvoiceRegeneration, type InvoiceRegeneration } from '@/lib/invoiceRegeneration';
 
 interface Invoice {
   id: string;
@@ -908,6 +909,7 @@ export default function CompanyInvoices() {
                     const failedMsgs: string[] = [];
                     const selectedIds = Array.from(selectedTutorIds);
                     const eligibleTutorIds: string[] = [];
+                    const regenerations = new Map<string, InvoiceRegeneration>();
 
                     // Pre-check duplicates for selected tutor set before generation.
                     for (const tutorId of selectedIds) {
@@ -932,6 +934,9 @@ export default function CompanyInvoices() {
                         }
                         if (precheckJson?.canGenerate) {
                           eligibleTutorIds.push(tutorId);
+                        } else if (precheckJson?.regeneration) {
+                          regenerations.set(tutorId, precheckJson.regeneration);
+                          eligibleTutorIds.push(tutorId);
                         } else if (precheckJson?.reason !== 'no_sessions') {
                           failedMsgs.push(`${tutorName}: ${precheckJson?.error || t('common.error')}`);
                         }
@@ -940,6 +945,10 @@ export default function CompanyInvoices() {
                       }
                     }
 
+                    if (!confirmInvoiceRegeneration([...regenerations.values()], t)) {
+                      setGeneratingForTutors(false);
+                      return;
+                    }
                     for (const tutorId of eligibleTutorIds) {
                       try {
                         const resp = await fetch('/api/generate-invoice', {
@@ -951,6 +960,7 @@ export default function CompanyInvoices() {
                             periodEnd: tutorEffectiveRange.end,
                             groupingType: 'single',
                             isOrgTutor: true,
+                            regeneration: regenerations.get(tutorId),
                           }),
                         });
                         if (!resp.ok) {

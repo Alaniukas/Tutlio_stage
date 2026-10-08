@@ -30,6 +30,7 @@ import { filterContractsForSchoolInvoiceReview, latestSchoolBillingDecisions, re
 import { orgStudentIdentityGroupKey } from '../src/lib/orgStudentIdentity.js';
 import { groupSchoolPayerInvoicePreviews, schoolPayerKey, schoolStudentInvoiceSendable } from '../src/lib/schoolPayerInvoiceGroups.js';
 import { sessionYmdVilnius } from '../src/lib/schoolExtraLessonsBilling.js';
+import { replaceSchoolInvoices } from './_lib/schoolInvoiceRegeneration.js';
 import {
   mapAcceptedDiscountAgreement,
   mapSavedLessonDiscount,
@@ -49,6 +50,7 @@ type RequestBody = {
   previewToken?: string;
   previewTokens?: Record<string, string>;
   payerPreviewTokens?: Record<string, string>;
+  regenerateInvoiceIds?: string[];
   sessionId?: string;
   excluded?: boolean;
   reason?: string;
@@ -74,6 +76,7 @@ type DraftContext = {
   /** Sibling student ids included in one payer-level S.F. */
   payerStudentIds?: string[];
   payerChildNames?: string[];
+  previousInvoices: any[];
 };
 
 const SESSION_DETAIL_SELECT = 'id, subject_id, tutor_id, start_time, original_start_time, end_time, status, price, class_group_id, school_billing_kind, student_joined_at, tutor_joined_at, status_confirmed_at, status_confirmed_by, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, class_group:school_class_groups(name), subject:subjects(name, price), tutor:profiles!sessions_tutor_id_fkey!inner(full_name,organization_id)';
@@ -100,6 +103,7 @@ function composePayerDraft(drafts: DraftContext[]): DraftContext {
     amountDueEur: credit.amountDueEur,
     payerStudentIds: [...new Set(sorted.flatMap((row) => row.payerStudentIds || [row.student.id]))],
     payerChildNames,
+    previousInvoices: [...new Map(sorted.flatMap((row) => row.previousInvoices).map((invoice) => [invoice.id, invoice])).values()],
   };
 }
 
@@ -139,11 +143,18 @@ function composeDraftContext(input: {
       && !liveIndividualSubjectIds.has(String(contract.order_snapshot?.subject_id || '')),
   })));
   const latestDecisions = latestSchoolBillingDecisions(decisions || []);
-  const invoiced = new Set<string>((invoices || []).flatMap((invoice: any) => [
+  const previousInvoices = invoices.filter((invoice: any) => invoice.payment_status === 'pending'
+    && invoice.billing_model === 'actual' && !invoice.contract_id && !invoice.stripe_checkout_session_id
+    && !Number(invoice.credit_applied_eur || 0)
+    && invoice.period_start === periodStart && invoice.period_end === periodEnd
+    && (invoice.payer_student_ids || [invoice.student_id]).every((id: string) => studentsById.has(id)));
+  const previousIds = new Set(previousInvoices.map((invoice: any) => invoice.id));
+  const retainedInvoices = invoices.filter((invoice: any) => !previousIds.has(invoice.id));
+  const invoiced = new Set<string>(retainedInvoices.flatMap((invoice: any) => [
     ...(invoice.billed_session_ids || []), ...(invoice.extra_session_ids || []),
     ...(invoice.lines || []).flatMap((line: any) => [line.session_id, ...(line.session_ids || [])].filter(Boolean)),
   ]));
-  const contractInvoices = (invoices || []).filter((invoice: any) => invoice.contract_id
+  const contractInvoices = retainedInvoices.filter((invoice: any) => invoice.contract_id
     && (invoice.billing_model !== 'actual' || !(invoice.billed_session_ids || []).length));
   const reviewSessions = (uniqueSessions || []).map((session: any) => {
     const coveredByContractInvoice = contractInvoices.some((invoice: any) => {
@@ -211,6 +222,7 @@ function composeDraftContext(input: {
     reviewSessionIds,
     sessions: reviewSessions,
     payerStudentIds: studentIds,
+    previousInvoices,
   };
 }
 
@@ -267,12 +279,16 @@ async function loadDraft(body: RequestBody): Promise<DraftContext> {
   if (!organizationId || !studentIds.length || !YMD.test(periodStart) || !YMD.test(periodEnd) || periodEnd < periodStart) {
     throw new Error('Pasirinkite mokinį ir teisingą sąskaitos laikotarpį.');
   }
-  const { drafts } = await loadBatchDrafts(body, studentIds);
+  // An existing family invoice must be rebuilt with every child it covered.
+  const { drafts } = await loadBatchDrafts(body);
   const draft = drafts.find((row) => studentIds.some((id) => (
     id === row.student.id || (row.payerStudentIds || []).includes(id)
   )));
   if (!draft) throw new Error('Mokinys arba mokykla nerasta.');
-  return draft;
+  return draft.previousInvoices.length
+    ? composePayerDraft(drafts.filter((row) => schoolPayerKey(row.student.payer_email, row.student.id)
+      === schoolPayerKey(draft.student.payer_email, draft.student.id)))
+    : draft;
 }
 
 const SESSION_SELECT = `${SESSION_DETAIL_SELECT.replace('subject_id,', 'student_id, subject_id,')}`;
@@ -341,9 +357,10 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
     supabase.from('school_session_billing_decisions')
       .select('id, student_id, session_reference_id, excluded, reason, created_at')
       .in('student_id', studentIds).eq('organization_id', organizationId).order('id', { ascending: false }),
-    supabase.from('school_monthly_invoices')
-      .select('id, student_id, contract_id, period_start, period_end, billing_model, billed_session_ids, extra_session_ids, lines:school_monthly_invoice_lines(session_id,session_ids)')
-      .in('student_id', studentIds).eq('organization_id', organizationId).neq('payment_status', 'cancelled'),
+    fetchAllRows<any>((from, to) => supabase.from('school_monthly_invoices')
+      .select('id, invoice_number, student_id, payer_student_ids, contract_id, period_start, period_end, billing_model, payment_status, total_eur, credit_applied_eur, stripe_checkout_session_id, billed_session_ids, extra_session_ids, lines:school_monthly_invoice_lines(session_id,session_ids)')
+      .eq('organization_id', organizationId).neq('payment_status', 'cancelled').order('id').range(from, to))
+      .then(data => ({ data, error: null })),
     loadSchoolInvoiceOverpayments(supabase, organizationId, studentIds),
   ]);
   for (const result of [studentsRes, discountsRes, discountAgreementsRes, contractsRes, decisionsRes, invoicesRes]) if (result.error) {
@@ -405,7 +422,8 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
     acceptedDiscountAgreements: discountAgreements.filter((row: any) => ids.includes(String(row.student_id || ''))),
     storedContracts: contracts.filter((row: any) => ids.includes(String(row.student_id || ''))),
     decisions: decisions.filter((row: any) => ids.includes(String(row.student_id || ''))),
-    invoices: invoices.filter((row: any) => ids.includes(String(row.student_id || ''))),
+    invoices: invoices.filter((row: any) => ids.includes(String(row.student_id || ''))
+      || (row.payer_student_ids || []).some((id: string) => ids.includes(id))),
     overpayments,
     liveIndividualSubjectIds,
     groupEvidence,
@@ -447,6 +465,7 @@ function digestPayload(draft: DraftContext, userId: string) {
     periodEnd: draft.periodEnd,
     dueDate: draft.dueDate,
     payerEmail: String(draft.student.payer_email || '').trim(),
+    previousInvoices: draft.previousInvoices,
     creditAppliedEur: draft.creditAppliedEur,
     credits: draft.credits.map((credit) => ({ id: credit.id, remainingEur: schoolOverpaymentRemaining(credit) })).sort((a,b) => a.id.localeCompare(b.id)),
     sessions: draft.sessions.map((session) => ({ id: session.id, status: session.status,
@@ -505,7 +524,7 @@ async function renderDraftPdf(draft: DraftContext, invoiceNumber: string, previe
   });
 }
 
-async function issueAndSendDraft(draft: DraftContext, userId: string, previewToken: string) {
+async function issueAndSendDraft(draft: DraftContext, userId: string, previewToken: string, confirmedInvoiceIds: string[] = []) {
   if (!draft.profile) throw new Error('Pirmiausia užpildykite mokyklos sąskaitų rekvizitus.');
   if (!draft.lines.length) throw new Error('Pasirinktu laikotarpiu nėra patvirtintų apmokestinamų užsiėmimų. Peržiūrėkite lankomumą.');
   if (draft.reviewSessionIds.length) {
@@ -518,8 +537,16 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
   if (!safeTokenEqual(String(previewToken || ''), token)) {
     throw new Error('Sąskaitos duomenys pasikeitė. Peržiūrėkite ją dar kartą.');
   }
+  const previousIds = draft.previousInvoices.map((invoice) => invoice.id).sort();
+  if (JSON.stringify([...new Set(confirmedInvoiceIds)].sort()) !== JSON.stringify(previousIds)) {
+    throw new Error('Sąskaita jau suformuota. Patvirtinkite, ar tikrai norite ją pergeneruoti.');
+  }
   const supabase = serviceSupabase();
   const invoiceStudentIds = draft.payerStudentIds?.length ? draft.payerStudentIds : [draft.student.id];
+  if (draft.previousInvoices.some(invoice => [invoice.student_id, ...(invoice.payer_student_ids || [])]
+    .some(id => !invoiceStudentIds.includes(id)))) {
+    throw new Error('Prieš pergeneruodami patvirtinkite visų į ankstesnę sąskaitą įtrauktų vaikų užsiėmimus.');
+  }
   const draftSessionIds = [...new Set(draft.lines.flatMap((line) => line.sessionIds.map(String)))];
   if (draftSessionIds.length) {
     const { data: priorInvoices, error: priorError } = await supabase.from('school_monthly_invoices')
@@ -528,7 +555,7 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
       .eq('organization_id', draft.organizationId)
       .neq('payment_status', 'cancelled');
     if (priorError) throw new Error(priorError.message);
-    const billedSessionIds = new Set<string>((priorInvoices || []).flatMap((invoice: any) => [
+    const billedSessionIds = new Set<string>((priorInvoices || []).filter((invoice: any) => !previousIds.includes(invoice.id)).flatMap((invoice: any) => [
       ...(invoice.billed_session_ids || []),
       ...(invoice.extra_session_ids || []),
       ...(invoice.lines || []).flatMap((line: any) => [line.session_id, ...(line.session_ids || [])].filter(Boolean)),
@@ -539,7 +566,7 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
   }
   const invoiceNumber = await allocateInvoiceNumber(supabase, draft.profile.id);
   const pdf = await renderDraftPdf(draft, invoiceNumber, false);
-  const { data: invoice, error: invoiceError } = await supabase.from('school_monthly_invoices').insert({
+  const invoiceInsert = {
     organization_id: draft.organizationId,
     contract_id: null,
     student_id: draft.student.id,
@@ -562,10 +589,8 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
     payment_status: 'pending',
     due_date: draft.dueDate,
     invoice_number: invoiceNumber,
-  }).select('*').single();
-  if (invoiceError || !invoice) throw new Error(invoiceError?.message || 'Nepavyko sukurti sąskaitos.');
+  };
   const lineRows = draft.lines.map((line, index) => ({
-    invoice_id: invoice.id,
     sort_order: index,
     description: line.description,
     unit_price_eur: line.unitPriceEur,
@@ -581,7 +606,14 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
     session_id: line.sessionIds[0] || null,
     session_ids: line.sessionIds,
   }));
-  const { error: lineError } = await supabase.from('school_monthly_invoice_lines').insert(lineRows);
+  const { data: invoice, error: invoiceError } = previousIds.length
+    ? { data: await replaceSchoolInvoices(supabase, 'payer', draft.organizationId, null,
+        draft.previousInvoices, invoiceInsert, lineRows), error: null }
+    : await supabase.from('school_monthly_invoices').insert(invoiceInsert).select('*').single();
+  if (invoiceError || !invoice) throw new Error(invoiceError?.message || 'Nepavyko sukurti sąskaitos.');
+  const storedLines = lineRows.map((line) => ({ ...line, invoice_id: invoice.id }));
+  const { error: lineError } = previousIds.length
+    ? { error: null } : await supabase.from('school_monthly_invoice_lines').insert(storedLines);
   if (lineError) throw new Error(lineError.message);
   const storagePath = `school-monthly/${draft.organizationId}/${invoice.id}.pdf`;
   const { error: uploadError } = await supabase.storage.from('invoices')
@@ -599,7 +631,7 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
     student: draft.student,
     org: draft.org,
     contract: {},
-    lines: lineRows,
+    lines: storedLines,
     creditSources: allocateSchoolInvoiceCredits(draft.credits, draft.totalEur),
   });
   return {
@@ -654,6 +686,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           payerEmail: String(draft.student.payer_email || '').trim(),
           payerName: String(draft.student.payer_name || draft.student.full_name || ''),
           previewToken: previewDigest(digestPayload(draft, auth.userId)),
+          regeneration: draft.previousInvoices.length ? {
+            invoiceIds: draft.previousInvoices.map(invoice => invoice.id),
+            invoiceNumbers: draft.previousInvoices.map(invoice => invoice.invoice_number),
+          } : undefined,
         };
         return { draft, row };
       });
@@ -746,7 +782,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue;
         }
         try {
-          const result = await issueAndSendDraft(mergedDraft, auth.userId, previewToken);
+          const expectedIds = new Set(mergedDraft.previousInvoices.map(invoice => invoice.id));
+          const result = await issueAndSendDraft(mergedDraft, auth.userId, previewToken,
+            (body.regenerateInvoiceIds || []).filter(id => expectedIds.has(id)));
           sent.push({
             payerKey: group.payerKey,
             studentIds: readyItems.map((item) => item.row.studentId),
@@ -825,7 +863,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ok: true,
         previewToken: token,
         pdfBase64: Buffer.from(pdf).toString('base64'),
-        student: { id: draft.student.id, fullName: draft.student.full_name, grade: draft.student.grade },
+        student: { id: draft.student.id, fullName: draft.payerChildNames?.join(', ') || draft.student.full_name,
+          grade: draft.payerChildNames && draft.payerChildNames.length > 1 ? null : draft.student.grade },
         periodLabel: periodLabel(draft.periodStart),
         dueDate: draft.dueDate,
         lines: draft.lines,
@@ -842,12 +881,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           availableEur: schoolOverpaymentRemaining(credit),
         })),
         reviewSessionIds: draft.reviewSessionIds,
+        regeneration: draft.previousInvoices.length ? {
+          invoiceIds: draft.previousInvoices.map(invoice => invoice.id),
+          invoiceNumbers: draft.previousInvoices.map(invoice => invoice.invoice_number),
+        } : undefined,
         ...reviewData(draft),
       });
     }
     if (body.action !== 'send') return res.status(400).json({ error: 'Nežinomas veiksmas.' });
     try {
-      const result = await issueAndSendDraft(draft, auth.userId, String(body.previewToken || ''));
+      const result = await issueAndSendDraft(draft, auth.userId, String(body.previewToken || ''), body.regenerateInvoiceIds);
       return res.status(result.emailSent ? 200 : 202).json({
         ok: true,
         invoiceId: result.invoiceId,

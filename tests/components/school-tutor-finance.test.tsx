@@ -16,7 +16,7 @@ const state = vi.hoisted(() => ({
   pageCap: 2,
   queries: [] as Array<{ table: string; select: string; filters: Array<[string, string, unknown]>; range?: [number, number] }>,
   from: vi.fn(),
-  precheck: { ok: true, code: undefined as string | undefined },
+  precheck: { ok: true, code: undefined } as { ok: boolean; code?: string; reason?: string; regeneration?: any },
   posts: [] as any[],
 }));
 
@@ -132,7 +132,7 @@ beforeEach(() => {
     if (url === '/api/generate-invoice') {
       const body = JSON.parse(String(init?.body)); state.posts.push(body);
       return body.precheckOnly
-        ? { ok: state.precheck.ok, json: async () => ({ code: state.precheck.code, error: 'Server pay review' }) }
+        ? { ok: state.precheck.ok, json: async () => ({ ...state.precheck, error: 'Server pay review' }) }
         : { ok: true, json: async () => ({ count: 1 }) };
     }
     throw new Error(`Unexpected endpoint ${url}`);
@@ -336,6 +336,21 @@ describe('school teacher Finance', () => {
 });
 
 describe('school teacher invoice preview', () => {
+  it('asks before replacing an existing teacher invoice and cancel performs no generation', async () => {
+    const regeneration = { invoiceIds: ['old'], invoiceNumbers: ['SF-OLD'], token: 'signed-preview' };
+    state.precheck = { ok: true, reason: 'duplicate', regeneration };
+    state.invoices = [{ invoice_number: 'SF-OLD', total_amount: 45, pdf_meta: { invoiceKind: 'tutor_pay', tutorId: 'teacher' } }];
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await preview();
+    const generate = await screen.findByRole('button', { name: 'invoices.regenerate' });
+    expect(screen.getByRole('status').textContent).toContain('SF-OLD');
+    fireEvent.click(generate);
+    expect(confirm).toHaveBeenCalledWith('invoiceCreate.regenerateExistingConfirm:SF-OLD');
+    expect(state.posts.filter(row => !row.precheckOnly)).toHaveLength(0);
+    fireEvent.click(generate);
+    await waitFor(() => expect(state.posts.filter(row => !row.precheckOnly)).toHaveLength(1));
+    expect(state.posts.find(row => !row.precheckOnly).regeneration).toEqual(regeneration);
+  });
   it('generates one attendance-only meeting with separate attendance IDs and no synthetic session ID', async () => {
     state.rows = [];
     state.rate = 90;

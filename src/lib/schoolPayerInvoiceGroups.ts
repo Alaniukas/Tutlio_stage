@@ -1,3 +1,5 @@
+import type { InvoiceRegeneration } from './invoiceRegeneration.js';
+
 export type SchoolPayerInvoiceStudentPreview = {
   studentId: string;
   fullName: string;
@@ -12,6 +14,7 @@ export type SchoolPayerInvoiceStudentPreview = {
   payerEmail: string;
   payerName: string;
   previewToken: string;
+  regeneration?: InvoiceRegeneration;
 };
 
 export type SchoolPayerInvoiceGroup = {

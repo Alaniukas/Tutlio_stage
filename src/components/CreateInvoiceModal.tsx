@@ -25,6 +25,7 @@ import { fetchSchoolTutorAttendancePayRows } from '@/lib/schoolTutorAttendancePa
 import { orgRequiresTutorStatusConfirmation } from '@/lib/sessionStatusConfirmation';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { schoolDate } from '@/lib/schoolTime';
+import { confirmInvoiceRegeneration, type InvoiceRegeneration } from '@/lib/invoiceRegeneration';
 
 function invoiceApiErrorMessage(
   json: { code?: string; error?: string } | null | undefined,
@@ -82,10 +83,12 @@ export default function CreateInvoiceModal({
   const [periodEnd, setPeriodEnd] = useState('');
   const [groupingType, setGroupingType] = useState<GroupingType>('single');
   const [sessions, setSessions] = useState<any[]>([]);
+  const [adjustmentsEur, setAdjustmentsEur] = useState(0);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState(false);
+  const [regeneration, setRegeneration] = useState<InvoiceRegeneration>();
   const [hasInvoiceProfile, setHasInvoiceProfile] = useState<boolean | null>(null);
   const [sellerInfo, setSellerInfo] = useState<SellerInfo | null>(null);
   const [orgBuyerInfo, setOrgBuyerInfo] = useState<{ name: string; email?: string } | null>(null);
@@ -97,7 +100,9 @@ export default function CreateInvoiceModal({
       setPeriodStart(format(thirtyDaysAgo, 'yyyy-MM-dd'));
       setPeriodEnd(format(today, 'yyyy-MM-dd'));
       setPreviewMode(false);
+      setRegeneration(undefined);
       setSessions([]);
+      setAdjustmentsEur(0);
       setError(null);
       setSellerInfo(null);
       setOrgBuyerInfo(null);
@@ -189,6 +194,9 @@ export default function CreateInvoiceModal({
 
     setLoading(true);
     setError(null);
+    setAdjustmentsEur(0);
+    setPreviewMode(false);
+    setRegeneration(undefined);
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -212,7 +220,7 @@ export default function CreateInvoiceModal({
         if (!tutorId) throw new Error(t('invoiceCreate.noSessions'));
 
         const issuingForAnotherTutor = !!billingTutorId && billingTutorId !== user.id;
-        if (!issuingForAnotherTutor) {
+        if (!issuingForAnotherTutor && !schoolPayMode) {
           const periodInvoiceKey = `periodStart=${encodeURIComponent(periodStart)}&periodEnd=${encodeURIComponent(periodEnd)}`;
           const periodInvoiceRes = await fetchOrgTutorInvoicesDeduped(periodInvoiceKey);
           if (periodInvoiceRes.ok) {
@@ -242,7 +250,8 @@ export default function CreateInvoiceModal({
           }),
         });
         const precheckJson = await precheckResp.json().catch(() => ({}));
-        if ((!precheckResp.ok && !(schoolPayMode && precheckJson?.code === 'SCHOOL_TUTOR_PAY_UNRESOLVED')) || precheckJson?.reason === 'duplicate') {
+        if ((!precheckResp.ok && !(schoolPayMode && precheckJson?.code === 'SCHOOL_TUTOR_PAY_UNRESOLVED'))
+          || (precheckJson?.reason === 'duplicate' && !(schoolPayMode && precheckJson?.regeneration))) {
           setError(
             (precheckJson.error as string) ||
               t('invoiceCreate.periodAlreadyIssued', { start: periodStart, end: periodEnd }),
@@ -251,6 +260,7 @@ export default function CreateInvoiceModal({
           setPreviewMode(false);
           return;
         }
+        if (schoolPayMode && precheckJson.regeneration) setRegeneration(precheckJson.regeneration);
 
         const startIso = schoolPayMode ? schoolDate(periodStart).toISOString() : periodStart + 'T00:00:00';
         const endIso = schoolPayMode ? endOfDay(schoolDate(periodEnd)).toISOString() : periodEnd + 'T23:59:59';
@@ -278,7 +288,7 @@ export default function CreateInvoiceModal({
         ]);
 
         if (sessErr) throw sessErr;
-        if (schoolPayMode && (profErr || !prof)) throw profErr || new Error(t('common.error'));
+        if (profErr || !prof) throw profErr || new Error(t('common.error'));
         const orgId = (prof as any)?.organization_id as string | undefined;
         const tutorPayRate = resolveSchoolTutorGroupPayRate({
           tutorRate: (prof as { company_commission_percent?: number | null } | null)?.company_commission_percent,
@@ -286,6 +296,17 @@ export default function CreateInvoiceModal({
           organizationId: orgId,
         }) ?? 0;
         const proKlasePay = isProKlaseOrg(orgId);
+        if (proKlasePay) {
+          const { data: adjustments, error: adjustmentsError } = await supabase
+            .from('tutor_adjustments')
+            .select('amount_eur')
+            .eq('tutor_id', tutorId)
+            .eq('organization_id', orgId!)
+            .gte('created_at', startIso)
+            .lte('created_at', endIso);
+          if (adjustmentsError) throw adjustmentsError;
+          setAdjustmentsEur((adjustments || []).reduce((sum, row) => sum + Number(row.amount_eur || 0), 0));
+        }
         const rows = schoolPayMode
           ? schoolTutorPayOccurrences([...(sessRows || []), ...attendanceRows] as any[], tutorPayRate, new Date(), {
             requireConfirmation: orgRequiresTutorStatusConfirmation(orgId, {
@@ -417,6 +438,7 @@ export default function CreateInvoiceModal({
       setError(t('invoices.orgProfileIncompleteError'));
       return;
     }
+    if (regeneration && !confirmInvoiceRegeneration([regeneration], t)) return;
 
     setGenerating(true);
     setError(null);
@@ -491,6 +513,7 @@ export default function CreateInvoiceModal({
             studentId: studentId || undefined,
             tutorId: tid,
             isOrgTutor: isOrgTutor || false,
+            regeneration,
             onlyPaid: true,
             sessionIds: sessionIds.length > 0 ? sessionIds : undefined,
             attendanceIds: attendanceIds.length > 0 ? attendanceIds : undefined,
@@ -526,7 +549,7 @@ export default function CreateInvoiceModal({
     }
   };
 
-  const totalAmount = sessions.reduce((sum, s) => sum + (s.price || 0), 0);
+  const totalAmount = Math.round((sessions.reduce((sum, s) => sum + (s.price || 0), 0) + adjustmentsEur) * 100) / 100;
   const schoolUnresolvedCount = sessions.filter(row => row._schoolPayIssue).length;
   const schoolKnownCount = sessions.filter(row => row._schoolMeeting && row.price !== null).length;
 
@@ -702,6 +725,11 @@ export default function CreateInvoiceModal({
                       {t('invoiceCreate.sessionsCount', { count: sessions.length })} |{' '}
                       {schoolUnresolvedCount > 0 ? t('orgFinance.schoolKnownPayTotal') : t('common.total')}: {schoolUnresolvedCount > 0 && schoolKnownCount === 0 ? t('orgFinance.schoolPayPending') : `€${totalAmount.toFixed(2)}`}
                     </p>
+                    {adjustmentsEur !== 0 && (
+                      <p className="text-xs text-indigo-700 mt-1">
+                        {t('orgFinance.adjustments')}: €{adjustmentsEur.toFixed(2)}
+                      </p>
+                    )}
                     {!isOrgTutor && (
                       <p className="text-xs text-indigo-600 mt-1">
                         {t('invoiceCreate.groupingLabel')}: {t(`invoiceCreate.${groupingType}`)}
@@ -838,6 +866,12 @@ export default function CreateInvoiceModal({
                 </div>
               )}
 
+              {regeneration && (
+                <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  {t('invoiceCreate.periodAlreadyIssued', { start: periodStart, end: periodEnd })}
+                  {' '}{regeneration.invoiceNumbers.join(', ')}
+                </p>
+              )}
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setPreviewMode(false)} disabled={generating} className="flex-1 rounded-lg">
                   {t('common.back')}
@@ -850,7 +884,7 @@ export default function CreateInvoiceModal({
                   {generating ? (
                     <><Loader2 className="w-4 h-4 animate-spin mr-2" />{t('invoiceCreate.generating')}</>
                   ) : (
-                    t('invoiceCreate.generate')
+                    t(regeneration ? 'invoices.regenerate' : 'invoiceCreate.generate')
                   )}
                 </Button>
               </div>

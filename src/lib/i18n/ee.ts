@@ -9,7 +9,11 @@ import { schoolInstructionsTranslationsEe } from './schoolInstructionsTranslatio
 import { schoolTeacherContractTranslationsEe } from './schoolTeacherContractTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
 
+import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
+
 export const ee: Record<string, string> = {
+  ...tutorEnvironmentTranslations.ee,
+  'invoiceCreate.regenerateExistingConfirm': "Arved {nums} on selle perioodi eest juba koostatud. Kas soovite need kindlasti uuesti koostada? Varasemad tasumata arved tühistatakse ning uued arvestavad ka hiljem sisestatud tunde.",
   ...organizationReleaseTranslations['ee'],
   'school.contractsLoadFailed': 'Lepingute laadimine ebaõnnestus. Proovige uuesti.',
   ...studentNotesTranslations.ee,

@@ -7,7 +7,11 @@ import { schoolInstructionsTranslationsPl } from './schoolInstructionsTranslatio
 import { schoolTeacherContractTranslationsPl } from './schoolTeacherContractTranslations.js';
 import { schoolConsultationsPl } from './schoolConsultationsTranslations.js';
 
+import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
+
 export const pl: Record<string, string> = {
+  ...tutorEnvironmentTranslations.pl,
+  'invoiceCreate.regenerateExistingConfirm': "Faktury {nums} za ten okres zostały już wygenerowane. Czy na pewno chcesz wygenerować je ponownie? Poprzednie nieopłacone faktury zostaną anulowane, a nowe uwzględnią również zajęcia wprowadzone później.",
   'school.contractsLoadFailed': 'Nie udało się wczytać umów. Spróbuj ponownie.',
   ...studentNotesTranslations.pl,
   ...schoolFamilyMaterialTranslations.pl,

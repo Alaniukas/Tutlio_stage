@@ -39,6 +39,9 @@ import SupportRobotIcon from '@/components/support/SupportRobotIcon';
 import { useInAppSupportAgent } from '@/components/support/InAppSupportProvider';
 import { inAppSupportLabel } from '@/lib/inAppSupport';
 import { IN_APP_SUPPORT_ENABLED } from '@/lib/inAppSupportAvailability';
+import { useTutorEnvironments } from '@/hooks/useTutorEnvironments';
+import TutorEnvironmentSwitcher from '@/components/TutorEnvironmentSwitcher';
+import TutorEnvironmentDialog from '@/components/TutorEnvironmentDialog';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -51,6 +54,8 @@ export default function Layout({ children }: LayoutProps) {
   const { profile, user: ctxUser, loading: userLoading } = useUser();
   const [profileOrgId, setProfileOrgId] = useState<string | null>(profile?.organization_id ?? null);
   const isOrgTutor = !!(profile?.organization_id || profileOrgId);
+  const tutorEnvironments = useTutorEnvironments();
+  const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
   const { hideWaitlist: hideWaitlistFromFeatures } = useHideWaitlist({
     failClosedWhileLoading: isOrgTutor,
   });
@@ -163,9 +168,23 @@ export default function Layout({ children }: LayoutProps) {
   const initials = tutorName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?';
   const isCalendarRoute = location.pathname === '/calendar';
   const hideInstructions = isInstructionsHiddenForOrg(profile?.organization_id || profileOrgId);
+  const environmentSwitcher = (compact = false) => (
+    <TutorEnvironmentSwitcher environments={tutorEnvironments.environments} value={ctxUser?.id || ''}
+      busy={tutorEnvironments.busy || tutorEnvironments.loading} compact={compact}
+      onChange={(id) => void tutorEnvironments.switchEnvironment(id)}
+      onManage={() => { tutorEnvironments.clearError(); setEnvironmentDialogOpen(true); }} />
+  );
+  if (tutorEnvironments.switching) return (
+    <div className="flex min-h-dvh items-center justify-center gap-3 bg-white text-gray-600" role="status" aria-live="polite">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200 border-t-[var(--org-brand)]" />
+      {t('tutorEnv.switching')}
+    </div>
+  );
   return (
     <div className="h-dvh max-h-dvh bg-white flex overflow-hidden relative">
       <OrgSuspendedBanner />
+      <TutorEnvironmentDialog open={environmentDialogOpen} onOpenChange={setEnvironmentDialogOpen}
+        tutorId={ctxUser?.id || ''} controller={tutorEnvironments} />
       <PwaInstallPrompt settingsPath={hideInstructions ? '/lesson-settings' : '/instructions'} />
       <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full blur-[80px] pointer-events-none z-0 bg-[color-mix(in_srgb,var(--org-brand)_12%,#ffffff)]" />
       <div className="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] bg-slate-50/40 rounded-full blur-[100px] pointer-events-none z-0" />
@@ -198,6 +217,8 @@ export default function Layout({ children }: LayoutProps) {
           </button>
         </div>
 
+        {isOrgTutor && <div className="px-3 pt-3">{environmentSwitcher(!sidebarExpanded)}</div>}
+        {tutorEnvironments.error && !environmentDialogOpen && <p role="alert" className="px-3 pt-2 text-xs text-red-600">{t(`tutorEnv.error.${tutorEnvironments.error}`)}</p>}
         <nav className="flex-1 overflow-y-auto p-3 space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -320,6 +341,7 @@ export default function Layout({ children }: LayoutProps) {
               </button>
             </div>
 
+            {isOrgTutor && <div className="px-3 pt-3">{environmentSwitcher()}</div>}
             <nav className="flex-1 overflow-y-auto p-3 space-y-1">
               {navItems.map((item) => {
                 const Icon = item.icon;
@@ -413,6 +435,8 @@ export default function Layout({ children }: LayoutProps) {
           {/* Spacer balances the menu button so the logo stays centered */}
           <div className="min-h-[44px] min-w-[44px] flex-shrink-0" aria-hidden />
         </header>
+        {isOrgTutor && <div className="border-b border-gray-100 bg-white px-4 py-2 lg:hidden">{environmentSwitcher()}</div>}
+        {tutorEnvironments.error && !environmentDialogOpen && <p role="alert" className="px-4 pt-2 text-xs text-red-600 lg:hidden">{t(`tutorEnv.error.${tutorEnvironments.error}`)}</p>}
 
         <main
           ref={mainRef}

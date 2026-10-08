@@ -9,7 +9,11 @@ import { schoolInstructionsTranslationsFr } from './schoolInstructionsTranslatio
 import { schoolTeacherContractTranslationsFr } from './schoolTeacherContractTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
 
+import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
+
 export const fr: Record<string, string> = {
+  ...tutorEnvironmentTranslations.fr,
+  'invoiceCreate.regenerateExistingConfirm': "Les factures {nums} ont déjà été créées pour cette période. Voulez-vous vraiment les recréer ? Les anciennes factures impayées seront annulées et les nouvelles incluront aussi les cours saisis ultérieurement.",
   ...organizationReleaseTranslations['fr'],
   'school.contractsLoadFailed': 'Impossible de charger les contrats. Veuillez réessayer.',
   ...studentNotesTranslations.fr,

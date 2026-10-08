@@ -13,13 +13,18 @@ vi.mock('../../src/components/ui/date-input', () => ({
   DateInput: (props: any) => createElement('input', { ...props, 'aria-label': 'Invoice due date', type: 'date' }),
 }));
 
-const state = vi.hoisted(() => ({ tables: {} as Record<string, any[]>, writes: [] as any[], canEdit: true, adminOrg: 'org1', rowLimit: Infinity }));
+const state = vi.hoisted(() => ({ tables: {} as Record<string, any[]>, writes: [] as any[], canEdit: true, adminOrg: 'org1', rowLimit: Infinity,
+  replacements: [] as any[] }));
 vi.mock('../../api/_lib/schoolConsultationsAccess.js', () => ({
   requireConsultationsAuth: async () => ({ userId: 'admin1' }),
   assertOrgConsultationsEnabled: async () => ({ ok: true }),
   assertSchoolMonthlyInvoiceEnabled: async () => ({ ok: true }),
   serviceSupabase: () => ({
     from: query,
+    rpc: async (_name: string, args: any) => {
+      state.replacements.push(args);
+      return { data: { id: 'replacement', ...args.p_invoice }, error: null };
+    },
     storage: { from: () => ({ upload: async () => ({ error: null }) }) },
   }),
 }));
@@ -102,6 +107,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-only';
   state.writes = []; state.canEdit = true; state.adminOrg = 'org1'; state.rowLimit = Infinity;
+  state.replacements = [];
+  vi.mocked(allocateInvoiceNumber).mockResolvedValue('SF-NEW');
+  vi.mocked(sendSchoolMonthlyInvoiceEmail).mockResolvedValue({ sent: true } as any);
   state.tables = {
     students: [{ id: 'child1', organization_id: 'org1', full_name: 'Child One', payer_email: 'parent@example.com' }],
     organizations: [{ id: 'org1', name: 'Target School', features: {} }],
@@ -117,6 +125,71 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('school monthly invoice review API', () => {
+  const existingInvoice = () => ({ id: 'earlier', organization_id: 'org1', student_id: 'child1', invoice_number: 'OLD',
+    period_start: '2026-09-01', period_end: '2026-09-30', payment_status: 'pending', billing_model: 'actual', total_eur: 12,
+    billed_session_ids: ['lesson1'], payer_student_ids: ['child1'] });
+  it('rebuilds the full payer invoice after confirmation, including a late in-person lesson', async () => {
+    state.tables.school_monthly_invoices = [existingInvoice()];
+    state.tables.sessions.push({ ...state.tables.sessions[0], id: 'late', start_time: '2026-09-21T13:00:00Z', end_time: '2026-09-21T14:00:00Z',
+      tutor_joined_at: null, status_confirmed_at: '2026-09-21T14:05:00Z', status_confirmed_by: 'teacher1' });
+    const preview = await request({ action: 'preview' });
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({ totalEur: 24, regeneration: { invoiceIds: ['earlier'], invoiceNumbers: ['OLD'] } });
+    const denied = await request({ action: 'send', previewToken: preview.body.previewToken });
+    expect(denied.status).toBe(409);
+    expect(state.writes).toHaveLength(0); expect(state.replacements).toHaveLength(0);
+    const sent = await request({ action: 'send', previewToken: preview.body.previewToken, regenerateInvoiceIds: ['earlier'] });
+    expect(sent.status).toBeLessThan(300);
+    expect(state.replacements[0]).toMatchObject({ p_kind: 'payer', p_invoice: { total_eur: 24, billed_session_ids: ['lesson1', 'late'] } });
+    expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledOnce();
+  });
+  it('requires payer confirmation during batch sending too', async () => {
+    state.tables.school_monthly_invoices = [existingInvoice()];
+    const preview = await request({ action: 'batch-preview' });
+    expect(preview.body.payers[0].students[0].regeneration.invoiceIds).toEqual(['earlier']);
+    expect((await request({ action: 'send-batch', ...batchTokens(preview) })).body.sentCount).toBe(0);
+    expect(state.replacements).toHaveLength(0);
+    const sent = await request({ action: 'send-batch', ...batchTokens(preview), regenerateInvoiceIds: ['earlier'] });
+    expect(sent.body.sentCount).toBe(1);
+    expect(state.replacements).toHaveLength(1);
+  });
+  it('does not reset a payment or an active checkout after payer preview', async () => {
+    state.tables.school_monthly_invoices = [existingInvoice()];
+    const preview = await request({ action: 'preview' });
+    state.tables.school_monthly_invoices[0].payment_status = 'paid';
+    expect((await request({ action: 'send', previewToken: preview.body.previewToken, regenerateInvoiceIds: ['earlier'] })).status).toBeGreaterThanOrEqual(400);
+    state.tables.school_monthly_invoices[0].payment_status = 'pending';
+    state.tables.school_monthly_invoices[0].stripe_checkout_session_id = 'cs_active';
+    expect((await request({ action: 'send', previewToken: preview.body.previewToken, regenerateInvoiceIds: ['earlier'] })).status).toBeGreaterThanOrEqual(400);
+    expect(state.writes).toHaveLength(0); expect(state.replacements).toHaveLength(0);
+  });
+  it('keeps both children when regenerating a family invoice from one child preview', async () => {
+    state.tables.students.push({ id: 'child2', organization_id: 'org1', full_name: 'Child Two', payer_email: 'parent@example.com' });
+    state.tables.sessions.push({ ...state.tables.sessions[0], id: 'sibling-lesson', student_id: 'child2' });
+    state.tables.school_monthly_invoices = [{ ...existingInvoice(), payer_student_ids: ['child1', 'child2'],
+      billed_session_ids: ['lesson1', 'sibling-lesson'], total_eur: 24 }];
+    const preview = await request({ action: 'preview' });
+    expect(preview.body.totalEur).toBe(24);
+    expect(preview.body.lines.map((line: any) => line.studentName)).toEqual(['Child One', 'Child Two']);
+    const sent = await request({ action: 'send', previewToken: preview.body.previewToken, regenerateInvoiceIds: ['earlier'] });
+    expect(sent.status).toBeLessThan(300);
+    expect(state.replacements[0].p_invoice.payer_student_ids.sort()).toEqual(['child1', 'child2']);
+    expect(state.replacements[0].p_invoice.billed_session_ids.sort()).toEqual(['lesson1', 'sibling-lesson']);
+  });
+  it('does not replace a family invoice when a sibling still needs attendance review', async () => {
+    state.tables.students.push({ id: 'child2', organization_id: 'org1', full_name: 'Child Two', payer_email: 'parent@example.com' });
+    state.tables.sessions.push({ ...state.tables.sessions[0], id: 'sibling-lesson', student_id: 'child2',
+      class_group_id: 'other-group', status: 'active', tutor_joined_at: null, status_confirmed_at: null });
+    state.tables.school_monthly_invoices = [{ ...existingInvoice(), payer_student_ids: ['child1', 'child2'],
+      billed_session_ids: ['lesson1', 'sibling-lesson'], total_eur: 24 }];
+    const preview = await request({ action: 'batch-preview' });
+    expect(preview.body.payers[0].students.find((child: any) => child.studentId === 'child2').reviewSessionIds).toEqual(['sibling-lesson']);
+    const sent = await request({ action: 'send-batch', ...batchTokens(preview), regenerateInvoiceIds: ['earlier'] });
+    expect(sent.body.sentCount).toBe(0);
+    expect(sent.body.skipped.some((item: any) => item.error.includes('visų į ankstesnę sąskaitą įtrauktų vaikų'))).toBe(true);
+    expect(allocateInvoiceNumber).not.toHaveBeenCalled();
+    expect(state.replacements).toHaveLength(0);
+  });
   it('shows an available prior overpayment in the PDF and final invoice without treating it as a discount', async () => {
     state.tables.school_invoice_overpayments = [{ id:'credit',organization_id:'org1',student_id:'child1',payer_email:'parent@example.com',
       source_invoice_id:'paid',amount_eur:5,reason:'Prior adjustment',created_at:'2026-08-31',source:{invoice_number:'PAM-OLD',period_end:'2026-08-31'},uses:[] }];
@@ -217,7 +290,7 @@ describe('school monthly invoice review API', () => {
     expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledTimes(1);
     expect(state.tables.school_monthly_invoices).toHaveLength(2);
     expect(state.tables.school_monthly_invoices[0].payment_status).toBe('cancelled');
-    expect((await request({ action: 'send', previewToken: preview.body.previewToken })).status).toBe(400);
+    expect((await request({ action: 'send', previewToken: preview.body.previewToken })).status).toBe(409);
     expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledTimes(1);
     expect(state.tables.sessions).toEqual(attendanceBefore);
   });

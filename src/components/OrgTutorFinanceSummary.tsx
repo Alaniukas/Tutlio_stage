@@ -89,8 +89,9 @@ export default function OrgTutorFinanceSummary() {
   const [rangeEnd, setRangeEnd] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [rangeError, setRangeError] = useState<string | null>(null);
   const [completedCount, setCompletedCount] = useState(0);
+  const [noShowCount, setNoShowCount] = useState(0);
   const [payBreakdown, setPayBreakdown] = useState<ProKlasePayBreakdown | null>(null);
-  const [manoPayEur, setManoPayEur] = useState<number | null>(null);
+  const [companyPayEur, setCompanyPayEur] = useState<number | null>(null);
   const [manoHasSubjectRates, setManoHasSubjectRates] = useState(false);
   const [schoolKnownPayEur, setSchoolKnownPayEur] = useState<number | null>(null);
   const [schoolUnresolvedCount, setSchoolUnresolvedCount] = useState(0);
@@ -132,6 +133,7 @@ export default function OrgTutorFinanceSummary() {
 
       setLoading(true);
       setSummaryLoadError(false);
+      setNoShowCount(0);
       setSchoolKnownPayEur(null);
       setSchoolUnresolvedCount(0);
       setSchoolKnownCount(0);
@@ -188,7 +190,7 @@ export default function OrgTutorFinanceSummary() {
       }
 
       let breakdown: ProKlasePayBreakdown | null = null;
-      let manoTotal: number | null = null;
+      let companyTotal: number | null = null;
       let manoHasSubjectRatesLocal = false;
       let conductedCount = 0;
 
@@ -235,7 +237,7 @@ export default function OrgTutorFinanceSummary() {
           setSchoolKnownCount(priced.length);
           setSchoolUnresolvedCount(occurrences.length - priced.length);
           setPayBreakdown(null);
-          setManoPayEur(null);
+          setCompanyPayEur(null);
           setManoHasSubjectRates(false);
         } catch (error) {
           if (cancelled) return;
@@ -280,7 +282,8 @@ export default function OrgTutorFinanceSummary() {
           adjustmentsEur,
         );
         conductedCount = (sessionRows || []).filter((row) =>
-          (row as { exclude_from_lesson_count?: boolean | null }).exclude_from_lesson_count !== true
+          row.status === 'completed'
+            && (row as { exclude_from_lesson_count?: boolean | null }).exclude_from_lesson_count !== true
             && Boolean((row as { status_confirmed_at?: string | null }).status_confirmed_at),
         ).length;
         if (cancelled) return;
@@ -289,19 +292,19 @@ export default function OrgTutorFinanceSummary() {
           setSummaryLoadError(true);
           setCompletedCount(0);
           setPayBreakdown(null);
-          setManoPayEur(null);
+          setCompanyPayEur(null);
           setManoHasSubjectRates(false);
         } else {
           setCompletedCount(conductedCount);
           setPayBreakdown(breakdown);
-          setManoPayEur(null);
+          setCompanyPayEur(null);
           setManoHasSubjectRates(false);
         }
         setLoading(false);
         return;
       }
 
-      if (manoPayMode) {
+      {
         const { data: sessionRows, error: sessionErr } = await supabase
           .from('sessions')
           .select('id, status, price, subject_id, tutor_pay_eur_snapshot')
@@ -310,14 +313,14 @@ export default function OrgTutorFinanceSummary() {
           .lte('end_time', new Date().toISOString())
           .gte('start_time', startIso)
           .lte('start_time', endIso);
-        const { data: payProfile, error: payProfileErr } = await supabase
+        const { data: payProfile, error: payProfileErr } = manoPayMode ? await supabase
           .from('profiles')
           .select('company_commission_by_subject')
           .eq('id', user.id)
-          .maybeSingle();
+          .maybeSingle() : { data: {}, error: null };
         const bySubject = parseTutorPayBySubject((payProfile as any)?.company_commission_by_subject);
         manoHasSubjectRatesLocal = Object.keys(bySubject).length > 0;
-        manoTotal = sumOrgTutorLessonsPayEur(
+        companyTotal = sumOrgTutorLessonsPayEur(
           (sessionRows || []) as Array<{
             subject_id?: string | null;
             price?: number | null;
@@ -327,49 +330,26 @@ export default function OrgTutorFinanceSummary() {
           bySubject,
           profile?.organization_id,
         );
-        conductedCount = (sessionRows || []).length;
+        conductedCount = (sessionRows || []).filter(row => row.status === 'completed').length;
         if (cancelled) return;
         if (sessionErr || payProfileErr || !payProfile) {
           console.error('[OrgTutorFinanceSummary]', sessionErr || payProfileErr || 'Tutor pay profile missing');
           setSummaryLoadError(true);
           setCompletedCount(0);
           setPayBreakdown(null);
-          setManoPayEur(null);
+          setCompanyPayEur(null);
           setManoHasSubjectRates(false);
         } else {
           setCompletedCount(conductedCount);
           setPayBreakdown(null);
-          setManoPayEur(manoTotal);
+          setCompanyPayEur(companyTotal);
+          setNoShowCount((sessionRows || []).filter(row => row.status === 'no_show').length);
           setManoHasSubjectRates(manoHasSubjectRatesLocal);
         }
         setLoading(false);
         return;
       }
 
-      const { data: genericRows, error } = await supabase
-        .from('sessions')
-        .select('id, status')
-        .eq('tutor_id', user.id)
-        .eq('status', 'completed')
-        .lte('end_time', new Date().toISOString())
-        .gte('start_time', startIso)
-        .lte('start_time', endIso);
-
-      if (cancelled) return;
-      if (error) {
-        console.error('[OrgTutorFinanceSummary]', error);
-        setSummaryLoadError(true);
-        setCompletedCount(0);
-        setPayBreakdown(null);
-        setManoPayEur(null);
-        setManoHasSubjectRates(false);
-      } else {
-        setCompletedCount((genericRows || []).length);
-        setPayBreakdown(null);
-        setManoPayEur(null);
-        setManoHasSubjectRates(false);
-      }
-      setLoading(false);
     };
 
     if (!policyLoading && !orgLoading) void load();
@@ -435,7 +415,7 @@ export default function OrgTutorFinanceSummary() {
     );
   };
 
-  const gross = schoolKnownPayEur ?? payBreakdown?.totalEur ?? manoPayEur ?? completedCount * (payPerLessonEur ?? 0);
+  const gross = schoolKnownPayEur ?? payBreakdown?.totalEur ?? companyPayEur ?? 0;
 
   return (
     <div className="space-y-6">
@@ -526,7 +506,7 @@ export default function OrgTutorFinanceSummary() {
 
         {loading || policyLoading || orgLoading ? (
           <p className="text-gray-500 text-sm mt-6">{t('common.loadingDots')}</p>
-        ) : summaryLoadError || (payPerLessonEur === null && !schoolPayMode) ? (
+        ) : rangeError ? null : summaryLoadError || (payPerLessonEur === null && !schoolPayMode) ? (
           <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-6">
             {t('common.error')}
           </p>
@@ -536,6 +516,9 @@ export default function OrgTutorFinanceSummary() {
               {schoolPayMode ? `${t('orgFinance.schoolFinalizedLessons')} (${rangeLabel}):` : t('orgFinance.completedLessons', { range: rangeLabel })}
             </p>
             <p className="text-2xl font-bold text-gray-900 mt-1">{completedCount}</p>
+            {noShowCount > 0 && (
+              <p className="text-sm text-gray-600 mt-2">{t('orgFinance.noShowLessons')} ({noShowCount})</p>
+            )}
             <div className="flex items-center gap-2 mt-4 pt-4 border-t border-gray-200">
               <Euro className="w-5 h-5 text-emerald-600" />
               <div>
@@ -575,7 +558,7 @@ export default function OrgTutorFinanceSummary() {
               </div>
             )}
             <p className="text-xs text-gray-400 mt-3">
-              {schoolPayMode ? t('orgFinance.schoolSummaryNote') : t('orgFinance.summaryNote')}
+              {schoolPayMode ? t('orgFinance.schoolSummaryNote') : t('orgFinance.companyPaySummaryNote')}
             </p>
           </div>
         )}

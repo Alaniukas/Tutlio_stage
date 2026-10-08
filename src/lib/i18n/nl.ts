@@ -11,7 +11,11 @@ import { schoolTeacherContractTranslationsNl } from './schoolTeacherContractTran
 import { supportTranslations } from './supportTranslations.js';
 import { nlQuiz } from './nlQuiz.js';
 
+import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
+
 export const nl: Record<string, string> = {
+  ...tutorEnvironmentTranslations.nl,
+  'invoiceCreate.regenerateExistingConfirm': "Facturen {nums} zijn al aangemaakt voor deze periode. Wilt u ze echt opnieuw aanmaken? De eerdere onbetaalde facturen worden geannuleerd en de nieuwe bevatten ook lessen die later zijn ingevoerd.",
   ...organizationReleaseTranslations['nl'],
   ...schoolGroupActivationTranslations['nl'],
   ...companyPaymentReportTranslations.nl,

@@ -19,7 +19,11 @@ const seLegalTranslations: Record<string, string> = {
   'em.schoolJoinBody': 'Din lektion börjar {date} kl. {time}. Använd länken nedan.',
 };
 
+import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
+
 export const se: Record<string, string> = {
+  ...tutorEnvironmentTranslations.se,
+  'invoiceCreate.regenerateExistingConfirm': "Fakturorna {nums} har redan skapats för denna period. Vill du verkligen skapa dem på nytt? De tidigare obetalda fakturorna annulleras och de nya inkluderar även lektioner som registrerats senare.",
   ...organizationReleaseTranslations['se'],
   ...schoolGroupActivationTranslations['se'],
   ...companyPaymentReportTranslations.se,

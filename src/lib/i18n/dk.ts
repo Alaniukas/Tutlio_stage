@@ -124,7 +124,11 @@ const DK_DPA_HTML = [
   '<p>Denne DPA træder i kraft, når Kunden accepterer Platformens Regler eller underskriver tjenesteydelsesaftalen, og er gældende i hele tjenesteperioden. Tjenesteudbyderen kan opdatere denne DPA ved at informere Kunden via e-mail senest 30 dage, før ændringerne træder i kraft. Denne aftale er underlagt Republikken Litauens ret og EU\'s GDPR-krav.</p>',
 ].join('');
 
+import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
+
 export const dk: Record<string, string> = {
+  ...tutorEnvironmentTranslations.dk,
+  'invoiceCreate.regenerateExistingConfirm': "Fakturaerne {nums} er allerede oprettet for denne periode. Vil du virkelig oprette dem igen? De tidligere ubetalte fakturaer annulleres, og de nye medtager også lektioner, der er registreret senere.",
   ...organizationReleaseTranslations['dk'],
   'school.contractsLoadFailed': 'Kontrakterne kunne ikke indlæses. Prøv igen.',
   ...studentNotesTranslations.dk,

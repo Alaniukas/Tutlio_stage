@@ -72,7 +72,13 @@ export function installFixtureFetch() {
     } };
     else if (url.startsWith('/api/school-tutor-attendance-pay')) data = { ok: true, rows: [] };
     else if (url === '/api/generate-invoice') data = body?.precheckOnly
-      ? { canGenerate: true, candidateCount: 3 } : { count: 1, invoiceIds: ['own-pay'] };
+      ? scenario === 'duplicate' || scenario === 'regenerate'
+        ? { canGenerate: false, reason: 'duplicate', invoiceNumbers: ['TUTOR-SF-001'], totalAmount: 40,
+          error: 'Sąskaita TUTOR-SF-001 jau suformuota.',
+          ...(scenario === 'regenerate' ? { regeneration: { invoiceIds: ['old-unpaid'], invoiceNumbers: ['TUTOR-SF-001'], token: 'synthetic-confirmation' } } : {}),
+        }
+        : { canGenerate: true, candidateCount: 3 }
+      : { count: 1, invoiceIds: ['own-pay'] };
     else if (url.startsWith('/api/invoice-pdf')) {
       if (!url.includes('id=own-pay')) throw new Error('A private client or other tutor PDF was requested');
       return new Response('%PDF-1.4\n% Synthetic download QA\n%%EOF', { headers: { 'Content-Type': 'application/pdf' } });

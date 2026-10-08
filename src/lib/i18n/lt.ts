@@ -4,7 +4,11 @@ import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { schoolConsultationsLt } from './schoolConsultationsTranslations.js';
 import { schoolInvoiceReviewLt } from './schoolInvoiceReviewTranslations.js';
 
+import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
+
 export const lt: Record<string, string> = {
+  ...tutorEnvironmentTranslations.lt,
+  'invoiceCreate.regenerateExistingConfirm': "Sąskaitos {nums} šiam laikotarpiui jau suformuotos. Ar tikrai norite pergeneruoti? Ankstesnės neapmokėtos sąskaitos bus anuliuotos, o naujos perskaičiuotos įtraukiant ir vėliau įvestas pamokas.",
   'school.contractsLoadFailed': 'Nepavyko įkelti sutarčių. Bandykite dar kartą.',
   ...studentNotesTranslations.lt,
   'chat.registrationPending': 'Laukiama registracijos',

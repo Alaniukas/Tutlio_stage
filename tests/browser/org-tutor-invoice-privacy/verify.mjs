@@ -35,7 +35,7 @@ try {
       await page.screenshot({ path: path.join(output, `${org}-${mobile ? 'mobile' : 'desktop'}-finance.png`), fullPage: true });
       const download = page.waitForEvent('download');
       await page.getByTitle('Atsisiųsti PDF').click();
-      assert.equal((await download).suggestedFilename(), 'invoice-own-pay.pdf');
+      assert.equal((await download).suggestedFilename(), 'TUTOR-SF-001.pdf');
       await page.getByRole('button', { name: 'Išrašyti S.F. įmonei', exact: true }).click();
       const dialog = page.getByRole('dialog');
       await dialog.waitFor();
@@ -81,6 +81,38 @@ try {
     assert(!(await alert.innerText()).includes('CLIENT-SF-001'), 'Duplicate warning must not disclose customer invoice');
     await page.screenshot({ path: path.join(output, `${org}-duplicate.png`), fullPage: true });
     results.push({ organization: org, checks: ['client-only list empty', 'own duplicate blocked without client disclosure'] });
+    await context.close();
+  }
+  for (const mobile of [false, true]) {
+    const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 1100 } });
+    const page = await context.newPage();
+    await page.clock.setFixedTime(new Date('2026-10-01T12:00:00Z'));
+    await page.goto(`${base}/finance?org=school&scenario=regenerate`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'Išrašyti S.F. įmonei', exact: true }).click();
+    const modal = page.getByRole('dialog');
+    await modal.getByRole('button', { name: 'Peržiūrėti pamokas', exact: true }).click();
+    const regenerate = modal.getByRole('button', { name: 'Pergeneruoti sąskaitą', exact: true });
+    await regenerate.waitFor();
+    assert((await modal.innerText()).includes('TUTOR-SF-001'), 'Preview must identify the invoice being replaced');
+    assert((await modal.innerText()).includes('€60.00'), 'Preview must include every current lesson');
+    await page.screenshot({ path: path.join(output, `school-${mobile ? 'mobile' : 'desktop'}-regenerate.png`), fullPage: true });
+    page.once('dialog', async dialog => {
+      assert.equal(dialog.type(), 'confirm');
+      assert(dialog.message().includes('Ar tikrai norite pergeneruoti?'));
+      assert(dialog.message().includes('TUTOR-SF-001'));
+      await dialog.dismiss();
+    });
+    await regenerate.click();
+    assert.equal(await page.evaluate(() => window.invoicePrivacyQA.requests.filter(r => r.url === '/api/generate-invoice' && !r.body.precheckOnly).length), 0,
+      'Dismissing confirmation must not generate an invoice');
+    page.once('dialog', dialog => dialog.accept());
+    await regenerate.click();
+    await modal.waitFor({ state: 'hidden' });
+    const request = await page.evaluate(() => window.invoicePrivacyQA.requests.find(r => r.url === '/api/generate-invoice' && !r.body.precheckOnly));
+    assert.deepEqual(request.body.regeneration.invoiceIds, ['old-unpaid']);
+    assert.equal(request.body.regeneration.token, 'synthetic-confirmation');
+    assert.deepEqual(request.body.sessionIds, ['lesson-0', 'lesson-1', 'lesson-2']);
+    results.push({ organization: 'school', viewport: mobile ? 'mobile' : 'desktop', checks: ['regeneration preview includes current lessons', 'native confirmation identifies prior invoice', 'cancel creates nothing', 'confirmation submits replacement'] });
     await context.close();
   }
   await writeFile(path.join(output, 'results.json'), JSON.stringify({ mode: 'real components, synthetic backend/auth fixtures', results }, null, 2));

@@ -9,7 +9,11 @@ import { schoolInstructionsTranslationsDe } from './schoolInstructionsTranslatio
 import { schoolTeacherContractTranslationsDe } from './schoolTeacherContractTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
 
+import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
+
 export const de: Record<string, string> = {
+  ...tutorEnvironmentTranslations.de,
+  'invoiceCreate.regenerateExistingConfirm': "Die Rechnungen {nums} wurden für diesen Zeitraum bereits erstellt. Möchten Sie sie wirklich neu erstellen? Die bisherigen unbezahlten Rechnungen werden storniert und die neuen berücksichtigen auch später erfasste Stunden.",
   ...organizationReleaseTranslations['de'],
   'school.contractsLoadFailed': 'Die Verträge konnten nicht geladen werden. Bitte versuchen Sie es erneut.',
   ...studentNotesTranslations.de,

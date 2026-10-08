@@ -154,14 +154,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cancel_url: `${appOrigin}/school-payment-success?cancelled=1&monthly=${invoice.id}`,
     }, directChargeOptions(destinationAcct));
 
-    // Bookkeeping column may lag behind the migration on a fresh deploy — never block the payer on it.
-    await supabase
+    // Regeneration may have cancelled the invoice while Stripe was creating
+    // the checkout. Never redirect a payer to a superseded invoice payment.
+    const { data: reservedInvoice, error: reserveError } = await supabase
       .from('school_monthly_invoices')
       .update({ stripe_checkout_session_id: checkoutSession.id })
       .eq('id', invoice.id)
-      .then(({ error }) => {
-        if (error) console.warn('[pay-school-monthly-invoice] could not store checkout id', error.message);
-      });
+      .eq('payment_status', 'pending')
+      .select('id')
+      .maybeSingle();
+    if (reserveError || !reservedInvoice) {
+      await expireConnectCheckoutSession(stripe, checkoutSession.id, destinationAcct).catch(() => {});
+      return res.status(409).send(errorPage('Sąskaita pasikeitė', 'Sąskaita jau apmokėta arba pakeista. Naudokite naujausiame laiške esančią nuorodą.'));
+    }
 
     return res.redirect(303, checkoutSession.url!);
   } catch (err: any) {

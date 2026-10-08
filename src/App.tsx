@@ -164,7 +164,7 @@ function ScrollToTopOnRouteChange() {
 
 function ProtectedWithUser() {
   return (
-    <UserProvider>
+    <UserProvider accountChangePath="/dashboard">
       <InAppSupportProvider>
         <OrgBrandingProvider scope="tutor">
           <ProtectedRoute />

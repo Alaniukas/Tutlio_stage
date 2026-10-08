@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ tables: {} as Record<string, any[]>, writes: [] as Array<{ table: string; value: any }>,
-  filters: [] as Array<[string, string, unknown]>, cap: 500, allocations: 0, orgError: false }));
+  filters: [] as Array<[string, string, unknown]>, cap: 500, allocations: 0, orgError: false,
+  replacements: [] as any[], replacementError: false }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => fakeDb() }));
 vi.mock('../../api/_lib/auth.js', () => ({ verifyRequestAuth: async () => ({ isInternal: true }) }));
 vi.mock('../../api/_lib/invoiceNumber.js', () => ({ allocateInvoiceNumber: async () => { state.allocations++; return 'T-1'; }, formatInvoiceSeriesHeading: () => 'T-1' }));
@@ -10,6 +11,11 @@ import handler from '../../api/generate-invoice';
 
 function fakeDb(): any {
   return { storage: { from: () => ({ upload: async () => ({ error: null }) }) },
+    rpc: async (_name: string, args: any) => {
+      state.replacements.push(args);
+      return state.replacementError ? { data: null, error: { message: 'Replacement failed' } }
+        : { data: { id: 'replacement', ...args.p_invoice }, error: null };
+    },
     from(table: string) {
       const predicates: Array<(row: any) => boolean> = [];
       let from = 0, to = Infinity, inserted: any = undefined, update: any = undefined;
@@ -48,6 +54,8 @@ const base = { tutor_id: 'teacher', student_id: 'student', class_group_id: 'grou
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-30T12:00:00Z'));
   state.writes = []; state.filters = []; state.cap = 500; state.allocations = 0; state.orgError = false;
+  state.replacements = []; state.replacementError = false;
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-only';
   state.tables = {
     profiles: [{ id: 'teacher', full_name: 'Teacher', organization_id: 'school', company_commission_percent: 0, company_commission_by_subject: {} }],
     organizations: [{ id: 'school', entity_type: 'school', name: 'School' }],
@@ -64,6 +72,41 @@ async function request(body: any = {}) {
   return res;
 }
 describe('school teacher invoices by meeting', () => {
+  const existingInvoice = () => ({ id: 'earlier', organization_id: 'school', status: 'issued', invoice_number: 'OLD', total_amount: 45,
+    period_start: '2026-09-01', period_end: '2026-09-30', pdf_meta: { invoiceKind: 'tutor_pay', layout: 'school_tutor_meetings',
+      tutorId: 'teacher', schoolMeetingKeys: [`class|group|teacher|${Date.parse(base.start_time)}`] } });
+  it('requires confirmation and recalculates teacher pay with a late in-person meeting', async () => {
+    state.tables.invoices = [existingInvoice()];
+    state.tables.sessions.push({ ...base, id: 'late', start_time: '2026-09-20T06:00:00Z', end_time: '2026-09-20T07:00:00Z' });
+    const preview = await request({ precheckOnly: true });
+    expect(preview.body).toMatchObject({ canGenerate: false, reason: 'duplicate', regeneration: { invoiceIds: ['earlier'], invoiceNumbers: ['OLD'] } });
+    expect((await request()).code).toBe(409);
+    expect(state.allocations).toBe(0); expect(state.replacements).toHaveLength(0);
+    expect((await request({ regeneration: preview.body.regeneration })).code).toBe(200);
+    expect(state.replacements).toHaveLength(1);
+    expect(state.replacements[0]).toMatchObject({ p_kind: 'tutor', p_tutor_id: 'teacher', p_invoice: { total_amount: 90 },
+      p_previous: [expect.objectContaining({ id: 'earlier' })] });
+    expect(state.replacements[0].p_lines.flatMap((line: any) => line.session_ids)).toContain('late');
+  });
+  it('requires a fresh confirmation after teacher sources or the prior amount change', async () => {
+    state.tables.invoices = [existingInvoice()];
+    const preview = await request({ precheckOnly: true });
+    state.tables.invoices[0].total_amount = 46;
+    expect((await request({ regeneration: preview.body.regeneration })).code).toBe(409);
+    state.tables.invoices[0].total_amount = 45;
+    state.tables.sessions.push({ ...base, id: 'late', start_time: '2026-09-20T06:00:00Z', end_time: '2026-09-20T07:00:00Z' });
+    expect((await request({ regeneration: preview.body.regeneration })).code).toBe(409);
+    expect(state.allocations).toBe(0); expect(state.replacements).toHaveLength(0);
+  });
+  it('keeps paid teacher invoices, billing batches and overlapping periods protected', async () => {
+    state.tables.invoices = [{ ...existingInvoice(), status: 'paid' }];
+    expect((await request({ precheckOnly: true })).body.regeneration).toBeUndefined();
+    state.tables.invoices = [{ ...existingInvoice(), period_start: '2026-09-10' }];
+    expect((await request({ precheckOnly: true })).body.regeneration).toBeUndefined();
+    state.tables.invoices = [{ ...existingInvoice(), billing_batch_id: 'batch' }];
+    expect((await request({ precheckOnly: true })).body.regeneration).toBeUndefined();
+    expect(state.allocations).toBe(0);
+  });
   it('stores an explicit beneficiary and purpose on Pro Klasė tutor-pay invoices', async () => {
     const org = 'b0a00000-7e57-4000-8000-000000000001';
     state.tables.profiles[0].organization_id = org;
@@ -112,7 +155,7 @@ describe('school teacher invoices by meeting', () => {
         schoolMeetingKeys: [`class|group|teacher|${Date.parse(base.start_time)}`] } }];
     state.tables.invoice_line_items = [{ invoice_id: 'earlier', session_ids: [], school_attendance_ids: [attendanceId] }];
     expect((await request({ sessionIds: ['new-real-row'], precheckOnly: true })).body).toMatchObject({ canGenerate: false, reason: 'duplicate' });
-    expect((await request({ sessionIds: ['new-real-row'] })).code).toBe(400);
+    expect((await request({ sessionIds: ['new-real-row'] })).code).toBe(409);
     expect(state.allocations).toBe(0);
   });
   it('blocks overlapping attendance invoices and ignores other tutors and customer sales invoices', async () => {

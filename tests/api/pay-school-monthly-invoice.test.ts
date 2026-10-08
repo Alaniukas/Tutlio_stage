@@ -20,11 +20,18 @@ const db = vi.hoisted(() => ({
 vi.mock('@supabase/supabase-js', () => {
   const builder = () => {
     let patch: Record<string, unknown> | null = null;
+    let pendingOnly = false;
     const api: any = {
       select: () => api,
-      eq: () => api,
+      eq: (column: string, value: unknown) => { if (column === 'payment_status' && value === 'pending') pendingOnly = true; return api; },
       update: (p: Record<string, unknown>) => { patch = p; return api; },
-      maybeSingle: async () => ({ data: db.invoice, error: null }),
+      maybeSingle: async () => {
+        if (patch) {
+          if (pendingOnly && db.invoice?.payment_status !== 'pending') return { data: null, error: null };
+          db.updates.push(patch);
+        }
+        return { data: db.invoice, error: null };
+      },
       then: (resolve: (v: any) => unknown) => { if (patch) db.updates.push(patch); return resolve({ error: null }); },
     };
     return api;
@@ -77,6 +84,18 @@ beforeEach(() => {
 });
 
 describe('GET /api/pay-school-monthly-invoice', () => {
+  it('expires a checkout if regeneration cancels the invoice during checkout creation', async () => {
+    stripeMocks.create.mockImplementationOnce(async () => {
+      db.invoice!.payment_status = 'cancelled';
+      return { id: 'cs_superseded', url: 'https://checkout.stripe.com/cs_superseded' };
+    });
+    const response = mockRes();
+    await handler(req({ invoice: INVOICE_ID, t: buildPublicLinkToken('monthly-invoice', INVOICE_ID) }), response as any);
+    expect(response.getResult().statusCode).toBe(409);
+    expect(response.getResult().redirect).toBeNull();
+    expect(stripeMocks.expire).toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+  });
   it('charges only the cash remainder after a previous overpayment and recalculates the fee', async () => {
     db.invoice = { ...baseInvoice(), total_eur:84, credit_applied_eur:12 };
     stripeMocks.create.mockResolvedValue({ id:'cs_credit',url:'https://checkout.stripe.com/cs_credit' });
