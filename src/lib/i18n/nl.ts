@@ -15,6 +15,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 
 export const nl: Record<string, string> = {
   ...tutorEnvironmentTranslations.nl,
+  'school.groups.loadMore': 'Meer weergeven ({shown} van {total})',
+  'school.groups.loadMoreIndividual': 'Meer individuele lessen weergeven ({shown} van {total})',
   'invoiceCreate.regenerateExistingConfirm': "Facturen {nums} zijn al aangemaakt voor deze periode. Wilt u ze echt opnieuw aanmaken? De eerdere onbetaalde facturen worden geannuleerd en de nieuwe bevatten ook lessen die later zijn ingevoerd.",
   ...organizationReleaseTranslations['nl'],
   ...schoolGroupActivationTranslations['nl'],

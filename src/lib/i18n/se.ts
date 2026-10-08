@@ -23,6 +23,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 
 export const se: Record<string, string> = {
   ...tutorEnvironmentTranslations.se,
+  'school.groups.loadMore': 'Visa fler ({shown} av {total})',
+  'school.groups.loadMoreIndividual': 'Visa fler individuella lektioner ({shown} av {total})',
   'invoiceCreate.regenerateExistingConfirm': "Fakturorna {nums} har redan skapats för denna period. Vill du verkligen skapa dem på nytt? De tidigare obetalda fakturorna annulleras och de nya inkluderar även lektioner som registrerats senare.",
   ...organizationReleaseTranslations['se'],
   ...schoolGroupActivationTranslations['se'],

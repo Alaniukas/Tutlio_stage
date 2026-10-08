@@ -7,6 +7,30 @@
  * an unrelated missing key still fails the locale quality tests.
  */
 export const DRAFT_LOCALE_ALANO_FALLBACK_KEYS = new Set<string>([
+  // Tutor company access and invoice regeneration ship in the 13 baseline
+  // locales. Newer locales retain their documented English fallback.
+  'tutorEnv.viewingCompany',
+  'tutorEnv.choose',
+  'tutorEnv.chooseHint',
+  'tutorEnv.switch',
+  'tutorEnv.current',
+  'tutorEnv.switching',
+  'tutorEnv.error.failed',
+  'tutorEnv.error.notTutor',
+  'tutorEnv.error.sameCompany',
+  'tutorEnv.error.notLinked',
+  'tutorEnv.error.mfaRequired',
+  'tutorEnv.error.setupRequired',
+  'tutorEnv.error.unauthorized',
+  'tutorEnv.error.sameAccount',
+  'tutorEnv.admin.title',
+  'tutorEnv.admin.hint',
+  'tutorEnv.admin.organization',
+  'tutorEnv.admin.account',
+  'tutorEnv.admin.assign',
+  'tutorEnv.admin.remove',
+  'orgFinance.companyPaySummaryNote',
+  'invoiceCreate.regenerateExistingConfirm',
   // The new organization payments report is released in LT/EN first. Keep
   // its English fallback explicit until the dedicated translation pass.
   'companyPaymentReport.title',
