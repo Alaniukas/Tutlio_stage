@@ -9,6 +9,8 @@ import {
   buildClassicLtTutorPdfMeta,
   CLASSIC_LT_TUTOR_LAYOUT,
   isManoKorepetitoriusTutorInvoice,
+  manoTutorMonthlyInvoiceNumber,
+  monthlyInvoiceIssueDate,
 } from './_lib/manoKorepetitoriusInvoice.js';
 import { proKlaseSessionPayEur } from './_lib/proKlaseTutorPay.js';
 import {
@@ -234,6 +236,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const hasPackageIds = resolvedPackageIds.length > 0;
     const manoTutorInvoice = isManoKorepetitoriusTutorInvoice(!!isOrgTutor, profile.organization_id);
+    let issueDate: string;
+    try {
+      // A same-day prepaid package is an advance invoice, not a monthly lesson invoice.
+      issueDate = hasPackageIds && periodStart === periodEnd
+        ? new Date().toISOString().slice(0, 10)
+        : monthlyInvoiceIssueDate(profile.organization_id, periodEnd);
+    } catch {
+      return res.status(400).json({ error: 'Invalid invoice period' });
+    }
+    let manoInvoiceNumber: string | null = null;
+    if (manoTutorInvoice) {
+      if (periodStart.slice(0, 7) !== periodEnd.slice(0, 7)) {
+        return res.status(400).json({ error: 'Korepetitoriaus mėnesio sąskaitai pasirinkite vieno kalendorinio mėnesio laikotarpį.' });
+      }
+      try {
+        manoInvoiceNumber = manoTutorMonthlyInvoiceNumber(profile.full_name, periodEnd);
+      } catch (error) {
+        return res.status(400).json({ error: (error as Error).message });
+      }
+    }
     if ((manoTutorInvoice || schoolTutorInvoice) && hasPackageIds) {
       return res.status(400).json({ error: 'Korepetitoriaus atlygio sąskaitoje negalima įtraukti pamokų paketų.' });
     }
@@ -755,7 +777,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           : schoolTutorInvoice ? { layout: SCHOOL_TUTOR_INVOICE_LAYOUT, tutorId,
               schoolMeetingKeys: [...new Set<string>(group.sessions.map(session => session.__schoolMeetingKey))] } as const : null;
 
-      const invoiceNumber = await allocateInvoiceNumber(supabase, sellerProfile.id);
+      const invoiceNumber = manoInvoiceNumber ?? await allocateInvoiceNumber(supabase, sellerProfile.id);
 
       // Tag with the billing tutor's org so company /invoices lists and RLS org policies match.
       // (Org admin issues with their user id as issued_by_user_id but tutorId = billed tutor.)
@@ -766,7 +788,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           seller_user_id: isOrgTutor || !profile.organization_id ? tutorId : null,
           seller_snapshot: sellerSnapshot,
           buyer_snapshot: buyer,
-          issue_date: new Date().toISOString().slice(0, 10),
+          issue_date: issueDate,
           period_start: periodStart,
           period_end: periodEnd,
           grouping_type: groupingType,
@@ -833,8 +855,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const pdfData: InvoicePdfData = {
           invoiceNumber,
           issueDate: classicTutorMeta
-            ? new Date().toISOString().slice(0, 10)
-            : new Date().toLocaleDateString('lt-LT'),
+            ? issueDate
+            : new Date(issueDate).toLocaleDateString('lt-LT', { timeZone: 'UTC' }),
           periodStart: new Date(periodStart).toLocaleDateString('lt-LT'),
           periodEnd: new Date(periodEnd).toLocaleDateString('lt-LT'),
           seller: sellerSnapshot,

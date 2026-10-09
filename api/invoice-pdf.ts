@@ -39,6 +39,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!invoiceId) return res.status(400).json({ error: 'Missing invoice id' });
 
   try {
+    if (req.query.source === 'school_monthly') {
+      const admin = await getOrgAdminAccessByUserId(supabase, userId);
+      if (!admin || !hasOrgAdminPermission(admin.role, admin.permissions, 'finance.view')) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      const { data: schoolInvoice, error } = await supabase
+        .from('school_monthly_invoices')
+        .select('id, organization_id, invoice_number, created_at, pdf_path')
+        .eq('id', invoiceId)
+        .eq('organization_id', admin.organizationId)
+        .single();
+      if (error || !schoolInvoice) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+      if (!schoolInvoice.invoice_number) {
+        return res.status(404).json({ error: 'Invoice PDF not available' });
+      }
+      // Older invoices can have an uploaded PDF even when persisting pdf_path failed.
+      const storagePath = schoolInvoice.pdf_path
+        || `school-monthly/${schoolInvoice.organization_id}/${schoolInvoice.id}.pdf`;
+      const { data: file, error: downloadError } = await supabase.storage
+        .from('invoices')
+        .download(storagePath);
+      if (downloadError || !file) {
+        return res.status(404).json({ error: 'Invoice PDF not available' });
+      }
+      const filename = formatInvoiceDownloadFilename({
+        invoiceNumber: schoolInvoice.invoice_number,
+        issueDate: schoolInvoice.created_at,
+        organizationId: schoolInvoice.organization_id,
+      });
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', invoiceDownloadContentDisposition(filename));
+      return res.status(200).send(Buffer.from(await file.arrayBuffer()));
+    }
+
     const { data: invoice, error: invErr } = await supabase
       .from('invoices')
       .select('*')

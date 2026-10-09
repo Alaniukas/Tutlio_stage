@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { uploadMock } = vi.hoisted(() => ({ uploadMock: vi.fn() }));
@@ -26,6 +26,45 @@ describe('school staff document upload form', () => {
   beforeEach(() => {
     uploadMock.mockReset();
     uploadMock.mockImplementation(async (path: string) => ({ path, error: null }));
+  });
+
+  it('offers previews for preparing and sent documents with viewing permission alone', async () => {
+    const base = {
+      organization_id: ORG_ID, counterparty_name: 'Bandomasis Darbuotojas', counterparty_email: 'employee@example.com',
+      staff_document_group_id: 'group-1', staff_employment_contract_number: 'DS-42', staff_employment_contract_date: '2026-09-22',
+      staff_consent_answers: null, staff_revoked_at: null, signing_status: 'draft',
+      sent_at: null, signed_at: null, pdf_url: null, signed_contract_url: null, staff_files_deleted_at: null,
+    };
+    const documents: StaffDocument[] = [
+      { ...base, id: 'one', status: 'draft', staff_document_type: 'confidentiality' },
+      { ...base, id: 'two', status: 'sent', staff_document_type: 'consent' },
+    ];
+    const fetchMock = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes('action=preview')
+      ? { preview: {
+        documentType: url.includes('id=one') ? 'confidentiality' : 'consent', pdfUrl: null, isDraft: true,
+        sections: url.includes('id=one')
+          ? [{ kind: 'confidentiality', text: 'Visos susitarimo sąlygos.' }, { kind: 'annex', text: 'Visos priedo sąlygos.' }]
+          : [{ kind: 'consent', text: 'Visas sutikimo tekstas.' }],
+      } }
+      : { organizationId: ORG_ID, documents },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CompanyStaffDocumentsContent canEdit={false} />);
+    const previews = await screen.findAllByRole('button', { name: 'Peržiūrėti dokumentą' });
+    expect(previews).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Atšaukti' })).toBeNull();
+    fireEvent.click(previews[0]);
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('Visos priedo sąlygos.')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    fireEvent.click(previews[1]);
+    expect(await screen.findByText('Visas sutikimo tekstas.')).toBeTruthy();
+    expect(screen.queryByText('Visos priedo sąlygos.')).toBeNull();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/school-staff-documents',
+      '/api/school-staff-documents?action=preview&id=one',
+      '/api/school-staff-documents?action=preview&id=two',
+    ]);
   });
 
   it('uploads one combined agreement/annex PDF and creates a separate consent record', async () => {

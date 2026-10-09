@@ -145,6 +145,18 @@ describe('Company invoice period filters', () => {
     expect(screen.queryByText('OCT-10')).toBeNull();
   });
 
+  it('shows a visible error when a customer PDF cannot be downloaded', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false, status: 500,
+      headers: new Headers({ 'content-type': 'application/json' }),
+    })));
+    render(<CompanyInvoices />);
+    await expectInvoiceCount(19);
+    fireEvent.click(screen.getAllByRole('button', { name: 'invoices.downloadPdf' })[0]);
+    await screen.findByText('common.error');
+  });
+
   it('honors an October-only range while the earlier September month choice remains stored', async () => {
     const { container } = render(<CompanyInvoices />);
     await expectInvoiceCount(19);

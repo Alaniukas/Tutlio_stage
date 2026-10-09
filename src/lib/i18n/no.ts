@@ -11,7 +11,10 @@ import { supportTranslations } from './supportTranslations.js';
 
 import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
 
+import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
+
 export const no: Record<string, string> = {
+  ...schoolStaffPreviewTranslations.no,
   ...tutorEnvironmentTranslations.no,
   'invoiceCreate.regenerateExistingConfirm': "Fakturaene {nums} er allerede opprettet for denne perioden. Vil du virkelig opprette dem på nytt? De tidligere ubetalte fakturaene annulleres, og de nye inkluderer også timer som er registrert senere.",
   ...organizationReleaseTranslations['no'],

@@ -21,6 +21,7 @@ import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { formatInvoiceDownloadFilename } from '../src/lib/invoiceDownloadFilename.js';
 import { lessonEmailDateTime } from './_lib/lessonLocalTime.js';
 import { proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
+import { monthlyInvoiceIssueDate } from './_lib/manoKorepetitoriusInvoice.js';
 import { isMonthlyBillingOnlyStudent } from '../src/lib/studentPaymentModel.js';
 import { countStudentIdentityInvoiceGroups, orgHasPvmEducationInvoice } from './_lib/pvmEducationInvoice.js';
 
@@ -717,7 +718,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                 : {}),
                         },
                         buyer_snapshot: { name: payerName || 'Mokinys', email: payerEmail || undefined },
-                        issue_date: new Date().toISOString().slice(0, 10),
+                        issue_date: monthlyInvoiceIssueDate(resolvedOrganizationId, periodEndDate),
                         period_start: periodStartDate,
                         period_end: periodEndDate,
                         grouping_type: 'single',

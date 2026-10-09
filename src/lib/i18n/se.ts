@@ -21,7 +21,10 @@ const seLegalTranslations: Record<string, string> = {
 
 import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
 
+import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
+
 export const se: Record<string, string> = {
+  ...schoolStaffPreviewTranslations.se,
   ...tutorEnvironmentTranslations.se,
   'school.groups.loadMore': 'Visa fler ({shown} av {total})',
   'school.groups.loadMoreIndividual': 'Visa fler individuella lektioner ({shown} av {total})',

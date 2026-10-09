@@ -17,6 +17,30 @@ export function isManoKorepetitoriusTutorInvoice(
   return isOrgTutor && isManoKorepetitoriusOrg(organizationId);
 }
 
+/** MK monthly invoices are issued on the last day of the service month. */
+export function monthlyInvoiceIssueDate(
+  organizationId: string | null | undefined,
+  periodEnd: string,
+  now: Date = new Date(),
+): string {
+  if (!isManoKorepetitoriusOrg(organizationId)) return now.toISOString().slice(0, 10);
+  const end = new Date(`${periodEnd}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)
+    || !Number.isFinite(end.getTime()) || end.toISOString().slice(0, 10) !== periodEnd) {
+    throw new Error('Invalid invoice period');
+  }
+  return new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+}
+
+/** Eva Jautakytė, May 2026 -> EVAJAU-202605 (one invoice per tutor/month). */
+export function manoTutorMonthlyInvoiceNumber(fullName: string, periodEnd: string): string {
+  const names = String(fullName || '').normalize('NFC').trim().split(/\s+/)
+    .map(name => name.replace(/[^\p{L}]/gu, '')).filter(Boolean);
+  if (names.length < 2) throw new Error('Korepetitoriaus sąskaitai būtinas vardas ir pavardė.');
+  const series = `${names[0].slice(0, 3)}${names[names.length - 1].slice(0, 3)}`.toUpperCase();
+  return `${series}-${periodEnd.slice(0, 7).replace('-', '')}`;
+}
+
 export function formatClassicLtSum(n: number): string {
   return `${(Math.round(Number(n) * 100) / 100).toFixed(2).replace('.', ',')}`;
 }

@@ -30,7 +30,7 @@ function query(table: string) {
     order() { return q; },
     range(first: number, last: number) { from = first; to = last + 1; return q; },
     single: async () => ({
-      data: { id: 'tutor-1', full_name: 'Tutor', organization_id: MANO_KOREPETITORIUS_ORG_ID,
+      data: { id: 'tutor-1', full_name: 'Eva Jautakytė', organization_id: MANO_KOREPETITORIUS_ORG_ID,
         company_commission_percent: mocks.profileRate, company_commission_by_subject: {} },
       error: null,
     }),

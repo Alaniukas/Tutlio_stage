@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { STAFF_CONSENT_QUESTIONS } from '@/lib/staffConsentQuestions';
+import { useTranslation } from '@/lib/i18n';
+import type { StaffDocumentPreview } from '@/lib/schoolStaffDocumentPreview';
+import StaffDocumentPreviewContent from '@/components/company/StaffDocumentPreviewContent';
 
 type Answer = 'yes' | 'no' | null;
 type ConsentInfo = {
   employeeName?: string;
   schoolName?: string;
   previewUrl?: string | null;
+  documentPreviews?: StaffDocumentPreview[];
   answersSubmitted?: boolean;
   signed?: boolean;
   needsPersonalDetails?: boolean;
@@ -17,6 +21,7 @@ const LOAD_TIMEOUT_MS = 12000;
 const SUBMIT_TIMEOUT_MS = 30000;
 
 export default function SchoolStaffConsent({ previewInfo }: { previewInfo?: ConsentInfo }) {
+  const { t } = useTranslation();
   const [params] = useSearchParams();
   const token = params.get('token') || '';
   const [answers, setAnswers] = useState<Answer[]>(Array(STAFF_CONSENT_QUESTIONS.length).fill(null));
@@ -94,6 +99,19 @@ export default function SchoolStaffConsent({ previewInfo }: { previewInfo?: Cons
         {info?.schoolName && <p className="mt-2 text-sm text-slate-600">{info.schoolName}{info.employeeName ? ` · ${info.employeeName}` : ''}</p>}
         {!info && !error && <p className="mt-6">Kraunama…</p>}
         {error && <p role="alert" className="mt-5 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+        {info?.documentPreviews && info.documentPreviews.length > 0 && (
+          <section className="mt-6 space-y-3">
+            <p className="text-sm text-slate-700">{t('school.staffPreview.reviewHint')}</p>
+            {info.documentPreviews.map((preview) => (
+              <details key={preview.documentType} className="rounded-xl border border-slate-200 p-4">
+                <summary className="cursor-pointer font-medium text-indigo-700">{t(`school.staffPreview.${preview.documentType}`)}</summary>
+                <div className="mt-4 max-h-[65dvh] overflow-y-auto pe-2">
+                  <StaffDocumentPreviewContent preview={preview} />
+                </div>
+              </details>
+            ))}
+          </section>
+        )}
         {info?.signed ? (
           <p className="mt-6 text-slate-700">Šis dokumentas jau pasirašytas elektroniniu parašu.</p>
         ) : info?.answersSubmitted ? (
@@ -119,14 +137,12 @@ export default function SchoolStaffConsent({ previewInfo }: { previewInfo?: Cons
                 </label>
               </section>
             )}
-            {info.previewUrl ? (
+            {!info.documentPreviews?.length && info.previewUrl && (
               <details className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <summary className="cursor-pointer font-medium text-indigo-700">Peržiūrėti visą dokumentą PDF</summary>
                 <a href={info.previewUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm text-indigo-700 underline">Atidaryti PDF atskirame lange</a>
                 <iframe src={info.previewUrl} title="Visas darbuotojo sutikimo dokumentas" className="mt-3 h-64 w-full rounded-lg border border-slate-200 bg-white sm:h-[420px]" />
               </details>
-            ) : (
-              <p className="mt-5 text-sm text-slate-600">PDF peržiūra nebūtina norint pažymėti punktus. Jei jos dar nematyti, dokumentas vis tiek bus paruoštas po pateikimo.</p>
             )}
             <div className="mt-7 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
               <h2 className="text-lg font-semibold">Jūsų pasirinkimai</h2>

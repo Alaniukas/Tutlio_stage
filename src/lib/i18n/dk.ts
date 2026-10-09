@@ -126,7 +126,10 @@ const DK_DPA_HTML = [
 
 import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
 
+import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
+
 export const dk: Record<string, string> = {
+  ...schoolStaffPreviewTranslations.dk,
   ...tutorEnvironmentTranslations.dk,
   'invoiceCreate.regenerateExistingConfirm': "Fakturaerne {nums} er allerede oprettet for denne periode. Vil du virkelig oprette dem igen? De tidligere ubetalte fakturaer annulleres, og de nye medtager også lektioner, der er registreret senere.",
   ...organizationReleaseTranslations['dk'],

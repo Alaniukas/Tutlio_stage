@@ -13,7 +13,10 @@ import { nlQuiz } from './nlQuiz.js';
 
 import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
 
+import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
+
 export const nl: Record<string, string> = {
+  ...schoolStaffPreviewTranslations.nl,
   ...tutorEnvironmentTranslations.nl,
   'school.groups.loadMore': 'Meer weergeven ({shown} van {total})',
   'school.groups.loadMoreIndividual': 'Meer individuele lessen weergeven ({shown} van {total})',

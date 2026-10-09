@@ -1,6 +1,6 @@
 import { isManoKorepetitoriusOrg, MANO_KOREPETITORIUS_QA_ORG_ID } from './marketMoney.js';
 
-function usesMkPayerInvoiceDownloadFilename(organizationId?: string | null): boolean {
+function usesMkInvoiceDownloadFilename(organizationId?: string | null): boolean {
   if (!organizationId) return false;
   if (isManoKorepetitoriusOrg(organizationId)) return true;
   return organizationId.trim().toLowerCase() === MANO_KOREPETITORIUS_QA_ORG_ID;
@@ -21,9 +21,11 @@ export function normalizeInvoiceIssueDateIso(issueDate?: string | null): string 
   return parsed.toISOString().slice(0, 10);
 }
 
-/** Mano Korepetitorius payer S.F.: `MK Nr. 1649 (2026-08-31).pdf` */
+/** MK payer: `MK Nr. 1649 (2026-08-31).pdf`; tutor: `EVAJAU (202605).pdf`. */
 export function formatInvoiceDownloadFilename(input: InvoiceDownloadFilenameInput): string {
-  if (usesMkPayerInvoiceDownloadFilename(input.organizationId)) {
+  if (usesMkInvoiceDownloadFilename(input.organizationId)) {
+    const tutorNumber = String(input.invoiceNumber || '').trim().match(/^(?![Mm][Kk]-)(\p{L}{2,6})-(\d{4}(?:0[1-9]|1[0-2]))$/u);
+    if (tutorNumber) return `${tutorNumber[1].toUpperCase()} (${tutorNumber[2]}).pdf`;
     const match = String(input.invoiceNumber || '').trim().match(/^MK-0*(\d+)$/i);
     const issueIso = normalizeInvoiceIssueDateIso(input.issueDate);
     if (match && issueIso) {
@@ -36,7 +38,14 @@ export function formatInvoiceDownloadFilename(input: InvoiceDownloadFilenameInpu
 
 export function invoiceDownloadContentDisposition(filename: string): string {
   const escaped = filename.replace(/"/g, "'");
-  return `attachment; filename="${escaped}"`;
+  const safe = escaped.replace(/[\r\n]/g, '').replace(/\\/g, '-');
+  const ascii = safe.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7e]/g, '-');
+  const header = `attachment; filename="${ascii}"`;
+  if (ascii === safe) return header;
+  const encoded = encodeURIComponent(safe).replace(/['()*]/g,
+    char => '%' + char.charCodeAt(0).toString(16).toUpperCase());
+  return header + "; filename*=UTF-8''" + encoded;
 }
 
 export function parseContentDispositionFilename(header: string | null | undefined): string | null {

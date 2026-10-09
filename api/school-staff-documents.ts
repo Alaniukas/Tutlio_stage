@@ -9,6 +9,7 @@ import { staffDocumentStatus, staffDocumentsFeatureEnabled, renderStaffDocumentP
 import { schoolContractPdfStoragePath, SCHOOL_CONTRACTS_BUCKET } from './_lib/schoolContractPdfPath.js';
 import { cancelSigning } from './_lib/gosignClient.js';
 import { PDFDocument } from 'pdf-lib';
+import { buildStaffDocumentPreview } from './_lib/schoolStaffDocumentPreview.js';
 
 const SELECT = 'id, organization_id, contract_number, counterparty_name, counterparty_email, signing_status, created_at, sent_at, signed_at, pdf_url, signed_contract_url, staff_document_type, staff_document_group_id, staff_employment_contract_number, staff_employment_contract_date, staff_consent_answers, staff_viewed_at, staff_revoked_at, staff_last_reminder_at, staff_files_deleted_at';
 
@@ -73,6 +74,7 @@ async function remindOne(supabase: SupabaseClient, contract: any, origin: string
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Cache-Control', 'private, no-store');
   if (req.method !== 'GET' && req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
   const auth = await verifyRequestAuth(req);
   if (!auth?.userId || auth.isInternal) return json(res, 401, { error: 'Unauthorized' });
@@ -92,6 +94,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === 'GET') {
+    if (req.query?.action === 'preview') {
+      const id = String(req.query?.id || '').trim();
+      if (!id) return json(res, 400, { error: 'Trūksta dokumento.' });
+      const { data: contract, error } = await supabase.from('school_contracts').select(SELECT)
+        .eq('id', id).eq('organization_id', orgId).not('staff_document_type', 'is', null).maybeSingle();
+      if (error) return json(res, 500, { error: 'Nepavyko įkelti dokumento.' });
+      if (!contract) return json(res, 404, { error: 'Dokumentas nerastas.' });
+      if (contract.staff_files_deleted_at) return json(res, 410, { error: 'Dokumento failai jau pašalinti.' });
+      try {
+        const preview = await buildStaffDocumentPreview(supabase, contract);
+        if (!preview) return json(res, 410, { error: 'Dokumento failas nebeprieinamas.' });
+        return json(res, 200, { preview });
+      } catch (cause) {
+        console.error('[school-staff-documents] preview failed:', cause);
+        return json(res, 500, { error: 'Nepavyko įkelti dokumento peržiūros. Bandykite dar kartą.' });
+      }
+    }
     const { data, error } = await supabase.from('school_contracts').select(SELECT)
       .eq('organization_id', orgId).not('staff_document_type', 'is', null)
       .order('created_at', { ascending: false }).limit(1000);

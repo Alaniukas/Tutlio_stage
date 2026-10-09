@@ -11,7 +11,10 @@ import { supportTranslations } from './supportTranslations.js';
 
 import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
 
+import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
+
 export const es: Record<string, string> = {
+  ...schoolStaffPreviewTranslations.es,
   ...tutorEnvironmentTranslations.es,
   'invoiceCreate.regenerateExistingConfirm': "Las facturas {nums} ya se han generado para este período. ¿Seguro que quieres volver a generarlas? Se anularán las anteriores facturas pendientes de pago y las nuevas incluirán las clases añadidas después.",
   ...organizationReleaseTranslations['es'],

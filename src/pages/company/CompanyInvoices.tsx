@@ -44,6 +44,7 @@ import { ORG_TUTOR_CARD_LIST_SCROLL_CLASS } from '@/lib/orgUi';
 import { isInvoiceProfileComplete } from '@/lib/invoiceProfileReady';
 import { downloadInvoicePdfFile, downloadInvoicesAsZip } from '@/lib/downloadInvoicesZip';
 import { confirmInvoiceRegeneration, type InvoiceRegeneration } from '@/lib/invoiceRegeneration';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 
 interface Invoice {
   id: string;
@@ -59,6 +60,25 @@ interface Invoice {
   billing_batch_id?: string | null;
   billing_batches?: { paid: boolean } | null;
   origin?: 'generated' | 'external';
+  source?: 'school_monthly';
+  pdf_available?: boolean;
+}
+
+interface SchoolInvoiceBuyer {
+  full_name?: string | null;
+  payer_name?: string | null;
+  payer_email?: string | null;
+}
+
+interface SchoolMonthlyInvoice {
+  id: string;
+  organization_id: string;
+  invoice_number: string;
+  created_at: string;
+  total_eur: number;
+  payment_status: string;
+  pdf_path: string | null;
+  student: SchoolInvoiceBuyer | SchoolInvoiceBuyer[] | null;
 }
 
 export default function CompanyInvoices() {
@@ -71,6 +91,7 @@ export default function CompanyInvoices() {
   const [orgId, setOrgId] = useState<string | null>(ic?.orgId ?? null);
   const [invoices, setInvoices] = useState<Invoice[]>(ic?.invoices ?? []);
   const [loading, setLoading] = useState(!ic);
+  const [invoiceLoadError, setInvoiceLoadError] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [monthlyInvoiceOpen, setMonthlyInvoiceOpen] = useState(false);
   const [invoiceToast, setInvoiceToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -141,6 +162,7 @@ export default function CompanyInvoices() {
 
   const loadData = useCallback(async () => {
     if (!getCached('company_invoices')) setLoading(true);
+    setInvoiceLoadError(false);
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -231,17 +253,62 @@ export default function CompanyInvoices() {
       query = query.gte('issue_date', start).lte('issue_date', endStr);
     }
 
-    const { data } = await query;
+    const { data, error: invoicesError } = await query;
     const invoicesList = (data || []) as Invoice[];
+    let loadFailed = Boolean(invoicesError);
+
+    // School payer invoices have their own billing table; the general table
+    // contains tutor remuneration. Keep historical invoices visible even when
+    // issuing new school invoices is disabled by a feature flag.
+    if (loadedOrg?.entity_type === 'school') {
+      try {
+        const schoolInvoices = await fetchAllRows<SchoolMonthlyInvoice>((from, to) => supabase
+          .from('school_monthly_invoices')
+          .select('id, organization_id, invoice_number, created_at, total_eur, payment_status, pdf_path, student:students(full_name, payer_name, payer_email)')
+          .eq('organization_id', orgIdVal)
+          .not('invoice_number', 'is', null)
+          .order('created_at', { ascending: false })
+          .order('id')
+          .range(from, to));
+        for (const row of schoolInvoices) {
+          if (!row.invoice_number) continue;
+          const student = Array.isArray(row.student) ? row.student[0] : row.student;
+          invoicesList.push({
+            id: row.id,
+            organization_id: row.organization_id,
+            invoice_number: row.invoice_number,
+            issue_date: row.created_at.slice(0, 10),
+            created_at: row.created_at,
+            buyer_snapshot: {
+              name: student?.payer_name || student?.full_name || '-',
+              email: student?.payer_email || undefined,
+            },
+            total_amount: Number(row.total_eur),
+            status: row.payment_status === 'paid' ? 'paid' : row.payment_status === 'cancelled' ? 'cancelled' : 'issued',
+            issued_by_user_id: '',
+            source: 'school_monthly',
+            // The API also finds existing PDFs at their canonical path when the
+            // historical invoice row is missing its pdf_path metadata.
+            pdf_available: true,
+          });
+        }
+      } catch (error) {
+        console.error('[CompanyInvoices] school invoices load error:', error);
+        loadFailed = true;
+      }
+    }
 
     setOrgId(orgIdVal);
     setTutors(tutorsList);
     setInvoices(invoicesList);
-    setCache('company_invoices', {
-      orgId: orgIdVal,
-      invoices: invoicesList,
-      tutors: tutorsList,
-    });
+    setInvoiceLoadError(loadFailed);
+    if (!loadFailed) {
+      setCache('company_invoices', {
+        orgId: orgIdVal,
+        invoices: invoicesList,
+        tutors: tutorsList,
+      });
+    }
     setLoading(false);
   }, [statusFilter, invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd]);
 
@@ -382,6 +449,7 @@ export default function CompanyInvoices() {
 
   const filteredInvoices = useMemo(() => {
     const filtered = invoices.filter((inv) => {
+      if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
       const issueDate = String(inv.issue_date || '').slice(0, 10);
       if (invoicePeriodMode === 'month' && invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth)) {
         const [yStr, mStr] = invoiceMonth.split('-');
@@ -405,7 +473,7 @@ export default function CompanyInvoices() {
       const bn = String((inv.buyer_snapshot as { name?: string } | undefined)?.name || '')
         .trim()
         .toLowerCase();
-      const isOrgBuyer = orgBuyerNames.has(bn);
+      const isOrgBuyer = inv.source !== 'school_monthly' && orgBuyerNames.has(bn);
       if (buyerKindFilter === 'org') return isOrgBuyer;
       if (buyerKindFilter === 'payer') return !isOrgBuyer;
       return true;
@@ -417,6 +485,7 @@ export default function CompanyInvoices() {
     return filtered;
   }, [
     invoices,
+    statusFilter,
     buyerKindFilter,
     orgBuyerNames,
     invoicePeriodMode,
@@ -427,7 +496,7 @@ export default function CompanyInvoices() {
   ]);
 
   const downloadableFilteredInvoices = useMemo(
-    () => filteredInvoices.filter((inv) => inv.origin !== 'external'),
+    () => filteredInvoices.filter((inv) => inv.origin !== 'external' && inv.pdf_available !== false),
     [filteredInvoices],
   );
 
@@ -522,6 +591,7 @@ export default function CompanyInvoices() {
       if (!ok) throw new Error('Download failed');
     } catch (err) {
       console.error('[CompanyInvoices] download error:', err);
+      setInvoiceToast({ message: t('common.error'), type: 'error' });
     } finally {
       setDownloadingId(null);
     }
@@ -585,7 +655,7 @@ export default function CompanyInvoices() {
   const handleDelete = async (invoiceId: string) => {
     const target = invoices.find((inv) => inv.id === invoiceId);
     if (!target) return;
-    if (target.origin === 'external') return;
+    if (target.origin === 'external' || target.source === 'school_monthly') return;
     const isPaid = target.status === 'paid' || target.billing_batches?.paid === true;
     const confirmed = window.confirm(
       isPaid ? t('invoices.deletePaidConfirm') : t('invoices.deleteConfirm'),
@@ -616,6 +686,7 @@ export default function CompanyInvoices() {
   const handleMarkPaid = async (invoiceId: string) => {
     const target = invoices.find(inv => inv.id === invoiceId);
     if (!target) return;
+    if (target.source === 'school_monthly') return;
     if (target.billing_batch_id) {
       try {
         const res = await fetch('/api/confirm-monthly-invoice-payment', {
@@ -1249,6 +1320,9 @@ export default function CompanyInvoices() {
             </div>
           </div>
 
+          {invoiceLoadError && (
+            <p role="alert" className="text-sm text-red-600">{t('common.error')}</p>
+          )}
           {loading ? (
             <div className="flex justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
@@ -1269,14 +1343,14 @@ export default function CompanyInvoices() {
                 const buyerNm = String((inv.buyer_snapshot as { name?: string } | undefined)?.name || '')
                   .trim()
                   .toLowerCase();
-                const isOrgBuyer = orgBuyerNames.has(buyerNm);
+                const isOrgBuyer = inv.source !== 'school_monthly' && orgBuyerNames.has(buyerNm);
                 return (
                   <div
                     key={inv.id}
                     className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors"
                   >
                     <div className="flex items-center gap-4 min-w-0">
-                      {inv.origin !== 'external' ? (
+                      {inv.origin !== 'external' && inv.pdf_available !== false ? (
                         <input
                           type="checkbox"
                           checked={selectedInvoiceIds.has(inv.id)}
@@ -1332,7 +1406,8 @@ export default function CompanyInvoices() {
                         variant="ghost"
                         size="sm"
                         onClick={() => handleDownloadPdf(inv.id)}
-                        disabled={downloadingId === inv.id}
+                        aria-label={t('invoices.downloadPdf')}
+                        disabled={downloadingId === inv.id || inv.pdf_available === false}
                         className="rounded-lg"
                       >
                         {downloadingId === inv.id ? (
@@ -1342,7 +1417,7 @@ export default function CompanyInvoices() {
                         )}
                       </Button>
                       )}
-                      {(inv.status === 'issued' || inv.status === 'paid') && inv.origin !== 'external' && (
+                      {(inv.status === 'issued' || inv.status === 'paid') && inv.origin !== 'external' && inv.source !== 'school_monthly' && (
                         <>
                           {inv.billing_batch_id && inv.status === 'issued' && (!inv.billing_batches || !inv.billing_batches.paid) && (
                             <Button

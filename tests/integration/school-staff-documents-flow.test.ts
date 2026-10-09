@@ -8,16 +8,22 @@ import { PDFDocument } from 'pdf-lib';
 const state = vi.hoisted(() => ({
   client: null as any,
   render: vi.fn(),
+  authenticated: true,
+  canView: true,
+  canEdit: true,
 }));
 
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => state.client }));
 vi.mock('../../api/_lib/auth', () => ({
-  verifyRequestAuth: async () => ({ userId: 'admin-1', isInternal: false }),
+  verifyRequestAuth: async () => state.authenticated ? ({ userId: 'admin-1', isInternal: false }) : null,
 }));
 vi.mock('../../api/_lib/orgAdminAccess', () => ({
   getOrgAdminAccessByUserId: async () => ({ organizationId: ORG_ID, role: 'owner', permissions: {} }),
 }));
-vi.mock('../../src/lib/orgAdminPermissions', () => ({ hasOrgAdminPermission: () => true }));
+vi.mock('../../src/lib/orgAdminPermissions', () => ({
+  hasOrgAdminPermission: (_role: unknown, _permissions: unknown, permission: string) =>
+    permission === 'contracts.view' ? state.canView : state.canEdit,
+}));
 vi.mock('../../api/_lib/public-origin', () => ({ publicOriginFromRequest: () => 'https://example.test' }));
 vi.mock('../../api/_lib/cronAuth', () => ({ requireCronAuth: () => true }));
 vi.mock('../../api/_lib/schoolStaffDocuments', async (importOriginal) => ({
@@ -95,13 +101,172 @@ function setup() {
   return { db, files };
 }
 
+function seedPreviewBundle(db: FakeSupabase) {
+  const common = {
+    organization_id: ORG_ID, counterparty_name: 'Vardas Pavardė', counterparty_email: 'employee@example.com',
+    signing_status: 'draft', staff_document_group_id: GROUP_ID,
+    staff_revoked_at: null, staff_consent_answers: null, pdf_url: null,
+    staff_employment_contract_number: 'DS-42', staff_employment_contract_date: '2026-09-22',
+    organizations: db.db.organizations[0],
+  };
+  db.db.school_contracts = [
+    { ...common, id: EMPLOYEE_ID, staff_document_type: 'confidentiality' },
+    { ...common, id: CONSENT_ID, staff_document_type: 'consent', sent_at: new Date().toISOString() },
+  ];
+  db.db.school_contract_signatures = [{
+    id: 'sig-1', contract_id: CONSENT_ID, role: 'teacher', status: 'pending',
+    token: 'safe-token', token_expires_at: new Date(Date.now() + 86400000).toISOString(),
+  }];
+}
+
 describe('prepared staff PDFs, consent and retention', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    state.authenticated = true;
+    state.canView = true;
+    state.canEdit = true;
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-key';
     process.env.SUPABASE_URL = 'https://supabase.test';
     state.render.mockResolvedValue(Buffer.from('%PDF-generated'));
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) })));
+  });
+
+  it('lets a viewing-only administrator read both complete drafts without creating signing PDFs', async () => {
+    const { db, files } = setup();
+    seedPreviewBundle(db);
+    state.canEdit = false;
+    const before = JSON.stringify(db.db);
+    const agreement = response();
+    await documentsHandler({ method: 'GET', query: { action: 'preview', id: EMPLOYEE_ID } } as any, agreement.res as any);
+    expect(agreement.res.statusCode, JSON.stringify(agreement.body)).toBe(200);
+    expect(agreement.body.preview.sections.map((section: any) => section.kind)).toEqual(['confidentiality', 'annex']);
+    expect(agreement.body.preview.sections[0].text).toContain('SUSITARIMAS DĖL KONFIDENCIALIOS INFORMACIJOS APSAUGOS');
+    expect(agreement.body.preview.sections[0].text).toContain('DS-42');
+    expect(agreement.body.preview.sections[1].text).toContain('DARBUOTOJO SUPAŽINDINIMAS');
+    expect(agreement.body.preview.sections[1].text.length).toBeGreaterThan(10000);
+    expect(agreement.body.preview.pdfUrl).toBeNull();
+    const consent = response();
+    await documentsHandler({ method: 'GET', query: { action: 'preview', id: CONSENT_ID } } as any, consent.res as any);
+    expect(consent.res.statusCode).toBe(200);
+    expect(consent.body.preview.sections[0].text).toContain('SUTINKU / NESUTINKU');
+    expect(consent.body.preview.sections[0].text).toContain('Valstybinei duomenų apsaugos inspekcijai');
+    expect(JSON.stringify(consent.body)).not.toContain('{{');
+    expect(JSON.stringify(db.db)).toBe(before);
+    expect(state.render).not.toHaveBeenCalled();
+    expect(files.size).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(agreement.res.setHeader).toHaveBeenCalledWith('Cache-Control', 'private, no-store');
+  });
+
+  it('shows both documents from the employee link before collecting details or consent choices', async () => {
+    const { db, files } = setup();
+    seedPreviewBundle(db);
+    const opened = response();
+    await consentHandler({ method: 'GET', query: { token: 'safe-token' } } as any, opened.res as any);
+    expect(opened.res.statusCode, JSON.stringify(opened.body)).toBe(200);
+    expect(opened.body.documentPreviews.map((preview: any) => preview.documentType)).toEqual(['confidentiality', 'consent']);
+    expect(opened.body.documentPreviews[0].sections).toHaveLength(2);
+    expect(opened.body.documentPreviews[1].sections[0].text).toContain('Valstybinei duomenų apsaugos inspekcijai');
+    expect(opened.body.needsPersonalDetails).toBe(true);
+    expect(db.db.school_contracts.every((row) => row.signing_status === 'draft' && !row.staff_consent_answers)).toBe(true);
+    expect(db.db.school_contract_signatures[0].status).toBe('pending');
+    expect(state.render).not.toHaveBeenCalled();
+    expect(files.size).toBe(0);
+  });
+
+  it('previews the actual uploaded or signed PDF instead of substituting the template', async () => {
+    const { db } = setup();
+    seedPreviewBundle(db);
+    const path = `${ORG_ID}/contracts/${EMPLOYEE_ID}/custom-agreement.pdf`;
+    db.db.school_contracts[0].pdf_url = path;
+    const uploaded = response();
+    await consentHandler({ method: 'GET', query: { token: 'safe-token' } } as any, uploaded.res as any);
+    expect(uploaded.res.statusCode).toBe(200);
+    expect(uploaded.body.documentPreviews[0]).toMatchObject({ pdfUrl: `https://storage.test/${path}`, isDraft: false, sections: [] });
+    const signedPath = `${ORG_ID}/contracts/${EMPLOYEE_ID}/signed/teacher.pdf`;
+    db.db.school_contracts[0].signed_contract_url = signedPath;
+    db.db.school_contracts[0].signing_status = 'signed';
+    const signed = response();
+    await documentsHandler({ method: 'GET', query: { action: 'preview', id: EMPLOYEE_ID } } as any, signed.res as any);
+    expect(signed.res.statusCode).toBe(200);
+    expect(signed.body.preview.pdfUrl).toBe(`https://storage.test/${signedPath}`);
+    expect(state.render).not.toHaveBeenCalled();
+  });
+
+  it('does not expose drafts without authentication, viewing permission, or the same organization', async () => {
+    const { db } = setup();
+    seedPreviewBundle(db);
+    const request = { method: 'GET', query: { action: 'preview', id: EMPLOYEE_ID } };
+    state.authenticated = false;
+    const anonymous = response();
+    await documentsHandler(request as any, anonymous.res as any);
+    expect(anonymous.res.statusCode).toBe(401);
+    state.authenticated = true;
+    state.canView = false;
+    const forbidden = response();
+    await documentsHandler(request as any, forbidden.res as any);
+    expect(forbidden.res.statusCode).toBe(403);
+    state.canView = true;
+    db.db.school_contracts[0].organization_id = 'another-org';
+    const foreign = response();
+    await documentsHandler(request as any, foreign.res as any);
+    expect(foreign.res.statusCode).toBe(404);
+    expect(foreign.body.preview).toBeUndefined();
+    expect(state.render).not.toHaveBeenCalled();
+  });
+
+  it.each(['expired', 'canceled', 'revoked', 'agreement-revoked', 'wrong-group', 'wrong-org', 'feature-disabled'])('rejects an employee preview with %s access', async (reason) => {
+    const { db } = setup();
+    seedPreviewBundle(db);
+    if (reason === 'expired') db.db.school_contract_signatures[0].token_expires_at = '2000-01-01T00:00:00Z';
+    if (reason === 'canceled') db.db.school_contract_signatures[0].status = 'canceled';
+    if (reason === 'revoked') db.db.school_contracts[1].staff_revoked_at = new Date().toISOString();
+    if (reason === 'agreement-revoked') db.db.school_contracts[0].staff_revoked_at = new Date().toISOString();
+    if (reason === 'wrong-group') db.db.school_contracts[0].staff_document_group_id = 'another-group';
+    if (reason === 'wrong-org') db.db.school_contracts[0].organization_id = 'another-org';
+    if (reason === 'feature-disabled') db.db.organizations[0].features.school_staff_documents = false;
+    const opened = response();
+    await consentHandler({ method: 'GET', query: { token: 'safe-token' } } as any, opened.res as any);
+    expect(opened.res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(opened.body.documentPreviews).toBeUndefined();
+    expect(state.render).not.toHaveBeenCalled();
+  });
+
+  it('does not recreate a preview after the retained files have been deleted', async () => {
+    const { db } = setup();
+    seedPreviewBundle(db);
+    db.db.school_contracts[0].staff_files_deleted_at = new Date().toISOString();
+    const opened = response();
+    await documentsHandler({ method: 'GET', query: { action: 'preview', id: EMPLOYEE_ID } } as any, opened.res as any);
+    expect(opened.res.statusCode).toBe(410);
+    expect(opened.body.preview).toBeUndefined();
+    expect(state.render).not.toHaveBeenCalled();
+  });
+
+  it('rejects a PDF path that belongs to another document', async () => {
+    const { db } = setup();
+    seedPreviewBundle(db);
+    db.db.school_contracts[0].pdf_url = `${ORG_ID}/contracts/another-employee/confidentiality.pdf`;
+    const opened = response();
+    await documentsHandler({ method: 'GET', query: { action: 'preview', id: EMPLOYEE_ID } } as any, opened.res as any);
+    expect(opened.res.statusCode).toBe(500);
+    expect(opened.body.preview).toBeUndefined();
+    expect(JSON.stringify(opened.body)).not.toContain('another-employee');
+  });
+
+  it('shows saved consent choices in the full text while the final PDF is pending', async () => {
+    const { db } = setup();
+    seedPreviewBundle(db);
+    db.db.school_contracts[1].staff_consent_answers = Array(10).fill('no');
+    const opened = response();
+    await consentHandler({ method: 'GET', query: { token: 'safe-token' } } as any, opened.res as any);
+    expect(opened.res.statusCode).toBe(200);
+    expect(opened.body.answersSubmitted).toBe(true);
+    const text = opened.body.documentPreviews[1].sections[0].text;
+    expect(text).not.toContain('SUTINKU / NESUTINKU');
+    expect(text.match(/NESUTINKU/g)).toHaveLength(10);
+    expect(text).toContain('Valstybinei duomenų apsaugos inspekcijai');
+    expect(state.render).not.toHaveBeenCalled();
   });
 
   it('accepts the prepared agreement-and-annex PDF without regenerating it', async () => {

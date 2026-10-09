@@ -6,7 +6,10 @@ import { schoolInvoiceReviewEn } from './schoolInvoiceReviewTranslations.js';
 
 import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
 
+import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
+
 export const en: Record<string, string> = {
+  ...schoolStaffPreviewTranslations.en,
   ...tutorEnvironmentTranslations.en,
   'invoiceCreate.regenerateExistingConfirm': "Invoices {nums} have already been generated for this period. Are you sure you want to regenerate them? The previous unpaid invoices will be cancelled and new ones calculated including lessons entered later.",
   'school.contractsLoadFailed': 'Unable to load contracts. Please try again.',

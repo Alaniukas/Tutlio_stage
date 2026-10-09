@@ -11,7 +11,10 @@ import { schoolConsultationsTranslations } from './schoolConsultationsTranslatio
 
 import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
 
+import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
+
 export const lv: Record<string, string> = {
+  ...schoolStaffPreviewTranslations.lv,
   ...tutorEnvironmentTranslations.lv,
   'invoiceCreate.regenerateExistingConfirm': "Rēķini {nums} par šo periodu jau ir izveidoti. Vai tiešām vēlaties tos izveidot no jauna? Iepriekšējie neapmaksātie rēķini tiks atcelti, un jaunajos tiks iekļautas arī vēlāk ievadītās nodarbības.",
   ...organizationReleaseTranslations['lv'],

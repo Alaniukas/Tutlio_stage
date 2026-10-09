@@ -11,7 +11,10 @@ import { supportTranslations } from './supportTranslations.js';
 
 import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
 
+import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
+
 export const ee: Record<string, string> = {
+  ...schoolStaffPreviewTranslations.ee,
   ...tutorEnvironmentTranslations.ee,
   'invoiceCreate.regenerateExistingConfirm': "Arved {nums} on selle perioodi eest juba koostatud. Kas soovite need kindlasti uuesti koostada? Varasemad tasumata arved tühistatakse ning uued arvestavad ka hiljem sisestatud tunde.",
   ...organizationReleaseTranslations['ee'],

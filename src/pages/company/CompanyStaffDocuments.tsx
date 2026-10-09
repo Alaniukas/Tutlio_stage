@@ -7,6 +7,9 @@ import { schoolContractPdfStoragePath } from '@/lib/schoolContractPdfPath';
 import { uploadContractFile } from '@/lib/contractStorage';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { DateInput } from '@/components/ui/date-input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import StaffDocumentPreviewContent from '@/components/company/StaffDocumentPreviewContent';
+import type { StaffDocumentPreview } from '@/lib/schoolStaffDocumentPreview';
 
 export type StaffDocument = {
   id: string;
@@ -96,6 +99,9 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
   const [preparedIncludesAnnex, setPreparedIncludesAnnex] = useState(false);
   const [preparedDetailsConfirmed, setPreparedDetailsConfirmed] = useState(false);
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [previewDocument, setPreviewDocument] = useState<StaffDocument | null>(null);
+  const [documentPreview, setDocumentPreview] = useState<StaffDocumentPreview | null>(null);
+  const [previewError, setPreviewError] = useState('');
   const pendingBundle = useRef<{
     fingerprint: string; file: File | null; groupId: string; confidentialityId: string;
     consentId: string; preparedPdfPath?: string;
@@ -118,6 +124,29 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
   };
 
   useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    if (!previewDocument || previewData) return;
+    setDocumentPreview(null);
+    setPreviewError('');
+    let active = true;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 12000);
+    void (async () => {
+      try {
+        const headers = await authHeaders();
+        if (!active) return;
+        const response = await fetch(`/api/school-staff-documents?action=preview&id=${encodeURIComponent(previewDocument.id)}`, {
+          headers, signal: controller.signal,
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || !body.preview) throw new Error(body.error || tr('school.staffPreview.loadError'));
+        if (active) setDocumentPreview(body.preview);
+      } catch (cause) {
+        if (active) setPreviewError(cause instanceof Error && cause.name !== 'AbortError' ? cause.message : tr('school.staffPreview.loadError'));
+      } finally { window.clearTimeout(timer); }
+    })();
+    return () => { active = false; controller.abort(); window.clearTimeout(timer); };
+  }, [previewDocument, previewData, tr]);
   useEffect(() => {
     const refresh = (event: StorageEvent | MessageEvent) => {
       if ('key' in event && event.key !== 'tutlio:school-contract-updated') return;
@@ -285,6 +314,16 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
       else window.location.assign(body.signingUrl);
       setBusy(false);
     } catch (cause: any) { tab?.close(); setError(cause?.message || 'Nepavyko pradėti pasirašymo.'); setBusy(false); }
+  };
+
+  const viewDocument = (document: StaffDocument) => {
+    if (previewData) {
+      setMessage('Peržiūros režimu būtų atidarytas pasirinktas PDF.');
+      return;
+    }
+    setDocumentPreview(null);
+    setPreviewError('');
+    setPreviewDocument(document);
   };
 
   const openPdf = async (document: StaffDocument) => {
@@ -482,7 +521,8 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
                       {document.status === 'signed' && !document.staff_files_deleted_at && retentionDate(document.signed_at) && <p className="text-xs text-slate-600">Atsisiųskite PDF iki {retentionDate(document.signed_at)}.</p>}
                       {document.staff_files_deleted_at && <p className="text-xs text-slate-500">PDF pašalintas po 30 dienų. Būsena ir parašų datos liko suvestinėje.</p>}
                       <div className="flex flex-wrap gap-2">
-                        {!document.staff_files_deleted_at && (document.signed_contract_url || document.pdf_url) && <button onClick={() => void openPdf(document)} className="rounded-md border px-3 py-2 text-xs">{document.status === 'signed' ? 'Atsisiųsti pasirašytą PDF' : 'Peržiūrėti PDF'}</button>}
+                        {!document.staff_files_deleted_at && <button type="button" onClick={() => viewDocument(document)} className="rounded-md border px-3 py-2 text-xs">{tr('school.staffPreview.view')}</button>}
+                        {!document.staff_files_deleted_at && document.status === 'signed' && (document.signed_contract_url || document.pdf_url) && <button onClick={() => void openPdf(document)} className="rounded-md border px-3 py-2 text-xs">Atsisiųsti pasirašytą PDF</button>}
                         {canEdit && !document.staff_revoked_at && document.signing_status === 'awaiting_school_signature' && <button disabled={busy} onClick={() => void signAsSchool(document.id)} className="rounded-md bg-indigo-600 px-3 py-2 text-xs text-white disabled:opacity-50">Pasirašyti mokyklos vardu</button>}
                         {canEdit && !document.staff_revoked_at && document.status !== 'signed' && canRemind(document) && <button disabled={busy} onClick={() => void action('remind', document.id)} className="rounded-md border px-3 py-2 text-xs disabled:opacity-50">Siųsti priminimą</button>}
                         {canEdit && !document.staff_revoked_at && document.status !== 'signed' && <button disabled={busy} onClick={() => void action('revoke', document.id)} className="rounded-md border border-red-200 px-3 py-2 text-xs text-red-700 disabled:opacity-50">Atšaukti</button>}
@@ -495,6 +535,17 @@ export function CompanyStaffDocumentsContent({ canEdit, previewData }: { canEdit
           </div>
         )}
       </section>}
+      <Dialog open={Boolean(previewDocument)} onOpenChange={(open) => { if (!open) setPreviewDocument(null); }}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader className="pe-10">
+            <DialogTitle>{previewDocument ? tr(`school.staffPreview.${previewDocument.staff_document_type}`) : ''}</DialogTitle>
+            <p className="text-sm text-slate-600">{previewDocument?.counterparty_name}</p>
+          </DialogHeader>
+          {previewError ? <p role="alert" className="text-sm text-red-700">{previewError}</p>
+            : documentPreview ? <StaffDocumentPreviewContent preview={documentPreview} />
+              : <p role="status" className="text-sm text-slate-600">{tr('common.loading')}</p>}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

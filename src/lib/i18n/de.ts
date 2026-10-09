@@ -11,7 +11,10 @@ import { supportTranslations } from './supportTranslations.js';
 
 import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
 
+import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
+
 export const de: Record<string, string> = {
+  ...schoolStaffPreviewTranslations.de,
   ...tutorEnvironmentTranslations.de,
   'invoiceCreate.regenerateExistingConfirm': "Die Rechnungen {nums} wurden für diesen Zeitraum bereits erstellt. Möchten Sie sie wirklich neu erstellen? Die bisherigen unbezahlten Rechnungen werden storniert und die neuen berücksichtigen auch später erfasste Stunden.",
   ...organizationReleaseTranslations['de'],

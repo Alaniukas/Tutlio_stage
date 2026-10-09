@@ -76,7 +76,7 @@ export function parseStoredStaffPersonalDetails(raw: unknown): { address: string
   return validateStaffPersonalDetails(raw as { address?: unknown; personalCode?: unknown });
 }
 
-function templateBytes(name: string): Buffer {
+export function staffTemplateBytes(name: string): Buffer {
   const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [
     join(here, 'templates', 'staff', name),
@@ -148,7 +148,7 @@ export async function renderStaffDocumentPdf(
     }
     if (hasDocxConverterEnv()) await waitForDocxConverterReady();
     return renderDocxTemplateBufferToPdfBuffer({
-      templateBytes: templateBytes(staffTemplateNames(type)[0]),
+      templateBytes: staffTemplateBytes(staffTemplateNames(type)[0]),
       payload,
       timeoutMs: STAFF_DOCX_TIMEOUT_MS,
     });
@@ -164,7 +164,7 @@ export async function renderStaffDocumentPdf(
   for (const name of staffTemplateNames(type)) {
     if (hasDocxConverterEnv()) await waitForDocxConverterReady();
     const part = await renderDocxTemplateBufferToPdfBuffer({
-      templateBytes: templateBytes(name),
+      templateBytes: staffTemplateBytes(name),
       payload,
       timeoutMs: STAFF_DOCX_TIMEOUT_MS,
     });

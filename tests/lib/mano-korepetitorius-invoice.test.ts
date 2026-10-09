@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { formatInvoiceSeriesHeading } from '../../api/_lib/invoiceNumber';
 import { generateInvoicePdf } from '../../api/_lib/invoicePdf';
 import {
+  manoTutorMonthlyInvoiceNumber,
+  monthlyInvoiceIssueDate,
   CLASSIC_LT_TUTOR_LAYOUT,
   buildClassicLtTutorPdfMeta,
   classicLtTutorBuyerLines,
@@ -14,6 +16,38 @@ import {
 import { MANO_KOREPETITORIUS_ORG_ID } from '../../src/lib/marketMoney';
 
 describe('Mano Korepetitorius tutor → company invoice', () => {
+  it.each([
+    ['2026-09-30', '2026-09-30'],
+    ['2026-09-15', '2026-09-30'],
+    ['2026-02-28', '2026-02-28'],
+    ['2028-02-12', '2028-02-29'],
+    ['2026-12-31', '2026-12-31'],
+  ])('dates monthly invoices at month end for %s', (periodEnd, expected) => {
+    expect(monthlyInvoiceIssueDate(MANO_KOREPETITORIUS_ORG_ID, periodEnd,
+      new Date('2026-10-08T09:00:00Z'))).toBe(expected);
+  });
+
+  it('preserves other organizations issue dates and rejects an invalid MK month', () => {
+    expect(monthlyInvoiceIssueDate('other-org', '2026-09-30',
+      new Date('2026-10-08T09:00:00Z'))).toBe('2026-10-08');
+    expect(() => monthlyInvoiceIssueDate(MANO_KOREPETITORIUS_ORG_ID, '2026-02-31')).toThrow();
+  });
+
+  it.each([
+    ['Eva Jautakytė', 'EVAJAU-202605'],
+    ['Gabija Mikalčiūtė', 'GABMIK-202605'],
+    ['  Beatričė   Zaveckaitė  ', 'BEAZAV-202605'],
+    ['Irina Gubacheva', 'IRIGUB-202605'],
+    ['Pijus Oželis', 'PIJOŽE-202605'],
+  ])('uses the tutor name and service month for %s', (name, expected) => {
+    expect(manoTutorMonthlyInvoiceNumber(name, '2026-05-31')).toBe(expected);
+    expect(formatInvoiceSeriesHeading(expected)).toMatch(/^Serija .* Nr. 202605$/);
+  });
+
+  it('rejects an incomplete name instead of creating a generic SF number', () => {
+    expect(() => manoTutorMonthlyInvoiceNumber('Eva', '2026-05-31')).toThrow('vardas ir pavardė');
+  });
+
   it('applies only to that org when the tutor bills the company', () => {
     expect(isManoKorepetitoriusTutorInvoice(true, MANO_KOREPETITORIUS_ORG_ID)).toBe(true);
     expect(isManoKorepetitoriusTutorInvoice(false, MANO_KOREPETITORIUS_ORG_ID)).toBe(false);

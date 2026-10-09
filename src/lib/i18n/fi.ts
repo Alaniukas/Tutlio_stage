@@ -11,7 +11,10 @@ import { supportTranslations } from './supportTranslations.js';
 
 import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js';
 
+import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
+
 export const fi: Record<string, string> = {
+  ...schoolStaffPreviewTranslations.fi,
   ...tutorEnvironmentTranslations.fi,
   'invoiceCreate.regenerateExistingConfirm': "Laskut {nums} on jo luotu tälle ajanjaksolle. Haluatko varmasti luoda ne uudelleen? Aiemmat maksamattomat laskut perutaan, ja uudet sisältävät myös myöhemmin kirjatut oppitunnit.",
   ...organizationReleaseTranslations['fi'],

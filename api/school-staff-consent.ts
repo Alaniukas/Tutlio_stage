@@ -11,6 +11,7 @@ import {
 } from './_lib/schoolStaffDocuments.js';
 import { completeStaffConsentPdfGeneration } from './_lib/schoolStaffConsentPdf.js';
 import { SCHOOL_CONTRACTS_BUCKET } from './_lib/schoolContractPdfPath.js';
+import { buildStaffDocumentPreview } from './_lib/schoolStaffDocumentPreview.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.statusCode = status;
@@ -62,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 410, { error: 'Nuoroda nebegalioja. Paprašykite mokyklos naujo pakvietimo.' });
   }
   const { data: contract } = await supabase.from('school_contracts')
-    .select('id, organization_id, contract_number, counterparty_name, counterparty_email, signing_status, staff_document_type, staff_document_group_id, staff_consent_answers, staff_revoked_at, staff_employment_contract_number, staff_employment_contract_date, pdf_url, organizations(name, entity_type, features)')
+    .select('id, organization_id, contract_number, counterparty_name, counterparty_email, signing_status, staff_document_type, staff_document_group_id, staff_consent_answers, staff_revoked_at, staff_employment_contract_number, staff_employment_contract_date, pdf_url, signed_contract_url, staff_files_deleted_at, organizations(name, entity_type, features)')
     .eq('id', signature.contract_id).maybeSingle();
   const org = (contract as any)?.organizations;
   if (!contract || !isStaffDocumentsOrg(contract.organization_id) || contract.staff_document_type !== 'consent' || org?.entity_type !== 'school'
@@ -73,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 410, { error: 'Šis dokumentas atšauktas.' });
   }
   const { data: agreement, error: agreementError } = await supabase.from('school_contracts')
-    .select('id, organization_id, contract_number, counterparty_name, signing_status, staff_document_type, staff_document_group_id, staff_revoked_at, pdf_url')
+    .select('id, organization_id, contract_number, counterparty_name, signing_status, staff_document_type, staff_document_group_id, staff_revoked_at, staff_employment_contract_number, staff_employment_contract_date, pdf_url, signed_contract_url, staff_files_deleted_at')
     .eq('organization_id', contract.organization_id)
     .eq('staff_document_group_id', contract.staff_document_group_id)
     .eq('staff_document_type', 'confidentiality').maybeSingle();
@@ -85,6 +86,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     : await loadStashedStaffDetails(supabase, agreement.organization_id, agreement.id);
   const needsPersonalDetails = !agreement.pdf_url && !stashedDetails;
   if (req.method === 'GET') {
+    let documentPreviews;
+    try {
+      documentPreviews = (await Promise.all([
+        buildStaffDocumentPreview(supabase, agreement),
+        buildStaffDocumentPreview(supabase, contract),
+      ])).filter((preview) => preview !== null);
+    } catch (cause) {
+      console.error('[school-staff-consent] preview failed:', cause);
+      return json(res, 502, { error: 'Nepavyko įkelti dokumentų peržiūros. Atnaujinkite puslapį.' });
+    }
     await supabase.from('school_contracts').update({ staff_viewed_at: new Date().toISOString() })
       .eq('id', contract.id).is('staff_viewed_at', null);
     let previewUrl: string | null = null;
@@ -102,6 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       answersSubmitted: Boolean(contract.staff_consent_answers),
       signed: contract.signing_status === 'signed',
       previewUrl,
+      documentPreviews,
       needsPersonalDetails,
       detailsHeldBySchool: Boolean(agreement.pdf_url || stashedDetails),
     });

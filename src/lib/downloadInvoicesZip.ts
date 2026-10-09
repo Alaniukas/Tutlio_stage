@@ -10,7 +10,24 @@ export type InvoicePdfDownloadRow = {
   issue_date?: string | null;
   organization_id?: string | null;
   origin?: string | null;
+  source?: 'school_monthly';
 };
+
+function saveDownloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+    // Give the browser time to consume the URL after the click event returns.
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  }
+}
 
 function uniqueZipEntryName(base: string, used: Set<string>): string {
   if (!used.has(base)) {
@@ -31,7 +48,8 @@ async function fetchInvoicePdfBytes(
   invoice: InvoicePdfDownloadRow,
   headers: HeadersInit,
 ): Promise<{ bytes: Uint8Array; filename: string } | null> {
-  const res = await fetch(`/api/invoice-pdf?id=${encodeURIComponent(invoice.id)}`, { headers });
+  const source = invoice.source === 'school_monthly' ? '&source=school_monthly' : '';
+  const res = await fetch(`/api/invoice-pdf?id=${encodeURIComponent(invoice.id)}${source}`, { headers });
   if (!res.ok || !res.headers.get('content-type')?.includes('application/pdf')) return null;
   const blob = await res.blob();
   if (blob.size === 0) return null;
@@ -75,12 +93,7 @@ export async function downloadInvoicesAsZip(
 
   const zipped = zipSync(zipEntries);
   const blob = new Blob([zipped], { type: 'application/zip' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = options.zipName || `saskaitos-${new Date().toISOString().slice(0, 10)}.zip`;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  saveDownloadBlob(blob, options.zipName || `saskaitos-${new Date().toISOString().slice(0, 10)}.zip`);
   return { downloaded, failedIds };
 }
 
@@ -91,12 +104,7 @@ export async function downloadInvoicePdfFile(
   try {
     const file = await fetchInvoicePdfBytes(invoice, headers);
     if (!file) return false;
-    const url = URL.createObjectURL(new Blob([file.bytes], { type: 'application/pdf' }));
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = file.filename;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    saveDownloadBlob(new Blob([file.bytes], { type: 'application/pdf' }), file.filename);
     return true;
   } catch {
     return false;
