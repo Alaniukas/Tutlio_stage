@@ -9,11 +9,29 @@ vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
     if (table === state.failedTable) query.then = (resolve: any, reject: any) => Promise.resolve({ data: null, error: new Error('Pay adjustments unavailable') }).then(resolve, reject);
     return query;
   },
+  rpc: async (name: string, args: any) => {
+    if (name === 'allocate_org_tutor_invoice_number') {
+      const profile = state.tables.invoice_profiles.find(row => row.id === args.p_profile_id);
+      return { data: [{ invoice_series: profile.invoice_series, allocated_number: 1 }], error: null };
+    }
+    if (name === 'create_org_tutor_pay_invoice') {
+      const invoice = { id: 'qa-created-0', ...args.p_invoice };
+      state.writes.push({ table: 'invoices', value: invoice });
+      state.writes.push({ table: 'invoice_line_items', value: args.p_lines.map((line: any) => ({
+        invoice_id: invoice.id, ...line,
+      })) });
+      return { data: invoice, error: null };
+    }
+    throw new Error(`Unexpected invoice RPC: ${name}`);
+  },
   storage: { from: () => ({ upload: async () => ({ error: null }) }) },
 }) }));
 vi.mock('../../api/_lib/auth.js', () => ({ verifyRequestAuth: async () => ({ isInternal: false, userId: state.tables.profiles[state.company].id }) }));
 vi.mock('../../api/_lib/orgAdminAccess.js', () => ({ getOrgAdminAccessByUserId: async () => null }));
-vi.mock('../../api/_lib/invoiceNumber.js', () => ({ allocateInvoiceNumber: async () => 'QA-001', formatInvoiceSeriesHeading: () => 'QA' }));
+vi.mock('../../api/_lib/invoiceNumber.js', async importActual => ({
+  ...await importActual<typeof import('../../api/_lib/invoiceNumber.js')>(),
+  allocateInvoiceNumber: async () => 'QA-001', formatInvoiceSeriesHeading: () => 'QA',
+}));
 vi.mock('../../api/_lib/invoicePdf.js', () => ({ generateInvoicePdf: async (data: any) => { state.pdfs.push(data); return new Uint8Array([1]); } }));
 vi.mock('../../api/_lib/invoiceBranding.js', () => ({ resolveInvoiceBranding: async () => null }));
 import generate from '../../api/generate-invoice';

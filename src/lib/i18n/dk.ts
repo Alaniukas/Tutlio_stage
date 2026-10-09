@@ -129,6 +129,20 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const dk: Record<string, string> = {
+  'companyNav.tutorFinance': 'Undervisernes økonomi',
+  'invoices.changeNumber': 'Skift nummer',
+  'invoices.newNumber': 'Nyt fakturanummer',
+  'invoices.numberConflict': 'Dette nummer bruges allerede, eller fakturaen er ændret. Opdater listen, og vælg et andet nummer.',
+  'invoices.numberCorrectionNote': 'Nuværende nummer: {number}. Det rettede nummer vises på listen og i PDF-filen. Det tidligere nummer bevares i ændringshistorikken.',
+  'orgFinance.licensedTutors': 'Undervisere med en aktiv Tutlio-licens',
+  'orgFinance.earnedBeforeAdjustments': 'Honorar før reguleringer',
+  'orgFinance.payRateMissing': 'Honorarsatsen er ikke angivet.',
+  'orgFinance.noAdjustments': 'Ingen fradrag eller reguleringer i denne periode.',
+  'orgFinance.adjustmentTutorNoShow': 'Underviseren udeblev',
+  'orgFinance.adjustmentMissingReport': 'Lektionsrapport mangler',
+  'orgFinance.adjustmentManualPenalty': 'Manuelt fradrag',
+  'orgFinance.adjustmentManualCorrection': 'Manuel regulering',
+  'orgFinance.refresh': 'Opdater',
   ...schoolStaffPreviewTranslations.dk,
   ...tutorEnvironmentTranslations.dk,
   'invoiceCreate.regenerateExistingConfirm': "Fakturaerne {nums} er allerede oprettet for denne periode. Vil du virkelig oprette dem igen? De tidligere ubetalte fakturaer annulleres, og de nye medtager også lektioner, der er registreret senere.",

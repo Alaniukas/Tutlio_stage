@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { DateInput } from '@/components/ui/date-input';
 import { MonthFilterInput } from '@/components/ui/month-filter-input';
 import { supabase } from '@/lib/supabase';
-import { getCached, setCache } from '@/lib/dataCache';
+import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
@@ -17,6 +17,9 @@ import {
 } from '@/components/ui/dialog';
 import InvoiceSettingsForm from '@/components/InvoiceSettingsForm';
 import CreateInvoiceModal from '@/components/CreateInvoiceModal';
+import TutorInvoiceNumberDialog, { type UpdatedCompanyInvoice } from '@/components/TutorInvoiceNumberDialog';
+import { useOptionalOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
+import { isOwnOrgTutorInvoice } from '@/lib/orgTutorInvoiceAccess';
 import SchoolMonthlyInvoiceDialog from '@/components/school/SchoolMonthlyInvoiceDialog';
 import Toast from '@/components/Toast';
 import { schoolMonthlyInvoicesEnabled } from '@/lib/schoolConsultationsOrg';
@@ -34,12 +37,13 @@ import {
   CheckCircle2,
   Mail,
   Trash2,
+  Pencil,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { orgTutorSessionPayEur } from '@/lib/orgTutorLessonPay';
-import { isManoKorepetitoriusOrg } from '@/lib/marketMoney';
+import { isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMoney';
 import { ORG_TUTOR_CARD_LIST_SCROLL_CLASS } from '@/lib/orgUi';
 import { isInvoiceProfileComplete } from '@/lib/invoiceProfileReady';
 import { downloadInvoicePdfFile, downloadInvoicesAsZip } from '@/lib/downloadInvoicesZip';
@@ -52,7 +56,8 @@ interface Invoice {
   issue_date: string;
   buyer_snapshot: { name: string; email?: string };
   total_amount: number;
-  pdf_meta?: { currency?: string } | null;
+  pdf_meta?: { currency?: string; invoiceKind?: string; tutorId?: string } | null;
+  seller_snapshot?: { name?: string } | null;
   status: 'issued' | 'paid' | 'cancelled';
   issued_by_user_id: string;
   organization_id?: string | null;
@@ -83,6 +88,7 @@ interface SchoolMonthlyInvoice {
 
 export default function CompanyInvoices() {
   const { t } = useTranslation();
+  const adminAccess = useOptionalOrgAdminAccess();
   const ic = getCached<{
     orgId: string;
     invoices: Invoice[];
@@ -147,6 +153,19 @@ export default function CompanyInvoices() {
   const [remindingId, setRemindingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [orgInvoiceProfileReady, setOrgInvoiceProfileReady] = useState<boolean | null>(null);
+  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
+  const [numberTarget, setNumberTarget] = useState<Invoice | null>(null);
+  const canEditFinance = adminAccess?.can('finance.edit') === true;
+  const tutorPeriodInitializedOrg = useRef<string | null>(null);
+  useEffect(() => {
+    if (!orgId || tutorPeriodInitializedOrg.current === orgId) return;
+    tutorPeriodInitializedOrg.current = orgId;
+    if (isProKlaseOrg(orgId)) {
+      const today = new Date();
+      setTutorPeriodMode('month');
+      setTutorMonth(format(new Date(today.getFullYear(), today.getMonth() - 1, 1), 'yyyy-MM'));
+    }
+  }, [orgId]);
 
   const tutorEffectiveRange = useMemo(() => {
     if (tutorPeriodMode === 'month' && tutorMonth && /^\d{4}-\d{2}$/.test(tutorMonth)) {
@@ -327,6 +346,29 @@ export default function CompanyInvoices() {
     }
     setLoadingTutorSessions(true);
     setTutorSessionsError(false);
+    if (isProKlaseOrg(orgId)) {
+      try {
+        const headers = await authHeaders();
+        const entries = await Promise.all(tutors.map(async tutor => {
+          const response = await fetch('/api/generate-invoice', { method: 'POST', headers,
+            body: JSON.stringify({ tutorId: tutor.id, periodStart: tutorEffectiveRange.start,
+              periodEnd: tutorEffectiveRange.end, groupingType: 'single', isOrgTutor: true, precheckOnly: true }) });
+          const result = await response.json();
+          if (!response.ok) throw new Error('Tutor invoice preview unavailable');
+          if (result.canGenerate === false) return [tutor.id, { count: 0, total: 0 }] as const;
+          if (!Number.isFinite(result.candidateCount) || !Number.isFinite(result.candidateTotal)) {
+            throw new Error('Tutor invoice preview unavailable');
+          }
+          return [tutor.id, { count: result.candidateCount, total: result.candidateTotal }] as const;
+        }));
+        if (requestId === tutorSessionsRequestId.current) setTutorSessions(Object.fromEntries(entries));
+      } catch {
+        if (requestId === tutorSessionsRequestId.current) { setTutorSessions({}); setTutorSessionsError(true); }
+      } finally {
+        if (requestId === tutorSessionsRequestId.current) setLoadingTutorSessions(false);
+      }
+      return;
+    }
     const tutorIds = tutors.map(t => t.id);
     const manoTutorInvoices = isManoKorepetitoriusOrg(orgId);
     let sessionQuery = supabase
@@ -687,25 +729,30 @@ export default function CompanyInvoices() {
     const target = invoices.find(inv => inv.id === invoiceId);
     if (!target) return;
     if (target.source === 'school_monthly') return;
-    if (target.billing_batch_id) {
-      try {
+    if (!canEditFinance) return;
+    setMarkingPaidId(invoiceId);
+    try {
+      if (target.billing_batch_id) {
         const res = await fetch('/api/confirm-monthly-invoice-payment', {
           method: 'POST',
           headers: await authHeaders(),
           body: JSON.stringify({ billingBatchId: target.billing_batch_id, manualConfirm: true }),
         });
-        if (res.ok) {
-          setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, status: 'paid' as const } : inv));
-        }
-      } catch (e) {
-        console.error('[CompanyInvoices] mark paid error:', e);
-      }
-    } else {
-      const { error } = await supabase.from('invoices').update({ status: 'paid' }).eq('id', invoiceId);
-      if (!error) {
+        if (!res.ok) throw new Error('Invoice payment not saved');
         setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, status: 'paid' as const } : inv));
+      } else {
+        const response = await fetch('/api/company-invoice-update', { method: 'POST', headers: await authHeaders(),
+          body: JSON.stringify({ action: 'mark_paid', invoiceId }) });
+        const result = await response.json();
+        if (!response.ok || result.invoice?.id !== invoiceId || result.invoice?.status !== 'paid') {
+          throw new Error('Invoice payment not saved');
+        }
+        setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, ...result.invoice } : inv));
       }
-    }
+      invalidateCache('company_invoices');
+    } catch {
+      setInvoiceToast({ type: 'error', message: t('common.saveFailed') });
+    } finally { setMarkingPaidId(null); }
   };
 
   const statusBadge = (status: string) => {
@@ -1339,7 +1386,9 @@ export default function CompanyInvoices() {
           ) : (
             <div className="space-y-2">
               {filteredInvoices.map((inv) => {
-                const tutorName = tutors.find(tu => tu.id === inv.issued_by_user_id)?.full_name;
+                const isTutorPay = isOwnOrgTutorInvoice(inv, inv.pdf_meta?.tutorId || '');
+                const tutorName = tutors.find(tu => tu.id === (isTutorPay ? inv.pdf_meta?.tutorId : inv.issued_by_user_id))?.full_name
+                  || (isTutorPay ? inv.seller_snapshot?.name : undefined);
                 const buyerNm = String((inv.buyer_snapshot as { name?: string } | undefined)?.name || '')
                   .trim()
                   .toLowerCase();
@@ -1347,7 +1396,7 @@ export default function CompanyInvoices() {
                 return (
                   <div
                     key={inv.id}
-                    className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors"
+                    className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors"
                   >
                     <div className="flex items-center gap-4 min-w-0">
                       {inv.origin !== 'external' && inv.pdf_available !== false ? (
@@ -1383,7 +1432,7 @@ export default function CompanyInvoices() {
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-gray-500 truncate">
+                        <p className="text-xs text-gray-500 break-words sm:truncate">
                           {(inv.buyer_snapshot as { name?: string })?.name || '-'}
                           {tutorName && <> {'\u00B7'} {tutorName}</>}
                           {' \u00B7 '}
@@ -1398,7 +1447,7 @@ export default function CompanyInvoices() {
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 self-end sm:self-auto shrink-0">
                       {inv.origin === 'external' ? (
                         <span className="text-[11px] text-gray-400 px-2">{t('invoices.externalNoPdf')}</span>
                       ) : (
@@ -1465,15 +1514,22 @@ export default function CompanyInvoices() {
                               <Trash2 className="w-4 h-4" />
                             )}
                           </Button>
-                          {inv.status === 'issued' && (
+                          {isProKlaseOrg(orgId) && canEditFinance && !inv.billing_batch_id && isTutorPay && (
+                            <Button variant="ghost" size="sm" onClick={() => setNumberTarget(inv)}
+                              title={t('invoices.changeNumber')} aria-label={`${t('invoices.changeNumber')} ${inv.invoice_number}`}
+                              className="rounded-lg text-indigo-600"><Pencil className="w-4 h-4" /></Button>
+                          )}
+                          {inv.status === 'issued' && canEditFinance && (
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => handleMarkPaid(inv.id)}
+                              disabled={Boolean(markingPaidId)}
                               className="rounded-lg text-green-600 hover:text-green-700 hover:bg-green-50"
                               title={t('invoices.markPaid')}
+                              aria-label={t('invoices.markPaid')}
                             >
-                              <CheckCircle2 className="w-4 h-4" />
+                              {markingPaidId === inv.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                             </Button>
                           )}
                         </>
@@ -1488,6 +1544,12 @@ export default function CompanyInvoices() {
         )}
       </div>
 
+      <TutorInvoiceNumberDialog invoice={numberTarget}
+        tutorName={tutors.find(tutor => tutor.id === numberTarget?.pdf_meta?.tutorId)?.full_name || numberTarget?.seller_snapshot?.name || ''}
+        onClose={() => setNumberTarget(null)} onSaved={(saved: UpdatedCompanyInvoice) => {
+          setInvoices(prev => prev.map(invoice => invoice.id === saved.id ? { ...invoice, ...saved } : invoice));
+          invalidateCache('company_invoices');
+        }} />
       {schoolPayerInvoices && orgId && (
         <SchoolMonthlyInvoiceDialog
           batch

@@ -828,6 +828,8 @@ export default function CalendarPage() {
             : [];
           const required = sessionNeedsOrgTrialComment({
             policy,
+            organizationId: orgId,
+            status: selectedEvent.status,
             isTrial: true,
             sessionId: selectedEvent.id,
             studentTrials: trialHistory,
@@ -840,7 +842,7 @@ export default function CalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedEvent?.id]);
+  }, [selectedEvent?.id, selectedEvent?.status]);
 
   const fetchData = async (opts?: { silent?: boolean }) => {
     if (!ctxUser) { setLoading(false); return; }
@@ -4208,6 +4210,8 @@ export default function CalendarPage() {
             : [];
           const needsTrialComment = sessionNeedsOrgTrialComment({
             policy: trialPolicy,
+            organizationId: orgId,
+            status: 'completed',
             isTrial: true,
             sessionId: selectedEvent.id,
             studentTrials: trialHistory,
@@ -4370,6 +4374,8 @@ export default function CalendarPage() {
           );
           needsTrialComment = sessionNeedsOrgTrialComment({
             policy,
+            organizationId: orgId,
+            status,
             isTrial: true,
             sessionId: session.id,
             studentTrials: trialHistory,

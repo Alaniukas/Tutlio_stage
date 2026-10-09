@@ -1,5 +1,7 @@
 /** Org trial-lesson counts and when a tutor comment is required. */
 
+import { isProKlaseOrg } from './marketMoney.js';
+
 export type OrgTrialPolicy = {
   commentRequired: boolean;
   /** How many trial lessons a student may take (1–5). */
@@ -69,9 +71,12 @@ export function sessionNeedsOrgTrialComment(opts: {
   policy: OrgTrialPolicy;
   isTrial: boolean;
   sessionId: string;
+  organizationId?: string | null;
+  status?: string | null;
   studentTrials: Array<{ id: string; start_time?: string | Date | null; status?: string | null }>;
 }): boolean {
   if (!opts.isTrial || !opts.policy.commentRequired) return false;
+  if (opts.status === 'no_show' && isProKlaseOrg(opts.organizationId)) return false;
   const ordered = sortTrialsOldestFirst(countableNonCancelled(opts.studentTrials));
   const idx = trialIndexAmongStudentTrials(opts.sessionId, ordered);
   return trialCommentRequiredForIndex(idx, opts.policy);

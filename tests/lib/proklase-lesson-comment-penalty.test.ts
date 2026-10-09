@@ -26,6 +26,13 @@ const trial: ProKlaseCommentPenaltySession = {
 };
 
 describe('Pro Klasė trial comment penalties', () => {
+  it.each(['2026-09-14T11:00:00.000Z', '2026-09-16T06:00:00.000Z'])('never reminds or deducts pay for a missed trial (%s)', status_confirmed_at => {
+    const missedTrial = { ...trial, status: 'no_show', status_confirmed_at };
+    const history = trialHistory.map(row => ({ ...row, status: 'no_show' }));
+    expect(proKlaseSessionRequiresTrialComment(missedTrial, policy, history)).toBe(false);
+    expect(proKlaseSessionEligibleForTrialCommentReminder(missedTrial, policy, history, now)).toBe(false);
+    expect(proKlaseSessionEligibleForTrialCommentPenalty(missedTrial, policy, history, now)).toBe(false);
+  });
   it('does not penalize or remind for regular lessons, even after 48 hours', () => {
     const regular = { ...trial, subjects: { is_trial: false } };
     expect(proKlaseSessionEligibleForTrialCommentPenalty(regular, policy, trialHistory, now)).toBe(false);

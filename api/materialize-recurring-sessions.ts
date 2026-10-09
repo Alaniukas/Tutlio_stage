@@ -147,13 +147,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const rangeStart = occurrenceStarts[0]!.toISOString();
     const rangeEnd = new Date(occurrenceStarts.at(-1)!.getTime() + durationMs).toISOString();
 
-    const [{ data: existingRows }, { data: tutorBusyRows }] = await Promise.all([
+    const [existingResult, busyResult] = await Promise.all([
       supabase
         .from('sessions')
-        .select('start_time')
+        .select('start_time, original_start_time')
         .eq('recurring_session_id', template.id)
-        .gte('start_time', rangeStart)
-        .lte('start_time', rangeEnd),
+        .eq('student_id', template.student_id)
+        .or(`and(start_time.gte.${rangeStart},start_time.lte.${rangeEnd}),and(original_start_time.gte.${rangeStart},original_start_time.lte.${rangeEnd})`),
       supabase
         .from('sessions')
         .select('start_time, end_time, subject_id')
@@ -163,8 +163,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .gt('end_time', rangeStart),
     ]);
 
-    const existing = new Set((existingRows || []).map((row: any) => new Date(row.start_time).toISOString()));
-    const busy = (tutorBusyRows || []).map((row: any) => ({
+    if (existingResult.error || busyResult.error) {
+      return res.status(500).json({ error: 'Failed to check existing recurring lessons' });
+    }
+    // A moved lesson still occupies its original occurrence, including when
+    // its new date is outside this materialization window.
+    const existing = new Set((existingResult.data || []).flatMap((row: any) =>
+      [row.start_time, row.original_start_time].filter(Boolean)
+        .map((value: string) => new Date(value).toISOString()),
+    ));
+    const busy = (busyResult.data || []).map((row: any) => ({
       start: new Date(row.start_time).getTime(),
       end: new Date(row.end_time).getTime(),
       subjectId: row.subject_id as string | null,

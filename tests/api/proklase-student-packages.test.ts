@@ -107,6 +107,26 @@ describe('GET /api/proklase-student-packages', () => {
     expect(result.body.packages.map((pkg: any) => pkg.id)).toEqual(['pooled-1']);
   });
 
+  it('keeps the actual unpaid extras invoice visible after a duplicate monthly offer is cancelled', async () => {
+    mocks.tables.lesson_packages = [
+      { id: 'duplicate-offer', student_id: 'student-1', tutor_id: 'tutor-1',
+        pool_organization_id: PRO_KLASE_ORG_ID, payment_status: 'cancelled', paid: false, active: false },
+      { id: 'september-extras', student_id: 'student-1', tutor_id: 'tutor-1',
+        pool_organization_id: null, extras_period_start: '2026-09-01',
+        payment_status: 'pending', paid: false, active: false, total_price: 93 },
+      { id: 'october-paid', student_id: 'student-1', tutor_id: 'tutor-1',
+        pool_organization_id: PRO_KLASE_ORG_ID, payment_status: 'paid', paid: true, active: true },
+      { id: 'old-settled-extras', student_id: 'student-1', tutor_id: 'tutor-1',
+        extras_period_start: '2026-08-01', payment_status: 'paid', paid: true, active: false },
+    ];
+    const { default: handler } = await import('../../api/proklase-student-packages');
+    const { res, result } = response();
+    await handler({ method: 'GET', query: { studentId: 'student-1' }, headers: {} } as any, res);
+    expect(result.statusCode).toBe(200);
+    expect(result.body.packages.map((pkg: any) => pkg.id)).toEqual(['september-extras', 'october-paid']);
+    expect(result.body.packages[0]).toMatchObject({ total_price: 93, paid: false, payment_status: 'pending' });
+  });
+
   it('rejects access to a student outside the organization result set', async () => {
     const { default: handler } = await import('../../api/proklase-student-packages');
     const { res, result } = response();

@@ -436,6 +436,8 @@ export default function DashboardPage() {
                     if (!needsComment || String(s.tutor_comment || '').trim()) return false;
                     return sessionNeedsOrgTrialComment({
                         policy: trialPolicy,
+                        organizationId,
+                        status: effectiveSessionOutcome(s, requireOutcomeConfirmation),
                         isTrial: s.subjects?.is_trial === true,
                         sessionId: s.id,
                         studentTrials: trialsByStudent.get(s.student_id) ?? [{ id: s.id, start_time: s.start_time, status: s.status }],

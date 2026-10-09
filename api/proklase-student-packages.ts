@@ -5,7 +5,7 @@ import { isProKlaseOrg } from './_lib/marketMoney.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { orgStudentIdentityGroupKey } from '../src/lib/orgStudentIdentity.js';
 import { proKlaseTrialFollowupStudentIds } from '../src/lib/proKlasePackageStatus.js';
-import { isOverdueUnpaidPooledPackage, isPayableUnpaidPooledPackage } from '../src/lib/pooledPackageOverdue.js';
+import { isOverdueUnpaidPooledPackage, isPayableUnpaidPooledPackage, isUnpaidPackage } from '../src/lib/pooledPackageOverdue.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -25,7 +25,7 @@ const PACKAGE_SELECT = `
   id, student_id, tutor_id, subject_id, total_lessons, available_lessons,
   reserved_lessons, completed_lessons, total_price, price_per_lesson, paid,
   payment_status, active, created_at, expires_at, billing_period_start,
-  billing_period_end, pool_organization_id, pool_email_sent_at,
+  billing_period_end, pool_organization_id, pool_email_sent_at, extras_period_start,
   subject:subjects(name, color, is_trial),
   lesson_package_items(subject_id, total_lessons, available_lessons, total_price,
     price_per_lesson, position, subjects!inner(name, color, is_trial))
@@ -182,7 +182,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const belongsToOrg = pkg.pool_organization_id === organizationId
         || organizationTutorIds.has(String(pkg.tutor_id || ''));
       const visibleState = pkg.payment_status !== 'cancelled'
-        && (isPayableUnpaidPooledPackage(pkg) || pkg.active !== false);
+        && (isPayableUnpaidPooledPackage(pkg) || pkg.active !== false
+          || (pkg.extras_period_start && isUnpaidPackage(pkg)));
       return belongsToOrg && visibleState;
     });
     return json(res, 200, { packages });

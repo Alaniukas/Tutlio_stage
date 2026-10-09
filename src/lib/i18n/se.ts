@@ -24,6 +24,20 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const se: Record<string, string> = {
+  'companyNav.tutorFinance': 'Lärarnas ekonomi',
+  'invoices.changeNumber': 'Ändra nummer',
+  'invoices.newNumber': 'Nytt fakturanummer',
+  'invoices.numberConflict': 'Numret används redan eller fakturan har ändrats. Uppdatera listan och välj ett annat nummer.',
+  'invoices.numberCorrectionNote': 'Nuvarande nummer: {number}. Det korrigerade numret visas i listan och PDF-filen. Det tidigare numret sparas i ändringshistoriken.',
+  'orgFinance.licensedTutors': 'Lärare med en aktiv Tutlio-licens',
+  'orgFinance.earnedBeforeAdjustments': 'Ersättning före justeringar',
+  'orgFinance.payRateMissing': 'Ersättningsnivån har inte angetts.',
+  'orgFinance.noAdjustments': 'Inga avdrag eller justeringar under denna period.',
+  'orgFinance.adjustmentTutorNoShow': 'Läraren uteblev',
+  'orgFinance.adjustmentMissingReport': 'Lektionsrapport saknas',
+  'orgFinance.adjustmentManualPenalty': 'Manuellt avdrag',
+  'orgFinance.adjustmentManualCorrection': 'Manuell justering',
+  'orgFinance.refresh': 'Uppdatera',
   ...schoolStaffPreviewTranslations.se,
   ...tutorEnvironmentTranslations.se,
   'school.groups.loadMore': 'Visa fler ({shown} av {total})',

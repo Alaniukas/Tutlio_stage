@@ -7,6 +7,22 @@
  * an unrelated missing key still fails the locale quality tests.
  */
 export const DRAFT_LOCALE_ALANO_FALLBACK_KEYS = new Set<string>([
+  // Pro Klasė tutor finances and number corrections follow the same 13-locale
+  // release as tutor company access. Draft locales retain English until review.
+  'companyNav.tutorFinance',
+  'invoices.changeNumber',
+  'invoices.newNumber',
+  'invoices.numberConflict',
+  'invoices.numberCorrectionNote',
+  'orgFinance.licensedTutors',
+  'orgFinance.earnedBeforeAdjustments',
+  'orgFinance.payRateMissing',
+  'orgFinance.noAdjustments',
+  'orgFinance.adjustmentTutorNoShow',
+  'orgFinance.adjustmentMissingReport',
+  'orgFinance.adjustmentManualPenalty',
+  'orgFinance.adjustmentManualCorrection',
+  'orgFinance.refresh',
   // Tutor company access and invoice regeneration ship in the 13 baseline
   // locales. Newer locales retain their documented English fallback.
   'tutorEnv.viewingCompany',

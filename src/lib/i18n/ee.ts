@@ -14,6 +14,20 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const ee: Record<string, string> = {
+  'companyNav.tutorFinance': 'Õpetajate rahaasjad',
+  'invoices.changeNumber': 'Muuda numbrit',
+  'invoices.newNumber': 'Uus arve number',
+  'invoices.numberConflict': 'See number on juba kasutusel või arve on muutunud. Värskendage loendit ja valige teine number.',
+  'invoices.numberCorrectionNote': 'Praegune number: {number}. Parandatud number kuvatakse loendis ja PDF-is. Eelmine number säilitatakse muudatuste ajaloos.',
+  'orgFinance.licensedTutors': 'Aktiivse Tutlio litsentsiga õpetajad',
+  'orgFinance.earnedBeforeAdjustments': 'Tasu enne korrigeerimisi',
+  'orgFinance.payRateMissing': 'Tasu määr ei ole määratud.',
+  'orgFinance.noAdjustments': 'Selles perioodis pole trahve ega korrigeerimisi.',
+  'orgFinance.adjustmentTutorNoShow': 'Õpetaja ei ilmunud kohale',
+  'orgFinance.adjustmentMissingReport': 'Tunni aruanne puudub',
+  'orgFinance.adjustmentManualPenalty': 'Käsitsi määratud trahv',
+  'orgFinance.adjustmentManualCorrection': 'Käsitsi tehtud korrigeerimine',
+  'orgFinance.refresh': 'Värskenda',
   ...schoolStaffPreviewTranslations.ee,
   ...tutorEnvironmentTranslations.ee,
   'invoiceCreate.regenerateExistingConfirm': "Arved {nums} on selle perioodi eest juba koostatud. Kas soovite need kindlasti uuesti koostada? Varasemad tasumata arved tühistatakse ning uued arvestavad ka hiljem sisestatud tunde.",

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PRO_KLASE_ORG_ID, PRO_KLASE_QA_ORG_ID } from '../../src/lib/marketMoney';
 import {
   parseOrgTrialPolicy,
   shouldAutoMarkNextLessonTrial,
@@ -9,6 +10,13 @@ import {
 } from '../../src/lib/orgTrialPolicy';
 
 describe('orgTrialPolicy', () => {
+  it.each([PRO_KLASE_ORG_ID, PRO_KLASE_QA_ORG_ID])('exempts a missed Pro Klasė trial from reporting (%s)', organizationId => {
+    const options = { policy: parseOrgTrialPolicy({ trial_comment_required: true }), isTrial: true,
+      organizationId, sessionId: 'trial', studentTrials: [{ id: 'trial', status: 'no_show' }] };
+    expect(sessionNeedsOrgTrialComment({ ...options, status: 'no_show' })).toBe(false);
+    expect(sessionNeedsOrgTrialComment({ ...options, status: 'completed' })).toBe(true);
+    expect(sessionNeedsOrgTrialComment({ ...options, organizationId: 'another-org', status: 'no_show' })).toBe(true);
+  });
   it('defaults to one trial and comment on the first', () => {
     expect(parseOrgTrialPolicy({})).toEqual({
       commentRequired: false,

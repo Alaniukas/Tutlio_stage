@@ -4,14 +4,23 @@ const state = vi.hoisted(() => ({ tables: {} as Record<string, any[]>, writes: [
   replacements: [] as any[], replacementError: false }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => fakeDb() }));
 vi.mock('../../api/_lib/auth.js', () => ({ verifyRequestAuth: async () => ({ isInternal: true }) }));
-vi.mock('../../api/_lib/invoiceNumber.js', () => ({ allocateInvoiceNumber: async () => { state.allocations++; return 'T-1'; }, formatInvoiceSeriesHeading: () => 'T-1' }));
+vi.mock('../../api/_lib/invoiceNumber.js', () => ({ allocateInvoiceNumber: async () => { state.allocations++; return 'T-1'; },
+  formatInvoiceSeriesHeading: () => 'T-1', formatStoredInvoiceNumber: (series: string, number: number) => `${series}-${String(number).padStart(3, '0')}` }));
 vi.mock('../../api/_lib/invoicePdf.js', () => ({ generateInvoicePdf: async () => new Uint8Array([1]) }));
 vi.mock('../../api/_lib/invoiceBranding.js', () => ({ resolveInvoiceBranding: async () => null }));
 import handler from '../../api/generate-invoice';
 
 function fakeDb(): any {
   return { storage: { from: () => ({ upload: async () => ({ error: null }) }) },
-    rpc: async (_name: string, args: any) => {
+    rpc: async (name: string, args: any) => {
+      if (name === 'allocate_org_tutor_invoice_number') {
+        state.allocations++;
+        return { data: [{ invoice_series: args.p_default_series, allocated_number: 1 }], error: null };
+      }
+      if (name === 'create_org_tutor_pay_invoice') {
+        state.writes.push({ table: 'invoices', value: args.p_invoice }, { table: 'invoice_line_items', value: args.p_lines });
+        return { data: { id: 'proklase-invoice', ...args.p_invoice }, error: null };
+      }
       state.replacements.push(args);
       return state.replacementError ? { data: null, error: { message: 'Replacement failed' } }
         : { data: { id: 'replacement', ...args.p_invoice }, error: null };

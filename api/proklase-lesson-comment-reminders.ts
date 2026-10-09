@@ -75,7 +75,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .select('id, student_id, tutor_comment, status, status_confirmed_at, subjects!inner(is_trial)')
           .eq('tutor_id', tutorId)
           .eq('subjects.is_trial', true)
-          .in('status', ['completed', 'no_show'])
+          .eq('status', 'completed')
           .lte('status_confirmed_at', reminderCutoff)
           .order('id', { ascending: true })
           .range(offset, offset + 999);

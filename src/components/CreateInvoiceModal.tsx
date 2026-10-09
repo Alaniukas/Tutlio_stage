@@ -96,9 +96,10 @@ export default function CreateInvoiceModal({
   useEffect(() => {
     if (isOpen) {
       const today = new Date();
-      const thirtyDaysAgo = subDays(today, 30);
-      setPeriodStart(format(thirtyDaysAgo, 'yyyy-MM-dd'));
-      setPeriodEnd(format(today, 'yyyy-MM-dd'));
+      const previousMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const proKlaseMonthly = isOrgTutor && isProKlaseOrg(schoolOrganizationId);
+      setPeriodStart(format(proKlaseMonthly ? previousMonth : subDays(today, 30), 'yyyy-MM-dd'));
+      setPeriodEnd(format(proKlaseMonthly ? new Date(today.getFullYear(), today.getMonth(), 0) : today, 'yyyy-MM-dd'));
       setPreviewMode(false);
       setRegeneration(undefined);
       setSessions([]);
@@ -109,7 +110,7 @@ export default function CreateInvoiceModal({
       checkInvoiceProfile();
       if (isOrgTutor) fetchOrgBuyerInfo();
     }
-  }, [isOpen, isOrgTutor, billingTutorId]);
+  }, [isOpen, isOrgTutor, billingTutorId, schoolOrganizationId]);
 
   const fetchOrgBuyerInfo = async () => {
     try {
@@ -220,7 +221,7 @@ export default function CreateInvoiceModal({
         if (!tutorId) throw new Error(t('invoiceCreate.noSessions'));
 
         const issuingForAnotherTutor = !!billingTutorId && billingTutorId !== user.id;
-        if (!issuingForAnotherTutor && !schoolPayMode) {
+        if (!issuingForAnotherTutor && !schoolPayMode && !isProKlaseOrg(schoolOrganizationId)) {
           const periodInvoiceKey = `periodStart=${encodeURIComponent(periodStart)}&periodEnd=${encodeURIComponent(periodEnd)}`;
           const periodInvoiceRes = await fetchOrgTutorInvoicesDeduped(periodInvoiceKey);
           if (periodInvoiceRes.ok) {
@@ -261,6 +262,13 @@ export default function CreateInvoiceModal({
           return;
         }
         if (schoolPayMode && precheckJson.regeneration) setRegeneration(precheckJson.regeneration);
+        if (precheckJson.canGenerate === false && !(schoolPayMode && precheckJson.regeneration)) {
+          setError(precheckJson.error || t('invoiceCreate.noSessions'));
+          setSessions([]);
+          return;
+        }
+        const eligibleSessionIds = Array.isArray(precheckJson.eligibleSessionIds)
+          ? new Set<string>(precheckJson.eligibleSessionIds) : null;
 
         const startIso = schoolPayMode ? schoolDate(periodStart).toISOString() : periodStart + 'T00:00:00';
         const endIso = schoolPayMode ? endOfDay(schoolDate(periodEnd)).toISOString() : periodEnd + 'T23:59:59';
@@ -279,8 +287,9 @@ export default function CreateInvoiceModal({
         const [{ data: prof, error: profErr }, { data: orgRow }, { data: sessRows, error: sessErr }, attendanceRows] = await Promise.all([
           supabase.from('profiles').select('organization_id, company_commission_percent, company_individual_commission_percent, company_commission_by_subject').eq('id', tutorId).maybeSingle(),
           supabase.from('organizations').select('default_company_commission_percent').eq('id', schoolOrganizationId || '').maybeSingle(),
-          schoolPayMode
-            ? fetchAllRows<any>((from, to) => sessionQuery().order('start_time').order('id').range(from, to))
+          schoolPayMode || isProKlaseOrg(schoolOrganizationId)
+            ? fetchAllRows<any>((from, to) => sessionQuery().order('start_time').order('id').range(from, to),
+              isProKlaseOrg(schoolOrganizationId) ? Infinity : 10_000)
               .then(data => ({ data, error: null }))
             : sessionQuery(),
           schoolPayMode ? fetchSchoolTutorAttendancePayRows({ tutorId, periodStart, periodEnd })
@@ -305,7 +314,8 @@ export default function CreateInvoiceModal({
             .gte('created_at', startIso)
             .lte('created_at', endIso);
           if (adjustmentsError) throw adjustmentsError;
-          setAdjustmentsEur((adjustments || []).reduce((sum, row) => sum + Number(row.amount_eur || 0), 0));
+          setAdjustmentsEur(typeof precheckJson.adjustmentsEur === 'number' ? precheckJson.adjustmentsEur
+            : (adjustments || []).reduce((sum, row) => sum + Number(row.amount_eur || 0), 0));
         }
         const rows = schoolPayMode
           ? schoolTutorPayOccurrences([...(sessRows || []), ...attendanceRows] as any[], tutorPayRate, new Date(), {
@@ -323,6 +333,7 @@ export default function CreateInvoiceModal({
             _schoolPayIssue: occurrence.payIssue,
           }))
           : (sessRows || [])
+          .filter((s: any) => !eligibleSessionIds || eligibleSessionIds.has(s.id))
           .filter((s: any) => !proKlasePay || Boolean(s.status_confirmed_at))
           .map((s: any) => ({
           ...s,

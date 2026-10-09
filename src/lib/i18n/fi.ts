@@ -14,6 +14,20 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const fi: Record<string, string> = {
+  'companyNav.tutorFinance': 'Opettajien talous',
+  'invoices.changeNumber': 'Muuta numeroa',
+  'invoices.newNumber': 'Uusi laskunumero',
+  'invoices.numberConflict': 'Numero on jo käytössä tai lasku on muuttunut. Päivitä luettelo ja valitse toinen numero.',
+  'invoices.numberCorrectionNote': 'Nykyinen numero: {number}. Korjattu numero näkyy luettelossa ja PDF-tiedostossa. Edellinen numero säilytetään muutoshistoriassa.',
+  'orgFinance.licensedTutors': 'Opettajat, joilla on aktiivinen Tutlio-lisenssi',
+  'orgFinance.earnedBeforeAdjustments': 'Palkkio ennen oikaisuja',
+  'orgFinance.payRateMissing': 'Palkkion määrää ei ole asetettu.',
+  'orgFinance.noAdjustments': 'Tällä jaksolla ei ole vähennyksiä tai oikaisuja.',
+  'orgFinance.adjustmentTutorNoShow': 'Opettaja ei saapunut paikalle',
+  'orgFinance.adjustmentMissingReport': 'Tuntiraportti puuttuu',
+  'orgFinance.adjustmentManualPenalty': 'Manuaalinen vähennys',
+  'orgFinance.adjustmentManualCorrection': 'Manuaalinen oikaisu',
+  'orgFinance.refresh': 'Päivitä',
   ...schoolStaffPreviewTranslations.fi,
   ...tutorEnvironmentTranslations.fi,
   'invoiceCreate.regenerateExistingConfirm': "Laskut {nums} on jo luotu tälle ajanjaksolle. Haluatko varmasti luoda ne uudelleen? Aiemmat maksamattomat laskut perutaan, ja uudet sisältävät myös myöhemmin kirjatut oppitunnit.",

@@ -9,6 +9,20 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const lt: Record<string, string> = {
+  'companyNav.tutorFinance': 'Korepetitorių finansai',
+  'invoices.changeNumber': 'Keisti numerį',
+  'invoices.newNumber': 'Naujas sąskaitos numeris',
+  'invoices.numberConflict': 'Šis numeris jau naudojamas arba sąskaita pasikeitė. Atnaujinkite sąrašą ir pasirinkite kitą numerį.',
+  'invoices.numberCorrectionNote': 'Dabartinis numeris: {number}. Pataisytas numeris bus rodomas sąraše ir PDF. Ankstesnis numeris išsaugomas pakeitimų istorijoje.',
+  'orgFinance.licensedTutors': 'Korepetitoriai su aktyvia Tutlio licencija',
+  'orgFinance.earnedBeforeAdjustments': 'Atlygis prieš korekcijas',
+  'orgFinance.payRateMissing': 'Nenustatytas atlygio tarifas.',
+  'orgFinance.noAdjustments': 'Šiuo laikotarpiu baudų ir korekcijų nėra.',
+  'orgFinance.adjustmentTutorNoShow': 'Korepetitorius neatvyko',
+  'orgFinance.adjustmentMissingReport': 'Nepateikta ataskaita',
+  'orgFinance.adjustmentManualPenalty': 'Rankinė bauda',
+  'orgFinance.adjustmentManualCorrection': 'Rankinė korekcija',
+  'orgFinance.refresh': 'Atnaujinti',
   ...schoolStaffPreviewTranslations.lt,
   ...tutorEnvironmentTranslations.lt,
   'invoiceCreate.regenerateExistingConfirm': "Sąskaitos {nums} šiam laikotarpiui jau suformuotos. Ar tikrai norite pergeneruoti? Ankstesnės neapmokėtos sąskaitos bus anuliuotos, o naujos perskaičiuotos įtraukiant ir vėliau įvestas pamokas.",

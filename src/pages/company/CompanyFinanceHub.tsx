@@ -1,21 +1,28 @@
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CreditCard, BarChart3, FileText, Receipt, FileSpreadsheet } from 'lucide-react';
+import { CreditCard, BarChart3, FileText, Receipt, FileSpreadsheet, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { useOptionalOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
+import { isProKlaseOrg } from '@/lib/marketMoney';
 import CompanyFinance from './CompanyFinance';
 import CompanyInvoices from './CompanyInvoices';
 import CompanyPayments from './CompanyPayments';
 import CompanyPlatformInvoices from './CompanyPlatformInvoices';
 import CompanySchoolFinanceReport from './CompanySchoolFinanceReport';
 
-type TabId = 'payments' | 'report' | 'finance' | 'invoices' | 'billing';
+const CompanyTutorFinance = lazy(() => import('./CompanyTutorFinance'));
+
+type TabId = 'payments' | 'report' | 'finance' | 'invoices' | 'billing' | 'tutor-finance';
 
 export default function CompanyFinanceHub() {
   const { t } = useTranslation();
   const entityType = useOrgEntityType();
   const isSchool = entityType === 'school';
+  const access = useOptionalOrgAdminAccess();
+  const showTutorFinance = !isSchool && isProKlaseOrg(access?.membership?.organizationId)
+    && access?.can('finance.view') === true;
   const [searchParams, setSearchParams] = useSearchParams();
 
   const tabs = useMemo(() => {
@@ -29,8 +36,9 @@ export default function CompanyFinanceHub() {
     if (!isSchool) {
       all.push({ id: 'billing', label: t('companyNav.tutlioInvoices'), icon: Receipt });
     }
+    if (showTutorFinance) all.push({ id: 'tutor-finance', label: t('companyNav.tutorFinance'), icon: Users });
     return all;
-  }, [t, isSchool]);
+  }, [t, isSchool, showTutorFinance]);
 
   const defaultTab = isSchool ? 'payments' : 'finance';
   const raw = searchParams.get('tab') as TabId | null;
@@ -73,6 +81,11 @@ export default function CompanyFinanceHub() {
       {activeTab === 'finance' && <CompanyFinance />}
       {activeTab === 'invoices' && <CompanyInvoices />}
       {activeTab === 'billing' && !isSchool && <CompanyPlatformInvoices />}
+      {activeTab === 'tutor-finance' && showTutorFinance && (
+        <Suspense fallback={<p className="text-sm text-gray-500">{t('common.loadingDots')}</p>}>
+          <CompanyTutorFinance />
+        </Suspense>
+      )}
     </div>
   );
 }

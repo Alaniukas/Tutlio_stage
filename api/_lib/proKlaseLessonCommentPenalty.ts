@@ -45,6 +45,7 @@ export function proKlaseSessionRequiresTrialComment(
   policy: OrgTrialPolicy,
   studentTrials: ProKlaseTrialHistorySession[],
 ): boolean {
+  if (session.status === 'no_show') return false;
   const subject = Array.isArray(session.subjects) ? session.subjects[0] : session.subjects;
   return sessionNeedsOrgTrialComment({
     policy,
@@ -57,7 +58,7 @@ export function proKlaseSessionRequiresTrialComment(
 export function proKlaseSessionMissingComment(
   session: ProKlaseCommentPenaltySession,
 ): boolean {
-  return ['completed', 'no_show'].includes(session.status)
+  return session.status === 'completed'
     && Boolean(session.status_confirmed_at)
     && !proKlaseSessionHasTutorComment(session);
 }

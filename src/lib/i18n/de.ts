@@ -14,6 +14,20 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const de: Record<string, string> = {
+  'companyNav.tutorFinance': 'Finanzen der Lehrkräfte',
+  'invoices.changeNumber': 'Nummer ändern',
+  'invoices.newNumber': 'Neue Rechnungsnummer',
+  'invoices.numberConflict': 'Diese Nummer wird bereits verwendet oder die Rechnung wurde geändert. Aktualisieren Sie die Liste und wählen Sie eine andere Nummer.',
+  'invoices.numberCorrectionNote': 'Aktuelle Nummer: {number}. Die korrigierte Nummer erscheint in der Liste und im PDF. Die vorherige Nummer bleibt im Änderungsverlauf erhalten.',
+  'orgFinance.licensedTutors': 'Lehrkräfte mit aktiver Tutlio-Lizenz',
+  'orgFinance.earnedBeforeAdjustments': 'Vergütung vor Korrekturen',
+  'orgFinance.payRateMissing': 'Der Vergütungssatz wurde nicht festgelegt.',
+  'orgFinance.noAdjustments': 'Keine Abzüge oder Korrekturen in diesem Zeitraum.',
+  'orgFinance.adjustmentTutorNoShow': 'Lehrkraft ist nicht erschienen',
+  'orgFinance.adjustmentMissingReport': 'Unterrichtsbericht fehlt',
+  'orgFinance.adjustmentManualPenalty': 'Manueller Abzug',
+  'orgFinance.adjustmentManualCorrection': 'Manuelle Korrektur',
+  'orgFinance.refresh': 'Aktualisieren',
   ...schoolStaffPreviewTranslations.de,
   ...tutorEnvironmentTranslations.de,
   'invoiceCreate.regenerateExistingConfirm': "Die Rechnungen {nums} wurden für diesen Zeitraum bereits erstellt. Möchten Sie sie wirklich neu erstellen? Die bisherigen unbezahlten Rechnungen werden storniert und die neuen berücksichtigen auch später erfasste Stunden.",

@@ -14,6 +14,20 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const lv: Record<string, string> = {
+  'companyNav.tutorFinance': 'Skolotāju finanses',
+  'invoices.changeNumber': 'Mainīt numuru',
+  'invoices.newNumber': 'Jaunais rēķina numurs',
+  'invoices.numberConflict': 'Šis numurs jau tiek izmantots vai rēķins ir mainījies. Atsvaidziniet sarakstu un izvēlieties citu numuru.',
+  'invoices.numberCorrectionNote': 'Pašreizējais numurs: {number}. Labotais numurs būs redzams sarakstā un PDF. Iepriekšējais numurs tiks saglabāts izmaiņu vēsturē.',
+  'orgFinance.licensedTutors': 'Skolotāji ar aktīvu Tutlio licenci',
+  'orgFinance.earnedBeforeAdjustments': 'Atlīdzība pirms korekcijām',
+  'orgFinance.payRateMissing': 'Atlīdzības likme nav iestatīta.',
+  'orgFinance.noAdjustments': 'Šajā periodā nav sodu vai korekciju.',
+  'orgFinance.adjustmentTutorNoShow': 'Skolotājs neieradās',
+  'orgFinance.adjustmentMissingReport': 'Nav iesniegta nodarbības atskaite',
+  'orgFinance.adjustmentManualPenalty': 'Manuāls sods',
+  'orgFinance.adjustmentManualCorrection': 'Manuāla korekcija',
+  'orgFinance.refresh': 'Atjaunināt',
   ...schoolStaffPreviewTranslations.lv,
   ...tutorEnvironmentTranslations.lv,
   'invoiceCreate.regenerateExistingConfirm': "Rēķini {nums} par šo periodu jau ir izveidoti. Vai tiešām vēlaties tos izveidot no jauna? Iepriekšējie neapmaksātie rēķini tiks atcelti, un jaunajos tiks iekļautas arī vēlāk ievadītās nodarbības.",

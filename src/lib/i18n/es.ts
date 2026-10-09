@@ -14,6 +14,20 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const es: Record<string, string> = {
+  'companyNav.tutorFinance': 'Finanzas de tutores',
+  'invoices.changeNumber': 'Cambiar número',
+  'invoices.newNumber': 'Nuevo número de factura',
+  'invoices.numberConflict': 'Este número ya se utiliza o la factura ha cambiado. Actualiza la lista y elige otro número.',
+  'invoices.numberCorrectionNote': 'Número actual: {number}. El número corregido aparecerá en la lista y en el PDF. El número anterior se conservará en el historial de cambios.',
+  'orgFinance.licensedTutors': 'Tutores con licencia Tutlio activa',
+  'orgFinance.earnedBeforeAdjustments': 'Retribución antes de ajustes',
+  'orgFinance.payRateMissing': 'No se ha definido la tarifa de remuneración.',
+  'orgFinance.noAdjustments': 'No hay penalizaciones ni ajustes en este período.',
+  'orgFinance.adjustmentTutorNoShow': 'El tutor no asistió',
+  'orgFinance.adjustmentMissingReport': 'Falta el informe de la clase',
+  'orgFinance.adjustmentManualPenalty': 'Penalización manual',
+  'orgFinance.adjustmentManualCorrection': 'Ajuste manual',
+  'orgFinance.refresh': 'Actualizar',
   ...schoolStaffPreviewTranslations.es,
   ...tutorEnvironmentTranslations.es,
   'invoiceCreate.regenerateExistingConfirm': "Las facturas {nums} ya se han generado para este período. ¿Seguro que quieres volver a generarlas? Se anularán las anteriores facturas pendientes de pago y las nuevas incluirán las clases añadidas después.",

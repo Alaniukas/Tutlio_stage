@@ -16,6 +16,20 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const nl: Record<string, string> = {
+  'companyNav.tutorFinance': 'Financiën van docenten',
+  'invoices.changeNumber': 'Nummer wijzigen',
+  'invoices.newNumber': 'Nieuw factuurnummer',
+  'invoices.numberConflict': 'Dit nummer wordt al gebruikt of de factuur is gewijzigd. Vernieuw de lijst en kies een ander nummer.',
+  'invoices.numberCorrectionNote': 'Huidig nummer: {number}. Het gecorrigeerde nummer verschijnt in de lijst en de PDF. Het vorige nummer blijft bewaard in de wijzigingsgeschiedenis.',
+  'orgFinance.licensedTutors': 'Docenten met een actieve Tutlio-licentie',
+  'orgFinance.earnedBeforeAdjustments': 'Vergoeding vóór correcties',
+  'orgFinance.payRateMissing': 'Het vergoedingstarief is niet ingesteld.',
+  'orgFinance.noAdjustments': 'Geen inhoudingen of correcties in deze periode.',
+  'orgFinance.adjustmentTutorNoShow': 'Docent niet verschenen',
+  'orgFinance.adjustmentMissingReport': 'Lesverslag ontbreekt',
+  'orgFinance.adjustmentManualPenalty': 'Handmatige inhouding',
+  'orgFinance.adjustmentManualCorrection': 'Handmatige correctie',
+  'orgFinance.refresh': 'Vernieuwen',
   ...schoolStaffPreviewTranslations.nl,
   ...tutorEnvironmentTranslations.nl,
   'school.groups.loadMore': 'Meer weergeven ({shown} van {total})',

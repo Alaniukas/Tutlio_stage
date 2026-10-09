@@ -50,6 +50,25 @@ async function postJsonWithTimeout(url: string, payload: unknown, timeoutMs = 20
   }
 }
 
+async function sessionsOutsidePooledOffers(db: any, organizationId: string, sessions: any[]) {
+  const offeredIds = new Set<string>();
+  // Quotes are the persisted list of lessons offered for payment. An unpaid
+  // offer has no session package links yet, so links alone cannot prevent
+  // billing those same lessons again as extras. Match IDs across all tutors.
+  for (let offset = 0; offset < sessions.length; offset += 100) {
+    const { data, error } = await db.from('pooled_package_quotes')
+      .select('session_ids, lesson_packages!inner(pool_organization_id, payment_status)')
+      .eq('lesson_packages.pool_organization_id', organizationId)
+      .neq('lesson_packages.payment_status', 'cancelled')
+      .overlaps('session_ids', sessions.slice(offset, offset + 100).map(s => s.id));
+    if (error) throw new Error(`Failed to check monthly package coverage: ${error.message}`);
+    for (const quote of data || []) {
+      for (const id of quote.session_ids || []) offeredIds.add(id);
+    }
+  }
+  return sessions.filter(s => !offeredIds.has(s.id));
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -144,8 +163,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const [tutorId, studentId] = pairKey.split('|');
     const orgId = orgByTutor.get(tutorId)!;
     try {
+      const extraSessions = await sessionsOutsidePooledOffers(supabase, orgId, pairSessions);
+      if (extraSessions.length === 0) {
+        skipped += 1;
+        continue;
+      }
       // Unique-index guard (also skip when a cancelled-then-recreated race left one).
-      const { data: existingExtras } = await supabase
+      const { data: existingExtras, error: existingExtrasError } = await supabase
         .from('lesson_packages')
         .select('id')
         .eq('tutor_id', tutorId)
@@ -153,6 +177,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('extras_period_start', periodStart)
         .neq('payment_status', 'cancelled')
         .maybeSingle();
+      if (existingExtrasError) throw new Error(existingExtrasError.message);
       if (existingExtras) {
         skipped += 1;
         continue;
@@ -205,7 +230,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       type ExtrasItem = { subjectId: string; subjectName: string; count: number; pricePerLesson: number; sessionIds: string[] };
       const itemsBySubject = new Map<string, ExtrasItem>();
-      for (const s of pairSessions) {
+      for (const s of extraSessions) {
         const subj = Array.isArray(s.subjects) ? s.subjects[0] : s.subjects;
         const subjectId = s.subject_id as string;
         let entry = itemsBySubject.get(subjectId);

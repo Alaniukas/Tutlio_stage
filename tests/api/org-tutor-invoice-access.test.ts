@@ -23,12 +23,13 @@ function db(): any {
       const request = { table, filters: [] as Array<[string, unknown]> };
       state.queries.push(request);
       const predicates: Array<(row: any) => boolean> = [];
-      const value = (row: any, key: string) => key.includes('->>')
-        ? row[key.split('->>')[0]]?.[key.split('->>')[1]] : row[key];
-      const result = () => ({ data: (state.tables[table] || []).filter(row => predicates.every(p => p(row))),
+      let offset = 0, maximum = Infinity;
+      const value = (row: any, key: string) => key.split(/\.|->>/).reduce((item, part) => item?.[part], row);
+      const result = () => ({ data: (state.tables[table] || []).filter(row => predicates.every(p => p(row))).slice(offset, maximum),
         error: state.errorTable === table ? { message: 'Private database error' } : null });
       const q: any = {
         select: () => q, order: () => q, limit: () => q,
+        range: (from: number, to: number) => { offset = from; maximum = to + 1; return q; },
         eq: (key: string, expected: unknown) => { request.filters.push([key, expected]); predicates.push(row => value(row,key) === expected); return q; },
         neq: (key: string, expected: unknown) => { predicates.push(row => value(row,key) !== expected); return q; },
         in: (key: string, values: unknown[]) => { predicates.push(row => values.includes(value(row,key))); return q; },
@@ -122,6 +123,17 @@ describe('organization tutor invoice confidentiality', () => {
     const res=response(); await pdf({ method:'GET',query:{ id } } as any,res);
     expect(res.code).toBe(200); expect(state.pdf).toHaveBeenCalledOnce();
   });
+  it('regenerates a corrected Pro Klasė PDF with the stored tutor series instead of serving the old file', async () => {
+    const organizationId = 'b0a00000-7e57-4000-8000-000000000001';
+    state.tables.profiles[0].organization_id = organizationId;
+    state.tables.organizations = [{ id: organizationId, name: 'Organization', entity_type: 'company' }];
+    state.tables.invoices = [{ ...invoice('own-pay', 'admin', { invoiceKind: 'tutor_pay', tutorId: 'tutor' }),
+      organization_id: organizationId, invoice_number: 'DOMSMA-001', pdf_storage_path: 'previous-number.pdf' }];
+    const res = response(); await pdf({ method: 'GET', query: { id: 'own-pay' } } as any, res);
+    expect(res.code).toBe(200);
+    expect(state.pdf.mock.calls[0][0]).toMatchObject({ invoiceNumber: 'DOMSMA-001', totalAmount: 10.40 });
+    expect(res.headers['Content-Disposition']).toContain('DOMSMA-001');
+  });
   it('keeps customer PDFs available to the authorized organization admin', async () => {
     state.admin={ organizationId:'org',role:'owner',permissions:{} };
     const res=response(); await pdf({ method:'GET',query:{ id:'related-customer' } } as any,res);
@@ -155,7 +167,7 @@ describe('organization tutor invoice confidentiality', () => {
     state.tables.invoice_line_items=[{ invoice_id:'CUSTOMER-SF',session_ids:['lesson'] }];
     state.tables.sessions=[{ id:'lesson',tutor_id:'tutor',status:'completed',status_confirmed_at:'2026-09-15T11:01:00Z',
       start_time:'2026-09-15T10:00:00Z',end_time:'2026-09-15T11:00:00Z',price:40,
-      subjects:{ is_trial:false },students:{ full_name:'Ruste' } }];
+      subjects:{ is_trial:false },students:{ full_name:'Ruste', organization_id: org } }];
     const body={ tutorId:'tutor',periodStart:'2026-09-01',periodEnd:'2026-09-30',groupingType:'single',isOrgTutor:true,precheckOnly:true };
     const res=response(); await generate({ method:'POST',body } as any,res);
     expect(res.body).toMatchObject({ canGenerate:true });

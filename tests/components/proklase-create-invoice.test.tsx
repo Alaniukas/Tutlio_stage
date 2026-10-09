@@ -5,6 +5,7 @@ import { PRO_KLASE_ORG_ID } from '../../src/lib/marketMoney';
 const state = vi.hoisted(() => ({
   fetch: vi.fn(), userId: 'tutor', organizationError: false,
   generateError: '' as string,
+  precheck: {} as Record<string, unknown>,
 }));
 vi.mock('@/lib/supabase', () => ({ supabase: {
   from: (table: string) => query(table),
@@ -22,7 +23,7 @@ vi.mock('@/components/ui/date-input', () => ({ DateInput: (props: any) => <input
 import CreateInvoiceModal from '../../src/components/CreateInvoiceModal';
 
 function query(table: string) {
-  let selected = '', id = '';
+  let selected = '', id = '', offset = 0, maximum = Infinity;
   const data = () => table === 'profiles'
     ? id === 'admin' ? null : { organization_id: PRO_KLASE_ORG_ID, full_name: 'Tutor', company_commission_percent: 0 }
     : table === 'organizations'
@@ -33,11 +34,13 @@ function query(table: string) {
         start_time: '2026-09-19T08:00:00Z', end_time: '2026-09-19T08:45:00Z',
         status_confirmed_at: '2026-09-21T13:00:00Z', students: { full_name: name, email: 'student@example.test' },
         subjects: { name: 'Bandomoji pamoka', is_trial: true },
-      })) : [];
+      })).slice(offset, maximum) : [];
   const q: any = {
     select: (v: string) => { selected = v; return q; },
     eq: (column: string, v: string) => { if (column === 'id') id = v; return q; },
     gte: () => q, lte: () => q, in: () => q,
+    order: () => q,
+    range: (from: number, to: number) => { offset = from; maximum = to + 1; return q; },
     maybeSingle: async () => ({ data: data(), error: null }),
     then: (resolve: any, reject: any) => Promise.resolve({ data: data(), error: null }).then(resolve, reject),
   };
@@ -45,7 +48,8 @@ function query(table: string) {
 }
 
 beforeEach(() => {
-  state.userId = 'tutor'; state.organizationError = false; state.generateError = '';
+  state.userId = 'tutor'; state.organizationError = false; state.generateError = ''; state.precheck = {};
+  vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-09T12:00:00Z'));
   state.fetch.mockReset();
   state.fetch.mockImplementation(async (url: string, init: any) => {
     const isGeneration = url === '/api/generate-invoice' && !JSON.parse(init.body).precheckOnly;
@@ -54,13 +58,13 @@ beforeEach(() => {
       json: async () => url.startsWith('/api/invoice-settings') ? { data: {
         entity_type: 'individual', activity_number: '123', contact_email: 'tutor@example.test',
       } } : isGeneration ? state.generateError ? { error: state.generateError }
-        : { count: 1, invoiceIds: ['new-invoice'] } : { canGenerate: true, candidateCount: 3 },
+        : { count: 1, invoiceIds: ['new-invoice'] } : { canGenerate: true, candidateCount: 3, ...state.precheck },
     };
   });
   vi.stubGlobal('fetch', state.fetch);
   vi.spyOn(window, 'alert').mockImplementation(() => {});
 });
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 async function preview(props: any = {}) {
   const onClose = vi.fn(), onSuccess = vi.fn();
@@ -73,6 +77,21 @@ async function preview(props: any = {}) {
 }
 
 describe('Pro Klasė invoice preview', () => {
+  it('defaults to the full previous calendar month', async () => {
+    await preview();
+    const request = state.fetch.mock.calls.find(([url]) => url === '/api/generate-invoice')!;
+    expect(JSON.parse(request[1].body)).toMatchObject({ periodStart: '2026-09-01', periodEnd: '2026-09-30' });
+  });
+  it('previews and submits only eligible unbilled lessons returned by the server', async () => {
+    state.precheck = { eligibleSessionIds: ['lesson-1', 'lesson-2'], adjustmentsEur: 10, candidateCount: 2, candidateTotal: 22 };
+    const { onSuccess } = await preview();
+    expect(screen.queryByText('Test')).toBeNull();
+    expect(screen.getByText(/€22.00/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'invoiceCreate.generate' }));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    const request = state.fetch.mock.calls.find(([url, init]) => url === '/api/generate-invoice' && !JSON.parse(init.body).precheckOnly)!;
+    expect(JSON.parse(request[1].body).sessionIds).toEqual(['lesson-1', 'lesson-2']);
+  });
   it('shows the organization as buyer and issues all three €6 no-shows', async () => {
     const { onClose, onSuccess } = await preview();
     expect(screen.getByText('Pro Klasė')).toBeTruthy();

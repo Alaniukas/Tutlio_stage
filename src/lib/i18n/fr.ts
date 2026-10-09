@@ -14,6 +14,20 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const fr: Record<string, string> = {
+  'companyNav.tutorFinance': 'Finances des tuteurs',
+  'invoices.changeNumber': 'Modifier le numéro',
+  'invoices.newNumber': 'Nouveau numéro de facture',
+  'invoices.numberConflict': 'Ce numéro est déjà utilisé ou la facture a changé. Actualisez la liste et choisissez un autre numéro.',
+  'invoices.numberCorrectionNote': 'Numéro actuel : {number}. Le numéro corrigé figurera dans la liste et le PDF. Le numéro précédent sera conservé dans l’historique des modifications.',
+  'orgFinance.licensedTutors': 'Tuteurs avec une licence Tutlio active',
+  'orgFinance.earnedBeforeAdjustments': 'Rémunération avant ajustements',
+  'orgFinance.payRateMissing': 'Le tarif de rémunération n’est pas défini.',
+  'orgFinance.noAdjustments': 'Aucune pénalité ni aucun ajustement pour cette période.',
+  'orgFinance.adjustmentTutorNoShow': 'Absence du tuteur',
+  'orgFinance.adjustmentMissingReport': 'Rapport de cours manquant',
+  'orgFinance.adjustmentManualPenalty': 'Pénalité manuelle',
+  'orgFinance.adjustmentManualCorrection': 'Ajustement manuel',
+  'orgFinance.refresh': 'Actualiser',
   ...schoolStaffPreviewTranslations.fr,
   ...tutorEnvironmentTranslations.fr,
   'invoiceCreate.regenerateExistingConfirm': "Les factures {nums} ont déjà été créées pour cette période. Voulez-vous vraiment les recréer ? Les anciennes factures impayées seront annulées et les nouvelles incluront aussi les cours saisis ultérieurement.",

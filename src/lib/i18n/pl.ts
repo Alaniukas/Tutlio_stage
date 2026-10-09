@@ -12,6 +12,20 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const pl: Record<string, string> = {
+  'companyNav.tutorFinance': 'Finanse korepetytorów',
+  'invoices.changeNumber': 'Zmień numer',
+  'invoices.newNumber': 'Nowy numer faktury',
+  'invoices.numberConflict': 'Ten numer jest już używany lub faktura została zmieniona. Odśwież listę i wybierz inny numer.',
+  'invoices.numberCorrectionNote': 'Obecny numer: {number}. Poprawiony numer pojawi się na liście i w pliku PDF. Poprzedni numer pozostanie w historii zmian.',
+  'orgFinance.licensedTutors': 'Korepetytorzy z aktywną licencją Tutlio',
+  'orgFinance.earnedBeforeAdjustments': 'Wynagrodzenie przed korektami',
+  'orgFinance.payRateMissing': 'Nie ustawiono stawki wynagrodzenia.',
+  'orgFinance.noAdjustments': 'Brak kar i korekt w tym okresie.',
+  'orgFinance.adjustmentTutorNoShow': 'Korepetytor nie pojawił się',
+  'orgFinance.adjustmentMissingReport': 'Brak raportu z lekcji',
+  'orgFinance.adjustmentManualPenalty': 'Kara ręczna',
+  'orgFinance.adjustmentManualCorrection': 'Korekta ręczna',
+  'orgFinance.refresh': 'Odśwież',
   ...schoolStaffPreviewTranslations.pl,
   ...tutorEnvironmentTranslations.pl,
   'invoiceCreate.regenerateExistingConfirm': "Faktury {nums} za ten okres zostały już wygenerowane. Czy na pewno chcesz wygenerować je ponownie? Poprzednie nieopłacone faktury zostaną anulowane, a nowe uwzględnią również zajęcia wprowadzone później.",

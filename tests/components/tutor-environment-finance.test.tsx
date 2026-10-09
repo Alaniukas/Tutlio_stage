@@ -34,6 +34,27 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('pay stays consistent in both assigned tutor environments', () => {
+  it('shows the original fine and its manual correction even when their net amount is zero', async () => {
+    state.company = 0;
+    state.tables.tutor_adjustments = [...qaAdjustments, { ...qaAdjustments[0], id: 'manual-correction',
+      type: 'penalty_manual', amount_eur: 10, reason: 'Baudos korekcija' }];
+    render(<OrgTutorFinanceSummary />);
+    await screen.findByText('Baudos korekcija');
+    expect(within(screen.getByRole('region', { name: 'Atlygio suvestinė' })).getAllByText('€44.00')).toHaveLength(2);
+    const adjustments = within(screen.getByRole('region', { name: 'Baudos ir koregavimai' }));
+    expect(adjustments.getByText('Testinis koregavimas')).toBeTruthy();
+    expect(adjustments.getByText('Baudos korekcija')).toBeTruthy();
+    expect(adjustments.getByText('€-10.00')).toBeTruthy();
+    expect(adjustments.getByText('+€10.00')).toBeTruthy();
+  });
+  it('keeps the Pro Klasė tutor summary scoped to the current organization', async () => {
+    state.company = 0;
+    state.tables.sessions = [...qaSessions, { ...qaSessions[0], id: 'foreign-session',
+      students: { organization_id: 'another-org' } }];
+    render(<OrgTutorFinanceSummary />);
+    expect(await screen.findByText('€34.00')).toBeTruthy();
+    expect(screen.queryByText('€48.00')).toBeNull();
+  });
   it.each([0, 1])('hides a previous pay total when company %i selects an invalid period', async company => {
     state.company = company;
     render(<OrgTutorFinanceSummary />);
@@ -58,7 +79,7 @@ describe('pay stays consistent in both assigned tutor environments', () => {
     render(<OrgTutorFinanceSummary />);
     expect(await screen.findByText(`€${qaExpected[company].total.toFixed(2)}`)).toBeTruthy();
     expect(screen.queryByText(`€${qaExpected[1 - company].total.toFixed(2)}`)).toBeNull();
-    if (company === 0) expect(screen.getByText('€-10.00')).toBeTruthy();
+    if (company === 0) expect(within(screen.getByRole('region', { name: 'Atlygio suvestinė' })).getByText('€-10.00')).toBeTruthy();
   });
   it.each([0, 1])('previews company %i invoice at the same total as earnings, including adjustments and historical rates', async company => {
     state.company = company;

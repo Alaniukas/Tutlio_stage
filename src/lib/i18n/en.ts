@@ -9,6 +9,20 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const en: Record<string, string> = {
+  'companyNav.tutorFinance': 'Tutor finances',
+  'invoices.changeNumber': 'Change number',
+  'invoices.newNumber': 'New invoice number',
+  'invoices.numberConflict': 'This number is already used or the invoice changed. Refresh the list and choose another number.',
+  'invoices.numberCorrectionNote': 'Current number: {number}. The corrected number will appear in the list and PDF. The previous number is retained in the change history.',
+  'orgFinance.licensedTutors': 'Tutors with an active Tutlio license',
+  'orgFinance.earnedBeforeAdjustments': 'Earnings before adjustments',
+  'orgFinance.payRateMissing': 'The pay rate has not been set.',
+  'orgFinance.noAdjustments': 'No penalties or adjustments in this period.',
+  'orgFinance.adjustmentTutorNoShow': 'Tutor did not attend',
+  'orgFinance.adjustmentMissingReport': 'Missing lesson report',
+  'orgFinance.adjustmentManualPenalty': 'Manual penalty',
+  'orgFinance.adjustmentManualCorrection': 'Manual adjustment',
+  'orgFinance.refresh': 'Refresh',
   ...schoolStaffPreviewTranslations.en,
   ...tutorEnvironmentTranslations.en,
   'invoiceCreate.regenerateExistingConfirm': "Invoices {nums} have already been generated for this period. Are you sure you want to regenerate them? The previous unpaid invoices will be cancelled and new ones calculated including lessons entered later.",

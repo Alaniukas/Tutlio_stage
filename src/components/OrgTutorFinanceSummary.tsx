@@ -21,7 +21,9 @@ import { Button } from '@/components/ui/button';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { fmtMoney, isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMoney';
-import { sumProKlasePayBreakdown, type ProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
+import { countProKlaseConfirmedCompleted, sumProKlasePayBreakdown, type ProKlasePayBreakdown, type ProKlaseSessionPayInput } from '@/lib/proKlaseTutorPay';
+import type { TutorPayAdjustment } from '@/lib/proKlaseTutorFinance';
+import ProKlaseTutorFinanceDetails from '@/components/ProKlaseTutorFinanceDetails';
 import { parseTutorPayBySubject, sumOrgTutorLessonsPayEur } from '@/lib/orgTutorLessonPay';
 import { schoolTutorPayOccurrences } from '@/lib/schoolTutorLessonPay';
 import { resolveSchoolTutorGroupPayRate } from '@/lib/schoolTutorDefaultPay';
@@ -91,6 +93,7 @@ export default function OrgTutorFinanceSummary() {
   const [completedCount, setCompletedCount] = useState(0);
   const [noShowCount, setNoShowCount] = useState(0);
   const [payBreakdown, setPayBreakdown] = useState<ProKlasePayBreakdown | null>(null);
+  const [payAdjustments, setPayAdjustments] = useState<TutorPayAdjustment[]>([]);
   const [companyPayEur, setCompanyPayEur] = useState<number | null>(null);
   const [manoHasSubjectRates, setManoHasSubjectRates] = useState(false);
   const [schoolKnownPayEur, setSchoolKnownPayEur] = useState<number | null>(null);
@@ -133,6 +136,7 @@ export default function OrgTutorFinanceSummary() {
 
       setLoading(true);
       setSummaryLoadError(false);
+      setPayAdjustments([]);
       setNoShowCount(0);
       setSchoolKnownPayEur(null);
       setSchoolUnresolvedCount(0);
@@ -250,53 +254,41 @@ export default function OrgTutorFinanceSummary() {
       }
 
       if (proKlasePayMode) {
-        const { data: sessionRows, error: sessionErr } = await supabase
-          .from('sessions')
-          .select('id, status, price, is_complimentary, exclude_from_lesson_count, status_confirmed_at, subjects(is_trial)')
-          .eq('tutor_id', user.id)
-          .in('status', ['completed', 'no_show'])
-          .lte('end_time', new Date().toISOString())
-          .gte('start_time', startIso)
-          .lte('start_time', endIso);
-
-        let adjustmentsEur = 0;
-        let adjustmentsErr: unknown = null;
-        if (profile?.organization_id) {
-          const { data: adjRows, error: adjErr } = await supabase
-            .from('tutor_adjustments')
-            .select('amount_eur')
-            .eq('tutor_id', user.id)
-            .eq('organization_id', profile.organization_id)
-            .gte('created_at', startIso)
-            .lte('created_at', endIso);
-          adjustmentsErr = adjErr;
-          adjustmentsEur = (adjRows || []).reduce(
-            (sum, row) => sum + (Number((row as { amount_eur?: number }).amount_eur) || 0),
-            0,
-          );
-        }
-
-        breakdown = sumProKlasePayBreakdown(
-          (sessionRows || []) as any[],
-          payPerLessonEur,
-          adjustmentsEur,
-        );
-        conductedCount = (sessionRows || []).filter((row) =>
-          row.status === 'completed'
-            && (row as { exclude_from_lesson_count?: boolean | null }).exclude_from_lesson_count !== true
-            && Boolean((row as { status_confirmed_at?: string | null }).status_confirmed_at),
-        ).length;
-        if (cancelled) return;
-        if (sessionErr || adjustmentsErr) {
-          console.error('[OrgTutorFinanceSummary]', sessionErr || adjustmentsErr);
+        try {
+          if (!profile?.organization_id) throw new Error('Tutor organization required');
+          const [sessionRows, adjRows] = await Promise.all([
+            fetchAllRows<ProKlaseSessionPayInput & { exclude_from_lesson_count?: boolean | null }>((from, to) => supabase
+              .from('sessions')
+              .select('id, status, is_complimentary, exclude_from_lesson_count, status_confirmed_at, subjects(is_trial), students!inner(organization_id)')
+              .eq('tutor_id', user.id)
+              .eq('students.organization_id', profile.organization_id)
+              .in('status', ['completed', 'no_show'])
+              .lte('end_time', new Date().toISOString())
+              .gte('start_time', startIso)
+              .lte('start_time', endIso).order('id').range(from, to), Infinity),
+            fetchAllRows<TutorPayAdjustment>((from, to) => supabase
+              .from('tutor_adjustments')
+              .select('id, tutor_id, session_id, type, amount_eur, reason, created_at')
+              .eq('tutor_id', user.id)
+              .eq('organization_id', profile.organization_id)
+              .gte('created_at', startIso)
+              .lte('created_at', endIso).order('created_at', { ascending: false }).order('id').range(from, to), Infinity),
+          ]);
+          const adjustmentsEur = adjRows.reduce((sum, row) => sum + Number(row.amount_eur), 0);
+          breakdown = sumProKlasePayBreakdown(sessionRows, payPerLessonEur, adjustmentsEur);
+          conductedCount = countProKlaseConfirmedCompleted(sessionRows);
+          if (cancelled) return;
+          setCompletedCount(conductedCount);
+          setPayBreakdown(breakdown);
+          setPayAdjustments(adjRows.map(row => ({ ...row, amount_eur: Number(row.amount_eur) })));
+          setCompanyPayEur(null);
+          setManoHasSubjectRates(false);
+        } catch (error) {
+          if (cancelled) return;
+          console.error('[OrgTutorFinanceSummary]', error);
           setSummaryLoadError(true);
           setCompletedCount(0);
           setPayBreakdown(null);
-          setCompanyPayEur(null);
-          setManoHasSubjectRates(false);
-        } else {
-          setCompletedCount(conductedCount);
-          setPayBreakdown(breakdown);
           setCompanyPayEur(null);
           setManoHasSubjectRates(false);
         }
@@ -510,6 +502,11 @@ export default function OrgTutorFinanceSummary() {
           <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-6">
             {t('common.error')}
           </p>
+        ) : proKlasePayMode && payBreakdown ? (
+          <div className="mt-6">
+            <ProKlaseTutorFinanceDetails completedCount={completedCount} rangeLabel={rangeLabel}
+              breakdown={payBreakdown} adjustments={payAdjustments} />
+          </div>
         ) : (
           <div className="mt-6 rounded-xl bg-gray-50 border border-gray-100 p-4">
             <p className="text-sm text-gray-600">
@@ -533,29 +530,6 @@ export default function OrgTutorFinanceSummary() {
                 {t('orgFinance.schoolUnresolvedPay', { count: schoolUnresolvedCount })}
                 <span className="block text-xs mt-1">{t('orgFinance.schoolRateSettingsHint')}</span>
               </p>
-            )}
-            {proKlasePayMode && payBreakdown && (
-              <div className="mt-4 space-y-2 text-sm">
-                <p className="font-medium text-gray-700">{t('orgFinance.payBreakdown')}</p>
-                <div className="flex justify-between text-gray-600">
-                  <span>{t('orgFinance.individualLessons')} ({payBreakdown.individualLessons})</span>
-                  <span>{fmtMoney(payBreakdown.individualEur)}</span>
-                </div>
-                <div className="flex justify-between text-gray-600">
-                  <span>{t('orgFinance.trialLessons')} ({payBreakdown.trialLessons})</span>
-                  <span>{fmtMoney(payBreakdown.trialEur)}</span>
-                </div>
-                <div className="flex justify-between text-gray-600">
-                  <span>{t('orgFinance.noShowLessons')} ({payBreakdown.noShowLessons})</span>
-                  <span>{fmtMoney(payBreakdown.noShowEur)}</span>
-                </div>
-                {payBreakdown.adjustmentsEur !== 0 && (
-                  <div className="flex justify-between text-rose-700">
-                    <span>{t('orgFinance.adjustments')}</span>
-                    <span>{fmtMoney(payBreakdown.adjustmentsEur)}</span>
-                  </div>
-                )}
-              </div>
             )}
             <p className="text-xs text-gray-400 mt-3">
               {schoolPayMode ? t('orgFinance.schoolSummaryNote') : t('orgFinance.companyPaySummaryNote')}

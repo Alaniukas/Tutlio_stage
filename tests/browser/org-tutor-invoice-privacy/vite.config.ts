@@ -9,6 +9,7 @@ const fixture = path.join(workspace, 'tests/browser/org-tutor-invoice-privacy');
 // data. It is never included in the application's build or public routes.
 export default defineConfig({
   root: fixture,
+  cacheDir: path.join(workspace, 'tmp/vite-invoice-privacy'),
   plugins: [react(), tailwindcss()],
   resolve: { alias: [
     ...['lib/supabase', 'lib/apiHelpers', 'lib/preload', 'contexts/UserContext',
