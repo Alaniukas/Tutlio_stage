@@ -13,6 +13,7 @@ import {
   monthlyInvoiceIssueDate,
 } from './_lib/manoKorepetitoriusInvoice.js';
 import { proKlaseSessionPayEur } from './_lib/proKlaseTutorPay.js';
+import { buildProKlaseTutorInvoiceLines, PRO_KLASE_TUTOR_PAY_LINE_VERSION } from './_lib/proKlaseTutorInvoiceLines.js';
 import { formatStoredInvoiceNumber } from './_lib/invoiceNumber.js';
 import { tutorInvoiceSeries } from '../src/lib/tutorInvoiceSeries.js';
 import { loadProKlaseTutorInvoiceCoverage, tutorAdjustmentDescription, uninvoicedTutorAdjustments } from './_lib/proKlaseTutorInvoiceCoverage.js';
@@ -840,7 +841,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           status: 'issued',
           origin: 'generated',
           pdf_meta: isOrgTutor ? { ...pdfMeta, invoiceKind: 'tutor_pay', tutorId,
-            ...(proKlaseTutorInvoice ? { tutorAdjustmentIds: proKlaseAdjustments.filter(adjustment => Number(adjustment.amount_eur) !== 0).map(adjustment => adjustment.id) } : {}) } : pdfMeta,
+            ...(proKlaseTutorInvoice ? { proKlaseTutorPayLineVersion: PRO_KLASE_TUTOR_PAY_LINE_VERSION,
+              tutorAdjustmentIds: proKlaseAdjustments.filter(adjustment => Number(adjustment.amount_eur) !== 0).map(adjustment => adjustment.id) } : {}) } : pdfMeta,
           ...(body.billingBatchId ? { billing_batch_id: body.billingBatchId } : {}),
         };
       const replacementLines = lineItems.map(li => ({
@@ -1178,6 +1180,8 @@ function buildLineItems(
         };
       });
     }
+
+    if (opts?.proKlasePay) return buildProKlaseTutorInvoiceLines(sessions, linePay);
 
     if (groupingType === 'per_payment') {
       return sessions.map(s => {

@@ -14,6 +14,16 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const ee: Record<string, string> = {
+  'school.recordings.chatTitle': "Vestluse ajalugu",
+  'school.recordings.chatLoading': "Vestluse laadimine…",
+  'school.recordings.chatError': "Vestlust ei saanud laadida. Värskendage salvestiste loendit ja proovige uuesti.",
+  'school.recordings.chatEmpty': "Vestluse fail on tühi.",
+  'school.recordings.chatMissing': "Sellele salvestisele vastavat Google Meeti vestlust ei leitud. Seda võidakse veel töödelda või pole seda salvestatud.",
+  'school.recordings.chatRestricted': "Google Drive blokeerib juurdepääsu sellele vestlusele. Võtke ühendust kooli administraatoriga.",
+  'school.recordings.chatExpired': "Selle vestluse vaatamise tähtaeg on möödunud.",
+  'school.recordings.chatAmbiguous': "Vestlust ei saa kindlalt ühe salvestisega siduda. Võtke ühendust kooli administraatoriga.",
+  'school.recordings.chatMissingAdmin': "Kontrollige, et Meet salvestab vestluse ning selle fail on videoga samas seotud kaustas ja sama koosoleku nimega. Pidev koosolekuvestlus ei loo eraldi vestlusfaili.",
+  'school.recordings.chatRestrictedAdmin': "Lubage Google Drive'i vestlusfaili jagamise seadetes vaatajatel fail alla laadida ja seejärel värskendage salvestiste loendit.",
   'companyNav.tutorFinance': 'Õpetajate rahaasjad',
   'invoices.changeNumber': 'Muuda numbrit',
   'invoices.newNumber': 'Uus arve number',

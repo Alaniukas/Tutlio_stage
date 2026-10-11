@@ -286,6 +286,28 @@ describe('GET /api/school-lesson-recording-stream', () => {
     expect(mocks.getMetadata).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])('explains a Drive-blocked chat after checking the current audience (homework=%s)', async (homework) => {
+    const { chat, ticket } = withChat();
+    chat.canDownload = false;
+    if (homework) mocks.verifyHomeworkTicket.mockReturnValue({ studentId: 'student-row', groupId: ticket.groupId, fileId: ticket.fileId, recordingFileId: ticket.recordingFileId });
+    const res = mockRes();
+    await handler({ method: 'GET', query: { t: 'chat' }, headers: {} } as any, res);
+    expect(res.getResult()).toMatchObject({ statusCode: 403, body: { code: 'CHAT_ACCESS_RESTRICTED' } });
+    expect(mocks.slotTag).toHaveBeenCalledWith(expect.anything(), 'group-a', 'file-a');
+    expect(mocks.fetchRange).not.toHaveBeenCalled();
+  });
+
+  it('withholds the Drive restriction reason when a chat belongs to another group time', async () => {
+    const { chat } = withChat();
+    chat.canDownload = false;
+    mocks.slotScope.mockResolvedValue({ unrestricted: false, schedules: [] });
+    const res = mockRes();
+    await handler({ method: 'GET', query: { t: 'chat' }, headers: {} } as any, res);
+    expect(res.getResult().statusCode).toBe(403);
+    expect(res.getResult().body).not.toHaveProperty('code');
+    expect(mocks.fetchRange).not.toHaveBeenCalled();
+  });
+
   it.each(['– Chat', '– Chat transcript'])('streams a bounded extensionless Meet %s file through the authorized proxy', async (suffix) => {
     const { chat, video, text } = withChat();
     const meeting = 'IT - Seniors - 2026/09/14 11:57 BST';

@@ -1,3 +1,5 @@
+export type RecordingChatStatus = 'available' | 'missing' | 'restricted' | 'expired' | 'ambiguous';
+
 /**
  * Match a Google Drive Meet recording to a Tutlio session, then decide
  * which class groups may view it.

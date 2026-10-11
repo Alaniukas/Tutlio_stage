@@ -177,6 +177,24 @@ describe('GET /api/school-lesson-recordings', () => {
     });
   });
 
+  it.each(['missing', 'restricted', 'expired', 'ambiguous'])('returns the %s chat state without issuing a chat ticket', async (chatStatus) => {
+    mocks.listRecordings.mockResolvedValue([{ id: 'drive-file-id', name: 'Pamoka.mp4', chatStatus }]);
+    const res = mockRes();
+    await handler({ method: 'GET', query: { groupId: 'group-allowed' }, headers: {} } as any, res as any);
+    expect(res.getResult().body.groups[0].recordings[0]).toMatchObject({ chatStatus, chatFiles: [] });
+    expect(mocks.createTicket).toHaveBeenCalledOnce();
+    expect(mocks.createTicket).toHaveBeenCalledWith({ userId: 'student-user', groupId: 'group-allowed', fileId: 'drive-file-id' });
+  });
+
+  it('bypasses cached Drive metadata only when a visible group is explicitly refreshed', async () => {
+    const res = mockRes();
+    await handler({ method: 'GET', query: { groupId: 'group-allowed', refresh: '1' }, headers: {} } as any, res as any);
+    expect(mocks.listRecordings).toHaveBeenCalledWith('private-folder-id', { refresh: true });
+    mocks.listRecordings.mockClear();
+    await handler({ method: 'GET', query: { groupId: 'other-group', refresh: '1' }, headers: {} } as any, mockRes() as any);
+    expect(mocks.listRecordings).not.toHaveBeenCalled();
+  });
+
   it('does not issue a playback ticket for another group day', async () => {
     mocks.slotScope.mockResolvedValue({ unrestricted: false, schedules: [[{ weekday: 4, start_time: '11:00' }]] });
     mocks.slotTags.mockResolvedValue(new Map([['drive-file-id', { weekday: 2, start_time: '11:00' }]]));

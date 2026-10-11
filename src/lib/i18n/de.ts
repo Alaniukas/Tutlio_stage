@@ -14,6 +14,16 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const de: Record<string, string> = {
+  'school.recordings.chatTitle': "Chatverlauf",
+  'school.recordings.chatLoading': "Chat wird geladen…",
+  'school.recordings.chatError': "Der Chat konnte nicht geladen werden. Aktualisieren Sie die Aufnahmeliste und versuchen Sie es erneut.",
+  'school.recordings.chatEmpty': "Die Chatdatei ist leer.",
+  'school.recordings.chatMissing': "Für diese Aufnahme wurde kein passender Google Meet-Chat gefunden. Er wird möglicherweise noch verarbeitet oder wurde nicht gespeichert.",
+  'school.recordings.chatRestricted': "Google Drive blockiert den Zugriff auf diesen Chat. Wenden Sie sich an die Schulverwaltung.",
+  'school.recordings.chatExpired': "Der Zeitraum zum Ansehen dieses Chats ist abgelaufen.",
+  'school.recordings.chatAmbiguous': "Der Chat konnte keiner einzelnen Aufnahme eindeutig zugeordnet werden. Wenden Sie sich an die Schulverwaltung.",
+  'school.recordings.chatMissingAdmin': "Prüfen Sie, ob Meet den Chat speichert und seine Datei im selben verknüpften Ordner wie das Video liegt und denselben Besprechungsnamen trägt. Ein fortlaufender Besprechungschat erstellt keine separate Chatdatei.",
+  'school.recordings.chatRestrictedAdmin': "Erlauben Sie Betrachtern in den Freigabeeinstellungen der Chatdatei in Google Drive, die Datei herunterzuladen, und aktualisieren Sie dann die Aufnahmen.",
   'companyNav.tutorFinance': 'Finanzen der Lehrkräfte',
   'invoices.changeNumber': 'Nummer ändern',
   'invoices.newNumber': 'Neue Rechnungsnummer',

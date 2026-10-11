@@ -14,6 +14,16 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const lv: Record<string, string> = {
+  'school.recordings.chatTitle': "Sarunas izraksts",
+  'school.recordings.chatLoading': "Saruna tiek ielādēta…",
+  'school.recordings.chatError': "Neizdevās ielādēt sarunu. Atjauniniet ierakstu sarakstu un mēģiniet vēlreiz.",
+  'school.recordings.chatEmpty': "Sarunas fails ir tukšs.",
+  'school.recordings.chatMissing': "Šim ierakstam nav atrasta atbilstoša Google Meet saruna. Tā vēl var tikt apstrādāta vai nav saglabāta.",
+  'school.recordings.chatRestricted': "Google Drive bloķē piekļuvi šai sarunai. Sazinieties ar skolas administratoru.",
+  'school.recordings.chatExpired': "Šīs sarunas skatīšanas termiņš ir beidzies.",
+  'school.recordings.chatAmbiguous': "Sarunu nevar droši saistīt ar vienu ierakstu. Sazinieties ar skolas administratoru.",
+  'school.recordings.chatMissingAdmin': "Pārbaudiet, vai Meet saglabā sarunu un tās fails ir tajā pašā piesaistītajā mapē kā video ar to pašu sapulces nosaukumu. Nepārtraukta sapulces saruna neveido atsevišķu sarunas failu.",
+  'school.recordings.chatRestrictedAdmin': "Google Drive sarunas faila kopīgošanas iestatījumos ļaujiet skatītājiem lejupielādēt failu un pēc tam atjauniniet ierakstus.",
   'companyNav.tutorFinance': 'Skolotāju finanses',
   'invoices.changeNumber': 'Mainīt numuru',
   'invoices.newNumber': 'Jaunais rēķina numurs',

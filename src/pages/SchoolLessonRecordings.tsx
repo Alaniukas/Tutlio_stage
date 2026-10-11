@@ -20,6 +20,7 @@ import ParentLayout from '@/components/ParentLayout';
 import RecordingAccessPanel from '@/components/school/RecordingAccessPanel';
 import SchoolMaterialBaselinePanel from '@/components/school/SchoolMaterialBaselinePanel';
 import RecordingChatFiles, { type RecordingChatFile } from '@/components/school/RecordingChatFiles';
+import type { RecordingChatStatus } from '@/lib/schoolLessonRecordings';
 
 type Recording = {
   id: string;
@@ -29,6 +30,7 @@ type Recording = {
   size: number | null;
   streamUrl: string;
   chatFiles?: RecordingChatFile[];
+  chatStatus?: RecordingChatStatus;
   slot?: { weekday: number; start_time: string } | null;
 };
 
@@ -89,9 +91,11 @@ function recordingPickerLabel(recording: Recording, locale: string): string {
 function RecordingPlayer({
   recording,
   unsupportedLabel,
+  canManage = false,
 }: {
   recording: Recording;
   unsupportedLabel: string;
+  canManage?: boolean;
 }) {
   return (
     <div className="space-y-3">
@@ -106,7 +110,7 @@ function RecordingPlayer({
       >
         {unsupportedLabel}
       </video>
-      <RecordingChatFiles files={recording.chatFiles} />
+      <RecordingChatFiles files={recording.chatFiles} status={recording.chatStatus} canManage={canManage} />
     </div>
   );
 }
@@ -117,12 +121,14 @@ function GroupRecordingsList({
   countLabel,
   pickLabel,
   unsupportedLabel,
+  canManage,
 }: {
   recordings: Recording[];
   locale: string;
   countLabel: string;
   pickLabel: string;
   unsupportedLabel: string;
+  canManage?: boolean;
 }) {
   const [selectedId, setSelectedId] = useState(recordings[0]?.id ?? '');
 
@@ -165,7 +171,7 @@ function GroupRecordingsList({
               <p className="mt-1 text-xs text-gray-500">{recordingDetails(selected, locale).meta}</p>
             )}
           </div>
-          <RecordingPlayer recording={selected} unsupportedLabel={unsupportedLabel} />
+          <RecordingPlayer recording={selected} unsupportedLabel={unsupportedLabel} canManage={canManage} />
         </div>
       </div>
     );
@@ -181,7 +187,7 @@ function GroupRecordingsList({
               <h3 className="font-medium text-gray-900 break-words">{title}</h3>
               {meta && <p className="mt-1 text-xs text-gray-500">{meta}</p>}
             </div>
-            <RecordingPlayer recording={recording} unsupportedLabel={unsupportedLabel} />
+            <RecordingPlayer recording={recording} unsupportedLabel={unsupportedLabel} canManage={canManage} />
           </article>
         );
       })}
@@ -210,14 +216,17 @@ export default function SchoolLessonRecordings() {
     return `/api/school-lesson-recordings?studentId=${encodeURIComponent(selectedStudentId)}`;
   }, [selectedStudentId]);
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
+  const load = useCallback(async (opts?: { silent?: boolean; refreshGroupId?: string }) => {
     const silent = opts?.silent ?? false;
     if (silent) setSilentRefreshing(true);
     else setLoading(true);
     if (!silent) setError('');
     try {
       const headers = await authHeaders();
-      const response = await fetch(endpoint, { headers });
+      const url = opts?.refreshGroupId
+        ? `${endpoint}${endpoint.includes('?') ? '&' : '?'}groupId=${encodeURIComponent(opts.refreshGroupId)}&refresh=1`
+        : endpoint;
+      const response = await fetch(url, { headers });
       const payload = await response.json() as RecordingsResponse;
       if (!response.ok) throw new Error(payload.error || t('school.recordings.error'));
       setData(payload);
@@ -381,7 +390,7 @@ export default function SchoolLessonRecordings() {
             </p>
           ) : null}
         </div>
-        <Button variant="outline" onClick={() => void load()} disabled={loading || silentRefreshing}>
+        <Button variant="outline" onClick={() => void load({ refreshGroupId: playbackGroupId })} disabled={loading || silentRefreshing}>
           <RefreshCw className={`w-4 h-4 mr-2 ${loading || silentRefreshing ? 'animate-spin' : ''}`} />
           {t('school.recordings.refresh')}
         </Button>
@@ -504,6 +513,7 @@ export default function SchoolLessonRecordings() {
                     countLabel={t('school.recordings.count', { count: String(group.recordings.length) })}
                     pickLabel={t('school.recordings.pickRecording')}
                     unsupportedLabel={t('school.recordings.videoUnsupported')}
+                    canManage={group.canManage}
                   />
                   {group.canManage && group.kind === 'class_group' && (group.slots || []).length > 1 && (
                     <div className="border-t p-4 sm:p-5 space-y-3">

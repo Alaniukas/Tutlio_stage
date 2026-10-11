@@ -9,6 +9,12 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const lt: Record<string, string> = {
+  'school.recordings.chatMissing': "Šiam įrašui nerasta Google Meet pokalbio išklotinė. Ji dar gali būti ruošiama arba pokalbis nebuvo išsaugotas.",
+  'school.recordings.chatRestricted': "Google Drive neleidžia perskaityti šio pokalbio. Kreipkitės į mokyklos administraciją.",
+  'school.recordings.chatExpired': "Šio pokalbio peržiūros terminas pasibaigė.",
+  'school.recordings.chatAmbiguous': "Pokalbio nepavyko patikimai susieti su vienu įrašu. Kreipkitės į mokyklos administraciją.",
+  'school.recordings.chatMissingAdmin': "Patikrinkite, ar Meet išsaugo pokalbį, o jo failas yra tame pačiame susietame aplanke kaip vaizdo įrašas ir turi tą patį susitikimo pavadinimą. Įjungus tęstinį susitikimo pokalbį, atskiras pokalbio failas nekuriamas.",
+  'school.recordings.chatRestrictedAdmin': "Google Drive pokalbio failo bendrinimo nustatymuose leiskite žiūrintiesiems atsisiųsti failą, tada atnaujinkite įrašų sąrašą.",
   'companyNav.tutorFinance': 'Korepetitorių finansai',
   'invoices.changeNumber': 'Keisti numerį',
   'invoices.newNumber': 'Naujas sąskaitos numeris',

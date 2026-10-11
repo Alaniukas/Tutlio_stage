@@ -9,6 +9,12 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const en: Record<string, string> = {
+  'school.recordings.chatMissing': "No matching Google Meet chat was found for this recording. It may still be processing or may not have been saved.",
+  'school.recordings.chatRestricted': "Google Drive is blocking access to this chat. Please contact your school administrator.",
+  'school.recordings.chatExpired': "This chat's viewing period has ended.",
+  'school.recordings.chatAmbiguous': "The chat could not be linked safely to a single recording. Please contact your school administrator.",
+  'school.recordings.chatMissingAdmin': "Check that Meet saves the chat and that its file is in the same linked folder as the video, with the same meeting name. Continuous meeting chat does not create a separate chat file.",
+  'school.recordings.chatRestrictedAdmin': "In the chat file's Google Drive sharing settings, allow viewers to download the file, then refresh Recordings.",
   'companyNav.tutorFinance': 'Tutor finances',
   'invoices.changeNumber': 'Change number',
   'invoices.newNumber': 'New invoice number',

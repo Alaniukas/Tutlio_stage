@@ -76,6 +76,47 @@ describe('Google Drive recording companion chats', () => {
     const result = await listDriveRecordings(folder);
     expect(result).toHaveLength(2);
     expect(result.every((file) => !file.chatFiles?.length)).toBe(true);
+    expect(result.every((file) => file.chatStatus === 'ambiguous')).toBe(true);
+  });
+
+  it('reports a restricted Meet chat without returning its metadata or a readable file', async () => {
+    drivePages([{ files: [video(), chat({ canDownload: false })] }]);
+    const [recording] = await listDriveRecordings(folder);
+    expect(recording.chatStatus).toBe('restricted');
+    expect(recording.chatFiles).toBeUndefined();
+    expect(JSON.stringify(recording)).not.toContain('chat-12345');
+  });
+
+  it.each([
+    [[], 'missing'],
+    [[chat({ createdTime: '2026-09-01T12:00:00Z' })], 'expired'],
+    [[chat({ canDownload: false }), chat({ id: 'allowed-copy', name: 'Matematika 2026-10-07.txt' })], 'available'],
+  ])('reports %j companion files as %s', async (chats, status) => {
+    drivePages([{ files: [video(), ...chats] }]);
+    const [recording] = await listDriveRecordings(folder);
+    expect(recording.chatStatus).toBe(status);
+    expect(recording.chatFiles?.map((file) => file.id) || []).toEqual(status === 'available' ? ['allowed-copy'] : []);
+  });
+
+  it('does not pair a chat when another matching video is restricted by Drive', async () => {
+    drivePages([{ files: [video(), video({ id: 'restricted-video', name: 'Matematika 2026-10-07.webm', canDownload: false }), chat()] }]);
+    const [recording] = await listDriveRecordings(folder);
+    expect(recording.chatStatus).toBe('ambiguous');
+    expect(recording.chatFiles).toBeUndefined();
+  });
+
+  it('rechecks chat permissions immediately when the user refreshes recordings', async () => {
+    const requests = drivePages([
+      { files: [video(), chat({ canDownload: false })] },
+      { files: [video(), chat()] },
+    ]);
+    expect((await listDriveRecordings(folder))[0].chatStatus).toBe('restricted');
+    expect((await listDriveRecordings(folder))[0].chatStatus).toBe('restricted');
+    expect(requests).toHaveLength(1);
+    const [recording] = await listDriveRecordings(folder, { refresh: true });
+    expect(recording.chatStatus).toBe('available');
+    expect(recording.chatFiles).toHaveLength(1);
+    expect(requests).toHaveLength(2);
   });
 
   it.each([

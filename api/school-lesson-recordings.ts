@@ -8,7 +8,7 @@ import {
   recordingRetentionDays,
 } from './_lib/googleDriveRecordings.js';
 import { resolveRecordingViewerAccess } from './_lib/schoolRecordingAccess.js';
-import { recordingChatFiles } from './_lib/schoolRecordingChatFiles.js';
+import { recordingChatFiles, recordingChatStatus } from './_lib/schoolRecordingChatFiles.js';
 import { recordingSlotScope, recordingSlotTags, recordingVisibleToScope } from './_lib/schoolRecordingSlotAccess.js';
 import { schoolMemberSlotKey } from '../src/lib/schoolClassGroups.js';
 import {
@@ -126,7 +126,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
       }
       try {
-        const recordings = await listDriveRecordings(mapping.drive_folder_id);
+        const recordings = firstQueryValue(req.query?.refresh) === '1'
+          ? await listDriveRecordings(mapping.drive_folder_id, { refresh: true })
+          : await listDriveRecordings(mapping.drive_folder_id);
         const classGroup = group.kind === 'class_group';
         const [scope, tags, groupSlots] = classGroup
           ? await Promise.all([
@@ -170,6 +172,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               size: file.size,
               ...(canManageGroup && classGroup ? { slot: tags.get(file.id) || null } : {}),
               streamUrl: `/api/school-lesson-recording-stream?t=${encodeURIComponent(ticket)}`,
+              chatStatus: recordingChatStatus(file),
               chatFiles: recordingChatFiles(file, (values) => createSchoolRecordingTicket({
                 userId: auth.userId!, groupId: group.id, ...values,
               })),

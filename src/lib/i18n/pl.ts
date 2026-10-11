@@ -12,6 +12,16 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const pl: Record<string, string> = {
+  'school.recordings.chatTitle': "Historia czatu",
+  'school.recordings.chatLoading': "Wczytywanie czatu…",
+  'school.recordings.chatError': "Nie udało się wczytać czatu. Odśwież listę nagrań i spróbuj ponownie.",
+  'school.recordings.chatEmpty': "Plik czatu jest pusty.",
+  'school.recordings.chatMissing': "Nie znaleziono czatu Google Meet pasującego do tego nagrania. Może być jeszcze przetwarzany lub nie został zapisany.",
+  'school.recordings.chatRestricted': "Google Drive blokuje dostęp do tego czatu. Skontaktuj się z administratorem szkoły.",
+  'school.recordings.chatExpired': "Okres dostępu do tego czatu dobiegł końca.",
+  'school.recordings.chatAmbiguous': "Nie można jednoznacznie powiązać czatu z jednym nagraniem. Skontaktuj się z administratorem szkoły.",
+  'school.recordings.chatMissingAdmin': "Sprawdź, czy Meet zapisuje czat, a jego plik znajduje się w tym samym połączonym folderze co wideo i ma tę samą nazwę spotkania. Ciągły czat spotkania nie tworzy osobnego pliku czatu.",
+  'school.recordings.chatRestrictedAdmin': "W ustawieniach udostępniania pliku czatu w Google Drive zezwól osobom z dostępem do wyświetlania na pobieranie pliku, a następnie odśwież nagrania.",
   'companyNav.tutorFinance': 'Finanse korepetytorów',
   'invoices.changeNumber': 'Zmień numer',
   'invoices.newNumber': 'Nowy numer faktury',

@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
 import SchoolGroupMaterialLibrary from '@/components/school/SchoolGroupMaterialLibrary';
 import RecordingChatFiles, { type RecordingChatFile } from '@/components/school/RecordingChatFiles';
+import type { RecordingChatStatus } from '@/lib/schoolLessonRecordings';
 import { Download, Loader2, Paperclip, Play, Trash2, Upload, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
@@ -53,6 +54,7 @@ type HomeworkRecording = {
   size: number | null;
   streamUrl: string;
   chatFiles?: RecordingChatFile[];
+  chatStatus?: RecordingChatStatus;
 };
 
 type HomeworkRecordingGroup = {
@@ -229,7 +231,7 @@ function HomeworkGroupRecordings({
           >
             {unsupportedLabel}
           </video>
-          <RecordingChatFiles files={selected.chatFiles} />
+          <RecordingChatFiles files={selected.chatFiles} status={selected.chatStatus} />
         </div>
       )}
     </section>

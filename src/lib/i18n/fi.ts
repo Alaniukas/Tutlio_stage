@@ -14,6 +14,16 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const fi: Record<string, string> = {
+  'school.recordings.chatTitle': "Keskusteluhistoria",
+  'school.recordings.chatLoading': "Ladataan keskustelua…",
+  'school.recordings.chatError': "Keskustelua ei voitu ladata. Päivitä tallenneluettelo ja yritä uudelleen.",
+  'school.recordings.chatEmpty': "Keskustelutiedosto on tyhjä.",
+  'school.recordings.chatMissing': "Tälle tallenteelle ei löytynyt vastaavaa Google Meet -keskustelua. Sitä saatetaan vielä käsitellä tai sitä ei tallennettu.",
+  'school.recordings.chatRestricted': "Google Drive estää tämän keskustelun käytön. Ota yhteyttä koulun ylläpitäjään.",
+  'school.recordings.chatExpired': "Tämän keskustelun katseluaika on päättynyt.",
+  'school.recordings.chatAmbiguous': "Keskustelua ei voitu yhdistää varmasti yhteen tallenteeseen. Ota yhteyttä koulun ylläpitäjään.",
+  'school.recordings.chatMissingAdmin': "Tarkista, että Meet tallentaa keskustelun ja sen tiedosto on videon kanssa samassa liitetyssä kansiossa samalla kokousnimellä. Jatkuva kokouskeskustelu ei luo erillistä keskustelutiedostoa.",
+  'school.recordings.chatRestrictedAdmin': "Salli katselijoiden ladata tiedosto keskustelutiedoston Google Drive -jakamisasetuksissa ja päivitä sitten tallenneluettelo.",
   'companyNav.tutorFinance': 'Opettajien talous',
   'invoices.changeNumber': 'Muuta numeroa',
   'invoices.newNumber': 'Uusi laskunumero',

@@ -95,6 +95,28 @@ describe('Pro Klasė tutor invoice generation', () => {
       issued_by_user_id: 'admin', seller_user_id: 'tutor',
     });
   });
+  it('saves and renders trial, regular and no-show tariffs separately without averaging', async () => {
+    state.tables.profiles[0].company_commission_percent = 13;
+    const base = state.tables.sessions[0];
+    state.tables.sessions = [
+      { ...base, id: 'regular', status: 'completed', subjects: { name: 'LIETUVIŲ KALBA', is_trial: false } },
+      { ...base, id: 'trial-1', status: 'completed' }, { ...base, id: 'trial-2', status: 'completed' },
+      { ...base, id: 'missed-1' }, { ...base, id: 'missed-2' },
+    ];
+    const res = await request({ sessionIds: state.tables.sessions.map(session => session.id) });
+    expect(res.code).toBe(200);
+    const saved = state.tables.invoice_line_items;
+    expect(saved).toHaveLength(3);
+    expect(saved.map(line => [line.description, line.quantity, line.unit_price, line.total_price])).toEqual(expect.arrayContaining([
+      ['LIETUVIŲ KALBA - korepetavimo paslaugos', 1, 13, 13],
+      ['Atlygis už mokinio neatvykimą - Bandomoji pamoka', 2, 6, 12],
+      ['Bandomoji pamoka - korepetavimo paslaugos', 2, 10, 20],
+    ]));
+    expect(saved.flatMap(line => line.session_ids).sort()).toEqual(state.tables.sessions.map(session => session.id).sort());
+    expect(state.tables.invoices.at(-1)).toMatchObject({ total_amount: 45,
+      pdf_meta: { invoiceKind: 'tutor_pay', proKlaseTutorPayLineVersion: 1 } });
+    expect(state.writes.some(write => write.table === 'sessions')).toBe(false);
+  });
   it('returns a serial conflict instead of success with zero invoices', async () => {
     state.invoiceError = { code: '23505', message: 'duplicate key value violates unique constraint' };
     const res = await request();

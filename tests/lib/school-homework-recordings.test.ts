@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const listDrive = vi.hoisted(() => vi.fn());
+const publication = vi.hoisted(() => vi.fn());
+
+vi.mock('../../api/_lib/schoolMaterialPublications.js', () => ({
+  registerDrivePublications: vi.fn(),
+  schoolRecordingPublicationAllowsLegacyAccess: publication,
+}));
 
 vi.mock('../../api/_lib/googleDriveRecordings.js', () => ({
   listDriveRecordings: listDrive,
@@ -54,6 +60,7 @@ function supabaseFixture(opts: {
 describe('listHomeworkGroupRecordings', () => {
   beforeEach(() => {
     listDrive.mockReset();
+    publication.mockReset().mockImplementation(async (_db, file) => file.fileId === 'file-1');
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-key-test';
   });
 
@@ -124,6 +131,30 @@ describe('listHomeworkGroupRecordings', () => {
       groupId: 'g1', fileId: 'chat-1', recordingFileId: 'file-1',
     });
     if (viewerUserId) expect(verifySchoolHomeworkRecordingTicket(ticket)).toBeNull();
+    expect(result.groups[0].recordings[0].chatStatus).toBe('available');
+  });
+
+  it('keeps a blocked chat reason visible on the homework page without issuing a chat URL', async () => {
+    listDrive.mockResolvedValue([{ id: 'file-1', name: 'Pamoka.mp4', chatStatus: 'restricted' }]);
+    const result = await listHomeworkGroupRecordings(supabaseFixture({
+      groups: [{ id: 'g1', name: 'Matematika', organization_id: 'org-1' }],
+      mappings: [{ group_id: 'g1', organization_id: 'org-1', drive_folder_id: 'folder-1' }],
+    }), { studentId: 'student-1', organizationId: 'org-1', memberGroupIds: ['g1'], recordingsEnabled: true, listFiles: true });
+    expect(result.groups[0].recordings[0]).toMatchObject({ chatStatus: 'restricted', chatFiles: [] });
+  });
+
+  it.each(['restricted', 'available'])('does not disclose a newer %s chat through a legacy homework link', async (chatStatus) => {
+    listDrive.mockResolvedValue([{ id: 'file-1', name: 'Pamoka.mp4', chatStatus,
+      chatFiles: chatStatus === 'available' ? [{ id: 'new-chat', name: 'Pamoka.sbv' }] : [],
+    }]);
+    const result = await listHomeworkGroupRecordings(supabaseFixture({
+      groups: [{ id: 'g1', name: 'Matematika', organization_id: 'org-1' }],
+      mappings: [{ group_id: 'g1', organization_id: 'org-1', drive_folder_id: 'folder-1' }],
+    }), { studentId: 'student-1', organizationId: 'org-1', memberGroupIds: ['g1'], recordingsEnabled: true,
+      listFiles: true, features: { school_family_portal: true },
+    });
+    expect(result.groups[0].recordings[0]).toMatchObject({ chatStatus: 'missing', chatFiles: [] });
+    expect(JSON.stringify(result)).not.toContain('new-chat');
   });
 
   it('lists a mapped individual recurring subject for that student', async () => {

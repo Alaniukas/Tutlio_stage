@@ -17,6 +17,8 @@ import {
   parseClassicLtTutorPdfMeta,
 } from './_lib/manoKorepetitoriusInvoice.js';
 import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { fetchAllRows } from '../src/lib/fetchAllRows.js';
+import { ProKlaseInvoiceLineError, proKlaseTutorInvoicePdfLines, type StoredTutorInvoiceLine } from './_lib/proKlaseTutorInvoiceLines.js';
 import {
   invoicePartyMatches,
   proKlaseVatExemptionNote,
@@ -114,6 +116,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const classicTutorMetaEarly = parseClassicLtTutorPdfMeta(invoice.pdf_meta);
 
     const isProKlaseInvoice = isProKlaseOrg(invoice.organization_id);
+    const payTutorId = typeof invoice.pdf_meta?.tutorId === 'string' ? invoice.pdf_meta.tutorId : '';
+    const isProKlaseTutorPay = isProKlaseInvoice && isOwnOrgTutorInvoice(invoice, payTutorId);
     if (
       !brandingPreview
       && !pvmMetaEarly
@@ -133,11 +137,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const { data: lineItems } = await supabase
-      .from('invoice_line_items')
-      .select('*')
-      .eq('invoice_id', invoiceId)
-      .order('created_at', { ascending: true });
+    const lineItems = isProKlaseTutorPay
+      ? await fetchAllRows<StoredTutorInvoiceLine>((from, to) => supabase.from('invoice_line_items')
+          .select('*').eq('invoice_id', invoiceId).order('created_at', { ascending: true })
+          .order('id').range(from, to), Infinity).catch(() => {
+            throw new ProKlaseInvoiceLineError(503, 'Nepavyko įkelti sąskaitos eilučių. Bandykite dar kartą.');
+          })
+      : (await supabase.from('invoice_line_items').select('*').eq('invoice_id', invoiceId)
+          .order('created_at', { ascending: true })).data || [];
+    const pdfLineItems = isProKlaseTutorPay
+      ? await proKlaseTutorInvoicePdfLines(supabase, invoice.organization_id, payTutorId,
+          invoice.pdf_meta?.proKlaseTutorPayLineVersion, lineItems)
+      : lineItems.map((li: StoredTutorInvoiceLine) => ({ description: li.description,
+          quantity: li.quantity, unitPrice: Number(li.unit_price), totalPrice: Number(li.total_price) }));
 
     const branding = classicTutorMetaEarly ? null : brandingPreview;
     const pvmMeta = pvmMetaEarly;
@@ -197,12 +209,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : undefined,
       seller: sellerSnapshot,
       buyer: invoice.buyer_snapshot as InvoicePdfData['buyer'],
-      lineItems: (lineItems || []).map((li: any) => ({
-        description: li.description,
-        quantity: li.quantity,
-        unitPrice: Number(li.unit_price),
-        totalPrice: Number(li.total_price),
-      })),
+      lineItems: pdfLineItems,
       totalAmount: Number(invoice.total_amount),
       currency: invoice.pdf_meta?.currency === 'PLN' ? 'PLN' : 'EUR',
       branding: branding ?? undefined,
@@ -253,6 +260,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Content-Disposition', invoiceDownloadContentDisposition(downloadFilename));
     return res.status(200).send(buffer);
   } catch (err: any) {
+    if (err instanceof ProKlaseInvoiceLineError) return res.status(err.status).json({ error: err.message });
     console.error('[invoice-pdf] Error:', err);
     return res.status(500).json({ error: err.message || 'Internal server error' });
   }

@@ -24,6 +24,12 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const se: Record<string, string> = {
+  'school.recordings.chatMissing': "Ingen matchande Google Meet-chatt hittades för den här inspelningen. Den kan fortfarande bearbetas eller kanske inte har sparats.",
+  'school.recordings.chatRestricted': "Google Drive blockerar åtkomsten till den här chatten. Kontakta skolans administratör.",
+  'school.recordings.chatExpired': "Tiden för att visa den här chatten har löpt ut.",
+  'school.recordings.chatAmbiguous': "Chatten kunde inte säkert kopplas till en enda inspelning. Kontakta skolans administratör.",
+  'school.recordings.chatMissingAdmin': "Kontrollera att Meet sparar chatten och att dess fil ligger i samma länkade mapp som videon och har samma mötesnamn. Kontinuerlig möteschatt skapar ingen separat chattfil.",
+  'school.recordings.chatRestrictedAdmin': "Tillåt läsare att ladda ned filen i chattfilens delningsinställningar i Google Drive och uppdatera sedan inspelningarna.",
   'companyNav.tutorFinance': 'Lärarnas ekonomi',
   'invoices.changeNumber': 'Ändra nummer',
   'invoices.newNumber': 'Nytt fakturanummer',

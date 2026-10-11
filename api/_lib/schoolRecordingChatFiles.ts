@@ -1,4 +1,12 @@
 import type { DriveRecordingFile } from './googleDriveRecordings.js';
+import type { RecordingChatStatus } from '../../src/lib/schoolLessonRecordings.js';
+
+export function recordingChatStatus(recording: DriveRecordingFile): RecordingChatStatus {
+  if (recording.chatFiles?.length) return 'available';
+  // A publication policy may remove readable chats from a legacy homework
+  // link. Do not claim those chats are still available to that viewer.
+  return recording.chatStatus === 'available' ? 'missing' : recording.chatStatus || 'missing';
+}
 
 export function recordingChatFiles(
   recording: DriveRecordingFile,

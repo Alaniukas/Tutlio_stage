@@ -57,7 +57,7 @@ function fakeDb(): any {
 }
 const base = { tutor_id: 'teacher', student_id: 'student', class_group_id: 'group', subject_id: 'math', status: 'completed',
   start_time: '2026-09-15T06:00:00Z', end_time: '2026-09-15T07:00:00Z', tutor_pay_eur_snapshot: 45,
-  subjects: { name: 'Math', is_group: true },
+  subjects: { name: 'Math', is_group: true, is_trial: false },
   class_group: { name: 'Matematika 5 kl.' },
   students: { full_name: 'Student', organization_id: 'school' } };
 beforeEach(() => {

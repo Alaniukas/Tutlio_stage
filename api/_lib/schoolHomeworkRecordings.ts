@@ -7,7 +7,7 @@ import { createSchoolHomeworkRecordingTicket, createSchoolRecordingTicket } from
 import { canStudentAccessSchoolGroupRecordings, recordingSlotScope, recordingSlotTags, recordingVisibleToScope } from './schoolRecordingSlotAccess.js';
 import { registerDrivePublications, schoolRecordingPublicationAllowsLegacyAccess } from './schoolMaterialPublications.js';
 import { schoolFamilyPortalEnabled } from './schoolFamilyGuardianAccess.js';
-import { recordingChatFiles } from './schoolRecordingChatFiles.js';
+import { recordingChatFiles, recordingChatStatus } from './schoolRecordingChatFiles.js';
 
 export type HomeworkRecordingFile = {
   id: string;
@@ -17,6 +17,7 @@ export type HomeworkRecordingFile = {
   size: number | null;
   streamUrl: string;
   chatFiles: ReturnType<typeof recordingChatFiles>;
+  chatStatus: ReturnType<typeof recordingChatStatus>;
 };
 
 export type HomeworkRecordingGroup = {
@@ -70,6 +71,7 @@ function mapRecordingFiles(
       durationMillis: file.durationMillis,
       size: file.size,
       streamUrl: `/api/school-lesson-recording-stream?t=${encodeURIComponent(ticket)}`,
+      chatStatus: recordingChatStatus(file),
       chatFiles: recordingChatFiles(file, (values) => viewerUserId
         ? createSchoolRecordingTicket({ userId: viewerUserId, groupId: targetId, ...values })
         : createSchoolHomeworkRecordingTicket({ studentId, groupId: targetId, ...values })),
@@ -211,7 +213,10 @@ export async function listHomeworkGroupRecordings(
             organizationId: params.organizationId, targetId: group.id, fileId: chat.id,
             createdTime: chat.createdTime, modifiedTime: chat.modifiedTime, features: params.features,
           })));
-          return { ...file, chatFiles: chats.filter((_, index) => allowedChats[index]) };
+          const chatFiles = chats.filter((_, index) => allowedChats[index]);
+          // Legacy links must not disclose the existence of newer restricted
+          // chats whose publication eligibility could not be checked.
+          return { ...file, chatFiles, chatStatus: chatFiles.length ? 'available' as const : 'missing' as const };
         }));
       }
       return {

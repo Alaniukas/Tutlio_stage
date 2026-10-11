@@ -14,6 +14,16 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const no: Record<string, string> = {
+  'school.recordings.chatTitle': "Chatthistorikk",
+  'school.recordings.chatLoading': "Laster chat…",
+  'school.recordings.chatError': "Chatten kunne ikke lastes. Oppdater listen over opptak og prøv igjen.",
+  'school.recordings.chatEmpty': "Chatfilen er tom.",
+  'school.recordings.chatMissing': "Ingen samsvarende Google Meet-chat ble funnet for dette opptaket. Den kan fortsatt være under behandling eller ble ikke lagret.",
+  'school.recordings.chatRestricted': "Google Drive blokkerer tilgangen til denne chatten. Kontakt skolens administrator.",
+  'school.recordings.chatExpired': "Perioden for å se denne chatten er utløpt.",
+  'school.recordings.chatAmbiguous': "Chatten kunne ikke knyttes sikkert til ett enkelt opptak. Kontakt skolens administrator.",
+  'school.recordings.chatMissingAdmin': "Kontroller at Meet lagrer chatten og at filen ligger i samme tilknyttede mappe som videoen med samme møtenavn. Kontinuerlig møtechat oppretter ikke en egen chatfil.",
+  'school.recordings.chatRestrictedAdmin': "Tillat lesere å laste ned filen i chatfilens delingsinnstillinger i Google Drive, og oppdater deretter opptakslisten.",
   'companyNav.tutorFinance': 'Lærernes økonomi',
   'invoices.changeNumber': 'Endre nummer',
   'invoices.newNumber': 'Nytt fakturanummer',

@@ -14,6 +14,16 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const es: Record<string, string> = {
+  'school.recordings.chatTitle': "Historial del chat",
+  'school.recordings.chatLoading': "Cargando el chat…",
+  'school.recordings.chatError': "No se pudo cargar el chat. Actualiza la lista de grabaciones e inténtalo de nuevo.",
+  'school.recordings.chatEmpty': "El archivo del chat está vacío.",
+  'school.recordings.chatMissing': "No se encontró un chat de Google Meet correspondiente a esta grabación. Puede que aún se esté procesando o que no se haya guardado.",
+  'school.recordings.chatRestricted': "Google Drive bloquea el acceso a este chat. Contacta con el administrador de tu escuela.",
+  'school.recordings.chatExpired': "El periodo de acceso a este chat ha terminado.",
+  'school.recordings.chatAmbiguous': "No se pudo vincular el chat con seguridad a una sola grabación. Contacta con el administrador de tu escuela.",
+  'school.recordings.chatMissingAdmin': "Comprueba que Meet guarda el chat y que su archivo está en la misma carpeta vinculada que el vídeo, con el mismo nombre de reunión. El chat continuo no crea un archivo de chat separado.",
+  'school.recordings.chatRestrictedAdmin': "En la configuración de uso compartido del archivo del chat en Google Drive, permite que los lectores descarguen el archivo y después actualiza las grabaciones.",
   'companyNav.tutorFinance': 'Finanzas de tutores',
   'invoices.changeNumber': 'Cambiar número',
   'invoices.newNumber': 'Nuevo número de factura',

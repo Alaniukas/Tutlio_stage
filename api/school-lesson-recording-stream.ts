@@ -90,7 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const isChat = isDriveRecordingChatFile(file);
     if (
       (!file.mimeType.startsWith('video/') && !isChat)
-      || !file.canDownload
+      || (!isChat && !file.canDownload)
       || !file.parents.includes(mapping.drive_folder_id)
       || !isRecordingWithinRetention(file.createdTime)
     ) {
@@ -137,6 +137,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
     if (isChat) {
+      if (!file.canDownload) {
+        return res.status(403).json({ code: 'CHAT_ACCESS_RESTRICTED', error: 'Google Drive neleidžia perskaityti pokalbio. Kreipkitės į mokyklos administraciją.' });
+      }
       let content: Buffer | null = null;
       if (req.method === 'GET' && file.size! > 0) {
         const upstream = await fetchDriveRecordingRange(file.id, { start: 0, end: file.size! - 1 });

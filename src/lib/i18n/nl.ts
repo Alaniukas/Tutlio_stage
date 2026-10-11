@@ -16,6 +16,12 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const nl: Record<string, string> = {
+  'school.recordings.chatMissing': "Er is geen bijpassende Google Meet-chat gevonden voor deze opname. Deze wordt mogelijk nog verwerkt of is niet opgeslagen.",
+  'school.recordings.chatRestricted': "Google Drive blokkeert de toegang tot deze chat. Neem contact op met de schoolbeheerder.",
+  'school.recordings.chatExpired': "De periode om deze chat te bekijken is verstreken.",
+  'school.recordings.chatAmbiguous': "De chat kon niet met zekerheid aan één opname worden gekoppeld. Neem contact op met de schoolbeheerder.",
+  'school.recordings.chatMissingAdmin': "Controleer of Meet de chat opslaat en of het bestand in dezelfde gekoppelde map als de video staat, met dezelfde vergadernaam. Doorlopende vergaderchat maakt geen afzonderlijk chatbestand aan.",
+  'school.recordings.chatRestrictedAdmin': "Sta kijkers toe het bestand te downloaden in de deelinstellingen van het chatbestand in Google Drive en vernieuw daarna de opnamen.",
   'companyNav.tutorFinance': 'Financiën van docenten',
   'invoices.changeNumber': 'Nummer wijzigen',
   'invoices.newNumber': 'Nieuw factuurnummer',

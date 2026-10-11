@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import type { RecordingChatStatus } from '../../src/lib/schoolLessonRecordings.js';
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -24,6 +25,7 @@ export interface DriveRecordingFile {
   canDownload: boolean;
   durationMillis: number | null;
   chatFiles?: DriveRecordingFile[];
+  chatStatus?: RecordingChatStatus;
 }
 
 type GoogleDriveFilePayload = {
@@ -281,30 +283,47 @@ export async function listDriveRecordingFolderFiles(folderId: string): Promise<D
   return files;
 }
 
-export async function listDriveRecordings(folderId: string): Promise<DriveRecordingFile[]> {
+export async function listDriveRecordings(
+  folderId: string,
+  options: { refresh?: boolean } = {},
+): Promise<DriveRecordingFile[]> {
   const safeId = extractGoogleDriveId(folderId);
   if (!safeId) throw new Error('Invalid Google Drive folder ID');
   const cached = driveListCache.get(safeId);
-  if (cached && cached.expiresAt > Date.now()) return cached.files;
+  if (!options.refresh && cached && cached.expiresAt > Date.now()) return cached.files;
   const files = await listDriveRecordingFolderFiles(safeId);
-  const eligible = files.filter((file) =>
-    file.canDownload
-    && file.parents.includes(safeId)
-    && isRecordingWithinRetention(file.createdTime),
-  );
-  const listed = eligible.filter((file) => file.mimeType.startsWith('video/'));
+  const folderFiles = files.filter((file) => file.parents.includes(safeId));
+  const videos = folderFiles.filter((file) => file.mimeType.startsWith('video/'));
+  const listed = videos.filter((file) => file.canDownload && isRecordingWithinRetention(file.createdTime));
   const recordingsByName = new Map<string, DriveRecordingFile[]>();
-  for (const recording of listed) {
+  for (const recording of videos) {
     const stem = recordingNameStem(recording.name);
     const matches = recordingsByName.get(stem) || [];
     matches.push(recording);
     recordingsByName.set(stem, matches);
   }
-  for (const chat of eligible.filter(isDriveRecordingChatFile)) {
-    const matches = recordingsByName.get(chatNameStem(chat.name));
-    if (matches?.length !== 1) continue;
-    const recording = matches[0];
-    if (isChatFileForRecording(chat, recording)) (recording.chatFiles ||= []).push(chat);
+  const chatsByName = new Map<string, DriveRecordingFile[]>();
+  for (const chat of folderFiles.filter(isDriveRecordingChatFile)) {
+    const stem = chatNameStem(chat.name);
+    const matches = chatsByName.get(stem) || [];
+    matches.push(chat);
+    chatsByName.set(stem, matches);
+  }
+  for (const recording of listed) {
+    const stem = recordingNameStem(recording.name);
+    const matches = (chatsByName.get(stem) || []).filter((chat) => isChatFileForRecording(chat, recording));
+    // Keep the reason a chat cannot be displayed, without publishing restricted
+    // file metadata or issuing a ticket that bypasses Google Drive permissions.
+    recording.chatStatus = 'missing';
+    if (!matches.length) continue;
+    if (recordingsByName.get(stem)!.length !== 1) {
+      recording.chatStatus = 'ambiguous';
+      continue;
+    }
+    const retainedChats = matches.filter((chat) => isRecordingWithinRetention(chat.createdTime));
+    const availableChats = retainedChats.filter((chat) => chat.canDownload);
+    recording.chatStatus = availableChats.length ? 'available' : retainedChats.length ? 'restricted' : 'expired';
+    if (availableChats.length) recording.chatFiles = availableChats;
   }
   driveListCache.set(safeId, { expiresAt: Date.now() + DRIVE_LIST_CACHE_MS, files: listed });
   return listed;
