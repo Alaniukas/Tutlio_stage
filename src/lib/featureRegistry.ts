@@ -324,6 +324,17 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'premium',
   },
 
+  disable_student_cancel: {
+    id: 'disable_student_cancel',
+    name: 'Mokiniai ir tėvai negali atšaukti pamokų',
+    nameEn: 'Students and parents cannot cancel lessons',
+    description: 'Mokinio ir tėvų portale paslepiamas pamokos atšaukimas, o serveris atmeta tokius bandymus. Pamokų perkėlimo teisės nesikeičia. Korepetitoriai ir administracija gali atšaukti pamokas.',
+    descriptionEn: 'Hides lesson cancellation in the student and parent portals and rejects cancellation attempts on the server. Rescheduling permissions are unchanged. Tutors and administrators can cancel lessons.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
   tutor_lesson_status_confirmation: {
     id: 'tutor_lesson_status_confirmation',
     name: 'Korepetitorius privalo pažymėti pamokos statusą',

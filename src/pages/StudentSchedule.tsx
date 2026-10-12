@@ -51,6 +51,7 @@ import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 import { tutorUsesManualStudentPayments, trimManualPaymentBankDetails } from '@/lib/subscription';
 import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
+import { LessonRescheduleHelp } from '@/components/LessonRescheduleHelp';
 import { buildClassGroupMetaMap, classGroupDisplayName } from '@/lib/schoolClassGroupSessions';
 import type { SchoolClassGroupRecord } from '@/lib/schoolClassGroups';
 import {
@@ -304,15 +305,19 @@ export default function StudentSchedule() {
     const [studentActionsDisabled, setStudentActionsDisabled] = useState(portalPolicy.actionsDisabled);
     const [orgRescheduleDisabled, setOrgRescheduleDisabled] = useState(portalPolicy.rescheduleDisabled);
     const rescheduleDisabled = studentActionsDisabled || orgRescheduleDisabled;
+    const [orgCancellationDisabled, setOrgCancellationDisabled] = useState(portalPolicy.cancellationDisabled);
+    const cancellationDisabled = studentActionsDisabled || orgCancellationDisabled;
+    const [tutorOrganizationId, setTutorOrganizationId] = useState(portalPolicy.organizationId);
     /** Org feature `disable_student_booking`: students/parents cannot book lessons themselves. */
     const [studentBookingDisabled, setStudentBookingDisabled] = useState(portalPolicy.bookingDisabled);
     useEffect(() => {
         if (!portalPolicy.resolved || isParentRoute) return;
         if (portalPolicy.actionsDisabled) setStudentActionsDisabled(true);
         if (portalPolicy.rescheduleDisabled) setOrgRescheduleDisabled(true);
+        if (portalPolicy.cancellationDisabled) setOrgCancellationDisabled(true);
         if (portalPolicy.bookingDisabled) setStudentBookingDisabled(true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [portalPolicy.resolved, portalPolicy.actionsDisabled, portalPolicy.rescheduleDisabled, portalPolicy.bookingDisabled]);
+    }, [portalPolicy.resolved, portalPolicy.actionsDisabled, portalPolicy.rescheduleDisabled, portalPolicy.cancellationDisabled, portalPolicy.bookingDisabled]);
     const [tutorOrgFeeProfile, setTutorOrgFeeProfile] = useState<OrgFeeProfile | null>(null);
     const [tutorOrgFeeSplit, setTutorOrgFeeSplit] = useState<OrgPayerFeeSplit | null>(null);
     /** Org/tutor Finance toggles — govern whether per-lesson payment UI shows at all. */
@@ -347,8 +352,10 @@ export default function StudentSchedule() {
             orgFeeProfile: tutorOrgFeeProfile,
             studentActionsDisabled,
             rescheduleDisabled,
+            cancellationDisabled,
+            organizationId: tutorOrganizationId,
         };
-    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours, tutorPerlasEnabled, tutorOrgIsSchool, tutorOrgFeeProfile, studentActionsDisabled, rescheduleDisabled, studentPaymentModel, studentPaymentOverrideActive, tutorPaymentFlags, billingPolicyResolved]);
+    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours, tutorPerlasEnabled, tutorOrgIsSchool, tutorOrgFeeProfile, studentActionsDisabled, rescheduleDisabled, cancellationDisabled, tutorOrganizationId, studentPaymentModel, studentPaymentOverrideActive, tutorPaymentFlags, billingPolicyResolved]);
 
     const manualPaymentInBookingModal =
         tutorSoloManualPayments || pendingPaymentSession?.tutorSoloManual === true;
@@ -773,6 +780,7 @@ export default function StudentSchedule() {
             // instead of the "no tutor yet" wall (the parent calendar was empty
             // while /parent/lessons listed the very same lessons).
             const orgId = (st as { organization_id?: string | null }).organization_id || null;
+            setTutorOrganizationId(orgId);
             let orgIsSchool = false;
             if (orgId) {
                 const { data: oe } = await supabase
@@ -785,6 +793,7 @@ export default function StudentSchedule() {
                 setSchoolClassGroupsEnabled(orgFeatures?.school_class_groups === true);
                 setStudentActionsDisabled(orgFeatures?.disable_student_reschedule_cancel === true);
                 setOrgRescheduleDisabled(orgFeatures?.disable_student_reschedule === true);
+                setOrgCancellationDisabled(orgFeatures?.disable_student_cancel === true);
                 setStudentBookingDisabled(orgFeatures?.disable_student_booking === true);
             }
             setTutorOrgIsSchool(orgIsSchool);
@@ -910,8 +919,10 @@ export default function StudentSchedule() {
                 enable_monthly_billing?: boolean | null;
             } | null;
             const orgId = tutorProfileRow?.organization_id;
+            setTutorOrganizationId(orgId ?? null);
             let actionsDisabledResolved = false;
             let rescheduleDisabledResolved = false;
+            let cancellationDisabledResolved = false;
             let bookingDisabledResolved = false;
             let enablePerLessonResolved = tutorProfileRow?.enable_per_lesson ?? true;
             let enableMonthlyBillingResolved = !!tutorProfileRow?.enable_monthly_billing;
@@ -929,6 +940,7 @@ export default function StudentSchedule() {
                 setSchoolClassGroupsEnabled(orgFeatures?.school_class_groups === true);
                 actionsDisabledResolved = orgFeatures?.disable_student_reschedule_cancel === true;
                 rescheduleDisabledResolved = orgFeatures?.disable_student_reschedule === true;
+                cancellationDisabledResolved = orgFeatures?.disable_student_cancel === true;
                 bookingDisabledResolved = orgFeatures?.disable_student_booking === true;
                 if (oe) {
                     enablePerLessonResolved = (oe as { enable_per_lesson?: boolean | null }).enable_per_lesson ?? enablePerLessonResolved;
@@ -943,6 +955,7 @@ export default function StudentSchedule() {
             if (!orgId) setTutorOrgFeeSplit(null);
             setStudentActionsDisabled(actionsDisabledResolved);
             setOrgRescheduleDisabled(rescheduleDisabledResolved);
+            setOrgCancellationDisabled(cancellationDisabledResolved);
             setStudentBookingDisabled(bookingDisabledResolved);
             setTutorPaymentFlags({
                 enable_per_lesson: enablePerLessonResolved,
@@ -2752,6 +2765,7 @@ export default function StudentSchedule() {
                                         {t('studentDash.reschedule')}
                                     </Button>
                                     )}
+                                    {!cancellationDisabled && (
                                     <Button
                                         variant="outline"
                                         onClick={() => {
@@ -2762,8 +2776,12 @@ export default function StudentSchedule() {
                                     >
                                         {t('stuSched.cancelLesson')}
                                     </Button>
+                                    )}
                                 </div>
                                 )
+                            )}
+                            {mySessionData?.status === 'active' && isAfter(new Date(mySessionData.start_time), new Date()) && (
+                                <LessonRescheduleHelp organizationId={tutorOrganizationId} />
                             )}
                         </div>
                         <DialogFooter>

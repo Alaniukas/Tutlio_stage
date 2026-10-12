@@ -14,6 +14,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const fr: Record<string, string> = {
+  'stuSess.cancellationDisabledByOrg': 'L’annulation des cours est désactivée. Contactez l’administration.',
+  'stuSess.rescheduleHelp': 'Si vous ne trouvez pas de date qui vous convient, contactez l’administrateur via la messagerie ou écrivez à l’adresse e-mail :',
   'school.recordings.chatTitle': "Historique du chat",
   'school.recordings.chatLoading': "Chargement du chat…",
   'school.recordings.chatError': "Impossible de charger le chat. Actualisez la liste des enregistrements et réessayez.",

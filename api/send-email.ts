@@ -9,6 +9,7 @@ if (typeof process !== 'undefined' && process.env.TUTLIO_DEV_API_LOCAL === '1') 
 
 import type { VercelRequest, VercelResponse } from './types';
 import { schoolJoinAndMaterialNotificationsEnabled } from '../src/lib/schoolNotificationPolicy.js';
+import { schoolFamilyInvitationsRequired } from '../src/lib/schoolFamilyInvitationPolicy.js';
 import { t, isValidLocale, localizedFromEmail, type Locale } from './_lib/i18n.js';
 import { preloadExtraLocaleDict } from './_lib/loadExtraLocaleDict.js';
 import { isMoksloVaisiaiOrg, isProKlaseOrg } from './_lib/marketMoney.js';
@@ -3645,6 +3646,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
       if (supabaseUrl && serviceKey && toEmail) {
         const inviteSb = createClient(supabaseUrl, serviceKey, supabaseServiceRoleClientOptions() as any);
+        let inviteOrganizationId = orgIdForBrandingLookup;
+        if (data.inviteCode) {
+          const student = await inviteSb.from('students').select('organization_id')
+            .eq('invite_code', String(data.inviteCode)).maybeSingle();
+          if (student.error) return res.status(503).json({ error: 'Invitation policy unavailable', code: 'invitation_policy_unavailable' });
+          inviteOrganizationId = student.data?.organization_id || inviteOrganizationId;
+        }
+        if (inviteOrganizationId) {
+          const organization = await inviteSb.from('organizations').select('entity_type, features')
+            .eq('id', inviteOrganizationId).maybeSingle();
+          if (organization.error || !organization.data) {
+            return res.status(503).json({ error: 'Invitation policy unavailable', code: 'invitation_policy_unavailable' });
+          }
+          if (schoolFamilyInvitationsRequired(organization.data.entity_type, organization.data.features)) {
+            return res.status(409).json({ error: 'Use the school family account invitation flow.', code: 'school_family_accounts_required' });
+          }
+        }
         if (await studentRegistrationAlreadyActive(inviteSb, { email: toEmail })) {
           return res.status(200).json({ success: true, skipped: true, reason: 'already_registered' });
         }

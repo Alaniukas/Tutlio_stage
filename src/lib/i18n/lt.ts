@@ -9,6 +9,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const lt: Record<string, string> = {
+  'stuSess.cancellationDisabledByOrg': 'Pamokų atšaukimas išjungtas. Susisiekite su administracija.',
+  'stuSess.rescheduleHelp': 'Jei nerandate tinkamos datos, susiekite su administratoriumi per susirašinėjimo funkciją arba parašykite el. paštu:',
   'school.recordings.chatMissing': "Šiam įrašui nerasta Google Meet pokalbio išklotinė. Ji dar gali būti ruošiama arba pokalbis nebuvo išsaugotas.",
   'school.recordings.chatRestricted': "Google Drive neleidžia perskaityti šio pokalbio. Kreipkitės į mokyklos administraciją.",
   'school.recordings.chatExpired': "Šio pokalbio peržiūros terminas pasibaigė.",

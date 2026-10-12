@@ -274,6 +274,8 @@ export default function ParentDashboard() {
           existing.orgFeeProfile = orgFeeProfile(org.slug) ?? orgFeeProfile(tp.organization_id);
           existing.studentActionsDisabled = (org.features as Record<string, unknown> | null)?.disable_student_reschedule_cancel === true;
           existing.rescheduleDisabled = existing.studentActionsDisabled || (org.features as Record<string, unknown> | null)?.disable_student_reschedule === true;
+          existing.cancellationDisabled = existing.studentActionsDisabled || (org.features as Record<string, unknown> | null)?.disable_student_cancel === true;
+          existing.organizationId = tp.organization_id;
           // Stripe Checkout charges in the org's name — show the same provider here.
           if (org.name) existing.providerName = org.name;
         }

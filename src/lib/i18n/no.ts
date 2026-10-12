@@ -14,6 +14,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const no: Record<string, string> = {
+  'stuSess.cancellationDisabledByOrg': 'Avbestilling av timer er deaktivert. Kontakt administrasjonen.',
+  'stuSess.rescheduleHelp': 'Hvis du ikke finner en passende dato, kontakt administratoren via meldingsfunksjonen eller send e-post til:',
   'school.recordings.chatTitle': "Chatthistorikk",
   'school.recordings.chatLoading': "Laster chat…",
   'school.recordings.chatError': "Chatten kunne ikke lastes. Oppdater listen over opptak og prøv igjen.",

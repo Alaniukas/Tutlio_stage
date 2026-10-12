@@ -19,6 +19,8 @@ export interface StudentPortalPolicy {
   actionsDisabled: boolean;
   /** Org feature disable_student_reschedule (or the combined student-action flag). */
   rescheduleDisabled: boolean;
+  /** Org feature disable_student_cancel (or the combined student-action flag). */
+  cancellationDisabled: boolean;
   /** Org feature student_payments_page ("Mokėjimai" portal section). */
   paymentsPageEnabled: boolean;
   /** School lesson recordings portal section. */
@@ -35,6 +37,7 @@ const DEFAULT: StudentPortalPolicy = {
   bookingDisabled: false,
   actionsDisabled: false,
   rescheduleDisabled: false,
+  cancellationDisabled: false,
   paymentsPageEnabled: false,
   lessonRecordingsEnabled: false,
   // Fail closed: hide waitlist until policy resolves (avoids Pro Klasė flash).
@@ -53,7 +56,12 @@ function readCache(userId: string | null): StudentPortalPolicy | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedPolicy;
     if (parsed.userId !== userId) return null;
-    return { ...parsed.policy, resolved: true, waitlistHidden: parsed.policy.waitlistHidden ?? false };
+    return {
+      ...parsed.policy,
+      resolved: true,
+      cancellationDisabled: parsed.policy.cancellationDisabled ?? parsed.policy.actionsDisabled,
+      waitlistHidden: parsed.policy.waitlistHidden ?? false,
+    };
   } catch {
     return null;
   }
@@ -129,6 +137,7 @@ export function StudentPolicyProvider({ children }: { children: ReactNode }) {
           bookingDisabled: entry?.bookingDisabled === true,
           actionsDisabled: entry?.actionsDisabled === true,
           rescheduleDisabled: entry?.rescheduleDisabled === true,
+          cancellationDisabled: entry?.cancellationDisabled === true,
           paymentsPageEnabled: entry?.paymentsPageEnabled === true,
           lessonRecordingsEnabled: entry?.lessonRecordingsEnabled === true,
           familyPortalEnabled: entry?.familyPortalEnabled === true,

@@ -14,6 +14,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const fi: Record<string, string> = {
+  'stuSess.cancellationDisabledByOrg': 'Oppituntien peruuttaminen on poistettu käytöstä. Ota yhteyttä hallintoon.',
+  'stuSess.rescheduleHelp': 'Jos et löydä sopivaa päivämäärää, ota yhteyttä ylläpitäjään viestitoiminnon kautta tai lähetä sähköpostia osoitteeseen:',
   'school.recordings.chatTitle': "Keskusteluhistoria",
   'school.recordings.chatLoading': "Ladataan keskustelua…",
   'school.recordings.chatError': "Keskustelua ei voitu ladata. Päivitä tallenneluettelo ja yritä uudelleen.",

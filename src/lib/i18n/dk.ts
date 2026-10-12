@@ -129,6 +129,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const dk: Record<string, string> = {
+  'stuSess.cancellationDisabledByOrg': 'Aflysning af lektioner er deaktiveret. Kontakt administrationen.',
+  'stuSess.rescheduleHelp': 'Hvis du ikke kan finde en passende dato, kan du kontakte administratoren via beskedfunktionen eller skrive til e-mailadressen:',
   'school.recordings.chatTitle': "Chathistorik",
   'school.recordings.chatLoading': "Indlæser chat…",
   'school.recordings.chatError': "Chatten kunne ikke indlæses. Opdater listen over optagelser, og prøv igen.",

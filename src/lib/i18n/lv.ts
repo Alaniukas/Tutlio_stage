@@ -14,6 +14,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const lv: Record<string, string> = {
+  'stuSess.cancellationDisabledByOrg': 'Nodarbību atcelšana ir atspējota. Sazinieties ar administrāciju.',
+  'stuSess.rescheduleHelp': 'Ja nevarat atrast piemērotu datumu, sazinieties ar administratoru ziņojumos vai rakstiet uz e-pastu:',
   'school.recordings.chatTitle': "Sarunas izraksts",
   'school.recordings.chatLoading': "Saruna tiek ielādēta…",
   'school.recordings.chatError': "Neizdevās ielādēt sarunu. Atjauniniet ierakstu sarakstu un mēģiniet vēlreiz.",

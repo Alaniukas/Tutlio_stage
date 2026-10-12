@@ -14,6 +14,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const ee: Record<string, string> = {
+  'stuSess.cancellationDisabledByOrg': 'Tundide tühistamine on keelatud. Võtke ühendust administratsiooniga.',
+  'stuSess.rescheduleHelp': 'Kui te ei leia sobivat kuupäeva, võtke administraatoriga ühendust sõnumite kaudu või kirjutage e-posti aadressile:',
   'school.recordings.chatTitle': "Vestluse ajalugu",
   'school.recordings.chatLoading': "Vestluse laadimine…",
   'school.recordings.chatError': "Vestlust ei saanud laadida. Värskendage salvestiste loendit ja proovige uuesti.",

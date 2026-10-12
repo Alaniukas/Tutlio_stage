@@ -25,6 +25,16 @@ describe('student lesson action policy', () => {
     const policy = (await fetchStudentPortalPolicyMap(['student-1']))['student-1'];
     expect(policy.rescheduleDisabled).toBe(true);
     expect(policy.actionsDisabled).toBe(false);
+    expect(policy.cancellationDisabled).toBe(false);
+  });
+
+  it('allows rescheduling when only cancellation is restricted', async () => {
+    mocks.features = { disable_student_cancel: true, disable_student_reschedule: false };
+    expect((await fetchStudentPortalPolicyMap(['student-1']))['student-1']).toMatchObject({
+      rescheduleDisabled: false,
+      cancellationDisabled: true,
+      actionsDisabled: false,
+    });
   });
 
   it('keeps the existing combined restriction and ordinary org behavior', async () => {
@@ -32,11 +42,13 @@ describe('student lesson action policy', () => {
     expect((await fetchStudentPortalPolicyMap(['student-1']))['student-1']).toMatchObject({
       rescheduleDisabled: true,
       actionsDisabled: true,
+      cancellationDisabled: true,
     });
     mocks.features = {};
     expect((await fetchStudentPortalPolicyMap(['student-1']))['student-1']).toMatchObject({
       rescheduleDisabled: false,
       actionsDisabled: false,
+      cancellationDisabled: false,
     });
   });
 });

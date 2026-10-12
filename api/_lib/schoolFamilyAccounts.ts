@@ -168,10 +168,11 @@ async function parentCandidate(db: SupabaseClient, student: Student, evidence: S
   return user;
 }
 
-export async function schoolFamilyAccountsPreview(db: SupabaseClient, org: SchoolFamilyOrganization, cursor = '') {
+export async function schoolFamilyAccountsPreview(db: SupabaseClient, org: SchoolFamilyOrganization, cursor = '', studentId = '') {
   let query = db.from('students').select(STUDENT_SELECT).eq('organization_id', org.id).eq('enrollment_status', 'active')
     .is('detached_at', null).order('id').limit(SCHOOL_FAMILY_PAGE_SIZE + 1);
-  if (cursor) query = query.gt('id', cursor);
+  if (studentId) query = query.eq('id', studentId);
+  else if (cursor) query = query.gt('id', cursor);
   const result = await query; check(result);
   const students = (result.data || []).slice(0, SCHOOL_FAMILY_PAGE_SIZE) as Student[];
   if (!students.length) return { rows: [] as SchoolFamilyPreviewRow[], nextCursor: null };

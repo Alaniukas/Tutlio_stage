@@ -24,6 +24,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const se: Record<string, string> = {
+  'stuSess.cancellationDisabledByOrg': 'Avbokning av lektioner är avstängd. Kontakta administrationen.',
+  'stuSess.rescheduleHelp': 'Om du inte hittar ett lämpligt datum, kontakta administratören via meddelandefunktionen eller skriv till e-postadressen:',
   'school.recordings.chatMissing': "Ingen matchande Google Meet-chatt hittades för den här inspelningen. Den kan fortfarande bearbetas eller kanske inte har sparats.",
   'school.recordings.chatRestricted': "Google Drive blockerar åtkomsten till den här chatten. Kontakta skolans administratör.",
   'school.recordings.chatExpired': "Tiden för att visa den här chatten har löpt ut.",

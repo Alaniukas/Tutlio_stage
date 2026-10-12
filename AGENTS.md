@@ -91,6 +91,8 @@ Maršrutai apibrėžti `src/App.tsx`.
 
 **Portalų nustatymas:** `src/lib/account-portal.ts` — pagal `organization_admins`, `students`, `parent_profiles`, `profiles`.
 
+**Mokslo vaisių pamokų valdymas:** tėvai ir mokiniai gali tik perkelti pamokas. Atskirą `disable_student_cancel` flag'ą tikrina student/parent UI, `/api/cancel-session` ir DB `guard_disable_student_cancel`; korepetitorių / adminų atšaukimas išlieka. Migracija `20261012065009_mokslo_vaisiai_student_reschedule_only.sql` MV ir Demo MV įjungia šį flag'ą bei išjungia abu perkėlimą blokuojančius flag'us. `LessonRescheduleHelp` pamokos ir perkėlimo languose tik MV rodo informaciją kreiptis į administraciją per žinutes arba `info@mokslovaisiai.lt`.
+
 **Org mokėjimų suvestinė:** `/company/payments` (`CompanyPaymentReport.tsx`), meniu „Mokėjimai“, teisė `finance.view`. `GET /api/company-payment-report` organizaciją ima tik iš autentifikuoto administratoriaus. Sąskaitos, paketai ir atskiri mokėjimai sujungiami pagal jų ryšius, ne pagal mokėtojo el. paštą; mokytojų atlygio sąskaitos neįtraukiamos. Laikotarpis pagal išrašymo / užsakymo arba apmokėjimo datą, papildomi tipo / būsenos / korepetitoriaus / paieškos filtrai. Excel ir CSV eksportuoja visas filtrą atitinkančias eilutes. Mokinio pamokų skaičiai, pirmoji pamoka, bandomosios ir pirmo paketo apmokėjimas apima visą istoriją (`companyPaymentReport.ts`). Neišsaugotos apmokėjimo datos lieka tuščios.
 
 ### School maršrutai (svarbiausi)

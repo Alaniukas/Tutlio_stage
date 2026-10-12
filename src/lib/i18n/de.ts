@@ -14,6 +14,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const de: Record<string, string> = {
+  'stuSess.cancellationDisabledByOrg': 'Das Absagen von Unterrichtsstunden ist deaktiviert. Wenden Sie sich an die Verwaltung.',
+  'stuSess.rescheduleHelp': 'Wenn Sie keinen passenden Termin finden, kontaktieren Sie den Administrator über die Nachrichtenfunktion oder per E-Mail:',
   'school.recordings.chatTitle': "Chatverlauf",
   'school.recordings.chatLoading': "Chat wird geladen…",
   'school.recordings.chatError': "Der Chat konnte nicht geladen werden. Aktualisieren Sie die Aufnahmeliste und versuchen Sie es erneut.",

@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CompanyStudents from '@/pages/company/CompanyStudents';
 import { supabase } from '@/lib/supabase';
 
@@ -15,6 +15,7 @@ const studentBase = {
 };
 
 const testState = vi.hoisted(() => ({
+  familyPortal: false,
   from: vi.fn(),
   cache: {
     students: [
@@ -87,7 +88,7 @@ vi.mock('@/contexts/OrgAdminAccessContext', () => ({
 }));
 
 vi.mock('@/hooks/useOrgFeatures', () => ({
-  useOrgFeatures: () => ({ loading: false, hasFeature: () => false }),
+  useOrgFeatures: () => ({ loading: false, hasFeature: (flag: string) => flag === 'school_family_portal' && testState.familyPortal }),
 }));
 
 vi.mock('@/hooks/useMarketMoney', () => ({
@@ -95,8 +96,10 @@ vi.mock('@/hooks/useMarketMoney', () => ({
 }));
 
 describe('CompanyStudents school list filters', () => {
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     vi.clearAllMocks();
+    testState.familyPortal = false;
     testState.cache.students = testState.cache.students.map((s: any) => ({ ...studentBase, ...s }));
     testState.from.mockImplementation(() => {
       const query: any = new Proxy(
@@ -140,6 +143,27 @@ describe('CompanyStudents school list filters', () => {
     expect(screen.getAllByText(/Petraitis Jonas/).length).toBeGreaterThan(0);
     // Default enrollment filter hides left students.
     expect(screen.queryAllByText(/Išėjęs Mokinys/).length).toBe(0);
+  });
+
+  it('hides legacy codes and opens the selected child in the verified family invitation flow', async () => {
+    testState.familyPortal = true;
+    testState.cache.students = testState.cache.students.map((student: any) => ({ ...student, invite_code: 'BROKEN123' }));
+    const emptyAccount = { userId: null, login: null, createdAt: null, invitedAt: null, activatedAt: null, firstLoginAt: null, hasLoggedIn: false };
+    const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, json: async () => ({ rows: [{
+      studentId: 's1', studentName: 'Scoped child s1', studentEmail: 'child@example.test',
+      guardianName: 'Verified Parent', guardianEmail: 'parent@example.test', verified: true,
+      annualContracts: [{ id: 'annual-s1', number: 'Annual s1' }], blockedReasons: [], parent: emptyAccount, student: emptyAccount,
+    }], nextCursor: null }) }));
+    vi.stubGlobal('fetch', fetcher);
+    render(<MemoryRouter initialEntries={['/school/students']}><CompanyStudents /></MemoryRouter>);
+    expect(screen.queryByText('BROKEN123')).toBeNull();
+    fireEvent.click(screen.getAllByText(/Vėgėlė Ąžuolas/)[0]);
+    const info = await screen.findByRole('dialog');
+    expect(within(info).queryByText('BROKEN123')).toBeNull();
+    fireEvent.click(within(info).getByRole('button', { name: 'Šeimos paskyros' }));
+    await screen.findByText('Scoped child s1');
+    expect(fetcher).toHaveBeenCalledWith('/api/school-family-accounts?studentId=s1', expect.anything());
+    expect(fetcher.mock.calls.every(([url]) => !String(url).includes('/api/send-email'))).toBe(true);
   });
 
   it('opens student info as a constrained two-column student/payer layout', async () => {

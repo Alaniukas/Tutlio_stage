@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Check, Loader2, RefreshCw, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -56,10 +56,16 @@ function AccountStatusPanel({
   );
 }
 
-export default function SchoolFamilyAccountsDialog({ canEdit, onChanged }: { canEdit: boolean; onChanged?: () => void }) {
+export default function SchoolFamilyAccountsDialog({ canEdit, onChanged, studentId, onStudentClose }: {
+  canEdit: boolean;
+  onChanged?: () => void;
+  studentId?: string | null;
+  onStudentClose?: () => void;
+}) {
   const { t, locale } = useTranslation();
   const copy = schoolFamilyAccountCopy(locale);
   const [open, setOpen] = useState(false);
+  const loadVersion = useRef(0);
   const [rows, setRows] = useState<SchoolFamilyPreviewRow[]>([]);
   const [cursor, setCursor] = useState('');
   const [previous, setPrevious] = useState<string[]>([]);
@@ -89,16 +95,27 @@ export default function SchoolFamilyAccountsDialog({ canEdit, onChanged }: { can
   const someSelected = selected.length > 0;
 
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     setLoading(true); setError('');
     try {
-      const response = await fetch(`/api/school-family-accounts${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { headers: await authHeaders() });
+      const query = new URLSearchParams(studentId ? { studentId } : cursor ? { cursor } : {});
+      const response = await fetch(`/api/school-family-accounts${query.size ? `?${query}` : ''}`, { headers: await authHeaders() });
       const result = await response.json();
+      if (version !== loadVersion.current) return;
       if (!response.ok) throw new Error(result.error);
-      setRows(result.rows || []); setNext(result.nextCursor || null); setSelected([]);
-    } catch (loadError) { setError(schoolFamilyAccountError((loadError as Error).message, copy)); }
-    finally { setLoading(false); }
-  }, [cursor, copy]);
-  useEffect(() => { if (open) void load(); }, [open, load]);
+      const loadedRows: SchoolFamilyPreviewRow[] = result.rows || [];
+      setRows(loadedRows); setNext(result.nextCursor || null);
+      setSelected(studentId ? pickStudentIds(loadedRows, (row) => row.studentId === studentId && isSelectableRow(row, canEdit, false)) : []);
+    } catch (loadError) { if (version === loadVersion.current) setError(schoolFamilyAccountError((loadError as Error).message, copy)); }
+    finally { if (version === loadVersion.current) setLoading(false); }
+  }, [cursor, copy, studentId, canEdit]);
+  useEffect(() => {
+    if (studentId) { setCursor(''); setPrevious([]); setMessage(''); setQaLinks([]); setReview(null); setSplit(null); setOpen(true); }
+  }, [studentId]);
+  useEffect(() => {
+    if (open) void load();
+    return () => { loadVersion.current++; };
+  }, [open, load]);
 
   const act = async (body: Record<string, unknown>) => {
     setBusy(true); setError(''); setMessage(''); setQaLinks([]);
@@ -141,7 +158,7 @@ export default function SchoolFamilyAccountsDialog({ canEdit, onChanged }: { can
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(value) => { setOpen(value); if (!value) onStudentClose?.(); }}>
       <DialogTrigger asChild><Button type="button" variant="outline" size="sm" className="gap-2 rounded-xl"><Users className="h-4 w-4" />{copy.title}</Button></DialogTrigger>
       <DialogContent className="max-w-6xl w-[96vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>{copy.title}</DialogTitle><DialogDescription>{copy.intro}</DialogDescription></DialogHeader>

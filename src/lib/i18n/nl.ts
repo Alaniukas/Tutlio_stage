@@ -16,6 +16,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const nl: Record<string, string> = {
+  'stuSess.cancellationDisabledByOrg': 'Het annuleren van lessen is uitgeschakeld. Neem contact op met de administratie.',
+  'stuSess.rescheduleHelp': 'Als u geen geschikte datum kunt vinden, neem dan contact op met de beheerder via de berichtenfunctie of stuur een e-mail naar:',
   'school.recordings.chatMissing': "Er is geen bijpassende Google Meet-chat gevonden voor deze opname. Deze wordt mogelijk nog verwerkt of is niet opgeslagen.",
   'school.recordings.chatRestricted': "Google Drive blokkeert de toegang tot deze chat. Neem contact op met de schoolbeheerder.",
   'school.recordings.chatExpired': "De periode om deze chat te bekijken is verstreken.",

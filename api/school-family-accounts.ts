@@ -27,8 +27,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (req.method === 'GET') {
       const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : '';
+      const studentId = typeof req.query.studentId === 'string' ? req.query.studentId : '';
       if (cursor && !UUID.test(cursor)) return res.status(400).json({ error: 'invalid_cursor' });
-      return res.status(200).json(await schoolFamilyAccountsPreview(db, org, cursor));
+      if (studentId && !UUID.test(studentId)) return res.status(400).json({ error: 'invalid_student' });
+      return res.status(200).json(await schoolFamilyAccountsPreview(db, org, cursor, studentId));
     }
     let body: Record<string, unknown> = req.body || {};
     if (typeof req.body === 'string') { try { body = JSON.parse(req.body); } catch { return res.status(400).json({ error: 'invalid_body' }); } }

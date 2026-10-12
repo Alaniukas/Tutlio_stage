@@ -224,24 +224,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
     }
 
-    // Org feature: students/parents may be blocked from cancelling entirely
-    // (disable_student_reschedule_cancel). Tutor/org-admin cancels are unaffected.
+    // Student/parent cancellation is independent of permission to reschedule.
+    // Tutor/org-admin and internal cancellations retain their existing rules.
     if (cancelledBy === 'student' && !auth.isInternal) {
-        const { data: tutorOrgRow } = await supabase
+        const { data: tutorOrgRow, error: tutorOrgError } = await supabase
             .from('profiles')
             .select('organization_id')
             .eq('id', tutorId)
             .maybeSingle();
-        const cancelOrgId = (tutorOrgRow as { organization_id?: string | null } | null)?.organization_id;
+        if (tutorOrgError) return res.status(503).json({ error: 'Failed to load cancellation policy' });
+        let cancelOrgId = (tutorOrgRow as { organization_id?: string | null } | null)?.organization_id;
+        if (!cancelOrgId && existingSession.student_id) {
+            const { data: studentOrgRow, error: studentOrgError } = await supabase
+                .from('students')
+                .select('organization_id')
+                .eq('id', existingSession.student_id)
+                .maybeSingle();
+            if (studentOrgError) return res.status(503).json({ error: 'Failed to load cancellation policy' });
+            cancelOrgId = studentOrgRow?.organization_id;
+        }
         if (cancelOrgId) {
-            const { data: orgFeatRow } = await supabase
+            const { data: orgFeatRow, error: orgFeatError } = await supabase
                 .from('organizations')
                 .select('features')
                 .eq('id', cancelOrgId)
                 .maybeSingle();
+            if (orgFeatError || !orgFeatRow) return res.status(503).json({ error: 'Failed to load cancellation policy' });
             const feats = (orgFeatRow as { features?: Record<string, unknown> | null } | null)?.features;
             if (feats && feats.disable_student_reschedule_cancel === true) {
                 return res.status(403).json({ error: 'student_actions_disabled' });
+            }
+            if (feats?.disable_student_cancel === true) {
+                return res.status(403).json({ error: 'student_cancellation_disabled' });
             }
         }
     }

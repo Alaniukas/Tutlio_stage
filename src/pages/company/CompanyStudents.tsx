@@ -157,6 +157,8 @@ import {
 } from '@/lib/mvProvisionOptions';
 import MvProvisionDialog, { type MvProvisionDialogSubmit } from '@/components/company/MvProvisionDialog';
 import SchoolFamilyAccountsDialog from '@/components/company/SchoolFamilyAccountsDialog';
+import { schoolFamilyInvitationsRequired } from '@/lib/schoolFamilyInvitationPolicy';
+import { schoolFamilyAccountCopy } from '@/lib/schoolFamilyAccountCopy';
 import {
   mergeMvStudentAccountStatus,
   mvNeedsParentAccount,
@@ -461,6 +463,12 @@ export default function CompanyStudents() {
   const { t, locale } = useTranslation();
   const { fmt } = useMarketMoney();
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
+  const usesSchoolFamilyInvites = schoolFamilyInvitationsRequired(orgEntityType, {
+    school_family_portal: hasFeature('school_family_portal'),
+  });
+  const showLegacyInviteCode = !orgFeaturesLoading && !usesSchoolFamilyInvites;
+  const familyAccountCopy = schoolFamilyAccountCopy(locale);
+  const [familyInviteStudentId, setFamilyInviteStudentId] = useState<string | null>(null);
   const { user: authUser } = useUser();
   const { membership, can } = useOrgAdminAccess();
   const [orgId, setOrgId] = useState<string | null>(() => membership?.organizationId ?? null);
@@ -3054,6 +3062,11 @@ export default function CompanyStudents() {
     if (failed.length === 0) setToastMessage({ message: t('compStu.commentSaved'), type: 'success' });
   };
 
+  const openFamilyAccountInvitation = (studentId: string) => {
+    setIsStudentModalOpen(false);
+    setFamilyInviteStudentId(studentId);
+  };
+
   const handleSaveStudentInfo = async () => {
     if (!selectedStudent) return;
     if (!studentEditDraft.full_name.trim()) {
@@ -3206,7 +3219,9 @@ export default function CompanyStudents() {
     // Email changed while the student is still unregistered → offer to resend
     // the full invitation to the new address right away.
     if (emailChanged && nextEmail && !selectedStudent.linked_user_id) {
-      if (window.confirm(t('compStu.resendInviteAfterEmailChange'))) {
+      if (usesSchoolFamilyInvites) {
+        openFamilyAccountInvitation(selectedStudent.id);
+      } else if (!orgFeaturesLoading && window.confirm(t('compStu.resendInviteAfterEmailChange'))) {
         void sendInviteEmailFor({ ...selectedStudent, ...payload });
       }
     }
@@ -3494,6 +3509,10 @@ export default function CompanyStudents() {
   };
 
   const sendParentPortalInvites = async (studentId: string, showToast: boolean) => {
+    if (usesSchoolFamilyInvites) {
+      openFamilyAccountInvitation(studentId);
+      return null;
+    }
     setSendingParentInvites(true);
     try {
       const res = await fetch('/api/parent-create-invites-for-student', {
@@ -3526,6 +3545,11 @@ export default function CompanyStudents() {
 
   /** Takes the row explicitly so callers with freshly-saved data avoid stale state. */
   const sendInviteEmailFor = async (student: Student) => {
+    if (orgFeaturesLoading) return;
+    if (usesSchoolFamilyInvites) {
+      openFamilyAccountInvitation(student.id);
+      return;
+    }
     const recipient = (student.email || '').trim() || (student.payer_email || '').trim();
     if (!recipient) {
       setToastMessage({ message: t('compStu.noInviteRecipient'), type: 'error' });
@@ -3600,7 +3624,8 @@ export default function CompanyStudents() {
             </h1>
             <div className="flex items-center gap-2 flex-wrap shrink-0">
               {isSchoolView && !orgFeaturesLoading && (hasFeature('school_family_portal') || hasFeature('school_family_accounts_setup'))
-                && <SchoolFamilyAccountsDialog canEdit={can('students.edit')} onChanged={() => void fetchData()} />}
+                && <SchoolFamilyAccountsDialog canEdit={can('students.edit')} onChanged={() => void fetchData()}
+                  studentId={familyInviteStudentId} onStudentClose={() => setFamilyInviteStudentId(null)} />}
               <Button
                 variant={showTrashBin ? 'default' : 'outline'}
                 size="sm"
@@ -4800,7 +4825,7 @@ export default function CompanyStudents() {
 
                   <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3">
                     <p className="text-xs text-indigo-700">
-                      {t(isSchoolView ? 'compStu.inviteCodeHintSchool' : 'compStu.inviteCodeHint')}
+                      {usesSchoolFamilyInvites ? familyAccountCopy.intro : t(isSchoolView ? 'compStu.inviteCodeHintSchool' : 'compStu.inviteCodeHint')}
                     </p>
                   </div>
                 </div>
@@ -5179,9 +5204,9 @@ export default function CompanyStudents() {
                           )}
                         </div>
                         <div className="mt-3 flex items-center justify-between gap-3">
-                          <code className="font-mono font-bold text-indigo-700 text-xs tracking-widest bg-indigo-50 px-2 py-1 rounded">
+                          {showLegacyInviteCode && <code className="font-mono font-bold text-indigo-700 text-xs tracking-widest bg-indigo-50 px-2 py-1 rounded">
                             {student.invite_code}
-                          </code>
+                          </code>}
                           <div className="flex items-center gap-1.5">
                             {(student.payer_email || student.parent_secondary_email) && (
                               <button
@@ -5189,8 +5214,8 @@ export default function CompanyStudents() {
                                 onClick={(e) => { e.stopPropagation(); void sendParentPortalInvites(student.id, true); }}
                                 disabled={sendingParentInvites}
                                 className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 px-2 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
-                                aria-label={t('compStu.inviteParent')}
-                                title={t('compStu.inviteParent')}
+                                aria-label={usesSchoolFamilyInvites ? familyAccountCopy.title : t('compStu.inviteParent')}
+                                title={usesSchoolFamilyInvites ? familyAccountCopy.title : t('compStu.inviteParent')}
                               >
                                 <Mail className="w-3.5 h-3.5" />
                               </button>
@@ -5224,7 +5249,7 @@ export default function CompanyStudents() {
                     <th className="w-[28%] px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{proKlaseAdminUi ? t('compStu.pkThClient') : t('compStu.thStudent')}</th>
                     <th className="w-[14%] px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thTutor')}</th>
                     <th className="w-[28%] px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thContacts')}</th>
-                    <th className="w-[12%] px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thCode')}</th>
+                    <th className="w-[12%] px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{usesSchoolFamilyInvites ? familyAccountCopy.title : t('compStu.thCode')}</th>
                     <th className="w-[18%] px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thActions')}</th>
                   </tr>
                 </thead>
@@ -5333,9 +5358,14 @@ export default function CompanyStudents() {
                           </div>
                         </td>
                         <td className="px-4 py-4 align-top">
-                          <code className="inline-block font-mono font-bold text-indigo-700 text-sm tracking-widest bg-indigo-50 px-2 py-1 rounded">
+                          {usesSchoolFamilyInvites && <button type="button"
+                            className="text-xs font-medium text-indigo-700 hover:underline"
+                            onClick={(event) => { event.stopPropagation(); openFamilyAccountInvitation(student.id); }}>
+                            {familyAccountCopy.title}
+                          </button>}
+                          {showLegacyInviteCode && <code className="inline-block font-mono font-bold text-indigo-700 text-sm tracking-widest bg-indigo-50 px-2 py-1 rounded">
                             {student.invite_code}
-                          </code>
+                          </code>}
                         </td>
                         <td className="px-4 py-4 text-right align-top">
                           <div className="inline-flex items-center gap-1.5">
@@ -5345,9 +5375,9 @@ export default function CompanyStudents() {
                                 onClick={(e) => { e.stopPropagation(); void sendParentPortalInvites(student.id, true); }}
                                 disabled={sendingParentInvites}
                                 className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 px-2 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
-                                title={t('compStu.inviteParent')}
+                                title={usesSchoolFamilyInvites ? familyAccountCopy.title : t('compStu.inviteParent')}
                               >
-                                <Mail className="w-3.5 h-3.5" /> {t('compStu.inviteParent')}
+                                <Mail className="w-3.5 h-3.5" /> {usesSchoolFamilyInvites ? familyAccountCopy.title : t('compStu.inviteParent')}
                               </button>
                             )}
                             <button
@@ -5588,9 +5618,9 @@ export default function CompanyStudents() {
                           <span className="text-amber-600">{t('compStu.tutorNotAssigned')}</span>
                         )}
                       </p>
-                      <p className="text-gray-600">
+                      {showLegacyInviteCode && <p className="text-gray-600">
                         {t('compStu.codeInline')} <code className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">{selectedStudent.invite_code}</code>
-                      </p>
+                      </p>}
                     </div>
                     {isSchoolView && (
                     <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5">
@@ -5964,12 +5994,12 @@ export default function CompanyStudents() {
                             size="sm"
                             variant="outline"
                             className="h-7 px-2.5 text-[11px] gap-1"
-                            disabled={sendingInviteNow || !inviteRecipient}
-                            title={!inviteRecipient ? t('compStu.noInviteRecipient') : undefined}
+                            disabled={sendingInviteNow || orgFeaturesLoading || (!usesSchoolFamilyInvites && !inviteRecipient)}
+                            title={!usesSchoolFamilyInvites && !inviteRecipient ? t('compStu.noInviteRecipient') : undefined}
                             onClick={() => void handleSendInviteNow()}
                           >
                             <Mail className="w-3 h-3" />
-                            {sendingInviteNow ? t('compStu.sendingNow') : t('compStu.sendInviteNow')}
+                            {usesSchoolFamilyInvites ? familyAccountCopy.title : sendingInviteNow ? t('compStu.sendingNow') : t('compStu.sendInviteNow')}
                           </Button>
                         );
                       })()}
@@ -5985,7 +6015,7 @@ export default function CompanyStudents() {
                           {provisioningExistingStudent ? t('common.loading') : t('compStu.provisionCreateParentAccount')}
                         </Button>
                       )}
-                      {!supportsManagedFamilyAccounts && (selectedStudent.payer_email || selectedStudent.parent_secondary_email) && (
+                      {!usesSchoolFamilyInvites && !supportsManagedFamilyAccounts && (selectedStudent.payer_email || selectedStudent.parent_secondary_email) && (
                         <Button
                           type="button"
                           size="sm"
@@ -6275,7 +6305,7 @@ export default function CompanyStudents() {
                         <div key={row.id} className="flex items-center justify-between gap-2 p-2 rounded-xl bg-gray-50 border border-gray-100">
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-gray-900 truncate">{row.tutor_id ? (row.tutor?.full_name || '—') : t('compStu.tutorNotAssigned')}</p>
-                            <p className="text-[11px] text-gray-500 truncate">{t('compStu.codePrefix', { code: row.invite_code })}</p>
+                            {showLegacyInviteCode && <p className="text-[11px] text-gray-500 truncate">{t('compStu.codePrefix', { code: row.invite_code })}</p>}
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
                             <button

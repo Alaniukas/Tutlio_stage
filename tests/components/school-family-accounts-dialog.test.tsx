@@ -13,6 +13,20 @@ const row = (id: string, blockedReasons: string[] = []) => ({ studentId: id, stu
   annualContracts: [{ id: `annual-${id}`, number: `Annual ${id}` }], blockedReasons, parent: empty, student: empty });
 const reply = (body: unknown) => ({ ok: true, json: async () => body });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+it('opens the reviewed child from the student card and waits for an explicit invitation action', async () => {
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => init?.method === 'POST'
+    ? reply({ success: true, results: [] }) : reply({ rows: [row('one')], nextCursor: null }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<SchoolFamilyAccountsDialog canEdit studentId="one" />);
+  await screen.findByText('Child one');
+  expect(fetcher.mock.calls[0][0]).toBe('/api/school-family-accounts?studentId=one');
+  expect(fetcher.mock.calls.some(call => call[1]?.method === 'POST')).toBe(false);
+  expect((screen.getByRole('checkbox', { name: 'Child one' }) as HTMLInputElement).checked).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: copy.createInvite }));
+  await waitFor(() => expect(fetcher.mock.calls.some(call => call[1]?.method === 'POST')).toBe(true));
+  const write = fetcher.mock.calls.find(call => call[1]?.method === 'POST')!;
+  expect(JSON.parse(write[1]!.body as string)).toEqual({ action: 'provision', studentIds: ['one'] });
+});
 
 it('requires an explicit shared-login confirmation and sends only the reviewed child', async () => {
   const fetcher = vi.fn(async (_url: string, init?: RequestInit) => init?.method === 'POST'

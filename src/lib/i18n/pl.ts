@@ -12,6 +12,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const pl: Record<string, string> = {
+  'stuSess.cancellationDisabledByOrg': 'Odwoływanie lekcji jest wyłączone. Skontaktuj się z administracją.',
+  'stuSess.rescheduleHelp': 'Jeśli nie możesz znaleźć odpowiedniego terminu, skontaktuj się z administratorem przez wiadomości lub napisz na adres e-mail:',
   'school.recordings.chatTitle': "Historia czatu",
   'school.recordings.chatLoading': "Wczytywanie czatu…",
   'school.recordings.chatError': "Nie udało się wczytać czatu. Odśwież listę nagrań i spróbuj ponownie.",

@@ -9,6 +9,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const en: Record<string, string> = {
+  'stuSess.cancellationDisabledByOrg': 'Lesson cancellation is disabled. Contact the administration.',
+  'stuSess.rescheduleHelp': 'If you cannot find a suitable date, contact the administrator through messaging or email:',
   'school.recordings.chatMissing': "No matching Google Meet chat was found for this recording. It may still be processing or may not have been saved.",
   'school.recordings.chatRestricted': "Google Drive is blocking access to this chat. Please contact your school administrator.",
   'school.recordings.chatExpired': "This chat's viewing period has ended.",

@@ -201,6 +201,17 @@ describe('school family account workflow', () => {
     expect(state.createdAt).toBeTruthy(); expect(state.invitedAt).toBeTruthy(); expect(state.activatedAt).toBeNull(); expect(state.hasLoggedIn).toBe(false);
   });
 
+  it('limits a card invitation preview to the active child inside the authenticated school', async () => {
+    const memory = existingFamily();
+    memory.tables.students.push(student('two', 'other-child@example.test'));
+    memory.tables.students.push({ ...student('foreign'), organization_id: 'another-school' });
+    expect((await schoolFamilyAccountsPreview(memory.db, org, '', 'one')).rows.map(row => row.studentId)).toEqual(['one']);
+    expect((await schoolFamilyAccountsPreview(memory.db, org, '', 'foreign')).rows).toEqual([]);
+    memory.tables.students[0].enrollment_status = 'left';
+    expect((await schoolFamilyAccountsPreview(memory.db, org, '', 'one')).rows).toEqual([]);
+    expect(memory.createUser).not.toHaveBeenCalled();
+  });
+
   it('rejects foreign-school and inactive students before provisioning any Auth account', async () => {
     const memory = existingFamily();
     await expect(runSchoolFamilyAccountWorkflow(memory.db, { ...org, id: 'another-school' }, 'admin-one', 'one', 'provision', 'https://tutlio.lt')).rejects.toThrow('student_not_active');

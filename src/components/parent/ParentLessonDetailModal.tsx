@@ -34,6 +34,7 @@ import SessionFiles from '@/components/SessionFiles';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { useTranslation } from '@/lib/i18n';
 import type { OrgFeeProfile } from '@/lib/marketMoney';
+import { LessonRescheduleHelp } from '@/components/LessonRescheduleHelp';
 /** Tutor contact + payment / cancellation rules (from profiles). */
 export type ParentTutorContactPolicy = {
   tutorId: string;
@@ -57,6 +58,9 @@ export type ParentTutorContactPolicy = {
   studentActionsDisabled?: boolean;
   /** Org feature disable_student_reschedule (or the combined student-action flag). */
   rescheduleDisabled?: boolean;
+  /** Org feature disable_student_cancel (or the combined student-action flag). */
+  cancellationDisabled?: boolean;
+  organizationId?: string | null;
 };
 
 /** Session row shape for the shared parent lesson modal. */
@@ -189,7 +193,7 @@ export function ParentLessonDetailModal({
   const calendarReturn = `/parent/calendar?studentId=${encodeURIComponent(childId)}`;
 
   const reschedule = () => {
-    if (!session) return;
+    if (!session || tutorPolicy?.studentActionsDisabled || tutorPolicy?.rescheduleDisabled) return;
     onOpenChange(false);
     navigate(lessonsPath, {
       state: {
@@ -201,7 +205,7 @@ export function ParentLessonDetailModal({
   };
 
   const cancel = () => {
-    if (!session) return;
+    if (!session || tutorPolicy?.studentActionsDisabled || tutorPolicy?.cancellationDisabled) return;
     onOpenChange(false);
     navigate(lessonsPath, {
       state: {
@@ -471,6 +475,7 @@ export function ParentLessonDetailModal({
                   {t('studentDash.reschedule')}
                 </Button>
                 )}
+                {!tutorPolicy?.cancellationDisabled && (
                 <Button
                   variant="outline"
                   onClick={cancel}
@@ -478,9 +483,14 @@ export function ParentLessonDetailModal({
                 >
                   {t('studentDash.cancelLesson')}
                 </Button>
+                )}
               </div>
               )
             )}
+
+          {session.status === 'active' && isAfter(new Date(session.start_time), now) && childId && (
+            <LessonRescheduleHelp organizationId={tutorPolicy?.organizationId} />
+          )}
 
           {session.status === 'cancelled' && onDelete && (
             <Button

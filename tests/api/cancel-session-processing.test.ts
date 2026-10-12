@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import cancelSession from '../../api/cancel-session.js';
 import resolvePenalty from '../../api/cancel-penalty-resolution.js';
 import type { VercelRequest, VercelResponse } from '../../api/types';
-import { PRO_KLASE_QA_ORG_ID } from '../../src/lib/marketMoney';
+import { MOKSLO_VAISIAI_ORG_ID, PRO_KLASE_QA_ORG_ID } from '../../src/lib/marketMoney';
 
 const state = vi.hoisted(() => ({
   session: {} as Record<string, unknown>,
@@ -14,6 +14,8 @@ const state = vi.hoisted(() => ({
   auth: { isInternal: true, userId: undefined as string | undefined },
   adminOrg: null as string | null,
   tutor: {} as Record<string, unknown>,
+  org: {} as Record<string, unknown>,
+  orgLookupFails: false,
 }));
 
 vi.mock('../../api/_lib/auth.js', () => ({ verifyRequestAuth: async () => state.auth }));
@@ -28,10 +30,12 @@ vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
     const source = () => table === 'sessions' ? [state.session]
       : table === 'students' ? [state.student]
       : table === 'profiles' ? [state.tutor]
+      : table === 'organizations' ? [state.org]
       : table === 'lesson_packages' ? [state.pkg]
       : table === 'lesson_package_items' ? [state.item]
       : [];
     const result = (single: boolean) => {
+      if (table === 'organizations' && state.orgLookupFails) return { data: null, error: { code: 'TEST_POLICY_ERROR' } };
       const rows = source().filter((row) => filters.every((filter) => filter(row)));
       if (mutation) {
         if (state.failFinalize && table === 'sessions' && mutation.penalty_resolution === null) {
@@ -99,6 +103,8 @@ beforeEach(() => {
   state.auth = { isInternal: true, userId: undefined };
   state.adminOrg = null;
   state.tutor = { id: 'tutor', email: null, organization_id: null };
+  state.org = { id: MOKSLO_VAISIAI_ORG_ID, features: { disable_student_cancel: true, disable_student_reschedule: false } };
+  state.orgLookupFails = false;
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -106,6 +112,72 @@ beforeEach(() => {
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('cancellation processing guard', () => {
+  it.each(['student', 'parent'])('rejects MV %s cancellation before changing lessons or package credit', async (actor) => {
+    state.auth = { isInternal: false, userId: actor };
+    state.student.linked_user_id = 'student';
+    state.student.parent_user_id = 'parent';
+    state.tutor.organization_id = MOKSLO_VAISIAI_ORG_ID;
+    state.session.lesson_package_id = 'package';
+    const { res, capture } = response();
+    await cancelSession(request(), res);
+    expect(capture).toEqual({ status: 403, body: { error: 'student_cancellation_disabled' } });
+    expect(state.session.status).toBe('active');
+    expect(state.writes).toEqual([]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects family cancellation using the student organization when the tutor has none', async () => {
+    state.auth = { isInternal: false, userId: 'parent' };
+    state.student.parent_user_id = 'parent';
+    state.student.organization_id = MOKSLO_VAISIAI_ORG_ID;
+    const { res, capture } = response();
+    await cancelSession(request(), res);
+    expect(capture.status).toBe(403);
+    expect(state.writes).toEqual([]);
+  });
+
+  it.each(['tutor', 'admin'])('allows MV %s cancellation under the cancellation-only flag', async (actor) => {
+    state.auth = { isInternal: false, userId: actor };
+    state.tutor.organization_id = MOKSLO_VAISIAI_ORG_ID;
+    if (actor === 'admin') state.adminOrg = MOKSLO_VAISIAI_ORG_ID;
+    const { res, capture } = response();
+    await cancelSession(request({ cancelledBy: 'tutor' }), res);
+    expect(capture.status).toBe(200);
+    expect(state.session.status).toBe('cancelled');
+  });
+
+  it('does not let a parent bypass the cancellation restriction by claiming to be the tutor', async () => {
+    state.auth = { isInternal: false, userId: 'parent' };
+    state.student.parent_user_id = 'parent';
+    state.tutor.organization_id = MOKSLO_VAISIAI_ORG_ID;
+    const { res, capture } = response();
+    await cancelSession(request({ cancelledBy: 'tutor' }), res);
+    expect(capture.status).toBe(403);
+    expect(state.writes).toEqual([]);
+  });
+
+  it('keeps cancellation available for an org restricting only rescheduling', async () => {
+    state.auth = { isInternal: false, userId: 'student' };
+    state.student.linked_user_id = 'student';
+    state.tutor.organization_id = MOKSLO_VAISIAI_ORG_ID;
+    state.org.features = { disable_student_reschedule: true };
+    const { res, capture } = response();
+    await cancelSession(request(), res);
+    expect(capture.status).toBe(200);
+    expect(state.session.status).toBe('cancelled');
+  });
+
+  it('does not cancel when the organization policy cannot be loaded', async () => {
+    state.auth = { isInternal: false, userId: 'student' };
+    state.student.linked_user_id = 'student';
+    state.tutor.organization_id = MOKSLO_VAISIAI_ORG_ID;
+    state.orgLookupFails = true;
+    const { res, capture } = response();
+    await cancelSession(request(), res);
+    expect(capture.status).toBe(503);
+    expect(state.writes).toEqual([]);
+  });
+
   it.each([true, false])('honors Pro Klasė admin notifyStudent=%s while keeping tutor email', async (notifyStudent) => {
     state.auth = { isInternal: false, userId: 'admin' };
     state.adminOrg = PRO_KLASE_QA_ORG_ID;

@@ -19,6 +19,8 @@ export interface StudentPortalPolicyEntry {
   actionsDisabled: boolean;
   /** Org feature disable_student_reschedule (or the combined student-action flag). */
   rescheduleDisabled: boolean;
+  /** Org feature disable_student_cancel (or the combined student-action flag). */
+  cancellationDisabled: boolean;
   /** Org feature student_payments_page ("Mokėjimai" portal section). */
   paymentsPageEnabled: boolean;
   /** School feature school_lesson_recordings. */
@@ -43,6 +45,7 @@ export async function fetchStudentPortalPolicyMap(
     bookingDisabled: false,
     actionsDisabled: false,
     rescheduleDisabled: false,
+    cancellationDisabled: false,
     paymentsPageEnabled: false,
     lessonRecordingsEnabled: false,
     waitlistHidden: false,
@@ -84,7 +87,7 @@ export async function fetchStudentPortalPolicyMap(
     const orgIds = [...new Set(Object.values(orgOfStudent).filter((v): v is string => !!v))];
     const policyByOrg: Record<
       string,
-      { bookingDisabled: boolean; actionsDisabled: boolean; rescheduleDisabled: boolean; paymentsPageEnabled: boolean; lessonRecordingsEnabled: boolean; familyPortalEnabled: boolean; waitlistHidden: boolean }
+      { bookingDisabled: boolean; actionsDisabled: boolean; rescheduleDisabled: boolean; cancellationDisabled: boolean; paymentsPageEnabled: boolean; lessonRecordingsEnabled: boolean; familyPortalEnabled: boolean; waitlistHidden: boolean }
     > = {};
     if (orgIds.length > 0) {
       const { data: orgs } = await supabase
@@ -101,6 +104,7 @@ export async function fetchStudentPortalPolicyMap(
           bookingDisabled,
           actionsDisabled: o.features?.disable_student_reschedule_cancel === true,
           rescheduleDisabled: o.features?.disable_student_reschedule_cancel === true || o.features?.disable_student_reschedule === true,
+          cancellationDisabled: o.features?.disable_student_reschedule_cancel === true || o.features?.disable_student_cancel === true,
           paymentsPageEnabled: proKlaseFeatureEnabledForOrgRecord(
             o.id,
             o.entity_type,
@@ -123,6 +127,7 @@ export async function fetchStudentPortalPolicyMap(
         bookingDisabled: policy?.bookingDisabled === true,
         actionsDisabled: policy?.actionsDisabled === true,
         rescheduleDisabled: policy?.rescheduleDisabled === true,
+        cancellationDisabled: policy?.cancellationDisabled === true,
         paymentsPageEnabled: policy?.paymentsPageEnabled === true,
         lessonRecordingsEnabled: policy?.lessonRecordingsEnabled === true,
         familyPortalEnabled: policy?.familyPortalEnabled === true,
