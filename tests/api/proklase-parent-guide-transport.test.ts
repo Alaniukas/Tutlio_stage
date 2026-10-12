@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { minimatch } from 'minimatch';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PRO_KLASE_QA_ORG_ID } from '../../api/_lib/marketMoney';
 import { resolveProKlaseRegistrationAsset } from '../../api/_lib/proKlaseParentGuide';
@@ -35,6 +36,22 @@ const activation = (role: 'parent' | 'student') => sendMvAccountActivationEmail(
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 
 describe('Pro Klasė guides through the real Resend serializer', () => {
+  it('fits Vercel configuration limits and bundles guides in every sending function', () => {
+    const config = JSON.parse(readFileSync('vercel.json', 'utf8')) as {
+      functions: Record<string, { includeFiles?: string }>;
+    };
+    expect(Object.keys(config.functions).length).toBeLessThanOrEqual(50);
+    for (const endpoint of [
+      'register-parent', 'register-student', 'send-email', 'create-parent-invite',
+      'parent-create-invites-for-student', 'student-invite-parent', 'mv-provision-family-accounts',
+      'confirm-package-payment', 'confirm-manual-payment', 'create-manual-package',
+      'create-package-checkout', 'create-trial-package', 'stripe-webhook',
+    ]) {
+      const match = Object.entries(config.functions).find(([pattern]) => minimatch(`api/${endpoint}.ts`, pattern));
+      expect(match?.[1].includeFiles, endpoint).toBe('api/_lib/assets/proklase/**');
+    }
+  });
+
   it.each([
     ['parent invitation', () => sendParentInviteEmail('qa@example.test', {
       studentName: 'QA Child', registerLink: 'https://tutlio.lt/parent-register?token=QA', organizationId: PRO_KLASE_QA_ORG_ID,

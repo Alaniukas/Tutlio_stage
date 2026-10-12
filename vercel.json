@@ -32,43 +32,10 @@
         "api/admin-b2b-invoices.ts": {
             "includeFiles": "api/_lib/fonts/**"
         },
-        "api/register-parent.ts": {
+        "api/{register-parent,register-student,send-email,create-parent-invite,parent-create-invites-for-student,student-invite-parent,mv-provision-family-accounts}.ts": {
             "includeFiles": "api/_lib/assets/proklase/**"
         },
-        "api/register-student.ts": {
-            "includeFiles": "api/_lib/assets/proklase/**"
-        },
-        "api/send-email.ts": {
-            "includeFiles": "api/_lib/assets/proklase/**"
-        },
-        "api/create-parent-invite.ts": {
-            "includeFiles": "api/_lib/assets/proklase/**"
-        },
-        "api/parent-create-invites-for-student.ts": {
-            "includeFiles": "api/_lib/assets/proklase/**"
-        },
-        "api/student-invite-parent.ts": {
-            "includeFiles": "api/_lib/assets/proklase/**"
-        },
-        "api/mv-provision-family-accounts.ts": {
-            "includeFiles": "api/_lib/assets/proklase/**"
-        },
-        "api/confirm-package-payment.ts": {
-            "includeFiles": "api/_lib/assets/proklase/**"
-        },
-        "api/confirm-manual-payment.ts": {
-            "includeFiles": "api/_lib/assets/proklase/**"
-        },
-        "api/create-manual-package.ts": {
-            "includeFiles": "api/_lib/assets/proklase/**"
-        },
-        "api/create-package-checkout.ts": {
-            "includeFiles": "api/_lib/assets/proklase/**"
-        },
-        "api/create-trial-package.ts": {
-            "includeFiles": "api/_lib/assets/proklase/**"
-        },
-        "api/stripe-webhook.ts": {
+        "api/{confirm-package-payment,confirm-manual-payment,create-manual-package,create-package-checkout,create-trial-package,stripe-webhook}.ts": {
             "includeFiles": "api/_lib/assets/proklase/**"
         },
         "api/page-render.ts": {
