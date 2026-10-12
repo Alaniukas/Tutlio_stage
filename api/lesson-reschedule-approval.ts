@@ -24,7 +24,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (input.action === 'list' && req.method === 'GET') {
         let query = db.from('lesson_reschedule_requests')
           .select('id, changes, status, scope, expires_at').eq('tutor_id', auth.userId);
-        if (typeof input.session === 'string' && uuid.test(input.session)) query = query.contains('changes', [{ id: input.session }]);
+        if (typeof input.session === 'string' && uuid.test(input.session)) query = query.contains('changes', JSON.stringify([{ id: input.session }]));
         const { data, error } = await query.order('created_at', { ascending: false }).limit(100);
         if (error) throw error;
         return res.status(200).json({ requests: (data || []).map(row => ({

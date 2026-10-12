@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createClient } from '@supabase/supabase-js';
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(), rpc: vi.fn(), proposal: vi.fn(), notify: vi.fn(), preview: vi.fn(), verifyToken: vi.fn(),
@@ -119,7 +120,24 @@ describe('lesson reschedule approval API access and delivery', () => {
     await handler(request({ action: 'list', session: sessionId, tutorId: 'someone-else' }, 'GET'), res);
     expect(res.output.statusCode).toBe(200);
     expect(mocks.calls).toContainEqual({ table: 'lesson_reschedule_requests', kind: 'eq', key: 'tutor_id', value: tutorId });
-    expect(mocks.calls).toContainEqual({ table: 'lesson_reschedule_requests', kind: 'contains', key: 'changes', value: [{ id: sessionId }] });
+    expect(mocks.calls).toContainEqual({ table: 'lesson_reschedule_requests', kind: 'contains', key: 'changes', value: JSON.stringify([{ id: sessionId }]) });
     expect(res.output.body.requests[0]).not.toHaveProperty('recipient');
+  });
+  it('encodes the status filter as valid JSON through the actual Supabase SDK', async () => {
+    await handler(request({ action: 'list', session: sessionId }, 'GET'), response());
+    const filter = mocks.calls.find(call => call.kind === 'contains')!;
+    const requests: URL[] = [];
+    const db = createClient('https://example.supabase.co', 'test-key', {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { fetch: async input => {
+        requests.push(new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url));
+        return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } },
+    });
+    await db.from('lesson_reschedule_requests').select('id').contains(filter.key!, filter.value as string);
+    expect(requests).toHaveLength(1);
+    const encoded = requests[0].searchParams.get('changes')!;
+    expect(encoded.startsWith('cs.')).toBe(true);
+    expect(JSON.parse(encoded.slice(3))).toEqual([{ id: sessionId }]);
   });
 });
