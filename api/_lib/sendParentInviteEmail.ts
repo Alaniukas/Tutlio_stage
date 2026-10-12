@@ -7,6 +7,7 @@ import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { resolveOrgEmailReplyToWithServiceClient } from './orgEmailReplyTo.js';
 import { t, localizedFromEmail, type Locale } from './i18n.js';
 import { headerInlineStyle } from './outlookEmail.js';
+import { appendProKlaseParentGuide, buildProKlaseParentGuide } from './proKlaseParentGuide.js';
 import {
   applyOrgBrandingToHtml,
   resolveEmailOrgBranding,
@@ -146,6 +147,9 @@ export async function sendParentInviteEmail(
     emailFooterPoweredBy: resolved.emailFooterPoweredBy === true,
   });
 
+  const guide = buildProKlaseParentGuide(data.organizationId);
+  if (guide) html = appendProKlaseParentGuide(html, guide.html);
+
   const resend = new Resend(apiKey);
   const replyTo = await resolveOrgEmailReplyToWithServiceClient(data.organizationId);
   const { error } = await resend.emails.send({
@@ -154,6 +158,7 @@ export async function sendParentInviteEmail(
     ...(replyTo ? { replyTo } : {}),
     subject,
     html,
+    ...(guide ? { attachments: guide.attachments } : {}),
   });
 
   if (error) {

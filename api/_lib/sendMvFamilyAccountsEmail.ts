@@ -13,6 +13,7 @@ import {
 } from './emailOrgBranding.js';
 import { MOKSLO_VAISIAI_BRAND_COLOR, MOKSLO_VAISIAI_BRAND_COLOR_SECONDARY } from './marketMoney.js';
 import type { MvActivationRole } from './mvAccountActivationToken.js';
+import { appendProKlaseParentGuide, buildProKlaseParentGuide } from './proKlaseParentGuide.js';
 import {
   appendMvPayerFeeNoticeBeforeFooter,
   finalizeMvPayerFirstFeeNoticeAfterSend,
@@ -163,6 +164,9 @@ export async function sendMvAccountActivationEmail(
     emailFooterPoweredBy: resolved.emailFooterPoweredBy === true,
   });
 
+  const guide = buildProKlaseParentGuide(data.organizationId);
+  if (guide) html = appendProKlaseParentGuide(html, guide.html);
+
   const resend = new Resend(apiKey);
   const from = localizedFromEmail(locale, { senderName: resolved.emailSenderName });
   const replyTo = await resolveOrgEmailReplyToWithServiceClient(data.organizationId);
@@ -172,6 +176,7 @@ export async function sendMvAccountActivationEmail(
     ...(replyTo ? { replyTo } : {}),
     subject,
     html,
+    ...(guide ? { attachments: guide.attachments } : {}),
   });
 
   if (error) {

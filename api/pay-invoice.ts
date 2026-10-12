@@ -16,6 +16,7 @@ import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, directChargeApplicationFeeCents, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { billingBatchInvoiceNumbers, checkoutPaymentReporting, checkoutReportingMatches } from './_lib/stripeCheckoutReporting.js';
 import {
     directChargeOptions,
     expireConnectCheckoutSession,
@@ -103,7 +104,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             stripeAccountId = (tutor as any).stripe_account_id;
         }
 
-        // 6. Try to reuse existing Stripe session if still open
+        const invoiceNumbers = await billingBatchInvoiceNumbers(supabase, batchId);
+        if (!invoiceNumbers.length) {
+            return res.status(409).send(errorPage('Sąskaita dar neparuošta', 'Nepavyko rasti S.F. numerio. Kreipkitės į korepetitorių arba administraciją.'));
+        }
+        const reporting = checkoutPaymentReporting(batch.payer_name, invoiceNumbers);
+
+        // 6. Reuse only checkouts created with the current invoice and payer.
         if (batch.stripe_checkout_session_id) {
             try {
                 const existingLookup = await retrieveConnectCheckoutSessionWithScope(
@@ -112,7 +119,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     stripeAccountId,
                 );
                 const existing = existingLookup.session;
-                if (existingLookup.stripeAccount === stripeAccountId && existing.status === 'open' && existing.url) {
+                if (existingLookup.stripeAccount === stripeAccountId && existing.status === 'open' && existing.url
+                    && checkoutReportingMatches(existing, reporting)) {
                     return res.redirect(303, existing.url);
                 }
                 if (existing.status === 'open') {
@@ -164,9 +172,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }],
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
-                    metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, tutlio_school_org_absorbed: 'true' },
+                    description: reporting.description,
+                    metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, tutlio_school_org_absorbed: 'true', ...reporting.metadata },
                 },
-                metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, tutlio_school_org_absorbed: 'true' },
+                metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, tutlio_school_org_absorbed: 'true', ...reporting.metadata },
                 success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${batchId}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId!)}`,
                 cancel_url: `${appOrigin}/student/sessions`,
             }, directChargeOptions(stripeAccountId!));
@@ -220,9 +229,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 ],
                 payment_intent_data: {
                     ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),
-                    metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id },
+                    description: reporting.description,
+                    metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, ...reporting.metadata },
                 },
-                metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, ...checkoutBaseMetadata(baseCents / 100, market) },
+                metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, ...checkoutBaseMetadata(baseCents / 100, market), ...reporting.metadata },
                 success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${batchId}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId!)}`,
                 cancel_url: `${appOrigin}/student/sessions`,
             }, directChargeOptions(stripeAccountId!));

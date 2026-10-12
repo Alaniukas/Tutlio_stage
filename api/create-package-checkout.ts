@@ -16,6 +16,7 @@ import { chargeCurrency, directChargeApplicationFeeCents, lessonCheckoutBreakdow
 import { customerTotalEur } from './_lib/stripeLessonPricing.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { checkoutPaymentReporting } from './_lib/stripeCheckoutReporting.js';
 import { directChargeOptions } from './_lib/stripeDirectCharge.js';
 import {
   normalizePackageItemsInput,
@@ -343,6 +344,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
         }
 
+        // Issue S.F. before Checkout so the Charge carries its number.
+        let invoicePdfBase64: string | null = null;
+        let invoiceNumber: string | null = null;
+        if (shouldAttachSf) {
+            try {
+                const issuedByUserId = recurringPlan.planCreatedBy || auth.userId!;
+                const invRes = await postInternalJson(
+                    resolveApiUrl(req, '/api/generate-invoice'),
+                    {
+                        periodStart: new Date().toISOString().slice(0, 10),
+                        periodEnd: new Date().toISOString().slice(0, 10),
+                        groupingType: 'single',
+                        tutorId,
+                        studentId,
+                        packageIds: [lessonPackage.id],
+                        allowPendingStripePackages: true,
+                        issuedByUserId,
+                    },
+                    20000,
+                );
+                if (invRes.ok) {
+                    const invData = (await invRes.json().catch(() => null)) as any;
+                    if (invData?.invoiceIds?.[0]) {
+                        const invId = invData.invoiceIds[0];
+                        const { data: inv } = await supabase.from('invoices').select('invoice_number, pdf_storage_path').eq('id', invId).single();
+                        invoiceNumber = inv?.invoice_number || null;
+                        if (inv?.pdf_storage_path) {
+                            const { data: blob } = await supabase.storage.from('invoices').download(inv.pdf_storage_path);
+                            if (blob) {
+                                const arrayBuf = await blob.arrayBuffer();
+                                invoicePdfBase64 = Buffer.from(arrayBuf).toString('base64');
+                            }
+                        }
+                    }
+                } else {
+                    const errText = await invRes.text().catch(() => '');
+                    console.error('[create-package-checkout] generate-invoice HTTP', invRes.status, errText);
+                }
+            } catch (e) {
+                console.error('[create-package-checkout] pre-payment invoice error:', e);
+            }
+        }
+
         // 6. Determine customer email (payer or student)
         const customerEmail = student.payer_email || student.email || undefined;
 
@@ -359,7 +403,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             quantity: it.totalLessons,
         }));
 
+        const reporting = checkoutPaymentReporting(student.payer_name || student.full_name, [invoiceNumber]);
         const metadataBase = {
+            ...reporting.metadata,
             tutlio_package_id: lessonPackage.id,
             tutor_id: tutorId,
             student_id: studentId,
@@ -384,6 +430,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 payment_method_types: ['card'],
                 line_items: itemLineItems,
                 payment_intent_data: {
+                    description: reporting.description,
                     application_fee_amount: applicationFeeCents,
                     metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
                 },
@@ -414,6 +461,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     },
                 ],
                 payment_intent_data: {
+                    description: reporting.description,
                     ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),
                     metadata: metadataBase,
                 },
@@ -428,49 +476,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .from('lesson_packages')
             .update({ stripe_checkout_session_id: checkoutSession.id })
             .eq('id', lessonPackage.id);
-
-        // 9. Generate pre-payment invoice (S.F.) and attach PDF to email
-        let invoicePdfBase64: string | null = null;
-        let invoiceNumber: string | null = null;
-        if (shouldAttachSf) {
-            try {
-                const issuedByUserId = recurringPlan.planCreatedBy || auth.userId!;
-                const invRes = await postInternalJson(
-                    resolveApiUrl(req, '/api/generate-invoice'),
-                    {
-                        periodStart: new Date().toISOString().slice(0, 10),
-                        periodEnd: new Date().toISOString().slice(0, 10),
-                        groupingType: 'single',
-                        tutorId,
-                        studentId,
-                        packageIds: [lessonPackage.id],
-                        allowPendingStripePackages: true,
-                        issuedByUserId,
-                    },
-                    20000,
-                );
-                if (invRes.ok) {
-                    const invData = (await invRes.json().catch(() => null)) as any;
-                    if (invData?.invoiceIds?.[0]) {
-                        const invId = invData.invoiceIds[0];
-                        const { data: inv } = await supabase.from('invoices').select('invoice_number, pdf_storage_path').eq('id', invId).single();
-                        if (inv?.pdf_storage_path) {
-                            invoiceNumber = inv.invoice_number;
-                            const { data: blob } = await supabase.storage.from('invoices').download(inv.pdf_storage_path);
-                            if (blob) {
-                                const arrayBuf = await blob.arrayBuffer();
-                                invoicePdfBase64 = Buffer.from(arrayBuf).toString('base64');
-                            }
-                        }
-                    }
-                } else {
-                    const errText = await invRes.text().catch(() => '');
-                    console.error('[create-package-checkout] generate-invoice HTTP', invRes.status, errText);
-                }
-            } catch (e) {
-                console.error('[create-package-checkout] pre-payment invoice error:', e);
-            }
-        }
 
         // 10. Send email to payer with package details, payment link, and optional invoice PDF.
         // Use stable /api/pay-package redirect so the link never expires.

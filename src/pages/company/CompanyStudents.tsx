@@ -104,6 +104,7 @@ import {
 } from '@/lib/proKlaseStudentLessonPlan';
 import {
   countProKlaseClientRoster,
+  proKlaseClientHasLeft,
   matchesProKlaseClientRosterFilter,
   toggleProKlaseClientRosterFilter,
   type ProKlaseClientRosterFilter,
@@ -676,6 +677,7 @@ export default function CompanyStudents() {
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
   const [pkClientFilter, setPkClientFilter] = useState<ProKlaseClientRosterFilter>('all');
+  const [savingClientStatus, setSavingClientStatus] = useState(false);
   // School list filters: grade, contract, consent, enrollment metadata.
   const [gradeFilter, setGradeFilter] = useState('all');
   const [contractFilter, setContractFilter] = useState<'all' | 'signed' | 'pending' | 'none'>('all');
@@ -710,6 +712,8 @@ export default function CompanyStudents() {
   const [trialSending, setTrialSending] = useState(false);
   const [trialTutorId, setTrialTutorId] = useState<string | null>(null);
   const [selectedStudentGroup, setSelectedStudentGroup] = useState<Student[]>([]);
+  const selectedClientHasLeft = Boolean(selectedStudent
+    && proKlaseClientHasLeft({ primary: selectedStudent, rows: selectedStudentGroup }));
   const [selectedStudentSessionCount, setSelectedStudentSessionCount] = useState<number | null>(null);
   const [addingTutorId, setAddingTutorId] = useState('');
   const [addingTutorSearch, setAddingTutorSearch] = useState('');
@@ -991,7 +995,7 @@ export default function CompanyStudents() {
         );
       }
     }
-    if (proKlaseAdminUi && pkClientFilter !== 'all') {
+    if (proKlaseAdminUi && !showTrashBin) {
       groups = groups.filter((g) => matchesProKlaseClientRosterFilter(g, pkClientFilter));
     }
     return groups;
@@ -3381,6 +3385,34 @@ export default function CompanyStudents() {
     }
   };
 
+  const handleSetClientDeparture = async (left: boolean) => {
+    if (!selectedStudent || !proKlaseAdminUi || !can('students.edit') || savingClientStatus) return;
+    const ids = (selectedStudentGroup.length > 0 ? selectedStudentGroup : [selectedStudent])
+      .filter((row) => !row.detached_at).map((row) => row.id);
+    if (ids.length === 0) return;
+    const enrollment_status = left ? 'left' : 'active';
+    setSavingClientStatus(true);
+    try {
+      const { data, error } = await supabase.from('students')
+        .update({ enrollment_status }).in('id', ids).is('detached_at', null)
+        .select('id, enrollment_status');
+      if (error || !data || data.length !== ids.length
+        || data.some((row) => row.enrollment_status !== enrollment_status)) {
+        throw new Error('Client status was not saved');
+      }
+      const savedIds = new Set(data.map((row) => row.id));
+      setStudents((current) => current.map((row) => savedIds.has(row.id) ? { ...row, enrollment_status } : row));
+      setSelectedStudent((row) => row && savedIds.has(row.id) ? { ...row, enrollment_status } : row);
+      setSelectedStudentGroup((current) => current.map((row) => savedIds.has(row.id) ? { ...row, enrollment_status } : row));
+      invalidateCache('company_students');
+      setToastMessage({ message: t(left ? 'compStu.pkClientMarkedLeft' : 'compStu.pkClientReturned'), type: 'success' });
+    } catch {
+      setToastMessage({ message: t('compStu.pkClientStatusFailed'), type: 'error' });
+    } finally {
+      setSavingClientStatus(false);
+    }
+  };
+
   const handleRestoreStudent = async (id: string) => {
     const { data: studentRow } = await supabase
       .from('students')
@@ -3630,7 +3662,7 @@ export default function CompanyStudents() {
                 variant={showTrashBin ? 'default' : 'outline'}
                 size="sm"
                 className="rounded-xl gap-1.5"
-                onClick={() => setShowTrashBin((v) => !v)}
+                onClick={() => { setShowTrashBin((v) => !v); setPkClientFilter('all'); }}
               >
                 <Archive className="w-4 h-4" />
                 {showTrashBin ? t('compStu.activeStudents') : t('compStu.trashBin')}
@@ -4856,6 +4888,7 @@ export default function CompanyStudents() {
                 { id: 'active' as const, label: t('compStu.pkActiveClients'), count: pkRosterCounts.active, icon: CheckCircle, active: 'bg-emerald-50 text-emerald-800 ring-emerald-200', idle: 'bg-white text-emerald-700 ring-emerald-100' },
                 { id: 'inactive' as const, label: t('compStu.pkInactiveClients'), count: pkRosterCounts.inactive, icon: Clock, active: 'bg-amber-50 text-amber-800 ring-amber-200', idle: 'bg-white text-amber-700 ring-amber-100' },
                 { id: 'unassigned' as const, label: t('compStu.pkUnassignedTutor'), count: pkRosterCounts.unassigned, icon: UserMinus, active: 'bg-violet-50 text-violet-800 ring-violet-200', idle: 'bg-white text-violet-700 ring-violet-100' },
+                { id: 'left' as const, label: t('compStu.pkLeftClients'), count: pkRosterCounts.left, icon: UserMinus, active: 'bg-slate-100 text-slate-800 ring-slate-300', idle: 'bg-white text-slate-700 ring-slate-200' },
               ]).map((chip) => {
                 const selected = pkClientFilter === chip.id;
                 const Icon = chip.icon;
@@ -5148,6 +5181,11 @@ export default function CompanyStudents() {
                               </span>
                             )}
                           </div>
+                          {proKlaseAdminUi && proKlaseClientHasLeft(g) && (
+                            <span className="text-[11px] text-slate-700 bg-slate-100 border border-slate-200 rounded-md px-1.5 py-0.5">
+                              {t('compStu.pkLeftClient')}
+                            </span>
+                          )}
                           {student.linked_user_id ? (
                             <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-1.5 py-0.5 flex-shrink-0">
                               {t(proKlaseAdminUi ? 'compStu.pkAccountConfirmed' : 'compStu.connected')}
@@ -5292,6 +5330,9 @@ export default function CompanyStudents() {
                                 )}
                               </div>
                               <div className="mt-1 flex flex-wrap items-center gap-1">
+                                {proKlaseAdminUi && proKlaseClientHasLeft(g) && (
+                                  <span className="text-[11px] text-slate-700 bg-slate-100 border border-slate-200 rounded-md px-2 py-0.5">{t('compStu.pkLeftClient')}</span>
+                                )}
                                 {student.linked_user_id ? (
                                   <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-0.5">{t(proKlaseAdminUi ? 'compStu.pkAccountConfirmed' : 'compStu.connected')}</span>
                                 ) : (
@@ -5411,6 +5452,26 @@ export default function CompanyStudents() {
             </DialogHeader>
             {selectedStudent && (
               <div className="w-full min-w-0 space-y-5">
+                {proKlaseAdminUi && !selectedStudent.detached_at && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                    <div className="text-sm">
+                      <p className="font-semibold text-gray-900">
+                        {selectedClientHasLeft
+                          ? t('compStu.pkLeftClient') : t('compStu.pkCurrentClient')}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">{t('compStu.pkDepartureHint')}</p>
+                    </div>
+                    {can('students.edit') && (
+                      <Button type="button" variant="outline" size="sm" className="rounded-xl gap-2"
+                        disabled={savingClientStatus}
+                        onClick={() => void handleSetClientDeparture(!selectedClientHasLeft)}>
+                        {savingClientStatus ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserMinus className="h-4 w-4" />}
+                        {t(selectedClientHasLeft
+                          ? 'compStu.pkReturnClient' : 'compStu.pkMarkClientLeft')}
+                      </Button>
+                    )}
+                  </div>
+                )}
                 {studentCardBookingEnabled && (
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/50 px-4 py-3">

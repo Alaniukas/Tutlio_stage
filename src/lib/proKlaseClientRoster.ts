@@ -1,9 +1,10 @@
-export type ProKlaseClientRosterFilter = 'all' | 'active' | 'inactive' | 'unassigned';
+export type ProKlaseClientRosterFilter = 'all' | 'active' | 'inactive' | 'unassigned' | 'left';
 
 export type ProKlaseClientRosterRow = {
   linked_user_id?: string | null;
   tutor_id?: string | null;
   detached_at?: string | null;
+  enrollment_status?: string | null;
 };
 
 export type ProKlaseClientRosterGroup = {
@@ -16,6 +17,7 @@ export type ProKlaseClientRosterCounts = {
   active: number;
   inactive: number;
   unassigned: number;
+  left: number;
 };
 
 export function proKlaseClientHasAccount(student: { linked_user_id?: string | null }): boolean {
@@ -26,10 +28,17 @@ export function proKlaseClientHasTutor(rows: Array<{ tutor_id?: string | null }>
   return rows.some((row) => Boolean(row.tutor_id));
 }
 
+export function proKlaseClientHasLeft(group: ProKlaseClientRosterGroup): boolean {
+  return [group.primary, ...group.rows].some((row) => !row.detached_at && row.enrollment_status === 'left');
+}
+
 export function matchesProKlaseClientRosterFilter(
   group: ProKlaseClientRosterGroup,
   filter: ProKlaseClientRosterFilter,
 ): boolean {
+  if (group.primary.detached_at) return false;
+  if (filter === 'left') return proKlaseClientHasLeft(group);
+  if (proKlaseClientHasLeft(group)) return false;
   if (filter === 'all') return true;
   if (filter === 'active') return proKlaseClientHasAccount(group.primary);
   if (filter === 'inactive') return !proKlaseClientHasAccount(group.primary);
@@ -46,11 +55,13 @@ export function countProKlaseClientRoster(
   groups: ProKlaseClientRosterGroup[],
 ): ProKlaseClientRosterCounts {
   const live = liveProKlaseClientRosterGroups(groups);
+  const current = live.filter((group) => !proKlaseClientHasLeft(group));
   return {
-    all: live.length,
-    active: live.filter((group) => proKlaseClientHasAccount(group.primary)).length,
-    inactive: live.filter((group) => !proKlaseClientHasAccount(group.primary)).length,
-    unassigned: live.filter((group) => !proKlaseClientHasTutor(group.rows)).length,
+    all: current.length,
+    active: current.filter((group) => proKlaseClientHasAccount(group.primary)).length,
+    inactive: current.filter((group) => !proKlaseClientHasAccount(group.primary)).length,
+    unassigned: current.filter((group) => !proKlaseClientHasTutor(group.rows)).length,
+    left: live.filter(proKlaseClientHasLeft).length,
   };
 }
 

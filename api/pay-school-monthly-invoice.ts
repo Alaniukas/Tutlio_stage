@@ -17,6 +17,7 @@ import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { verifyPublicLinkToken } from './_lib/publicLinkToken.js';
 import { monthLabelLt } from './_lib/schoolMonthlyInvoiceEmail.js';
 import { schoolInvoiceAmountDue } from '../src/lib/schoolInvoiceOverpayments.js';
+import { checkoutPaymentReporting, checkoutReportingMatches } from './_lib/stripeCheckoutReporting.js';
 import {
   directChargeOptions,
   expireConnectCheckoutSession,
@@ -50,7 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: invoice, error: invoiceErr } = await supabase
       .from('school_monthly_invoices')
       .select(
-        '*, contract:school_contracts(id, contract_number, archived_at, student:students(full_name, email, payer_email, payer_name)), org:organizations(name, email, stripe_account_id, stripe_onboarding_complete)',
+        '*, student:students(full_name, email, payer_email, payer_name), contract:school_contracts(id, contract_number, archived_at, student:students(full_name, email, payer_email, payer_name)), org:organizations(name, email, stripe_account_id, stripe_onboarding_complete)',
       )
       .eq('id', invoiceId)
       .maybeSingle();
@@ -70,7 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (contract?.archived_at) {
       return res.status(400).send(errorPage('Sutartis nebegalioja', 'Ši sutartis archyvuota. Kreipkitės į mokyklą.'));
     }
-    const student = contract?.student;
+    const student = (invoice.student as any) || contract?.student;
     const org = invoice.org as any;
 
     const totalEur = schoolInvoiceAmountDue(invoice);
@@ -94,7 +95,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).send(errorPage('Klaida', 'Neteisingas mokesčių skaidymas sąskaitai.'));
     }
 
-    // Reuse an open Checkout with the same amount; otherwise expire and recreate.
+    const reporting = checkoutPaymentReporting(student?.payer_name || student?.full_name, [invoice.invoice_number]);
+
+    // Reuse only if both the amount and reporting fields still match.
     const existingCheckoutId = String((invoice as any).stripe_checkout_session_id || '').trim();
     if (existingCheckoutId) {
       try {
@@ -103,7 +106,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (existingLookup.stripeAccount === destinationAcct
           && existing.status === 'open'
           && existing.url
-          && existing.amount_total === chargeCents) {
+          && existing.amount_total === chargeCents
+          && checkoutReportingMatches(existing, reporting)) {
           return res.redirect(303, existing.url);
         }
         if (existing.status === 'open') {
@@ -124,6 +128,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ].filter(Boolean).join(' · ');
 
     const metadata = {
+      ...reporting.metadata,
       tutlio_school_monthly_invoice_id: invoice.id,
       tutlio_school_contract_id: invoice.contract_id,
       tutlio_student_id: invoice.student_id,
@@ -147,6 +152,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }],
       payment_intent_data: {
         application_fee_amount: applicationFeeCents,
+        description: reporting.description,
         metadata,
       },
       metadata,

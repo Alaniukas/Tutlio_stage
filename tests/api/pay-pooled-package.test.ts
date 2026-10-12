@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mock = vi.hoisted(() => ({ create: vi.fn(), retrieve: vi.fn(), expire: vi.fn(), from: vi.fn(), pkg: {} as any, checkoutClaim: {} as any,
-  origin: '', org: {} as any, items: [] as any[] }));
+  origin: '', org: {} as any, items: [] as any[], invoice: null as any }));
 vi.mock('stripe', () => ({ default: class { checkout = { sessions: { create: mock.create, retrieve: mock.retrieve, expire: mock.expire } }; } }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ from: mock.from }) }));
 vi.mock('../../api/_lib/public-origin.js', () => ({ publicOriginFromRequest: () => mock.origin }));
@@ -14,13 +14,14 @@ beforeEach(() => {
     payment_method: 'stripe', expires_at: '2099-10-01T00:00Z', students: { full_name: 'Student' },
     profiles: { full_name: 'Tutor', organization_id: 'changed-org' } };
   mock.checkoutClaim = mock.pkg;
+  mock.invoice = null;
   mock.origin = 'https://tutlio.pl';
   mock.org = { stripe_account_id: 'org-account', stripe_onboarding_complete: true, name: 'Pro Klase', slug: 'proklase' };
   mock.items = [{ total_lessons: 4, price_per_lesson: 27, subjects: { name: 'Lithuanian' } }, { total_lessons: 5, price_per_lesson: 27, subjects: { name: 'Maths' } }];
   mock.create.mockResolvedValue({ id: 'checkout', url: 'https://checkout.stripe.com/test' });
   mock.expire.mockResolvedValue({ id: 'cs_old', status: 'expired' });
   mock.from.mockImplementation((table: string) => {
-    const data = table === 'lesson_packages' ? mock.pkg : table === 'organizations' ? mock.org : mock.items;
+    const data = table === 'lesson_packages' ? mock.pkg : table === 'organizations' ? mock.org : table === 'invoices' ? mock.invoice : mock.items;
     const filters: Array<[string, unknown]> = [];
     const q: any = { then: (resolve: any) => Promise.resolve({ data, error: null }).then(resolve) };
     for (const method of ['select','single','order','update','neq']) q[method] = vi.fn(() => q);
@@ -53,6 +54,9 @@ describe('pooled package payment', () => {
     expect(checkout.success_url).toBe('https://tutlio.pl/package-success?session_id={CHECKOUT_SESSION_ID}&stripe_account=org-account');
     expect(checkout.cancel_url).toBe('https://tutlio.pl/package-cancelled');
     expect(checkout.metadata.tutlio_package_id).toBe('pool');
+    expect(checkout.payment_intent_data.description).toBe('Student');
+    expect(checkout.payment_intent_data.metadata.payer_name).toBe('Student');
+    expect(checkout.metadata.payer_name).toBe('Student');
     expect(options.idempotencyKey).toMatch(/^package-checkout:v2:pool:[a-f0-9]{64}$/);
     const orgQuery = mock.from.mock.results[mock.from.mock.calls.findIndex(([table]) => table === 'organizations')].value;
     expect(orgQuery.eq).toHaveBeenCalledWith('id', mock.pkg.pool_organization_id);
@@ -122,7 +126,7 @@ describe('pooled package payment', () => {
   });
   it('reuses an open checkout when its locale matches the link', async () => {
     mock.pkg.stripe_checkout_session_id = 'cs_old';
-    mock.retrieve.mockResolvedValue({ id: 'cs_old', status: 'open', url: 'https://checkout.stripe.com/old', locale: 'lt' });
+    mock.retrieve.mockResolvedValue({ id: 'cs_old', status: 'open', url: 'https://checkout.stripe.com/old', locale: 'lt', metadata: { payer_name: 'Student' } });
 
     const res = await pay();
 
@@ -133,6 +137,25 @@ describe('pooled package payment', () => {
   it('uses an explicit supported UI locale on a direct package link', async () => {
     await pay('pl');
     expect(mock.create.mock.calls[0][0].locale).toBe('pl');
+  });
+
+  it('includes the linked Tutlio sales invoice on the payment at creation', async () => {
+    mock.pkg.manual_sales_invoice_id = 'invoice-pk';
+    mock.pkg.students.payer_name = 'Mokėtojas';
+    mock.invoice = { invoice_number: 'PK-57' };
+    await pay();
+    const payload = mock.create.mock.calls[0][0];
+    expect(payload.payment_intent_data.description).toBe('PK-57 · Mokėtojas');
+    expect(payload.payment_intent_data.metadata).toMatchObject({ invoice_number: 'PK-57', payer_name: 'Mokėtojas', tutlio_package_id: 'pool' });
+    expect(payload.metadata).toMatchObject({ invoice_number: 'PK-57', payer_name: 'Mokėtojas' });
+  });
+
+  it('recreates a matching-locale legacy package checkout without reporting metadata', async () => {
+    mock.pkg.stripe_checkout_session_id = 'cs_old';
+    mock.retrieve.mockResolvedValue({ status: 'open', url: 'https://checkout.stripe.com/old', locale: 'lt' });
+    await pay();
+    expect(mock.expire).toHaveBeenCalledWith('cs_old', { stripeAccount: 'org-account' });
+    expect(mock.create.mock.calls[0][0].payment_intent_data.description).toBe('Student');
   });
   it('never creates a checkout for a cancelled package', async () => {
     mock.pkg.payment_status = 'cancelled';

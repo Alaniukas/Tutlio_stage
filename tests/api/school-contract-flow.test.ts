@@ -284,6 +284,9 @@ describe('School contract full flow (API integration)', () => {
     expect(checkoutParams.customer_creation).toBe('always');
     expect(checkoutParams.payment_intent_data.transfer_data).toBeUndefined();
     expect(checkoutParams.payment_intent_data.application_fee_amount).toBe(300);
+    expect(checkoutParams.payment_intent_data.description).toBe(flowDb.student.payer_name);
+    expect(checkoutParams.payment_intent_data.metadata.payer_name).toBe(flowDb.student.payer_name);
+    expect(checkoutParams.metadata.payer_name).toBe(flowDb.student.payer_name);
     expect(checkoutParams.line_items.reduce(
       (sum: number, item: any) => sum + item.price_data.unit_amount * item.quantity,
       0,

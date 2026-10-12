@@ -83,6 +83,9 @@ import { DateInput } from '@/components/ui/date-input';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { hasOverlapWithExclusions } from '@/lib/calendarSessionOverlap';
+import { resolveAccessToken } from '@/lib/authSession';
+import type { TutorLessonRescheduleRequest } from '@/lib/lessonRescheduleApproval';
+import { lessonRescheduleApprovalErrorKey, lessonRescheduleApprovalText } from '@/lib/i18n/lessonRescheduleApprovalCopy';
 import {
   applyCalendarSeriesEdit,
   CalendarSeriesConflictError,
@@ -376,6 +379,8 @@ export default function CalendarPage() {
   const { contactVisibility, hasFeature: hasOrgFeature, entityType: orgEntityType, organizationId, loading: orgFeaturesLoading } = useOrgFeatures();
   const { user: ctxUser, profile: ctxProfile } = useUser();
   const isSchoolTutor = orgEntityType === 'school';
+  const recurringRescheduleApprovalEnabled = orgEntityType === 'company'
+    && hasOrgFeature('tutor_recurring_reschedule_approval');
   const showClassGroups = !!organizationId && !orgFeaturesLoading && hasOrgFeature('school_class_groups');
   const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, orgEntityType, hasOrgFeature, 'monthly_packages', orgFeaturesLoading);
   // Org feature: ended lessons are not auto-completed — the tutor must confirm the outcome.
@@ -482,6 +487,7 @@ export default function CalendarPage() {
   // BigCalendar Setup
   const [selectedSlot, setSelectedSlot] = useState<{ start: Date; end: Date } | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<Session | null>(null);
+  const [rescheduleApprovalRequest, setRescheduleApprovalRequest] = useState<TutorLessonRescheduleRequest | null>(null);
   const [selectedGroupSessions, setSelectedGroupSessions] = useState<Session[]>([]);
   const [isGroupSession, setIsGroupSession] = useState(false);
   const [isClassGroupSession, setIsClassGroupSession] = useState(false);
@@ -663,6 +669,29 @@ export default function CalendarPage() {
 
   // Group edit/cancel choice states
   const [groupEditChoice, setGroupEditChoice] = useState<'single' | 'all_future' | null>(null);
+
+  useEffect(() => {
+    setRescheduleApprovalRequest(null);
+    if (!recurringRescheduleApprovalEnabled || !isEventModalOpen || !selectedEvent?.recurring_session_id) return;
+    const sessionId = selectedEvent.id;
+    const abort = new AbortController();
+    void (async () => {
+      try {
+        const token = await resolveAccessToken();
+        if (!token || abort.signal.aborted) return;
+        const response = await fetch(`/api/lesson-reschedule-approval?action=list&session=${sessionId}`, {
+          headers: { Authorization: `Bearer ${token}` }, signal: abort.signal,
+        });
+        const json = await response.json();
+        if (response.ok && !abort.signal.aborted) {
+          setRescheduleApprovalRequest((json.requests as TutorLessonRescheduleRequest[]).find(r => r.sessionIds.includes(sessionId)) || null);
+        }
+      } catch (cause) {
+        if (!abort.signal.aborted) console.warn('[Calendar] approval status unavailable', cause);
+      }
+    })();
+    return () => abort.abort();
+  }, [recurringRescheduleApprovalEnabled, isEventModalOpen, selectedEvent?.id, selectedEvent?.recurring_session_id]);
   const [groupCancelChoice, setGroupCancelChoice] = useState<'single' | 'all_future' | null>(null);
   const [classGroupCancelScope, setClassGroupCancelScope] = useState<'one_student' | 'whole_occurrence'>('whole_occurrence');
   const [classGroupCancelStudentId, setClassGroupCancelStudentId] = useState('');
@@ -3808,6 +3837,31 @@ export default function CalendarPage() {
         ...(!orgPolicy.hideMoney ? { price: Number.isFinite(Number(editPrice)) ? Number(editPrice) : 0 } : {}),
       };
 
+      if (timeChanged && recurringRescheduleApprovalEnabled && selectedEvent.recurring_session_id) {
+        const token = await resolveAccessToken();
+        if (!token) throw new Error('reschedule_error');
+        const response = await fetch('/api/lesson-reschedule-approval', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            action: 'request', sessionId: selectedEvent.id,
+            oldStart: oldStart.toISOString(), oldEnd: oldEnd.toISOString(),
+            newStart: newStart.toISOString(), newEnd: newEnd.toISOString(),
+            scope: applyToAllFuture ? 'future' : 'single', reason: rescheduleReason.trim(),
+            requestedBy: effectiveRescheduleRequestedBy, fields: editSessionPayload,
+            leaveFreeTime: leaveFreeTimeOnReschedule,
+          }),
+        });
+        const json = await response.json();
+        if (!response.ok) throw new Error(json.code || 'reschedule_error');
+        setIsEditingSession(false);
+        setIsEventModalOpen(false);
+        setGroupEditChoice(null);
+        setLeaveFreeTimeOnReschedule(false);
+        setToastMessage({ message: lessonRescheduleApprovalText(locale, 'sent'), type: 'success' });
+        setSaving(false);
+        return;
+      }
+
       if (applyToAllFuture) {
         const groupRecurringIds = isGroupSession
           ? [...new Set(selectedGroupSessions
@@ -4082,7 +4136,9 @@ export default function CalendarPage() {
       }
     } catch (err) {
       console.error(err);
-      alert(err instanceof CalendarSeriesConflictError
+      alert(err instanceof Error && err.message.startsWith('reschedule_')
+        ? lessonRescheduleApprovalText(locale, lessonRescheduleApprovalErrorKey(err.message))
+        : err instanceof CalendarSeriesConflictError
         ? t('cal.createOverlapDates', { dates: `${format(err.start, 'yyyy-MM-dd HH:mm')} - ${format(err.end, 'HH:mm')}` })
         : `${t('cal.failedToUpdate')}: ${err instanceof Error ? err.message : t('cal.errorGeneric')}`);
       fetchData();
@@ -5772,6 +5828,16 @@ export default function CalendarPage() {
             </DialogTitle>
           </DialogHeader>
 
+          {recurringRescheduleApprovalEnabled && rescheduleApprovalRequest?.status === 'pending' && (
+            <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800" role="status">
+              {lessonRescheduleApprovalText(locale, 'alreadyPending')}
+            </p>
+          )}
+          {recurringRescheduleApprovalEnabled && rescheduleApprovalRequest?.status === 'rejected' && (
+            <p className="rounded-xl bg-red-50 p-3 text-sm text-red-800" role="status">
+              {lessonRescheduleApprovalText(locale, 'tutorRejected', { student: selectedEvent?.student?.full_name || '' })}
+            </p>
+          )}
           {isEditingSession ? (
             <div className="space-y-4 py-2 min-w-0">
               <div className="space-y-2">
@@ -5782,6 +5848,12 @@ export default function CalendarPage() {
                 <Label>{t('cal.timeLabel')}</Label>
                 <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
               </div>
+              {recurringRescheduleApprovalEnabled && selectedEvent?.recurring_session_id && editNewStartTime
+                && new Date(editNewStartTime).getTime() !== selectedEvent.start_time.getTime() && (
+                <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+                  {lessonRescheduleApprovalText(locale, 'pending')}
+                </p>
+              )}
               {editNewStartTime && selectedEvent &&
                 Math.floor(new Date(editNewStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) && (
                 <div className="space-y-2">

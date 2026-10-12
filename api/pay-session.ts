@@ -22,6 +22,7 @@ import {
 } from './_lib/marketMoney.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { stripeCheckoutLocale } from './_lib/stripeLocale.js';
+import { checkoutPaymentReporting, checkoutReportingMatches } from './_lib/stripeCheckoutReporting.js';
 import {
     directChargeOptions,
     expireConnectCheckoutSession,
@@ -146,6 +147,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             expectedTotalCents = breakdown.baseCents + breakdown.feesCents;
         }
 
+        const reporting = checkoutPaymentReporting(student?.payer_name || student?.full_name);
+
         // 4. Reuse the existing Stripe session only if it is still open AND its amount matches
         //    the current price. If the lesson price changed after the checkout was created
         //    (e.g. the tutor extended a single lesson into a double one and raised the price),
@@ -163,7 +166,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     && existing.status === 'open'
                     && existing.url
                     && existing.amount_total === expectedTotalCents
-                    && existing.locale === checkoutLocale) {
+                    && existing.locale === checkoutLocale
+                    && checkoutReportingMatches(existing, reporting)) {
                     return res.redirect(303, existing.url);
                 }
                 if (existing.status === 'open') {
@@ -201,9 +205,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 line_items: [{ price_data: { currency, product_data: { name: itemName, description: itemDesc }, unit_amount: chargeCents }, quantity: 1 }],
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
-                    metadata: { tutlio_session_id: sessionId, tutlio_school_org_absorbed: 'true' },
+                    description: reporting.description,
+                    metadata: { tutlio_session_id: sessionId, tutlio_school_org_absorbed: 'true', ...reporting.metadata },
                 },
-                metadata: { tutlio_session_id: sessionId, tutlio_school_org_absorbed: 'true' },
+                metadata: { tutlio_session_id: sessionId, tutlio_school_org_absorbed: 'true', ...reporting.metadata },
                 success_url: `${appOrigin}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${appOrigin}/student/sessions`,
             }, directChargeOptions(stripeAccountId!));
@@ -222,9 +227,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 ],
                 payment_intent_data: {
                     ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),
-                    metadata: { tutlio_session_id: sessionId },
+                    description: reporting.description,
+                    metadata: { tutlio_session_id: sessionId, ...reporting.metadata },
                 },
-                metadata: { tutlio_session_id: sessionId, ...checkoutBaseMetadata(baseCents / 100, market) },
+                metadata: { tutlio_session_id: sessionId, ...checkoutBaseMetadata(baseCents / 100, market), ...reporting.metadata },
                 success_url: `${appOrigin}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${appOrigin}/student/sessions`,
             }, directChargeOptions(stripeAccountId!));

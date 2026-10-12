@@ -1,14 +1,10 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Resend } from 'resend';
 import { localizedFromEmail } from './i18n.js';
-import { isProKlaseOrg } from './marketMoney.js';
+import { isProKlaseOrg, PRO_KLASE_ORG_ID } from './marketMoney.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { resolveOrgEmailReplyToWithServiceClient } from './orgEmailReplyTo.js';
-
-const PARENT_GUIDE_FILE = 'tevu-atmintine.png';
-const PAYMENT_GUIDE_FILE = 'atsiskaitymo-tvarka.png';
+import { buildProKlaseParentGuide } from './proKlaseParentGuide.js';
+export { resolveProKlaseRegistrationAsset } from './proKlaseParentGuide.js';
 
 function escapeHtml(value: string): string {
   return value
@@ -19,25 +15,10 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function assetCandidates(fileName: string): string[] {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return [
-    join(here, 'assets', 'proklase', fileName),
-    join(process.cwd(), 'api', '_lib', 'assets', 'proklase', fileName),
-    join(process.cwd(), '_lib', 'assets', 'proklase', fileName),
-  ];
-}
-
-export function resolveProKlaseRegistrationAsset(fileName: string): string {
-  const candidates = assetCandidates(fileName);
-  const found = candidates.find((candidate) => existsSync(candidate));
-  if (found) return found;
-  throw new Error(`ProKlasė registration asset not found: ${fileName}. Tried: ${candidates.join(' | ')}`);
-}
-
 export function buildProKlaseRegistrationWelcomeEmail(parentName?: string | null) {
   const safeName = escapeHtml(String(parentName || '').trim());
   const greeting = safeName ? `<p style="margin:0 0 18px;">Sveiki, ${safeName}!</p>` : '';
+  const guide = buildProKlaseParentGuide(PRO_KLASE_ORG_ID)!;
 
   return {
     subject: 'Sėkmingai užsiregistravote ProKlasės sistemoje! 🎉',
@@ -74,20 +55,7 @@ export function buildProKlaseRegistrationWelcomeEmail(parentName?: string | null
   </table>
 </body>
 </html>`,
-    attachments: [
-      {
-        filename: 'ProKlase - Tevu atmintine.png',
-        content: readFileSync(resolveProKlaseRegistrationAsset(PARENT_GUIDE_FILE)),
-        contentType: 'image/png',
-        contentId: 'proklase-tevu-atmintine',
-      },
-      {
-        filename: 'ProKlase - Atsiskaitymo tvarka.png',
-        content: readFileSync(resolveProKlaseRegistrationAsset(PAYMENT_GUIDE_FILE)),
-        contentType: 'image/png',
-        contentId: 'proklase-atsiskaitymo-tvarka',
-      },
-    ],
+    attachments: guide.attachments,
   };
 }
 

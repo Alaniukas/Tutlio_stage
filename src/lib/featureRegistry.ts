@@ -63,6 +63,15 @@ export const FEATURE_CATEGORIES = {
  * where the flag is enabled, never from the organization where it originated.
  */
 export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
+  tutor_recurring_reschedule_approval: {
+    id: 'tutor_recurring_reschedule_approval',
+    name: 'Kliento patvirtinimas perkeliant pasikartojančią pamoką',
+    nameEn: 'Client approval for recurring lesson rescheduling',
+    description: 'Įmonės korepetitoriaus pasiūlytas vienos arba visų būsimų pasikartojančių pamokų laikas įsigalioja tik klientui patvirtinus el. paštu. Atmetus korepetitorius nukreipiamas į administraciją.',
+    descriptionEn: 'A company tutor’s proposed move of one or all future recurring lessons takes effect only after client email approval. Declined moves direct the tutor to the administration.',
+    category: 'automation',
+    defaultValue: false,
+  },
   // ─────────────────────────────────────────────────────────────────────
   // Org Admin Calendar Features
   // ─────────────────────────────────────────────────────────────────────

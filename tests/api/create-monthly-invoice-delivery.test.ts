@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   junctionFails: false, sessionLinkFails: false,
   checkoutSaveFails: false,
   manualPayments: false,
+  organizationId: '', entityType: 'company',
 }));
 
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
@@ -50,24 +51,25 @@ function query(table: string) {
       if (columns === 'id') {
         return { data: [{ id: 'tutor-1' }, { id: 'tutor-2' }], error: null };
       }
-      return { data: { id: 'tutor-1', full_name: 'Mokytojas', organization_id: MANO_ID,
+      return { data: { id: 'tutor-1', full_name: 'Mokytojas', organization_id: mocks.organizationId,
         enable_manual_student_payments: mocks.manualPayments }, error: null };
     }
     if (table === 'organizations') return { data: {
-      name: 'Mano korepetitorius', entity_type: 'company', stripe_account_id: 'acct_test',
+      name: 'Mano korepetitorius', entity_type: mocks.entityType, stripe_account_id: 'acct_test',
       stripe_onboarding_complete: true, enable_monthly_billing: true, enable_per_lesson: false,
       features: { pvm_education_invoice: true, org_payer_fee_split: true },
     }, error: null };
     if (table === 'sessions') return { data: columns.includes('students!inner(payment_model') ? [] : mocks.sessions, error: null };
     if (table === 'invoices') {
       if (filters.id) return { data: { invoice_number: `SF-${filters.id}`, pdf_storage_path: `${filters.id}.pdf` }, error: null };
-      return { data: mocks.invoiceGenerationFails ? [] : mocks.invoiceIds.map(id => ({ id })), error: null };
+      return { data: mocks.invoiceGenerationFails ? [] : mocks.invoiceIds.map(id => ({ id, invoice_number: `SF-${id}` })), error: null };
     }
     return { data: [], error: null };
   };
   const q: any = {
     select(c = '') { columns = c; return q; },
     eq(c: string, v: any) { filters[c] = v; return q; },
+    neq() { return q; },
     in() { return q; }, is() { return q; }, gte() { return q; }, lte() { return q; }, lt() { return q; }, limit() { return q; },
     insert(v: any) { operation = 'insert'; value = v; return q; },
     update(v: any) { operation = 'update'; value = v; return q; },
@@ -104,6 +106,8 @@ describe('monthly invoice creation and delivery', () => {
     mocks.junctionFails = false; mocks.sessionLinkFails = false;
     mocks.checkoutSaveFails = false;
     mocks.manualPayments = false;
+    mocks.organizationId = MANO_ID;
+    mocks.entityType = 'company';
     mocks.invoiceIds = ['invoice-1', 'invoice-2'];
     mocks.sessions = ['child-1', 'child-2'].map((id, i) => ({
       id: `lesson-${i}`, student_id: id, tutor_id: 'tutor-1', status: 'completed',
@@ -137,6 +141,15 @@ describe('monthly invoice creation and delivery', () => {
     expect(mocks.batches[0].sent_at).toBeNull();
     expect(mocks.writes).toContainEqual(expect.objectContaining({ table: 'billing_batches', operation: 'update', value: { sent_at: expect.any(String) } }));
     expect(mocks.writes.some(w => w.table === 'invoices' && w.operation === 'insert')).toBe(false);
+    const checkout = mocks.checkout.mock.calls[0][0];
+    expect(checkout.payment_intent_data.description).toBe('SF-invoice-1, SF-invoice-2 · Tėvas');
+    expect(checkout.payment_intent_data.metadata).toMatchObject({
+      tutlio_billing_batch_id: 'batch-1', tutor_id: 'tutor-1',
+      invoice_number: 'SF-invoice-1, SF-invoice-2', payer_name: 'Tėvas',
+    });
+    expect(checkout.metadata).toMatchObject(checkout.payment_intent_data.metadata);
+    expect(mocks.fetch.mock.invocationCallOrder[0]).toBeLessThan(mocks.checkout.mock.invocationCallOrder[0]);
+    expect(Math.max(...mocks.download.mock.invocationCallOrder)).toBeLessThan(mocks.checkout.mock.invocationCallOrder[0]);
   });
 
   it('keeps an issued invoice for resend but reports an email delivery failure', async () => {
@@ -148,6 +161,19 @@ describe('monthly invoice creation and delivery', () => {
     expect(res.body).toMatchObject({ success: false, totalBatches: 0, failures: [{ payerEmail: 'parent@example.test', batchId: 'batch-1', stage: 'email' }] });
     expect(mocks.writes.some(w => w.table === 'billing_batches' && w.operation === 'delete')).toBe(false);
     expect(mocks.writes.some(w => w.value?.sent_at)).toBe(false);
+  });
+
+  it.each(['company', 'school'])('includes the payer and S.F. numbers for another %s organization', async (entityType) => {
+    mocks.organizationId = 'other-org';
+    mocks.entityType = entityType;
+    const res = await send();
+    expect(res.statusCode).toBe(200);
+    const payload = mocks.checkout.mock.calls[0][0];
+    expect(payload.payment_intent_data.description).toBe('SF-invoice-1, SF-invoice-2 · Tėvas');
+    expect(payload.payment_intent_data.metadata).toMatchObject({ invoice_number: 'SF-invoice-1, SF-invoice-2', payer_name: 'Tėvas' });
+    expect(payload.metadata).toMatchObject({ invoice_number: 'SF-invoice-1, SF-invoice-2', payer_name: 'Tėvas' });
+    expect(mocks.checkout.mock.calls[0][1]).toEqual({ stripeAccount: 'acct_test' });
+    if (entityType === 'school') expect(payload.metadata.tutlio_school_org_absorbed).toBe('true');
   });
 
   it('attaches every child invoice when an organization tutor uses manual payments', async () => {
@@ -181,7 +207,8 @@ describe('monthly invoice creation and delivery', () => {
     mocks.invoiceGenerationFails = true;
     const res = await send();
     expect(res.body.failures[0].stage).toBe('invoice');
-    expect(mocks.expire).toHaveBeenCalledWith('cs_test', { stripeAccount: 'acct_test' });
+    expect(mocks.checkout).not.toHaveBeenCalled();
+    expect(mocks.expire).not.toHaveBeenCalled();
     expect(mocks.writes).toContainEqual(expect.objectContaining({ table: 'sessions', operation: 'update', value: { payment_batch_id: null } }));
     expect(mocks.writes.some(w => w.table === 'billing_batches' && w.operation === 'delete')).toBe(true);
     expect(mocks.writes.some(w => w.table === 'invoices' && w.operation === 'insert')).toBe(false);
@@ -192,7 +219,10 @@ describe('monthly invoice creation and delivery', () => {
     const res = await send();
     expect(res.statusCode).toBe(502);
     expect(res.body).toMatchObject({ success: false, totalBatches: 0, failures: [{ stage: 'checkout' }] });
-    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.fetch.mock.calls.some(([url]) => url.endsWith('/api/generate-invoice'))).toBe(true);
+    expect(mocks.fetch.mock.calls.some(([url]) => url.endsWith('/api/send-email'))).toBe(false);
+    expect(res.body.failures[0].batchId).toBe('batch-1');
+    expect(mocks.writes.some(w => w.table === 'billing_batches' && w.operation === 'delete')).toBe(false);
   });
 
   it('does not charge or email after session linking fails', async () => {
@@ -203,13 +233,15 @@ describe('monthly invoice creation and delivery', () => {
     expect(mocks.fetch).not.toHaveBeenCalled();
   });
 
-  it('releases and expires checkout when its reference cannot be saved', async () => {
+  it('expires checkout but preserves the issued invoice batch when its reference cannot be saved', async () => {
     mocks.checkoutSaveFails = true;
     const res = await send();
     expect(res.body.failures[0].stage).toBe('checkout');
     expect(mocks.expire).toHaveBeenCalled();
-    expect(mocks.writes.some(w => w.table === 'billing_batches' && w.operation === 'delete')).toBe(true);
-    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.writes.some(w => w.table === 'billing_batches' && w.operation === 'delete')).toBe(false);
+    expect(mocks.writes.some(w => w.table === 'sessions' && w.value?.payment_batch_id === null)).toBe(false);
+    expect(res.body.failures[0].batchId).toBe('batch-1');
+    expect(mocks.fetch.mock.calls.some(([url]) => url.endsWith('/api/send-email'))).toBe(false);
   });
 
   it('reports an already-billed lesson conflict without creating a second checkout', async () => {

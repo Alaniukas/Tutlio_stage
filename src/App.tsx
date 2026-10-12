@@ -130,6 +130,7 @@ const ParentRegister = lazy(() => import('@/pages/ParentRegister'));
 const SchoolContractComplete = lazy(() => import('@/pages/SchoolContractComplete'));
 const SchoolExtraLessonsAccept = lazy(() => import('@/pages/SchoolExtraLessonsAccept'));
 const SchoolDiscountAccept = lazy(() => import('@/pages/SchoolDiscountAccept'));
+const LessonRescheduleApproval = lazy(() => import('@/pages/LessonRescheduleApproval'));
 const MvAccountActivate = lazy(() => import('@/pages/MvAccountActivate'));
 const SchoolHomework = lazy(() => import('@/pages/SchoolHomework'));
 const SchoolFamilyMaterials = lazy(() => import('@/pages/SchoolFamilyMaterials'));
@@ -462,6 +463,7 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
         <Route path="/school-extra-lessons-accept" element={<SchoolExtraLessonsAccept />} />
         <Route path="/school-discount-accept" element={<SchoolDiscountAccept />} />
+        <Route path="/lesson-reschedule-approval" element={<LessonRescheduleApproval />} />
         <Route path="/school-homework" element={<SchoolHomework />} />
         <Route path="/school-sign" element={<SchoolSign />} />
         <Route path="/school-staff-consent" element={<SchoolStaffConsent />} />

@@ -60,6 +60,8 @@ import { shouldSkipTutorNotification } from './_lib/tutorNotificationPreferences
 import { filterUserNotificationRecipients } from './_lib/userNotificationPreferences.js';
 import { allowsPerLessonBilling } from './_lib/perLessonBillingEligibility.js';
 import { resolveOrgEmailReplyTo } from './_lib/orgEmailReplyTo.js';
+import { lessonRescheduleApprovalEmail } from './_lib/lessonRescheduleApprovalEmail.js';
+import { appendProKlaseParentGuide, buildProKlaseParentGuide } from './_lib/proKlaseParentGuide.js';
 
 
 function randomToken() {
@@ -3951,6 +3953,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'tutor_invite': emailContent = tutorInvite(data, locale); break;
       case 'mokslo_vaisiai_student_archive': emailContent = moksloVaisiaiStudentArchiveRequest(data, locale); break;
       case 'lesson_rescheduled': emailContent = lessonRescheduled(data, locale); break;
+      case 'lesson_reschedule_proposed': {
+        const content = lessonRescheduleApprovalEmail('proposal', data, locale);
+        emailContent = { subject: content.subject, html: wrap(content.html, locale) };
+        break;
+      }
+      case 'lesson_reschedule_decision': {
+        const content = lessonRescheduleApprovalEmail('decision', data, locale);
+        emailContent = { subject: content.subject, html: wrap(content.html, locale) };
+        break;
+      }
       case 'waitlist_added': emailContent = waitlistAdded(data, locale); break;
       case 'waitlist_matched_student': emailContent = waitlistMatchedStudent(data, locale); break;
       case 'waitlist_matched_tutor': emailContent = waitlistMatchedTutor(data, locale); break;
@@ -4014,6 +4026,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     emailContent = applyBranding(emailContent);
 
+    const invitationGuide = ['invite_email', 'parent_invite'].includes(String(type))
+      ? buildProKlaseParentGuide(orgIdForBrandingLookup) : null;
+    if (invitationGuide) {
+      emailContent = { ...emailContent,
+        html: appendProKlaseParentGuide(emailContent.html, invitationGuide.html) };
+    }
+
     if ((req.body as { dryRun?: unknown } | undefined)?.dryRun === true) {
       if (!isInternalRequest(req)) {
         return res.status(403).json({ error: 'Forbidden' });
@@ -4074,6 +4093,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         content: Buffer.from(a.content, 'base64'),
       }));
     }
+    if (invitationGuide) {
+      emailPayload.attachments = [...(emailPayload.attachments || []), ...invitationGuide.attachments];
+    }
 
     if (type === 'school_monthly_invoice') {
       const delivery = await deliverSchoolMonthlyInvoiceOnce({
@@ -4121,16 +4143,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ success: true, ...delivery });
     }
 
-    const { data: result, error } = pooledPackageDelivery || sessionReminderDelivery
-      ? await resend.emails.send(emailPayload, { idempotencyKey: requestedIdempotencyKey })
+    const rescheduleDeliveryKey = isInternalRequest(req)
+      && ['lesson_reschedule_proposed', 'lesson_reschedule_decision', 'lesson_rescheduled'].includes(String(type))
+      && /^reschedule\/[a-f\d-]{36}\/(proposal\/[a-f\d-]{36}|decision\/(approved|rejected)|moved\/[a-f\d]{64})$/.test(String(rawData.rescheduleDeliveryKey || ''))
+      ? String(rawData.rescheduleDeliveryKey) : undefined;
+    const { data: result, error } = pooledPackageDelivery || sessionReminderDelivery || rescheduleDeliveryKey
+      ? await resend.emails.send(emailPayload, { idempotencyKey: rescheduleDeliveryKey || requestedIdempotencyKey })
       : await resend.emails.send(emailPayload);
 
     if (error) {
-      if (sessionReminderDelivery && reminderWasAlreadySent(error)) {
+      if ((sessionReminderDelivery || rescheduleDeliveryKey) && reminderWasAlreadySent(error)) {
         // Resend accepted this logical reminder earlier. Its rendered body can
         // change on retry (for example after a lesson edit or deployment), but
         // retrying with a new key would deliver a duplicate email.
-        console.warn('[send-email] Reminder was already sent with this idempotency key');
+        console.warn('[send-email] Notification was already sent with this idempotency key');
         return res.status(200).json({
           success: true,
           skipped: true,

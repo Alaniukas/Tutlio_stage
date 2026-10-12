@@ -11,6 +11,7 @@ import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, directChargeApplicationFeeCents, isManoKorepetitoriusOrg, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { billingBatchInvoiceNumbers, checkoutPaymentReporting } from './_lib/stripeCheckoutReporting.js';
 import { directChargeOptions, expireConnectCheckoutSession } from './_lib/stripeDirectCharge.js';
 import {
     tutorUsesManualStudentPayments,
@@ -530,145 +531,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 continue;
             }
 
-            // Stripe Checkout (skipped for solo tutors in manual pupil-payment mode)
-            const periodText = `${startDate.toLocaleDateString('lt-LT')} - ${endDate.toLocaleDateString('lt-LT')}`;
-
-            let checkoutSession: Stripe.Checkout.Session | undefined;
-            let payerCheckoutTotalEur = totalLessonPrice;
-            try {
-                if (usesManualStudentPayments) {
-                    checkoutSession = undefined;
-                    payerCheckoutTotalEur = totalLessonPrice;
-                } else if (useSchoolOrgAbsorbedFees) {
-                    const { chargeCents, applicationFeeCents } =
-                        schoolInstallmentCheckoutCents(totalLessonPrice, market);
-                    if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
-                        throw new Error('Netinkamas mėnesinės sąskaitos sumų skaidymas');
-                    }
-                    checkoutSession = await stripe.checkout.sessions.create({
-                        mode: 'payment',
-                        customer_email: payerEmail,
-                        customer_creation: 'always',
-                        payment_method_types: ['card'],
-                        line_items: [
-                            {
-                                price_data: {
-                                    currency,
-                                    product_data: {
-                                        name: `Pamokos (${lessonCount}) – ${periodText}`,
-                                        description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,
-                                    },
-                                    unit_amount: chargeCents,
-                                },
-                                quantity: 1,
-                            },
-                        ],
-                        payment_intent_data: {
-                            application_fee_amount: applicationFeeCents,
-                            metadata: {
-                                tutlio_billing_batch_id: billingBatch.id,
-                                tutor_id: batchTutorId,
-                                tutlio_school_org_absorbed: 'true',
-                            },
-                        },
-                        metadata: {
-                            tutlio_billing_batch_id: billingBatch.id,
-                            tutor_id: batchTutorId,
-                            tutlio_school_org_absorbed: 'true',
-                        },
-                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId as string)}`,
-                        cancel_url: `${appOrigin}/student/sessions`,
-                    }, directChargeOptions(stripeAccountId as string));
-                    payerCheckoutTotalEur = chargeCents / 100;
-                } else if (stripeAccountId) {
-                    let baseCents = 0;
-                    let feesCents = 0;
-                    let applicationFeeCents = 0;
-                    if (feeProfile) {
-                        // Custom org deals are tiered on the full transaction (invoice total), not per session.
-                        const b = lessonCheckoutBreakdownCents(totalLessonPrice, market, feeProfile, feeSplit);
-                        baseCents = b.baseCents;
-                        feesCents = b.feesCents;
-                        applicationFeeCents = directChargeApplicationFeeCents(totalLessonPrice, market, feeProfile, feeSplit);
-                    } else {
-                        for (const s of payerSessions) {
-                            const b = lessonCheckoutBreakdownCents(Number(s.price) || 0, market, null, feeSplit);
-                            baseCents += b.baseCents;
-                            feesCents += b.feesCents;
-                            applicationFeeCents += directChargeApplicationFeeCents(Number(s.price) || 0, market, null, feeSplit);
-                        }
-                    }
-                    checkoutSession = await stripe.checkout.sessions.create({
-                        mode: 'payment',
-                        customer_email: payerEmail,
-                        customer_creation: 'always',
-                        payment_method_types: ['card'],
-                        line_items: [
-                            {
-                                price_data: {
-                                    currency,
-                                    product_data: {
-                                        name: `Pamokos (${lessonCount}) – ${periodText}`,
-                                        description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,
-                                    },
-                                    unit_amount: baseCents,
-                                },
-                                quantity: 1,
-                            },
-                            {
-                                price_data: {
-                                    currency,
-                                    product_data: {
-                                        name: 'Platformos administravimo mokestis',
-                                        description: 'Paslaugos teikėjas: MB „Tutlio“',
-                                    },
-                                    unit_amount: feesCents,
-                                },
-                                quantity: 1,
-                            },
-                        ],
-                        payment_intent_data: {
-                            ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),
-                            metadata: {
-                                tutlio_billing_batch_id: billingBatch.id,
-                                tutor_id: batchTutorId,
-                            },
-                        },
-                        metadata: {
-                            tutlio_billing_batch_id: billingBatch.id,
-                            tutor_id: batchTutorId,
-                            ...checkoutBaseMetadata(baseCents / 100, market),
-                        },
-                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId)}`,
-                        cancel_url: `${appOrigin}/student/sessions`,
-                    }, directChargeOptions(stripeAccountId));
-                    payerCheckoutTotalEur = (baseCents + feesCents) / 100;
-                } else {
-                    throw new Error('[create-monthly-invoice] Missing Stripe account for checkout');
-                }
-            } catch (stripeErr: any) {
-                console.error(`[create-monthly-invoice] Stripe checkout failed for ${payerEmail}, rolling back batch ${billingBatch.id}:`, stripeErr);
-                await supabase.from('sessions').update({ payment_batch_id: null }).in('id', sessionIdsForBatch);
-                await supabase.from('billing_batch_sessions').delete().eq('billing_batch_id', billingBatch.id);
-                await supabase.from('billing_batches').delete().eq('id', billingBatch.id);
-                failures.push({ payerEmail, stage: 'checkout', error: 'Nepavyko paruošti Stripe mokėjimo. Atnaujinkite sąskaitos peržiūrą ir bandykite dar kartą.' });
-                continue;
-            }
-
-            if (checkoutSession?.id) {
-                const { error: checkoutSaveErr } = await supabase
-                    .from('billing_batches')
-                    .update({ stripe_checkout_session_id: checkoutSession.id })
-                    .eq('id', billingBatch.id);
-                if (checkoutSaveErr) {
-                    await expireConnectCheckoutSession(stripe, checkoutSession.id, stripeAccountId).catch(() => {});
-                    await supabase.from('sessions').update({ payment_batch_id: null }).eq('payment_batch_id', billingBatch.id);
-                    await supabase.from('billing_batches').delete().eq('id', billingBatch.id);
-                    failures.push({ payerEmail, stage: 'checkout', error: 'Nepavyko išsaugoti Stripe nuorodos. Atnaujoję sąskaitos peržiūrą bandykite dar kartą.' });
-                    continue;
-                }
-            }
-
             // Generate S.F. PDF via shared generate-invoice (same path as lesson packages).
             let sfAttachments: Array<{ invoiceNumber: string; downloadFilename: string; pdfBase64: string }> | null = null;
             if (shouldIncludeSalesInvoice) {
@@ -764,9 +626,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const { data: generatedInvoices, error: invoiceLookupErr } = await supabase
                     .from('invoices').select('id').eq('billing_batch_id', billingBatch.id);
                 if (!invoiceLookupErr && generatedInvoices?.length === 0) {
-                    if (checkoutSession?.id) {
-                        await expireConnectCheckoutSession(stripe, checkoutSession.id, stripeAccountId).catch(() => {});
-                    }
                     await supabase.from('sessions').update({ payment_batch_id: null }).eq('payment_batch_id', billingBatch.id);
                     await supabase.from('billing_batches').delete().eq('id', billingBatch.id);
                     failures.push({ payerEmail, stage: 'invoice', error: 'Nepavyko paruošti S.F. PDF. Laiškas neišsiųstas. Atnaujinkite sąskaitos peržiūrą ir bandykite dar kartą.' });
@@ -774,6 +633,161 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     failures.push({ payerEmail, batchId: billingBatch.id, stage: 'invoice', error: 'Mokėjimo užklausa sukurta, bet nepavyko paruošti visų S.F. PDF. Laiškas neišsiųstas. Patikrinkite sąskaitų sąrašą prieš kartodami.' });
                 }
                 continue;
+            }
+
+            // The invoice must exist before Stripe snapshots the payment details.
+            let invoiceNumbers: string[] = [];
+            if (!usesManualStudentPayments) {
+                try {
+                    invoiceNumbers = await billingBatchInvoiceNumbers(supabase, billingBatch.id);
+                    if (!invoiceNumbers.length) throw new Error('Missing billing batch invoice number');
+                } catch (error) {
+                    console.error('[create-monthly-invoice] invoice number lookup failed for batch', billingBatch.id, error);
+                    failures.push({ payerEmail, batchId: billingBatch.id, stage: 'invoice', error: 'Nepavyko rasti S.F. numerio. Laiškas neišsiųstas. Patikrinkite sąskaitų sąrašą prieš kartodami.' });
+                    continue;
+                }
+            }
+            const reporting = checkoutPaymentReporting(billingBatch.payer_name, invoiceNumbers);
+
+            // Stripe Checkout (skipped for solo tutors in manual pupil-payment mode)
+            const periodText = `${startDate.toLocaleDateString('lt-LT')} - ${endDate.toLocaleDateString('lt-LT')}`;
+
+            let checkoutSession: Stripe.Checkout.Session | undefined;
+            let payerCheckoutTotalEur = totalLessonPrice;
+            try {
+                if (usesManualStudentPayments) {
+                    checkoutSession = undefined;
+                    payerCheckoutTotalEur = totalLessonPrice;
+                } else if (useSchoolOrgAbsorbedFees) {
+                    const { chargeCents, applicationFeeCents } =
+                        schoolInstallmentCheckoutCents(totalLessonPrice, market);
+                    if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
+                        throw new Error('Netinkamas mėnesinės sąskaitos sumų skaidymas');
+                    }
+                    checkoutSession = await stripe.checkout.sessions.create({
+                        mode: 'payment',
+                        customer_email: payerEmail,
+                        customer_creation: 'always',
+                        payment_method_types: ['card'],
+                        line_items: [
+                            {
+                                price_data: {
+                                    currency,
+                                    product_data: {
+                                        name: `Pamokos (${lessonCount}) – ${periodText}`,
+                                        description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,
+                                    },
+                                    unit_amount: chargeCents,
+                                },
+                                quantity: 1,
+                            },
+                        ],
+                        payment_intent_data: {
+                            description: reporting.description,
+                            application_fee_amount: applicationFeeCents,
+                            metadata: {
+                                tutlio_billing_batch_id: billingBatch.id,
+                                tutor_id: batchTutorId,
+                                ...reporting.metadata,
+                                tutlio_school_org_absorbed: 'true',
+                            },
+                        },
+                        metadata: {
+                            tutlio_billing_batch_id: billingBatch.id,
+                            tutor_id: batchTutorId,
+                            ...reporting.metadata,
+                            tutlio_school_org_absorbed: 'true',
+                        },
+                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId as string)}`,
+                        cancel_url: `${appOrigin}/student/sessions`,
+                    }, directChargeOptions(stripeAccountId as string));
+                    payerCheckoutTotalEur = chargeCents / 100;
+                } else if (stripeAccountId) {
+                    let baseCents = 0;
+                    let feesCents = 0;
+                    let applicationFeeCents = 0;
+                    if (feeProfile) {
+                        // Custom org deals are tiered on the full transaction (invoice total), not per session.
+                        const b = lessonCheckoutBreakdownCents(totalLessonPrice, market, feeProfile, feeSplit);
+                        baseCents = b.baseCents;
+                        feesCents = b.feesCents;
+                        applicationFeeCents = directChargeApplicationFeeCents(totalLessonPrice, market, feeProfile, feeSplit);
+                    } else {
+                        for (const s of payerSessions) {
+                            const b = lessonCheckoutBreakdownCents(Number(s.price) || 0, market, null, feeSplit);
+                            baseCents += b.baseCents;
+                            feesCents += b.feesCents;
+                            applicationFeeCents += directChargeApplicationFeeCents(Number(s.price) || 0, market, null, feeSplit);
+                        }
+                    }
+                    checkoutSession = await stripe.checkout.sessions.create({
+                        mode: 'payment',
+                        customer_email: payerEmail,
+                        customer_creation: 'always',
+                        payment_method_types: ['card'],
+                        line_items: [
+                            {
+                                price_data: {
+                                    currency,
+                                    product_data: {
+                                        name: `Pamokos (${lessonCount}) – ${periodText}`,
+                                        description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,
+                                    },
+                                    unit_amount: baseCents,
+                                },
+                                quantity: 1,
+                            },
+                            {
+                                price_data: {
+                                    currency,
+                                    product_data: {
+                                        name: 'Platformos administravimo mokestis',
+                                        description: 'Paslaugos teikėjas: MB „Tutlio“',
+                                    },
+                                    unit_amount: feesCents,
+                                },
+                                quantity: 1,
+                            },
+                        ],
+                        payment_intent_data: {
+                            description: reporting.description,
+                            ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),
+                            metadata: {
+                                tutlio_billing_batch_id: billingBatch.id,
+                                tutor_id: batchTutorId,
+                                ...reporting.metadata,
+                            },
+                        },
+                        metadata: {
+                            tutlio_billing_batch_id: billingBatch.id,
+                            tutor_id: batchTutorId,
+                            ...reporting.metadata,
+                            ...checkoutBaseMetadata(baseCents / 100, market),
+                        },
+                        success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}&stripe_account=${encodeURIComponent(stripeAccountId)}`,
+                        cancel_url: `${appOrigin}/student/sessions`,
+                    }, directChargeOptions(stripeAccountId));
+                    payerCheckoutTotalEur = (baseCents + feesCents) / 100;
+                } else {
+                    throw new Error('[create-monthly-invoice] Missing Stripe account for checkout');
+                }
+            } catch (stripeErr: any) {
+                console.error(`[create-monthly-invoice] Stripe checkout failed for batch ${billingBatch.id}:`, stripeErr);
+                // Keep issued invoices and their batch linked so retry cannot issue duplicates.
+                failures.push({ payerEmail, batchId: billingBatch.id, stage: 'checkout', error: 'Sąskaita sukurta, bet nepavyko paruošti Stripe mokėjimo. Sąskaitų sąraše pasirinkite Siųsti dar kartą.' });
+                continue;
+            }
+
+            if (checkoutSession?.id) {
+                const { error: checkoutSaveErr } = await supabase
+                    .from('billing_batches')
+                    .update({ stripe_checkout_session_id: checkoutSession.id })
+                    .eq('id', billingBatch.id);
+                if (checkoutSaveErr) {
+                    await expireConnectCheckoutSession(stripe, checkoutSession.id, stripeAccountId).catch(() => {});
+                    failures.push({ payerEmail, batchId: billingBatch.id, stage: 'checkout', error: 'Sąskaita sukurta, bet nepavyko išsaugoti Stripe nuorodos. Sąskaitų sąraše pasirinkite Siųsti dar kartą.' });
+                    continue;
+                }
             }
 
             // Prepare session details for email (sorted oldest → newest)

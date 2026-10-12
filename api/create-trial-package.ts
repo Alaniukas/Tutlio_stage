@@ -5,6 +5,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
+import { checkoutPaymentReporting } from './_lib/stripeCheckoutReporting.js';
 import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, directChargeApplicationFeeCents, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile } from './_lib/marketMoney.js';
 import { customerTotalEur } from './_lib/stripeLessonPricing.js';
@@ -363,6 +364,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const customerEmail = student.payer_email || student.email || undefined;
+    const reporting = checkoutPaymentReporting(student.payer_name || student.full_name);
 
     let checkoutSession;
     try {
@@ -391,8 +393,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             },
           ],
           payment_intent_data: {
+            description: reporting.description,
             application_fee_amount: applicationFeeCents,
             metadata: {
+              ...reporting.metadata,
               tutlio_package_id: lessonPackage.id,
               tutor_id: tutorId,
               student_id: studentId,
@@ -402,6 +406,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             },
           },
           metadata: {
+            ...reporting.metadata,
             tutlio_package_id: lessonPackage.id,
             tutor_id: tutorId,
             student_id: studentId,
@@ -443,8 +448,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             },
           ],
           payment_intent_data: {
+            description: reporting.description,
             ...(directChargeFeeCents > 0 ? { application_fee_amount: directChargeFeeCents } : {}),
             metadata: {
+              ...reporting.metadata,
               tutlio_package_id: lessonPackage.id,
               tutor_id: tutorId,
               student_id: studentId,
@@ -453,6 +460,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             },
           },
           metadata: {
+            ...reporting.metadata,
             tutlio_package_id: lessonPackage.id,
             tutor_id: tutorId,
             student_id: studentId,

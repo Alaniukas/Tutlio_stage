@@ -56,6 +56,9 @@ import { useHideWaitlist } from '@/hooks/useHideWaitlist';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isWaitlistHiddenForOrg, isProKlaseOrg, isLaisviVaikaiOrg, isManoKorepetitoriusOrg } from '@/lib/marketMoney';
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
+import { AnnulSessionPaymentDialog } from '@/components/AnnulSessionPaymentDialog';
+import { canAnnulSessionPayment } from '@/lib/sessionPaymentAnnulment';
+import { sessionPaymentAnnulmentText } from '@/lib/i18n/sessionPaymentAnnulmentCopy';
 import {
   resolveOrgSessionSubjectDefaults,
   type OrgSubjectForDefaults,
@@ -316,6 +319,7 @@ export default function CompanySessions() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [togglingPaid, setTogglingPaid] = useState(false);
   const [togglingComplimentary, setTogglingComplimentary] = useState(false);
+  const [annulPaymentOpen, setAnnulPaymentOpen] = useState(false);
   const [organizationId, setOrganizationId] = useState<string | null>(cachedOrgId);
   const canChooseParentComment = isManoKorepetitoriusOrg(organizationId);
   const isProKlase = isProKlaseOrg(organizationId);
@@ -1594,7 +1598,7 @@ export default function CompanySessions() {
       </div>
 
       {/* Session Detail Modal */}
-      <Dialog open={!!selectedSession} onOpenChange={(open) => { if (!open) { setSelectedSession(null); setCancelMode(false); setEditMode(false); } }}>
+      <Dialog open={!!selectedSession} onOpenChange={(open) => { if (!open) { setSelectedSession(null); setAnnulPaymentOpen(false); setCancelMode(false); setEditMode(false); } }}>
         <DialogContent className="w-[95vw] sm:w-full max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t('compSess.lessonInfo')}</DialogTitle>
@@ -1973,7 +1977,19 @@ export default function CompanySessions() {
                           {selectedSession.paid ? t('compSess.markUnpaid') : t('compSess.markPaid')}
                         </Button>
                       )}
-                      {isProKlase && (selectedSession.status === 'active' || selectedSession.status === 'completed') && (
+                      {isProKlase && canAnnulSessionPayment(selectedSession) && (
+                        <Button
+                          variant="outline"
+                          className="w-full rounded-xl border-amber-200 text-amber-800 hover:bg-amber-50"
+                          disabled={togglingPaid || togglingComplimentary || deletingSession}
+                          onClick={() => setAnnulPaymentOpen(true)}
+                        >
+                          <Ban className="w-4 h-4 mr-2" />
+                          {sessionPaymentAnnulmentText(locale, 'action')}
+                        </Button>
+                      )}
+                      {isProKlase && !canAnnulSessionPayment(selectedSession)
+                        && (selectedSession.status === 'active' || selectedSession.status === 'completed' || selectedSession.is_complimentary) && (
                         <Button
                           variant="outline"
                           className="w-full rounded-xl border-sky-200 text-sky-700 hover:bg-sky-50"
@@ -2095,6 +2111,16 @@ export default function CompanySessions() {
         recurring={isRecurringSession(selectedSession)}
         busy={deletingSession}
         onDelete={hardDeleteCompanySessionWithApproval}
+      />
+      <AnnulSessionPaymentDialog
+        open={annulPaymentOpen}
+        onOpenChange={setAnnulPaymentOpen}
+        sessionId={selectedSession?.id ?? null}
+        onAnnulled={payment => {
+          setSelectedSession(current => current?.id === payment.id ? { ...current, ...payment } : current);
+          setSessions(rows => rows.map(row => row.id === payment.id ? { ...row, ...payment } : row));
+          setStatsSessions(rows => rows.map(row => row.id === payment.id ? { ...row, ...payment } : row));
+        }}
       />
     </>
   );

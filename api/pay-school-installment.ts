@@ -25,6 +25,7 @@ import {
     retrieveConnectCheckoutSessionWithScope,
 } from './_lib/stripeDirectCharge.js';
 import { isSchoolContractSuspended } from '../src/lib/schoolContractLifecycle.js';
+import { checkoutPaymentReporting, checkoutReportingMatches } from './_lib/stripeCheckoutReporting.js';
 
 /** Connect accounts need this API version (matches api/stripe-connect.ts) — mixed versions caused opaque failures. */
 const STRIPE_API_VERSION = '2026-02-25.clover' as any;
@@ -105,6 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         const payerEmail = student?.payer_email || student?.email || undefined;
+        const reporting = checkoutPaymentReporting(student?.payer_name || student?.full_name);
 
         // 3. Compute amounts + fee split (see api/_lib/schoolInstallmentStripe.ts)
         const baseEur = Number(installment.amount);
@@ -139,7 +141,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 if (existingLookup.stripeAccount === destinationAcct
                     && existing.status === 'open'
                     && existing.url
-                    && existing.amount_total === chargeCents) {
+                    && existing.amount_total === chargeCents
+                    && checkoutReportingMatches(existing, reporting)) {
                     return res.redirect(303, existing.url);
                 }
                 if (existing.status === 'open') {
@@ -197,6 +200,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             });
         }
         const metadata = {
+            ...reporting.metadata,
             tutlio_school_installment_id: installment.id,
             tutlio_school_contract_id: contract.id,
             tutlio_student_id: contract.student_id,
@@ -211,6 +215,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             line_items: lineItems,
             payment_intent_data: {
                 application_fee_amount: applicationFeeCents,
+                description: reporting.description,
                 metadata,
             },
             metadata,

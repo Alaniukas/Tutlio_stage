@@ -8,6 +8,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
+import { retryRescheduleDecisionNotifications } from './_lib/lessonRescheduleApproval.js';
 import { dedupeReminderRecipients, type ReminderRecipient } from './_lib/reminderRecipients.js';
 import { loadReminderOptOuts } from './_lib/reminderOptOut.js';
 import { parseEmailOptOutList, isEmailOptedOut } from './_lib/emailNotificationOptOut.js';
@@ -608,6 +609,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (e) {
       console.error('[send-reminders] school-group-minimum-warnings error:', e);
     }
+
+    try { await retryRescheduleDecisionNotifications(req, supabase); }
+    catch (cause) { console.error('[send-reminders] reschedule decision delivery failed', cause); }
 
     return res.status(200).json({
       message: 'Reminders run complete',

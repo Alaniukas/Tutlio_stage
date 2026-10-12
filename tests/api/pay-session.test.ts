@@ -147,6 +147,9 @@ describe('GET /api/pay-session', () => {
     expect(createArgs.locale).toBe('lt');
     expect(createArgs.payment_intent_data.application_fee_amount).toBe(expectedFeeCents(50));
     expect(createArgs.payment_intent_data.transfer_data).toBeUndefined();
+    expect(createArgs.payment_intent_data.description).toBe('Mokinys');
+    expect(createArgs.payment_intent_data.metadata).toEqual({ tutlio_session_id: 'sess-1', payer_name: 'Mokinys' });
+    expect(createArgs.metadata.payer_name).toBe('Mokinys');
     expect(stripeCreate.mock.calls[0][1]).toEqual({ stripeAccount: 'acct_individual' });
 
     expect(result.redirectStatus).toBe(303);
@@ -161,6 +164,7 @@ describe('GET /api/pay-session', () => {
       url: 'https://checkout.stripe.test/cs_old',
       amount_total: expectedTotalCents(25),
       locale: 'lt',
+      metadata: { payer_name: 'Mokinys' },
     });
 
     const handler = (await import('../../api/pay-session')).default;
@@ -173,6 +177,21 @@ describe('GET /api/pay-session', () => {
     expect(stripeCreate).not.toHaveBeenCalled();
     expect(result.redirectStatus).toBe(303);
     expect(result.redirectedTo).toBe('https://checkout.stripe.test/cs_old');
+  });
+
+  it('replaces a matching-price legacy checkout with the current payer name at creation', async () => {
+    const row = sessionRow({ price: 25 });
+    row.students.payer_name = 'Mokėtojas' as any;
+    sessionsSingle.mockResolvedValue({ data: row, error: null });
+    stripeRetrieve.mockResolvedValue({ status: 'open', url: 'https://checkout.stripe.test/legacy', amount_total: expectedTotalCents(25), locale: 'lt' });
+    stripeCreate.mockResolvedValue({ id: 'cs_new', url: 'https://checkout.stripe.test/cs_new' });
+    const handler = (await import('../../api/pay-session')).default;
+    await handler(mockReq('GET', 'sess-1') as any, mockRes() as any);
+    expect(stripeExpire).toHaveBeenCalledWith('cs_old', { stripeAccount: 'acct_individual' });
+    const payload = stripeCreate.mock.calls[0][0];
+    expect(payload.payment_intent_data.description).toBe('Mokėtojas');
+    expect(payload.payment_intent_data.metadata.payer_name).toBe('Mokėtojas');
+    expect(payload.metadata.payer_name).toBe('Mokėtojas');
   });
 
   it('replaces an open auto-locale checkout even when the lesson price is unchanged', async () => {

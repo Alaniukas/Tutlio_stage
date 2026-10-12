@@ -12,6 +12,7 @@ vi.mock('../../api/_lib/orgEmailReplyTo.js', () => ({
 
 import { sendTutorInviteEmail } from '../../api/_lib/sendTutorInviteResend';
 import { sendParentInviteEmail } from '../../api/_lib/sendParentInviteEmail';
+import { PRO_KLASE_ORG_ID } from '../../api/_lib/marketMoney';
 
 const organizationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
@@ -74,5 +75,29 @@ describe('direct organization emails', () => {
     });
 
     expect(mocks.send.mock.calls[0][0]).not.toHaveProperty('replyTo');
+  });
+
+  it('includes both approved guides in the first Pro Klasė parent invitation', async () => {
+    await sendParentInviteEmail('parent@example.com', {
+      parentName: 'Parent', studentName: 'Student', organizationId: PRO_KLASE_ORG_ID,
+      registerLink: 'https://tutlio.lt/parent-register?t=invite-token', code: 'INVITE', orgName: 'Pro Klasė',
+    });
+    const payload = mocks.send.mock.calls[0][0];
+    expect(payload.html).toContain('https://tutlio.lt/parent-register?t=invite-token');
+    expect(payload.html).toContain('cid:proklase-tevu-atmintine');
+    expect(payload.html).toContain('cid:proklase-atsiskaitymo-tvarka');
+    expect(payload.attachments).toHaveLength(2);
+    for (const attachment of payload.attachments) {
+      expect(attachment.contentType).toBe('image/png');
+      expect(attachment.content.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps the Pro Klasė guides out of other organization invitations', async () => {
+    await sendParentInviteEmail('parent@example.com', {
+      studentName: 'Student', registerLink: 'https://tutlio.lt/parent-register', organizationId, orgName: 'Example School',
+    });
+    expect(mocks.send.mock.calls[0][0].html).not.toContain('cid:proklase-');
+    expect(mocks.send.mock.calls[0][0].attachments).toBeUndefined();
   });
 });

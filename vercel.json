@@ -38,6 +38,39 @@
         "api/register-student.ts": {
             "includeFiles": "api/_lib/assets/proklase/**"
         },
+        "api/send-email.ts": {
+            "includeFiles": "api/_lib/assets/proklase/**"
+        },
+        "api/create-parent-invite.ts": {
+            "includeFiles": "api/_lib/assets/proklase/**"
+        },
+        "api/parent-create-invites-for-student.ts": {
+            "includeFiles": "api/_lib/assets/proklase/**"
+        },
+        "api/student-invite-parent.ts": {
+            "includeFiles": "api/_lib/assets/proklase/**"
+        },
+        "api/mv-provision-family-accounts.ts": {
+            "includeFiles": "api/_lib/assets/proklase/**"
+        },
+        "api/confirm-package-payment.ts": {
+            "includeFiles": "api/_lib/assets/proklase/**"
+        },
+        "api/confirm-manual-payment.ts": {
+            "includeFiles": "api/_lib/assets/proklase/**"
+        },
+        "api/create-manual-package.ts": {
+            "includeFiles": "api/_lib/assets/proklase/**"
+        },
+        "api/create-package-checkout.ts": {
+            "includeFiles": "api/_lib/assets/proklase/**"
+        },
+        "api/create-trial-package.ts": {
+            "includeFiles": "api/_lib/assets/proklase/**"
+        },
+        "api/stripe-webhook.ts": {
+            "includeFiles": "api/_lib/assets/proklase/**"
+        },
         "api/page-render.ts": {
             "maxDuration": 30
         },

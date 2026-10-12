@@ -33,6 +33,7 @@ beforeEach(() => {
   vi.stubEnv('RESEND_API_KEY', 'test-key');
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'test-service-key');
   vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
+  mocks.send.mockResolvedValue({ data: { id: 'email-id' }, error: null });
   mocks.organization = {
     name: 'Pro Klasė',
     logo_url: 'https://cdn.example.test/proklase.png',
@@ -44,7 +45,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 
-async function renderInvite(data: Record<string, unknown> = {}, locale = 'lt') {
+async function renderInvite(data: Record<string, unknown> = {}, locale = 'lt', dryRun = true, type = 'invite_email') {
   const { default: handler } = await import('../../api/send-email');
   const result = { status: 0, body: null as any };
   const res: any = {
@@ -55,7 +56,8 @@ async function renderInvite(data: Record<string, unknown> = {}, locale = 'lt') {
   await handler({
     method: 'POST', headers: { 'x-internal-key': 'test-service-key' }, query: {},
     body: {
-      type: 'invite_email', to: 'student@example.test', locale, dryRun: true,
+      type, to: 'student@example.test', locale, dryRun,
+      attachments: [{ filename: 'other-document.pdf', content: Buffer.from('pdf').toString('base64') }],
       data: {
         organizationId: PRO_KLASE_ORG_ID, studentName: 'Tautvydas', tutorName: 'Liepa Linkevičiūtė',
         inviteCode: 'T9KX2S', bookingUrl: 'https://tutlio.com/register?code=T9KX2S', ...data,
@@ -63,7 +65,7 @@ async function renderInvite(data: Record<string, unknown> = {}, locale = 'lt') {
     },
   } as any, res);
   expect(result.status).toBe(200);
-  expect(mocks.send).not.toHaveBeenCalled();
+  if (dryRun) expect(mocks.send).not.toHaveBeenCalled();
   return result.body as { subject: string; html: string };
 }
 
@@ -79,6 +81,28 @@ describe('student invitation sender copy', () => {
     expect(html).toContain('https://cdn.example.test/proklase.png');
     expect(html).toContain('https://www.tutlio.lt/register?code=T9KX2S');
     expect(html).toContain('T9KX2S');
+    expect(html).toContain('cid:proklase-tevu-atmintine');
+    expect(html).toContain('cid:proklase-atsiskaitymo-tvarka');
+  });
+
+  it('attaches both guides to the first registration invitation while preserving its link and existing attachment', async () => {
+    await renderInvite({}, 'lt', false);
+    const payload = mocks.send.mock.calls[0][0];
+    expect(payload.html).toContain('https://www.tutlio.lt/register?code=T9KX2S');
+    expect(payload.attachments).toHaveLength(3);
+    expect(payload.attachments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ filename: 'other-document.pdf', content: Buffer.from('pdf') }),
+      expect.objectContaining({ contentId: 'proklase-tevu-atmintine', contentType: 'image/png', content: expect.any(String) }),
+      expect.objectContaining({ contentId: 'proklase-atsiskaitymo-tvarka', contentType: 'image/png', content: expect.any(String) }),
+    ]));
+  });
+
+  it('also includes the guides when the parent invitation is sent through send-email', async () => {
+    await renderInvite({ registerLink: 'https://tutlio.lt/parent-register?token=INVITE' }, 'lt', false, 'parent_invite');
+    const payload = mocks.send.mock.calls[0][0];
+    expect(payload.html).toContain('https://tutlio.lt/parent-register?token=INVITE');
+    expect(payload.html).toContain('cid:proklase-tevu-atmintine');
+    expect(payload.attachments).toHaveLength(3);
   });
 
   it('uses the target organization name even when custom branding is disabled', async () => {
@@ -88,6 +112,7 @@ describe('student invitation sender copy', () => {
     expect(html).toContain('<strong>Kita akademija</strong> pridėjo Jus į sistemą');
     expect(html).not.toContain('ProKlasė');
     expect(html).not.toContain('Liepa Linkevičiūtė');
+    expect(html).not.toContain('cid:proklase-');
   });
 
   it('escapes organization names once in HTML and keeps the subject readable', async () => {

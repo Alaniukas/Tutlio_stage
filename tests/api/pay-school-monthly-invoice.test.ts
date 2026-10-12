@@ -57,6 +57,7 @@ function mockRes() {
 const INVOICE_ID = 'inv-1';
 const baseInvoice = () => ({
   id: INVOICE_ID,
+  invoice_number: 'PAM-42',
   contract_id: 'c1',
   student_id: 's1',
   period_start: '2026-09-01',
@@ -130,7 +131,9 @@ describe('GET /api/pay-school-monthly-invoice', () => {
     const [params, options] = stripeMocks.create.mock.calls[0];
     expect(params.mode).toBe('payment');
     expect(params.customer_email).toBe('parent@example.com');
-    expect(params.metadata).toEqual({ tutlio_school_monthly_invoice_id: INVOICE_ID, tutlio_school_contract_id: 'c1', tutlio_student_id: 's1' });
+    expect(params.metadata).toEqual({ tutlio_school_monthly_invoice_id: INVOICE_ID, tutlio_school_contract_id: 'c1', tutlio_student_id: 's1', payer_name: 'Tėvas', invoice_number: 'PAM-42' });
+    expect(params.payment_intent_data.metadata).toEqual(params.metadata);
+    expect(params.payment_intent_data.description).toBe('PAM-42 · Tėvas');
     expect(params.payment_intent_data.transfer_data).toBeUndefined();
     expect(params.customer_creation).toBe('always');
     expect(options).toEqual({ stripeAccount: 'acct_123' });
@@ -170,14 +173,33 @@ describe('GET /api/pay-school-monthly-invoice', () => {
 
   it('reuses an open checkout with the same amount', async () => {
     db.invoice = { ...baseInvoice(), stripe_checkout_session_id: 'cs_old' };
-    stripeMocks.retrieve.mockResolvedValue({ status: 'open', url: 'https://checkout.stripe.com/cs_old', amount_total: 16597 });
+    stripeMocks.retrieve.mockResolvedValue({ status: 'open', url: 'https://checkout.stripe.com/cs_old', amount_total: 16200, metadata: { payer_name: 'Tėvas', invoice_number: 'PAM-42' } });
     const res = mockRes();
     await handler(req({ invoice: INVOICE_ID, t: buildPublicLinkToken('monthly-invoice', INVOICE_ID) }), res as any);
-    if (res.getResult().redirect === 'https://checkout.stripe.com/cs_old') {
-      expect(stripeMocks.create).not.toHaveBeenCalled();
-    } else {
-      // Amount differs from the current fee table → a fresh session is created instead.
-      expect(stripeMocks.create).toHaveBeenCalledTimes(1);
-    }
+    expect(res.getResult().redirect).toBe('https://checkout.stripe.com/cs_old');
+    expect(stripeMocks.create).not.toHaveBeenCalled();
+  });
+
+  it('recreates a legacy checkout without reporting data on the connected school account', async () => {
+    db.invoice = { ...baseInvoice(), stripe_checkout_session_id: 'cs_old' };
+    stripeMocks.retrieve.mockResolvedValue({ status: 'open', url: 'https://checkout.stripe.com/cs_old', amount_total: 16200 });
+    stripeMocks.expire.mockResolvedValue({ status: 'expired' });
+    stripeMocks.create.mockResolvedValue({ id: 'cs_new', url: 'https://checkout.stripe.com/cs_new' });
+    const res = mockRes();
+    await handler(req({ invoice: INVOICE_ID, t: buildPublicLinkToken('monthly-invoice', INVOICE_ID) }), res as any);
+    expect(stripeMocks.expire).toHaveBeenCalledWith('cs_old', { stripeAccount: 'acct_123' });
+    expect(stripeMocks.create.mock.calls[0][0].payment_intent_data.description).toBe('PAM-42 · Tėvas');
+    expect(res.getResult().redirect).toBe('https://checkout.stripe.com/cs_new');
+  });
+
+  it('uses the invoice student payer for an invoice that spans contracts', async () => {
+    db.invoice = { ...baseInvoice(), contract: null, student: { full_name: 'Vaikas', payer_name: 'Kitas mokėtojas', payer_email: 'other@example.test' } };
+    stripeMocks.create.mockResolvedValue({ id: 'cs_family', url: 'https://checkout.stripe.com/cs_family' });
+    const res = mockRes();
+    await handler(req({ invoice: INVOICE_ID, t: buildPublicLinkToken('monthly-invoice', INVOICE_ID) }), res as any);
+    const payload = stripeMocks.create.mock.calls[0][0];
+    expect(payload.customer_email).toBe('other@example.test');
+    expect(payload.payment_intent_data.description).toBe('PAM-42 · Kitas mokėtojas');
+    expect(payload.metadata.payer_name).toBe('Kitas mokėtojas');
   });
 });

@@ -61,6 +61,10 @@ describe('Pro Klasė managed-account activation email', () => {
     expect(payload.html).toContain('Pro Klasės komanda');
     expect(payload.html).not.toContain('Mokslo vais');
     expect(payload.html).not.toContain('Aktyvuokite Tutlio paskyrą');
+    expect(payload.html).toContain('cid:proklase-tevu-atmintine');
+    expect(payload.html).toContain('cid:proklase-atsiskaitymo-tvarka');
+    expect(payload.attachments).toHaveLength(2);
+    expect(payload.attachments[0]).toMatchObject({ contentType: 'image/png', contentId: 'proklase-tevu-atmintine' });
   });
 
   it('uses the target white-label when the portable flag originated elsewhere', async () => {
@@ -97,5 +101,6 @@ describe('Pro Klasė managed-account activation email', () => {
     expect(payload.html).toContain('Kita Akademija');
     expect(payload.html).not.toContain('Mokslo vais');
     expect(payload.html).not.toContain('Pro Klas');
+    expect(payload.attachments).toBeUndefined();
   });
 });

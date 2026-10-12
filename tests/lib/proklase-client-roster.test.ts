@@ -9,9 +9,10 @@ const group = (
   linkedUserId: string | null,
   tutorIds: Array<string | null>,
   detached = false,
+  enrollment_status = 'active',
 ) => ({
-  primary: { linked_user_id: linkedUserId, detached_at: detached ? '2026-09-01T00:00:00Z' : null },
-  rows: tutorIds.map((tutor_id) => ({ tutor_id })),
+  primary: { linked_user_id: linkedUserId, detached_at: detached ? '2026-09-01T00:00:00Z' : null, enrollment_status },
+  rows: tutorIds.map((tutor_id) => ({ tutor_id, enrollment_status, detached_at: detached ? '2026-09-01T00:00:00Z' : null })),
 });
 
 describe('Pro Klasė client roster chips', () => {
@@ -22,6 +23,8 @@ describe('Pro Klasė client roster chips', () => {
     group(null, [null]),
     group('user-3', [null]),
     group('user-4', ['tutor-3'], true),
+    group('user-5', ['tutor-1', 'tutor-2'], false, 'left'),
+    group('user-6', [null], true, 'left'),
   ];
 
   it('counts live clients by account and tutor assignment', () => {
@@ -30,6 +33,7 @@ describe('Pro Klasė client roster chips', () => {
       active: 3,
       inactive: 2,
       unassigned: 2,
+      left: 1,
     });
   });
 
@@ -39,6 +43,20 @@ describe('Pro Klasė client roster chips', () => {
     expect(live.filter((g) => matchesProKlaseClientRosterFilter(g, 'inactive'))).toHaveLength(2);
     expect(live.filter((g) => matchesProKlaseClientRosterFilter(g, 'unassigned'))).toHaveLength(2);
     expect(live.filter((g) => matchesProKlaseClientRosterFilter(g, 'all'))).toHaveLength(5);
+    expect(groups.filter((g) => matchesProKlaseClientRosterFilter(g, 'left'))).toHaveLength(1);
+    expect(groups.filter((g) => matchesProKlaseClientRosterFilter(g, 'unassigned'))).toHaveLength(2);
+  });
+
+  it('counts a former client once across tutors even when a duplicate row has stale status', () => {
+    const client = group('user-1', ['tutor-1', 'tutor-2']);
+    client.rows[1].enrollment_status = 'left';
+    expect(countProKlaseClientRoster([client])).toEqual({ all: 0, active: 0, inactive: 0, unassigned: 0, left: 1 });
+  });
+
+  it('does not treat an archived historical tutor row as a current departure', () => {
+    const client = group('user-1', ['tutor-1']);
+    client.rows.push({ tutor_id: 'old-tutor', enrollment_status: 'left', detached_at: '2026-10-01T00:00:00Z' });
+    expect(countProKlaseClientRoster([client])).toEqual({ all: 1, active: 1, inactive: 0, unassigned: 0, left: 0 });
   });
 
   it('clicking the active chip again clears back to all clients', () => {
@@ -46,5 +64,7 @@ describe('Pro Klasė client roster chips', () => {
     expect(toggleProKlaseClientRosterFilter('active', 'active')).toBe('all');
     expect(toggleProKlaseClientRosterFilter('active', 'inactive')).toBe('inactive');
     expect(toggleProKlaseClientRosterFilter('inactive', 'all')).toBe('all');
+    expect(toggleProKlaseClientRosterFilter('all', 'left')).toBe('left');
+    expect(toggleProKlaseClientRosterFilter('left', 'left')).toBe('all');
   });
 });

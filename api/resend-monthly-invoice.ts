@@ -12,6 +12,7 @@ import { marketFromRequest } from './_lib/market.js';
 import { lessonCheckoutBreakdownCents, orgFeeProfile } from './_lib/marketMoney.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { retrieveConnectCheckoutSessionWithScope } from './_lib/stripeDirectCharge.js';
+import { billingBatchInvoiceNumbers, checkoutPaymentReporting, checkoutReportingMatches } from './_lib/stripeCheckoutReporting.js';
 import {
   tutorUsesManualStudentPayments,
   trimManualPaymentBankDetails,
@@ -163,14 +164,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           : junction.reduce((sum: number, row: any) => sum
             + lessonCheckoutBreakdownCents(Number(row.session_price) || 0, market, null, feeSplit).totalCents, 0);
       }
-      // The payer link reuses an open Checkout even after the org changes its
-      // fee settings. The reminder must quote that exact existing amount.
+      // Quote an open Checkout only when pay-invoice can still reuse it.
+      // Legacy reporting fields cause the link to recreate it at current prices.
       if (batch.stripe_checkout_session_id) {
         const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
         const accountId = org?.stripe_account_id || tutor.stripe_account_id;
         try {
+          const reporting = checkoutPaymentReporting(batch.payer_name, await billingBatchInvoiceNumbers(supabase, batch.id));
           const lookup = await retrieveConnectCheckoutSessionWithScope(stripe, batch.stripe_checkout_session_id, accountId);
           if (lookup.stripeAccount === accountId && lookup.session.status === 'open'
+            && checkoutReportingMatches(lookup.session, reporting)
             && Number.isFinite(lookup.session.amount_total)) {
             checkoutTotalCents = lookup.session.amount_total!;
           }

@@ -92,6 +92,9 @@ import {
   countTrialsFromHistory,
 } from '@/lib/orgTrialPolicy';
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
+import { AnnulSessionPaymentDialog } from '@/components/AnnulSessionPaymentDialog';
+import { canAnnulSessionPayment } from '@/lib/sessionPaymentAnnulment';
+import { sessionPaymentAnnulmentText } from '@/lib/i18n/sessionPaymentAnnulmentCopy';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/lib/orgUi';
 import TutorTeachingNotesBadge from '@/components/TutorTeachingNotesBadge';
 import {
@@ -551,6 +554,7 @@ export default function CompanyTvarkarastis() {
   const [isCreateSessionOpen, setIsCreateSessionOpen] = useState(false);
   const [isEventDetailOpen, setIsEventDetailOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Session | null>(null);
+  const [annulPaymentOpen, setAnnulPaymentOpen] = useState(false);
   const [isGroupSession, setIsGroupSession] = useState(false);
   const [isClassGroupSession, setIsClassGroupSession] = useState(false);
   const [selectedGroupSessions, setSelectedGroupSessions] = useState<Session[]>([]);
@@ -4431,6 +4435,7 @@ export default function CompanyTvarkarastis() {
       <Dialog open={isEventDetailOpen} onOpenChange={(open) => {
         setIsEventDetailOpen(open);
         if (!open) {
+          setAnnulPaymentOpen(false);
           setIsEditingSession(false);
           setIsGroupSession(false);
           setIsClassGroupSession(false);
@@ -4934,7 +4939,18 @@ export default function CompanyTvarkarastis() {
                     {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : selectedEvent.paid ? <XCircle className="w-4 h-4 mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
                     {selectedEvent.paid ? t('compSess.markUnpaid') : t('compSess.markPaid')}
                   </Button>
-                  {isProKlaseOrg(organizationId) && (
+                  {isProKlaseOrg(organizationId) && canAnnulSessionPayment(selectedEvent) && (
+                    <Button
+                      variant="outline"
+                      className="w-full rounded-xl border-amber-200 text-amber-800 hover:bg-amber-50"
+                      disabled={saving}
+                      onClick={() => setAnnulPaymentOpen(true)}
+                    >
+                      <Ban className="w-4 h-4 mr-2" />
+                      {sessionPaymentAnnulmentText(locale, 'action')}
+                    </Button>
+                  )}
+                  {isProKlaseOrg(organizationId) && !canAnnulSessionPayment(selectedEvent) && (
                     <Button
                       variant="outline"
                       className={cn(
@@ -5751,6 +5767,15 @@ export default function CompanyTvarkarastis() {
         onConfirm={(w) => void confirmMarkStudentNoShowSchedule(w)}
       />
 
+      <AnnulSessionPaymentDialog
+        open={annulPaymentOpen && isEventDetailOpen}
+        onOpenChange={setAnnulPaymentOpen}
+        sessionId={selectedEvent?.id ?? null}
+        onAnnulled={payment => {
+          setSelectedEvent(current => current?.id === payment.id ? { ...current, ...payment } : current);
+          void refreshSchedule();
+        }}
+      />
       <DeleteSessionDialog
         open={isDeleteRecurringDialogOpen}
         onOpenChange={setIsDeleteRecurringDialogOpen}

@@ -23,6 +23,7 @@ import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasAnyOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { directChargeOptions } from './_lib/stripeDirectCharge.js';
 import { stripeCheckoutLocale } from './_lib/stripeLocale.js';
+import { checkoutPaymentReporting } from './_lib/stripeCheckoutReporting.js';
 import {
     allowsPerLessonBilling,
     loadPerLessonBillingFlags,
@@ -186,6 +187,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         // 4. Determine customer email (payer or student)
         const customerEmail = payerEmail || student?.payer_email || undefined;
+        const reporting = checkoutPaymentReporting(student?.payer_name || student?.full_name);
 
         const itemName = isPenaltyPayment
             ? 'Vėlyvo atšaukimo bauda'
@@ -225,13 +227,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 ],
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
+                    description: reporting.description,
                     metadata: {
+                        ...reporting.metadata,
                         tutlio_session_id: sessionId,
                         is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
                         tutlio_school_org_absorbed: 'true',
                     },
                 },
                 metadata: {
+                    ...reporting.metadata,
                     tutlio_session_id: sessionId,
                     is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
                     tutlio_school_org_absorbed: 'true',
@@ -274,12 +279,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 ],
                 payment_intent_data: {
                     ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),
+                    description: reporting.description,
                     metadata: {
+                        ...reporting.metadata,
                         tutlio_session_id: sessionId,
                         is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
                     },
                 },
                 metadata: {
+                    ...reporting.metadata,
                     tutlio_session_id: sessionId,
                     is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
                     ...checkoutBaseMetadata(basePriceEur, market),

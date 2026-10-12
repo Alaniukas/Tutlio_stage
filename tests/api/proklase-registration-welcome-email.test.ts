@@ -55,13 +55,13 @@ describe('Pro Klasė registration welcome email', () => {
         filename: 'ProKlase - Tevu atmintine.png',
         contentType: 'image/png',
         contentId: 'proklase-tevu-atmintine',
-        content: expect.any(Buffer),
+        content: expect.any(String),
       }),
       expect.objectContaining({
         filename: 'ProKlase - Atsiskaitymo tvarka.png',
         contentType: 'image/png',
         contentId: 'proklase-atsiskaitymo-tvarka',
-        content: expect.any(Buffer),
+        content: expect.any(String),
       }),
     ]));
   });

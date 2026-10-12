@@ -205,8 +205,40 @@ const copy: Record<string, string[]> = {
   ],
 };
 
+const rescheduleHelpCopy: Record<string, [string, string]> = {
+  it: ["L'annullamento delle lezioni è disattivato. Contatta l'amministrazione.", "Se non trovi una data adatta, contatta l'amministratore tramite messaggi o email:"],
+  pt: ['O cancelamento de aulas está desativado. Contacte a administração.', 'Se não encontrar uma data adequada, contacte o administrador por mensagem ou email:'],
+  ro: ['Anularea lecțiilor este dezactivată. Contactați administrația.', 'Dacă nu găsiți o dată potrivită, contactați administratorul prin mesaje sau e-mail:'],
+  cs: ['Rušení lekcí je vypnuto. Kontaktujte administraci.', 'Pokud nenajdete vhodný termín, kontaktujte administrátora prostřednictvím zpráv nebo e-mailu:'],
+  el: ['Η ακύρωση μαθημάτων είναι απενεργοποιημένη. Επικοινωνήστε με τη διοίκηση.', 'Αν δεν βρίσκετε κατάλληλη ημερομηνία, επικοινωνήστε με τον διαχειριστή μέσω μηνυμάτων ή email:'],
+  hu: ['Az órák lemondása le van tiltva. Forduljon az adminisztrációhoz.', 'Ha nem talál megfelelő időpontot, keresse az adminisztrátort üzenetben vagy e-mailben:'],
+  bg: ['Отмяната на уроци е изключена. Свържете се с администрацията.', 'Ако не намирате подходяща дата, свържете се с администратора чрез съобщения или имейл:'],
+  hr: ['Otkazivanje lekcija je onemogućeno. Obratite se administraciji.', 'Ako ne pronađete odgovarajući datum, kontaktirajte administratora putem poruka ili e-pošte:'],
+  sk: ['Rušenie lekcií je vypnuté. Kontaktujte administráciu.', 'Ak nenájdete vhodný termín, kontaktujte administrátora prostredníctvom správ alebo e-mailu:'],
+  sl: ['Odpovedovanje ur je onemogočeno. Obrnite se na administracijo.', 'Če ne najdete primernega datuma, se obrnite na administratorja prek sporočil ali e-pošte:'],
+  hi: ['पाठ रद्द करना बंद है। प्रशासन से संपर्क करें।', 'यदि आपको उपयुक्त तारीख नहीं मिलती है, तो संदेशों या ईमेल के माध्यम से व्यवस्थापक से संपर्क करें:'],
+  ko: ['수업 취소가 비활성화되어 있습니다. 운영 담당자에게 문의하세요.', '적절한 날짜를 찾을 수 없다면 메시지나 이메일로 관리자에게 문의하세요:'],
+  ja: ['レッスンのキャンセルは無効になっています。運営担当者にお問い合わせください。', '適切な日程が見つからない場合は、メッセージまたはメールで管理者にお問い合わせください:'],
+  id: ['Pembatalan pelajaran dinonaktifkan. Hubungi administrasi.', 'Jika Anda tidak menemukan tanggal yang sesuai, hubungi administrator melalui pesan atau email:'],
+  ar: ['إلغاء الدروس معطّل. تواصل مع الإدارة.', 'إذا لم تجد موعدًا مناسبًا، تواصل مع المسؤول عبر الرسائل أو البريد الإلكتروني:'],
+  'pt-br': ['O cancelamento de aulas está desativado. Entre em contato com a administração.', 'Se não encontrar uma data adequada, entre em contato com o administrador por mensagem ou e-mail:'],
+  'es-mx': ['La cancelación de clases está desactivada. Contacta a la administración.', 'Si no encuentras una fecha adecuada, contacta al administrador por mensajes o correo electrónico:'],
+  fil: ['Naka-disable ang pagkansela ng mga aralin. Makipag-ugnayan sa administrasyon.', 'Kung wala kang mahanap na angkop na petsa, makipag-ugnayan sa administrator sa pamamagitan ng mga mensahe o email:'],
+  he: ['ביטול שיעורים מושבת. יש לפנות להנהלה.', 'אם לא מצאת תאריך מתאים, יש לפנות למנהל באמצעות הודעות או דוא״ל:'],
+  uk: ['Скасування уроків вимкнено. Зверніться до адміністрації.', 'Якщо ви не можете знайти відповідну дату, зв’яжіться з адміністратором через повідомлення або електронну пошту:'],
+  'zh-hk': ['課堂取消功能已停用。請聯絡行政人員。', '如果找不到合適的日期，請透過訊息或電郵聯絡管理員:'],
+  tr: ['Ders iptali devre dışı. Yönetimle iletişime geçin.', 'Uygun bir tarih bulamazsanız mesajlar veya e-posta yoluyla yöneticiyle iletişime geçin:'],
+  th: ['ปิดใช้งานการยกเลิกบทเรียนแล้ว โปรดติดต่อฝ่ายดูแลระบบ', 'หากไม่พบวันที่ที่เหมาะสม โปรดติดต่อผู้ดูแลระบบผ่านข้อความหรืออีเมล:'],
+};
+
 export const organizationReleaseTranslations: Record<string, Record<string, string>> = Object.fromEntries(
-  Object.entries(copy).map(([locale, values]) => [locale, Object.fromEntries(keys.map((key, index) => [key, values[index]]))]),
+  Object.entries(copy).map(([locale, values]) => [locale, {
+    ...Object.fromEntries(keys.map((key, index) => [key, values[index]])),
+    ...(rescheduleHelpCopy[locale] ? {
+      'stuSess.cancellationDisabledByOrg': rescheduleHelpCopy[locale][0],
+      'stuSess.rescheduleHelp': rescheduleHelpCopy[locale][1],
+    } : {}),
+  }]),
 );
 
 export const schoolGroupActivationTranslations: Record<string, Record<string, string>> = {

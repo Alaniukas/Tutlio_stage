@@ -16,6 +16,7 @@ import { chargeCurrency, directChargeApplicationFeeCents, lessonCheckoutBreakdow
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { stripeCheckoutLocale } from './_lib/stripeLocale.js';
+import { checkoutPaymentReporting, checkoutReportingMatches, linkedSalesInvoiceNumbers } from './_lib/stripeCheckoutReporting.js';
 import {
     directChargeOptions,
     expireConnectCheckoutSession,
@@ -50,7 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .select(`
                 id, tutor_id, student_id, subject_id, total_lessons, price_per_lesson, total_price,
                 paid, payment_status, stripe_checkout_session_id, payment_method,
-                pool_organization_id, active, expires_at,
+                pool_organization_id, active, expires_at, manual_sales_invoice_id,
                 students!inner(id, full_name, email, payer_email, payer_name, payment_payer),
                 profiles!lesson_packages_tutor_id_fkey(
                     stripe_account_id, stripe_onboarding_complete, organization_id, full_name,
@@ -154,6 +155,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             stripeAccountId = tutor.stripe_account_id;
         }
 
+        const invoiceNumbers = await linkedSalesInvoiceNumbers(supabase, pkg.manual_sales_invoice_id);
+        const reporting = checkoutPaymentReporting(student?.payer_name || student?.full_name, invoiceNumbers);
+
         // 3. Try to reuse existing Stripe session if still open
         if (pkg.stripe_checkout_session_id) {
             try {
@@ -166,7 +170,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 if (existingLookup.stripeAccount === stripeAccountId
                     && existing.status === 'open'
                     && existing.url
-                    && existing.locale === checkoutLocale) {
+                    && existing.locale === checkoutLocale
+                    && checkoutReportingMatches(existing, reporting)) {
                     return res.redirect(303, existing.url);
                 }
                 if (existing.status === 'open') {
@@ -199,6 +204,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }));
 
         const metadataBase = {
+            ...reporting.metadata,
             tutlio_package_id: packageId,
             tutor_id: pkg.tutor_id,
             student_id: pkg.student_id,
@@ -218,6 +224,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 line_items: itemLineItems,
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
+                    description: reporting.description,
                     metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
                 },
                 metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
@@ -239,6 +246,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 ],
                 payment_intent_data: {
                     ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),
+                    description: reporting.description,
                     metadata: metadataBase,
                 },
                 metadata: { ...metadataBase, ...checkoutBaseMetadata(basePriceEur, market) },

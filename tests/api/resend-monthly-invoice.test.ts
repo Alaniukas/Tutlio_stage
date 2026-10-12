@@ -107,13 +107,22 @@ describe('Mano Korepetitorius monthly invoice reminders', () => {
 
   it('quotes the exact total of the open connected-account checkout', async () => {
     mocks.existingCheckoutId = 'cs_test_open';
-    mocks.retrieve.mockResolvedValue({ status: 'open', amount_total: 4888 });
+    mocks.retrieve.mockResolvedValue({ status: 'open', amount_total: 4888, metadata: { invoice_number: 'MANO-1, MANO-2', payer_name: 'Parent' } });
     const res = response();
     await handler(request as any, res as any);
 
     expect(mocks.retrieve).toHaveBeenCalledWith('cs_test_open', { stripeAccount: 'acct_mano_test' });
     expect(sentEmail().data).toMatchObject({ lessonsTotal: '40.00', platformFees: '8.88', totalAmount: '48.88' });
     expect(res.statusCode).toBe(200);
+  });
+
+  it('quotes current pricing when a legacy open checkout will be replaced for missing reporting data', async () => {
+    mocks.existingCheckoutId = 'cs_legacy';
+    mocks.retrieve.mockResolvedValue({ status: 'open', amount_total: 4888, metadata: { tutlio_billing_batch_id: 'batch-1' } });
+    const res = response();
+    await handler(request as any, res as any);
+    expect(res.statusCode).toBe(200);
+    expect(sentEmail().data.totalAmount).toBe('41.10');
   });
 
   it('uses refreshed-checkout pricing when the old checkout cannot be retrieved', async () => {

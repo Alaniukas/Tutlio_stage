@@ -183,6 +183,9 @@ describe('POST /api/stripe-checkout', () => {
     expect(stripeCreate.mock.calls[0][0]?.payment_intent_data?.application_fee_amount)
       .toBe(directChargeApplicationFeeCents(25));
     expect(stripeCreate.mock.calls[0][0]?.customer_creation).toBe('always');
+    expect(stripeCreate.mock.calls[0][0]?.payment_intent_data.description).toBe('Mokinys');
+    expect(stripeCreate.mock.calls[0][0]?.payment_intent_data.metadata.payer_name).toBe('Mokinys');
+    expect(stripeCreate.mock.calls[0][0]?.metadata.payer_name).toBe('Mokinys');
     expect(stripeCreate.mock.calls[0][0]?.locale).toBe('lt');
     expect(stripeCreate.mock.calls[0][1]).toEqual({ stripeAccount: 'acct_individual' });
     expect(sessionsUpdateEq).toHaveBeenCalledWith('id', 'sess-1');
@@ -255,6 +258,9 @@ describe('POST /api/stripe-checkout', () => {
     expect(res.getResult().statusCode).toBe(200);
     expect(stripeCreate.mock.calls[0][0]?.locale).toBe('lt');
     expect(stripeCreate.mock.calls[0][0]?.metadata?.tutlio_school_org_absorbed).toBe('true');
+    expect(stripeCreate.mock.calls[0][0]?.payment_intent_data.description).toBe('Mokinys');
+    expect(stripeCreate.mock.calls[0][0]?.payment_intent_data.metadata.payer_name).toBe('Mokinys');
+    expect(stripeCreate.mock.calls[0][0]?.metadata.payer_name).toBe('Mokinys');
     expect(stripeCreate.mock.calls[0][1]).toEqual({ stripeAccount: 'acct_school' });
   });
 
