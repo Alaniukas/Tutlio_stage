@@ -24,7 +24,7 @@ export function isInternalRequest(req: VercelRequest): boolean {
  */
 export async function verifyRequestAuth(
   req: VercelRequest
-): Promise<{ userId: string | null; isInternal: boolean } | null> {
+): Promise<{ userId: string | null; isInternal: boolean; lastSignInAt?: string | null } | null> {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
   if (isInternalRequest(req)) {
@@ -47,7 +47,7 @@ export async function verifyRequestAuth(
     });
     const { data, error } = await sb.auth.getUser(token);
     if (!error && data.user) {
-      return { userId: data.user.id, isInternal: false };
+      return { userId: data.user.id, isInternal: false, lastSignInAt: data.user.last_sign_in_at || null };
     }
   }
 

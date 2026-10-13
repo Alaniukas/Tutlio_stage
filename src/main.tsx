@@ -64,7 +64,9 @@ function bootApp() {
     } catch {
       /* ignore */
     }
-    createRoot(document.getElementById('root')!).render(
+    createRoot(document.getElementById('root')!, {
+      onUncaughtError(error) { recordOrgAdminRuntimeError(error); console.error(error); },
+    }).render(
       <PlatformProvider platform={platform}>
         <LocaleProvider>
           <App basename={basename} />
@@ -78,3 +80,4 @@ function bootApp() {
   // language download for a stale shell and reload it after six seconds.
   renderApp();
 }
+import { recordOrgAdminRuntimeError } from './lib/orgAdminTelemetry';

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { extractStoragePath, openContractFileInNewTab } from '@/lib/contractStorage';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
@@ -110,6 +110,10 @@ import {
   type ProKlaseClientRosterFilter,
 } from '@/lib/proKlaseClientRoster';
 import { monthlyPackageErrorMessage } from '@/lib/monthlyPackageUi';
+import { useStudentRegistrationStatus } from '@/hooks/useStudentRegistrationStatus';
+import StudentRegistrationAlert from '@/components/StudentRegistrationAlert';
+import { isRegistrationOverdue } from '@/lib/studentRegistration';
+import { registrationText } from '@/lib/studentRegistrationCopy';
 import { defaultLessonRange, lessonFitsAvailabilityWindow, appendUniqueBySlotKey, availabilitySlotKey } from '@/lib/pickedAvailabilityTime';
 import { orgCanonicalOrigin } from '@/lib/orgPublicOrigin';
 import {
@@ -240,6 +244,7 @@ interface Student {
   payment_payer?: 'self' | 'parent' | string | null;
   linked_user_id?: string | null;
   parent_user_id?: string | null;
+  registration_pending?: boolean;
   created_at: string;
   admin_comment?: string | null;
   admin_comment_visible_to_tutor?: boolean;
@@ -495,6 +500,8 @@ export default function CompanyStudents() {
   const showSchoolContractFields = isSchoolView;
   const stc = getCached<any>('company_students');
   const [students, setStudents] = useState<Student[]>(stc?.students ?? []);
+  const registration = useStudentRegistrationStatus(orgId, students.map((row) => `${row.id}:${row.linked_user_id || ''}:${row.parent_user_id || ''}`).join('|'));
+  const [registrationSearchParams] = useSearchParams();
   const [tutors, setTutors] = useState<Tutor[]>(stc?.tutors ?? []);
   const [contractsByStudent, setContractsByStudent] = useState<Record<string, StudentContractInfo>>(stc?.contractsByStudent ?? {});
   // Req 8 (trial_followup_alert): student IDs with a completed trial but no real package sent yet.
@@ -676,7 +683,7 @@ export default function CompanyStudents() {
   const [deactivatingPackageId, setDeactivatingPackageId] = useState<string | null>(null);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
-  const [pkClientFilter, setPkClientFilter] = useState<ProKlaseClientRosterFilter>('all');
+  const [pkClientFilter, setPkClientFilter] = useState<ProKlaseClientRosterFilter>(() => registrationSearchParams.get('registration') === 'pending' ? 'inactive' : 'all');
   const [savingClientStatus, setSavingClientStatus] = useState(false);
   // School list filters: grade, contract, consent, enrollment metadata.
   const [gradeFilter, setGradeFilter] = useState('all');
@@ -902,7 +909,9 @@ export default function CompanyStudents() {
     // parent login or payer email stay on separate cards.
     const groups = new Map<string, Student[]>();
     const order: string[] = [];
-    for (const s of students) {
+    for (const student of students) {
+      const state = registration.enabled ? registration.byStudentId.get(student.id) : undefined;
+      const s = state ? { ...student, registration_pending: state.registration_pending } : student;
       const key = orgStudentIdentityGroupKey(s);
       if (!groups.has(key)) {
         groups.set(key, []);
@@ -920,7 +929,7 @@ export default function CompanyStudents() {
         || rows[0];
       return { key, primary, rows };
     });
-  }, [students]);
+  }, [students, registration.byStudentId, registration.enabled]);
 
   const availableGrades = useMemo(() => {
     const set = new Set<string>(GRADE_OPTIONS);
@@ -5113,6 +5122,8 @@ export default function CompanyStudents() {
           </div>
         )}
 
+        {registration.enabled && !showTrashBin && <StudentRegistrationAlert states={registration.states} error={registration.error} />}
+
         {students.length === 0 && !loading ? (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
             <div className="text-center py-16 px-6">
@@ -5147,7 +5158,7 @@ export default function CompanyStudents() {
                     key={g.key}
                     role="button"
                     tabIndex={0}
-                    className="w-full text-left p-4 hover:bg-gray-50 transition-colors cursor-pointer"
+                    className={`w-full text-left p-4 transition-colors cursor-pointer ${registration.enabled && g.rows.some((row) => isRegistrationOverdue(registration.byStudentId.get(row.id))) ? 'bg-red-50 hover:bg-red-100 border-l-4 border-red-500' : 'hover:bg-gray-50'}`}
                     onClick={() => {
                       setSelectedStudent(student);
                       setSelectedStudentGroup(g.rows);
@@ -5186,13 +5197,13 @@ export default function CompanyStudents() {
                               {t('compStu.pkLeftClient')}
                             </span>
                           )}
-                          {student.linked_user_id ? (
+                          {(student.registration_pending === false || (student.registration_pending === undefined && student.linked_user_id)) ? (
                             <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-1.5 py-0.5 flex-shrink-0">
                               {t(proKlaseAdminUi ? 'compStu.pkAccountConfirmed' : 'compStu.connected')}
                             </span>
                           ) : (
-                            <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5 flex-shrink-0">
-                              {t(proKlaseAdminUi ? 'compStu.pkAccountUnconfirmed' : 'compStu.notConnected')}
+                            <span className={`text-[11px] border rounded-md px-1.5 py-0.5 flex-shrink-0 ${registration.enabled && isRegistrationOverdue(registration.byStudentId.get(student.id)) ? 'text-red-700 bg-red-50 border-red-200' : 'text-amber-700 bg-amber-50 border-amber-200'}`}>
+                              {registration.enabled ? registrationText(locale, isRegistrationOverdue(registration.byStudentId.get(student.id)) ? 'overdue' : 'pending') : t(proKlaseAdminUi ? 'compStu.pkAccountUnconfirmed' : 'compStu.notConnected')}
                             </span>
                           )}
                         </div>
@@ -5303,7 +5314,7 @@ export default function CompanyStudents() {
                     return (
                       <tr
                         key={g.key}
-                        className="hover:bg-gray-50 transition-colors cursor-pointer"
+                        className={`transition-colors cursor-pointer ${registration.enabled && g.rows.some((row) => isRegistrationOverdue(registration.byStudentId.get(row.id))) ? 'bg-red-50 hover:bg-red-100 border-l-4 border-red-500' : 'hover:bg-gray-50'}`}
                         onClick={(e) => {
                           if ((e.target as HTMLElement).closest('button')) return;
                           setSelectedStudent(student);
@@ -5333,10 +5344,10 @@ export default function CompanyStudents() {
                                 {proKlaseAdminUi && proKlaseClientHasLeft(g) && (
                                   <span className="text-[11px] text-slate-700 bg-slate-100 border border-slate-200 rounded-md px-2 py-0.5">{t('compStu.pkLeftClient')}</span>
                                 )}
-                                {student.linked_user_id ? (
+                                {(student.registration_pending === false || (student.registration_pending === undefined && student.linked_user_id)) ? (
                                   <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-0.5">{t(proKlaseAdminUi ? 'compStu.pkAccountConfirmed' : 'compStu.connected')}</span>
                                 ) : (
-                                  <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5">{t(proKlaseAdminUi ? 'compStu.pkAccountUnconfirmed' : 'compStu.notConnected')}</span>
+                                  <span className={`text-[11px] border rounded-md px-2 py-0.5 ${registration.enabled && isRegistrationOverdue(registration.byStudentId.get(student.id)) ? 'text-red-700 bg-red-50 border-red-200' : 'text-amber-700 bg-amber-50 border-amber-200'}`}>{registration.enabled ? registrationText(locale, isRegistrationOverdue(registration.byStudentId.get(student.id)) ? 'overdue' : 'pending') : t(proKlaseAdminUi ? 'compStu.pkAccountUnconfirmed' : 'compStu.notConnected')}</span>
                                 )}
                                 {needsPackage && (
                                   <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-0.5">

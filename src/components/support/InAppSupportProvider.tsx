@@ -15,7 +15,7 @@ import {
   inAppSupportLauncherInsets,
 } from '@/lib/inAppSupportLauncher';
 import { useTranslation } from '@/lib/i18n';
-import { clearSupportDiagnostics, installSupportDiagnostics } from '@/lib/supportDiagnostics';
+import { acquireSupportDiagnostics, clearSupportDiagnostics } from '@/lib/supportDiagnostics';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import SupportRobotIcon from './SupportRobotIcon';
@@ -83,7 +83,7 @@ export default function InAppSupportProvider({ children }: { children: ReactNode
 
   useEffect(() => {
     if (!IN_APP_SUPPORT_ENABLED) return;
-    const uninstall = installSupportDiagnostics();
+    const uninstall = acquireSupportDiagnostics();
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const nextUserId = session?.user?.id || null;
       if (diagnosticsUserId && diagnosticsUserId !== nextUserId) clearSupportDiagnostics();

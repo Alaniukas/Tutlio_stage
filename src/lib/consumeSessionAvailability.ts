@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { recurringAvailabilityAppliesOnDate } from './availabilityRecurring';
-import { sessionInstantToAvailabilityFields } from './releaseSessionAvailability';
+import { effectiveAvailabilityOnDate } from './availabilityCalendarBlocks.js';
+import { sessionInstantToAvailabilityFields } from './releaseSessionAvailability.js';
 
 type AvailabilityRow = {
   id: string;
@@ -70,11 +70,16 @@ async function insertSpecificDateSegments(
   const existingSpecific = rows.filter(
     (r) => r.tutor_id === row.tutor_id && !r.is_recurring && r.specific_date === specificDate,
   );
-  for (const seg of segments) {
-    const overlapsExisting = existingSpecific.some((s) =>
-      rangesOverlap(seg.start, seg.end, s.start_time, s.end_time),
-    );
-    if (overlapsExisting) continue;
+  const sameSettings = (other: AvailabilityRow) => Boolean(other.public_bookable) === Boolean(row.public_bookable)
+    && (other.meeting_link ?? null) === (row.meeting_link ?? null)
+    && JSON.stringify([...(other.subject_ids ?? [])].sort()) === JSON.stringify([...(row.subject_ids ?? [])].sort());
+  let missing = segments;
+  for (const existing of existingSpecific.filter(sameSettings)) {
+    missing = missing.flatMap((seg) => rangesOverlap(seg.start, seg.end, existing.start_time, existing.end_time)
+      ? remainingSegments(seg.start, seg.end, existing.start_time, existing.end_time)
+      : [seg]);
+  }
+  for (const seg of missing) {
     const { data: inserted, error } = await supabase.from('availability').insert({
       tutor_id: row.tutor_id,
       specific_date: specificDate,
@@ -84,7 +89,7 @@ async function insertSpecificDateSegments(
       subject_ids: row.subject_ids ?? [],
       meeting_link: row.meeting_link,
       public_bookable: row.public_bookable,
-    }).select('id').single();
+    }).select('id, created_at').single();
     if (error) throw error;
     if (inserted?.id) {
       const newRow: AvailabilityRow = {
@@ -98,6 +103,7 @@ async function insertSpecificDateSegments(
         subject_ids: row.subject_ids ?? [],
         meeting_link: row.meeting_link,
         public_bookable: row.public_bookable,
+        created_at: inserted.created_at ?? new Date().toISOString(),
       };
       rows.push(newRow);
       existingSpecific.push(newRow);
@@ -122,15 +128,20 @@ async function consumeSessionSlotAvailabilityOnRows(
   );
   const dayOfWeek = dayOfWeekFromDateStr(specificDate);
 
-  for (const row of rows) {
-    if (row.tutor_id !== params.tutorId) continue;
+  const effective = effectiveAvailabilityOnDate(
+    rows.filter((row) => row.tutor_id === params.tutorId), specificDate, dayOfWeek,
+  );
+  if (!effective.some((row) => row.is_recurring && rangesOverlap(row.start_time, row.end_time, startTime, endTime))) return;
+
+  for (const row of effective) {
     // The lesson masks booked time in calendar and booking views. Keeping the
     // source row lets deletion/cancellation reveal it with all original settings.
     if (!row.is_recurring) continue;
-    if (!recurringAvailabilityAppliesOnDate(row, specificDate, dayOfWeek)) continue;
-    if (!rangesOverlap(row.start_time, row.end_time, startTime, endTime)) continue;
-
-    const segments = remainingSegments(row.start_time, row.end_time, startTime, endTime);
+    // Creating a remainder freezes this date's schedule. Copy unrelated windows
+    // too, so booking an evening lesson cannot hide a separate daytime window.
+    const segments = rangesOverlap(row.start_time, row.end_time, startTime, endTime)
+      ? remainingSegments(row.start_time, row.end_time, startTime, endTime)
+      : [{ start: row.start_time, end: row.end_time }];
     await insertSpecificDateSegments(supabase, row, specificDate, segments, rows);
   }
 }

@@ -46,6 +46,20 @@ const SAFE_CLICK_LABEL_ACTIONS: Record<string, string> = {
 const breadcrumbs: SupportDiagnostic[] = [];
 let lastNavigationPath: string | null = null;
 let uninstallCurrent: (() => void) | null = null;
+let diagnosticConsumers = 0;
+
+/** Sharing keeps support and proactive diagnostics alive until their last consumer leaves. */
+export function acquireSupportDiagnostics(): () => void {
+  const uninstall = installSupportDiagnostics();
+  diagnosticConsumers += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    diagnosticConsumers -= 1;
+    if (diagnosticConsumers === 0) uninstall();
+  };
+}
 
 function safePath(pathname: string): string {
   const segments = pathname.split('/').filter(Boolean);

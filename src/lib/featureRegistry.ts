@@ -63,6 +63,13 @@ export const FEATURE_CATEGORIES = {
  * where the flag is enabled, never from the organization where it originated.
  */
 export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
+  pending_registration_lessons: {
+    id: 'pending_registration_lessons',
+    name: 'Laukiančių registracijų pamokos', nameEn: 'Lessons awaiting registration',
+    description: 'Administracijos įspėjimai po 24 val., nepatvirtintų pamokų žymos ir vienas registracijos priminimas klientui. Pro Klasei įjungta numatytai.',
+    descriptionEn: 'Admin warnings after 24 hours, tentative lesson labels and one registration reminder per client. Enabled by default for Pro Klasė.',
+    category: 'automation', defaultValue: false,
+  },
   tutor_recurring_reschedule_approval: {
     id: 'tutor_recurring_reschedule_approval',
     name: 'Kliento patvirtinimas perkeliant pasikartojančią pamoką',

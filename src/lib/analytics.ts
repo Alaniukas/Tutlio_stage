@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { telemetryModule } from './orgAdminTelemetryShared.js';
 
 const SESSION_KEY = 'tutlio_analytics_sid';
 const UTM_KEY = 'tutlio_utm';
@@ -54,6 +55,8 @@ let lastTrackedPath = '';
 
 /** Track a pageview. Deduplicates consecutive identical paths. */
 export function trackPageview(pathname: string) {
+  // Admin application activity has its own authenticated, compact collector.
+  if (import.meta.env.DEV || telemetryModule(pathname)) return;
   if (pathname === lastTrackedPath) return;
   lastTrackedPath = pathname;
 

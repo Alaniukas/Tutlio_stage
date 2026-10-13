@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { TZDate } from '@date-fns/tz';
 import { recurringAvailabilityAppliesOnDate } from './availabilityRecurring.js';
+import { effectiveAvailabilityOnDate } from './availabilityCalendarBlocks.js';
 
 const VILNIUS_TZ = 'Europe/Vilnius';
 const READ_PAGE_SIZE = 500;
@@ -180,8 +181,9 @@ export async function releaseSessionSlotAsAvailability(
   const specific = availability.filter((row) => !row.is_recurring && row.specific_date === specificDate);
   const recurring = availability.filter((row) => row.is_recurring
     && recurringAvailabilityAppliesOnDate(row, specificDate, dayStart.getDay()));
-  // A specific-date remainder overrides all recurring rules for this tutor/day.
-  const effective = specific.length > 0 ? specific : recurring;
+  const effective = effectiveAvailabilityOnDate(
+    availability.map((row) => ({ ...row, tutor_id: params.tutorId })), specificDate, dayStart.getDay(),
+  );
   const covered = effective.flatMap((row) => {
     const range = availabilityRange(row);
     return range ? [range] : [];
@@ -222,14 +224,21 @@ export async function releaseSessionSlotAsAvailability(
     insertedRanges.push(range);
   };
 
-  if (specific.length === 0) {
-    // Creating the first one-time row replaces the day's recurring rules in
-    // calendar views. Preserve their other free windows with the same metadata.
-    for (const row of recurring) {
-      const range = availabilityRange(row);
-      if (!range) continue;
-      for (const part of subtractRanges(range, [...occupied, ...insertedRanges])) append(part, row);
-    }
+  // Every new date row replaces older weekly rules, including weekly windows
+  // added after existing date remainders. Preserve only the currently visible
+  // weekly windows, with their original settings, before restoring the gap.
+  for (const row of effective.filter((entry) => entry.is_recurring)) {
+    const range = availabilityRange(row);
+    if (!range) continue;
+    const matchingSpecific = specific.filter((entry) =>
+      Boolean(entry.public_bookable) === Boolean(row.public_bookable)
+      && (entry.meeting_link ?? null) === (row.meeting_link ?? null)
+      && JSON.stringify([...(entry.subject_ids ?? [])].sort()) === JSON.stringify([...(row.subject_ids ?? [])].sort()),
+    ).flatMap((entry) => {
+      const existing = availabilityRange(entry);
+      return existing ? [existing] : [];
+    });
+    for (const part of subtractRanges(range, [...matchingSpecific, ...occupied, ...insertedRanges])) append(part, row);
   }
 
   for (const gap of gaps) {

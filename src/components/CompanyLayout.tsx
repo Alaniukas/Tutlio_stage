@@ -46,6 +46,7 @@ import SupportRobotIcon from '@/components/support/SupportRobotIcon';
 import { useInAppSupportAgent } from '@/components/support/InAppSupportProvider';
 import { inAppSupportLabel } from '@/lib/inAppSupport';
 import { IN_APP_SUPPORT_ENABLED } from '@/lib/inAppSupportAvailability';
+import { useOrgAdminTelemetry } from '@/hooks/useOrgAdminTelemetry';
 
 /** Drive proxy is ready; the per-organization feature flag remains the rollout switch. */
 const SCHOOL_LESSON_RECORDINGS_NAV_READY = true;
@@ -129,6 +130,7 @@ export default function CompanyLayout() {
   const { openSupportAgent } = useInAppSupportAgent();
   const { user: ctxUser } = useUser();
   const { can, membership } = useOrgAdminAccess();
+  useOrgAdminTelemetry(membership?.status === 'active' ? ctxUser?.id : undefined, membership?.organizationId);
   const chatUnreadTotal = useTotalChatUnread({ enabled: can('messages.view') });
   const location = useLocation();
   const ENTITY_KEY = 'tutlio_entity_type';

@@ -36,6 +36,8 @@ import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { confirmSessionOutcome } from '@/lib/confirmSessionOutcome';
 import { orgDashboardMonthMetrics } from '@/lib/orgDashboardMetrics';
 import { allowsPerLessonPaymentForStudent } from '@/lib/studentPaymentModel';
+import { useStudentRegistrationStatus } from '@/hooks/useStudentRegistrationStatus';
+import StudentRegistrationAlert from '@/components/StudentRegistrationAlert';
 
 interface StatCard {
   label: string;
@@ -129,6 +131,7 @@ export default function CompanyDashboard() {
   const cached = getCached<any>(DASH_CACHE_KEY);
   const [loading, setLoading] = useState(!cached);
   const [orgIdForDismiss, setOrgIdForDismiss] = useState<string | null>(cached?.orgIdForDismiss ?? null);
+  const registration = useStudentRegistrationStatus(can('students.view') ? orgIdForDismiss : null);
   const companyAttentionRowsKey = orgIdForDismiss
     ? `tutlio:v1:company_dash_attention_rows:${orgIdForDismiss}`
     : undefined;
@@ -799,6 +802,7 @@ export default function CompanyDashboard() {
   return (
     <>
       <div className="max-w-5xl mx-auto space-y-5 sm:space-y-6">
+        {registration.enabled && <StudentRegistrationAlert states={registration.states} error={registration.error} showLink />}
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Sveiki, {orgName}</h1>
           <p className="text-sm text-gray-500 mt-0.5">

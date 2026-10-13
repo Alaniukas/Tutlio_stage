@@ -123,10 +123,7 @@ describe('Vercel support log drain', () => {
       log_id: '1573817250283254651097202070',
       vercel_id: 'iad1::abc123',
     })]), { onConflict: 'project_id,log_id', ignoreDuplicates: true });
-    expect(prune).toHaveBeenCalledWith('occurred_at', expect.any(String));
-    const cutoff = Date.parse(prune.mock.calls[0][1]);
-    expect(Date.now() - cutoff).toBeGreaterThanOrEqual(13 * 24 * 60 * 60 * 1000);
-    expect(Date.now() - cutoff).toBeLessThanOrEqual(15 * 24 * 60 * 60 * 1000);
+    expect(prune).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid signature without querying the database', async () => {

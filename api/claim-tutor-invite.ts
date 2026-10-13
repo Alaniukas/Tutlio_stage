@@ -1,27 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { tutorInviteClaimDecision } from '../src/lib/tutorInviteClaim.js';
-
-type SubjectPreset = {
-  name: string;
-  duration_minutes?: number;
-  price?: number;
-  color?: string | null;
-};
-
-function normalizePreset(preset: SubjectPreset) {
-  return {
-    name: String(preset?.name || '').trim(),
-    duration_minutes: Number(preset?.duration_minutes) || 60,
-    price: Number(preset?.price) || 0,
-    color: String(preset?.color || '#6366f1').toLowerCase(),
-  };
-}
-
-/** Name + duration + price — matches app `subjectTutorLessonKey`; blocks duplicate lesson rows regardless of colour. */
-function tutorLessonKey(parts: { name: string; duration_minutes: number; price: number }) {
-  return `${String(parts.name).trim().toLowerCase()}|${Number(parts.duration_minutes)}|${Number(parts.price)}`;
-}
+import { ensureTutorInviteSubjects } from './_lib/tutorInviteSubjects.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -146,6 +126,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // A failed subject write must leave the invite pending so login can retry.
+    await ensureTutorInviteSubjects(supabase, user.id, invite.subjects_preset);
+
     if (claim.shouldLink) {
       const { error: inviteUpdateError } = await supabase
         .from('tutor_invites')
@@ -165,43 +148,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('used', false)
         .eq('invitee_email', siblingEmail)
         .neq('id', invite.id);
-    }
-
-    const presets = Array.isArray(invite.subjects_preset) ? (invite.subjects_preset as SubjectPreset[]) : [];
-    if (presets.length > 0) {
-      const { data: existing } = await supabase
-        .from('subjects')
-        .select('name, duration_minutes, price, color')
-        .eq('tutor_id', user.id);
-
-      const taken = new Set(
-        (existing || []).map((s: any) =>
-          tutorLessonKey({
-            name: s.name,
-            duration_minutes: s.duration_minutes,
-            price: Number(s.price),
-          })
-        )
-      );
-
-      const newRows = presets
-        .map((p) => normalizePreset(p))
-        .filter((p) => p.name.length > 0)
-        .filter((p) => {
-          const key = tutorLessonKey({
-            name: p.name,
-            duration_minutes: p.duration_minutes,
-            price: p.price,
-          });
-          if (taken.has(key)) return false;
-          taken.add(key);
-          return true;
-        })
-        .map((p) => ({ tutor_id: user.id, ...p }));
-
-      if (newRows.length > 0) {
-        await supabase.from('subjects').insert(newRows);
-      }
     }
 
     return res.status(200).json({ success: true, organizationId: invite.organization_id });

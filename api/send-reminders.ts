@@ -9,6 +9,8 @@ import { createClient } from '@supabase/supabase-js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { retryRescheduleDecisionNotifications } from './_lib/lessonRescheduleApproval.js';
+import { loadStudentRegistrationStates } from './_lib/studentRegistration.js';
+import { studentRegistrationEnabled } from '../src/lib/studentRegistration.js';
 import { dedupeReminderRecipients, type ReminderRecipient } from './_lib/reminderRecipients.js';
 import { loadReminderOptOuts } from './_lib/reminderOptOut.js';
 import { parseEmailOptOutList, isEmailOptedOut } from './_lib/emailNotificationOptOut.js';
@@ -170,7 +172,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error) {
       console.error('[send-reminders] Session query error:', error);
     } else if (sessions?.length) {
-      const orderedSessions = sortSessionsForReminderDelivery(sessions);
+      const pendingByOrg = new Map<string, Set<string> | null>();
+      for (const session of sessions) {
+        const orgId = (session.student as any)?.organization_id || (session.tutor as any)?.organization_id;
+        if (!orgId || pendingByOrg.has(orgId)) continue;
+        if (!studentRegistrationEnabled(orgId, await getOrgFeatures(orgId))) {
+          pendingByOrg.set(orgId, new Set());
+          continue;
+        }
+        try {
+          const states = await loadStudentRegistrationStates(supabase, orgId);
+          pendingByOrg.set(orgId, new Set(states.filter((row) => row.registration_pending).map((row) => row.student_id)));
+        } catch (cause) {
+          console.error('[send-reminders] registration lookup unavailable', cause);
+          pendingByOrg.set(orgId, null); // Retry later; do not announce tentative lessons as confirmed.
+        }
+      }
+      const readySessions = sessions.filter((session) => {
+        const student = session.student as any;
+        const orgId = student?.organization_id || (session.tutor as any)?.organization_id;
+        const pending = pendingByOrg.get(orgId);
+        return pending !== null && !pending?.has(student?.id);
+      });
+      const orderedSessions = sortSessionsForReminderDelivery(readySessions);
       let activeSchoolPayerOccurrence: string | null = null;
       // A school group occurrence has one session row per student. Choose one
       // deterministic row per tutor/time slot so the teacher gets one reminder.

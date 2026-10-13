@@ -1,7 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
+import { configureSupabaseTelemetry, orgAdminTelemetryFetch, setOrgAdminTelemetryAuth } from './orgAdminTelemetry.js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+configureSupabaseTelemetry(supabaseUrl || '');
 
 const REMEMBER_ME_KEY = 'tutlio_remember_me';
 
@@ -95,6 +97,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '', {
+  global: { fetch: (input, init) => orgAdminTelemetryFetch((request, options) => globalThis.fetch(request, options), input, init) },
   auth: {
     storage: customStorage,
     persistSession: true,
@@ -130,11 +133,13 @@ if (typeof window !== 'undefined') {
   };
 
   void supabase.auth.getSession().then(({ data: { session } }) => {
+    setOrgAdminTelemetryAuth(session?.user.id ?? null, session?.access_token ?? null);
     syncRealtimeAuth(session?.access_token);
   });
 
   // Add global auth event logger to track all auth events
   supabase.auth.onAuthStateChange((event, session) => {
+    setOrgAdminTelemetryAuth(session?.user.id ?? null, session?.access_token ?? null);
     syncRealtimeAuth(session?.access_token);
 
     // Log all auth events for debugging

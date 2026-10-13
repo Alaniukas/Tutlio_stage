@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AvailabilityManager from '@/components/AvailabilityManager';
 
@@ -6,6 +6,7 @@ const supabaseMock = vi.hoisted(() => ({
   getUser: vi.fn(),
   from: vi.fn(),
   sessionRange: vi.fn(),
+  insert: vi.fn(),
 }));
 
 const day = '2026-11-11';
@@ -19,6 +20,7 @@ let availability: Record<string, unknown>[];
 let sessions: Record<string, unknown>[];
 let sessionsError: { message: string } | null;
 let breakMinutes: number;
+let availabilityRangeError: { message: string } | null;
 
 vi.mock('@/lib/supabase', () => ({
   supabase: {
@@ -34,6 +36,8 @@ describe('AvailabilityManager', () => {
     sessions = [];
     sessionsError = null;
     breakMinutes = 0;
+    availabilityRangeError = null;
+    supabaseMock.insert.mockResolvedValue({ error: null });
     supabaseMock.sessionRange.mockImplementation(async (from: number, to: number) => ({
       data: sessions.slice(from, to + 1), error: sessionsError,
     }));
@@ -60,13 +64,17 @@ describe('AvailabilityManager', () => {
       }
 
       if (table === 'availability') {
-        return {
-          select: () => ({
-            eq: () => ({
-              order: async () => ({ data: availability, error: null }),
-            }),
-          }),
+        const filters: Record<string, unknown> = {};
+        const rows = () => availability.filter(row => Object.entries(filters).every(([key, value]) => row[key] === value || key === 'tutor_id' && row[key] == null));
+        const query = {
+          select: () => query,
+          eq: (key: string, value: unknown) => { filters[key] = value; return query; },
+          order: () => query,
+          range: async (from: number, to: number) => ({ data: rows().slice(from, to + 1), error: availabilityRangeError }),
+          then: (resolve: (result: { data: Record<string, unknown>[]; error: null }) => void) => resolve({ data: rows(), error: null }),
+          insert: supabaseMock.insert,
         };
+        return query;
       }
 
       if (table === 'sessions') {
@@ -83,6 +91,31 @@ describe('AvailabilityManager', () => {
   });
 
   afterEach(cleanup);
+
+  it('blocks a duplicate weekly range before inserting and restores the save button', async () => {
+    availability = [{ ...slot, id: 'weekly', tutor_id: 'tutor-1', is_recurring: true, day_of_week: 1,
+      specific_date: null, start_time: '12:00:00', end_time: '16:00:00' }];
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    render(<AvailabilityManager />);
+    const button = await screen.findByRole('button', { name: 'Pridėti laisvą laiką' });
+    fireEvent.click(button);
+    await waitFor(() => expect(alert).toHaveBeenCalledWith('Laisvi laikai negali kirstis. Jau turite laisvą laiką šiuo metu.'));
+    expect(supabaseMock.insert).not.toHaveBeenCalled();
+    await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false));
+    alert.mockRestore();
+  });
+
+  it('does not save when existing availability cannot be checked', async () => {
+    availabilityRangeError = { message: 'Availability lookup unavailable' };
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<AvailabilityManager />);
+    const button = await screen.findByRole('button', { name: 'Pridėti laisvą laiką' });
+    fireEvent.click(button);
+    expect(await screen.findByText('Nepavyko pridėti laisvo laiko.')).toBeTruthy();
+    expect(supabaseMock.insert).not.toHaveBeenCalled();
+    await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false));
+    errorLog.mockRestore();
+  });
 
   it('keeps free-time settings independent from subjects', async () => {
     render(<AvailabilityManager />);

@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { ensureTutorInviteSubjects } from './_lib/tutorInviteSubjects.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -30,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: invite, error: inviteErr } = await supabase
       .from('tutor_invites')
-      .select('id, used, organization_id, invitee_email, company_commission_percent')
+      .select('id, used, organization_id, invitee_email, company_commission_percent, teaching_notes, subjects_preset')
       .eq('token', orgToken)
       .maybeSingle();
 
@@ -64,10 +65,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // The following login replays a fully claimed invite and returns early,
       // so the agreed tutor pay must be saved during registration itself.
       company_commission_percent: invite.company_commission_percent ?? 0,
+      teaching_notes: String(invite.teaching_notes || '').trim() || null,
     }, { onConflict: 'id' });
     if (profileError) {
       return res.status(500).json({ error: 'Failed to save tutor profile' });
     }
+
+    // Subsequent login treats this invite as fully claimed. Persist subjects
+    // now so that shortcut cannot leave the tutor without the assigned lessons.
+    await ensureTutorInviteSubjects(supabase, authData.user.id, invite.subjects_preset);
 
     const { error: inviteUpdateError } = await supabase
       .from('tutor_invites')

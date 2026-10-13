@@ -319,6 +319,7 @@ export async function downloadSchoolContractsZip(
     || (studentContractIds.length && (teacherContractIds.length || staffDocumentIds.length) ? 'all' : undefined)
     || (teacherContractIds.length || staffDocumentIds.length ? 'employees' : 'payers');
   await triggerZipDownload(blob, options.zipName || schoolContractsZipExportFilename(scope));
+  recordOrgAdminAction('export');
   return { payerCount, employeeCount, downloaded, failedIds };
 }
 
@@ -339,3 +340,4 @@ export async function downloadSchoolContractsByPayerZip(
     failedIds: result.failedIds,
   };
 }
+import { recordOrgAdminAction } from './orgAdminTelemetry.js';

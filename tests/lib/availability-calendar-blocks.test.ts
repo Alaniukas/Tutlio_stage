@@ -100,6 +100,35 @@ describe('availabilityCalendarBlocks', () => {
     expect(slices[1].end.getHours()).toBe(16);
   });
 
+  it('keeps a newly added weekly lunch window visible beside older evening exceptions', () => {
+    const base = { tutor_id: 't1', day_of_week: 1, specific_date: null, is_recurring: true, start_date: '2026-10-12', end_date: null };
+    const rows = [
+      { ...base, id: 'evening', start_time: '18:00', end_time: '21:30', created_at: '2026-09-21T10:00:00Z' },
+      { ...base, id: 'lunch', start_time: '12:00', end_time: '16:00', created_at: '2026-10-13T11:00:00Z' },
+      { ...base, id: 'exception', is_recurring: false, specific_date: '2026-10-19', day_of_week: null,
+        start_time: '20:05', end_time: '21:30', created_at: '2026-09-23T06:00:00Z' },
+    ];
+    expect(effectiveAvailabilityOnDate(rows, '2026-10-19', 1).map(r => r.id)).toEqual(['exception', 'lunch']);
+    const newer = { ...rows[2], created_at: '2026-10-14T06:00:00Z' };
+    expect(effectiveAvailabilityOnDate([...rows.slice(0, 2), newer], '2026-10-19', 1).map(r => r.id))
+      .toEqual(['exception']);
+    expect(effectiveAvailabilityOnDate(rows, '2026-10-26', 1).map(r => r.id)).toEqual(['evening', 'lunch']);
+  });
+
+  it('keeps unknown and equal timestamps conservative and isolates overrides by tutor', () => {
+    const weekly = { id: 'weekly', tutor_id: 't1', is_recurring: true, day_of_week: 1,
+      start_time: '12:00', end_time: '16:00', created_at: '2026-10-13T11:00:00Z' };
+    const specific = { ...weekly, id: 'one-time', is_recurring: false, day_of_week: null, specific_date: '2026-10-19' };
+    for (const created_at of [undefined, 'invalid', weekly.created_at]) {
+      expect(effectiveAvailabilityOnDate([weekly, { ...specific, created_at }], '2026-10-19', 1).map(r => r.id))
+        .toEqual(['one-time']);
+    }
+    expect(effectiveAvailabilityOnDate([weekly, { ...specific, tutor_id: 't2' }], '2026-10-19', 1).map(r => r.id))
+      .toEqual(['one-time', 'weekly']);
+    expect(effectiveAvailabilityOnDate([{ ...weekly, start_date: '2026-10-20' }, { ...specific, created_at: '2026-10-12T11:00:00Z' }], '2026-10-19', 1).map(r => r.id))
+      .toEqual(['one-time']);
+  });
+
   it('removes a fully booked block when session timestamps come from the database as strings', () => {
     const start = new Date('2026-05-21T14:00:00.000Z');
     const end = new Date('2026-05-21T15:00:00.000Z');

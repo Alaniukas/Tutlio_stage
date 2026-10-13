@@ -133,10 +133,10 @@ import {
   buildRecurringFreeTimeRows,
   isValidTimeRange,
   resolveFreeTimeEndDate,
-  timeRangesOverlap,
   type DayTime,
   type FreeTimeUntilMode,
 } from '@/lib/calendarFreeTimeFromSlot';
+import { hasAvailabilityConflict } from '@/lib/availabilityValidation';
 import { consumeAvailabilityForCreatedSessions } from '@/lib/consumeSessionAvailability';
 import {
   advanceRecurringOccurrence,
@@ -149,6 +149,9 @@ import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isLaisviVaikaiOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
 import { isProKlaseAwaitingOutcomeConfirmation } from '@/lib/proKlaseTutorPay';
+import { useStudentRegistrationStatus } from '@/hooks/useStudentRegistrationStatus';
+import { lessonAwaitingRegistration } from '@/lib/studentRegistration';
+import { registrationText } from '@/lib/studentRegistrationCopy';
 import { canChooseParentLessonComment } from '@/lib/parentLessonComment';
 import { resolveOrCreateTrialSubject } from '@/pages/company/orgAdminSessionCreate';
 import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
@@ -409,6 +412,8 @@ export default function CalendarPage() {
     [sessions],
   );
   const [students, setStudents] = useState<Student[]>([]);
+  const registration = useStudentRegistrationStatus(orgPolicy.isOrgTutor ? organizationId : null, students.map((row) => `${row.id}:${row.linked_user_id || ''}`).join('|'));
+  const awaitingRegistration = (session: Session) => registration.enabled && lessonAwaitingRegistration(session, registration.byStudentId);
   const [schoolStudentOptions, setSchoolStudentOptions] = useState<Student[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [individualPricing, setIndividualPricing] = useState<any[]>([]);
@@ -1606,23 +1611,17 @@ export default function CalendarPage() {
 
       setSavingFreeTimeFromSlot(true);
       try {
-        const { data: existingRecurring } = await supabase
-          .from('availability')
-          .select('id, start_time, end_time, end_date, day_of_week')
-          .eq('tutor_id', ctxUser.id)
-          .eq('is_recurring', true)
-          .in('day_of_week', freeTimeDays);
-
-        const stillValid = (existingRecurring || []).filter((s) => !s.end_date || s.end_date >= ruleStartDate);
-        const hasOverlap = freeTimeDays.some((day) => {
+        const conflicts = await Promise.all(freeTimeDays.map((day) => {
           const times = freeTimeSameTimes
             ? { start: specificStart, end: specificEnd }
             : (freeTimeDayTimes[day] || { start: specificStart, end: specificEnd });
-          return stillValid.some((s) =>
-            s.day_of_week === day && timeRangesOverlap(times.start, times.end, s.start_time, s.end_time),
-          );
-        });
-        if (hasOverlap) {
+          return hasAvailabilityConflict(supabase, {
+            tutor_id: ctxUser.id, is_recurring: true, day_of_week: day,
+            start_time: times.start, end_time: times.end,
+            start_date: ruleStartDate, end_date: endDate,
+          });
+        }));
+        if (conflicts.some(Boolean)) {
           setToastMessage({ message: t('avail.overlapError'), type: 'error' });
           return;
         }
@@ -1649,6 +1648,9 @@ export default function CalendarPage() {
         setPendingSlot(null);
         setToastMessage({ message: t('cal.freeTimeCreatedRecurring'), type: 'success' });
         fetchData();
+      } catch (error) {
+        console.error('Error adding recurring free time:', error);
+        setToastMessage({ message: t('avail.addFailed'), type: 'error' });
       } finally {
         setSavingFreeTimeFromSlot(false);
       }
@@ -1657,16 +1659,10 @@ export default function CalendarPage() {
 
     setSavingFreeTimeFromSlot(true);
     try {
-      const { data: existingSpecific } = await supabase
-        .from('availability')
-        .select('id, start_time, end_time')
-        .eq('tutor_id', ctxUser.id)
-        .eq('is_recurring', false)
-        .eq('specific_date', specificDate);
-
-      if (existingSpecific?.some((s) =>
-        timeRangesOverlap(specificStart, specificEnd, s.start_time, s.end_time),
-      )) {
+      if (await hasAvailabilityConflict(supabase, {
+        tutor_id: ctxUser.id, is_recurring: false, specific_date: specificDate,
+        start_time: specificStart, end_time: specificEnd,
+      })) {
         setToastMessage({ message: t('avail.overlapError'), type: 'error' });
         return;
       }
@@ -1710,6 +1706,9 @@ export default function CalendarPage() {
       setSlotEditPublicBookable(false);
       setIsSlotEditOpen(true);
       fetchData();
+    } catch (error) {
+      console.error('Error adding free time slot:', error);
+      setToastMessage({ message: t('avail.addFailed'), type: 'error' });
     } finally {
       setSavingFreeTimeFromSlot(false);
     }
@@ -4899,6 +4898,7 @@ export default function CalendarPage() {
 
     const outcome = effectiveSessionOutcome(event, requiresStatusConfirmation);
     const eventStyle = getCalendarSessionEventStyle({
+      awaitingRegistration: awaitingRegistration(event),
       status: outcome,
       paid: event.paid,
       payment_status: event.payment_status,
@@ -4984,6 +4984,9 @@ export default function CalendarPage() {
           />
         )}
         <div className="flex flex-col w-full max-w-none px-0 sm:px-1">
+        {registration.enabled && registration.error && (
+          <div role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{registrationText(locale, 'error')}</div>
+        )}
         {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-4 flex-shrink-0 min-w-0">
         <div className="min-w-0">
@@ -5305,6 +5308,7 @@ export default function CalendarPage() {
                 if (event._attendanceOnly) return `${event._classGroupName} · ${t('schoolDash.attendance')}`;
 
                 const name = calendarTitleForSession(event, t('cal.unknown'));
+                if (awaitingRegistration(event)) return `${name} · ${registrationText(locale, 'pending')}`;
                 const skipPaymentUi = orgPolicy.isOrgTutor || isSchoolBilledSession(event);
                 const topic = skipPaymentUi ? calendarSessionTopicSuffix(name, event.topic) : '';
 
@@ -5386,6 +5390,7 @@ export default function CalendarPage() {
                 { color: '#ef4444', label: t('cal.legendTutorNoShow'), opacity: true, border: '2px dashed #991b1b' },
               ]
             : []),
+          ...(registration.enabled ? [{ color: '#e2e8f0', label: registrationText(locale, 'pending'), border: '1px dashed #64748b' }] : []),
           { color: '#ef4444', label: t('cal.legendCancelled'), opacity: true },
         ] as Array<{ color: string; label: string; border?: string; opacity?: boolean }>).map((item) => (
           <div key={item.label} className="flex items-center gap-2">
@@ -5827,6 +5832,13 @@ export default function CalendarPage() {
               )}
             </DialogTitle>
           </DialogHeader>
+
+          {selectedEvent && awaitingRegistration(selectedEvent) && (
+            <div role="status" className="rounded-xl border border-slate-300 bg-slate-50 p-3 text-sm text-slate-700">
+              <p className="font-semibold">{registrationText(locale, 'pending')}</p>
+              <p className="mt-1">{registrationText(locale, 'tutorHint')}</p>
+            </div>
+          )}
 
           {recurringRescheduleApprovalEnabled && rescheduleApprovalRequest?.status === 'pending' && (
             <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800" role="status">
@@ -6339,7 +6351,7 @@ export default function CalendarPage() {
                 )}
               </div>
 
-              {cancelConfirmId !== selectedEvent?.id && selectedEvent?.meeting_link && (
+              {cancelConfirmId !== selectedEvent?.id && selectedEvent?.meeting_link && !awaitingRegistration(selectedEvent) && (
                 <a
                   href={normalizeUrl(selectedEvent.meeting_link) || undefined}
                   target="_blank"
@@ -7555,16 +7567,26 @@ export default function CalendarPage() {
                 className="flex-1 rounded-xl"
                 disabled={slotSaving || !slotEditStart || !slotEditEnd || slotEditStart >= slotEditEnd}
                 onClick={async () => {
-                  if (!editingSlot) return;
+                  if (!editingSlot || !currentUserId) return;
                   setSlotSaving(true);
-                  const { error } = await supabase.from('availability').update({
-                    start_time: slotEditStart,
-                    end_time: slotEditEnd,
-                    subject_ids: uniqueSubjectIds(slotEditSubjects),
-                    meeting_link: slotEditMeetingLink || null,
-                    public_bookable: slotEditPublicBookable,
-                  }).eq('id', editingSlot.ruleId);
-                  if (!error && currentUserId) {
+                  try {
+                    const source = availability.find((row) => row.id === editingSlot.ruleId);
+                    if (!source) throw new Error(t('avail.updateFailed'));
+                    if (await hasAvailabilityConflict(supabase, {
+                      ...source, id: editingSlot.ruleId, tutor_id: currentUserId,
+                      start_time: slotEditStart, end_time: slotEditEnd,
+                    })) {
+                      setToastMessage({ message: t('avail.overlapError'), type: 'error' });
+                      return;
+                    }
+                    const { error } = await supabase.from('availability').update({
+                      start_time: slotEditStart,
+                      end_time: slotEditEnd,
+                      subject_ids: uniqueSubjectIds(slotEditSubjects),
+                      meeting_link: slotEditMeetingLink || null,
+                      public_bookable: slotEditPublicBookable,
+                    }).eq('id', editingSlot.ruleId);
+                    if (error) throw error;
                     try {
                       const url = `${window.location.origin}/api/google-calendar-sync`;
                       await fetch(url, {
@@ -7573,10 +7595,14 @@ export default function CalendarPage() {
                         body: JSON.stringify({ userId: currentUserId }),
                       });
                     } catch (_) {}
+                    setIsSlotEditOpen(false);
+                    fetchData();
+                  } catch (error) {
+                    console.error('Error updating free time slot:', error);
+                    setToastMessage({ message: t('avail.updateFailed'), type: 'error' });
+                  } finally {
+                    setSlotSaving(false);
                   }
-                  setSlotSaving(false);
-                  setIsSlotEditOpen(false);
-                  fetchData();
                 }}
               >
                 {slotSaving ? t('cal.slotSaving') : t('cal.slotSave')}

@@ -2,10 +2,18 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import type { IncomingMessage } from 'node:http';
 import path from 'path';
+import { execFileSync } from 'node:child_process';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+function telemetryRelease(): string {
+  let commit = process.env.VERCEL_GIT_COMMIT_SHA || '';
+  if (!commit) { try { commit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim(); } catch { commit = 'local'; } }
+  return `${commit.slice(0, 40)}:${new Date().toISOString().replace(/[^0-9T]/g, '')}`;
+}
+
 export default defineConfig({
+  define: { 'import.meta.env.VITE_APP_RELEASE': JSON.stringify(telemetryRelease()) },
   plugins: [
     react(),
     tailwindcss(),

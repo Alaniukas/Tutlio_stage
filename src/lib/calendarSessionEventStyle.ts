@@ -18,6 +18,7 @@ export type CalendarSessionStyleInput = {
   /** MV admin calendar: planned paid vs unpaid, completed unpaid, recurring unpaid. */
   mvDistinguishPlannedPayment?: boolean;
   defaultColor?: string;
+  awaitingRegistration?: boolean;
 };
 
 /** Mokslo vaisiai: geltona „nuolatinė“ tik kai serijoje sukurta daugiau nei 2 pamokos. */
@@ -132,6 +133,9 @@ export function getCalendarSessionEventStyle(input: CalendarSessionStyleInput): 
 
   const endMs = endAt instanceof Date ? endAt.getTime() : new Date(endAt as Date).getTime();
   const hasEnded = Number.isFinite(endMs) && endMs <= Date.now();
+  if (input.awaitingRegistration && status === 'active' && !hasEnded) {
+    return { backgroundColor: '#e2e8f0', border: '1px dashed #64748b', color: '#334155', opacity: 0.8 };
+  }
   const isPaid = isSessionActuallyPaid({ paid, payment_status });
   const isMoksloVaisiaiTrial = useMoksloVaisiaiPalette === true && isTrial === true;
   const isMoksloVaisiaiRecurring =

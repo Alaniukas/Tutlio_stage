@@ -263,6 +263,14 @@
     ],
     "crons": [
         {
+            "path": "/api/cleanup-admin-telemetry",
+            "schedule": "35 2 * * *"
+        },
+        {
+            "path": "/api/registration-reminders",
+            "schedule": "*/15 * * * *"
+        },
+        {
             "path": "/api/retry-support-releases",
             "schedule": "*/15 * * * *"
         },

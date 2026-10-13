@@ -5,6 +5,7 @@ export type ProKlaseClientRosterRow = {
   tutor_id?: string | null;
   detached_at?: string | null;
   enrollment_status?: string | null;
+  registration_pending?: boolean;
 };
 
 export type ProKlaseClientRosterGroup = {
@@ -20,7 +21,8 @@ export type ProKlaseClientRosterCounts = {
   left: number;
 };
 
-export function proKlaseClientHasAccount(student: { linked_user_id?: string | null }): boolean {
+export function proKlaseClientHasAccount(student: { linked_user_id?: string | null; registration_pending?: boolean }): boolean {
+  if (typeof student.registration_pending === 'boolean') return !student.registration_pending;
   return Boolean(student.linked_user_id);
 }
 

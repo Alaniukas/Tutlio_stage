@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  acquireSupportDiagnostics,
   clearSupportDiagnostics,
   getSupportDiagnostics,
   installSupportDiagnostics,
@@ -24,6 +25,14 @@ afterEach(() => {
 });
 
 describe('support diagnostics', () => {
+  it('keeps a shared diagnostic listener alive until support and proactive tracking both release it', () => {
+    const first = acquireSupportDiagnostics(); const second = acquireSupportDiagnostics();
+    first(); first();
+    window.history.pushState({}, '', '/company/finance');
+    expect(getSupportDiagnostics().at(-1)).toMatchObject({type:'navigation',path:'/company/finance'});
+    second(); const previous = getSupportDiagnostics().length;
+    window.history.pushState({}, '', '/company/settings'); expect(getSupportDiagnostics()).toHaveLength(previous);
+  });
   it('keeps route and click context without collecting form values or sensitive URLs', () => {
     uninstall = installSupportDiagnostics();
     window.history.pushState({}, '', '/company/students/123e4567-e89b-12d3-a456-426614174000?token=secret');

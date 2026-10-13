@@ -19,6 +19,7 @@ import Toast from '@/components/Toast';
 import { useTranslation } from '@/lib/i18n';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import { sliceTimeRangeBySessions, type SessionTimeSlice } from '@/lib/availabilityCalendarBlocks';
+import { hasAvailabilityConflict, type AvailabilitySaveRule } from '@/lib/availabilityValidation';
 import { format } from 'date-fns';
 
 interface AvailabilitySlot {
@@ -40,24 +41,6 @@ function timeToMinutes(time: string) {
   const m = Number(mStr);
   if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
   return h * 60 + m;
-}
-
-function rangesOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string) {
-  const aS = timeToMinutes(aStart);
-  const aE = timeToMinutes(aEnd);
-  const bS = timeToMinutes(bStart);
-  const bE = timeToMinutes(bEnd);
-  if (aS === null || aE === null || bS === null || bE === null) return false;
-  return aS < bE && aE > bS;
-}
-
-function isAvailabilityStillValid(endDate: string | null) {
-  if (!endDate) return true;
-  const d = new Date(endDate);
-  if (Number.isNaN(d.getTime())) return true;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return d.getTime() >= today.getTime();
 }
 
 export interface AvailabilityManagerPrefill {
@@ -204,6 +187,20 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
     }
   };
 
+  const canSaveAvailability = async (candidate: AvailabilitySaveRule) => {
+    try {
+      if (await hasAvailabilityConflict(supabase, candidate)) {
+        alert(t('avail.overlapError'));
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error('Error checking availability:', error);
+      setToastMessage({ message: t(candidate.id ? 'avail.updateFailed' : 'avail.addFailed'), type: 'error' });
+      return false;
+    }
+  };
+
   const addRecurringSlot = async () => {
     if (!isOrgTutor && !stripeConnected) {
       alert(t('avail.stripeRequired'));
@@ -222,23 +219,13 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
     }
 
     const dayNum = parseInt(dayOfWeek);
-    const { data: existingRecurring } = await supabase
-      .from('availability')
-      .select('id, start_time, end_time, end_date')
-      .eq('tutor_id', user.id)
-      .eq('is_recurring', true)
-      .eq('day_of_week', dayNum);
-
-    if (existingRecurring && existingRecurring.length > 0) {
-      const validExisting = existingRecurring.filter((s: any) => isAvailabilityStillValid(s.end_date ?? null));
-      const hasOverlap = validExisting.some((s: any) =>
-        rangesOverlap(recurringStart, recurringEnd, s.start_time, s.end_time)
-      );
-      if (hasOverlap) {
-        setSaving(false);
-        alert(t('avail.overlapError'));
-        return;
-      }
+    if (!await canSaveAvailability({
+      tutor_id: user.id, is_recurring: true, day_of_week: dayNum,
+      start_time: recurringStart, end_time: recurringEnd,
+      start_date: recurringStartDate || null, end_date: recurringEndDate || null,
+    })) {
+      setSaving(false);
+      return;
     }
 
     const { error } = await supabase.from('availability').insert([
@@ -284,22 +271,12 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
       return;
     }
 
-    const { data: existingSpecific } = await supabase
-      .from('availability')
-      .select('id, start_time, end_time')
-      .eq('tutor_id', user.id)
-      .eq('is_recurring', false)
-      .eq('specific_date', specificDate);
-
-    if (existingSpecific && existingSpecific.length > 0) {
-      const hasOverlap = existingSpecific.some((s: any) =>
-        rangesOverlap(specificStart, specificEnd, s.start_time, s.end_time)
-      );
-      if (hasOverlap) {
-        setSaving(false);
-        alert(t('avail.overlapError'));
-        return;
-      }
+    if (!await canSaveAvailability({
+      tutor_id: user.id, is_recurring: false, specific_date: specificDate,
+      start_time: specificStart, end_time: specificEnd,
+    })) {
+      setSaving(false);
+      return;
     }
 
     const { error } = await supabase.from('availability').insert([
@@ -414,43 +391,13 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
       return;
     }
 
-    if (slotToEdit.is_recurring) {
-      const dayNum = slotToEdit.day_of_week;
-      const { data: existingRecurring } = await supabase
-        .from('availability')
-        .select('id, start_time, end_time, end_date')
-        .eq('tutor_id', user.id)
-        .eq('is_recurring', true)
-        .eq('day_of_week', dayNum)
-        .neq('id', slotId);
-
-      const validExisting = (existingRecurring || []).filter((s: any) => isAvailabilityStillValid(s.end_date ?? null));
-      const hasOverlap = validExisting.some((s: any) =>
-        rangesOverlap(editStart, editEnd, s.start_time, s.end_time)
-      );
-      if (hasOverlap) {
-        setSaving(false);
-        alert(t('avail.overlapError'));
-        return;
-      }
-    } else {
-      const dateStr = slotToEdit.specific_date;
-      const { data: existingSpecific } = await supabase
-        .from('availability')
-        .select('id, start_time, end_time')
-        .eq('tutor_id', user.id)
-        .eq('is_recurring', false)
-        .eq('specific_date', dateStr)
-        .neq('id', slotId);
-
-      const hasOverlap = (existingSpecific || []).some((s: any) =>
-        rangesOverlap(editStart, editEnd, s.start_time, s.end_time)
-      );
-      if (hasOverlap) {
-        setSaving(false);
-        alert(t('avail.overlapError'));
-        return;
-      }
+    if (!await canSaveAvailability({
+      ...slotToEdit, id: slotId, tutor_id: user.id,
+      start_time: editStart, end_time: editEnd,
+      start_date: editStartDate || null, end_date: editEndDate || null,
+    })) {
+      setSaving(false);
+      return;
     }
 
     const { error } = await supabase.from('availability').update({

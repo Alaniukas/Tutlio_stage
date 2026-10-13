@@ -3,6 +3,7 @@ import {
   releaseSessionSlotAsAvailability,
   sessionInstantToAvailabilityFields,
 } from '@/lib/releaseSessionAvailability';
+import { effectiveAvailabilityOnDate } from '@/lib/availabilityCalendarBlocks';
 
 type Row = Record<string, any>;
 
@@ -56,7 +57,7 @@ function mockSupabase(availability: Row[] = [], sessions: Row[] = []) {
       select: vi.fn(() => selectApi),
       insert: vi.fn((payload: Row | Row[]) => {
         const inserted = (Array.isArray(payload) ? payload : [payload])
-          .map((row, index) => ({ id: `new-${state[table].length + index}`, ...row }));
+          .map((row, index) => ({ id: `new-${state[table].length + index}`, created_at: new Date().toISOString(), ...row }));
         state[table].push(...inserted);
         return {
           then(resolve: (result: { error: null }) => void) { resolve({ error: null }); },
@@ -222,6 +223,27 @@ describe('releaseSessionSlotAsAvailability', () => {
     expect(timeRanges(restored)).toEqual(['09:00-10:00', '11:00-12:00', '15:00-16:00', '16:00-17:00']);
     expect(restored.find((row) => row.start_time === '09:00')).toMatchObject({ subject_ids: ['morning'], public_bookable: true });
     expect(restored.find((row) => row.start_time === '16:00')).toMatchObject({ meeting_link: 'https://meet.example/evening' });
+  });
+
+  it('keeps a later weekly window visible when restoring a gap beside older date remainders', async () => {
+    vi.setSystemTime(new Date('2026-10-14T10:00:00Z'));
+    const day = '2026-10-19';
+    const lunchMetadata = { subject_ids: ['math'], meeting_link: 'https://meet.example/lunch', public_bookable: true };
+    const { supabase, state } = mockSupabase([
+      recurring('18:00', '21:00', { day_of_week: 1, start_date: '2026-09-01', end_date: null, created_at: '2026-09-01T10:00:00Z' }),
+      specific('20:00', '21:00', { specific_date: day, created_at: '2026-09-02T10:00:00Z' }),
+      recurring('12:00', '16:00', { day_of_week: 1, start_date: '2026-10-13', end_date: null, created_at: '2026-10-13T10:00:00Z', ...lunchMetadata }),
+    ]);
+    expect(timeRanges(effectiveAvailabilityOnDate(state.availability as never, day, 1)))
+      .toEqual(['12:00-16:00', '20:00-21:00']);
+
+    await releaseSessionSlotAsAvailability(supabase as never, {
+      ...session, startTime: '2026-10-19T16:00:00Z', endTime: '2026-10-19T17:00:00Z',
+    });
+
+    const effective = effectiveAvailabilityOnDate(state.availability as never, day, 1) as Row[];
+    expect(timeRanges(effective)).toEqual(['12:00-16:00', '19:00-20:00', '20:00-21:00']);
+    expect(effective.find((row) => row.start_time === '12:00')).toMatchObject(lunchMetadata);
   });
 
   it('does not free a group slot until its remaining active participant is removed', async () => {

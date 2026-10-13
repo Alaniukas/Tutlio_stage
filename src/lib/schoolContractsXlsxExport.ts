@@ -95,6 +95,7 @@ export async function downloadSchoolContractsXlsx(
   filename: string,
   orgName?: string,
 ): Promise<void> {
+  return withOrgAdminTelemetryOperation('export', async () => {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Tutlio';
   workbook.created = new Date();
@@ -110,4 +111,6 @@ export async function downloadSchoolContractsXlsx(
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+  });
 }
+import { withOrgAdminTelemetryOperation } from './orgAdminTelemetry.js';

@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { withOrgAdminTelemetryOperation } from './orgAdminTelemetry.js';
 import { buildConsultationExportRows, consultationExportHeaders } from './schoolConsultationsExport.js';
 
 export async function downloadSchoolConsultationsXlsx(input: {
@@ -8,6 +9,7 @@ export async function downloadSchoolConsultationsXlsx(input: {
   t: (key: string) => string;
   orgName?: string;
 }) {
+  return withOrgAdminTelemetryOperation('export', async () => {
   const rows = buildConsultationExportRows({
     students: input.students as any,
     consultations: input.consultations,
@@ -42,4 +44,5 @@ export async function downloadSchoolConsultationsXlsx(input: {
   a.download = `konsultacijos-${input.schoolYear.replace('/', '-')}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
+  });
 }

@@ -230,6 +230,7 @@ export async function downloadSchoolFinanceXlsx(
   filename: string,
   orgName?: string,
 ): Promise<void> {
+  return withOrgAdminTelemetryOperation('export', async () => {
   const workbook = await buildSchoolFinanceWorkbook(rows, t, summary, orgName);
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
@@ -241,4 +242,6 @@ export async function downloadSchoolFinanceXlsx(
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+  });
 }
+import { withOrgAdminTelemetryOperation } from './orgAdminTelemetry.js';

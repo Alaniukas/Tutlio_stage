@@ -110,6 +110,9 @@ const PreviewInAppSupport = import.meta.env.DEV
 const PreviewAdminSupport = import.meta.env.DEV
   ? lazy(() => import('@/pages/dev/PreviewAdminSupport'))
   : null;
+const PreviewAdminUsage = import.meta.env.DEV
+  ? lazy(() => import('@/pages/dev/PreviewAdminUsage'))
+  : null;
 const PreviewSchoolMonthlyInvoice = import.meta.env.DEV
   ? lazy(() => import('@/pages/dev/PreviewSchoolMonthlyInvoice'))
   : null;
@@ -356,6 +359,9 @@ export default function App({ basename }: { basename: string }) {
               </StaticLocaleProvider>
             }
           />
+        )}
+        {import.meta.env.DEV && PreviewAdminUsage && (
+          <Route path="/preview/admin-usage" element={<StaticLocaleProvider locale="lt"><PreviewAdminUsage /></StaticLocaleProvider>} />
         )}
         {import.meta.env.DEV && PreviewSchoolMonthlyInvoice && (
           <Route

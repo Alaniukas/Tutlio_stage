@@ -34,6 +34,7 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { useTranslation } from '@/lib/i18n';
 import { getCached, setCache, companyTvarkarastisCacheKey, dedupeAsync } from '@/lib/dataCache';
 import { fetchAllRows } from '@/lib/fetchAllRows';
+import { loadAvailabilityForTutorIds } from '@/lib/availabilityData';
 import { supabase } from '@/lib/supabase';
 import { sendEmail } from '@/lib/email';
 import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
@@ -55,7 +56,8 @@ import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages
 import { defaultSessionPaymentStatusForStudent } from '@/lib/studentPaymentModel';
 import { unpaidOrgSessionPaymentStatus } from '@/lib/orgSessionPaymentStatus';
 import { planRecurringSeriesPatches, sortSeriesPatchesForApply } from '@/lib/recurringSessions';
-import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
+import { isValidTimeRange } from '@/lib/calendarFreeTimeFromSlot';
+import { hasAvailabilityConflict } from '@/lib/availabilityValidation';
 import {
   effectiveAvailabilityOnDate,
   sliceTimeRangeBySessions,
@@ -381,10 +383,8 @@ function buildAvailWindowsForDay(
   dayJs: number
 ): Array<{ start: Date; end: Date }> {
   const windows: Array<{ start: Date; end: Date }> = [];
-  for (const a of avails) {
-    if (a.tutor_id !== tutorId) continue;
+  for (const a of effectiveAvailabilityOnDate(avails.filter((row) => row.tutor_id === tutorId), datePart, dayJs)) {
     if (a.is_recurring && a.day_of_week !== null) {
-      if (!recurringAvailabilityAppliesOnDate(a, datePart, dayJs)) continue;
       const [sh, sm] = a.start_time.split(':').map(Number);
       const [eh, em] = a.end_time.split(':').map(Number);
       const base = parseISO(`${datePart}T00:00:00`);
@@ -830,12 +830,7 @@ export default function CompanyTvarkarastis() {
     if (!organizationId || tutorIds.length === 0) return [];
     const tutorNameById = new Map(tutorRows.map((t) => [t.id, t.full_name || '']));
     const availabilityData = await dedupeAsync(`org_availability:${organizationId}:${tutorIds.join(',')}`, () =>
-      fetchAllRows<any>((from, to) => supabase
-        .from('availability')
-        .select('*')
-        .in('tutor_id', tutorIds)
-        .order('id', { ascending: true })
-        .range(from, to), 2_000),
+      loadAvailabilityForTutorIds(supabase, tutorIds),
     );
     const mappedAvailability = (availabilityData || []).map((row: any) => ({
       ...row,
@@ -2846,6 +2841,11 @@ export default function CompanyTvarkarastis() {
         payload.end_date = null;
       }
 
+      if (!isValidTimeRange(payload.start_time, payload.end_time)) throw new Error(t('avail.invalidTimeRange'));
+      if (await hasAvailabilityConflict(supabase, {
+        ...payload, id: editingAvailability.id, tutor_id: editingAvailability.tutor_id,
+      })) throw new Error(t('avail.overlapError'));
+
       const { error } = await supabase
         .from('availability')
         .update(payload)
@@ -2926,6 +2926,8 @@ export default function CompanyTvarkarastis() {
         payload.start_date = null;
         payload.end_date = null;
       }
+      if (!isValidTimeRange(payload.start_time, payload.end_time)) throw new Error(t('avail.invalidTimeRange'));
+      if (await hasAvailabilityConflict(supabase, payload)) throw new Error(t('avail.overlapError'));
       const { error } = await supabase.from('availability').insert(payload);
       if (error) throw new Error(error.message);
       const timeRangeCr = `${createAvailStart.slice(0, 5)}–${createAvailEnd.slice(0, 5)}`;

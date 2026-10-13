@@ -5,6 +5,7 @@ import {
 } from '@/lib/consumeSessionAvailability';
 import { sliceTimeRangeBySessions } from '@/lib/availabilityCalendarBlocks';
 import { computeTutorSlots } from '@/lib/tutorMatching';
+import { bookableAvailabilitySlotsOnDate } from '@/lib/availabilityBooking';
 
 type Row = Record<string, unknown>;
 
@@ -177,5 +178,48 @@ describe('consumeSessionSlotAvailability', () => {
     expect(state.selectCalls).toBe(1);
     expect(state.rows).toHaveLength(1);
     expect(state.rows[0]).toMatchObject({ start_time: '08:00', end_time: '18:00' });
+  });
+
+  it('booking an evening lesson preserves a separate daytime window and its settings', async () => {
+    const lunch = { id: 'lunch', tutor_id: 't1', is_recurring: true, day_of_week: 4,
+      specific_date: null, start_time: '12:00', end_time: '16:00', subject_ids: ['math'],
+      meeting_link: 'https://meet.example/lunch', public_bookable: false };
+    const evening = { ...lunch, id: 'evening', start_time: '18:00', end_time: '21:00', subject_ids: ['physics'] };
+    const { supabase, state } = mockSupabase([lunch, evening]);
+    const lesson = { start_time: '2026-05-21T15:00:00Z', end_time: '2026-05-21T16:00:00Z', status: 'active' };
+    await consumeSessionSlotAvailability(supabase as never, { tutorId: 't1', startTime: lesson.start_time, endTime: lesson.end_time });
+    expect(state.rows.find(r => r.is_recurring === false && r.start_time === '12:00'))
+      .toMatchObject({ end_time: '16:00', subject_ids: ['math'], meeting_link: lunch.meeting_link, public_bookable: false });
+    const slots = bookableAvailabilitySlotsOnDate(state.rows as never, '2026-05-21', [lesson], {
+      durationMs: 60 * 60000, earliest: new Date('2026-05-21T00:00:00'), subjectId: 'math',
+    });
+    expect(slots).toHaveLength(7);
+    expect(state.rows.filter(r => r.is_recurring)).toEqual([lunch, evening]);
+  });
+
+  it('does not revive older weekly time hidden by a deliberate newer date override', async () => {
+    const weekly = { id: 'weekly', tutor_id: 't1', is_recurring: true, day_of_week: 4,
+      start_time: '12:00', end_time: '16:00', created_at: '2026-05-01T00:00:00Z' };
+    const exception = { ...weekly, id: 'exception', is_recurring: false, specific_date: '2026-05-21',
+      day_of_week: null, start_time: '14:00', end_time: '15:00', created_at: '2026-05-02T00:00:00Z' };
+    const { supabase, state } = mockSupabase([weekly, exception]);
+    await consumeSessionSlotAvailability(supabase as never, {
+      tutorId: 't1', startTime: '2026-05-21T11:00:00Z', endTime: '2026-05-21T12:00:00Z',
+    });
+    expect(state.rows).toEqual([weekly, exception]);
+  });
+
+  it('preserves an uncovered extension when older one-time time partly covers a new weekly rule', async () => {
+    const weekly = { id: 'weekly', tutor_id: 't1', is_recurring: true, day_of_week: 4,
+      start_time: '12:00', end_time: '16:00', created_at: '2026-05-02T00:00:00Z' };
+    const existing = { ...weekly, id: 'exception', is_recurring: false, specific_date: '2026-05-21',
+      day_of_week: null, end_time: '14:00', created_at: '2026-05-01T00:00:00Z' };
+    const evening = { ...weekly, id: 'evening', start_time: '18:00', end_time: '21:00' };
+    const { supabase, state } = mockSupabase([weekly, existing, evening]);
+    await consumeSessionSlotAvailability(supabase as never, {
+      tutorId: 't1', startTime: '2026-05-21T15:00:00Z', endTime: '2026-05-21T16:00:00Z',
+    });
+    expect(state.rows.find(r => r.is_recurring === false && r.start_time === '14:00')).toMatchObject({ end_time: '16:00' });
+    expect(state.rows.filter(r => r.is_recurring === false && r.start_time === '12:00')).toHaveLength(1);
   });
 });

@@ -7,6 +7,7 @@ import { getFeaturesByCategoryForOrg, stripProKlaseOnlyFeatures } from '@/lib/or
 import { useTranslation } from '@/lib/i18n';
 import AdminBlogPanel from '@/components/admin/AdminBlogPanel';
 import AdminStatisticsPanel from '@/components/admin/AdminStatisticsPanel';
+import AdminUsagePanel from '@/components/admin/AdminUsagePanel';
 import AdminPerlasPayoutsPanel from '@/components/admin/AdminPerlasPayoutsPanel';
 import AdminEnterpriseContactsPanel from '@/components/admin/AdminEnterpriseContactsPanel';
 import AdminBillingPanel from '@/components/admin/AdminBillingPanel';
@@ -84,7 +85,7 @@ interface AuditRow {
   details: Record<string, unknown>;
 }
 
-type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog' | 'soloTutors' | 'statistics' | 'perlasPayouts' | 'enterpriseContacts' | 'billing' | 'attendance' | 'support';
+type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog' | 'soloTutors' | 'statistics' | 'usage' | 'perlasPayouts' | 'enterpriseContacts' | 'billing' | 'attendance' | 'support';
 
 interface SoloTutorAdminRow {
   id: string;
@@ -712,6 +713,9 @@ export default function AdminPanel() {
           >
             <BarChart3 className="w-4 h-4" />
             Statistika
+          </button>
+          <button type="button" onClick={() => { setPanelView('usage'); setDetailId(null); }} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'usage' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
+            <BarChart3 className="w-4 h-4" />Klientų naudojimas
           </button>
           <button
             type="button"
@@ -1532,6 +1536,7 @@ export default function AdminPanel() {
         {panelView === 'statistics' && (
           <AdminStatisticsPanel adminSecret={platformAdminSecret} />
         )}
+        {panelView === 'usage' && <AdminUsagePanel adminSecret={platformAdminSecret} />}
 
         {panelView === 'perlasPayouts' && (
           <AdminPerlasPayoutsPanel adminSecret={platformAdminSecret} />

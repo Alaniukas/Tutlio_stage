@@ -4,7 +4,6 @@ import { getSupportServiceClient } from './_lib/supportPersistence.js';
 import { parseSupportVercelLogBatch } from './_lib/supportVercelLogs.js';
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
-const LOG_RETENTION_DAYS = 14;
 
 export const config = { api: { bodyParser: false } };
 
@@ -65,12 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
       if (error) throw error;
     }
-    try {
-      const cutoff = new Date(Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-      await db.from('support_vercel_log_events').delete().lt('occurred_at', cutoff);
-    } catch {
-      // A cleanup failure must not cause Vercel to resend an accepted batch.
-    }
+    // Retention runs in cleanup-admin-telemetry, including when no new logs arrive.
   } catch {
     // Logging an ingestion failure here would itself be delivered by this drain
     // and could cause a feedback loop while the database is unavailable.

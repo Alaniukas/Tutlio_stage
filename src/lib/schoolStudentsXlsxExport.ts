@@ -85,6 +85,7 @@ export async function downloadSchoolStudentsXlsx(
   orgName?: string,
   columns?: SchoolStudentExportColumnId[],
 ): Promise<void> {
+  return withOrgAdminTelemetryOperation('export', async () => {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Tutlio';
   workbook.created = new Date();
@@ -100,4 +101,6 @@ export async function downloadSchoolStudentsXlsx(
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+  });
 }
+import { withOrgAdminTelemetryOperation } from './orgAdminTelemetry.js';

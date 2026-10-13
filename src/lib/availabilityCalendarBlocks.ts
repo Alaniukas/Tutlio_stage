@@ -1,4 +1,4 @@
-import { recurringAvailabilityAppliesOnDate } from './availabilityRecurring';
+import { recurringAvailabilityAppliesOnDate } from './availabilityRecurring.js';
 
 export type AvailabilityCalendarRow = {
   id: string;
@@ -10,6 +10,7 @@ export type AvailabilityCalendarRow = {
   end_time: string;
   start_date?: string | null;
   end_date?: string | null;
+  created_at?: string | null;
   subject_ids?: string[] | null;
   meeting_link?: string | null;
   public_bookable?: boolean | null;
@@ -32,17 +33,27 @@ type AvailabilityDateRule = {
   created_at?: string | null;
 };
 
-/** One-time rows for a date override recurring rules for the same tutor on that day. */
+/** A date override replaces existing weekly rules, while later additions remain visible. */
 export function effectiveAvailabilityOnDate<T extends AvailabilityDateRule>(
   availability: T[],
   dateStr: string,
   dayOfWeek: number,
 ): T[] {
   const specific = availability.filter((a) => a.is_recurring === false && a.specific_date === dateStr);
-  const tutorsWithOverride = new Set(specific.map((a) => a.tutor_id));
+  const overrideCreatedAt = new Map<string, number>();
+  for (const row of specific) {
+    const createdAt = row.created_at ? Date.parse(row.created_at) : NaN;
+    // Unknown legacy timestamps retain the original full-day override behavior.
+    const timestamp = Number.isFinite(createdAt) ? createdAt : Infinity;
+    overrideCreatedAt.set(row.tutor_id, Math.max(overrideCreatedAt.get(row.tutor_id) ?? -Infinity, timestamp));
+  }
   const recurring = availability.filter((a) => {
     if (a.is_recurring === false || a.day_of_week === null) return false;
-    if (tutorsWithOverride.has(a.tutor_id)) return false;
+    const override = overrideCreatedAt.get(a.tutor_id);
+    if (override !== undefined) {
+      const createdAt = a.created_at ? Date.parse(a.created_at) : NaN;
+      if (!Number.isFinite(createdAt) || createdAt <= override) return false;
+    }
     return recurringAvailabilityAppliesOnDate(a, dateStr, dayOfWeek);
   });
   return [...specific, ...recurring];

@@ -16,10 +16,12 @@ const mocks = vi.hoisted(() => {
     emailOptOuts: [] as Array<{ email: string }>,
     lookupErrors: {} as Record<string, { message: string }>,
     organization: null as { entity_type: string; features: Record<string, unknown> } | null,
+    registrationLookup: vi.fn(),
   };
 });
 
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.createClient }));
+vi.mock('../../api/_lib/studentRegistration', () => ({ loadStudentRegistrationStates: mocks.registrationLookup }));
 
 import handler, {
   SESSION_REMINDER_BATCH_SIZE,
@@ -226,6 +228,7 @@ describe('session reminder capacity behavior', () => {
     mocks.emailOptOuts.length = 0;
     mocks.lookupErrors = {};
     mocks.organization = null;
+    mocks.registrationLookup.mockResolvedValue([]);
     vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
     vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'service-role-test');
     vi.stubEnv('CRON_SECRET', '');
@@ -718,5 +721,57 @@ describe('session reminder capacity behavior', () => {
     expect(reminderBodies[0].idempotencyKey).toMatch(/^session-reminder\/[a-f0-9]{64}$/);
     expect(response.getResult()).toMatchObject({ statusCode: 200, body: { sent: 1, emailAttempts: 1 } });
     expect(mocks.updateCalls.filter((call) => call.reminder_tutor_sent === true)).toHaveLength(1);
+  });
+
+  it('does not announce lessons for clients awaiting registration, and resumes after activation', async () => {
+    const session = futureSession();
+    const organizationId = '3422031d-6e21-424d-980b-35a9c6d7b8f1';
+    Object.assign(session.student, { organization_id: organizationId });
+    session.tutor.organization_id = organizationId;
+    mocks.organization = { entity_type: 'company', features: {} };
+    mocks.sessions.push(session);
+    mocks.registrationLookup.mockResolvedValue([{ student_id: session.student.id, registration_pending: true }]);
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+    await handler(mockReq(), mockRes());
+    expect(reminderRequestBodies(fetchMock)).toEqual([]);
+    expect(mocks.updateCalls).toEqual([]);
+    mocks.registrationLookup.mockResolvedValue([{ student_id: session.student.id, registration_pending: false }]);
+    await handler(mockReq(), mockRes());
+    expect(reminderRequestBodies(fetchMock).map((body) => body.to)).toContain(session.tutor.email);
+  });
+
+  it('keeps a mixed group tutor reminder when the first client is still pending', async () => {
+    const sessions = [futureSession(1), futureSession(2)];
+    const organizationId = '3422031d-6e21-424d-980b-35a9c6d7b8f1';
+    for (const session of sessions) {
+      Object.assign(session.student, { organization_id: organizationId });
+      session.tutor_id = 'tutor-1';
+      session.tutor = { ...sessions[0].tutor, organization_id: organizationId };
+      session.subject_id = 'group-subject' as any;
+      session.subjects = { is_group: true, name: 'Group' } as any;
+      session.start_time = sessions[0].start_time;
+    }
+    mocks.organization = { entity_type: 'company', features: {} };
+    mocks.sessions.push(...sessions);
+    mocks.registrationLookup.mockResolvedValue([{ student_id: sessions[0].student.id, registration_pending: true }]);
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+    await handler(mockReq(), mockRes());
+    const bodies = reminderRequestBodies(fetchMock);
+    expect(bodies.filter((body) => body.data.isTutor)).toHaveLength(1);
+    expect(bodies.some((body) => body.to === sessions[0].student.email)).toBe(false);
+    expect(bodies.some((body) => body.to === sessions[1].student.email)).toBe(true);
+  });
+
+  it('retries affected organizations when the registration lookup fails without marking reminders sent', async () => {
+    const session = futureSession();
+    const organizationId = '3422031d-6e21-424d-980b-35a9c6d7b8f1';
+    Object.assign(session.student, { organization_id: organizationId }); session.tutor.organization_id = organizationId;
+    mocks.sessions.push(session); mocks.organization = { entity_type: 'company', features: {} };
+    mocks.registrationLookup.mockRejectedValue(new Error('Unavailable'));
+    const fetchMock = vi.fn(async () => emailResponse(true)); vi.stubGlobal('fetch', fetchMock);
+    await handler(mockReq(), mockRes());
+    expect(reminderRequestBodies(fetchMock)).toEqual([]); expect(mocks.updateCalls).toEqual([]);
   });
 });

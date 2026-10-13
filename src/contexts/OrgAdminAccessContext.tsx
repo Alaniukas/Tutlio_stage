@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { startOrgAdminTelemetry } from '@/lib/orgAdminTelemetry';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
 import {
@@ -55,10 +56,19 @@ export function OrgAdminAccessProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [membership, setMembership] = useState<OrgAdminMembership | null>(null);
   const [resolvedUserId, setResolvedUserId] = useState<string | null>(null);
+  const telemetryStop = useRef<(() => void) | null>(null);
+  const mounted = useRef(false);
+  const latestUserId = useRef(user?.id);
+  latestUserId.current = user?.id;
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; telemetryStop.current?.(); };
+  }, []);
 
   const refresh = useCallback(async () => {
     if (userLoading) return;
     if (!user) {
+      telemetryStop.current?.(); telemetryStop.current = null;
       setMembership(null);
       setResolvedUserId(null);
       setLoading(false);
@@ -90,13 +100,22 @@ export function OrgAdminAccessProvider({ children }: { children: ReactNode }) {
         return { row: (legacy.data as Record<string, unknown> | null) ?? null, legacy: true };
       }, 8000);
 
+      if (!mounted.current || latestUserId.current !== user.id) return;
+
       if (!seat.row) {
+        telemetryStop.current?.(); telemetryStop.current = null;
         setMembership(null);
         return;
       }
 
       const row = seat.row;
       const organizationId = String(row.organization_id || '');
+      // Start before mounting the protected page so its first request/render failures are observed.
+      if (mounted.current && latestUserId.current === user.id) {
+        if (organizationId && (seat.legacy || row.status === 'active')) {
+          telemetryStop.current = startOrgAdminTelemetry({ userId: user.id, organizationId, enabled: import.meta.env.PROD, release: import.meta.env.VITE_APP_RELEASE });
+        } else { telemetryStop.current?.(); telemetryStop.current = null; }
+      }
       let organizationName = '';
       let entityType: 'school' | 'company' = 'company';
       if (organizationId) {
@@ -129,6 +148,7 @@ export function OrgAdminAccessProvider({ children }: { children: ReactNode }) {
         organizationName,
         entityType,
       };
+      if (!mounted.current || latestUserId.current !== user.id) return;
       setMembership(next.status === 'active' ? next : null);
 
       if (next.status === 'active' && !next.acceptedAt) {
@@ -146,11 +166,14 @@ export function OrgAdminAccessProvider({ children }: { children: ReactNode }) {
         });
       }
     } catch (err) {
+      if (latestUserId.current === user.id) { telemetryStop.current?.(); telemetryStop.current = null; }
       console.warn('[OrgAdminAccess] seat lookup failed:', err);
       setMembership(null);
     } finally {
-      setResolvedUserId(user.id);
-      setLoading(false);
+      if (mounted.current && latestUserId.current === user.id) {
+        setResolvedUserId(user.id);
+        setLoading(false);
+      }
     }
   }, [user?.id, userLoading]);
 

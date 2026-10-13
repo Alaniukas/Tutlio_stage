@@ -60,6 +60,19 @@ describe('bookableAvailabilitySlotsOnDate', () => {
     expect(bookableAvailabilitySlotsOnDate([{ ...recurring, end_date: '2026-11-10' }], day, [], options)).toEqual([]);
   });
 
+  it('offers newly added lunch time while retaining evening bookings, breaks and subject restrictions', () => {
+    const morning = { ...recurring, id: 'new-lunch', start_time: '12:00:00', end_time: '16:00:00',
+      created_at: '2026-11-01T10:00:00Z', subject_ids: ['math'] };
+    const evening = { ...specific, created_at: '2026-10-01T10:00:00Z', subject_ids: ['physics'] };
+    const occupied = [{ start_time: at('13:00'), end_time: at('14:00'), status: 'active' }];
+    const slots = bookableAvailabilitySlotsOnDate([morning, evening], day, occupied, {
+      ...options, subjectId: 'math', breakMs: 5 * 60000,
+    });
+    expect(slots.map(s => s.start.getTime())).toEqual([at('14:30').getTime(), at('15:00').getTime()]);
+    expect(bookableAvailabilitySlotsOnDate([morning, evening], day, occupied, { ...options, subjectId: 'biology' }))
+      .toEqual([]);
+  });
+
   it('does not revive a weekly rule when the date override only allows another subject', () => {
     const override = { ...specific, subject_ids: ['physics'] };
     expect(bookableAvailabilitySlotsOnDate([recurring, override], day, [], {

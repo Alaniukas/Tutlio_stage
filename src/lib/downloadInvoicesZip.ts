@@ -89,11 +89,12 @@ export async function downloadInvoicesAsZip(
   }
 
   const downloaded = Object.keys(zipEntries).length;
-  if (downloaded === 0) return { downloaded: 0, failedIds };
+  if (downloaded === 0) { if (rows.length) recordOrgAdminAction('export', false); return { downloaded: 0, failedIds }; }
 
   const zipped = zipSync(zipEntries);
   const blob = new Blob([zipped], { type: 'application/zip' });
   saveDownloadBlob(blob, options.zipName || `saskaitos-${new Date().toISOString().slice(0, 10)}.zip`);
+  recordOrgAdminAction('export');
   return { downloaded, failedIds };
 }
 
@@ -110,3 +111,4 @@ export async function downloadInvoicePdfFile(
     return false;
   }
 }
+import { recordOrgAdminAction } from './orgAdminTelemetry.js';

@@ -164,6 +164,10 @@ async function activateAccount(
         mv_account_activated_at: now,
         role: prevMeta.role || role,
       },
+      app_metadata: {
+        ...authUser.app_metadata,
+        mv_account_activated_at: now,
+      },
     });
     if (updErr) {
       return { status: 500 as const, body: { error: updErr.message, code: 'activation_failed' } };
