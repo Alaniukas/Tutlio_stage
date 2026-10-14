@@ -1602,6 +1602,14 @@ export const en: Record<string, string> = {
   'compStu.emailInline': 'Email:',
   'compStu.emailLabel': 'Email',
   'compStu.emailSendFailed': 'Email send failed',
+  'compStu.studentEmailCheckFailed':
+    'Could not verify whether this email is already in use. Try again in a moment.',
+  'compStu.studentEmailAlreadyUsed':
+    'Email {email} is already used for student {name}. Choose a different address or open the existing card.',
+  'compStu.studentPlaceholderEmailTaken':
+    'Email {email} is a shared “no email” placeholder already assigned to {name}. Enter the student’s real email.',
+  'compStu.studentEmailAuthConflict':
+    'Email {email} is already linked to another login account ({name}). Use a different address.',
   'compStu.emailMatchesOrgTutor':
     'This email belongs to tutor {name}. Use a different email for the student, or remove the tutor’s student record first.',
   'compStu.errorGeneric': 'Error',

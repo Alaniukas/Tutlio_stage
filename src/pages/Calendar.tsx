@@ -90,7 +90,9 @@ import {
   applyCalendarSeriesEdit,
   CalendarSeriesConflictError,
   loadFutureCalendarSeries,
+  syncRecurringTemplateAfterSeriesTimeEdit,
 } from '@/lib/calendarSessionSeriesEdit';
+import { canEditFutureOrgSeries, orgSessionEditNotice } from '@/lib/orgSessionEdit';
 import TimeSpinner, { CompactTimeSelect, DateTimeSpinner } from '@/components/TimeSpinner';
 import AvailabilityManager from '@/components/AvailabilityManager';
 import SchoolGroupMinimumRiskBanner from '@/components/school/SchoolGroupMinimumRiskBanner';
@@ -471,7 +473,7 @@ export default function CalendarPage() {
     if (!open) {
       setCancelConfirmId(null);
       setIsEditingSession(false);
-      setGroupEditChoice(null);
+      setGroupEditChoice('single');
       setGroupCancelChoice(null);
       setClassGroupCancelScope('whole_occurrence');
       setClassGroupCancelStudentId('');
@@ -673,7 +675,7 @@ export default function CalendarPage() {
   const [addToGroupChoice, setAddToGroupChoice] = useState<'single' | 'all_future'>('single');
 
   // Group edit/cancel choice states
-  const [groupEditChoice, setGroupEditChoice] = useState<'single' | 'all_future' | null>(null);
+  const [groupEditChoice, setGroupEditChoice] = useState<'single' | 'all_future'>('single');
 
   useEffect(() => {
     setRescheduleApprovalRequest(null);
@@ -3784,6 +3786,11 @@ export default function CalendarPage() {
           ? new Set(selectedGroupSessions.map((s) => s.id))
           : null;
       const applyToAllFuture = groupEditChoice === 'all_future' && (isGroupSession || !!selectedEvent.recurring_session_id);
+      if (applyToAllFuture && !isGroupSession && selectedEvent.recurring_session_id && !canEditFutureOrgSeries(selectedEvent)) {
+        alert(orgSessionEditNotice(locale, 'noLongerAllowed'));
+        setSaving(false);
+        return;
+      }
 
       if ((timeChanged || durationChanged) && !applyToAllFuture) {
         const { data: overlapping, error: overlapError } = await supabase
@@ -3854,7 +3861,7 @@ export default function CalendarPage() {
         if (!response.ok) throw new Error(json.code || 'reschedule_error');
         setIsEditingSession(false);
         setIsEventModalOpen(false);
-        setGroupEditChoice(null);
+        setGroupEditChoice('single');
         setLeaveFreeTimeOnReschedule(false);
         setToastMessage({ message: lessonRescheduleApprovalText(locale, 'sent'), type: 'success' });
         setSaving(false);
@@ -3885,6 +3892,15 @@ export default function CalendarPage() {
             : { start: oldStart, end: oldEnd },
           fields: editSessionPayload,
         }));
+        if (!isGroupSession && selectedEvent.recurring_session_id && (timeChanged || durationChanged)) {
+          await syncRecurringTemplateAfterSeriesTimeEdit(supabase, {
+            recurringId: selectedEvent.recurring_session_id,
+            tutorId: user.id,
+            newStart,
+            newEnd,
+            fields: editSessionPayload,
+          });
+        }
         if (timeChanged) {
           await supabase.from('sessions').update({
             reschedule_reason: rescheduleReason.trim(),
@@ -4128,7 +4144,7 @@ export default function CalendarPage() {
         setViewShowToParent(editSessionPayload.show_comment_to_parent);
 
         setIsEditingSession(false);
-        setGroupEditChoice(null);
+        setGroupEditChoice('single');
         fetchData();
       } else {
         alert(t('cal.failedToUpdate') + ': ' + error.message);
@@ -4204,10 +4220,7 @@ export default function CalendarPage() {
       setIsEditingSession(true);
       return;
     }
-    if ((isGroupSession || selectedEvent.recurring_session_id) && !groupEditChoice) {
-      setGroupEditChoice('single');
-      return;
-    }
+    setGroupEditChoice('single');
     setEditNewStartTime(format(selectedEvent.start_time, "yyyy-MM-dd'T'HH:mm"));
     setEditDurationMinutes(Math.max(5, Math.round((selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime()) / 60000)));
     setEditTopic(selectedEvent.topic || '');
@@ -5852,6 +5865,28 @@ export default function CalendarPage() {
           )}
           {isEditingSession ? (
             <div className="space-y-4 py-2 min-w-0">
+              {selectedEvent && !isClassGroupSession && (isGroupSession || selectedEvent.recurring_session_id)
+                && canEditFutureOrgSeries(selectedEvent) && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <p className="mb-2 text-xs font-semibold text-amber-800">{t('compSch.recurringSeriesPart')}</p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setGroupEditChoice('single')}
+                      className={`flex-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${groupEditChoice === 'single' ? 'bg-amber-600 border-amber-600 text-white' : 'border-amber-300 text-amber-700 hover:bg-amber-100'}`}
+                    >
+                      {t('cal.editThisOnly')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGroupEditChoice('all_future')}
+                      className={`flex-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${groupEditChoice === 'all_future' ? 'bg-amber-600 border-amber-600 text-white' : 'border-amber-300 text-amber-700 hover:bg-amber-100'}`}
+                    >
+                      {t('cal.editAllFuture')}
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label>{t('compSch.topicSubject')}</Label>
                 <Input value={editTopic} onChange={(e) => setEditTopic(e.target.value)} placeholder={t('cal.topicPlaceholder')} className="rounded-xl" />
@@ -5976,7 +6011,16 @@ export default function CalendarPage() {
                 )}
               </div>
               <div className="flex gap-2 pt-2">
-                <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setIsEditingSession(false)}>{t('cal.cancelEdit')}</Button>
+                <Button
+                  variant="outline"
+                  className="flex-1 rounded-xl"
+                  onClick={() => {
+                    setIsEditingSession(false);
+                    setGroupEditChoice('single');
+                  }}
+                >
+                  {t('cal.cancelEdit')}
+                </Button>
                 <Button
                   onClick={handleSaveChanges}
                   disabled={saving || (
@@ -6866,82 +6910,6 @@ export default function CalendarPage() {
               className="rounded-xl"
             >
               {saving ? t('cal.adding') : t('cal.addStudentsBtn', { count: String(addToGroupStudentIds.length) })}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* === EDIT SCOPE CHOICE DIALOG === */}
-      <Dialog open={groupEditChoice !== null && !isEditingSession} onOpenChange={(open) => {
-        if (!open) setGroupEditChoice(null);
-      }}>
-        <DialogContent className="w-[95vw] sm:max-w-[400px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Edit2 className="w-5 h-5 text-indigo-600" />
-              {t('cal.editLesson')}
-            </DialogTitle>
-            <DialogDescription>
-              {t('cal.editChoiceDesc')}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-2 py-2">
-            <label className="flex items-center gap-2 cursor-pointer p-3 border rounded-lg hover:bg-gray-50">
-              <input
-                type="radio"
-                name="groupEditChoice"
-                checked={groupEditChoice === 'single'}
-                onChange={() => setGroupEditChoice('single')}
-                className="rounded-full border-gray-300 text-indigo-600 focus:ring-indigo-500"
-              />
-              <div>
-                <p className="text-sm font-medium">{t('cal.editThisOnly')}</p>
-                <p className="text-xs text-gray-500">{t('cal.editThisOnlyDesc')}</p>
-              </div>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer p-3 border rounded-lg hover:bg-gray-50">
-              <input
-                type="radio"
-                name="groupEditChoice"
-                checked={groupEditChoice === 'all_future'}
-                onChange={() => setGroupEditChoice('all_future')}
-                className="rounded-full border-gray-300 text-indigo-600 focus:ring-indigo-500"
-              />
-              <div>
-                <p className="text-sm font-medium">{t('cal.editAllFuture')}</p>
-                <p className="text-xs text-gray-500">{t('cal.editAllFutureDesc')}</p>
-              </div>
-            </label>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setGroupEditChoice(null)}
-              className="rounded-xl"
-            >
-              {t('cal.cancelChoice')}
-            </Button>
-            <Button
-              onClick={() => {
-                if (selectedEvent) {
-                  setEditNewStartTime(format(selectedEvent.start_time, "yyyy-MM-dd'T'HH:mm"));
-                  setEditDurationMinutes(Math.max(5, Math.round((selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime()) / 60000)));
-                  setEditTopic(selectedEvent.topic || '');
-                  setEditMeetingLink(selectedEvent.meeting_link || '');
-                  setEditPrice(Number(selectedEvent.price ?? 0) || 0);
-                  setEditTutorComment(selectedEvent.tutor_comment || '');
-                  setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
-                  setEditShowCommentToParent(selectedEvent.show_comment_to_parent || false);
-                  setRescheduleReason('');
-                  setRescheduleRequestedBy('tutor');
-                  setIsEditingSession(true);
-                }
-              }}
-              className="rounded-xl"
-            >
-              {t('cal.continue')}
             </Button>
           </DialogFooter>
         </DialogContent>

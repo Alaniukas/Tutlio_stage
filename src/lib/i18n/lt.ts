@@ -1602,6 +1602,14 @@ export const lt: Record<string, string> = {
   'compStu.emailSendFailed': 'Mokinys išsaugotas, bet pakvietimo el. laiško išsiųsti nepavyko. Patikrinkite nustatymus arba nusiųskite nuorodą rankiniu būdu.',
   'compStu.emailMatchesOrgTutor':
     'Šis el. paštas priklauso korepetitoriui {name}. Mokiniui naudokite kitą el. paštą arba pirmiausia pašalinkite korepetitoriaus mokinio įrašą.',
+  'compStu.studentEmailAlreadyUsed':
+    'El. paštas {email} jau naudojamas mokiniui {name}. Pasirinkite kitą adresą arba atidarykite esamą kortelę.',
+  'compStu.studentPlaceholderEmailTaken':
+    'El. paštas {email} yra bendras „be pašto“ adresas ir jau priskirtas mokiniui {name}. Įveskite tikrą mokinio el. paštą.',
+  'compStu.studentEmailAuthConflict':
+    'El. paštas {email} jau susietas su kita prisijungimo paskyra ({name}). Naudokite kitą adresą.',
+  'compStu.studentEmailCheckFailed':
+    'Nepavyko patikrinti, ar šis el. paštas jau naudojamas. Bandykite dar kartą po kelių sekundžių.',
   'compStu.errorGeneric': 'Klaida',
   'compStu.errorManualPackage': 'Klaida kuriant rankinį paketą',
   'compStu.errorPrefix': 'Klaida:',

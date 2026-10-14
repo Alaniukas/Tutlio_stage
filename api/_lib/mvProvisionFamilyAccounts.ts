@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { resolveOrgStudentEmailConflict } from './orgStudentContactConflict.js';
 import { findAuthUserByEmail, isAuthEmailAlreadyRegistered } from './findAuthUserByEmail.js';
 import { generateTempPassword } from './generateTempPassword.js';
 import { generateStudentLoginName } from './generateStudentLoginName.js';
@@ -503,6 +504,22 @@ export async function provisionMvFamilyAccounts(
   }
   if (doParent && doStudent && validEmail(studentEmail) && parentEmail === studentEmail) {
     return { ok: false, status: 400, error: 'Parent and student emails must differ', code: 'emails_must_differ' };
+  }
+  if (doStudent && validEmail(studentEmail) && organizationId) {
+    const emailConflict = await resolveOrgStudentEmailConflict(supabase, {
+      organizationId,
+      fullName: studentFullName,
+      studentEmail,
+      excludeStudentIds: studentIds,
+    });
+    if (emailConflict) {
+      return {
+        ok: false,
+        status: 409,
+        error: `Student email is already used by ${emailConflict.existingStudentName}`,
+        code: emailConflict.code,
+      };
+    }
   }
 
   const tutorIds = new Set(studentRows.map((row) => row.tutor_id).filter(Boolean));

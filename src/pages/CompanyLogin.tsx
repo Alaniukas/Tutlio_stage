@@ -15,9 +15,12 @@ import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
 import { setLastPortal } from '@/lib/pwaPortal';
 import { loadSavedLoginForm, persistLoginForm, readRememberMePreference } from '@/lib/loginCredentials';
 import { withLoginTimeout } from '@/lib/loginTimeout';
+import { useOrgBranding } from '@/hooks/useOrgBranding';
+import { ORG_LOGIN_LOGO_IMG_CLASS, ORG_LOGIN_LOGO_WRAP_CLASS, ORG_LOGIN_LOGO_WRAP_CLASS_DARK } from '@/lib/orgLoginLogo';
 
 export default function CompanyLogin() {
   const { t, locale } = useTranslation();
+  const { branding: orgBranding, loading: brandingLoading, slug: orgSlug } = useOrgBranding();
   const { platform } = usePlatform();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,6 +43,23 @@ export default function CompanyLogin() {
   const portalBadge = isSchoolLogin ? t('school.loginPortalBadge') : t('companyLogin.adminLogin');
   const cardBadge = isSchoolLogin ? t('school.loginCardBadge') : t('companyLogin.loginTitle');
   const cardTitle = isSchoolLogin ? t('school.loginCardTitle') : t('companyLogin.loginSubtitle');
+  const loginOnly = Boolean(orgSlug);
+
+  const brandColor = orgBranding?.brand_color || null;
+  const brandColor2 = orgBranding?.brand_color_secondary || brandColor;
+  const brandedHeaderStyle = brandColor
+    ? { background: `linear-gradient(135deg, ${brandColor} 0%, ${brandColor2 || brandColor} 100%)` }
+    : undefined;
+  const brandedPrimaryBtnClass = brandColor
+    ? 'w-full py-2.5 rounded-xl text-white font-semibold hover:opacity-90 disabled:opacity-50 transition-colors'
+    : 'w-full py-2.5 rounded-xl bg-slate-800 text-white font-semibold hover:bg-slate-900 disabled:opacity-50 transition-colors';
+  const brandedPrimaryBtnStyle = brandColor ? { background: brandColor } : undefined;
+  const loginBgStyle = brandColor
+    ? { background: `linear-gradient(135deg, color-mix(in srgb, ${brandColor} 30%, #0f0f23) 0%, color-mix(in srgb, ${brandColor} 45%, #1a1a2e) 50%, color-mix(in srgb, ${brandColor2} 35%, #16162a) 100%)` }
+    : undefined;
+  const leftPanelStyle = brandColor
+    ? { background: `linear-gradient(135deg, color-mix(in srgb, ${brandColor} 45%, #000) 0%, color-mix(in srgb, ${brandColor2} 55%, #1a1a2e) 100%)` }
+    : undefined;
 
   // Remember the portal so a logged-out installed PWA opens the right login.
   useEffect(() => {
@@ -155,43 +175,92 @@ export default function CompanyLogin() {
 
   return (
     <div className="min-h-screen flex">
-      <div className="hidden lg:flex w-1/2 bg-gradient-to-br from-slate-900 to-indigo-950 flex-col justify-between p-12 text-white">
-        <Link
-          to="/"
-          className="flex items-center gap-2 text-sm font-medium bg-white/10 hover:bg-white/20 transition-all w-fit px-5 py-2.5 rounded-full backdrop-blur border border-white/10"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          {t('auth.goBackToMain')}
-        </Link>
+      <div
+        className={`hidden lg:flex w-1/2 flex-col justify-between p-12 text-white ${leftPanelStyle ? '' : 'bg-gradient-to-br from-slate-900 to-indigo-950'}`}
+        style={leftPanelStyle}
+      >
+        {!loginOnly ? (
+          <Link
+            to="/"
+            className="flex items-center gap-2 text-sm font-medium bg-white/10 hover:bg-white/20 transition-all w-fit px-5 py-2.5 rounded-full backdrop-blur border border-white/10"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            {t('auth.goBackToMain')}
+          </Link>
+        ) : (
+          <div />
+        )}
 
         <div className="space-y-6 max-w-xl">
-          <div className="w-14 h-14 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center">
-            <Building2 className="w-7 h-7 text-white" />
-          </div>
-          <h1 className="text-4xl font-bold leading-tight">{heroTitle}</h1>
-          <p className="text-slate-300 text-lg leading-relaxed font-light">{heroSubtitle}</p>
+          {orgBranding?.logo_url ? (
+            <div className={orgBranding.logo_on_dark ? ORG_LOGIN_LOGO_WRAP_CLASS_DARK : ORG_LOGIN_LOGO_WRAP_CLASS}>
+              <img src={orgBranding.logo_url} alt={orgBranding.name} className={ORG_LOGIN_LOGO_IMG_CLASS} />
+            </div>
+          ) : (
+            <div className="w-14 h-14 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center">
+              <Building2 className="w-7 h-7 text-white" />
+            </div>
+          )}
+          <h1 className="text-4xl font-bold leading-tight">
+            {orgBranding ? orgBranding.name : heroTitle}
+          </h1>
+          <p className="text-slate-300 text-lg leading-relaxed font-light">
+            {orgBranding
+              ? (orgBranding.login_description || t('login.orgHeroDesc', { name: orgBranding.name }))
+              : heroSubtitle}
+          </p>
         </div>
 
         <div className="text-sm text-slate-400">
-          {t('companyLogin.copyright', { year: new Date().getFullYear() })}
+          {loginOnly
+            ? (orgBranding?.name || '')
+            : t('companyLogin.copyright', { year: new Date().getFullYear() })}
         </div>
       </div>
 
-      <div className="w-full lg:w-1/2 bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 flex flex-col items-center justify-center px-4 py-12 relative">
-        <div className="absolute top-0 left-0 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 right-0 w-80 h-80 bg-slate-600/10 rounded-full blur-3xl pointer-events-none" />
+      <div
+        className={`w-full lg:w-1/2 flex flex-col items-center justify-center px-4 py-12 relative ${loginBgStyle ? '' : 'bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950'}`}
+        style={loginBgStyle}
+      >
+        <div
+          className="absolute top-0 left-0 w-96 h-96 rounded-full blur-3xl pointer-events-none"
+          style={brandColor ? { backgroundColor: `color-mix(in srgb, ${brandColor} 20%, transparent)` } : { backgroundColor: 'rgb(79 70 229 / 0.1)' }}
+        />
+        <div
+          className="absolute bottom-0 right-0 w-80 h-80 rounded-full blur-3xl pointer-events-none"
+          style={brandColor ? { backgroundColor: `color-mix(in srgb, ${brandColor} 15%, transparent)` } : { backgroundColor: 'rgb(71 85 105 / 0.1)' }}
+        />
 
         <div className="relative w-full max-w-md z-10">
           <div className="text-center mb-8">
-            <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur border border-white/20 flex items-center justify-center mx-auto mb-3 shadow-xl">
-              <Building2 className="w-7 h-7 text-white" />
-            </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Tutlio</h1>
+            {orgBranding?.logo_url ? (
+              <div className="inline-flex flex-col items-center">
+                <div className={orgBranding.logo_on_dark ? ORG_LOGIN_LOGO_WRAP_CLASS_DARK : ORG_LOGIN_LOGO_WRAP_CLASS}>
+                  <img src={orgBranding.logo_url} alt={orgBranding.name} className={ORG_LOGIN_LOGO_IMG_CLASS} />
+                </div>
+                {!orgBranding.hide_powered_by && (
+                  <span className="text-[10px] text-white/40 mt-1">powered by Tutlio</span>
+                )}
+                <h1 className="text-2xl font-bold text-white tracking-tight mt-4">{orgBranding.name}</h1>
+              </div>
+            ) : loginOnly ? (
+              <div className="inline-flex flex-col items-center">
+                <div className={`w-14 h-14 rounded-2xl bg-white/10 backdrop-blur border border-white/20 mx-auto mb-3 shadow-xl ${brandingLoading ? 'animate-pulse' : ''}`} />
+                <h1 className="text-2xl font-bold text-white tracking-tight">{orgBranding?.name || ''}</h1>
+              </div>
+            ) : (
+              <>
+                <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur border border-white/20 flex items-center justify-center mx-auto mb-3 shadow-xl">
+                  <Building2 className="w-7 h-7 text-white" />
+                </div>
+                <h1 className="text-2xl font-bold text-white tracking-tight">Tutlio</h1>
+              </>
+            )}
             <p className="text-slate-400 text-sm mt-1">{portalBadge}</p>
           </div>
 
           <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
-            <div className="bg-gradient-to-br from-slate-700 to-slate-900 px-6 py-5">
+            <div className={brandedHeaderStyle ? 'px-6 py-5' : 'bg-gradient-to-br from-slate-700 to-slate-900 px-6 py-5'} style={brandedHeaderStyle}>
               <p className="text-white/70 text-xs font-medium uppercase tracking-wider">{cardBadge}</p>
               <h2 className="text-white text-xl font-bold mt-0.5">{cardTitle}</h2>
             </div>
@@ -229,7 +298,8 @@ export default function CompanyLogin() {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full py-2.5 rounded-xl bg-slate-800 text-white font-semibold hover:bg-slate-900 disabled:opacity-50 transition-colors"
+                      className={brandedPrimaryBtnClass}
+                      style={brandedPrimaryBtnStyle}
                     >
                       {loading ? t('common.sending') : t('login.sendResetLink')}
                     </button>
@@ -277,7 +347,7 @@ export default function CompanyLogin() {
                     </div>
                   )}
 
-                  <button type="submit" disabled={loading} className="w-full py-2.5 rounded-xl bg-slate-800 text-white font-semibold hover:bg-slate-900 disabled:opacity-50 transition-colors">
+                  <button type="submit" disabled={loading} className={brandedPrimaryBtnClass} style={brandedPrimaryBtnStyle}>
                     {loading ? t('common.connecting') : t('common.login')}
                   </button>
                 </form>

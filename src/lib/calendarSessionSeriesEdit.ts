@@ -3,7 +3,57 @@ import { buildSameSlotPeerIdMap, hasOverlapWithExclusions, type SessionIntervalR
 import { planRecurringSeriesPatches, sortSeriesPatchesForApply } from './recurringSessions';
 
 const PAGE_SIZE = 500;
+const VILNIUS_TZ = 'Europe/Vilnius';
 type SessionClient = Pick<SupabaseClient, 'from'>;
+
+const VILNIUS_DOW: Record<string, number> = {
+  Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+};
+
+function vilniusWallClockParts(date: Date): { dateYmd: string; timeHms: string; dayOfWeek: number } {
+  const dateYmd = new Intl.DateTimeFormat('en-CA', {
+    timeZone: VILNIUS_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(date);
+  const timeHms = new Intl.DateTimeFormat('en-GB', {
+    timeZone: VILNIUS_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).format(date);
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: VILNIUS_TZ, weekday: 'short' }).format(date);
+  const dayOfWeek = VILNIUS_DOW[weekday];
+  if (dayOfWeek === undefined) throw new Error('Invalid weekday');
+  return { dateYmd, timeHms, dayOfWeek };
+}
+
+/** Keep rolling materializer aligned after tutor moves an entire recurring series. */
+export async function syncRecurringTemplateAfterSeriesTimeEdit(
+  client: SessionClient,
+  params: {
+    recurringId: string;
+    tutorId: string;
+    newStart: Date;
+    newEnd: Date;
+    fields: Record<string, unknown>;
+  },
+): Promise<void> {
+  const startParts = vilniusWallClockParts(params.newStart);
+  const endParts = vilniusWallClockParts(params.newEnd);
+  const patch: Record<string, unknown> = {
+    start_date: startParts.dateYmd,
+    day_of_week: startParts.dayOfWeek,
+    start_time: startParts.timeHms,
+    end_time: endParts.timeHms,
+    last_materialized_at: null,
+  };
+  if (params.fields.topic !== undefined) patch.topic = params.fields.topic;
+  if (params.fields.meeting_link !== undefined) patch.meeting_link = params.fields.meeting_link;
+  if (params.fields.price !== undefined) patch.price = params.fields.price;
+  const { data, error } = await client.from('recurring_individual_sessions')
+    .update(patch)
+    .eq('id', params.recurringId)
+    .eq('tutor_id', params.tutorId)
+    .select('id');
+  if (error) throw new Error(error.message);
+  if (!data?.length) throw new Error('Recurring template update not permitted');
+}
 
 export class CalendarSeriesConflictError extends Error {
   constructor(public readonly start: Date, public readonly end: Date) {

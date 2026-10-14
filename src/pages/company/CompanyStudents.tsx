@@ -133,6 +133,8 @@ import {
   type SchoolClassGroupRecord,
 } from '@/lib/schoolClassGroups';
 import { findOrgTutorEmailConflict } from '@/lib/orgStudentTutorGuards';
+import { studentEmailConflictI18nKey } from '@/lib/orgStudentContactConflict';
+import { checkOrgStudentEmailAvailable } from '@/lib/orgStudentContactCheckApi';
 import { removeOrgStudentTutorPairing } from '@/lib/reassignStudentTutorLessons';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { useUser } from '@/contexts/UserContext';
@@ -2179,6 +2181,32 @@ export default function CompanyStudents() {
           return;
         }
       }
+      const emailChecks = canAddAdditionalChildren
+        ? [
+            { email: newStudent.email, fullName: newStudent.full_name },
+            ...mvAdditionalChildren.map((child) => ({ email: child.email, fullName: child.full_name })),
+          ]
+        : [{ email: newStudent.email, fullName: newStudent.full_name }];
+      for (const item of emailChecks) {
+        if (!item.email.trim()) continue;
+        const check = await checkOrgStudentEmailAvailable({
+          organizationId: effectiveOrgId,
+          fullName: item.fullName,
+          studentEmail: item.email,
+        });
+        if (!check.ok) {
+          setToastMessage({
+            message: check.unavailable
+              ? t('compStu.studentEmailCheckFailed')
+              : t(studentEmailConflictI18nKey(check.code), {
+                  email: check.email,
+                  name: check.existingStudentName,
+                }),
+            type: 'error',
+          });
+          return;
+        }
+      }
     }
 
     setSaving(true);
@@ -2810,6 +2838,23 @@ export default function CompanyStudents() {
       if (conflict) {
         setToastMessage({
           message: t('compStu.emailMatchesOrgTutor', { name: conflict.tutorName }),
+          type: 'error',
+        });
+        return;
+      }
+      const check = await checkOrgStudentEmailAvailable({
+        organizationId: orgId,
+        fullName,
+        studentEmail: siblingDraft.email,
+      });
+      if (!check.ok) {
+        setToastMessage({
+          message: check.unavailable
+            ? t('compStu.studentEmailCheckFailed')
+            : t(studentEmailConflictI18nKey(check.code), {
+                email: check.email,
+                name: check.existingStudentName,
+              }),
           type: 'error',
         });
         return;

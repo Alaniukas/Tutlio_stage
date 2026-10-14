@@ -372,6 +372,8 @@ if (hasFeature('school_contract_esign')) { /* GoSign flow */ }
 
 **Pastaba:** `AvailabilityManager` (meniu „Darbo laiko nustatymai“) — atskiras srautas; su `prefill` automatiškai perjungia į skirtuką „Konkreti data“.
 
+**Pasikartojančios serijos redagavimas (korepetitorius / org tutor):** `Calendar.tsx` redagavimo režime rodo „tik šią“ / „visas būsimas“ (kaip org `CompanyTvarkarastis`), ne atskirą dialogą po pamokos modalo. `all_future` taiko `applyCalendarSeriesEdit` + `syncRecurringTemplateAfterSeriesTimeEdit` (`calendarSessionSeriesEdit.ts`), kad materializatorius negrąžintų seno laiko. Pro Klasė ir kitos org be `tutor_recurring_reschedule_approval` išsaugo tiesiogiai; MV su flag'u laiko keitimui reikia `/api/lesson-reschedule-approval`.
+
 **Laisvo laiko pataisa (paruošta kitam leidimui):** `effectiveAvailabilityOnDate` dienos išimtimi užgožia tik anksčiau sukurtas pasikartojančias taisykles; vėliau pridėtas savaitinis laikas išlieka matomas. Naujesnė dienos išimtis ir įrašai be patikimo `created_at` išlaiko visos dienos override. `consumeSessionAvailability` kurdamas pamokos dienos likučius išsaugo ir kitus tos dienos laisvus langus su jų dalykais / nuoroda / viešumo nustatymais. `availabilityValidation.ts` visiems tutor ir admin kūrimo / redagavimo srautams tikrina persidengimą pagal laiką, savaitės dieną ir galiojimo datas; nepavykus patikrinti įrašų išsaugojimas stabdomas. Org kalendorius per `availabilityData.ts` įkelia visus puslapius, be ankstesnio 2 000 eilučių limito. Naujos migracijos nereikia.
 
 ### Pamokų trynimas ir laisvo laiko atkūrimas
@@ -734,6 +736,8 @@ Viešas widget `src/components/support/SupportWidget.tsx` (lazy `App.tsx`) — t
 
 Webhook: `api/stripe-webhook.ts` — apdoroja subscriptions, checkout, Connect, school installments.
 
+**Tutlio komisijos S.F. pagal org (prod, iki 2026-10-12):** `platform_invoices` vis dar 0. PDF iš Book1 šablono (indigo/violetinė) `output/tutlio-komisijos-sf/pdf/`: `siusti/` 6 vnt. įmonėms (LV 0020/0021/0029/0045, MV 0030, MK 0046) = €939.61; `nesiusti/` 23 vnt. tėvams = €19.84. Serija TT 0020–0048, viso €959.45. Ne DB, ne laiškai. Jei TT 0020+ užimti licencijoms – pernumeruoti.
+
 Pamokos Checkout (`tutlio_session_id`) apmokėjimas sinchronizuoja ir susietą vienos pamokos `lesson_packages` įrašą per `api/_lib/sessionPackagePayment.ts` (webhook + `confirm-stripe-payment`). Kartotinis patvirtinimas sutvarko paketą net jei pamoka jau apmokėta; apmokėti, atšaukti ir kelių pamokų paketai nekeičiami. Siunčiami esami pamokos mokėjimo laiškai, papildomi paketo laiškai nesiunčiami.
 
 ---
@@ -863,6 +867,7 @@ npm run security:pencheck
 | `scripts/seed-proklase-package-edit-qa.mjs` | Pro Klasė pending package edit QA |
 | `scripts/seed-proklase-forward-stats-qa.mjs` | Pro Klasė: būsimos pamokos statistikos prognozės QA (`/company/stats`, Kitas mėnuo) |
 | `scripts/seed-czech-mk-demo.mjs` | Čekų MK-style demo (`demo-ceske-doucovani`, `preferred_locale=cs`, fake data česky) — `test_czech_mk.md` |
+| `scripts/seed-intelektacentrs-demo.mjs` | Intelekta attīstības centrs prezentacijos demo (`intelektacentrs-demo`, LV UI, MK feature set, logo/krāsas no intelektacentrs.lv) — `test_intelektacentrs.md`; admin `trenini@intelektacentrs.lv` + `alanas@tutlio.com` |
 | `scripts/seed-school-contract-completion-test.mjs` | Sutarčių completion testiniai duomenys |
 | `scripts/seed-demo-school-unconfirmed-attendance-qa.mjs` | Demo Mokykla: 4 sistemos matomi neatvykimai (relatyvios datos) + 09.03 istorija be join įrodymų; įjungia school flag'us |
 | `scripts/seed-demo-school-backlog-qa.mjs` | Demo Mokykla backlog QA: 2 apmokėtos mėnesio S.F. (permokos), tutor/org `invoice_profiles`, grupinis + individualus patvirtintas/ne patvirtintas užsiėmimas, grupė rizikai (1/2 narys, slotas ~4 d.) |
@@ -924,6 +929,8 @@ npm run security:pencheck
 46. **Korepetitoriaus login „Jungiamasi…“ amžinai** — universalus timeout trūkumas: `/login` (`Login.tsx`) ir tutor guard (`ProtectedRoute.tsx`) kvietė `resolveAccountPortals` be deadline (org admin jau turėjo `CompanyLogin.withLoginTimeout`). Pataisa: bendras `src/lib/loginTimeout.ts` (15 s) tutor login post-auth žingsniams; `ProtectedRoute` — 2,5 s timeout su fallback jei profilyje yra `organization_id`. Pro Klasė org koreps neturi atskiro blokavimo — `tutorHasPlatformSubscriptionAccess` grąžina `true` su `organization_id`.
 47. **„Mano pagalbos užklausos“ amžiniai „Kraunamos užklausos…“** — `SupportTickets.tsx` antrą kartą kvietė `supabase.auth.getSession()` ir galėjo užstrigti ant `navigatorLock` (tas pats šablonas kaip `CompanyStudents`). Pataisa: `resolveAccessToken` + `finishGuardedLoad`, tokenas perduodamas iš `onAuthStateChange`. Jei sąrašas tuščias, bet ticket egzistuoja — tikrinti ar prisijungęs tas pats Auth vartotojas, kuriam `reporter_user_id` įrašytas (`GET /api/my-support-requests` filtruoja tik pagal `auth.userId`).
 48. **School Apžvalga amžinas spinneris** — `SchoolDashboard.tsx` `loadData` priklausomybėse buvo `hasFeature` (nauja funkcija kiekviename render'yje) → begalinis `useEffect` ciklas. Naudok `features.school_class_groups` ir `can('…')` boolean'us, ne funkcijų reference.
+49. **Pro Klasė placeholder el. paštas (`neturipasto@gmail.com`) ≠ tėvas / sibling** — tas paštas yra bendras „nėra pašto“ placeholderis ir gali priklausyti kitam mokiniui (pvz. Denas). Naujas vaikas su tikru paštu (pvz. Justinas `visojusti@gmail.com`) yra **kita** `students` eilutė; `orgStudentIdentityGroupKey` jų nesujungia. „Mokinio paskyra: sukurta“ nereiškia registracijos pabaigos, jei Auth `provisioned_by_organization` ir `last_sign_in_at` tuščias. Dummy eilutę slėpti `detached_at` + `tutor_id=null`; **neliesti** placeholder Auth, jei jis priklauso kitam vaikui. 2026-10-14 prod: Justino dummy `AO0B6J` paslėptas; gyva eilutė `N4U56U` / Nomeda, 70 pamokų.
+50. **Org admin mokinio el. paštas prieš insert / provision** — `CompanyStudents` „Pridėti mokinį“ ir „Pridėti dar vieną vaiką“ kviečia `POST /api/org-student-contact-check` (`students.edit`): org `students.email` (įsk. `neturipasto@gmail.com` placeholderį tarp skirtingų vaikų) + Auth el. paštas, kur jau yra kita mokinio paskyra. Ta pati tapatybė (`sameOrgStudentIdentity`, keli tutor eilutės) leidžiama. Managed-family provision (`mvProvisionFamilyAccounts`) tikrina prieš `ensureMvAuthUser`. Logika: `src/lib/orgStudentContactConflict.ts`, `api/_lib/orgStudentContactConflict.ts`. Testai: `tests/lib/org-student-contact-conflict.test.ts`.
 
 ---
 
@@ -948,7 +955,7 @@ npm run security:pencheck
 | Mokytojo grupės lankomumas (kalendorius) | `SchoolGroupRosterAttendanceControls.tsx`, `schoolAttendanceUi.ts`, `schoolGroupAttendance.ts`, `Calendar.tsx` |
 | Lankomumo pažymėjimo šaltinis (sessions / S.F. peržiūra) | `schoolAttendanceMarking.ts`, `SchoolAttendanceMarkingLabel.tsx`, `CompanySessions.tsx`, `SchoolMonthlyInvoiceDialog.tsx` |
 | Viešo AI widget'o rodymas (tik landing, niekur kitur) | `supportWidgetVisibility.ts` (`isLandingPath`) |
-| School mokiniai + filtrai | `CompanyStudents.tsx`, `schoolStudentEnrollment.ts`, `authSession.ts`, `schoolStudentsExport.ts` |
+| School mokiniai + filtrai | `CompanyStudents.tsx`, `schoolStudentEnrollment.ts`, `authSession.ts`, `schoolStudentsExport.ts`, `orgStudentContactConflict.ts`, `api/org-student-contact-check.ts` |
 | Pamoka iš mokinio kortelės / tikslus laikas | `FindTutorModal.tsx`, `FindLessonBookDialog.tsx`, `PickedAvailabilityTimeEditor.tsx`, `pickedAvailabilityTime.ts`, `studentLessonPricing.ts` |
 | School mokėjimai | `CompanyPayments.tsx`, `useSchoolPaymentsData.ts` |
 | Mokyklos tėvų S.F. (mėnesinė) | `SchoolMonthlyInvoiceDialog` (`batch`), `api/school-monthly-invoice-admin.ts`, `schoolPayerInvoiceGroups.ts`, `schoolInvoiceSessionReview.ts` (`resolveSchoolInvoiceUnitPrice`) |
@@ -1015,4 +1022,4 @@ npm run security:pencheck
 
 ---
 
-*Paskutinis atnaujinimas: 2026-10-07: sutarčių sąrašo filtro/pagination regresijos pataisa (`CompanyContracts` `visibleContracts` pagal puslapio ID), `SchoolExtraLessonsAccept` preview abort pateikimo metu, i18n (NL/SE invoice batch+preview, holiday calendar, tutors activity; `schoolInvoiceReviewOtherTranslations` visoms 11 legacy kalboms; draft locale fallback `att.marking.*` / `compStu.viewAllSessions`).*
+*Paskutinis atnaujinimas: 2026-10-14: org admin mokinio kūrimas tikrina dubliuojantį `students.email` / Auth prieš insert ir managed-family provision (`org-student-contact-check`).*
