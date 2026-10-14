@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import JoinLessonButton from '@/components/JoinLessonButton';
 import { supabase } from '@/lib/supabase';
+import { loadStudentSessionMeetingLinks } from '@/lib/studentSessionMeetingLinks';
 import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { getCached, setCache } from '@/lib/dataCache';
 import { parentFullNameForUserDeduped, parentStudentLinksDeduped } from '@/lib/preload';
@@ -181,7 +182,7 @@ export default function ParentDashboard() {
         supabase
           .from('sessions')
           .select(
-            'id, student_id, tutor_id, start_time, end_time, status, cancelled_by, topic, paid, payment_status, price, meeting_link, whiteboard_room_id, tutor_comment, show_comment_to_student, show_comment_to_parent, subjects(name, is_group)',
+            'id, student_id, tutor_id, subject_id, start_time, end_time, status, cancelled_by, topic, paid, payment_status, price, meeting_link, whiteboard_room_id, tutor_comment, show_comment_to_student, show_comment_to_parent, subjects(name, is_group, meeting_link)',
           )
           .in('student_id', studentIds)
           .gte('start_time', past.toISOString())
@@ -192,7 +193,7 @@ export default function ParentDashboard() {
           ? supabase
               .from('profiles')
               .select(
-                'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, payment_timing, payment_deadline_hours, perlas_finance_enabled, organization_id, enable_per_lesson, enable_monthly_billing',
+                'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, payment_timing, payment_deadline_hours, perlas_finance_enabled, organization_id, enable_per_lesson, enable_monthly_billing, personal_meeting_link',
               )
               .in('id', tutorIds)
           : Promise.resolve({ data: [], error: null } as any),
@@ -218,10 +219,16 @@ export default function ParentDashboard() {
         .filter((id): id is string => !!id && !loadedTutorIds.has(id)))];
       if (missingSessionTutorIds.length > 0) {
         const { data: extraTutorProfiles } = await supabase.from('profiles')
-          .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, payment_timing, payment_deadline_hours, perlas_finance_enabled, organization_id, enable_per_lesson, enable_monthly_billing')
+          .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, payment_timing, payment_deadline_hours, perlas_finance_enabled, organization_id, enable_per_lesson, enable_monthly_billing, personal_meeting_link')
           .in('id', missingSessionTutorIds);
         tutorProfiles.push(...(extraTutorProfiles || []));
       }
+      const linkedSessionsPromise = loadStudentSessionMeetingLinks(supabase, sessions ?? [], {
+        tutorsById: new Map(tutorProfiles.map((row) => [row.id, row])),
+        subjectsById: new Map((sessions ?? [])
+          .filter((row: any) => row.subject_id && row.subjects)
+          .map((row: any) => [row.subject_id, row.subjects])),
+      });
       const tutorById = new Map<string, ChildTutorPolicy>();
       const paymentFlagsByTutorId = new Map<string, { enable_per_lesson: boolean; enable_monthly_billing: boolean }>();
       const orgIdsToCheck: string[] = [];
@@ -282,7 +289,7 @@ export default function ParentDashboard() {
       }
 
       const byStudent = new Map<string, ChildSession[]>();
-      for (const s of sessions ?? []) {
+      for (const s of await linkedSessionsPromise) {
         const arr = byStudent.get((s as any).student_id) ?? [];
         arr.push({
           id: (s as any).id,

@@ -40,7 +40,7 @@ function database(scenario: Scenario) {
       if (table === 'students') {
         studentQueryCount += 1;
         const call = studentQueryCount;
-        let operation: 'select' | 'update' = 'select';
+        let operation: 'select' | 'update' | 'contact-check' | 'auth-owner-check' = 'select';
         const query: any = {
           select: vi.fn(() => {
             operation = 'select';
@@ -54,6 +54,8 @@ function database(scenario: Scenario) {
           eq: vi.fn(() => query),
           in: vi.fn(() => query),
           is: vi.fn(() => query),
+          ilike: vi.fn(() => { operation = 'contact-check'; return query; }),
+          or: vi.fn(() => { operation = 'auth-owner-check'; return query; }),
           maybeSingle: vi.fn(async () => ({
             data: {
               id: 'student-1',
@@ -75,6 +77,11 @@ function database(scenario: Scenario) {
           })),
           then: (resolve: (value: unknown) => void) => {
             if (operation === 'update') return resolve({ error: null });
+            if (operation === 'contact-check') return resolve({ data: [], error: null });
+            if (operation === 'auth-owner-check') return resolve({ data: [{
+              id: 'student-1', full_name: 'Child', email: 'child@example.test',
+              organization_id: MOKSLO_VAISIAI_ORG_ID, linked_user_id: null,
+            }], error: null });
             // The second students query in the student scenario checks whether
             // the existing auth user is already linked elsewhere.
             if (scenario === 'student' && call === 2) return resolve({ data: [], error: null });

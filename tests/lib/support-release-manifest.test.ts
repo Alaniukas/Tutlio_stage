@@ -19,6 +19,7 @@ import {
   parseSupportReleaseManifest,
   type SupportReleaseManifest,
 } from '../../api/_lib/inAppSupportReleaseManifest.js';
+import { supportReleaseManifest } from '../../api/_lib/supportReleaseManifest.js';
 import {
   assertSupportReleaseBranch,
   buildSupportReleaseManifest,
@@ -40,8 +41,13 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.restoreAllMocks());
 
 describe('support release manifest', () => {
-  it('starts empty and returns independent validated data', () => {
-    expect(loadSupportReleaseManifest()).toEqual(EMPTY);
+  it('loads empty or selected release configurations and returns independent validated data', () => {
+    const configured = parseSupportReleaseManifest(supportReleaseManifest);
+    const loaded = loadSupportReleaseManifest();
+    expect(loaded).toEqual(configured);
+    loaded.ticketIds.push(OTHER_TICKET_ID);
+    expect(loadSupportReleaseManifest()).toEqual(configured);
+    expect(parseSupportReleaseManifest(EMPTY)).toEqual(EMPTY);
     const result = parseSupportReleaseManifest(SELECTED);
     result.ticketIds.push(OTHER_TICKET_ID);
     expect(SELECTED.ticketIds).toEqual([TICKET_ID]);

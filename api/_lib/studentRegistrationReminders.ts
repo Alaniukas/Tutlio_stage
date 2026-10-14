@@ -41,7 +41,8 @@ export function buildStudentRegistrationReminderEmail(org: ReminderOrg, studentN
   return { subject, html, from: localizedFromEmail(locale as Locale, { senderName: resolved.emailSenderName || name }) };
 }
 
-async function reminderTarget(db: SupabaseClient, org: ReminderOrg, student: ReminderStudent, origin: string) {
+export async function studentRegistrationInvitationTarget(db: SupabaseClient, org: ReminderOrg, student: ReminderStudent, origin: string,
+  options: { activationIssuedAt?: number } = {}) {
   const userId = student.parent_user_id || student.linked_user_id;
   const role = student.parent_user_id ? 'parent' as const : 'student' as const;
   const appOrigin = orgAwareOrigin(org.preferred_locale, origin);
@@ -54,12 +55,12 @@ async function reminderTarget(db: SupabaseClient, org: ReminderOrg, student: Rem
     const identifier = String(user.app_metadata?.student_login_name || user.email || '');
     const to = role === 'parent' ? user.email : user.app_metadata?.student_login_name
       ? user.app_metadata?.student_contact_email || student.email || student.payer_email : user.email;
-    if (!identifier || !to || !String(to).includes('@')) return null;
-    const token = buildMvAccountActivationToken({ studentId: student.id, role, email: identifier });
+    if (!identifier || !to || !String(to).includes('@')) throw new Error('Registration recipient unavailable');
+    const token = buildMvAccountActivationToken({ studentId: student.id, role, email: identifier, issuedAt: options.activationIssuedAt });
     return { to: String(to).trim().toLowerCase(), url: buildMvAccountActivationUrl(appOrigin, token), identity: userId };
   }
   const to = student.payer_email || student.email;
-  if (!to || !student.invite_code) return null;
+  if (!to || !student.invite_code) throw new Error('Registration recipient unavailable');
   return { to: to.trim().toLowerCase(), url: `${appOrigin}/book/${encodeURIComponent(student.invite_code)}`,
     identity: orgStudentIdentityGroupKey(student) };
 }
@@ -86,7 +87,7 @@ export async function runStudentRegistrationReminders(db: SupabaseClient, origin
             .select('id, organization_id, full_name, email, payer_email, invite_code, linked_user_id, parent_user_id')
             .eq('id', state.student_id).eq('organization_id', org.id).maybeSingle<ReminderStudent>();
           if (error || !student) throw new Error('Registration student lookup failed');
-          const target = await reminderTarget(db, org, student, origin);
+          const target = await studentRegistrationInvitationTarget(db, org, student, origin);
           if (!target) { result.skipped++; continue; }
           const hash = createHash('sha256').update(target.identity).digest('hex').slice(0, 32);
           const deliveryKey = `registration:${org.id}:${hash}:24h:v1`;

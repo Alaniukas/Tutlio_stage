@@ -2194,9 +2194,9 @@ export default function CompanyStudents() {
           fullName: item.fullName,
           studentEmail: item.email,
         });
-        if (!check.ok) {
+        if (check.ok === false) {
           setToastMessage({
-            message: check.unavailable
+            message: check.unavailable === true
               ? t('compStu.studentEmailCheckFailed')
               : t(studentEmailConflictI18nKey(check.code), {
                   email: check.email,
@@ -2847,9 +2847,9 @@ export default function CompanyStudents() {
         fullName,
         studentEmail: siblingDraft.email,
       });
-      if (!check.ok) {
+      if (check.ok === false) {
         setToastMessage({
-          message: check.unavailable
+          message: check.unavailable === true
             ? t('compStu.studentEmailCheckFailed')
             : t(studentEmailConflictI18nKey(check.code), {
                 email: check.email,
@@ -3636,6 +3636,27 @@ export default function CompanyStudents() {
       openFamilyAccountInvitation(student.id);
       return;
     }
+    if (supportsManagedFamilyAccounts) {
+      setSendingInviteNow(true);
+      try {
+        const response = await fetch('/api/student-registration-invitation', {
+          method: 'POST',
+          headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ studentId: student.id }),
+        });
+        const result = await response.json();
+        setToastMessage({
+          message: !response.ok ? t('compStu.inviteSentNowFailed')
+            : result.skipped ? t('compStu.inviteSkippedAlreadyRegistered') : t('compStu.inviteSentNowSuccess'),
+          type: response.ok && !result.skipped ? 'success' : 'error',
+        });
+      } catch {
+        setToastMessage({ message: t('compStu.inviteSentNowFailed'), type: 'error' });
+      } finally {
+        setSendingInviteNow(false);
+      }
+      return;
+    }
     const recipient = (student.email || '').trim() || (student.payer_email || '').trim();
     if (!recipient) {
       setToastMessage({ message: t('compStu.noInviteRecipient'), type: 'error' });
@@ -3677,6 +3698,28 @@ export default function CompanyStudents() {
   const handleSendInviteNow = async () => {
     if (!selectedStudent) return;
     await sendInviteEmailFor(selectedStudent);
+  };
+
+  const handleCopyRegistrationLink = async () => {
+    if (!selectedStudent) return;
+    setSendingInviteNow(true);
+    try {
+      const response = await fetch(`/api/student-registration-invitation?studentId=${encodeURIComponent(selectedStudent.id)}`, {
+        headers: await authHeaders(), cache: 'no-store',
+      });
+      const result = await response.json();
+      if (response.ok && result.skipped) {
+        setToastMessage({ message: t('compStu.inviteSkippedAlreadyRegistered'), type: 'error' });
+        return;
+      }
+      if (!response.ok || !result.url) throw new Error('Invitation unavailable');
+      await navigator.clipboard.writeText(result.url);
+      setToastMessage({ message: t('compStu.provisionCopied'), type: 'success' });
+    } catch {
+      setToastMessage({ message: t('common.error'), type: 'error' });
+    } finally {
+      setSendingInviteNow(false);
+    }
   };
 
   if (loading) {
@@ -6111,7 +6154,9 @@ export default function CompanyStudents() {
                             size="sm"
                             variant="outline"
                             className="h-7 px-2.5 text-[11px] gap-1"
-                            disabled={sendingInviteNow || orgFeaturesLoading || (!usesSchoolFamilyInvites && !inviteRecipient)}
+                            disabled={sendingInviteNow || orgFeaturesLoading
+                              || (supportsManagedFamilyAccounts && !can('students.edit'))
+                              || (!usesSchoolFamilyInvites && !supportsManagedFamilyAccounts && !inviteRecipient)}
                             title={!usesSchoolFamilyInvites && !inviteRecipient ? t('compStu.noInviteRecipient') : undefined}
                             onClick={() => void handleSendInviteNow()}
                           >
@@ -6120,6 +6165,14 @@ export default function CompanyStudents() {
                           </Button>
                         );
                       })()}
+                      {supportsManagedFamilyAccounts && !usesSchoolFamilyInvites && (
+                        <Button type="button" size="sm" variant="outline"
+                          className="h-7 px-2.5 text-[11px]"
+                          disabled={sendingInviteNow || !can('students.edit')}
+                          onClick={() => void handleCopyRegistrationLink()}>
+                          {t('stu.copyLink')}
+                        </Button>
+                      )}
                       {supportsManagedFamilyAccounts && selectedStudent && mvNeedsParentAccount(selectedMvAccountStatus) && (
                         <Button
                           type="button"
@@ -6150,6 +6203,11 @@ export default function CompanyStudents() {
                             {selectedMvAccountStatus.linked_user_id ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
                             {t('compStu.provisionStudentAccount')}: {selectedMvAccountStatus.linked_user_id ? t('compStu.accountCreated') : t('compStu.accountMissing')}
                           </span>
+                          {selectedMvAccountStatus.linked_user_id && registration.byStudentId.get(selectedStudent.id)?.registration_pending && (
+                            <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                              {registrationText(locale, 'pending')}
+                            </span>
+                          )}
                           <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs ${selectedMvAccountStatus.parent_user_id ? 'border-green-200 bg-green-50 text-green-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
                             {selectedMvAccountStatus.parent_user_id ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
                             {t('compStu.provisionParentAccount')}: {selectedMvAccountStatus.parent_user_id ? t('compStu.accountCreated') : t('compStu.accountMissing')}

@@ -69,22 +69,26 @@ export function resolveSessionMeetingLink(opts: {
   });
 }
 
-type SessionMeetingLinkRow = {
+export type SessionMeetingLinkRow = {
   meeting_link?: string | null;
   student_id?: string | null;
+  tutor_id?: string | null;
   subject_id?: string | null;
+};
+
+export type SessionMeetingLinkContext = {
+  tutorPersonalLink?: string | null;
+  tutorsById?: ReadonlyMap<string, { personal_meeting_link?: string | null }>;
+  studentsById?: ReadonlyMap<string, { personal_meeting_link?: string | null }>;
+  subjectsById?: ReadonlyMap<string, { meeting_link?: string | null }>;
+  studentPersonalLink?: string | null;
+  subjectLink?: string | null;
 };
 
 /** Enrich session rows for display / join when `sessions.meeting_link` was never snapshotted. */
 export function enrichSessionMeetingLink<T extends SessionMeetingLinkRow>(
   session: T,
-  ctx: {
-    tutorPersonalLink?: string | null;
-    studentsById?: ReadonlyMap<string, { personal_meeting_link?: string | null }>;
-    subjectsById?: ReadonlyMap<string, { meeting_link?: string | null }>;
-    studentPersonalLink?: string | null;
-    subjectLink?: string | null;
-  },
+  ctx: SessionMeetingLinkContext,
 ): T {
   const studentLink =
     ctx.studentPersonalLink ??
@@ -94,7 +98,8 @@ export function enrichSessionMeetingLink<T extends SessionMeetingLinkRow>(
     (session.subject_id ? ctx.subjectsById?.get(session.subject_id)?.meeting_link : undefined);
   const resolved = resolveSessionMeetingLink({
     sessionLink: session.meeting_link,
-    tutorPersonalLink: ctx.tutorPersonalLink,
+    tutorPersonalLink: ctx.tutorPersonalLink ??
+      (session.tutor_id ? ctx.tutorsById?.get(session.tutor_id)?.personal_meeting_link : undefined),
     studentPersonalLink: studentLink,
     subjectLink,
   });

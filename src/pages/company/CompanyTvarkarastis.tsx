@@ -80,6 +80,10 @@ function recurringAvailDateRangeLabel(
 import { authHeaders } from '@/lib/apiHelpers';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { useStudentRegistrationStatus } from '@/hooks/useStudentRegistrationStatus';
+import { lessonAwaitingRegistration } from '@/lib/studentRegistration';
+import { registrationText } from '@/lib/studentRegistrationCopy';
+import StudentRegistrationAlert from '@/components/StudentRegistrationAlert';
 import { isSchoolHolidayDisplayDay } from '@/lib/schoolOrgCalendar';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
@@ -529,6 +533,15 @@ export default function CompanyTvarkarastis() {
   const [availability, setAvailability] = useState<Availability[]>(tc?.availability ?? []);
   const [subjects, setSubjects] = useState<Subject[]>(tc?.subjects ?? []);
   const [students, setStudents] = useState<Student[]>(tc?.students ?? []);
+  const canReadRegistration = canView && !accessLoading && canOrgAdmin('students.view');
+  const registration = useStudentRegistrationStatus(
+    canReadRegistration ? organizationId : null,
+    students.map((row) => `${row.id}:${row.linked_user_id || ''}`).join('|'),
+  );
+  const awaitingRegistration = useCallback(
+    (session: Session) => registration.enabled && lessonAwaitingRegistration(session, registration.byStudentId),
+    [registration.enabled, registration.byStudentId],
+  );
   const [dynamicPricingRules, setDynamicPricingRules] = useState<OrganizationDynamicPricingRule[]>(
     tc?.dynamicPricingRules ?? [],
   );
@@ -1277,7 +1290,7 @@ export default function CompanyTvarkarastis() {
         })}${orgScheduleSessionTitle(session, t('cal.unknown'), {
           isSchoolOrg: isSchoolOrgView,
           tutorFallback: 'Tutorius',
-        })}${!session.meeting_link && session.status !== 'cancelled' ? ` · ${t('compSch.noMeetingLink')}` : ''}`,
+        })}${awaitingRegistration(session) ? ` · ${registrationText(locale, 'pending')}` : ''}${!session.meeting_link && session.status !== 'cancelled' ? ` · ${t('compSch.noMeetingLink')}` : ''}`,
         start: session.start_time,
         end: session.end_time,
         resource: {
@@ -1288,7 +1301,7 @@ export default function CompanyTvarkarastis() {
     }
 
     return events.filter((ev) => isUsableCalendarDateRange(ev.start, ev.end));
-  }, [mergedCalendarSessions, availabilityBlocks, showOnlySessions, showOnlyAvailability, trialSubjectIds, isProKlase, isSchoolOrgView, t]);
+  }, [mergedCalendarSessions, availabilityBlocks, showOnlySessions, showOnlyAvailability, trialSubjectIds, isProKlase, isSchoolOrgView, t, locale, awaitingRegistration]);
 
   const filteredOrgTutorsForList = useMemo(() => {
     const q = tutorSearchQuery.trim().toLowerCase();
@@ -1880,6 +1893,7 @@ export default function CompanyTvarkarastis() {
       isOrgTutor: isMvOrg ? false : isSchoolOrgView || isSchoolBilledSession(session),
       useMoksloVaisiaiPalette: isMvOrg,
       mvDistinguishPlannedPayment: isMvOrg,
+      awaitingRegistration: awaitingRegistration(session),
     });
 
     return {
@@ -2021,22 +2035,19 @@ export default function CompanyTvarkarastis() {
           .eq('id', sid)
           .maybeSingle();
         if (error || !data) return;
+        const detailed = enrichParsedSessions([data],
+          new Map(orgTutors.map((tutor) => [tutor.id, tutor.personal_meeting_link])),
+          new Map(students.map((student) => [student.id, student])),
+          new Map(subjects.map((subject) => [subject.id, subject])),
+        )[0];
         setSelectedEvent((prev) => {
           if (!prev || prev.id !== sid) return prev;
-          return {
-            ...data,
-            start_time: new Date((data as any).start_time),
-            end_time: new Date((data as any).end_time),
-          } as Session;
+          return detailed;
         });
         setSessions((prev) =>
           prev.map((s) =>
             s.id === sid
-              ? ({
-                  ...data,
-                  start_time: new Date((data as any).start_time),
-                  end_time: new Date((data as any).end_time),
-                } as Session)
+              ? detailed
               : s,
           ),
         );
@@ -3449,6 +3460,7 @@ export default function CompanyTvarkarastis() {
   return (
     <>
       <div className="space-y-4 min-w-0 max-w-full">
+        {registration.enabled && registration.error && <StudentRegistrationAlert states={[]} error />}
         {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between min-w-0">
           <div className="min-w-0 flex-1">
@@ -3732,6 +3744,12 @@ export default function CompanyTvarkarastis() {
 
         {/* Legend */}
         <div className="bg-gray-50 rounded-lg p-3 flex flex-wrap items-center gap-4 sm:gap-6 text-sm">
+          {registration.enabled && (
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded border border-dashed border-slate-500 bg-slate-200 opacity-80" />
+              <span>{registrationText(locale, 'pending')}</span>
+            </div>
+          )}
           {isSchoolOrgView && (
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded bg-rose-200 ring-1 ring-rose-300" />
@@ -4500,6 +4518,15 @@ export default function CompanyTvarkarastis() {
           </DialogHeader>
 
           {/* VIEW MODE — layout aligned with Pamokos (CompanySessions) */}
+          {selectedEvent && registration.enabled && lessonAwaitingRegistration({
+            ...selectedEvent,
+            _groupSessions: isGroupSession ? selectedGroupSessions : undefined,
+          }, registration.byStudentId) && (
+            <div role="status" className="rounded-xl border border-slate-300 bg-slate-50 p-3 text-sm text-slate-700">
+              <p className="font-semibold">{registrationText(locale, 'pending')}</p>
+              <p className="mt-1">{registrationText(locale, 'adminLessonHint')}</p>
+            </div>
+          )}
           {selectedEvent && !isEditingSession && (
             <div className="space-y-3">
               {isGroupSession ? (

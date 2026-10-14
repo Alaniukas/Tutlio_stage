@@ -5,6 +5,7 @@ import StatusBadge from '@/components/StatusBadge';
 import SessionFiles from '@/components/SessionFiles';
 import WhiteboardButton from '@/components/WhiteboardButton';
 import { supabase } from '@/lib/supabase';
+import { loadStudentSessionMeetingLinks } from '@/lib/studentSessionMeetingLinks';
 import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { startPerlasPayment } from '@/lib/perlasPay';
 import { getCached, setCache } from '@/lib/dataCache';
@@ -43,7 +44,7 @@ import {
     pickActiveStudentProfile,
 } from '@/lib/studentLinkedProfiles';
 
-interface Session { id: string; start_time: string; end_time: string; status: string; paid: boolean; price: number | null; topic: string | null; meeting_link: string | null; payment_status?: string; tutor_comment?: string | null; show_comment_to_student?: boolean; subject_id?: string | null; subjects?: { is_group?: boolean; max_students?: number; is_trial?: boolean } | null; }
+interface Session { id: string; student_id?: string | null; tutor_id?: string | null; start_time: string; end_time: string; status: string; paid: boolean; price: number | null; topic: string | null; meeting_link: string | null; payment_status?: string; tutor_comment?: string | null; show_comment_to_student?: boolean; subject_id?: string | null; subjects?: { is_group?: boolean; max_students?: number; is_trial?: boolean } | null; }
 interface StudentInfo {
     full_name: string;
     grade: string | null;
@@ -203,7 +204,7 @@ export default function StudentDashboard() {
     }, [loading, student, sessions]);
 
     const STUDENT_DASH_SESSION_COLS =
-        'id,start_time,end_time,status,paid,price,topic,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id';
+        'id,student_id,tutor_id,start_time,end_time,status,paid,price,topic,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id';
 
     const fetchData = async () => {
         if (!ctxUser) return;
@@ -254,7 +255,7 @@ export default function StudentDashboard() {
             const [tutorResult, sessionsResult, pkgsRows, installmentsResult] = await Promise.all([
                 studentRow.tutor_id
                     ? Promise.all([
-                        supabase.from('profiles').select('email, phone, organization_id, perlas_finance_enabled, enable_per_lesson, enable_monthly_billing, subscription_plan, manual_subscription_exempt, enable_manual_student_payments').eq('id', studentRow.tutor_id).single(),
+                        supabase.from('profiles').select('id, email, phone, organization_id, perlas_finance_enabled, enable_per_lesson, enable_monthly_billing, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, personal_meeting_link').eq('id', studentRow.tutor_id).single(),
                         supabase.rpc('get_tutor_contact_visibility_for_student', { p_tutor_id: studentRow.tutor_id }),
                     ])
                     : Promise.resolve(null),
@@ -374,24 +375,32 @@ export default function StudentDashboard() {
                     getCached<{ sessions?: Session[] }>('student_sessions')?.sessions;
                 setSessions(Array.isArray(fb) ? fb : []);
             } else {
-                const rows = dedupeSessionsById((sessionRowsRaw || []) as Array<Record<string, unknown> & { id: string }>);
+                const rows = dedupeSessionsById((sessionRowsRaw || []) as Session[]);
                 const subjectIds = [...new Set(rows.map((r) => r.subject_id).filter(Boolean) as string[])];
-                let subjectMeta: Record<string, { is_group?: boolean; max_students?: number | null; is_trial?: boolean }> = {};
+                let subjectMeta: Record<string, { is_group?: boolean; max_students?: number | null; is_trial?: boolean; meeting_link?: string | null }> = {};
                 if (subjectIds.length > 0) {
                     const { data: subs } = await supabase
                         .from('subjects')
-                        .select('id,is_group,max_students,is_trial')
+                        .select('id,is_group,max_students,is_trial,meeting_link')
                         .in('id', subjectIds);
                     for (const s of subs ?? []) {
-                        const row = s as { id: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean };
+                        const row = s as { id: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean; meeting_link?: string | null };
                         subjectMeta[row.id] = {
                             is_group: row.is_group ?? undefined,
                             max_students: row.max_students,
                             is_trial: row.is_trial ?? undefined,
+                            meeting_link: row.meeting_link ?? null,
                         };
                     }
                 }
-                const merged: Session[] = rows.map((row) => {
+                const tutorProfile = tutorResult?.[0].data;
+                const linkedRows = await loadStudentSessionMeetingLinks(supabase, rows, {
+                    tutorsById: tutorProfile && studentRow.tutor_id
+                        ? new Map([[studentRow.tutor_id, tutorProfile]])
+                        : undefined,
+                    subjectsById: new Map(Object.entries(subjectMeta)),
+                });
+                const merged: Session[] = linkedRows.map((row) => {
                     const sid = row.subject_id as string | null | undefined;
                     const sm = sid ? subjectMeta[sid] : undefined;
                     return {
@@ -859,7 +868,7 @@ export default function StudentDashboard() {
 
                         {selectedSession?.meeting_link && selectedSession.status !== 'cancelled' && (
                             <JoinLessonButton
-                                session={selectedSession as any}
+                                session={selectedSession}
                                 className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100 mt-2"
                             >
                                 {t('studentDash.joinMeeting')}

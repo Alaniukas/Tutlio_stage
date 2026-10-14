@@ -212,6 +212,11 @@ function mockStudentSaveQueries() {
 describe('CompanyStudents Pro Klasė list', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Student creation also checks contact availability before any insert.
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: true, packages: [] }),
+    })));
     testState.studentInserts.length = 0;
     testState.selectedSlots = null;
     testState.rpc.mockResolvedValue({ data: [], error: null });
@@ -282,6 +287,26 @@ describe('CompanyStudents Pro Klasė list', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('stops duplicate email creation before inserting a student or sending an invitation', async () => {
+    mockStudentSaveQueries();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url === '/api/org-student-contact-check'
+      ? { ok: false, status: 409, json: async () => ({
+          code: 'student_email_taken', email: 'existing@example.test', existingStudentName: 'Esamas vaikas',
+        }) }
+      : { ok: true, json: async () => ({ ok: true, packages: [] }) }));
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+    fireEvent.change(screen.getByPlaceholderText('Jonas Jonaitis'), { target: { value: 'Naujas vaikas' } });
+    fireEvent.change(screen.getByPlaceholderText('jonas@example.com'), { target: { value: 'existing@example.test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Tik mokinį' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti', exact: true }));
+
+    expect(await screen.findByText(/El. paštas existing@example.test jau naudojamas mokiniui Esamas vaikas/)).toBeTruthy();
+    expect(testState.studentInserts).toHaveLength(0);
+    expect(testState.sendEmailDetailed).not.toHaveBeenCalled();
+    expect(testState.createSession).not.toHaveBeenCalled();
   });
 
   it('allows separate student and parent phone numbers for every company organization', () => {

@@ -61,6 +61,11 @@ export function schoolFamilyMemoryDatabase(initial: Record<string, Array<Record<
       const query: any = {
         select: vi.fn(() => query),
         eq: vi.fn((field: string, value: any) => { filters.push((row) => row[field] === value); return query; }),
+        ilike: vi.fn((field: string, value: string) => {
+          const pattern = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*').replace(/_/g, '.');
+          const match = new RegExp(`^${pattern}$`, 'i');
+          filters.push((row) => row[field] != null && match.test(String(row[field]))); return query;
+        }),
         neq: vi.fn((field: string, value: any) => { filters.push((row) => row[field] !== value); return query; }),
         is: vi.fn((field: string, value: any) => { filters.push((row) => value === null ? row[field] == null : row[field] === value); return query; }),
         in: vi.fn((field: string, values: any[]) => { filters.push((row) => values.includes(row[field])); return query; }),

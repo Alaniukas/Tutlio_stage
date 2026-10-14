@@ -123,9 +123,12 @@ export function findAuthEmailStudentConflict(
   }
 
   const metaStudentId = String(auth.studentId || '').trim();
-  if (metaStudentId && !exclude.has(metaStudentId)) {
+  if (metaStudentId) {
     const owner = orgStudents.find((row) => row.id === metaStudentId);
     if (owner) {
+      // Provision retries exclude the same child's rows, including the Auth
+      // metadata owner. A confirmed owner in this org is not another child.
+      if (exclude.has(owner.id) && owner.organization_id === input.organizationId) return null;
       if (normalizeOrgStudentIdentityName(owner.full_name) === incomingName
         && owner.organization_id === input.organizationId) {
         return null;
@@ -139,10 +142,15 @@ export function findAuthEmailStudentConflict(
     }
   }
 
+  if (linkedRows.length && linkedRows.every((row) => exclude.has(row.id)
+    && row.organization_id === input.organizationId)) return null;
+
   if (auth.role === 'student' || metaStudentId) {
     return {
       code: 'auth_email_other_student',
-      existingStudentName: String(auth.fullName || '').trim() || '—',
+      // No owner row is visible in this organization. Do not disclose a
+      // different organization's account name through the availability check.
+      existingStudentName: '—',
       email,
     };
   }

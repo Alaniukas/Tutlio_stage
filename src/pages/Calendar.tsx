@@ -90,8 +90,8 @@ import {
   applyCalendarSeriesEdit,
   CalendarSeriesConflictError,
   loadFutureCalendarSeries,
-  syncRecurringTemplateAfterSeriesTimeEdit,
 } from '@/lib/calendarSessionSeriesEdit';
+import { editTutorCalendarSeries } from '@/lib/tutorCalendarSeriesEdit';
 import { canEditFutureOrgSeries, orgSessionEditNotice } from '@/lib/orgSessionEdit';
 import TimeSpinner, { CompactTimeSelect, DateTimeSpinner } from '@/components/TimeSpinner';
 import AvailabilityManager from '@/components/AvailabilityManager';
@@ -3831,6 +3831,7 @@ export default function CalendarPage() {
 
       let error: any = null;
       let editedSessionIds = new Set([selectedEvent.id]);
+      const seriesSavedTimes = new Map<string, { start_time: Date; end_time: Date }>();
 
       const editSessionPayload = {
         topic: editTopic,
@@ -3877,38 +3878,43 @@ export default function CalendarPage() {
         const recurringIds = groupRecurringIds.length
           ? groupRecurringIds
           : selectedEvent.recurring_session_id ? [selectedEvent.recurring_session_id] : [];
-        const futureList = await loadFutureCalendarSeries(supabase, {
-          tutorId: user.id,
-          from: oldStart,
-          recurringIds,
-          subjectId: selectedEvent.subject_id ?? null,
-        });
-        editedSessionIds = new Set(await applyCalendarSeriesEdit(supabase, {
-          tutorId: user.id,
-          rows: futureList,
-          edited: { id: selectedEvent.id, start_time: oldStart.toISOString(), end_time: oldEnd.toISOString() },
-          next: timeChanged || durationChanged
-            ? { start: newStart, end: newEnd }
-            : { start: oldStart, end: oldEnd },
-          fields: editSessionPayload,
-        }));
-        if (!isGroupSession && selectedEvent.recurring_session_id && (timeChanged || durationChanged)) {
-          await syncRecurringTemplateAfterSeriesTimeEdit(supabase, {
-            recurringId: selectedEvent.recurring_session_id,
-            tutorId: user.id,
-            newStart,
-            newEnd,
-            fields: editSessionPayload,
+        if (recurringIds.length) {
+          const saved = await editTutorCalendarSeries({
+            sessionId: selectedEvent.id, recurringIds, oldStart, oldEnd,
+            start: timeChanged || durationChanged ? newStart : oldStart,
+            end: timeChanged || durationChanged ? newEnd : oldEnd,
+            fields: editSessionPayload, reason: rescheduleReason.trim(),
+            requestedBy: effectiveRescheduleRequestedBy,
           });
-        }
-        if (timeChanged) {
-          await supabase.from('sessions').update({
-            reschedule_reason: rescheduleReason.trim(),
-            reschedule_requested_by: effectiveRescheduleRequestedBy,
-          }).in('id', [...editedSessionIds])
-            .then(({ error: reschedErr }) => {
-              if (reschedErr) console.warn('[Calendar] reschedule tracking columns not available:', reschedErr.message);
-            });
+          editedSessionIds = new Set(saved.map(row => row.id));
+          for (const row of saved) seriesSavedTimes.set(row.id, {
+            start_time: new Date(row.start_time), end_time: new Date(row.end_time),
+          });
+        } else {
+          const futureList = await loadFutureCalendarSeries(supabase, {
+            tutorId: user.id,
+            from: oldStart,
+            recurringIds,
+            subjectId: selectedEvent.subject_id ?? null,
+          });
+          editedSessionIds = new Set(await applyCalendarSeriesEdit(supabase, {
+            tutorId: user.id,
+            rows: futureList,
+            edited: { id: selectedEvent.id, start_time: oldStart.toISOString(), end_time: oldEnd.toISOString() },
+            next: timeChanged || durationChanged
+              ? { start: newStart, end: newEnd }
+              : { start: oldStart, end: oldEnd },
+            fields: editSessionPayload,
+          }));
+          if (timeChanged) {
+            await supabase.from('sessions').update({
+              reschedule_reason: rescheduleReason.trim(),
+              reschedule_requested_by: effectiveRescheduleRequestedBy,
+            }).in('id', [...editedSessionIds])
+              .then(({ error: reschedErr }) => {
+                if (reschedErr) console.warn('[Calendar] reschedule tracking columns not available:', reschedErr.message);
+              });
+          }
         }
       } else if (isGroupSession) {
         const ids = isClassGroupSession
@@ -4105,8 +4111,6 @@ export default function CalendarPage() {
         }
 
         const savedFields: Partial<Session> = {
-          start_time: newStart,
-          end_time: newEnd,
           topic: editTopic,
           meeting_link: editMeetingLink,
           tutor_comment: editTutorComment || null,
@@ -4123,6 +4127,8 @@ export default function CalendarPage() {
 
         const applySavedFieldsToSession = (s: Session): Session => {
           if (!matchesFutureEditScope(s)) return s;
+          const storedTimes = seriesSavedTimes.get(s.id);
+          if (storedTimes) return { ...s, ...savedFields, ...storedTimes };
           if (applyToAllFuture && (timeChanged || durationChanged)) {
             const shiftMs = newStart.getTime() - oldStart.getTime();
             const rowNewStart = new Date(s.start_time.getTime() + shiftMs);
@@ -4133,7 +4139,9 @@ export default function CalendarPage() {
               end_time: new Date(rowNewStart.getTime() + durMs),
             };
           }
-          return { ...s, ...savedFields };
+          return applyToAllFuture
+            ? { ...s, ...savedFields }
+            : { ...s, ...savedFields, start_time: newStart, end_time: newEnd };
         };
 
         setSessions((prev) => prev.map(applySavedFieldsToSession));
@@ -4145,7 +4153,7 @@ export default function CalendarPage() {
 
         setIsEditingSession(false);
         setGroupEditChoice('single');
-        fetchData();
+        fetchData({ silent: true });
       } else {
         alert(t('cal.failedToUpdate') + ': ' + error.message);
       }

@@ -32,11 +32,13 @@ export function buildMvAccountActivationToken(
     role: MvActivationRole;
     email: string;
     ttlMs?: number;
+    /** Server-controlled timestamp for identical idempotent delivery retries. */
+    issuedAt?: number;
   },
   signingSecret = secret(),
 ): string {
   if (!signingSecret) throw new Error('JOIN_LINK_SECRET / SUPABASE_SERVICE_ROLE_KEY is not configured');
-  const exp = Date.now() + (opts.ttlMs ?? DEFAULT_TTL_MS);
+  const exp = (opts.issuedAt ?? Date.now()) + (opts.ttlMs ?? DEFAULT_TTL_MS);
   const payload: MvActivationPayload = {
     studentId: opts.studentId.trim(),
     role: opts.role,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import JoinLessonButton from '@/components/JoinLessonButton';
-import { enrichSessionMeetingLink } from '@/lib/meetingLink';
+import { loadStudentSessionMeetingLinks } from '@/lib/studentSessionMeetingLinks';
 import StudentLayout from '@/components/StudentLayout';
 import { LessonRescheduleHelp } from '@/components/LessonRescheduleHelp';
 import ParentLayout from '@/components/ParentLayout';
@@ -54,6 +54,8 @@ import {
 
 interface Session {
     id: string;
+    student_id?: string | null;
+    tutor_id?: string | null;
     start_time: string;
     end_time: string;
     status: string;
@@ -781,7 +783,7 @@ export default function StudentSessions() {
 
         /** Narrow columns + no nested embed — `*, subjects(...)` pegged Postgres/RLS (statement timeouts). */
         const SESSION_LIST_COLUMNS =
-            'id,start_time,end_time,status,paid,price,topic,class_group_id,recurring_session_id,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,lesson_package_id,is_late_cancelled,cancellation_penalty_amount,penalty_resolution,cancelled_by,no_show_when,reschedule_reason';
+            'id,student_id,tutor_id,start_time,end_time,status,paid,price,topic,class_group_id,recurring_session_id,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,lesson_package_id,is_late_cancelled,cancellation_penalty_amount,penalty_resolution,cancelled_by,no_show_when,reschedule_reason';
 
         const secondaryGen = ++sessionsSecondaryGenRef.current;
 
@@ -876,7 +878,7 @@ export default function StudentSessions() {
             }
             return;
         }
-        const sessionRows = dedupeSessionsById((sessionsRes.data || []) as Array<Record<string, unknown> & { id: string }>);
+        const sessionRows = dedupeSessionsById((sessionsRes.data || []) as Session[]);
         const subjectIdsForSessions = [...new Set(sessionRows.map((r) => r.subject_id).filter(Boolean) as string[])];
         let subjectMeta: Record<string, { name: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean; meeting_link?: string | null }> =
             {};
@@ -900,24 +902,24 @@ export default function StudentSessions() {
                 }
             }
         }
-        const tutorPersonalLink = (tutorSub as { personal_meeting_link?: string | null } | null)?.personal_meeting_link;
         const subjectLinksById = new Map(
             Object.entries(subjectMeta).map(([id, meta]) => [id, { meeting_link: meta.meeting_link }]),
         );
-        const fetchedSessions: Session[] = sessionRows.map((row) => {
+        const linkedRows = await loadStudentSessionMeetingLinks(supabase, sessionRows, {
+            tutorsById: tutorManualRes.data && st.tutor_id
+                ? new Map([[st.tutor_id, tutorManualRes.data]])
+                : undefined,
+            subjectsById: subjectLinksById,
+        });
+        const fetchedSessions: Session[] = linkedRows.map((row) => {
             const sid = row.subject_id as string | null | undefined;
             const sm = sid ? subjectMeta[sid] : undefined;
-            const base = {
+            return {
                 ...(row as unknown as Session),
                 subjects: sm
                     ? { name: sm.name, is_group: sm.is_group, max_students: sm.max_students ?? undefined, is_trial: sm.is_trial }
                     : null,
             };
-            return enrichSessionMeetingLink(base, {
-                tutorPersonalLink,
-                studentPersonalLink: (st as { personal_meeting_link?: string | null }).personal_meeting_link,
-                subjectsById: subjectLinksById,
-            });
         });
         const currentStudentIdForFetch = st.id;
         setSessions(fetchedSessions);

@@ -44,7 +44,8 @@ export async function resolveOrgStudentEmailConflict(
   if (authErr || !authUser) return null;
 
   const meta = (authUser.user_metadata || {}) as Record<string, unknown>;
-  const metaStudentId = typeof meta.student_id === 'string' ? meta.student_id : null;
+  const metadataStudentId = authUser.app_metadata?.student_id || meta.student_id;
+  const metaStudentId = typeof metadataStudentId === 'string' ? metadataStudentId : null;
   const metaName = typeof meta.full_name === 'string' ? meta.full_name : null;
   const role = typeof meta.role === 'string' ? meta.role : null;
 

@@ -5,13 +5,18 @@ import { MemoryRouter } from 'react-router-dom';
 import StudentDashboard from '@/pages/StudentDashboard';
 import { invalidateCache, setCache } from '@/lib/dataCache';
 
-const state = vi.hoisted(() => ({ deferProfile: false }));
+const state = vi.hoisted(() => ({
+  deferProfile: false,
+  tutorLink: null as string | null,
+  studentLink: null as string | null,
+  subjectLink: null as string | null,
+}));
 const futureLesson = {
   id: 'lesson-1', student_id: 'student-1', tutor_id: 'tutor-1',
   start_time: new Date(Date.now() + 86_400_000).toISOString(),
   end_time: new Date(Date.now() + 90_000_000).toISOString(),
   status: 'active', paid: false, price: 25, topic: 'Mathematics',
-  payment_status: 'pending', subject_id: null, meeting_link: null,
+  payment_status: 'pending', subject_id: null as string | null, meeting_link: null as string | null,
 };
 
 vi.mock('@/lib/i18n', async () => {
@@ -38,14 +43,16 @@ vi.mock('@/lib/preload', () => ({
 }));
 vi.mock('@/components/StudentLayout', () => ({ default: ({ children }: { children: ReactNode }) => <div>{children}</div> }));
 vi.mock('@/components/SessionFiles', () => ({ default: () => null }));
-vi.mock('@/components/JoinLessonButton', () => ({ default: () => null }));
+vi.mock('@/lib/joinTracking', () => ({ recordJoinClick: vi.fn() }));
 vi.mock('@/components/WhiteboardButton', () => ({ default: () => null }));
 vi.mock('@/components/StatusBadge', () => ({ default: ({ treatUnpaidAsReserved }: { treatUnpaidAsReserved?: boolean }) =>
   <span>{treatUnpaidAsReserved ? 'status.reserved' : 'status.awaitingPayment'}</span> }));
 vi.mock('@/lib/supabase', () => {
   const from = (table: string) => {
     const rows = () => {
-      if (table === 'profiles') return [{ id: 'tutor-1', full_name: 'Tutor', organization_id: 'org-1', enable_per_lesson: true }];
+      if (table === 'profiles') return [{ id: 'tutor-1', full_name: 'Tutor', organization_id: 'org-1', enable_per_lesson: true, personal_meeting_link: state.tutorLink }];
+      if (table === 'students') return [{ id: 'student-1', personal_meeting_link: state.studentLink }];
+      if (table === 'subjects') return [{ id: 'subject-1', meeting_link: state.subjectLink }];
       if (table === 'organizations') return [{ id: 'org-1', entity_type: 'company', enable_per_lesson: true, enable_monthly_billing: true, features: {} }];
       if (table === 'sessions') return [futureLesson];
       return [];
@@ -62,7 +69,13 @@ vi.mock('@/lib/supabase', () => {
   return { supabase: { from, rpc: async () => ({ data: null, error: null }) } };
 });
 
-beforeEach(() => { invalidateCache(); localStorage.clear(); state.deferProfile = false; });
+beforeEach(() => {
+  invalidateCache(); localStorage.clear(); state.deferProfile = false;
+  state.tutorLink = null; state.studentLink = null; state.subjectLink = null;
+  futureLesson.meeting_link = null; futureLesson.subject_id = null;
+  futureLesson.start_time = new Date(Date.now() + 86_400_000).toISOString();
+  futureLesson.end_time = new Date(Date.now() + 90_000_000).toISOString();
+});
 afterEach(() => { cleanup(); invalidateCache(); });
 
 describe('student dashboard monthly lesson payment status', () => {
@@ -80,4 +93,29 @@ describe('student dashboard monthly lesson payment status', () => {
     await waitFor(() => expect(screen.getByText('stuSess.monthlyBillingNote')).toBeTruthy());
     expect(screen.queryByText('studentDash.stripePayBtn')).toBeNull();
   });
+});
+
+describe('student dashboard lesson joining', () => {
+  it.each([
+    { source: 'tutor', expected: 'https://meet.example/tutor' },
+    { source: 'student', expected: 'https://meet.example/student' },
+    { source: 'subject', expected: 'https://meet.example/subject' },
+    { source: 'session', expected: 'https://meet.example/session' },
+  ])('shows the $source link on the upcoming card and lesson dialog', async ({ source, expected }) => {
+    state.tutorLink = source === 'subject' ? null : 'https://meet.example/tutor';
+    if (source === 'student') state.studentLink = expected;
+    if (source === 'subject') {
+      state.subjectLink = expected;
+      futureLesson.subject_id = 'subject-1';
+    }
+    if (source === 'session') futureLesson.meeting_link = expected;
+    futureLesson.start_time = new Date(Date.now() + 20 * 60_000).toISOString();
+    futureLesson.end_time = new Date(Date.now() + 80 * 60_000).toISOString();
+
+    const { container } = render(<MemoryRouter><StudentDashboard /></MemoryRouter>);
+    await waitFor(() => expect(container.querySelector('a[href="' + expected + '"]')).toBeTruthy());
+    fireEvent.click(screen.getByText('Mathematics'));
+    expect(screen.getByRole('dialog').querySelector('a[href="' + expected + '"]')).toBeTruthy();
+  });
+
 });
