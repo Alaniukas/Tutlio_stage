@@ -409,6 +409,7 @@ export default function CalendarPage() {
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [eventModalNotice, setEventModalNotice] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const dataRevisionRef = useRef(0);
   const recurringSessionCounts = useMemo(
     () => buildRecurringSessionCounts(sessions),
     [sessions],
@@ -880,11 +881,16 @@ export default function CalendarPage() {
     };
   }, [selectedEvent?.id, selectedEvent?.status]);
 
-  const fetchData = async (opts?: { silent?: boolean }) => {
+  const fetchData = async (opts?: { silent?: boolean; fresh?: boolean }) => {
     if (!ctxUser) { setLoading(false); return; }
     const user = ctxUser;
+    // A save must not reuse a read started before that mutation or allow its
+    // delayed response to replace the newer lesson times already on screen.
+    if (opts?.fresh) dataRevisionRef.current += 1;
+    const revision = dataRevisionRef.current;
+    const isCurrent = () => revision === dataRevisionRef.current;
 
-    await dedupeAsync(`cal:${user.id}`, async () => {
+    await dedupeAsync(`cal:${user.id}:${revision}`, async () => {
     // Silent refresh (after an action with an optimistic local update) keeps the
     // current grid on screen instead of flashing the full-screen loading spinner.
     if (!opts?.silent) setLoading(true);
@@ -918,6 +924,7 @@ export default function CalendarPage() {
 
     // Sintakronizuoti Stripe / rankinių mokėjimų laukus iš DB (UserContext gali būti pasenęs po admin / Finansų kitų langų)
     const { data: paySync } = await tutorCalendarFallbackProfileDeduped(user.id);
+    if (!isCurrent()) return;
     if (paySync && profileData) {
       profileData = {
         ...profileData,
@@ -982,6 +989,7 @@ export default function CalendarPage() {
     }));
 
     const { data: studentsData } = await tutorStudentsRowsDeduped(user.id);
+    if (!isCurrent()) return;
     const calStudents =
       studentsData?.map((row: Record<string, unknown>) => ({
         id: row.id,
@@ -997,6 +1005,7 @@ export default function CalendarPage() {
     setStudents(calStudents as Student[]);
 
     const { data: subjectsData } = await tutorSubjectsCalendarDeduped(user.id);
+    if (!isCurrent()) return;
     const calSubjects = dedupeSubjectsById(subjectsData || []);
     setSubjects(calSubjects);
 
@@ -1018,13 +1027,16 @@ export default function CalendarPage() {
     );
 
     const { data: pricingData } = await tutorStudentPricingAllDeduped(user.id);
+    if (!isCurrent()) return;
     setIndividualPricing(pricingData || []);
 
     const { data: tspData } = await tutorSubjectPricesRowsAllDeduped(user.id);
+    if (!isCurrent()) return;
     setTutorSubjectPrices(tspData || []);
 
     if (profileData?.organization_id) {
       const { data: orgRow } = await organizationSubjectTemplatesDeduped(profileData.organization_id);
+      if (!isCurrent()) return;
       const tpl = (orgRow as any)?.org_subject_templates;
       if (Array.isArray(tpl)) {
         setCalOrgSubjectTemplates(tpl.filter((t: any) => t?.id && t?.name).map((t: any) => ({ id: t.id, name: String(t.name).trim() })));
@@ -1032,11 +1044,12 @@ export default function CalendarPage() {
     }
 
     const { data: av } = await tutorAvailabilityAllRowsDeduped(user.id);
+    if (!isCurrent()) return;
     setAvailability(av || []);
     } catch (error) {
       console.error('[Calendar] fetchData failed:', error);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
     });
   };
@@ -4153,7 +4166,7 @@ export default function CalendarPage() {
 
         setIsEditingSession(false);
         setGroupEditChoice('single');
-        fetchData({ silent: true });
+        fetchData({ silent: true, fresh: true });
       } else {
         alert(t('cal.failedToUpdate') + ': ' + error.message);
       }

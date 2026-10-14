@@ -1988,7 +1988,7 @@ export default function CompanySessions() {
                           {sessionPaymentAnnulmentText(locale, 'action')}
                         </Button>
                       )}
-                      {isProKlase && !canAnnulSessionPayment(selectedSession)
+                      {isProKlase
                         && (selectedSession.status === 'active' || selectedSession.status === 'completed' || selectedSession.is_complimentary) && (
                         <Button
                           variant="outline"

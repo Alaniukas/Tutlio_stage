@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { format } from 'date-fns';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CalendarPage from '@/pages/Calendar';
@@ -54,13 +55,20 @@ vi.mock('@/components/Layout', () => ({ default: ({ children }: { children: Reac
 vi.mock('@/components/SessionFiles', () => ({ default: () => null }));
 vi.mock('@/components/WhiteboardButton', () => ({ default: () => null }));
 vi.mock('@/components/AvailabilityManager', () => ({ default: () => null }));
+vi.mock('@/components/TimeSpinner', () => ({
+  default: () => null,
+  CompactTimeSelect: () => null,
+  DateTimeSpinner: ({ value, onChange }: { value: string; onChange: (value: string) => void }) =>
+    <input aria-label="Lesson start" type="datetime-local" value={value} onChange={event => onChange(event.target.value)} />,
+}));
 vi.mock('@/lib/authSession', () => ({ resolveAccessToken: async () => 'tutor-token' }));
 vi.mock('react-big-calendar', () => ({
   dateFnsLocalizer: () => ({}), Views: { WEEK: 'week', DAY: 'day', MONTH: 'month', AGENDA: 'agenda' },
-  Calendar: ({ events, onSelectEvent }: { events: Array<{ id: string; start_time: Date }>; onSelectEvent: (event: unknown) => void }) =>
-    <div>{events.map(event => <div key={event.id}>
+  Calendar: ({ events, onSelectEvent, view }: { events: Array<{ id: string; start_time: Date; end_time: Date }>; onSelectEvent: (event: unknown) => void; view: string }) =>
+    <div><output data-testid="calendar-view">{view}</output>{events.map(event => <div key={event.id}>
       <button onClick={() => onSelectEvent(event)}>open {event.id}</button>
       <output data-testid={`date-${event.id}`}>{event.start_time.toISOString()}</output>
+      <output data-testid={`end-${event.id}`}>{event.end_time.toISOString()}</output>
     </div>)}</div>,
 }));
 vi.mock('@/lib/email', () => ({ sendEmail: vi.fn(async () => true) }));
@@ -68,6 +76,7 @@ vi.mock('@/lib/supabase', () => {
   const from = (table: string) => {
     const filters: Array<(row: Record<string, any>) => boolean> = [];
     let patch: Record<string, any> | null = null;
+    let selection = '';
     let offset = 0, limit = Infinity;
     const rows = () => {
       if (table === 'profiles') return [{ id: 'tutor', full_name: 'Tutor', organization_id: '3422031d-6e21-424d-980b-35a9c6d7b8f1' }];
@@ -78,17 +87,19 @@ vi.mock('@/lib/supabase', () => {
       return [];
     };
     const resolveRows = async () => {
-      if (!patch && table === 'sessions' && state.deferRefresh && state.writes.length) {
-        await new Promise<void>(resolve => { state.releaseRefresh = resolve; });
-      }
       const result = rows().filter(row => filters.every(filter => filter(row))).slice(offset, offset + limit);
       if (patch) for (const row of result) {
         state.writes.push({ id: row.id, patch }); Object.assign(row, patch);
       }
-      return { data: structuredClone(result), error: null };
+      const data = structuredClone(result);
+      if (!patch && table === 'sessions' && selection.includes('student:students') && state.deferRefresh && state.writes.length) {
+        // A request reads the rows before its response reaches the browser.
+        await new Promise<void>(resolve => { state.releaseRefresh = resolve; });
+      }
+      return { data, error: null };
     };
     const query = {
-      select: () => query, order: () => query,
+      select: (value: string) => { selection = value; return query; }, order: () => query,
       eq: (key: string, value: unknown) => { filters.push(row => row[key] === value); return query; },
       neq: (key: string, value: unknown) => { filters.push(row => row[key] !== value); return query; },
       in: (key: string, values: unknown[]) => { filters.push(row => values.includes(row[key])); return query; },
@@ -120,14 +131,82 @@ beforeEach(() => {
   }));
   vi.spyOn(window, 'alert').mockImplementation(() => {});
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-    if (url === '/api/lesson-reschedule-approval') return new Response(JSON.stringify({ requests: [] }));
+    if (url.startsWith('/api/lesson-reschedule-approval')) return new Response(JSON.stringify({ requests: [] }));
     if (url !== '/api/tutor-calendar-series-edit') throw new Error(`Unexpected fetch: ${url}`);
     const input = JSON.parse(String(init?.body));
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer tutor-token');
     const saved = state.rows.filter(row => row.recurring_session_id === 'series' && row.status === 'active');
-    for (const row of saved) { state.writes.push({ id: row.id, patch: input.fields }); Object.assign(row, input.fields); }
+    const shiftMs = Date.parse(input.newStart) - Date.parse(input.oldStart);
+    const durationMs = Date.parse(input.newEnd) - Date.parse(input.newStart);
+    for (const row of saved) {
+      const start = new Date(Date.parse(row.start_time) + shiftMs);
+      const patch = { ...input.fields, start_time: start.toISOString(), end_time: new Date(start.getTime() + durationMs).toISOString() };
+      state.writes.push({ id: row.id, patch }); Object.assign(row, patch);
+    }
     return new Response(JSON.stringify({ sessions: saved.map(({ id, start_time, end_time }) => ({ id, start_time, end_time })) }));
   }));
+});
+
+async function saveNewStart(start: Date) {
+  fireEvent.change(screen.getByLabelText('Lesson start'), { target: { value: format(start, "yyyy-MM-dd'T'HH:mm") } });
+  fireEvent.change(screen.getByPlaceholderText('cal.rescheduleReasonPlaceholder'), { target: { value: 'Changed availability' } });
+  fireEvent.click(screen.getByText('cal.saveEdit'));
+  await waitFor(() => expect(screen.queryByText('cal.saveEdit')).toBeNull());
+}
+
+describe('SUP-97F99689 saved lesson time in the tutor calendar', () => {
+  it.each([357, 1280])('shows a single lesson at its saved date and time before and after refresh at width %s', async width => {
+    vi.stubGlobal('innerWidth', width);
+    state.deferRefresh = true;
+    const otherDates = state.rows.slice(1).map(row => row.start_time);
+    await edit('single', 'cal.moveLesson');
+    expect(screen.getByTestId('calendar-view').textContent).toBe(width < 768 ? 'day' : 'week');
+    const start = new Date(state.rows[0].start_time);
+    start.setDate(start.getDate() + 1);
+    start.setHours(9, 15, 0, 0);
+    await saveNewStart(start);
+    expect(state.rows[0].start_time).toBe(start.toISOString());
+    expect(screen.getByTestId('date-lesson-0').textContent).toBe(start.toISOString());
+    expect(screen.getByTestId('end-lesson-0').textContent).toBe(new Date(start.getTime() + 3_600_000).toISOString());
+    expect(state.rows.slice(1).map(row => row.start_time)).toEqual(otherDates);
+    await waitFor(() => expect(state.releaseRefresh).toBeTypeOf('function'));
+    await act(async () => { state.releaseRefresh!(); });
+    expect(screen.getByTestId('date-lesson-0').textContent).toBe(start.toISOString());
+  });
+
+  it.each(['single', 'all_future'] as const)('does not restore an older time when a previous %s refresh finishes after another move', async scope => {
+    state.deferRefresh = true;
+    await edit(scope, 'cal.moveLesson');
+    const firstStart = new Date(Date.parse(state.rows[0].start_time) + 3_600_000);
+    firstStart.setMinutes(0, 0, 0);
+    await saveNewStart(firstStart);
+    await waitFor(() => expect(state.releaseRefresh).toBeTypeOf('function'));
+    const releaseOlderRefresh = state.releaseRefresh!;
+
+    fireEvent.click(screen.getByText('cal.moveLesson'));
+    fireEvent.click(screen.getByText(scope === 'single' ? 'cal.editThisOnly' : 'cal.editAllFuture'));
+    const latestStart = new Date(firstStart.getTime() + 3_600_000);
+    await saveNewStart(latestStart);
+    await waitFor(() => expect(state.releaseRefresh).not.toBe(releaseOlderRefresh));
+    expect(state.rows[0].start_time).toBe(latestStart.toISOString());
+    expect(screen.getByTestId('date-lesson-0').textContent).toBe(latestStart.toISOString());
+
+    await act(async () => { releaseOlderRefresh(); await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(screen.getByTestId('date-lesson-0').textContent).toBe(latestStart.toISOString());
+    await act(async () => { state.releaseRefresh!(); });
+    expect(screen.getByTestId('date-lesson-0').textContent).toBe(latestStart.toISOString());
+  });
+
+  it('keeps the current time for recurring moves that require client approval', async () => {
+    state.approval = true;
+    const original = state.rows[0].start_time;
+    await edit('single', 'cal.moveLesson');
+    await saveNewStart(new Date(Date.parse(original) + 3_600_000));
+    expect(state.writes).toHaveLength(0);
+    expect(state.rows[0].start_time).toBe(original);
+    expect(screen.getByTestId('date-lesson-0').textContent).toBe(original);
+    expect(vi.mocked(fetch).mock.calls.some(([url, options]) => url === '/api/lesson-reschedule-approval' && options?.method === 'POST')).toBe(true);
+  });
 });
 afterEach(async () => {
   cleanup(); state.deferRefresh = false; state.releaseRefresh?.(); state.releaseRefresh = null;

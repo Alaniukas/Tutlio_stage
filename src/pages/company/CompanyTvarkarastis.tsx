@@ -4979,7 +4979,7 @@ export default function CompanyTvarkarastis() {
                       {sessionPaymentAnnulmentText(locale, 'action')}
                     </Button>
                   )}
-                  {isProKlaseOrg(organizationId) && !canAnnulSessionPayment(selectedEvent) && (
+                  {isProKlaseOrg(organizationId) && (
                     <Button
                       variant="outline"
                       className={cn(
