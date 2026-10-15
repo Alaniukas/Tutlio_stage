@@ -4,7 +4,8 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
-import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { isProKlaseOrg, orgFeeProfile } from './_lib/marketMoney.js';
+import { appendPayerAdminFeeInvoiceLine } from '../src/lib/invoiceAdminFee.js';
 import {
   buildClassicLtTutorPdfMeta,
   CLASSIC_LT_TUTOR_LAYOUT,
@@ -23,6 +24,7 @@ import {
   orgTutorSessionPayEur,
 } from '../src/lib/orgTutorLessonPay.js';
 import { findUnpricedManoTutorSessions } from './_lib/manoKorepetitoriusPayGuard.js';
+import { manoOrgTutorInvoiceAddressError } from '../src/lib/manoTutorInvoiceProfile.js';
 import { invoicePartyMatches, proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
 import { findSchoolAttendanceDuplicateInvoices, loadSchoolTutorInvoiceRows, SCHOOL_TUTOR_INVOICE_LAYOUT, SchoolTutorInvoiceSelectionError } from './_lib/schoolTutorInvoice.js';
 import { SchoolTutorAttendancePayPeriodError } from './_lib/schoolTutorAttendancePay.js';
@@ -537,6 +539,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (manoTutorInvoice) {
+      const addressError = manoOrgTutorInvoiceAddressError(sellerProfile);
+      if (addressError) {
+        return res.status(400).json({ error: addressError });
+      }
       const unpriced = findUnpricedManoTutorSessions(
         sessions,
         profile.organization_id,
@@ -734,6 +740,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
     const sellerSnapshot = {
       ...buildSellerSnapshot(sellerProfile, profile),
+      ...(manoTutorInvoice ? { personalCode: undefined } : {}),
       ...(sellerTaxExemptionNote ? { taxExemptionNote: sellerTaxExemptionNote } : {}),
     };
 
@@ -793,7 +800,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      const totalAmount = lineItems.reduce((sum, li) => sum + li.totalPrice, 0);
+      let totalAmount = lineItems.reduce((sum, li) => sum + li.totalPrice, 0);
+      let adminFee = 0;
+      if (!isOrgTutor) {
+        const withAdminFee = appendPayerAdminFeeInvoiceLine(
+          lineItems,
+          totalAmount,
+          profile.organization_id,
+          'default',
+          orgFeeProfile(profile.organization_id),
+        );
+        lineItems = withAdminFee.lineItems;
+        totalAmount = withAdminFee.totalAmount;
+        adminFee = withAdminFee.adminFee;
+      }
 
       const buyer = organizationAsBuyer ?? buildBuyerFromSessions(group.sessions);
 
@@ -842,7 +862,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           origin: 'generated',
           pdf_meta: isOrgTutor ? { ...pdfMeta, invoiceKind: 'tutor_pay', tutorId,
             ...(proKlaseTutorInvoice ? { proKlaseTutorPayLineVersion: PRO_KLASE_TUTOR_PAY_LINE_VERSION,
-              tutorAdjustmentIds: proKlaseAdjustments.filter(adjustment => Number(adjustment.amount_eur) !== 0).map(adjustment => adjustment.id) } : {}) } : pdfMeta,
+              tutorAdjustmentIds: proKlaseAdjustments.filter(adjustment => Number(adjustment.amount_eur) !== 0).map(adjustment => adjustment.id) } : {}) }
+            : adminFee > 0
+              ? { ...(pdfMeta || {}), includesPayerAdminFee: true, adminFeeEur: adminFee }
+              : pdfMeta,
           ...(body.billingBatchId ? { billing_batch_id: body.billingBatchId } : {}),
         };
       const replacementLines = lineItems.map(li => ({

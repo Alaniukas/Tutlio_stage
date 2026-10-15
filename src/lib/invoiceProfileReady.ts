@@ -31,8 +31,9 @@ export function invoiceProfileMissingFields(profile: InvoiceProfileLike | null |
     if (!hasText(profile.business_name)) missing.push('business_name');
     if (!hasText(profile.company_code)) missing.push('company_code');
     if (!hasText(profile.address)) missing.push('address');
-  } else if (!hasText(profile.activity_number)) {
-    missing.push('activity_number');
+  } else {
+    if (!hasText(profile.activity_number)) missing.push('activity_number');
+    if (!hasText(profile.address)) missing.push('address');
   }
 
   if (!hasText(profile.contact_email) && !hasText(profile.contact_phone)) {

@@ -35,6 +35,8 @@ export type SchoolLessonInvoiceSession = {
   tutorId: string;
   tutorName: string;
   unitPriceEur: number;
+  /** Extra-lessons contracts that cover this billable session (discount matching). */
+  matchingContractIds?: string[];
 };
 
 export type SchoolLessonDiscountInput = {
@@ -43,6 +45,7 @@ export type SchoolLessonDiscountInput = {
   subjectId: string;
   tutorId?: string | null;
   classGroupId?: string | null;
+  contractId?: string | null;
   agreementId?: string | null;
   note?: string | null;
 };
@@ -108,6 +111,7 @@ export function buildSchoolLessonInvoiceLines(
       subjectId: first.subjectId,
       tutorId: first.tutorId,
       classGroupId: first.classGroupId || null,
+      matchingContractIds: first.matchingContractIds,
     });
     const applied = invoiceLineDiscount(originalAmountEur, discount);
     return {

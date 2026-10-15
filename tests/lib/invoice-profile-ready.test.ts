@@ -12,13 +12,15 @@ describe('invoiceProfileReady', () => {
     })).toBe(true);
   });
 
-  it('requires activity number for individuali_veikla', () => {
+  it('requires activity number and address for individuali_veikla', () => {
     const profile = {
       entity_type: 'individuali_veikla',
       activity_number: '123456789',
+      address: 'Gatvė 1, Vilnius',
       contact_phone: '+37060000000',
     };
     expect(isInvoiceProfileComplete(profile)).toBe(true);
     expect(invoiceProfileMissingFields({ ...profile, activity_number: '' })).toContain('activity_number');
+    expect(invoiceProfileMissingFields({ ...profile, address: '' })).toContain('address');
   });
 });

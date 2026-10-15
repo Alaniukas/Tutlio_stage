@@ -30,6 +30,8 @@ interface InvoiceProfile {
 interface InvoiceSettingsFormProps {
   scope?: 'user' | 'organization';
   allowedEntityTypes?: EntityType[];
+  /** MK org tutor invoices must show address, not asmens kodas on PDF. */
+  showPersonalCodeOnInvoice?: boolean;
   onSaved?: () => void;
 }
 
@@ -54,6 +56,7 @@ const COMPANY_TYPES: EntityType[] = ['mb', 'uab', 'ii'];
 export default function InvoiceSettingsForm({
   scope = 'user',
   allowedEntityTypes,
+  showPersonalCodeOnInvoice = true,
   onSaved,
 }: InvoiceSettingsFormProps) {
   const { t } = useTranslation();
@@ -249,15 +252,28 @@ export default function InvoiceSettingsForm({
           </div>
           <div>
             <Label className="text-sm font-medium text-gray-700">
-              {t('invoiceSettings.personalCode')}
+              {t('invoiceSettings.address')} *
             </Label>
             <Input
-              value={form.personal_code}
-              onChange={(e) => updateField('personal_code', e.target.value)}
-              placeholder="39001010000"
+              value={form.address}
+              onChange={(e) => updateField('address', e.target.value)}
+              placeholder={t('invoiceSettings.addressPlaceholder')}
               className="mt-1 rounded-lg"
             />
           </div>
+          {showPersonalCodeOnInvoice ? (
+            <div>
+              <Label className="text-sm font-medium text-gray-700">
+                {t('invoiceSettings.personalCode')}
+              </Label>
+              <Input
+                value={form.personal_code}
+                onChange={(e) => updateField('personal_code', e.target.value)}
+                placeholder="39001010000"
+                className="mt-1 rounded-lg"
+              />
+            </div>
+          ) : null}
         </div>
       )}
 

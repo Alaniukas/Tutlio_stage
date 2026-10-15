@@ -2102,7 +2102,9 @@ export default function CompanyTutors() {
                     {tutorInvoiceProfile.vat_code && <p><span className="text-gray-500">{t('invoiceSettings.vatCode')}:</span> {tutorInvoiceProfile.vat_code}</p>}
                     {tutorInvoiceProfile.address && <p><span className="text-gray-500">{t('invoiceSettings.address')}:</span> {tutorInvoiceProfile.address}</p>}
                     {tutorInvoiceProfile.activity_number && <p><span className="text-gray-500">{t('invoiceSettings.activityNumber')}:</span> {tutorInvoiceProfile.activity_number}</p>}
-                    {tutorInvoiceProfile.personal_code && <p><span className="text-gray-500">{t('invoiceSettings.personalCode')}:</span> {tutorInvoiceProfile.personal_code}</p>}
+                    {tutorInvoiceProfile.personal_code && !isManoKorepetitoriusOrg(orgId) && (
+                      <p><span className="text-gray-500">{t('invoiceSettings.personalCode')}:</span> {tutorInvoiceProfile.personal_code}</p>
+                    )}
                     {tutorInvoiceProfile.contact_email && <p><span className="text-gray-500">{t('invoiceSettings.contactEmail')}:</span> {tutorInvoiceProfile.contact_email}</p>}
                     {tutorInvoiceProfile.contact_phone && <p><span className="text-gray-500">{t('invoiceSettings.contactPhone')}:</span> {tutorInvoiceProfile.contact_phone}</p>}
                     {tutorInvoiceProfile.invoice_series && <p><span className="text-gray-500">{t('invoiceSettings.invoiceSeries')}:</span> {tutorInvoiceProfile.invoice_series}</p>}

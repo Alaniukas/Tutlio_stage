@@ -99,7 +99,7 @@ describe('Mano Korepetitorius monthly invoice payment fee split', () => {
         expect.objectContaining({ price_data: expect.objectContaining({ unit_amount: 4000,
           product_data: expect.objectContaining({ description: 'Mokymo paslaugos. Paslaugos teikėjas: MB Mano korepetitorius' }),
         }) }),
-        expect.objectContaining({ price_data: expect.objectContaining({ unit_amount: 110 }) }),
+        expect.objectContaining({ price_data: expect.objectContaining({ unit_amount: 111 }) }),
       ],
       payment_intent_data: {
         application_fee_amount: 80,
@@ -131,7 +131,7 @@ describe('Mano Korepetitorius monthly invoice payment fee split', () => {
 
     expect(mocks.retrieve).toHaveBeenCalledWith('cs_test_expired', { stripeAccount: 'acct_mano_test' });
     expect(mocks.create).toHaveBeenCalledTimes(1);
-    expect(mocks.create.mock.calls[0][0].line_items[1].price_data.unit_amount).toBe(110);
+    expect(mocks.create.mock.calls[0][0].line_items[1].price_data.unit_amount).toBe(111);
     expect(res.statusCode).toBe(303);
   });
 

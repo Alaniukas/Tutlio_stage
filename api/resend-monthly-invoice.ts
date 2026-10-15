@@ -9,7 +9,7 @@ import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { marketFromRequest } from './_lib/market.js';
-import { lessonCheckoutBreakdownCents, orgFeeProfile } from './_lib/marketMoney.js';
+import { paymentCheckoutBreakdownCents, orgFeeProfile } from './_lib/marketMoney.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { retrieveConnectCheckoutSessionWithScope } from './_lib/stripeDirectCharge.js';
 import { billingBatchInvoiceNumbers, checkoutPaymentReporting, checkoutReportingMatches } from './_lib/stripeCheckoutReporting.js';
@@ -159,10 +159,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const feeProfile = orgFeeProfile(org?.slug) ?? orgFeeProfile(tutor.organization_id);
       const feeSplit = resolveOrgPayerFeeSplit(org?.features);
       if (!(org?.entity_type === 'school' && !feeProfile)) {
-        checkoutTotalCents = feeProfile
-          ? lessonCheckoutBreakdownCents(Number(batch.total_amount), market, feeProfile, feeSplit).totalCents
-          : junction.reduce((sum: number, row: any) => sum
-            + lessonCheckoutBreakdownCents(Number(row.session_price) || 0, market, null, feeSplit).totalCents, 0);
+        checkoutTotalCents = paymentCheckoutBreakdownCents(
+          Number(batch.total_amount),
+          market,
+          feeProfile,
+          feeSplit,
+        ).totalCents;
       }
       // Quote an open Checkout only when pay-invoice can still reuse it.
       // Legacy reporting fields cause the link to recreate it at current prices.

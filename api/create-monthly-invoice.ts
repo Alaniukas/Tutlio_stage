@@ -8,7 +8,8 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { marketFromRequest } from './_lib/market.js';
-import { chargeCurrency, directChargeApplicationFeeCents, isManoKorepetitoriusOrg, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
+import { chargeCurrency, directChargeApplicationFeeCents, isManoKorepetitoriusOrg, paymentCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
+import { stripePayerAdminFeeLineItem } from '../src/lib/invoiceAdminFee.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { billingBatchInvoiceNumbers, checkoutPaymentReporting } from './_lib/stripeCheckoutReporting.js';
@@ -703,23 +704,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }, directChargeOptions(stripeAccountId as string));
                     payerCheckoutTotalEur = chargeCents / 100;
                 } else if (stripeAccountId) {
-                    let baseCents = 0;
-                    let feesCents = 0;
-                    let applicationFeeCents = 0;
-                    if (feeProfile) {
-                        // Custom org deals are tiered on the full transaction (invoice total), not per session.
-                        const b = lessonCheckoutBreakdownCents(totalLessonPrice, market, feeProfile, feeSplit);
-                        baseCents = b.baseCents;
-                        feesCents = b.feesCents;
-                        applicationFeeCents = directChargeApplicationFeeCents(totalLessonPrice, market, feeProfile, feeSplit);
-                    } else {
-                        for (const s of payerSessions) {
-                            const b = lessonCheckoutBreakdownCents(Number(s.price) || 0, market, null, feeSplit);
-                            baseCents += b.baseCents;
-                            feesCents += b.feesCents;
-                            applicationFeeCents += directChargeApplicationFeeCents(Number(s.price) || 0, market, null, feeSplit);
-                        }
-                    }
+                    const b = paymentCheckoutBreakdownCents(totalLessonPrice, market, feeProfile, feeSplit);
+                    const baseCents = b.baseCents;
+                    const feesCents = b.feesCents;
+                    const applicationFeeCents = directChargeApplicationFeeCents(totalLessonPrice, market, feeProfile, feeSplit);
                     checkoutSession = await stripe.checkout.sessions.create({
                         mode: 'payment',
                         customer_email: payerEmail,
@@ -737,17 +725,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                 },
                                 quantity: 1,
                             },
-                            {
-                                price_data: {
-                                    currency,
-                                    product_data: {
-                                        name: 'Platformos administravimo mokestis',
-                                        description: 'Paslaugos teikėjas: MB „Tutlio“',
-                                    },
-                                    unit_amount: feesCents,
-                                },
-                                quantity: 1,
-                            },
+                            stripePayerAdminFeeLineItem(resolvedOrganizationId, currency, feesCents),
                         ],
                         payment_intent_data: {
                             description: reporting.description,

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const migration = readFileSync('supabase/migrations/20261002110334_universal_paid_source_invoices.sql', 'utf8');
+const adminFeeMigration = readFileSync('supabase/migrations/20261015183000_proklase_invoice_admin_fee.sql', 'utf8');
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const org = id(10);
 let db: PGlite;
@@ -53,7 +54,8 @@ beforeEach(async () => {
       total_price numeric, session_ids uuid[]);
     CREATE TABLE lesson_package_items(package_id uuid, subject_id uuid, total_lessons int, total_price numeric, position int);
     CREATE TABLE platform_fee_ledger(source_type text, source_id uuid, provider text, organization_id uuid,
-      base_amount numeric, paid_at timestamptz, stripe_checkout_session_id text, currency text, PRIMARY KEY(source_type, source_id));
+      base_amount numeric, paid_at timestamptz, stripe_checkout_session_id text, currency text,
+      platform_fee numeric DEFAULT 0, gross_amount numeric DEFAULT 0, PRIMARY KEY(source_type, source_id));
     CREATE FUNCTION allocate_invoice_number(p_profile_id uuid) RETURNS TABLE(invoice_series text, allocated_number int)
       LANGUAGE sql AS $$ UPDATE invoice_profiles SET next_invoice_number = next_invoice_number + 1
         WHERE id = p_profile_id RETURNING invoice_series, next_invoice_number - 1 $$;
@@ -68,6 +70,7 @@ beforeEach(async () => {
     INSERT INTO platform_fee_ledger VALUES ('session', '${id(4)}', 'stripe', '${org}', 29, '2026-09-10T10:00:00Z', 'cs_paid', 'EUR');
   `);
   await db.exec(migration);
+  await db.exec(adminFeeMigration);
 });
 afterEach(async () => db.close());
 
@@ -238,6 +241,33 @@ describe('shared organization sales invoices', () => {
     await issue();
     expect((await db.query<any>('SELECT seller_snapshot FROM invoices')).rows[0].seller_snapshot)
       .toHaveProperty('taxExemptionNote', 'PVM neapmokestinama pagal LR PVMĮ 22 str.');
+  });
+
+  it('adds Administravimo mokestis on Pro Klasė invoices so the S.F. matches Checkout', async () => {
+    const pro = 'b0a00000-7e57-4000-8000-000000000001';
+    await db.exec(`UPDATE organizations SET id = '${pro}'; UPDATE profiles SET organization_id = '${pro}';
+      UPDATE invoice_profiles SET organization_id = '${pro}';
+      UPDATE platform_fee_ledger SET organization_id = '${pro}', platform_fee = 0.45, gross_amount = 29.45`);
+    await issue();
+    expect((await db.query('SELECT total_amount, subtotal FROM invoices')).rows)
+      .toEqual([{ total_amount: '29.45', subtotal: '29.45' }]);
+    expect((await db.query<any>(
+      "SELECT description, total_price FROM invoice_line_items WHERE description = 'Administravimo mokestis'",
+    )).rows).toEqual([{ description: 'Administravimo mokestis', total_price: '0.45' }]);
+    expect((await db.query<any>(
+      "SELECT total_price FROM invoice_line_items WHERE description <> 'Administravimo mokestis'",
+    )).rows).toEqual([{ total_price: '29.00' }]);
+    expect((await db.query<any>('SELECT pdf_meta FROM invoices')).rows[0].pdf_meta)
+      .toMatchObject({ includesPayerAdminFee: true, adminFeeEur: 0.45 });
+  });
+
+  it('does not add an admin fee line for other organizations even when Stripe collected a fee', async () => {
+    await db.exec('UPDATE platform_fee_ledger SET platform_fee = 0.45, gross_amount = 29.45');
+    await issue();
+    expect((await db.query('SELECT total_amount FROM invoices')).rows).toEqual([{ total_amount: '29.00' }]);
+    expect((await db.query(
+      "SELECT count(*)::int AS count FROM invoice_line_items WHERE description = 'Administravimo mokestis'",
+    )).rows).toEqual([{ count: 0 }]);
   });
 
   it('keeps the operation inaccessible to browser roles', async () => {

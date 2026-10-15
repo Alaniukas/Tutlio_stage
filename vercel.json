@@ -267,6 +267,10 @@
             "schedule": "35 2 * * *"
         },
         {
+            "path": "/api/admin-usage-weekly-report",
+            "schedule": "0 6 * * 1"
+        },
+        {
             "path": "/api/registration-reminders",
             "schedule": "*/15 * * * *"
         },

@@ -18,6 +18,7 @@ import {
   type OrgFeeProfile,
 } from './_lib/marketMoney.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
+import { stripePayerAdminFeeLineItem } from '../src/lib/invoiceAdminFee.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasAnyOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
@@ -265,17 +266,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         },
                         quantity: 1,
                     },
-                    {
-                        price_data: {
-                            currency,
-                            product_data: {
-                                name: 'Platformos administravimo mokestis',
-                                description: 'Paslaugos teikėjas: MB „Tutlio“',
-                            },
-                            unit_amount: feesCents,
-                        },
-                        quantity: 1,
-                    },
+                    stripePayerAdminFeeLineItem(tutor?.organization_id, currency, feesCents),
                 ],
                 payment_intent_data: {
                     ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),

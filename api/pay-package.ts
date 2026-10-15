@@ -13,6 +13,7 @@ import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, directChargeApplicationFeeCents, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
+import { stripePayerAdminFeeLineItem } from '../src/lib/invoiceAdminFee.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { stripeCheckoutLocale } from './_lib/stripeLocale.js';
@@ -242,7 +243,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 payment_method_types: ['card'],
                 line_items: [
                     ...itemLineItems,
-                    { price_data: { currency, product_data: { name: 'Platformos administravimo mokestis', description: 'Paslaugos teikėjas: MB „Tutlio“' }, unit_amount: feesCents }, quantity: 1 },
+                    stripePayerAdminFeeLineItem(paymentOrganizationId, currency, feesCents),
                 ],
                 payment_intent_data: {
                     ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),

@@ -34,7 +34,22 @@ function query(table: string) {
         company_commission_percent: mocks.profileRate, company_commission_by_subject: {} },
       error: null,
     }),
-    maybeSingle: async () => ({ data: table === 'organizations' ? { entity_type: 'company' } : null, error: null }),
+    maybeSingle: async () => {
+      if (table === 'organizations') {
+        return { data: { entity_type: 'company', name: 'MB Mano korepetitorius', email: 'info@test.lt' }, error: null };
+      }
+      if (table === 'invoice_profiles') {
+        return { data: {
+          id: 'ip-1',
+          entity_type: 'individuali_veikla',
+          activity_number: '1461510',
+          address: 'Veteranų 14-30, Visaginas',
+          contact_email: 'eva@test.lt',
+          iban: 'LT237300010157800697',
+        }, error: null };
+      }
+      return { data: null, error: null };
+    },
     then(resolve: (value: unknown) => unknown) {
       const sessions = [{ id: 'lesson-1', tutor_id: 'tutor-1', status: 'completed',
         start_time: '2026-09-15T10:00:00Z', end_time: '2026-09-15T11:00:00Z',
@@ -136,6 +151,28 @@ describe('Mano tutor invoice precheck', () => {
     } } as any, res as any);
 
     expect(res.body).toEqual(expect.objectContaining({ canGenerate: true }));
+  });
+
+  it('rejects MK tutor invoices when the seller address is missing', async () => {
+    mocks.profileRate = 20;
+    mocks.from.mockImplementation((table: string) => {
+      const q = query(table);
+      q.maybeSingle = async () => {
+        if (table === 'invoice_profiles') {
+          return { data: { id: 'ip-1', entity_type: 'individuali_veikla', activity_number: '1461510', address: '' }, error: null };
+        }
+        return query(table).maybeSingle();
+      };
+      return q;
+    });
+    const res = response();
+    await handler({ method: 'POST', body: {
+      tutorId: 'tutor-1', periodStart: '2026-09-01', periodEnd: '2026-09-30',
+      groupingType: 'single', isOrgTutor: true, precheckOnly: true,
+    } } as any, res as any);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual(expect.objectContaining({ error: expect.stringContaining('adresas') }));
   });
 
   it('fails closed when duplicate lookup fails', async () => {

@@ -38,6 +38,29 @@ All new tables use RLS with no browser policies, revoke PUBLIC/anon/authenticate
 - Onboarding flags apply only to organizations created within 30 days, observed for at least three days, with missing role/feature-appropriate first actions. Invoice sending also satisfies invoice onboarding; creating a group satisfies initial lesson scheduling.
 - Demo/QA and suspended organizations receive no attention flags. Missing history is unknown, not proof of inactivity. History before the migration is not reconstructed.
 
+## Weekly internal email (customer success)
+
+`GET /api/admin-usage-weekly-report` requires `CRON_SECRET` and runs **every Monday at 06:00 UTC** (08:00/09:00 Vilnius). It sends one HTML digest to `INTERNAL_NOTIFY_EMAILS` (includes `alaniukasa@gmail.com`). The email does not contact customers.
+
+| Section | Purpose |
+| --- | --- |
+| Kaip sekasi klientams | Active org count (7 d.), successful actions this week vs previous week, orgs with errors, top modules (30 d.) |
+| Neaktyvūs administratoriai (≥7 d.) | No observed login or in-app activity for at least 7 days (`last_active_at` / `last_login_at` from telemetry) |
+| Įspėjimas (≥14 d.) | Same list filtered to 14+ days (or no telemetry yet on older orgs) |
+| Onboarding checklist | Orgs younger than 30 days missing first milestones (student, tutor, session, invoice, contract, group) |
+
+Resend idempotency key: `admin-usage-weekly-YYYY-Www` (one send per ISO week). Requires the same telemetry migration and production collector as the admin panel.
+
+### Metrics that matter for Tutlio-style SaaS
+
+- **Activation:** first milestones per org (students, schedule, finance/contracts for schools).
+- **Engagement:** active admin days per week, module visits (which areas they actually use).
+- **Depth:** successful workflow actions (not page views alone), week-over-week trend.
+- **Reliability:** grouped client errors and repeated fingerprints (support before churn).
+- **Risk:** admin inactivity (7 d. ping internally, 14 d. escalate), usage drop ≥50% with baseline volume.
+
+Page and feature use are captured as **modules** (route segments under `/company` and `/school`) and **actions** (successful mutations such as `student.create`, `invoice.send`). See `TELEMETRY_MODULES` and `TELEMETRY_ACTIONS` in `src/lib/orgAdminTelemetryShared.ts`.
+
 ## Release and verification
 
 Apply `20261013170213_org_admin_usage_telemetry.sql` before deploying the frontend/API and the updated log drain together. It relies on the existing organization-admin permission schema and `support_vercel_log_events` migration. No new environment secret is required: existing Supabase service credentials, `ADMIN_SECRET`, `CRON_SECRET`, `VERCEL_PROJECT_ID`, and signed drain configuration are reused. Follow the repository's approved `simo-local` release procedure; creating these files does not apply the production migration or publish a release.

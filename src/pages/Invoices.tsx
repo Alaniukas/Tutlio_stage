@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
+import { useUser } from '@/contexts/UserContext';
 import { fetchOrgTutorInvoicesDeduped } from '@/lib/fetchOrgTutorInvoicesDeduped';
 import { isOwnOrgTutorInvoice } from '@/lib/orgTutorInvoiceAccess';
 import InvoiceSettingsForm from '@/components/InvoiceSettingsForm';
@@ -29,6 +30,7 @@ import {
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { downloadInvoicePdfFile, downloadInvoicesAsZip } from '@/lib/downloadInvoicesZip';
+import { isManoKorepetitoriusOrg } from '@/lib/marketMoney';
 
 interface Invoice {
   pdf_meta?: unknown;
@@ -51,6 +53,8 @@ interface Invoice {
 export default function InvoicesPage() {
   const { t } = useTranslation();
   const orgPolicy = useOrgTutorPolicy();
+  const { profile: userProfile } = useUser();
+  const hidePersonalCodeOnInvoice = isManoKorepetitoriusOrg(userProfile?.organization_id);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -445,6 +449,7 @@ export default function InvoicesPage() {
             <InvoiceSettingsForm
               scope={orgPolicy.isOrgTutor ? 'user' : 'user'}
               allowedEntityTypes={orgPolicy.isOrgTutor ? ['verslo_liudijimas', 'individuali_veikla'] : undefined}
+              showPersonalCodeOnInvoice={!hidePersonalCodeOnInvoice}
               onSaved={() => setShowSettings(false)}
             />
           </div>

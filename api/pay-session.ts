@@ -29,6 +29,7 @@ import {
     retrieveConnectCheckoutSessionWithScope,
 } from './_lib/stripeDirectCharge.js';
 import { resolveOrgPayerFeeSplit } from './_lib/orgPayerFeeSplit.js';
+import { stripePayerAdminFeeLineItem } from '../src/lib/invoiceAdminFee.js';
 import {
     allowsPerLessonBilling,
     loadPerLessonBillingFlags,
@@ -223,7 +224,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 payment_method_types: ['card'],
                 line_items: [
                     { price_data: { currency, product_data: { name: itemName, description: itemDesc }, unit_amount: baseCents }, quantity: 1 },
-                    { price_data: { currency, product_data: { name: 'Platformos administravimo mokestis', description: 'Paslaugos teikėjas: MB „Tutlio“' }, unit_amount: feesCents }, quantity: 1 },
+                    stripePayerAdminFeeLineItem(tutor.organization_id, currency, feesCents),
                 ],
                 payment_intent_data: {
                     ...(applicationFeeCents > 0 ? { application_fee_amount: applicationFeeCents } : {}),

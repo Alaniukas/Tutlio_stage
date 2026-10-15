@@ -31,6 +31,10 @@ export type AcceptedDiscountAgreementRow = {
 export type DiscountContractRow = {
   id: string;
   class_group_id?: string | null;
+  order_snapshot?: {
+    subject_id?: string | null;
+    group_id?: string | null;
+  } | null;
 };
 
 export function discountAgreementNote(agreement: Pick<AcceptedDiscountAgreementRow, 'agreement_number' | 'note'>): string | null {
@@ -52,13 +56,18 @@ export function mapAcceptedDiscountAgreement(
   agreement: AcceptedDiscountAgreementRow,
   contract?: DiscountContractRow | null,
 ): SchoolLessonDiscountInput {
-  const classGroupId = contract?.class_group_id ? String(contract.class_group_id) : null;
+  const order = contract?.order_snapshot;
+  const classGroupId = contract?.class_group_id
+    ? String(contract.class_group_id)
+    : (order?.group_id ? String(order.group_id) : null);
+  const snapshotSubjectId = order?.subject_id ? String(order.subject_id) : '';
   return {
     type: agreement.discount_type === 'amount' ? 'amount' : 'percent',
     value: Number(agreement.discount_value || 0),
-    subjectId: agreement.subject_id ? String(agreement.subject_id) : (classGroupId || ''),
+    subjectId: agreement.subject_id ? String(agreement.subject_id) : (snapshotSubjectId || classGroupId || ''),
     tutorId: agreement.tutor_id ? String(agreement.tutor_id) : null,
     classGroupId,
+    contractId: String(agreement.contract_id),
     note: discountAgreementNote(agreement),
     agreementId: String(agreement.id),
   };
@@ -75,12 +84,18 @@ export function mergeLessonDiscountInputs(
   ];
 }
 
+export type LessonDiscountSessionMatch = Pick<
+  SchoolLessonInvoiceSession,
+  'subjectId' | 'tutorId' | 'classGroupId' | 'matchingContractIds'
+>;
+
 export function findLessonDiscountForSession(
   discounts: SchoolLessonDiscountInput[],
-  session: Pick<SchoolLessonInvoiceSession, 'subjectId' | 'tutorId' | 'classGroupId'>,
+  session: LessonDiscountSessionMatch,
 ): SchoolLessonDiscountInput | undefined {
   return discounts.find((candidate) => {
     if (candidate.tutorId && candidate.tutorId !== session.tutorId) return false;
+    if (candidate.contractId && session.matchingContractIds?.includes(candidate.contractId)) return true;
     if (candidate.subjectId && candidate.subjectId === session.subjectId) return true;
     const groupId = session.classGroupId || null;
     if (candidate.classGroupId && (candidate.classGroupId === groupId || candidate.classGroupId === session.subjectId)) {

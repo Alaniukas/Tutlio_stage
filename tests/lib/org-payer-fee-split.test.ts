@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { customerTotal } from '../../src/lib/marketMoney';
+import { customerTotal, paymentCheckoutBreakdownCents } from '../../src/lib/marketMoney';
+import { paymentCheckoutBreakdownCents as serverPaymentBreakdown } from '../../api/_lib/marketMoney';
 import { directChargeApplicationFeeCents } from '../../api/_lib/marketMoney';
 import { en } from '../../src/lib/i18n/en';
 import { lt } from '../../src/lib/i18n/lt';
@@ -69,5 +70,36 @@ describe('org payer fee split', () => {
     });
 
     expect(directChargeApplicationFeeCents(100, 'default', null, split)).toBe(200);
+  });
+
+  it('applies Stripe 1.5% + 0.25 EUR once per payment, not per lesson', () => {
+    const mk = parseOrgPayerFeeSplitConfig({
+      platform_share: 0,
+      stripe_percent_share: 65,
+      stripe_fixed_share: 100,
+    });
+    const oneLesson = paymentCheckoutBreakdownCents(15, 'default', null, mk);
+    const tenLessonsWrong = Array.from({ length: 10 }, () => paymentCheckoutBreakdownCents(30, 'default', null, mk))
+      .reduce((sum, row) => sum + row.totalCents, 0);
+    const tenLessonsPayment = paymentCheckoutBreakdownCents(300, 'default', null, mk);
+
+    expect(oneLesson.totalCents).toBe(1540);
+    expect(tenLessonsPayment.totalCents).toBe(30321);
+    expect(tenLessonsWrong).toBe(30550);
+    expect(tenLessonsPayment.totalCents).toBeLessThan(tenLessonsWrong);
+    expect(serverPaymentBreakdown(300, 'default', null, mk)).toEqual(tenLessonsPayment);
+  });
+
+  it('applies the same once-per-payment Stripe fixed fee for Mokslo vaisiai shares', () => {
+    const mv = parseOrgPayerFeeSplitConfig({
+      platform_share: 50,
+      stripe_percent_share: 50,
+      stripe_fixed_share: 100,
+    });
+    const once = paymentCheckoutBreakdownCents(200, 'default', null, mv);
+    const twice = paymentCheckoutBreakdownCents(100, 'default', null, mv).totalCents
+      + paymentCheckoutBreakdownCents(100, 'default', null, mv).totalCents;
+    expect(once.totalCents).toBeLessThan(twice);
+    expect(directChargeApplicationFeeCents(200, 'default', null, mv)).toBe(400);
   });
 });

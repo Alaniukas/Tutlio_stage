@@ -60,8 +60,6 @@ export function classicLtTutorSellerLines(seller: {
   iban?: string | null;
 }): string[] {
   const lines = [`Vardas, pavardė: ${String(seller.name || '').trim() || '—'}`];
-  const personal = String(seller.personalCode || '').trim();
-  if (personal) lines.push(`Asmens kodas: ${personal}`);
   const activity = String(seller.activityNumber || '').trim();
   if (activity) lines.push(`Ind. veiklos Nr.: ${activity}`);
   const address = String(seller.address || '').trim();

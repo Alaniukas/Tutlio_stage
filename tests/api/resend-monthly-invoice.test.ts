@@ -99,7 +99,7 @@ describe('Mano Korepetitorius monthly invoice reminders', () => {
 
     expect(res.statusCode).toBe(200);
     expect(sentEmail().data).toMatchObject({
-      lessonsTotal: '40.00', platformFees: '1.10', totalAmount: '41.10', tutorName: 'MB Mano korepetitorius',
+      lessonsTotal: '40.00', platformFees: '1.11', totalAmount: '41.11', tutorName: 'MB Mano korepetitorius',
       organizationId: MANO_ID, paymentLink: 'http://localhost:3000/api/pay-invoice?batch=batch-1',
       sessions: [{ price: '20.00' }, { price: '20.00' }],
     });
@@ -122,7 +122,7 @@ describe('Mano Korepetitorius monthly invoice reminders', () => {
     const res = response();
     await handler(request as any, res as any);
     expect(res.statusCode).toBe(200);
-    expect(sentEmail().data.totalAmount).toBe('41.10');
+    expect(sentEmail().data.totalAmount).toBe('41.11');
   });
 
   it('uses refreshed-checkout pricing when the old checkout cannot be retrieved', async () => {
@@ -132,7 +132,7 @@ describe('Mano Korepetitorius monthly invoice reminders', () => {
     await handler(request as any, res as any);
 
     expect(res.statusCode).toBe(200);
-    expect(sentEmail().data.totalAmount).toBe('41.10');
+    expect(sentEmail().data.totalAmount).toBe('41.11');
   });
 
   it('attaches every child invoice belonging to the family billing batch', async () => {
@@ -184,7 +184,7 @@ describe('Mano Korepetitorius monthly invoice reminders', () => {
 
     expect(res.statusCode).toBe(200);
     expect(sentEmail().attachments).toBeUndefined();
-    expect(sentEmail().data.totalAmount).toBe(manual ? '40.00' : '41.10');
+    expect(sentEmail().data.totalAmount).toBe(manual ? '40.00' : '41.11');
     expect(mocks.download).not.toHaveBeenCalled();
   });
 });

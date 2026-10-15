@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { isLikelyLithuanianPersonalCode } from '../src/lib/manoTutorInvoiceProfile.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -42,7 +43,10 @@ function validateFields(body: InvoiceSettingsBody): string | null {
     if (!body.address?.trim()) return 'address is required for company entities';
   } else {
     if (!body.activity_number?.trim()) return 'activity_number is required';
-    // personal_code is optional (some tutors don't want to disclose it on invoices)
+    if (!body.address?.trim()) return 'address is required';
+    if (isLikelyLithuanianPersonalCode(body.address)) {
+      return 'address must be a postal address, not a personal code';
+    }
   }
 
   if (!body.contact_email?.trim() && !body.contact_phone?.trim()) {

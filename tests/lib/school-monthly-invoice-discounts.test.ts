@@ -53,6 +53,60 @@ describe('schoolMonthlyInvoiceDiscounts', () => {
     expect(mergeLessonDiscountInputs(saved, fromAgreement)).toHaveLength(1);
   });
 
+  it('matches a contract-only discount when the agreement has no subject id and sessions use a replacement subject', () => {
+    const contractId = 'contract-individual';
+    const discount = mapAcceptedDiscountAgreement({
+      id: 'agr-2',
+      student_id: 'child1',
+      contract_id: contractId,
+      subject_id: null,
+      tutor_id: null,
+      discount_type: 'percent',
+      discount_value: 70,
+      valid_from: '2026-09-01',
+      valid_until: '2027-06-30',
+      agreement_number: 'NPR-2',
+    }, {
+      id: contractId,
+      class_group_id: null,
+      order_snapshot: { subject_id: 'stale-subject-id' },
+    });
+    const liveSubjectId = 'live-subject-id';
+    expect(findLessonDiscountForSession([discount], {
+      subjectId: liveSubjectId,
+      tutorId: 'teacher1',
+      classGroupId: null,
+      matchingContractIds: [contractId],
+    })).toEqual(discount);
+    const lines = buildSchoolLessonInvoiceLines([
+      {
+        id: 'l1',
+        subjectId: liveSubjectId,
+        tutorId: 'teacher1',
+        subjectName: 'Rusų kalba',
+        tutorName: 'Olga',
+        unitPriceEur: 20,
+        matchingContractIds: [contractId],
+      },
+      {
+        id: 'l2',
+        subjectId: liveSubjectId,
+        tutorId: 'teacher1',
+        subjectName: 'Rusų kalba',
+        tutorName: 'Olga',
+        unitPriceEur: 20,
+        matchingContractIds: [contractId],
+      },
+    ], [discount]);
+    expect(lines[0]).toMatchObject({
+      quantity: 2,
+      originalAmountEur: 40,
+      discountAmountEur: 28,
+      amountEur: 12,
+      discountValue: 70,
+    });
+  });
+
   it('applies a confirmed 100 percent agreement to grouped lesson rows', () => {
     const discounts = [mapAcceptedDiscountAgreement({
       id: 'agr-1',

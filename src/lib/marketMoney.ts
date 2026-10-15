@@ -9,6 +9,7 @@ export type ChargeCurrency = 'eur' | 'pln';
 export const MARKET_FEES = {
   platformPercent: 0.02,
   stripePercent: 0.015,
+  /** Stripe card fixed fee once per Checkout payment, not per lesson. */
   stripeFixed: { eur: 0.25, pln: 1.0 },
   schoolTutlioPercent: 0.01,
 } as const;
@@ -287,6 +288,19 @@ export function lessonCheckoutBreakdownCents(
   const totalCents = Math.round(total * 100);
   const baseCents = Math.round(baseAmount * 100);
   return { baseCents, feesCents: totalCents - baseCents, totalCents };
+}
+
+/**
+ * Checkout for one payment (monthly S.F., package, single lesson).
+ * Stripe 1.5% + 0.25 EUR / 1 PLN is applied once to `paymentBaseAmount`.
+ */
+export function paymentCheckoutBreakdownCents(
+  paymentBaseAmount: number,
+  market: TutlioMarket = 'default',
+  feeProfile?: OrgFeeProfile | null,
+  feeSplit?: OrgPayerFeeSplit | null,
+): { baseCents: number; feesCents: number; totalCents: number } {
+  return lessonCheckoutBreakdownCents(paymentBaseAmount, market, feeProfile, feeSplit);
 }
 
 export function schoolInstallmentCheckoutCents(

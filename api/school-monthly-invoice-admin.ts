@@ -180,6 +180,13 @@ function composeDraftContext(input: {
     const tutor = Array.isArray(session.tutor) ? session.tutor[0] : session.tutor;
     const subjectId = schoolInvoiceBillableSubjectKey(session, sessionContracts, sessionStudent.full_name);
     if (!subjectId) return [];
+    const matchingContractIds = (sessionContracts || [])
+      .filter((contract: any) => schoolInvoiceSessionMatchesContract(
+        session,
+        contract,
+        sessionStudent.full_name,
+      ))
+      .map((contract: any) => String(contract.id));
     return [{
       id: String(session.id),
       studentId: String(sessionStudent.id),
@@ -190,6 +197,7 @@ function composeDraftContext(input: {
       tutorId: String(session.tutor_id || ''),
       tutorName: String(tutor?.full_name || 'mokytojas'),
       unitPriceEur: resolveSchoolInvoiceUnitPrice(session, sessionContracts, sessionStudent.full_name),
+      matchingContractIds,
     }];
   });
   const contractsById = new Map((contracts || []).map((row: any) => [String(row.id), row]));
