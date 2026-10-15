@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { copyStudentParentLinksForTutorPairing } from '@/lib/studentParentLinks.js';
 
 /** Upcoming / held lessons — history (completed, cancelled, no_show) stays with the old tutor. */
 export const OPEN_LESSON_SESSION_STATUSES = ['active'] as const;
@@ -25,6 +26,9 @@ export async function reassignOpenLessonsToTutor(
   fromStudentId: string,
   to: { studentId: string; tutorId: string },
 ): Promise<{ movedSessions: number; movedPackages: number }> {
+  if (to.studentId !== fromStudentId) {
+    await copyStudentParentLinksForTutorPairing(supabase, fromStudentId, to.studentId);
+  }
   const { data: sessions, error: sessErr } = await supabase
     .from('sessions')
     .select('id, lesson_package_id')

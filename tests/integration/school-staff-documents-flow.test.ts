@@ -38,6 +38,7 @@ import documentsHandler from '../../api/school-staff-documents';
 import consentHandler from '../../api/school-staff-consent';
 import retentionHandler from '../../api/school-staff-document-retention';
 import pdfRetryHandler from '../../api/school-staff-consent-pdf-retry';
+import { completeStaffConsentPdfGeneration, type StaffConsentPdfContext } from '../../api/_lib/schoolStaffConsentPdf';
 
 const ORG_ID = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
 const EMPLOYEE_ID = '11111111-1111-4111-8111-111111111111';
@@ -117,6 +118,22 @@ function seedPreviewBundle(db: FakeSupabase) {
     id: 'sig-1', contract_id: CONSENT_ID, role: 'teacher', status: 'pending',
     token: 'safe-token', token_expires_at: new Date(Date.now() + 86400000).toISOString(),
   }];
+}
+
+function pendingConsentContext(db: FakeSupabase): StaffConsentPdfContext & { schoolName: string; source: 'cron_retry' } {
+  seedPreviewBundle(db);
+  const [agreement, contract] = db.db.school_contracts;
+  const answers = Array(10).fill('yes');
+  contract.staff_consent_answers = answers;
+  return {
+    supabase: db as any,
+    agreement: { ...agreement } as any,
+    contract: { ...contract } as any,
+    answers,
+    details: { address: 'Vilniaus g. 1, Vilnius', personalCode: '39001010013' },
+    schoolName: 'VšĮ Laisvi vaikai',
+    source: 'cron_retry',
+  };
 }
 
 describe('prepared staff PDFs, consent and retention', () => {
@@ -526,9 +543,10 @@ describe('prepared staff PDFs, consent and retention', () => {
     } } as any, created.res as any);
     for (const row of db.db.school_contracts) row.organizations = db.db.organizations[0];
     const token = db.db.school_contract_signatures.find((row) => row.contract_id === CONSENT_ID)?.token;
-    state.render
-      .mockResolvedValueOnce(Buffer.from('%PDF-agreement'))
-      .mockRejectedValueOnce(new Error('converter busy'));
+    state.render.mockImplementation(async (type: string) => {
+      if (type === 'consent') throw new Error('converter busy');
+      return Buffer.from('%PDF-agreement');
+    });
 
     const submitted = response();
     await consentHandler({ method: 'POST', body: {
@@ -554,6 +572,90 @@ describe('prepared staff PDFs, consent and retention', () => {
     expect(retry.body).toMatchObject({ ok: true, attempted: 1, completed: 1 });
     expect(consent).toMatchObject({ signing_status: 'awaiting_school_signature' });
     expect(consent.pdf_url).toBeTruthy();
+  });
+
+  it('finishes a transient consent failure in the same run without regenerating the agreement', async () => {
+    const { db, files } = setup();
+    const ctx = pendingConsentContext(db);
+    state.render.mockResolvedValueOnce(Buffer.from('%PDF-agreement'))
+      .mockRejectedValueOnce(new Error('converter busy'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      const work = completeStaffConsentPdfGeneration(ctx);
+      await vi.runAllTimersAsync();
+      expect(await work).toBe(true);
+      expect(state.render.mock.calls.map(([type]) => type)).toEqual(['confidentiality', 'consent', 'consent']);
+      expect(db.db.school_contracts.every((row) => row.signing_status === 'awaiting_school_signature' && row.pdf_url)).toBe(true);
+      expect(files.size).toBe(2);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      log.mockRestore();
+    }
+  });
+
+  it('treats overlapping workers as successful when another worker has saved both PDFs', async () => {
+    const { db, files } = setup();
+    const ctx = pendingConsentContext(db);
+    let rendering!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => { rendering = resolve; });
+    const paused = new Promise<void>((resolve) => { release = resolve; });
+    state.render.mockImplementationOnce(async () => {
+      rendering();
+      await paused;
+      return Buffer.from('%PDF-losing-agreement');
+    });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      const firstWorker = completeStaffConsentPdfGeneration(ctx);
+      await started;
+      expect(await completeStaffConsentPdfGeneration({ ...ctx })).toBe(true);
+      const savedPaths = db.db.school_contracts.map((row) => row.pdf_url);
+      release();
+      await vi.runAllTimersAsync();
+      expect(await firstWorker).toBe(true);
+      expect(db.db.school_contracts.map((row) => row.pdf_url)).toEqual(savedPaths);
+      expect(files.size).toBe(2);
+      expect(savedPaths.every((path) => files.has(path))).toBe(true);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      release();
+      vi.useRealTimers();
+      log.mockRestore();
+    }
+  });
+
+  it('rechecks saved PDFs after the final failed conversion before sending an alert', async () => {
+    const { db, files } = setup();
+    const ctx = pendingConsentContext(db);
+    let consentAttempts = 0;
+    state.render.mockImplementation(async (type: string) => {
+      if (type !== 'consent') return Buffer.from('%PDF-agreement');
+      consentAttempts += 1;
+      if (consentAttempts === 3) {
+        const consent = db.db.school_contracts.find((row) => row.id === CONSENT_ID)!;
+        consent.pdf_url = `${ORG_ID}/contracts/${CONSENT_ID}/other-worker.pdf`;
+        consent.signing_status = 'awaiting_school_signature';
+        files.set(consent.pdf_url, Buffer.from('%PDF-other-worker'));
+      }
+      throw new Error('converter temporarily unavailable');
+    });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      const work = completeStaffConsentPdfGeneration(ctx);
+      await vi.runAllTimersAsync();
+      expect(await work).toBe(true);
+      expect(consentAttempts).toBe(3);
+      expect(files.size).toBe(2);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      log.mockRestore();
+    }
   });
 
   it('saves employee answers even if the private details stash is rejected', async () => {

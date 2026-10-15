@@ -56,9 +56,11 @@ export default function WhiteboardPage() {
   const currentUser = user && session
     ? {
         id: user.id,
-        name: (user.id === session.students?.linked_user_id
-          ? session.students?.full_name
-          : session.profiles?.full_name) || user.email || 'User',
+        name: (user.id === session.tutor_id
+          ? session.profiles?.full_name
+          : user.id === session.students?.linked_user_id
+            ? session.students?.full_name
+            : user.user_metadata?.full_name) || user.email || 'User',
       }
     : null;
 
@@ -277,10 +279,19 @@ export default function WhiteboardPage() {
         const tutorOrgId = tutorProfileRes.data?.organization_id;
         const isStudent = studentLinkedUserId && user.id === studentLinkedUserId;
 
+        let isParent = false;
+        if (!isTutor && !isStudent) {
+          const { data: parentAllowed, error: parentError } = await supabase.rpc('parent_can_access_student', {
+            p_student_id: baseSession.student_id,
+          });
+          if (cancelled) return;
+          isParent = !parentError && parentAllowed === true;
+        }
+
         let isOrgTutor = false;
         let isOrgAdmin = false;
 
-        if (!isTutor && !isStudent && tutorOrgId) {
+        if (!isTutor && !isStudent && !isParent && tutorOrgId) {
           const { data: currentProfile } = await supabase
             .from('profiles')
             .select('organization_id')
@@ -313,7 +324,7 @@ export default function WhiteboardPage() {
           }
         }
 
-        if (!isTutor && !isStudent && !isOrgAdmin && !isOrgTutor) {
+        if (!isTutor && !isStudent && !isParent && !isOrgAdmin && !isOrgTutor) {
           if (!cancelled) {
             setError(t('whiteboard.unauthorized'));
             setLoading(false);

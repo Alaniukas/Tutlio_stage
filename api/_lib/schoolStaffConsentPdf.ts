@@ -157,10 +157,32 @@ export async function persistStaffConsentPdfs(ctx: StaffConsentPdfContext): Prom
   await persistStaffConsentPdfOnly({ ...ctx, agreement });
 }
 
+async function loadStaffConsentPdfProgress(ctx: StaffConsentPdfContext): Promise<{
+  agreement: StaffConsentPdfContext['agreement'];
+  complete: boolean;
+}> {
+  const { data, error } = await ctx.supabase.from('school_contracts')
+    .select('id, pdf_url')
+    .eq('organization_id', ctx.contract.organization_id)
+    .in('id', [ctx.agreement.id, ctx.contract.id])
+    .is('staff_revoked_at', null);
+  if (error) throw error;
+  const agreement = data?.find((row) => row.id === ctx.agreement.id);
+  const consent = data?.find((row) => row.id === ctx.contract.id);
+  if (!agreement || !consent) throw new Error('Darbuotojo dokumentai nerasti arba atšaukti.');
+  return {
+    agreement: { ...ctx.agreement, pdf_url: agreement.pdf_url },
+    complete: Boolean(agreement.pdf_url && consent.pdf_url),
+  };
+}
+
 export async function persistStaffConsentPdfsWithRetry(ctx: StaffConsentPdfContext, attempts = 3): Promise<void> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      await persistStaffConsentPdfs(ctx);
+      // A prior attempt or an overlapping cron may already have saved either PDF.
+      const progress = await loadStaffConsentPdfProgress(ctx);
+      if (progress.complete) return;
+      await persistStaffConsentPdfs({ ...ctx, agreement: progress.agreement });
       return;
     } catch (error) {
       if (attempt === attempts - 1) throw error;
@@ -176,6 +198,12 @@ export async function completeStaffConsentPdfGeneration(
     await persistStaffConsentPdfsWithRetry(ctx);
     return true;
   } catch (error) {
+    // The last conversion can fail after another worker has completed the bundle.
+    try {
+      if ((await loadStaffConsentPdfProgress(ctx)).complete) return true;
+    } catch {
+      // Without a confirmed completion, keep the existing failure alert.
+    }
     console.error('[school-staff-consent] pdf generation failed after retries', error instanceof Error ? error.name : 'unknown');
     await notifyStaffConsentPdfFailure(ctx.supabase, {
       organizationId: ctx.contract.organization_id,

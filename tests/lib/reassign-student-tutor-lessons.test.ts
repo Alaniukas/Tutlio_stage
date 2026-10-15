@@ -41,6 +41,7 @@ describe('canHardDeleteStudentPairing', () => {
 
 function mockSb(handlers: Record<string, any>) {
   return {
+    rpc: vi.fn(async () => ({ error: null })),
     from(table: string) {
       const h = handlers[table];
       if (!h) throw new Error(`unexpected table ${table}`);
@@ -123,6 +124,10 @@ describe('reassignOpenLessonsToTutor', () => {
       student_id: 'rimantas-student',
       tutor_id: 'rimantas',
     });
+    expect(sb.rpc).toHaveBeenCalledWith('copy_student_parent_links_for_tutor_pairing', {
+      p_source_student_id: 'ieva-student',
+      p_target_student_id: 'rimantas-student',
+    });
   });
 
   it('keeps student_id when the same pairing is claimed by a new tutor', async () => {
@@ -163,6 +168,16 @@ describe('reassignOpenLessonsToTutor', () => {
     });
 
     expect(sessionUpdate.mock.calls[0][0].patch).toEqual({ tutor_id: 'rimantas' });
+    expect(sb.rpc).not.toHaveBeenCalled();
+  });
+
+  it('does not move lessons or packages when preserving parent access fails', async () => {
+    const from = vi.fn();
+    const rpc = vi.fn(async () => ({ error: { message: 'Parent copy failed' } }));
+    await expect(reassignOpenLessonsToTutor({ from, rpc } as any, 'old-row', {
+      studentId: 'new-row', tutorId: 'new-tutor',
+    })).rejects.toThrow('Parent copy failed');
+    expect(from).not.toHaveBeenCalled();
   });
 });
 
@@ -243,13 +258,17 @@ describe('removeOrgStudentTutorPairing', () => {
       throw new Error(table);
     };
 
-    const result = await removeOrgStudentTutorPairing({ from } as any, {
+    const rpc = vi.fn(async () => ({ error: null }));
+    const result = await removeOrgStudentTutorPairing({ from, rpc } as any, {
       rowId: 'ieva-row',
       remainingGroup: [{ id: 'rimantas-row', tutor_id: 'rimantas' }],
     });
     expect(result.mode).toBe('deleted');
     expect(deleted).toEqual(['ieva-row']);
     expect(sessionsSelectCalls).toBeGreaterThanOrEqual(2);
+    expect(rpc).toHaveBeenCalledWith('copy_student_parent_links_for_tutor_pairing', {
+      p_source_student_id: 'ieva-row', p_target_student_id: 'rimantas-row',
+    });
   });
 
   it('detaches instead of deleting when past lessons remain on the old row', async () => {
@@ -317,7 +336,7 @@ describe('removeOrgStudentTutorPairing', () => {
       throw new Error(table);
     };
 
-    const result = await removeOrgStudentTutorPairing({ from } as any, {
+    const result = await removeOrgStudentTutorPairing({ from, rpc: async () => ({ error: null }) } as any, {
       rowId: 'ieva-row',
       remainingGroup: [{ id: 'rimantas-row', tutor_id: 'rimantas' }],
     });

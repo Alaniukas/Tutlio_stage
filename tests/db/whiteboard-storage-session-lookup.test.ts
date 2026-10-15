@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const migration = readFileSync('supabase/migrations/20261007092500_whiteboard_storage_session_lookup.sql', 'utf8');
+const parentMigration = readFileSync('supabase/migrations/20261015080856_whiteboard_parent_read_access.sql', 'utf8');
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const scene = `${id(31)}/scene.json`;
 let db: PGlite;
@@ -16,7 +17,15 @@ beforeAll(async () => {
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT nullif(current_setting('test.uid',true),'')::uuid $$;
     CREATE TABLE profiles(id uuid PRIMARY KEY, organization_id uuid);
     CREATE TABLE organization_admins(user_id uuid, organization_id uuid, status text, can_view boolean, can_edit boolean);
-    CREATE TABLE students(id uuid PRIMARY KEY, tutor_id uuid, linked_user_id uuid);
+    CREATE TABLE students(id uuid PRIMARY KEY, tutor_id uuid, linked_user_id uuid, parent_user_id uuid);
+    CREATE TABLE parent_profiles(id uuid PRIMARY KEY, user_id uuid);
+    CREATE TABLE parent_students(parent_id uuid, student_id uuid);
+    CREATE FUNCTION public.parent_can_access_student(p_student_id uuid) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+      SET search_path='' AS $$
+      SELECT EXISTS(SELECT 1 FROM public.students WHERE id=p_student_id AND parent_user_id=auth.uid())
+        OR EXISTS(SELECT 1 FROM public.parent_students ps JOIN public.parent_profiles pp ON pp.id=ps.parent_id
+          WHERE ps.student_id=p_student_id AND pp.user_id=auth.uid());
+    $$;
     CREATE TABLE sessions(id uuid PRIMARY KEY, tutor_id uuid, student_id uuid);
     CREATE TABLE storage.objects(bucket_id text, name text, metadata text, PRIMARY KEY(bucket_id,name));
     CREATE SEQUENCE private.scope_checks;
@@ -32,6 +41,7 @@ beforeAll(async () => {
     ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
     CREATE POLICY session_roles ON sessions FOR SELECT TO authenticated USING(
       tutor_id=auth.uid() OR student_id IN(SELECT id FROM students WHERE linked_user_id=auth.uid())
+      OR public.parent_can_access_student(student_id)
       OR tutor_id IN(SELECT p.id FROM profiles p JOIN organization_admins a ON a.organization_id=p.organization_id WHERE a.user_id=auth.uid()));
     CREATE POLICY school_family_session_read_scope ON sessions AS RESTRICTIVE FOR SELECT TO authenticated
       USING(private.check_session_scope(student_id));
@@ -52,13 +62,16 @@ beforeAll(async () => {
       ('${id(22)}','${id(2)}','active',true,true),
       ('${id(23)}','${id(1)}','revoked',true,true),
       ('${id(24)}','${id(1)}','active',false,false);
-    INSERT INTO students VALUES('${id(41)}','${id(11)}','${id(51)}'),('${id(42)}','${id(13)}','${id(52)}');
+    INSERT INTO students VALUES('${id(41)}','${id(11)}','${id(51)}','${id(61)}'),('${id(42)}','${id(13)}','${id(52)}','${id(63)}');
+    INSERT INTO parent_profiles VALUES('${id(71)}','${id(62)}');
+    INSERT INTO parent_students VALUES('${id(71)}','${id(41)}');
     INSERT INTO sessions VALUES('${id(31)}','${id(11)}','${id(41)}'),('${id(32)}','${id(13)}','${id(42)}');
     INSERT INTO sessions SELECT ('00000000-0000-4000-8000-'||lpad((1000+n)::text,12,'0'))::uuid,'${id(13)}','${id(42)}'
       FROM generate_series(1,3000) n;
     ANALYZE sessions;
   `);
   await db.exec(migration);
+  await db.exec(parentMigration);
 }, 30_000);
 beforeEach(async () => {
   await db.exec(`RESET ROLE; SELECT set_config('test.deny_scope','false',false);
@@ -91,6 +104,31 @@ describe('whiteboard Storage session lookups', () => {
     expect(await asUser(id(51), writeScene())).toEqual([{ metadata: 'saved' }]);
     expect(await asUser(id(52), readScene)).toEqual([]);
     await expect(asUser(id(52), writeScene())).rejects.toThrow(/row-level security/);
+  });
+
+  it('lets direct and linked guardians read only their child scene and image assets', async () => {
+    await db.exec(`INSERT INTO storage.objects VALUES('whiteboard-data','${id(31)}/files/image.json','image');`);
+    for (const guardian of [id(61), id(62)]) {
+      expect(await asUser(guardian, readScene)).toEqual([{ metadata: 'original' }]);
+      expect(await asUser(guardian, `SELECT metadata FROM storage.objects WHERE bucket_id='whiteboard-data' AND name='${id(31)}/files/image.json'`))
+        .toEqual([{ metadata: 'image' }]);
+      expect(await asUser(guardian, `SELECT metadata FROM storage.objects WHERE bucket_id='whiteboard-data' AND name='${id(32)}/scene.json'`)).toEqual([]);
+      await expect(asUser(guardian, writeScene())).rejects.toThrow(/row-level security/);
+      expect(await asUser(guardian, `DELETE FROM storage.objects WHERE bucket_id='whiteboard-data' AND name='${scene}' RETURNING name`)).toEqual([]);
+    }
+    expect(await asUser(id(63), readScene)).toEqual([]);
+  });
+
+  it('revokes guardian reads with the live relationship and preserves school family restrictions', async () => {
+    await db.exec(`DELETE FROM parent_students WHERE parent_id='${id(71)}';`);
+    try {
+      expect(await asUser(id(62), readScene)).toEqual([]);
+      expect(await asUser(id(61), readScene)).toEqual([{ metadata: 'original' }]);
+      await db.exec("SELECT set_config('test.deny_scope','true',false)");
+      expect(await asUser(id(61), readScene)).toEqual([]);
+    } finally {
+      await db.exec(`INSERT INTO parent_students VALUES('${id(71)}','${id(41)}');`);
+    }
   });
 
   it('keeps org admins read-only and enforces revoked seats and permissions', async () => {
