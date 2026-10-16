@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { reconcileElements, CaptureUpdateAction } from '@excalidraw/excalidraw';
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import { createWhiteboardBroadcastQueue, whiteboardSceneKey, whiteboardSettingsKey } from '@/lib/whiteboardRealtime';
 type ExcalidrawImperativeAPI = any;
 
 const SAVE_DEBOUNCE_MS = 5_000;
@@ -16,21 +17,13 @@ const SCENE_FILE = 'scene.json';
 const IMAGE_PREFIX = 'data:image/';
 const WHITEBOARD_BUCKET = 'whiteboard-data';
 const FILES_PREFIX = 'files';
-/** Images whose dataURL exceeds this are excluded from inline broadcasts (sent via Storage instead).
- * Raised to 800 KB so most phone photos are delivered inline on the first broadcast,
- * giving peers an immediate preview without waiting for the Storage upload/download cycle.
- * Chunking handles the larger wire payload.
- */
+/** Keep immediate inline previews up to 800 KB until the original is stored. */
 const MAX_BROADCAST_DATAURL_BYTES = 800_000;
-/** While drawing lines/freehand, still broadcast throttled so peers see strokes live (not only after mouseup). */
-const LINEAR_BROADCAST_MIN_INTERVAL_MS = 50;
 /**
  * Max rate for full-scene Realtime broadcasts. Flooding ~200KB JSON at >10Hz stalls the peer's JS thread
  * (reconcileElements) even when RX latency looks fine — feels like 10–20s “catch-up”.
  */
 const OUTBOUND_BROADCAST_MIN_GAP_MS = 250;
-/** Supabase Free plan Realtime broadcast limit is ~256KB; near/over this, messages may drop or lag. */
-const BROADCAST_WARN_BYTES = 240_000;
 
 function wbDiagEnabled(): boolean {
   try {
@@ -132,11 +125,14 @@ function mergeRemoteFilesFast(
 
 type SceneUpdatePayload = {
   senderId: string;
+  senderInstanceId?: string;
   revision: number;
   sentAt: number;
   elements: readonly any[];
   files?: Record<string, WhiteboardFile>;
 };
+
+type SceneBroadcast = { elements: readonly any[]; files: Record<string, WhiteboardFile> };
 
 type CompressedSceneBroadcast = {
   _wbCompressed: true;
@@ -339,13 +335,19 @@ export function useWhiteboardSync(
   persistSceneToStorage = true,
 ) {
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const channelReadyRef = useRef(false);
+  const hasRemotePeersRef = useRef(false);
+  const channelGenerationRef = useRef(0);
+  const senderInstanceIdRef = useRef(crypto.randomUUID());
+  const broadcastQueueRef = useRef<ReturnType<typeof createWhiteboardBroadcastQueue<SceneBroadcast>> | null>(null);
+  const requestSceneBroadcastRef = useRef<() => void>(() => {});
+  const lastObservedSceneKeyRef = useRef<string | null>(null);
+  const lastObservedSettingsKeyRef = useRef<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveMaxDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const broadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isRemoteUpdateRef = useRef(false);
   const excalidrawApiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const saveInFlightRef = useRef<Promise<boolean> | null>(null);
-  const pendingBroadcastRef = useRef(false);
   const lastSavedPayloadRef = useRef<string>('');
   const saveCooldownUntilRef = useRef(0);
   const loadedRef = useRef(false);
@@ -354,7 +356,8 @@ export function useWhiteboardSync(
   const pendingRemotePayloadsRef = useRef<SceneUpdatePayload[]>([]);
   const uploadedAssetPathByFileIdRef = useRef<Map<string, string>>(new Map());
   const hydratedDataUrlByPathRef = useRef<Map<string, string>>(new Map());
-  const uploadInFlightSetRef = useRef<Set<string>>(new Set());
+  const uploadInFlightRef = useRef<Map<string, Promise<WhiteboardFile>>>(new Map());
+  const downloadInFlightRef = useRef<Map<string, Promise<string | undefined>>>(new Map());
   const uploadErrorCooldownRef = useRef<Map<string, number>>(new Map());
   const uploadConsecutiveFailuresRef = useRef(0);
   const uploadGlobalPauseUntilRef = useRef(0);
@@ -372,10 +375,6 @@ export function useWhiteboardSync(
   );
   const persistSceneToStorageRef = useRef(persistSceneToStorage);
   const debouncedSaveRef = useRef<() => void>(() => {});
-  const lastLinearBroadcastAtRef = useRef(0);
-  const lastOutboundSentAtRef = useRef(0);
-  const pendingOutboundRef = useRef<{ elements: readonly any[]; files: Record<string, WhiteboardFile> } | null>(null);
-  const outboundBroadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chunkAssemblyRef = useRef<Map<string, ChunkAssemblyState>>(new Map());
 
   useEffect(() => {
@@ -385,6 +384,20 @@ export function useWhiteboardSync(
   useEffect(() => {
     excalidrawApiRef.current = excalidrawAPI;
   }, [excalidrawAPI]);
+
+  const rememberCurrentScene = useCallback(() => {
+    const api = excalidrawApiRef.current;
+    if (!api) return;
+    lastObservedSceneKeyRef.current = whiteboardSceneKey(
+      api.getSceneElementsIncludingDeleted(), toPlainFiles(api.getFiles?.()),
+    );
+    lastObservedSettingsKeyRef.current = whiteboardSettingsKey(api.getAppState?.());
+  }, []);
+
+  const canBroadcast = useCallback(() => Boolean(
+    channelReadyRef.current && hasRemotePeersRef.current &&
+    channelRef.current?.state === 'joined' && supabase.realtime.isConnected(),
+  ), []);
 
   useEffect(() => {
     loadedRef.current = loaded;
@@ -469,7 +482,14 @@ export function useWhiteboardSync(
             hydrated[fileId] = { ...file, dataURL: cached };
             return;
           }
-          const dataURL = await downloadFileAsset(storagePath);
+          let download = downloadInFlightRef.current.get(storagePath);
+          if (!download) {
+            download = downloadFileAsset(storagePath).finally(() => {
+              downloadInFlightRef.current.delete(storagePath);
+            });
+            downloadInFlightRef.current.set(storagePath, download);
+          }
+          const dataURL = await download;
           if (!dataURL) return;
           hydratedDataUrlByPathRef.current.set(storagePath, dataURL);
           hydrated[fileId] = { ...file, dataURL };
@@ -500,7 +520,8 @@ export function useWhiteboardSync(
       const dataURL = typeof file.dataURL === 'string' ? file.dataURL : '';
       if (!dataURL.startsWith(IMAGE_PREFIX)) return file;
 
-      if (uploadInFlightSetRef.current.has(fileId)) return file;
+      const existingUpload = uploadInFlightRef.current.get(fileId);
+      if (existingUpload) return existingUpload;
 
       if (Date.now() < uploadGlobalPauseUntilRef.current) return file;
 
@@ -512,32 +533,32 @@ export function useWhiteboardSync(
       const jsonPayload = JSON.stringify({ dataURL, mimeType: file.mimeType });
       const jsonBlob = new Blob([jsonPayload], { type: 'application/json' });
 
-      uploadInFlightSetRef.current.add(fileId);
-      try {
-        const { error } = await supabase.storage.from(WHITEBOARD_BUCKET).upload(targetPath, jsonBlob, {
-          upsert: true,
-          contentType: 'application/json',
-        });
-        if (error) {
+      const upload = (async (): Promise<WhiteboardFile> => {
+        try {
+          const { error } = await supabase.storage.from(WHITEBOARD_BUCKET).upload(targetPath, jsonBlob, {
+            upsert: true,
+            contentType: 'application/json',
+          });
+          if (error) throw error;
+          uploadConsecutiveFailuresRef.current = 0;
+          uploadedAssetPathByFileIdRef.current.set(fileId, targetPath);
+          hydratedDataUrlByPathRef.current.set(targetPath, dataURL);
+          return { ...file, storagePath: targetPath, dataURL: undefined };
+        } catch (error) {
           uploadConsecutiveFailuresRef.current++;
           uploadErrorCooldownRef.current.set(fileId, Date.now() + UPLOAD_ERROR_COOLDOWN_MS);
           if (uploadConsecutiveFailuresRef.current >= MAX_CONSECUTIVE_UPLOAD_FAILURES) {
             uploadGlobalPauseUntilRef.current = Date.now() + UPLOAD_GLOBAL_PAUSE_MS;
             console.warn('[Whiteboard] Too many upload failures, pausing for', UPLOAD_GLOBAL_PAUSE_MS / 1000, 's');
           }
+          wbDebug('image upload deferred:', error);
           return file;
+        } finally {
+          uploadInFlightRef.current.delete(fileId);
         }
-        uploadConsecutiveFailuresRef.current = 0;
-        uploadedAssetPathByFileIdRef.current.set(fileId, targetPath);
-        hydratedDataUrlByPathRef.current.set(targetPath, dataURL);
-        return {
-          ...file,
-          storagePath: targetPath,
-          dataURL: undefined,
-        };
-      } finally {
-        uploadInFlightSetRef.current.delete(fileId);
-      }
+      })();
+      uploadInFlightRef.current.set(fileId, upload);
+      return upload;
     },
     [sessionId],
   );
@@ -649,8 +670,7 @@ export function useWhiteboardSync(
     }, SAVE_DEBOUNCE_MS);
     // Max-delay guarantee: even during continuous drawing (where the debounce
     // timer keeps resetting), force a save at most SAVE_MAX_DELAY_MS after the
-    // first dirty change. This caps DB write pressure to ~1 save / 30s per
-    // scene writer regardless of how much the user is drawing.
+    // first dirty change, so continuous drawing still gets saved.
     if (!saveMaxDelayTimerRef.current) {
       saveMaxDelayTimerRef.current = setTimeout(() => {
         saveMaxDelayTimerRef.current = null;
@@ -670,17 +690,24 @@ export function useWhiteboardSync(
   const applyRemotePayload = useCallback(
     async (payload: SceneUpdatePayload) => {
       const api = excalidrawApiRef.current;
+      const generation = channelGenerationRef.current;
       if (!api || !payload?.elements) return;
       const senderId = String(payload.senderId || '');
       const revision = Number(payload.revision || 0);
       if (!senderId || revision <= 0) return;
 
-      const lastSeen = lastRevisionBySenderRef.current.get(senderId) || 0;
+      const senderKey = `${senderId}:${payload.senderInstanceId || 'legacy'}`;
+      const lastSeen = lastRevisionBySenderRef.current.get(senderKey) || 0;
       if (revision <= lastSeen) return;
-      lastRevisionBySenderRef.current.set(senderId, revision);
+      lastRevisionBySenderRef.current.set(senderKey, revision);
 
       // Fast path: never await Storage before showing remote strokes (hydrate was blocking 10–20s under load).
       const localFiles = toPlainFiles(api.getFiles?.());
+      const localElements = api.getSceneElementsIncludingDeleted();
+      // A continuous pointer event can have changed the scene before React's
+      // onChange callback runs. Do not classify that local stroke as remote.
+      const hasUnobservedLocalEdit = lastObservedSceneKeyRef.current !== null &&
+        whiteboardSceneKey(localElements, localFiles) !== lastObservedSceneKeyRef.current;
       let mergedFiles: Record<string, WhiteboardFile> = mergeRemoteFilesFast(
         payload.files,
         localFiles,
@@ -697,7 +724,7 @@ export function useWhiteboardSync(
       const filesToApply: Record<string, WhiteboardFile> = {};
       for (const [fid, f] of Object.entries(mergedFiles)) {
         if (typeof f?.dataURL === 'string' && f.dataURL.startsWith(IMAGE_PREFIX)) {
-          filesToApply[fid] = f;
+          filesToApply[fid] = { ...f, id: f.id ?? fid };
         }
       }
       const filesArray = Object.values(filesToApply);
@@ -708,8 +735,7 @@ export function useWhiteboardSync(
         if (filesArray.length > 0 && typeof api.addFiles === 'function') {
           api.addFiles(filesArray);
         }
-        const local = api.getSceneElementsIncludingDeleted();
-        const reconciled = reconcileElements(local, payload.elements as any, api.getAppState());
+        const reconciled = reconcileElements(localElements, payload.elements as any, api.getAppState());
         api.updateScene({
           elements: reconciled,
           captureUpdate: CaptureUpdateAction.NEVER,
@@ -720,10 +746,12 @@ export function useWhiteboardSync(
           captureUpdate: CaptureUpdateAction.NEVER,
         });
       } finally {
-        requestAnimationFrame(() => {
-          isRemoteUpdateRef.current = false;
-        });
+        // Excalidraw also calls onChange on subsequent UI renders. Remember the
+        // reconciled content so those callbacks cannot echo a remote scene.
+        rememberCurrentScene();
+        isRemoteUpdateRef.current = false;
       }
+      if (hasUnobservedLocalEdit) requestSceneBroadcastRef.current();
 
       if (persistSceneToStorageRef.current) {
         changeVersionRef.current++;
@@ -734,7 +762,7 @@ export function useWhiteboardSync(
       void (async () => {
         const hydratedFiles = await hydrateFilesFromStorage(payload.files || {});
         const api2 = excalidrawApiRef.current;
-        if (!api2) return;
+        if (!api2 || api2 !== api || generation !== channelGenerationRef.current) return;
         const localFiles2 = toPlainFiles(api2.getFiles?.());
         const mergedAfterHydrate: Record<string, WhiteboardFile> = { ...hydratedFiles };
         for (const [fileId, localFile] of Object.entries(localFiles2)) {
@@ -778,6 +806,9 @@ export function useWhiteboardSync(
         });
         if (newFiles.length === 0) return;
 
+        const hasUnobservedEditBeforeHydrate = lastObservedSceneKeyRef.current !== null &&
+          whiteboardSceneKey(api2.getSceneElementsIncludingDeleted(), currentLocalFiles2) !==
+            lastObservedSceneKeyRef.current;
         isRemoteUpdateRef.current = true;
         try {
           api2.addFiles(newFiles);
@@ -789,13 +820,13 @@ export function useWhiteboardSync(
           });
           wbDiag('hydrate-files-applied', { count: newFiles.length });
         } finally {
-          requestAnimationFrame(() => {
-            isRemoteUpdateRef.current = false;
-          });
+          rememberCurrentScene();
+          isRemoteUpdateRef.current = false;
         }
+        if (hasUnobservedEditBeforeHydrate) requestSceneBroadcastRef.current();
       })();
     },
-    [hydrateFilesFromStorage],
+    [hydrateFilesFromStorage, rememberCurrentScene],
   );
 
   const flushQueuedPayloads = useCallback(async () => {
@@ -840,236 +871,133 @@ export function useWhiteboardSync(
     }
   }, [sessionId]);
 
-  const emitSceneBroadcast = useCallback(
-    async (elements: readonly any[], files: Record<string, WhiteboardFile> | undefined) => {
-      if (!channelRef.current || isRemoteUpdateRef.current || !currentUser) return;
+  const broadcastAssetUploadsRef = useRef<Set<string>>(new Set());
 
-      const fileEntries = Object.entries(files || {});
+  const emitSceneBroadcast = useCallback(
+    async ({ elements, files }: SceneBroadcast): Promise<boolean> => {
+      const channel = channelRef.current;
+      const generation = channelGenerationRef.current;
+      const stillReady = () => channel === channelRef.current &&
+        generation === channelGenerationRef.current && canBroadcast();
+      if (!channel || !currentUser || !stillReady()) return false;
+
+      const imageIds = new Set(elements.filter((element) => !element.isDeleted && element.fileId)
+        .map((element) => element.fileId as string));
       const needsUpload: [string, WhiteboardFile][] = [];
       const preparedFiles: Record<string, WhiteboardFile> = {};
-
-      for (const [fileId, file] of fileEntries) {
-        const dataURL = typeof file?.dataURL === 'string' ? file.dataURL : '';
-        const hasLargeData = dataURL.startsWith(IMAGE_PREFIX) && dataURL.length > MAX_BROADCAST_DATAURL_BYTES;
-        const knownPath = uploadedAssetPathByFileIdRef.current.get(fileId);
-
-        if (hasLargeData && !knownPath) {
-          needsUpload.push([fileId, { ...file, dataURL }]);
-          // Include inline so the peer sees the image immediately on first broadcast.
-          // Once the Storage upload completes, subsequent broadcasts switch to storagePath.
-          preparedFiles[fileId] = { ...file };
-          continue;
+      for (const fileId of imageIds) {
+        const file = files[fileId];
+        if (!file) continue;
+        const knownPath = uploadedAssetPathByFileIdRef.current.get(fileId) || file.storagePath;
+        if (knownPath) {
+          // Reuse uploaded originals for small images too. Repeated dataURLs
+          // were turning one drawing update into many billable chunks.
+          preparedFiles[fileId] = { ...file, storagePath: knownPath, dataURL: undefined };
+        } else {
+          // Preserve immediate previews while storing the full-quality original.
+          preparedFiles[fileId] = file;
+          if (file.dataURL?.startsWith(IMAGE_PREFIX) && !broadcastAssetUploadsRef.current.has(fileId)) {
+            needsUpload.push([fileId, file]);
+          }
         }
-
-        const safeFile: WhiteboardFile = { ...file };
-        if (hasLargeData && knownPath) {
-          safeFile.dataURL = undefined;
-          safeFile.storagePath = knownPath;
-        }
-        preparedFiles[fileId] = safeFile;
       }
 
-      localRevisionRef.current += 1;
-      const sentAt = Date.now();
+      // Legacy peers order revisions by user rather than browser instance. A
+      // timestamp also lets them accept edits after this participant reloads.
+      localRevisionRef.current = Math.max(localRevisionRef.current + 1, Date.now());
       const wirePayload: SceneUpdatePayload = {
         senderId: currentUser.id,
+        senderInstanceId: senderInstanceIdRef.current,
         revision: localRevisionRef.current,
-        sentAt,
+        sentAt: Date.now(),
         elements,
         files: compactFilesForBroadcast(preparedFiles),
       };
-      const uncompressedBytes = estimateScenePayloadBytes(wirePayload);
       const parts = await prepareOutboundBroadcastParts(wirePayload);
-      let maxWire = 0;
-      for (const p of parts) {
-        maxWire = Math.max(maxWire, new Blob([JSON.stringify(p)]).size);
+      if (wbDiagEnabled()) {
+        wbDiag('TX', {
+          revision: wirePayload.revision,
+          elementCount: elements.length,
+          fileKeys: Object.keys(preparedFiles).length,
+          parts: parts.length,
+          uncompressedBytes: estimateScenePayloadBytes(wirePayload),
+        });
       }
-      const first = parts[0] as Record<string, unknown> | undefined;
-      const isChunked =
-        parts.length > 1 ||
-        (first !== undefined &&
-          typeof first === 'object' &&
-          first !== null &&
-          first._wbChunked === true);
-      const isCompressedSingle =
-        parts.length === 1 &&
-        first !== undefined &&
-        typeof first === 'object' &&
-        first !== null &&
-        first._wbCompressed === true;
-      wbDiag('TX', {
-        revision: wirePayload.revision,
-        elementCount: elements.length,
-        fileKeys: Object.keys(wirePayload.files || {}).length,
-        bytesOnWire: maxWire,
-        parts: parts.length,
-        uncompressedBytes,
-        compressed: isCompressedSingle || isChunked,
-        chunked: isChunked,
-        nearOrOverFreeBroadcastLimit: maxWire >= BROADCAST_WARN_BYTES,
-      });
-      if (!isCompressedSingle && !isChunked && uncompressedBytes >= BROADCAST_WARN_BYTES) {
-        console.warn(
-          '[Whiteboard] Broadcast ~',
-          uncompressedBytes,
-          'bytes uncompressed (Free tier Realtime ~256KB per message). Oversized messages may not reach the other user — simplify the board or upgrade Realtime limits.',
-        );
-      }
-      if ((isCompressedSingle || isChunked) && maxWire >= BROADCAST_WARN_BYTES) {
-        console.warn(
-          '[Whiteboard] Largest broadcast frame still ~',
-          maxWire,
-          'bytes — reduce scene complexity, split chunk size, or raise Realtime limits.',
-        );
-      }
-
       for (const part of parts) {
-        channelRef.current.send({
-          type: 'broadcast',
-          event: 'scene-update',
-          payload: part,
-        });
+        // The SDK otherwise silently falls back to HTTP on a disconnected socket.
+        if (!stillReady()) return false;
+        const status = await channel.send({ type: 'broadcast', event: 'scene-update', payload: part });
+        if (status !== 'ok') return false;
       }
 
-      if (needsUpload.length === 0) return;
-
-      (async () => {
-        const uploadedFiles: Record<string, WhiteboardFile> = { ...preparedFiles };
-        const results = await Promise.all(
-          needsUpload.map(async ([fileId, fileSnapshot]) => {
-            const uploaded = await uploadFileAssetIfNeeded(fileId, fileSnapshot);
-            return [fileId, uploaded] as const;
-          }),
-        );
-        for (const [fileId, uploaded] of results) {
-          uploadedFiles[fileId] = uploaded.storagePath
-            ? { ...uploaded, dataURL: undefined }
-            : needsUpload.find(([fid]) => fid === fileId)?.[1] || uploaded;
-        }
-        if (!channelRef.current || isRemoteUpdateRef.current) return;
-        const api = excalidrawApiRef.current;
-        const freshElements = api?.getSceneElementsIncludingDeleted?.() || api?.getSceneElements?.() || elements;
-        localRevisionRef.current += 1;
-        const sentAt2 = Date.now();
-        const wirePayload2: SceneUpdatePayload = {
-          senderId: currentUser.id,
-          revision: localRevisionRef.current,
-          sentAt: sentAt2,
-          elements: freshElements,
-          files: compactFilesForBroadcast(uploadedFiles),
-        };
-        const uncompressed2 = estimateScenePayloadBytes(wirePayload2);
-        const parts2 = await prepareOutboundBroadcastParts(wirePayload2);
-        let maxWire2 = 0;
-        for (const p of parts2) {
-          maxWire2 = Math.max(maxWire2, new Blob([JSON.stringify(p)]).size);
-        }
-        const first2 = parts2[0] as Record<string, unknown> | undefined;
-        const isChunked2 =
-          parts2.length > 1 ||
-          (first2 !== undefined &&
-            typeof first2 === 'object' &&
-            first2 !== null &&
-            first2._wbChunked === true);
-        const compressed2 =
-          parts2.length === 1 &&
-          first2 !== undefined &&
-          typeof first2 === 'object' &&
-          first2 !== null &&
-          first2._wbCompressed === true;
-        wbDiag('TX-after-upload', {
-          revision: wirePayload2.revision,
-          elementCount: freshElements.length,
-          bytesOnWire: maxWire2,
-          parts: parts2.length,
-          uncompressedBytes: uncompressed2,
-          compressed: compressed2 || isChunked2,
-          chunked: isChunked2,
-          nearOrOverFreeBroadcastLimit: maxWire2 >= BROADCAST_WARN_BYTES,
-        });
-        if (!compressed2 && !isChunked2 && uncompressed2 >= BROADCAST_WARN_BYTES) {
-          console.warn('[Whiteboard] Broadcast (post-upload) ~', uncompressed2, 'bytes uncompressed.');
-        }
-        for (const part of parts2) {
-          channelRef.current.send({
-            type: 'broadcast',
-            event: 'scene-update',
-            payload: part,
+      if (needsUpload.length > 0) {
+        for (const [fileId] of needsUpload) broadcastAssetUploadsRef.current.add(fileId);
+        void Promise.all(needsUpload.map(([fileId, file]) => uploadFileAssetIfNeeded(fileId, file)))
+          .then((uploaded) => {
+            if (generation !== channelGenerationRef.current) return;
+            if (uploaded.some((file) => file.storagePath)) requestSceneBroadcastRef.current();
+          })
+          .catch((error) => console.warn('[Whiteboard] image upload failed:', error))
+          .finally(() => {
+            for (const [fileId] of needsUpload) broadcastAssetUploadsRef.current.delete(fileId);
           });
-        }
-      })();
+      }
+      return true;
     },
-    [currentUser?.id, uploadFileAssetIfNeeded],
+    [canBroadcast, currentUser?.id, uploadFileAssetIfNeeded],
   );
 
   const broadcastUpdate = useCallback(
-    (elements: readonly any[], files?: Record<string, WhiteboardFile>) => {
-      const normalizedFiles = files ?? {};
-      pendingOutboundRef.current = { elements, files: normalizedFiles };
-      const now = Date.now();
-      if (now - lastOutboundSentAtRef.current >= OUTBOUND_BROADCAST_MIN_GAP_MS) {
-        if (outboundBroadcastTimerRef.current) {
-          clearTimeout(outboundBroadcastTimerRef.current);
-          outboundBroadcastTimerRef.current = null;
-        }
-        lastOutboundSentAtRef.current = now;
-        const pending = pendingOutboundRef.current;
-        pendingOutboundRef.current = null;
-        if (pending) {
-          void emitSceneBroadcast(pending.elements, pending.files).catch((err) =>
-            console.warn('[Whiteboard] emitSceneBroadcast failed:', err),
-          );
-        }
-        return;
-      }
-      const delay = Math.max(0, OUTBOUND_BROADCAST_MIN_GAP_MS - (now - lastOutboundSentAtRef.current));
-      if (outboundBroadcastTimerRef.current) clearTimeout(outboundBroadcastTimerRef.current);
-      outboundBroadcastTimerRef.current = setTimeout(() => {
-        outboundBroadcastTimerRef.current = null;
-        lastOutboundSentAtRef.current = Date.now();
-        const pending = pendingOutboundRef.current;
-        pendingOutboundRef.current = null;
-        if (pending) {
-          void emitSceneBroadcast(pending.elements, pending.files).catch((err) =>
-            console.warn('[Whiteboard] emitSceneBroadcast failed:', err),
-          );
-        }
-      }, delay);
-    },
-    [emitSceneBroadcast],
+    (elements: readonly any[], files: Record<string, WhiteboardFile> = {}, force = false) => {
+      broadcastQueueRef.current?.enqueue({ elements, files }, whiteboardSceneKey(elements, files), force);
+    }, [],
   );
 
-  const scheduleStableBroadcast = useCallback(() => {
-    if (!loadedRef.current) return;
-    if (broadcastTimerRef.current) clearTimeout(broadcastTimerRef.current);
-    broadcastTimerRef.current = setTimeout(() => {
+  useEffect(() => {
+    const queue = createWhiteboardBroadcastQueue<SceneBroadcast>({
+      ready: canBroadcast,
+      send: emitSceneBroadcast,
+      minGapMs: OUTBOUND_BROADCAST_MIN_GAP_MS,
+      onError: (error) => console.warn('[Whiteboard] scene broadcast failed:', error),
+    });
+    broadcastQueueRef.current = queue;
+    requestSceneBroadcastRef.current = () => {
       const api = excalidrawApiRef.current;
-      if (!api || !pendingBroadcastRef.current) return;
-      const appState = api.getAppState?.() || {};
-      const isLinearInProgress = !!appState?.editingLinearElement || !!appState?.multiElement;
-      if (isLinearInProgress) {
-        // Trailing sync shortly after gesture sampling stops (throttled live sends happen in onChange).
-        scheduleStableBroadcast();
-        return;
-      }
-      pendingBroadcastRef.current = false;
-      const elements = api.getSceneElementsIncludingDeleted?.() || api.getSceneElements?.() || [];
-      const files = toPlainFiles(api.getFiles?.());
-      void broadcastUpdate(elements, files);
-    }, 120);
-  }, [broadcastUpdate]);
+      if (!api || !loadedRef.current) return;
+      broadcastUpdate(api.getSceneElementsIncludingDeleted(), toPlainFiles(api.getFiles?.()), true);
+      queue.resume();
+    };
+    return () => {
+      queue.dispose();
+      broadcastQueueRef.current = null;
+      requestSceneBroadcastRef.current = () => {};
+    };
+  }, [sessionId, broadcastUpdate, canBroadcast, emitSceneBroadcast]);
 
   useEffect(() => {
     if (!sessionId || !currentUser) return;
+    let disposed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let remotePeers = new Set<string>();
 
     const setupChannel = () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      channelReadyRef.current = false;
+      hasRemotePeersRef.current = false;
+      remotePeers = new Set();
+      broadcastQueueRef.current?.pause();
+      const generation = ++channelGenerationRef.current;
       const channel = supabase.channel(`wb:${sessionId}`, {
         config: { broadcast: { self: false } },
       });
+      channelRef.current = channel;
+      const isCurrent = () => !disposed && channelRef.current === channel &&
+        generation === channelGenerationRef.current;
 
       channel
         .on('broadcast', { event: 'scene-update' }, ({ payload }) => {
+          if (!isCurrent()) return;
           void (async () => {
             let typedPayload: SceneUpdatePayload | null = null;
             try {
@@ -1090,21 +1018,20 @@ export function useWhiteboardSync(
               }
               return;
             }
-            if (!typedPayload?.elements) return;
-            const bytesDecoded = estimateScenePayloadBytes(typedPayload);
-            const bytesOnWire = new Blob([JSON.stringify(payload)]).size;
-            const latencyMs = Date.now() - (typedPayload.sentAt || 0);
-            const po = payload as Record<string, unknown> | null;
-            wbDiag('RX', {
-              revision: typedPayload.revision,
-              senderId: typedPayload.senderId,
-              elementCount: typedPayload.elements?.length,
-              bytesOnWire,
-              bytesDecoded,
-              compressed: po?._wbCompressed === true,
-              chunkedAssembly: po?._wbChunked === true,
-              latencyMs,
-            });
+            if (!isCurrent() || !typedPayload?.elements) return;
+            if (wbDiagEnabled()) {
+              const po = payload as Record<string, unknown> | null;
+              wbDiag('RX', {
+                revision: typedPayload.revision,
+                senderId: typedPayload.senderId,
+                elementCount: typedPayload.elements?.length,
+                bytesOnWire: new Blob([JSON.stringify(payload)]).size,
+                bytesDecoded: estimateScenePayloadBytes(typedPayload),
+                compressed: po?._wbCompressed === true,
+                chunkedAssembly: po?._wbChunked === true,
+                latencyMs: Date.now() - (typedPayload.sentAt || 0),
+              });
+            }
             if (typedPayload.senderId && currentUser && typedPayload.senderId === currentUser.id) return;
             if (!loadedRef.current) {
               pendingRemotePayloadsRef.current.push(typedPayload);
@@ -1114,29 +1041,44 @@ export function useWhiteboardSync(
           })();
         })
         .on('presence', { event: 'sync' }, () => {
-          const state = channel.presenceState<{ userId: string; name: string; joinedAt: string }>();
+          if (!isCurrent()) return;
+          const state = channel.presenceState<{ userId: string; name: string; joinedAt: string; phx_ref?: string }>();
           const list: Participant[] = [];
+          const nextPeers = new Set<string>();
           for (const key of Object.keys(state)) {
             for (const p of state[key]) {
               if (!list.some((x) => x.userId === p.userId)) {
                 list.push({ userId: p.userId, name: p.name, joinedAt: p.joinedAt });
               }
+              if (p.userId !== currentUser.id) nextPeers.add(p.phx_ref || `${p.userId}:${p.joinedAt}`);
             }
           }
+          const peerJoined = [...nextPeers].some((key) => !remotePeers.has(key));
+          remotePeers = nextPeers;
+          hasRemotePeersRef.current = nextPeers.size > 0;
           setParticipants(list);
+          if (peerJoined) requestSceneBroadcastRef.current();
+          if (hasRemotePeersRef.current) broadcastQueueRef.current?.resume();
+          else broadcastQueueRef.current?.pause();
         })
         .subscribe(async (status) => {
+          if (!isCurrent()) return;
           wbDiag('channel', status);
           if (status === 'SUBSCRIBED') {
+            channelReadyRef.current = true;
             await channel.track({
               userId: currentUser.id,
               name: currentUser.name,
               joinedAt: new Date().toISOString(),
             });
           }
-          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            channelReadyRef.current = false;
+            hasRemotePeersRef.current = false;
+            broadcastQueueRef.current?.pause();
             if (reconnectTimer) clearTimeout(reconnectTimer);
             reconnectTimer = setTimeout(() => {
+              if (!isCurrent()) return;
               if (channelRef.current) {
                 supabase.removeChannel(channelRef.current);
                 channelRef.current = null;
@@ -1155,12 +1097,18 @@ export function useWhiteboardSync(
 
     const handleOnline = () => {
       if (!channelRef.current) return;
+      channelReadyRef.current = false;
       supabase.removeChannel(channelRef.current);
       channelRef.current = setupChannel();
     };
     window.addEventListener('online', handleOnline);
 
     return () => {
+      disposed = true;
+      channelGenerationRef.current++;
+      channelReadyRef.current = false;
+      hasRemotePeersRef.current = false;
+      broadcastQueueRef.current?.pause();
       window.removeEventListener('online', handleOnline);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       for (const v of chunkAssemblyRef.current.values()) {
@@ -1179,14 +1127,6 @@ export function useWhiteboardSync(
         clearTimeout(saveMaxDelayTimerRef.current);
         saveMaxDelayTimerRef.current = null;
       }
-      if (broadcastTimerRef.current) {
-        clearTimeout(broadcastTimerRef.current);
-        broadcastTimerRef.current = null;
-      }
-      if (outboundBroadcastTimerRef.current) {
-        clearTimeout(outboundBroadcastTimerRef.current);
-        outboundBroadcastTimerRef.current = null;
-      }
     };
   }, [sessionId, currentUserKey, applyRemotePayload]);
 
@@ -1203,6 +1143,7 @@ export function useWhiteboardSync(
           if (cancelled) return;
           const validFiles: Record<string, WhiteboardFile> = {};
           for (const [fid, f] of Object.entries(hydratedFiles)) {
+            if (f.storagePath) uploadedAssetPathByFileIdRef.current.set(fid, f.storagePath);
             if (typeof f?.dataURL === 'string' && f.dataURL.startsWith(IMAGE_PREFIX)) {
               validFiles[fid] = { ...f, id: f.id ?? fid };
             }
@@ -1222,10 +1163,12 @@ export function useWhiteboardSync(
             captureUpdate: CaptureUpdateAction.NEVER,
           });
         }
+        rememberCurrentScene();
         loadedRef.current = true;
         setLoadError(false);
         setLoaded(true);
         await flushQueuedPayloads();
+        requestSceneBroadcastRef.current();
       } catch (err) {
         if (cancelled) return;
         console.warn('[Whiteboard] scene load failed:', err);
@@ -1236,7 +1179,7 @@ export function useWhiteboardSync(
     return () => {
       cancelled = true;
     };
-  }, [sessionId, excalidrawAPI, loaded, loadScene, flushQueuedPayloads, hydrateFilesFromStorage, loadAttempt]);
+  }, [sessionId, excalidrawAPI, loaded, loadScene, flushQueuedPayloads, hydrateFilesFromStorage, loadAttempt, rememberCurrentScene]);
 
   const retryLoadScene = useCallback(() => {
     setLoadError(false);
@@ -1284,27 +1227,19 @@ export function useWhiteboardSync(
     (elements: readonly any[], appState?: any, rawFiles?: Record<string, WhiteboardFile> | unknown) => {
       if (!loaded) return;
       if (isRemoteUpdateRef.current) return;
+      const files = toPlainFiles(rawFiles);
+      const sceneKey = whiteboardSceneKey(elements, files);
+      const settingsKey = whiteboardSettingsKey(appState);
+      const sceneChanged = sceneKey !== lastObservedSceneKeyRef.current;
+      if (!sceneChanged && settingsKey === lastObservedSettingsKeyRef.current) return;
+      lastObservedSceneKeyRef.current = sceneKey;
+      lastObservedSettingsKeyRef.current = settingsKey;
       changeVersionRef.current++;
       setSaved(false);
-      const files = toPlainFiles(rawFiles);
-      pendingBroadcastRef.current = true;
-      scheduleStableBroadcast();
-      const isLinearInProgress =
-        !!appState?.editingLinearElement ||
-        !!appState?.multiElement;
-      if (isLinearInProgress) {
-        const now = performance.now();
-        if (now - lastLinearBroadcastAtRef.current >= LINEAR_BROADCAST_MIN_INTERVAL_MS) {
-          lastLinearBroadcastAtRef.current = now;
-          void broadcastUpdate(elements, files);
-        }
-        return;
-      }
-      lastLinearBroadcastAtRef.current = 0;
-      void broadcastUpdate(elements, files);
+      if (sceneChanged) broadcastUpdate(elements, files);
       debouncedSave();
     },
-    [broadcastUpdate, debouncedSave, loaded, scheduleStableBroadcast],
+    [broadcastUpdate, debouncedSave, loaded],
   );
 
   return { participants, saving, saved, saveError, loadError, loaded, onChange, saveScene, retryLoadScene };
