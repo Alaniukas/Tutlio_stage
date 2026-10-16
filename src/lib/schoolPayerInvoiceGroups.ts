@@ -11,6 +11,8 @@ export type SchoolPayerInvoiceStudentPreview = {
   reviewSessionIds: string[];
   reviewReasons?: Array<'unconfirmed' | 'contract_review' | 'missing_price'>;
   alreadyIssued: boolean;
+  issuedInvoiceNumbers?: string[];
+  issuedTotalEur?: number;
   payerEmail: string;
   payerName: string;
   detachedAt?: string | null;

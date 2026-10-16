@@ -107,6 +107,26 @@ describe('schoolMonthlyInvoiceDiscounts', () => {
     });
   });
 
+  it('uses any session in the line when matching a later accepted contract discount', () => {
+    const literature = mapAcceptedDiscountAgreement({
+      id: 'agr-lit',
+      student_id: 'child1',
+      contract_id: 'contract-lit',
+      subject_id: null,
+      tutor_id: 'alina',
+      discount_type: 'percent',
+      discount_value: 100,
+      valid_from: '2026-09-07',
+      valid_until: '2027-06-30',
+      agreement_number: 'NPR-LIT',
+    }, { id: 'contract-lit', class_group_id: 'group-lit' });
+    const lines = buildSchoolLessonInvoiceLines([
+      { id: 'l1', subjectId: 'group-lit', classGroupId: 'group-lit', subjectName: 'Literatūra', tutorId: 'alina', tutorName: 'Alina', unitPriceEur: 6, matchingContractIds: [] },
+      { id: 'l2', subjectId: 'group-lit', classGroupId: 'group-lit', subjectName: 'Literatūra', tutorId: 'alina', tutorName: 'Alina', unitPriceEur: 6, matchingContractIds: ['contract-lit'] },
+    ], [literature]);
+    expect(lines[0]).toMatchObject({ quantity: 2, discountAmountEur: 12, amountEur: 0 });
+  });
+
   it('applies a confirmed 100 percent agreement to grouped lesson rows', () => {
     const discounts = [mapAcceptedDiscountAgreement({
       id: 'agr-1',

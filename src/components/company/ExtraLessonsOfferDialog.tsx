@@ -204,8 +204,7 @@ export default function ExtraLessonsOfferDialog(props: {
     setServiceType('group');
     setServiceName((prev) => prev || g.name);
     const defaults = applyGroupDefaults(props.organizationId, g, 'group', startDate, endDate);
-    const selectedSlots = props.recordingPlanEnabled && recordingAccess === 'none'
-      ? defaults.slots.slice(0, 1) : defaults.slots;
+    const selectedSlots = defaults.slots;
     setSlots(selectedSlots);
     if (defaults.platform) setPlatform(defaults.platform);
     if (defaults.duration) setDuration(defaults.duration);
@@ -440,30 +439,14 @@ export default function ExtraLessonsOfferDialog(props: {
           </div>
           <div>
             <Label>Grafikas (pasirinkite dienas)</Label>
-            {props.recordingPlanEnabled && serviceType === 'group' && recordingAccess === 'none' && selectedGroup ? (
-              <select aria-label={t('school.recordingPlan.oneWeekly')} className="w-full border rounded-md h-9 px-2 text-sm"
-                value={slots[0] ? `${slots[0].weekday}:${slots[0].start_time}` : ''}
-                onChange={(event) => {
-                  const selected = selectedGroup.slots?.find((slot) => `${slot.weekday}:${String(slot.start_time).slice(0, 5)}` === event.target.value);
-                  const next = selected ? [{ ...selected, start_time: selected.start_time.slice(0, 5) }] : [];
-                  setSlots(next);
-                  recalcBaseLessons(next, startDate, endDate, selectedGroup);
-                }}>
-                <option value="">{t('school.recordingPlan.oneWeekly')}</option>
-                {(selectedGroup.slots || []).map((slot) => (
-                  <option key={`${slot.weekday}:${slot.start_time}`} value={`${slot.weekday}:${slot.start_time.slice(0, 5)}`}>
-                    {formatScheduleLabel([slot])}
-                  </option>
-                ))}
-              </select>
-            ) : <ScheduleSlotPicker
+            <ScheduleSlotPicker
               slots={slots}
               onChange={(next) => {
                 setSlots(next);
                 recalcBaseLessons(next, startDate, endDate, selectedGroup);
               }}
               durationMinutes={Number(duration) || 45}
-            />}
+            />
           </div>
           <DateRangeFields startDate={startDate} endDate={endDate} onStart={setStartDate} onEnd={setEndDate} />
           {props.recordingPlanEnabled && serviceType === 'group' && groupId && (
@@ -471,13 +454,7 @@ export default function ExtraLessonsOfferDialog(props: {
               <Label htmlFor="extra-recording-plan">{t('school.recordingPlan.label')}</Label>
               <select id="extra-recording-plan" className="w-full border rounded-md h-9 px-2 text-sm"
                 value={recordingAccess} onChange={(event) => {
-                  const nextMode = schoolRecordingAccessMode(event.target.value);
-                  setRecordingAccess(nextMode);
-                  if (nextMode === 'none') {
-                    const next = slots.slice(0, 1);
-                    setSlots(next);
-                    recalcBaseLessons(next, startDate, endDate, selectedGroup);
-                  }
+                  setRecordingAccess(schoolRecordingAccessMode(event.target.value));
                 }}>
                 <option value="group">{t('school.recordingPlan.group')}</option>
                 <option value="none">{t('school.recordingPlan.none')}</option>

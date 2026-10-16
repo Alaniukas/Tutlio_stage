@@ -99,6 +99,14 @@ describe('buildSchoolMonthlyInvoiceEmailData', () => {
     });
   });
 
+  it('passes a supplemental apology through to the email payload', () => {
+    const data = buildSchoolMonthlyInvoiceEmailData({
+      ...invoice,
+      issuer_note: 'Atsiprašome – ankstesnėje sąskaitoje PAM-800 šie užsiėmimai nebuvo įtraukti.',
+    }, { publicOrigin: 'https://tutlio.lt', student, org, contract: {} });
+    expect(data.correctionNote).toContain('PAM-800');
+  });
+
   it('omits the payment link when the accepted addendum covers the whole amount', () => {
     const data = buildSchoolMonthlyInvoiceEmailData({ ...invoice, subtotal_eur: 162,
       discount_amount_eur: 162, total_eur: 0, payment_status: 'paid' },

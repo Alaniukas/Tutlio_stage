@@ -2,7 +2,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 
-it('keeps cancelled invoice history while allowing one replacement and blocking pending or paid duplicates', async () => {
+it('keeps cancelled invoice history and allows a supplemental invoice in the same period', async () => {
   const db = new PGlite();
   try {
     await db.exec(`
@@ -16,17 +16,11 @@ it('keeps cancelled invoice history while allowing one replacement and blocking 
     `);
     await db.exec(readFileSync('supabase/migrations/20261001133628_school_monthly_invoice_reissue_after_cancellation.sql', 'utf8'));
     await db.exec(`INSERT INTO public.school_monthly_invoices VALUES ('new', 'kajus', NULL, '2026-09-01', 'pending')`);
-    for (const status of ['pending', 'paid']) {
-      await db.exec(`UPDATE public.school_monthly_invoices SET payment_status = '${status}' WHERE id = 'new'`);
-      await expect(db.exec(`INSERT INTO public.school_monthly_invoices VALUES ('duplicate', 'kajus', NULL, '2026-09-01', 'pending')`))
-        .rejects.toThrow(/duplicate key/);
-    }
-    expect((await db.query(`SELECT id, payment_status FROM public.school_monthly_invoices ORDER BY id`)).rows).toEqual([
-      { id: 'new', payment_status: 'paid' }, { id: 'old', payment_status: 'cancelled' },
-    ]);
-    await db.exec(`UPDATE public.school_monthly_invoices SET payment_status = 'cancelled' WHERE id = 'new'`);
-    await db.exec(`INSERT INTO public.school_monthly_invoices VALUES ('second-replacement', 'kajus', NULL, '2026-09-01', 'pending')`);
-    expect((await db.query(`SELECT COUNT(*)::int AS count FROM public.school_monthly_invoices`)).rows).toEqual([{ count: 3 }]);
+    await db.exec(readFileSync('supabase/migrations/20261016170000_school_monthly_supplemental_invoices.sql', 'utf8'));
+    await db.exec(`UPDATE public.school_monthly_invoices SET payment_status = 'paid' WHERE id = 'new'`);
+    await db.exec(`INSERT INTO public.school_monthly_invoices VALUES ('supplemental', 'kajus', NULL, '2026-09-01', 'pending')`);
+    expect((await db.query(`SELECT id FROM public.school_monthly_invoices WHERE payment_status <> 'cancelled' ORDER BY id`)).rows)
+      .toEqual([{ id: 'new' }, { id: 'supplemental' }]);
   } finally {
     await db.close();
   }

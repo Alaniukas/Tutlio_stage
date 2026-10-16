@@ -107,11 +107,12 @@ export function buildSchoolLessonInvoiceLines(
     const quantity = rows.length;
     const unitPriceEur = money(first.unitPriceEur);
     const originalAmountEur = money(unitPriceEur * quantity);
+    const matchingContractIds = [...new Set(rows.flatMap((row) => row.matchingContractIds || []))];
     const discount = findLessonDiscountForSession(discounts, {
       subjectId: first.subjectId,
       tutorId: first.tutorId,
       classGroupId: first.classGroupId || null,
-      matchingContractIds: first.matchingContractIds,
+      matchingContractIds,
     });
     const applied = invoiceLineDiscount(originalAmountEur, discount);
     return {

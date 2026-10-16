@@ -237,6 +237,25 @@ describe('school monthly invoice review API', () => {
     expect(sent.body.sentCount).toBe(1);
     expect(state.replacements).toHaveLength(1);
   });
+  it('locks an already emailed pending invoice instead of offering regeneration', async () => {
+    state.tables.school_monthly_invoices = [{
+      ...existingInvoice(),
+      invoice_number: 'PAM-828',
+      invoice_email_sent_at: '2026-10-04T12:08:00Z',
+      total_eur: 236,
+    }];
+    const preview = await request({ action: 'preview' });
+    expect(preview.status).toBeGreaterThanOrEqual(400);
+    const batch = await request({ action: 'batch-preview' });
+    expect(batch.body.payers[0].students[0]).toMatchObject({
+      alreadyIssued: true,
+      lessonCount: 0,
+      issuedInvoiceNumbers: ['PAM-828'],
+      issuedTotalEur: 236,
+    });
+    expect(batch.body.payers[0].students[0].regeneration).toBeFalsy();
+    expect(batch.body.payers[0].sendableStudentIds).toEqual([]);
+  });
   it('does not reset a payment or an active checkout after payer preview', async () => {
     state.tables.school_monthly_invoices = [existingInvoice()];
     const preview = await request({ action: 'preview' });
@@ -259,6 +278,15 @@ describe('school monthly invoice review API', () => {
     expect(sent.status).toBeLessThan(300);
     expect(state.replacements[0].p_invoice.payer_student_ids.sort()).toEqual(['child1', 'child2']);
     expect(state.replacements[0].p_invoice.billed_session_ids.sort()).toEqual(['lesson1', 'sibling-lesson']);
+  });
+  it('does not pull a sibling into review when only the selected child has a pending invoice', async () => {
+    state.tables.students.push({ id: 'child2', organization_id: 'org1', full_name: 'Child Two', payer_email: 'parent@example.com' });
+    state.tables.sessions.push({ ...state.tables.sessions[0], id: 'sibling-lesson', student_id: 'child2',
+      class_group: { name: 'Rusų kalba Tauras' } });
+    state.tables.school_monthly_invoices = [existingInvoice()];
+    const review = await request({ action: 'review', studentId: 'child1' });
+    expect(review.body.sessions.map((row: any) => row.id)).toEqual(['lesson1']);
+    expect(review.body.sessions.some((row: any) => row.id === 'sibling-lesson' || String(row.subjectName || '').includes('Tauras'))).toBe(false);
   });
   it('does not replace a family invoice when a sibling still needs attendance review', async () => {
     state.tables.students.push({ id: 'child2', organization_id: 'org1', full_name: 'Child Two', payer_email: 'parent@example.com' });
@@ -532,9 +560,10 @@ describe('school monthly invoice review API', () => {
   });
   it('allows a supplemental invoice in the same period when other sessions are still unbilled', async () => {
     state.tables.school_monthly_invoices.push({
-      id: 'invoice1', organization_id: 'org1', student_id: 'child1', payment_status: 'pending',
+      id: 'invoice1', organization_id: 'org1', student_id: 'child1', payment_status: 'paid',
       period_start: '2026-09-01', period_end: '2026-09-30', contract_id: null,
       invoice_number: 'PAM-800', billed_session_ids: ['lesson1'],
+      invoice_email_sent_at: '2026-10-04T10:09:00Z', total_eur: 96,
     });
     state.tables.sessions.push({ ...state.tables.sessions[0], id: 'new-lesson' });
     const preview = await request({ action: 'preview' });
@@ -546,6 +575,7 @@ describe('school monthly invoice review API', () => {
     expect(send.status).toBe(200);
     expect(send.body).toMatchObject({ invoiceNumber: 'PAM-801', emailSent: true });
     expect(state.tables.school_monthly_invoices).toHaveLength(2);
+    expect(state.writes.find((write) => write.table === 'school_monthly_invoices')?.row.issuer_note).toContain('PAM-800');
   });
   it('blocks issuance before allocating an invoice number when payer email is missing, even if child email exists', async () => {
     state.tables.students[0].payer_email = null; state.tables.students[0].email = 'child@example.com';

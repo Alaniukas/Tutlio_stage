@@ -46,7 +46,7 @@ export const schoolInvoiceReviewLt: Record<string, string> = {
   'school.invoice.batch.blocked': 'Dar reikia patvirtinti lankomumą',
   'school.invoice.batch.childLine': '{name} · {count} užsiėm. · {amount}',
   'school.invoice.batch.reviewChild': 'Peržiūrėti vaiką',
-  'school.invoice.batch.searchPayer': 'Ieškoti mokėtojo vardo ar el. pašto',
+  'school.invoice.batch.searchPayer': 'Ieškoti mokėtojo, vaiko vardo ar el. pašto',
   'school.invoice.batch.filterAll': 'Visos būsenos',
   'school.invoice.batch.filterReady': 'Paruošta siųsti',
   'school.invoice.batch.filterBlocked': 'Reikia patvirtinti',
@@ -71,6 +71,8 @@ export const schoolInvoiceReviewLt: Record<string, string> = {
   'school.invoice.discount.autoHelp': 'Naują nuolaidą suteikite Sutarčių puslapyje — atidarykite sutartį ir pasirinkite „Pasiūlyti nuolaidą“. Ji sąskaitose bus taikoma tik po mokėtojo patvirtinimo el. laiške.',
   'school.invoice.preview.checklistTitle': 'Kas bus rodoma sąskaitoje',
   'school.invoice.review.reason.missing_price': 'Nenurodyta kaina. Nustatykite ją papildomų užsiėmimų pasiūlyme (Sutartys).',
+  'school.invoice.batch.issuedLine': 'Išsiųsta {numbers} · {amount}',
+  'school.invoice.preview.sentBadge': 'Išsiųsta {number}',
 };
 
 export const schoolInvoiceReviewEn: Record<string, string> = {
@@ -119,7 +121,7 @@ export const schoolInvoiceReviewEn: Record<string, string> = {
   'school.invoice.batch.blocked': 'Attendance still needs confirmation',
   'school.invoice.batch.childLine': '{name} · {count} sessions · {amount}',
   'school.invoice.batch.reviewChild': 'Review child',
-  'school.invoice.batch.searchPayer': 'Search payer name or email',
+  'school.invoice.batch.searchPayer': 'Search payer, child name or email',
   'school.invoice.batch.filterAll': 'All statuses',
   'school.invoice.batch.filterReady': 'Ready to send',
   'school.invoice.batch.filterBlocked': 'Needs confirmation',
@@ -144,4 +146,6 @@ export const schoolInvoiceReviewEn: Record<string, string> = {
   'school.invoice.discount.autoHelp': 'Offer a new discount on the Contracts page — open a contract and choose the discount offer. It applies on invoices only after the payer confirms by email.',
   'school.invoice.preview.checklistTitle': 'What the invoice will show',
   'school.invoice.review.reason.missing_price': 'Price missing. Set it in the extra session offer on the Contracts page.',
+  'school.invoice.batch.issuedLine': 'Sent {numbers} · {amount}',
+  'school.invoice.preview.sentBadge': 'Sent {number}',
 };

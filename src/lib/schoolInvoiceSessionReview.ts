@@ -63,6 +63,8 @@ type SchoolInvoiceActivity = {
   member_schedule_slots?: SchoolMemberSlot[] | null;
   class_group_id?: string | null;
   subject_id?: string | null;
+  tutor_id?: string | null;
+  tutor?: { id?: string | null; full_name?: string | null } | Array<{ id?: string | null; full_name?: string | null }> | null;
   class_group?: { name?: string | null } | Array<{ name?: string | null }> | null;
   subject?: { name?: string | null; price?: number | null; is_trial?: boolean | null }
     | Array<{ name?: string | null; price?: number | null; is_trial?: boolean | null }> | null;
@@ -79,6 +81,28 @@ function normalizeBillingLabel(value: string): string {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+const INDIVIDUAL_SERVICE_STOPWORDS = new Set([
+  'individuali', 'individualus', 'individual', 'grupine', 'grupinis', 'group',
+  'pamoka', 'pamokos', 'uzsiemimas', 'lesson', 'session', 'kalba', 'language',
+]);
+
+function foldBillingLetters(value: string): string {
+  return normalizeBillingLabel(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function individualServiceCoreTokens(value: string): string[] {
+  return foldBillingLetters(value)
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 4 && !INDIVIDUAL_SERVICE_STOPWORDS.has(token));
+}
+
+function individualServiceCoreOverlap(subjectName: string, serviceName: string): boolean {
+  const serviceTokens = new Set(individualServiceCoreTokens(serviceName));
+  return individualServiceCoreTokens(subjectName).some((token) => serviceTokens.has(token));
+}
+
 function individualSessionMatchesContractService(
   session: SchoolInvoiceActivity,
   order: ExtraLessonsOrderSnapshot,
@@ -90,6 +114,16 @@ function individualSessionMatchesContractService(
   if (!subjectName || !serviceName) return false;
   if (subjectName === serviceName || subjectName.includes(serviceName) || serviceName.includes(subjectName)) return true;
   if (studentFullName && studentNameInLabel(studentFullName, subjectName) && studentNameInLabel(studentFullName, serviceName)) {
+    return true;
+  }
+  // Recreated individual subjects often drop the child name ("… Individuali grupinė")
+  // while the signed snapshot keeps it. Keep the student on this contract, then
+  // require a shared service token so another of the same tutor's subjects is not billed here.
+  if (
+    studentFullName
+    && studentNameInLabel(studentFullName, serviceName)
+    && individualServiceCoreOverlap(subjectName, serviceName)
+  ) {
     return true;
   }
   return false;
@@ -220,7 +254,11 @@ function individualContractLooselyMatchesSession(
   if (order.end_date && day > order.end_date) return false;
   if (!tutorNamesMatch(session, order)) return false;
   if (studentFullName && !studentNameInLabel(studentFullName, String(order.service_name || ''))) return false;
-  return !session.subject_id || individualSessionMatchesContractService(session, order, studentFullName);
+  if (!session.subject_id) return true;
+  return individualServiceCoreOverlap(
+    String((Array.isArray(session.subject) ? session.subject[0] : session.subject)?.name || ''),
+    String(order.service_name || ''),
+  );
 }
 
 function contractActivitySuffix(
@@ -265,7 +303,8 @@ export function schoolInvoiceSessionActivityName(
     return String(group?.name || order?.group_name || order?.service_name || 'Užsiėmimas');
   }
   const subject = Array.isArray(session.subject) ? session.subject[0] : session.subject;
-  const raw = String(subject?.name || 'Užsiėmimas');
+  const tutor = Array.isArray(session.tutor) ? session.tutor[0] : session.tutor;
+  const raw = String(subject?.name || (tutor?.full_name ? `${tutor.full_name} · individualus užsiėmimas` : 'Užsiėmimas'));
   const fromContract = individualContractActivityName(session, contracts, studentFullName);
   if (fromContract) return fromContract;
   if (studentFullName && raw.includes('(individuali)') && !studentNameInLabel(studentFullName, raw)) {
@@ -323,6 +362,13 @@ function resolveAcceptedAtIso(contract: SchoolInvoiceContractWindow): string {
   return start ? `${start}T12:00:00.000Z` : '';
 }
 
+function extraLessonsBillingStartStatus(contract: SchoolInvoiceContractWindow): StartWithin14Status {
+  // 14-day delay applies only after a real parent acceptance. A sent offer still
+  // bills attended lessons from the ordered start_date.
+  if (!contract.accepted_at) return 'yes';
+  return (contract.start_within_14_status || (contract.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status;
+}
+
 function sessionWithinContractWindow(session: CanonicalBillableSession, contract: SchoolInvoiceContractWindow): boolean {
   const order = contract.order_snapshot;
   if (!order) return false;
@@ -333,7 +379,7 @@ function sessionWithinContractWindow(session: CanonicalBillableSession, contract
   return (!order.end_date || sessionYmdVilnius(session.start_time) <= order.end_date)
     && isSessionInExtraLessonsServiceWindow(session.start_time, {
       serviceStartYmd: extraLessonsServiceStartYmd({
-        status: (contract.start_within_14_status || (contract.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status,
+        status: extraLessonsBillingStartStatus(contract),
         acceptedAtIso,
         order,
       }),
@@ -414,7 +460,7 @@ export function resolveSchoolInvoiceUnitPrice(
 
 /** Invoice line key when session.subject_id and class_group_id are both empty (pre-link group row). */
 export function schoolInvoiceBillableSubjectKey(
-  session: Pick<CanonicalBillableSession, 'id' | 'class_group_id' | 'subject_id' | 'start_time'> & SchoolInvoiceActivity & { tutor?: any },
+  session: Pick<CanonicalBillableSession, 'id' | 'class_group_id' | 'subject_id' | 'start_time'> & SchoolInvoiceActivity & { tutor?: any; tutor_id?: string | null },
   contracts: SchoolInvoiceContractWindow[] = [],
   studentFullName?: string | null,
 ): string | null {
@@ -426,7 +472,10 @@ export function schoolInvoiceBillableSubjectKey(
     .find((value) => Boolean(value));
   if (groupId) return String(groupId);
   if (matching.length) return `session:${session.id}`;
-  return null;
+  const tutor = Array.isArray(session.tutor) ? session.tutor[0] : session.tutor;
+  const tutorId = String(session.tutor_id || tutor?.id || '').trim();
+  if (tutorId) return `tutor:${tutorId}`;
+  return session.id ? `session:${session.id}` : null;
 }
 
 export function schoolInvoiceSessionMatchesContract(
@@ -453,7 +502,10 @@ export function schoolInvoiceContractReason(
   studentFullName?: string | null,
 ): 'payable' | 'outside_contract' | 'outside_schedule' | 'suspended' | 'contract_review' {
   const activeContracts = filterContractsForSchoolInvoiceReview(contracts);
-  const matching = activeContracts.filter((contract) => schoolInvoiceSessionMatchesContract(session, contract, studentFullName));
+  const matching = activeContracts.filter((contract) => (
+    (contract.signing_status === 'signed' || contract.signing_status === 'sent')
+    && schoolInvoiceSessionMatchesContract(session, contract, studentFullName)
+  ));
   if (matching.some((contract) => !contract.order_snapshot)
     || activeContracts.some((contract) => contractNeedsAdminReview(contract))) return 'contract_review';
   // Older/direct school lessons do not necessarily have an extra-lessons agreement.

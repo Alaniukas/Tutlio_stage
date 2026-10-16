@@ -89,6 +89,7 @@ describe('school payer invoices in the organization invoice list', () => {
     render(<CompanyInvoices />);
     await screen.findByText('PAM-4');
     for (const number of ['TEACHER-1', 'PAM-1', 'PAM-2', 'PAM-3']) expect(screen.getByText(number)).toBeTruthy();
+    expect(within(screen.getByText('PAM-1').closest('.rounded-xl') as HTMLElement).getByText(/Student/)).toBeTruthy();
     expect(screen.queryByText('FOREIGN-1')).toBeNull();
     expect(screen.getAllByRole('checkbox')).toHaveLength(6); // select all, teacher, 4 numbered payer invoices
     expect(state.queries.filter(query => query.table === 'school_monthly_invoices').map(query => query.from)).toEqual([0, 2, 4]);

@@ -46,6 +46,7 @@ export type SchoolMonthlyInvoicePdfData = {
   creditAppliedEur?: number;
   creditSources?: Array<{ monthLabel: string; amountEur: number }>;
   discountNote?: string | null;
+  issuerNote?: string | null;
   issuedByName?: string | null;
   branding?: InvoicePdfBranding | null;
 };
@@ -355,7 +356,8 @@ export async function generateSchoolMonthlyInvoicePdf(data: SchoolMonthlyInvoice
     ? data.creditSources
     : creditApplied > 0 ? [{ monthLabel: '', amountEur: creditApplied }] : [];
   const noteHeight = data.discountNote ? wrap(`Nuolaidos pastaba: ${data.discountNote}`,font,8,TABLE_W).length * 11 + 24 : 0;
-  const summaryHeight = 92 + (creditSources.length * 16) + noteHeight + (data.dueDate ? 24 : 0);
+  const issuerNoteHeight = data.issuerNote ? wrap(data.issuerNote, font, 8, TABLE_W).length * 11 + 24 : 0;
+  const summaryHeight = 92 + (creditSources.length * 16) + noteHeight + issuerNoteHeight + (data.dueDate ? 24 : 0);
   if (y - summaryHeight < 135) continuationPage();
   y -= 17;
   const summaryX = 348;
@@ -386,6 +388,13 @@ export async function generateSchoolMonthlyInvoicePdf(data: SchoolMonthlyInvoice
     y -= 24;
     const noteLines = wrap(`Nuolaidos pastaba: ${data.discountNote}`, font, 8, TABLE_W);
     noteLines.forEach((line) => { page.drawText(line, { x: MARGIN, y, size: 8, font, color: black }); y -= 11; });
+  }
+  if (data.issuerNote) {
+    y -= 24;
+    wrap(data.issuerNote, font, 8, TABLE_W).forEach((line) => {
+      page.drawText(line, { x: MARGIN, y, size: 8, font, color: black });
+      y -= 11;
+    });
   }
   if (data.dueDate) {
     y -= 7;

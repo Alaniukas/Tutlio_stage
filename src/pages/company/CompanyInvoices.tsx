@@ -67,6 +67,9 @@ interface Invoice {
   origin?: 'generated' | 'external';
   source?: 'school_monthly';
   pdf_available?: boolean;
+  period_start?: string | null;
+  studentNames?: string;
+  issuerNote?: string | null;
 }
 
 interface SchoolInvoiceBuyer {
@@ -80,10 +83,14 @@ interface SchoolMonthlyInvoice {
   organization_id: string;
   invoice_number: string;
   created_at: string;
+  period_start?: string | null;
   total_eur: number;
   payment_status: string;
   pdf_path: string | null;
+  student_id?: string | null;
+  payer_student_ids?: string[] | null;
   student: SchoolInvoiceBuyer | SchoolInvoiceBuyer[] | null;
+  issuer_note?: string | null;
 }
 
 export default function CompanyInvoices() {
@@ -222,13 +229,15 @@ export default function CompanyInvoices() {
     const loadedOrg = orgRow as { entity_type?: string; features?: Record<string, unknown> } | null;
     setSchoolPayerInvoices(schoolMonthlyInvoicesEnabled(orgIdVal, loadedOrg?.features, loadedOrg?.entity_type));
 
+    let schoolStudentRows: { id: string; full_name?: string | null; payer_email?: string | null }[] = [];
     if (loadedOrg?.entity_type === 'school') {
       const { data: studentRows } = await supabase
         .from('students')
         .select('id, full_name, payer_email')
         .eq('organization_id', orgIdVal)
         .order('full_name');
-      setSchoolInvoiceStudents((studentRows || []).map((row: { id: string; full_name?: string | null; payer_email?: string | null }) => ({
+      schoolStudentRows = studentRows || [];
+      setSchoolInvoiceStudents(schoolStudentRows.map((row) => ({
         id: row.id,
         fullName: row.full_name || 'Mokinys',
         payerEmail: row.payer_email || null,
@@ -283,21 +292,32 @@ export default function CompanyInvoices() {
       try {
         const schoolInvoices = await fetchAllRows<SchoolMonthlyInvoice>((from, to) => supabase
           .from('school_monthly_invoices')
-          .select('id, organization_id, invoice_number, created_at, total_eur, payment_status, pdf_path, student:students(full_name, payer_name, payer_email)')
+          .select('id, organization_id, invoice_number, created_at, period_start, total_eur, payment_status, pdf_path, student_id, payer_student_ids, issuer_note, student:students(full_name, payer_name, payer_email)')
           .eq('organization_id', orgIdVal)
           .not('invoice_number', 'is', null)
           .order('created_at', { ascending: false })
           .order('id')
           .range(from, to));
+        const studentNameById = new Map(schoolStudentRows.map((row) => [
+          row.id,
+          row.full_name || '',
+        ]));
         for (const row of schoolInvoices) {
           if (!row.invoice_number) continue;
           const student = Array.isArray(row.student) ? row.student[0] : row.student;
+          const childIds = row.payer_student_ids?.length ? row.payer_student_ids : (row.student_id ? [row.student_id] : []);
+          const studentNames = [...new Set(childIds
+            .map((id) => studentNameById.get(id) || '')
+            .concat(student?.full_name || '')
+            .filter(Boolean))];
           invoicesList.push({
             id: row.id,
             organization_id: row.organization_id,
             invoice_number: row.invoice_number,
             issue_date: row.created_at.slice(0, 10),
             created_at: row.created_at,
+            period_start: row.period_start || null,
+            studentNames: studentNames.join(', '),
             buyer_snapshot: {
               name: student?.payer_name || student?.full_name || '-',
               email: student?.payer_email || undefined,
@@ -306,6 +326,7 @@ export default function CompanyInvoices() {
             status: row.payment_status === 'paid' ? 'paid' : row.payment_status === 'cancelled' ? 'cancelled' : 'issued',
             issued_by_user_id: '',
             source: 'school_monthly',
+            issuerNote: row.issuer_note || null,
             // The API also finds existing PDFs at their canonical path when the
             // historical invoice row is missing its pdf_path metadata.
             pdf_available: true,
@@ -499,7 +520,10 @@ export default function CompanyInvoices() {
         const m = parseInt(mStr, 10);
         const monthStart = `${y}-${String(m).padStart(2, '0')}-01`;
         const monthEnd = format(new Date(y, m, 0), 'yyyy-MM-dd');
-        if (issueDate < monthStart || issueDate > monthEnd) return false;
+        const periodStart = String(inv.period_start || '').slice(0, 10);
+        const inIssueMonth = issueDate >= monthStart && issueDate <= monthEnd;
+        const inServiceMonth = Boolean(periodStart) && periodStart >= monthStart && periodStart <= monthEnd;
+        if (!inIssueMonth && !inServiceMonth) return false;
       } else if (
         invoicePeriodMode === 'range' &&
         invoiceRangeStart &&
@@ -1434,7 +1458,11 @@ export default function CompanyInvoices() {
                         </div>
                         <p className="text-xs text-gray-500 break-words sm:truncate">
                           {(inv.buyer_snapshot as { name?: string })?.name || '-'}
+                          {inv.studentNames && inv.studentNames !== String((inv.buyer_snapshot as { name?: string })?.name || '')
+                            ? <> {'\u00B7'} {inv.studentNames}</>
+                            : null}
                           {tutorName && <> {'\u00B7'} {tutorName}</>}
+                          {inv.period_start ? <> {'\u00B7'} {String(inv.period_start).slice(0, 7)}</> : null}
                           {' \u00B7 '}
                           {format(new Date(inv.issue_date), 'yyyy-MM-dd')}
                           {' \u00B7 '}
@@ -1442,6 +1470,7 @@ export default function CompanyInvoices() {
                             ? `${Number(inv.total_amount).toFixed(2)} PLN`
                             : `€${Number(inv.total_amount).toFixed(2)}`}
                         </p>
+                        {inv.issuerNote ? <p className="text-xs text-amber-800 mt-1 break-words">{inv.issuerNote}</p> : null}
                         {inv.status === 'issued' && inv.billing_batch_id && inv.billing_batches && !inv.billing_batches.paid && (
                           <p className="text-xs text-amber-700 mt-0.5">{t('invoices.checkoutPendingSubtitle')}</p>
                         )}

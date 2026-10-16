@@ -166,6 +166,42 @@ describe('school invoice session review', () => {
       .toMatchObject({ included: false, reason: 'already_invoiced', canConfirm: false });
   });
 
+  it('matches a recreated individual subject by service token and child name on the signed snapshot', () => {
+    const contractRow = {
+      ...contract,
+      class_group_id: null,
+      unit_price_eur: 20,
+      order_snapshot: {
+        ...contract.order_snapshot,
+        service_type: 'individual',
+        subject_id: 'stale-subject',
+        tutor_name: 'Olga Pekorienė',
+        service_name: 'Rusų kalba Individuali pamoka Etmė Vitkutė, Gertrūda Liuka Petraitytė',
+        start_date: '2026-09-07',
+        end_date: '2027-06-11',
+      } as any,
+    };
+    const live = {
+      ...session,
+      class_group_id: null,
+      subject_id: 'live-subject',
+      price: 20,
+      tutor: { full_name: 'Olga Pekorienė' },
+      subject: { name: 'Olga Pekorienė Rusų kalba Individuali grupinė', price: 20 },
+    };
+    expect(reviewSchoolInvoiceSession(live, [contractRow], undefined, false, undefined, 'Petraitytė Gertrūda Liuka'))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 20 });
+    expect(schoolInvoiceSessionActivityName(live, [contractRow], 'Petraitytė Gertrūda Liuka'))
+      .toBe('Rusų kalba Individuali pamoka Etmė Vitkutė, Gertrūda Liuka Petraitytė');
+    const otherSubject = {
+      ...live,
+      subject_id: 'math-subject',
+      subject: { name: 'Olga Pekorienė Matematika Individuali grupinė', price: 20 },
+    };
+    expect(schoolInvoiceSessionActivityName(otherSubject, [contractRow], 'Petraitytė Gertrūda Liuka'))
+      .toBe('Olga Pekorienė Matematika Individuali grupinė');
+  });
+
   it('matches individual lessons by service name when the frozen subject id drifted', () => {
     const stale = { ...contract, class_group_id: null, missingIndividualSubject: true, unit_price_eur: 20,
       order_snapshot: { ...contract.order_snapshot, service_type: 'individual', subject_id: 'deleted-subject',
@@ -232,6 +268,65 @@ describe('school invoice session review', () => {
       student_joined_at: '2026-09-10T09:14:00Z', status_confirmed_at: '2026-09-10T10:00:00Z', price: 0 };
     expect(reviewSchoolInvoiceSession(attended, [sentOnly], undefined, false))
       .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 6 });
+  });
+
+  it('does not wait 14 days before billing a sent offer that parents have not accepted', () => {
+    const sentOnly = { ...contract, signing_status: 'sent', accepted_at: null, start_within_14_status: null,
+      unit_price_eur: 6, order_snapshot: { ...contract.order_snapshot, start_date: '2026-09-08', unit_price_eur: 6 } as any };
+    const early = { ...session, start_time: '2026-09-09T09:30:00Z', end_time: '2026-09-09T10:30:00Z',
+      status: 'completed', tutor_joined_at: '2026-09-09T09:29:00Z', price: 0 };
+    expect(reviewSchoolInvoiceSession(early, [sentOnly], undefined, false))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 6 });
+    expect(schoolInvoiceContractReason(early, [sentOnly])).toBe('payable');
+  });
+
+  it('does not let a draft extra-lessons offer block a priced individual lesson', () => {
+    const draft = {
+      ...contract,
+      signing_status: 'draft',
+      accepted_at: null,
+      class_group_id: null,
+      unit_price_eur: 20,
+      order_snapshot: {
+        service_type: 'individual',
+        subject_id: 'math-ben',
+        service_name: 'Natalija Naidionova Matematika individuali Benediktas Šipaila',
+        start_date: '2026-09-07',
+        end_date: '2027-06-11',
+        unit_price_eur: 20,
+      } as any,
+    };
+    const lesson = {
+      ...session,
+      class_group_id: null,
+      subject_id: 'math-ben',
+      price: 20,
+      status: 'completed',
+      student_joined_at: null,
+      tutor_joined_at: null,
+      status_confirmed_at: '2026-10-04T11:59:00Z',
+      status_confirmed_by: 'admin',
+      tutor: { full_name: 'Natalija Naidionova' },
+      subject: { name: 'Natalija Naidionova Matematika individuali Benediktas Šipaila' },
+    };
+    expect(schoolInvoiceContractReason(lesson, [draft], 'Šipaila Benediktas')).toBe('payable');
+    expect(reviewSchoolInvoiceSession(lesson, [draft], undefined, false, undefined, 'Šipaila Benediktas'))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 20 });
+  });
+
+  it('bills an individual lesson that still has a price after its subject row was deleted', () => {
+    const orphan = { ...session, id: 'natalija-20', class_group_id: null, subject_id: null, class_group: null,
+      subject: null, price: 20, status: 'completed', tutor_id: 'natalija',
+      tutor: { id: 'natalija', full_name: 'Natalija Naidionova' },
+      status_confirmed_at: '2026-09-07T12:00:00Z' };
+    expect(reviewSchoolInvoiceSession(orphan, [], undefined, false, undefined, 'Austėja'))
+      .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 20 });
+    expect(schoolInvoiceBillableSubjectKey(orphan, [])).toBe('tutor:natalija');
+    expect(schoolInvoiceSessionActivityName(orphan)).toBe('Natalija Naidionova · individualus užsiėmimas');
+    expect(buildSchoolLessonInvoiceLines([{
+      id: orphan.id, subjectId: schoolInvoiceBillableSubjectKey(orphan, [])!, tutorId: 'natalija',
+      subjectName: schoolInvoiceSessionActivityName(orphan), tutorName: 'Natalija Naidionova', unitPriceEur: 20,
+    }])[0]).toMatchObject({ quantity: 1, originalAmountEur: 20, amountEur: 20 });
   });
 
   it('requires price review even with join evidence when a sent offer has no billable price', () => {

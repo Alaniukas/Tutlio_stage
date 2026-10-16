@@ -261,14 +261,16 @@ describe('school invoice batch review navigation', () => {
     const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({ payers: [{ ...batchGroup, sendableStudentIds: [],
       students: [
         { ...batchGroup.students[0], reviewSessionIds: ['lesson1'], reviewReasons: ['contract_review'] },
-        { ...batchGroup.students[0], studentId: 'issued', alreadyIssued: true, lessonCount: 0 },
+        { ...batchGroup.students[0], studentId: 'issued', alreadyIssued: true, lessonCount: 0,
+          issuedInvoiceNumbers: ['PAM-828'], issuedTotalEur: 236 },
         { ...batchGroup.students[0], studentId: 'free', lessonCount: 0 },
       ] }] }) }));
     mountBatch(fetcher);
     fireEvent.click(screen.getByRole('button', { name: 'school.invoice.batch.preview' }));
     await screen.findByText('school.invoice.review.reason.contract_review');
     expect(screen.queryByText('school.invoice.batch.blocked')).toBeNull();
-    expect(screen.getByText('school.invoice.review.reason.already_invoiced')).toBeTruthy();
+    expect(screen.getByText('school.invoice.batch.issuedLine')).toBeTruthy();
+    expect(screen.queryByText('school.invoice.review.reason.already_invoiced')).toBeNull();
     expect(screen.getByText('school.invoice.batch.empty')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'school.invoice.batch.sendAll' }) as HTMLButtonElement).disabled).toBe(true);
   });

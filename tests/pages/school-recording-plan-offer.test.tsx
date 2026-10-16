@@ -12,20 +12,19 @@ function openGroup(enabled: boolean) {
   };
   selectOption('group'); selectOption('g1');
 }
-describe('one weekly activity without recordings offer', () => {
-  it('shows clear access choices and one actual group slot without changing the agreed price or base count', () => {
+describe('group offer without recordings', () => {
+  it('keeps every live weekly day when recordings are turned off', () => {
     openGroup(true);
     const price = screen.getByPlaceholderText('12.00');
     const count = screen.getByPlaceholderText('8');
     fireEvent.change(price, { target: { value: '9.50' } });
-    fireEvent.change(count, { target: { value: '4' } });
+    fireEvent.change(count, { target: { value: '8' } });
     fireEvent.change(screen.getByLabelText('Prieiga prie įrašų'), { target: { value: 'none' } });
-    const slot = screen.getByLabelText('Vienas grupės užsiėmimas per savaitę') as HTMLSelectElement;
-    expect([...slot.options].map((option) => option.value)).toEqual(['', '1:18:00', '4:18:00']);
-    fireEvent.change(slot, { target: { value: '4:18:00' } });
-    expect(slot.value).toBe('4:18:00');
+    expect(screen.queryByLabelText('Vienas grupės užsiėmimas per savaitę')).toBeNull();
+    expect(screen.getAllByLabelText('Diena')).toHaveLength(2);
+    expect(screen.getByText(/pirmadienis 18:00–18:45, ketvirtadienis 18:00–18:45/)).toBeTruthy();
     expect((price as HTMLInputElement).value).toBe('9.50');
-    expect((count as HTMLInputElement).value).toBe('4');
+    expect((count as HTMLInputElement).value).toBe('8');
     expect(screen.getByRole('option', { name: 'Su visos grupės įrašais' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'Be įrašų' })).toBeTruthy();
   });

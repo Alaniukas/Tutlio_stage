@@ -36,6 +36,11 @@ import {
   mapSavedLessonDiscount,
   mergeLessonDiscountInputs,
 } from '../src/lib/schoolMonthlyInvoiceDiscounts.js';
+import {
+  isReplaceableSchoolMonthlyInvoice,
+  schoolMonthlyInvoicesIssuedForStudents,
+  schoolMonthlySupplementalInvoiceNote,
+} from '../src/lib/schoolMonthlyInvoiceIssuance.js';
 
 type RequestBody = {
   action?: 'options' | 'review' | 'billing-decision' | 'preview' | 'send' | 'batch-preview' | 'send-batch';
@@ -77,6 +82,7 @@ type DraftContext = {
   payerStudentIds?: string[];
   payerChildNames?: string[];
   previousInvoices: any[];
+  issuedInvoices: any[];
 };
 
 const SESSION_DETAIL_SELECT = 'id, subject_id, tutor_id, start_time, original_start_time, end_time, status, price, class_group_id, school_billing_kind, student_joined_at, tutor_joined_at, status_confirmed_at, status_confirmed_by, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, class_group:school_class_groups(name), subject:subjects(name, price, is_trial), tutor:profiles!sessions_tutor_id_fkey!inner(full_name,organization_id)';
@@ -106,6 +112,7 @@ function composePayerDraft(drafts: DraftContext[]): DraftContext {
     payerStudentIds: [...new Set(sorted.flatMap((row) => row.payerStudentIds || [row.student.id]))],
     payerChildNames,
     previousInvoices: [...new Map(sorted.flatMap((row) => row.previousInvoices).map((invoice) => [invoice.id, invoice])).values()],
+    issuedInvoices: [...new Map(sorted.flatMap((row) => row.issuedInvoices).map((invoice) => [invoice.id, invoice])).values()],
   };
 }
 
@@ -147,11 +154,18 @@ function composeDraftContext(input: {
       && !liveIndividualSubjectIds.has(String(contract.order_snapshot?.subject_id || '')),
   })));
   const latestDecisions = latestSchoolBillingDecisions(decisions || []);
-  const previousInvoices = invoices.filter((invoice: any) => invoice.payment_status === 'pending'
-    && invoice.billing_model === 'actual' && !invoice.contract_id && !invoice.stripe_checkout_session_id
-    && !Number(invoice.credit_applied_eur || 0)
-    && invoice.period_start === periodStart && invoice.period_end === periodEnd
-    && (invoice.payer_student_ids || [invoice.student_id]).every((id: string) => studentsById.has(id)));
+  const studentIdSet = new Set(studentIds);
+  const knownStudents = new Set([...studentsById.keys()]);
+  const previousInvoices = invoices.filter((invoice: any) => (
+    isReplaceableSchoolMonthlyInvoice(invoice, periodStart, periodEnd, knownStudents)
+    && (invoice.payer_student_ids || [invoice.student_id]).some((id: string) => studentIdSet.has(String(id)))
+  ));
+  const issuedInvoices = schoolMonthlyInvoicesIssuedForStudents(
+    invoices,
+    periodStart,
+    periodEnd,
+    studentIdSet,
+  );
   const previousIds = new Set(previousInvoices.map((invoice: any) => invoice.id));
   const retainedInvoices = invoices.filter((invoice: any) => !previousIds.has(invoice.id));
   const invoiced = new Set<string>(retainedInvoices.flatMap((invoice: any) => [
@@ -235,6 +249,7 @@ function composeDraftContext(input: {
     sessions: reviewSessions,
     payerStudentIds: studentIds,
     previousInvoices,
+    issuedInvoices,
   };
 }
 
@@ -297,10 +312,20 @@ async function loadDraft(body: RequestBody): Promise<DraftContext> {
     id === row.student.id || (row.payerStudentIds || []).includes(id)
   )));
   if (!draft) throw new Error('Mokinys arba mokykla nerasta.');
-  return draft.previousInvoices.length
-    ? composePayerDraft(drafts.filter((row) => schoolPayerKey(row.student.payer_email, row.student.id)
-      === schoolPayerKey(draft.student.payer_email, draft.student.id)))
-    : draft;
+  const coveredIds = new Set(draft.previousInvoices.flatMap((invoice: any) => (
+    Array.isArray(invoice.payer_student_ids) && invoice.payer_student_ids.length
+      ? invoice.payer_student_ids.map(String)
+      : [String(invoice.student_id || '')]
+  )).filter(Boolean));
+  // Rebuild only children listed on the pending family invoice, never every
+  // roommate who merely shares payer_email (Kipras vs Tauras).
+  if (coveredIds.size <= 1) return draft;
+  const payer = schoolPayerKey(draft.student.payer_email, draft.student.id);
+  const familyDrafts = drafts.filter((row) => (
+    coveredIds.has(String(row.student.id))
+    || (row.payerStudentIds || []).some((id) => coveredIds.has(String(id)))
+  ) && schoolPayerKey(row.student.payer_email, row.student.id) === payer);
+  return familyDrafts.length ? composePayerDraft(familyDrafts) : draft;
 }
 
 const SESSION_SELECT = `${SESSION_DETAIL_SELECT.replace('subject_id,', 'student_id, subject_id,')}`;
@@ -370,7 +395,7 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
       .select('id, student_id, session_reference_id, excluded, reason, created_at')
       .in('student_id', studentIds).eq('organization_id', organizationId).order('id', { ascending: false }),
     fetchAllRows<any>((from, to) => supabase.from('school_monthly_invoices')
-      .select('id, invoice_number, student_id, payer_student_ids, contract_id, period_start, period_end, billing_model, payment_status, total_eur, credit_applied_eur, stripe_checkout_session_id, billed_session_ids, extra_session_ids, lines:school_monthly_invoice_lines(session_id,session_ids)')
+      .select('id, invoice_number, student_id, payer_student_ids, contract_id, period_start, period_end, billing_model, payment_status, total_eur, credit_applied_eur, stripe_checkout_session_id, invoice_email_sent_at, billed_session_ids, extra_session_ids, lines:school_monthly_invoice_lines(session_id,session_ids)')
       .eq('organization_id', organizationId).neq('payment_status', 'cancelled').order('id').range(from, to))
       .then(data => ({ data, error: null })),
     loadSchoolInvoiceOverpayments(supabase, organizationId, studentIds),
@@ -534,6 +559,7 @@ async function renderDraftPdf(draft: DraftContext, invoiceNumber: string, previe
     creditAppliedEur: draft.creditAppliedEur,
     creditSources: allocateSchoolInvoiceCredits(draft.credits, draft.totalEur),
     discountNote: discountNotesForInvoice(draft.lines),
+    issuerNote: schoolMonthlySupplementalInvoiceNote(draft.issuedInvoices),
     issuedByName: typeof features.school_invoice_issued_by_name === 'string'
       ? features.school_invoice_issued_by_name
       : `${draft.org.name} administracija`,
@@ -609,6 +635,7 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
     payment_status: 'pending',
     due_date: draft.dueDate,
     invoice_number: invoiceNumber,
+    issuer_note: schoolMonthlySupplementalInvoiceNote(draft.issuedInvoices),
   };
   const lineRows = draft.lines.map((line, index) => ({
     sort_order: index,
@@ -690,6 +717,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? true
           : false;
         const issuedForPeriod = !draft.lines.length && draft.sessions.every((session) => session.alreadyInvoiced || session.reason === 'already_invoiced');
+        const issuedInvoiceNumbers = [...new Set(draft.issuedInvoices
+          .map((invoice) => String(invoice.invoice_number || ''))
+          .filter(Boolean))];
+        const issuedTotalEur = Math.round(draft.issuedInvoices
+          .reduce((sum, invoice) => sum + Number(invoice.total_eur || 0), 0) * 100) / 100;
         const row = {
           studentId: draft.student.id,
           fullName: String(draft.student.full_name || ''),
@@ -702,7 +734,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           reviewReasons: [...new Set(draft.sessions.flatMap((session) => (
             session.reason === 'unconfirmed' || session.reason === 'contract_review' || session.reason === 'missing_price' ? [session.reason] : []
           )))],
-          alreadyIssued: issuedForPeriod || alreadyIssued,
+          alreadyIssued: issuedForPeriod || alreadyIssued || (Boolean(issuedInvoiceNumbers.length) && !draft.lines.length),
+          issuedInvoiceNumbers,
+          issuedTotalEur,
           payerEmail: String(draft.student.payer_email || '').trim(),
           payerName: String(draft.student.payer_name || draft.student.full_name || ''),
           detachedAt: draft.student.detached_at || null,

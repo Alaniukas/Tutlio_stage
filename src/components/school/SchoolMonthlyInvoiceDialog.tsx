@@ -194,7 +194,7 @@ export default function SchoolMonthlyInvoiceDialog({
     const matchesStudent = (row: SchoolPayerInvoiceGroup['students'][number]) => {
       if (payerStatusFilter === 'ready') return schoolStudentInvoiceSendable(row);
       if (payerStatusFilter === 'blocked') return row.reviewSessionIds.length > 0;
-      if (payerStatusFilter === 'issued') return row.alreadyIssued;
+      if (payerStatusFilter === 'issued') return row.alreadyIssued || Boolean(row.issuedInvoiceNumbers?.length);
       if (payerStatusFilter === 'empty') {
         return row.lessonCount === 0 && !row.alreadyIssued && row.reviewSessionIds.length === 0;
       }
@@ -202,7 +202,7 @@ export default function SchoolMonthlyInvoiceDialog({
     };
     return batchPayers.flatMap((group) => {
       if (needle) {
-        const haystack = `${group.payerName} ${group.payerEmail}`.toLocaleLowerCase('lt');
+        const haystack = `${group.payerName} ${group.payerEmail} ${group.students.map((row) => row.fullName).join(' ')}`.toLocaleLowerCase('lt');
         if (!haystack.includes(needle)) return [];
       }
       const students = payerStatusFilter === 'all'
@@ -705,7 +705,12 @@ export default function SchoolMonthlyInvoiceDialog({
                             {child.reviewSessionIds.length ? <span className="ml-2 text-amber-700">{child.reviewReasons?.length
                               ? child.reviewReasons.map((reason) => t(`school.invoice.review.reason.${reason}`)).join(' · ')
                               : t('school.invoice.batch.blocked')}</span> : null}
-                            {child.alreadyIssued ? <span className="ml-2 text-slate-500">{t('school.invoice.review.reason.already_invoiced')}</span>
+                            {child.issuedInvoiceNumbers?.length
+                              ? <span className={`text-emerald-800 ${child.lessonCount ? 'mt-1 block text-xs font-medium' : 'ml-2'}`}>{t('school.invoice.batch.issuedLine', {
+                                numbers: child.issuedInvoiceNumbers.join(', '),
+                                amount: money(child.issuedTotalEur || 0),
+                              })}</span>
+                              : child.alreadyIssued ? <span className="ml-2 text-slate-500">{t('school.invoice.review.reason.already_invoiced')}</span>
                               : !child.lessonCount && !child.reviewSessionIds.length ? <span className="ml-2 text-slate-500">{t('school.invoice.batch.empty')}</span> : null}
                             {child.regeneration && <span className="ml-2 text-amber-700">{t('invoices.regenerate')}: {child.regeneration.invoiceNumbers.join(', ')}</span>}
                           </span>

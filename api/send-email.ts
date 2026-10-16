@@ -2722,14 +2722,15 @@ function schoolMonthlyInvoice(d: any, locale: Locale) {
        <p style="color:#6b7280; font-size:13px; line-height:1.6; text-align:center;">Mokėjimas kortele per saugų Stripe langą. Paskyros kurti ar prisijungti nereikia.</p>`
     : `<p style="color:#4b5563; font-size:14px; line-height:1.6;">Apmokėjimo būdą nurodys mokykla${d.contactEmail ? ` — <a href="mailto:${d.contactEmail}" style="color:#6366f1;">${d.contactEmail}</a>` : ''}.</p>`;
   return {
-    subject: `Sąskaita už ${d.periodLabel || 'mėnesį'} — ${d.studentName || 'Mokinys'}`,
+    subject: `${d.correctionNote ? 'Papildoma sąskaita' : 'Sąskaita'} už ${d.periodLabel || 'mėnesį'} — ${d.studentName || 'Mokinys'}`,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#0f766e', '#115e59')}">
-        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${isDetailed ? 'Mėnesio sąskaita' : 'Papildomų užsiėmimų sąskaita'}</h1>
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${d.correctionNote ? 'Papildoma sąskaita' : isDetailed ? 'Mėnesio sąskaita' : 'Papildomų užsiėmimų sąskaita'}</h1>
         <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${d.schoolName || 'Mokykla'}</p>
       </div>
       <div class="body">
         <p class="greeting">Sveiki${d.parentName ? `, ${d.parentName}` : ''}!</p>
+        ${d.correctionNote ? `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${esc(String(d.correctionNote))}</p>` : ''}
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           Pateikiame <strong>${d.studentName || 'mokinio'}</strong> ${isDetailed ? 'užsiėmimų' : 'papildomų užsiėmimų'} sąskaitą už ${d.periodLabel || 'praėjusį mėnesį'}${d.invoiceNumber ? ` (${d.invoiceNumber})` : d.contractNumber ? ` (sutartis Nr. ${d.contractNumber})` : ''}.
         </p>

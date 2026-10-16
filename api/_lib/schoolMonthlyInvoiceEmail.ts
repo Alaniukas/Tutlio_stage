@@ -32,6 +32,7 @@ export type SchoolMonthlyInvoiceRow = {
   subtotal_eur?: number | string;
   discount_amount_eur?: number | string;
   discount_note?: string | null;
+  issuer_note?: string | null;
   lines?: SchoolMonthlyInvoiceEmailLine[];
 };
 
@@ -138,6 +139,7 @@ export function buildSchoolMonthlyInvoiceEmailData(
     subtotalAmount: Number(invoice.subtotal_eur ?? invoice.total_eur ?? 0).toFixed(2),
     discountAmount: Number(invoice.discount_amount_eur || 0).toFixed(2),
     discountNote: invoice.discount_note || '',
+    correctionNote: String(invoice.issuer_note || '').trim(),
     lines: lines.map((line) => ({
       description: line.description,
       quantity: Number(line.quantity || 0),
