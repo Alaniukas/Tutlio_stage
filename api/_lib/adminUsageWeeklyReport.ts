@@ -148,7 +148,7 @@ export function buildWeeklyDigest(report: TelemetryReport, now = Date.now()): We
 }
 
 export async function fetchFullTelemetryReport(
-  db: { rpc: (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }> },
+  db: { rpc: (name: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: { message: string } | null }> },
   projectId: string | null,
 ): Promise<TelemetryReport | null> {
   const limit = 50;

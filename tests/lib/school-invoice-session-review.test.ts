@@ -199,6 +199,16 @@ describe('school invoice session review', () => {
     const sentOnly = { ...contract, signing_status: 'sent', accepted_at: null };
     expect(reviewSchoolInvoiceSession({ ...session, class_group: { name: 'Etika (5-9 kl)' } },
       [sentOnly], undefined, false).subjectName).toBe('Etika (5-9 kl) · sutartis nepasirašyta');
+    expect(schoolInvoiceSessionActivityName({ ...session, class_group: { name: 'Etika (5-9 kl)' } }, [sentOnly]))
+      .toBe('Etika (5-9 kl)');
+    const unmatched = { ...session, class_group_id: 'other', class_group: { name: 'Muzika' } };
+    expect(reviewSchoolInvoiceSession(unmatched, [contract], undefined, false).subjectName).toContain('sutartis nėra');
+    expect(schoolInvoiceSessionActivityName(unmatched, [contract])).toBe('Muzika');
+    const individual = { ...session, class_group_id: null, subject: { name: 'Etika' } };
+    const individualOffer = { ...sentOnly, class_group_id: null,
+      order_snapshot: { ...sentOnly.order_snapshot, service_type: 'individual', subject_id: session.subject_id, service_name: 'Etika' } as any };
+    expect(schoolInvoiceSessionActivityName(individual, [individualOffer])).toBe('Etika');
+    expect(reviewSchoolInvoiceSession(individual, [individualOffer], undefined, false).subjectName).toContain('sutartis nepasirašyta');
   });
 
   it('does not use a group subject price when the session row is stored as 0', () => {
@@ -224,16 +234,30 @@ describe('school invoice session review', () => {
       .toMatchObject({ included: true, reason: 'payable', unitPriceEur: 6 });
   });
 
-  it('still requires join evidence when a sent offer has no billable price', () => {
+  it('requires price review even with join evidence when a sent offer has no billable price', () => {
     const sentOnly = { ...contract, signing_status: 'sent', accepted_at: null, unit_price_eur: null,
       order_snapshot: { ...contract.order_snapshot, unit_price_eur: null } as any };
     const attended = { ...session, status: 'completed', tutor_joined_at: '2026-09-10T08:59:00Z',
       student_joined_at: '2026-09-10T09:14:00Z', status_confirmed_at: '2026-09-10T10:00:00Z', price: 0 };
     expect(reviewSchoolInvoiceSession(attended, [sentOnly], undefined, false))
-      .toMatchObject({ included: true, reason: 'payable' });
+      .toMatchObject({ included: false, reason: 'missing_price', unitPriceEur: 0 });
     expect(reviewSchoolInvoiceSession({ ...attended, tutor_joined_at: null, student_joined_at: null,
       status_confirmed_at: '2026-09-10T10:00:00Z' }, [sentOnly], undefined, false))
       .toMatchObject({ included: false, reason: 'outside_contract' });
+  });
+
+  it('requires a missing group price without guessing from an unrelated individual subject', () => {
+    const unpriced = { ...session, status: 'completed', price: 0, tutor_joined_at: session.start_time,
+      subject: { name: 'Individuali pamoka kitam mokiniui', price: 20 } };
+    expect(reviewSchoolInvoiceSession(unpriced, [], undefined, false))
+      .toMatchObject({ included: false, reason: 'missing_price', unitPriceEur: 0 });
+    expect(reviewSchoolInvoiceSession({ ...unpriced, is_complimentary: true }, [], undefined, false))
+      .toMatchObject({ included: false, reason: 'free' });
+    expect(reviewSchoolInvoiceSession(unpriced, [], undefined, true))
+      .toMatchObject({ included: false, reason: 'already_invoiced', alreadyInvoiced: true });
+    expect(reviewSchoolInvoiceSession(unpriced, [], {
+      id: 1, session_reference_id: session.id, excluded: true, reason: 'Agreed free session', created_at: '2026-10-16T10:00:00Z',
+    }, false)).toMatchObject({ included: false, reason: 'excluded' });
   });
 
   it('bills a direct individual lesson without any extra-lessons agreement', () => {

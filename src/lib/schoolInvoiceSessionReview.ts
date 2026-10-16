@@ -33,7 +33,7 @@ export type SchoolSessionBillingDecision = {
 };
 
 export type SchoolInvoiceReviewReason = 'payable' | 'unconfirmed' | 'free' | 'outside_contract' | 'suspended'
-  | 'outside_schedule' | 'contract_review' | 'excluded' | 'already_invoiced' | 'not_ended';
+  | 'outside_schedule' | 'contract_review' | 'missing_price' | 'excluded' | 'already_invoiced' | 'not_ended';
 
 export type SchoolInvoiceReviewSession = {
   id: string;
@@ -250,7 +250,7 @@ function contractActivitySuffix(
   return null;
 }
 
-/** Historical group rows may still reference a subject named for an individual child. */
+/** Customer-facing name; administrative contract notes belong only in attendance review. */
 export function schoolInvoiceSessionActivityName(
   session: SchoolInvoiceActivity,
   contracts: SchoolInvoiceContractWindow[] = [],
@@ -261,24 +261,27 @@ export function schoolInvoiceSessionActivityName(
     const order = contracts.find((contract) => (
       (contract.class_group_id || contract.order_snapshot?.group_id) === session.class_group_id
     ))?.order_snapshot;
-    const base = String(group?.name || order?.group_name || order?.service_name || 'Užsiėmimas');
-    const suffix = contractActivitySuffix(session, contracts, studentFullName);
-    return suffix ? `${base} · ${suffix}` : base;
+    // Historical group rows may still reference a subject named for an individual child.
+    return String(group?.name || order?.group_name || order?.service_name || 'Užsiėmimas');
   }
   const subject = Array.isArray(session.subject) ? session.subject[0] : session.subject;
   const raw = String(subject?.name || 'Užsiėmimas');
   const fromContract = individualContractActivityName(session, contracts, studentFullName);
-  if (fromContract) {
-    const suffix = contractActivitySuffix(session, contracts, studentFullName);
-    return suffix ? `${fromContract} · ${suffix}` : fromContract;
-  }
+  if (fromContract) return fromContract;
   if (studentFullName && raw.includes('(individuali)') && !studentNameInLabel(studentFullName, raw)) {
-    const renamed = raw.replace(/\s+[A-ZĄČĘĖĮŠŲŪŽ][^\s]+\s+[A-ZĄČĘĖĮŠŲŪŽ][^\s]+$/, ` ${studentFullName}`);
-    const suffix = contractActivitySuffix(session, contracts, studentFullName);
-    return suffix ? `${renamed} · ${suffix}` : renamed;
+    return raw.replace(/\s+[A-ZĄČĘĖĮŠŲŪŽ][^\s]+\s+[A-ZĄČĘĖĮŠŲŪŽ][^\s]+$/, ` ${studentFullName}`);
   }
+  return raw;
+}
+
+function schoolInvoiceSessionReviewActivityName(
+  session: SchoolInvoiceActivity,
+  contracts: SchoolInvoiceContractWindow[],
+  studentFullName?: string | null,
+): string {
+  const name = schoolInvoiceSessionActivityName(session, contracts, studentFullName);
   const suffix = contractActivitySuffix(session, contracts, studentFullName);
-  return suffix && raw === 'Užsiėmimas' ? `${raw} · ${suffix}` : (suffix ? `${raw} · ${suffix}` : raw);
+  return suffix ? `${name} · ${suffix}` : name;
 }
 
 function inSuspension(session: CanonicalBillableSession, contract: SchoolInvoiceContractWindow): boolean {
@@ -511,7 +514,7 @@ export function reviewSchoolInvoiceSession(
       statusConfirmedAt: session.status_confirmed_at || null,
       statusConfirmedBy: session.status_confirmed_by || null,
       tutorId: session.tutor_id || null,
-      subjectName: schoolInvoiceSessionActivityName(session, contracts, studentFullName),
+      subjectName: schoolInvoiceSessionReviewActivityName(session, contracts, studentFullName),
       tutorName: String(tutor?.full_name || 'mokytojas'),
       unitPriceEur: 0,
       included: false,
@@ -524,12 +527,14 @@ export function reviewSchoolInvoiceSession(
   }
   const contractReason = schoolInvoiceContractReason(session, contracts, studentFullName);
   const charge = canonicalSessionCharge(session, session.class_group_id ? 'group' : 'individual');
+  const unitPriceEur = resolveSchoolInvoiceUnitPrice(session, contracts, studentFullName);
   const reason: SchoolInvoiceReviewReason = alreadyInvoiced ? 'already_invoiced'
     : decision?.excluded ? 'excluded'
     : !ended ? 'not_ended'
     : contractReason !== 'payable' ? contractReason
     : charge === 'free' ? 'free'
     : charge === 'review' ? 'unconfirmed'
+    : unitPriceEur <= 0 ? 'missing_price'
     : 'payable';
   return {
     id: session.id,
@@ -539,9 +544,9 @@ export function reviewSchoolInvoiceSession(
     statusConfirmedAt: session.status_confirmed_at || null,
     statusConfirmedBy: session.status_confirmed_by || null,
     tutorId: session.tutor_id || null,
-    subjectName: schoolInvoiceSessionActivityName(session, contracts, studentFullName),
+    subjectName: schoolInvoiceSessionReviewActivityName(session, contracts, studentFullName),
     tutorName: String(tutor?.full_name || 'mokytojas'),
-    unitPriceEur: resolveSchoolInvoiceUnitPrice(session, contracts, studentFullName),
+    unitPriceEur,
     included: reason === 'payable',
     reason,
     exclusionReason: decision?.excluded ? decision.reason : null,

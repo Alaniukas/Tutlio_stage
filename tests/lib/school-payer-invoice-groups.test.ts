@@ -26,6 +26,18 @@ const palaima = {
 };
 
 describe('school payer invoice groups', () => {
+  it('uses the current payer name regardless of a trashed sibling record order', () => {
+    const old = { ...kajus, studentId: 'old-test', fullName: 'AAA Testinis mokinys',
+      payerName: 'Vardenis pavardenis', detachedAt: '2026-09-04T15:00:00Z' };
+    for (const rows of [[old, kajus, etme], [etme, kajus, old]]) {
+      const [group] = groupSchoolPayerInvoicePreviews(rows);
+      expect(group.payerName).toBe('Akvilė Adomaitytė');
+      expect(group.students).toHaveLength(3);
+      expect(group.totalEur).toBe(24);
+    }
+    expect(groupSchoolPayerInvoicePreviews([{ ...old, payerName: 'Historic Payer' }])[0].payerName).toBe('Historic Payer');
+  });
+
   it('keeps siblings together and never mixes another family into that invoice', () => {
     const groups = groupSchoolPayerInvoicePreviews([palaima, etme, kajus]);
     expect(groups.map((group) => group.payerEmail)).toEqual(['akvile@example.com', 'raimonda@example.com']);

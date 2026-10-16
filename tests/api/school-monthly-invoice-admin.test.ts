@@ -43,11 +43,13 @@ vi.mock('../../api/_lib/schoolMonthlyInvoiceEmail.js', () => ({ sendSchoolMonthl
 function query(table: string) {
   let rows = [...(state.tables[table] || [])];
   let sessionColumns: string[] | null = null;
+  let subjectColumns: string[] | null = null;
   const builder: any = {
     select: (columns?: string) => {
       // Honor session projections so the mock cannot hide a missing attendance field in SELECT.
       if (table === 'sessions' && columns && columns !== '*') {
         sessionColumns = columns.split(/,(?![^(]*\))/).map((column) => column.trim().split(/[:(]/)[0]);
+        subjectColumns = columns.match(/subject:subjects\(([^)]+)\)/)?.[1].split(',').map((column) => column.trim()) || null;
       }
       return builder;
     },
@@ -75,8 +77,16 @@ function query(table: string) {
     update: (row: any) => { rows = rows.map((item) => ({ ...item, ...row })); return builder; },
     range: (from: number, to: number) => { rows = rows.slice(from, to + 1); return builder; },
     single: async () => ({ data: rows[0] || null, error: null }),
-    then: (resolve: any) => resolve({ data: rows.slice(0, state.rowLimit).map((row) => sessionColumns
-      ? Object.fromEntries(Object.entries(row).filter(([key]) => sessionColumns!.includes(key))) : row), error: null }),
+    then: (resolve: any) => resolve({ data: rows.slice(0, state.rowLimit).map((row) => {
+      const projected = sessionColumns
+        ? Object.fromEntries(Object.entries(row).filter(([key]) => sessionColumns!.includes(key))) : row;
+      if (!subjectColumns || !projected.subject) return projected;
+      const projectSubject = (subject: Record<string, unknown>) => Object.fromEntries(
+        Object.entries(subject).filter(([key]) => subjectColumns!.includes(key)),
+      );
+      return { ...projected, subject: Array.isArray(projected.subject)
+        ? projected.subject.map(projectSubject) : projectSubject(projected.subject) };
+    }), error: null }),
   };
   return builder;
 }
@@ -125,6 +135,80 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('school monthly invoice review API', () => {
+  it.each([0, 6])('recognizes the stored trial flag and keeps a %s EUR trial out of payer invoices without a missing-price warning', async (price) => {
+    state.tables.sessions.push({ ...state.tables.sessions[0], id: 'trial', class_group_id: null,
+      subject_id: 'trial-subject', subject: { name: 'Bandomasis užsiėmimas', price: 6, is_trial: true }, price });
+    state.tables.sessions.push({ ...state.tables.sessions[0], id: 'complimentary', price: 0, is_complimentary: true });
+    const preview = await request({ action: 'preview' });
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({ totalEur: 12, reviewSessionIds: [] });
+    expect(preview.body.sessions.find((row: any) => row.id === 'trial'))
+      .toMatchObject({ included: false, reason: 'free', unitPriceEur: 0 });
+    expect(preview.body.sessions.find((row: any) => row.id === 'complimentary'))
+      .toMatchObject({ included: false, reason: 'free' });
+    expect(preview.body.lines.flatMap((line: any) => line.sessionIds)).toEqual(['lesson1']);
+    const batch = await request({ action: 'batch-preview' });
+    expect(batch.body.payers[0]).toMatchObject({ sendableStudentIds: ['child1'],
+      students: [{ reviewSessionIds: [], reviewReasons: [], lessonCount: 1 }] });
+    expect(state.writes).toEqual([]);
+  });
+
+  it.each(['sent', 'missing'])('keeps %s contract notes in admin review and out of invoice preview, PDF, and saved lines', async (status) => {
+    Object.assign(state.tables.sessions[0], { price: 6, class_group: { name: 'Etika (5-9 kl)' } });
+    state.tables.school_contracts = [{ id: 'offer', organization_id: 'org1', student_id: 'child1', kind: 'extra_lessons',
+      signing_status: 'sent', accepted_at: null, unit_price_eur: 6, start_within_14_status: 'yes',
+      class_group_id: status === 'sent' ? 'group1' : 'other-group',
+      order_snapshot: { service_type: 'group', group_id: status === 'sent' ? 'group1' : 'other-group',
+        start_date: '2026-09-01', unit_price_eur: 6 } }];
+    const preview = await request({ action: 'preview' });
+    expect(preview.status).toBe(200);
+    expect(preview.body.sessions[0].subjectName).toContain(status === 'sent' ? 'sutartis nepasirašyta' : 'sutartis nėra');
+    expect(preview.body.lines[0]).toMatchObject({ subjectName: 'Etika (5-9 kl)',
+      description: 'Etika (5-9 kl) - mokytojas Teacher One', unitPriceEur: 6, amountEur: 6 });
+    expect(generateSchoolMonthlyInvoicePdf).toHaveBeenCalledWith(expect.objectContaining({
+      lines: [expect.objectContaining({ activity: 'Etika (5-9 kl) - mokytojas Teacher One' })],
+    }));
+    expect((await request({ action: 'send', previewToken: preview.body.previewToken })).status).toBe(200);
+    const saved = state.writes.find((write) => write.table === 'school_monthly_invoice_lines');
+    expect(saved.row[0].description).toBe('Etika (5-9 kl) - mokytojas Teacher One');
+    expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledOnce();
+  });
+
+  it('blocks individual and batch sending when an archived offer leaves a group session without a price', async () => {
+    const original = structuredClone(state.tables.sessions[0]);
+    state.tables.sessions.push({ ...original, id: 'unpriced', class_group_id: 'ethics', price: 0,
+      class_group: { name: 'Etika' }, subject: { name: 'Individuali pamoka', price: 20 } });
+    state.tables.school_contracts = [{ id: 'archived-offer', organization_id: 'org1', student_id: 'child1',
+      kind: 'extra_lessons', class_group_id: 'ethics', signing_status: 'sent', unit_price_eur: 6,
+      archived_at: '2026-09-16T14:19:30Z', order_snapshot: { service_type: 'group', group_id: 'ethics', unit_price_eur: 6 } }];
+    const preview = await request({ action: 'preview' });
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({ totalEur: 12, reviewSessionIds: ['unpriced'] });
+    expect(preview.body.sessions.find((row: any) => row.id === 'unpriced'))
+      .toMatchObject({ included: false, reason: 'missing_price', unitPriceEur: 0 });
+    expect(preview.body.lines.flatMap((line: any) => line.sessionIds)).toEqual(['lesson1']);
+    expect((await request({ action: 'send', previewToken: preview.body.previewToken })).status).toBeGreaterThanOrEqual(400);
+    const batch = await request({ action: 'batch-preview' });
+    expect(batch.body.payers[0]).toMatchObject({ sendableStudentIds: [],
+      students: [{ reviewSessionIds: ['unpriced'], reviewReasons: ['missing_price'] }] });
+    expect((await request({ action: 'send-batch', ...batchTokens(batch) })).body.sentCount).toBe(0);
+    expect(state.writes).toEqual([]);
+    expect(sendSchoolMonthlyInvoiceEmail).not.toHaveBeenCalled();
+    expect(state.tables.sessions[0]).toEqual(original);
+
+    state.tables.sessions[1].price = 6;
+    expect((await request({ action: 'preview' })).body).toMatchObject({ totalEur: 18, reviewSessionIds: [] });
+  });
+
+  it('still sends an approved 100 percent discount when the original session price is known', async () => {
+    state.tables.student_lesson_discounts = [{ organization_id: 'org1', student_id: 'child1', subject_id: 'math', tutor_id: 'teacher1',
+      discount_type: 'percent', percent: 100, valid_from: '2026-09-01', valid_until: null }];
+    const preview = await request({ action: 'preview' });
+    expect(preview.body).toMatchObject({ totalEur: 0, discountAmountEur: 12, reviewSessionIds: [],
+      sessions: [{ included: true, reason: 'payable', unitPriceEur: 12 }] });
+    expect((await request({ action: 'send', previewToken: preview.body.previewToken })).status).toBe(200);
+  });
+
   const existingInvoice = () => ({ id: 'earlier', organization_id: 'org1', student_id: 'child1', invoice_number: 'OLD',
     period_start: '2026-09-01', period_end: '2026-09-30', payment_status: 'pending', billing_model: 'actual', total_eur: 12,
     billed_session_ids: ['lesson1'], payer_student_ids: ['child1'] });
@@ -561,6 +645,28 @@ describe('school monthly invoice review API', () => {
 });
 
 describe('school monthly invoice batch by payer', () => {
+  it.each([false, true])('prefers current payer details and retains trashed historical charges only when needed (%s)', async (hasHistoricalCharge) => {
+    const active = state.tables.students[0];
+    active.payer_name = 'Current Payer';
+    state.tables.students.push({ ...active, id: 'old-test', full_name: 'AAA Testinis mokinys',
+      payer_name: 'Vardenis pavardenis', detached_at: '2026-09-04T15:00:00Z' });
+    state.tables.sessions.push({ ...state.tables.sessions[0], id: '000-old', student_id: 'old-test',
+      status: hasHistoricalCharge ? 'completed' : 'cancelled', cancelled_by: hasHistoricalCharge ? null : 'tutor' });
+    const batch = await request({ action: 'batch-preview' });
+    expect(batch.status).toBe(200);
+    const group = batch.body.payers[0];
+    expect(group.payerName).toBe('Current Payer');
+    expect(group.students.map((row: any) => row.studentId).sort())
+      .toEqual(hasHistoricalCharge ? ['child1', 'old-test'] : ['child1']);
+    expect(group.totalEur).toBe(hasHistoricalCharge ? 24 : 12);
+    expect(state.writes).toEqual([]);
+    const sent = await request({ action: 'send-batch', ...batchTokens(batch) });
+    expect(sent.body.sentCount).toBe(1);
+    expect(vi.mocked(generateSchoolMonthlyInvoicePdf).mock.calls.at(-1)?.[0].buyer.name).toBe('Current Payer');
+    expect(vi.mocked(sendSchoolMonthlyInvoiceEmail).mock.calls[0][2].student.payer_name).toBe('Current Payer');
+    expect(state.tables.students.find((row) => row.id === 'old-test').payer_name).toBe('Vardenis pavardenis');
+  });
+
   function familyTables() {
     const lesson = {
       start_time: '2026-09-14T13:00:00Z',

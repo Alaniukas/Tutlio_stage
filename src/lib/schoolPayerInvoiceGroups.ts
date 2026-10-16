@@ -9,10 +9,11 @@ export type SchoolPayerInvoiceStudentPreview = {
   amountDueEur?: number;
   lessonCount: number;
   reviewSessionIds: string[];
-  reviewReasons?: Array<'unconfirmed' | 'contract_review'>;
+  reviewReasons?: Array<'unconfirmed' | 'contract_review' | 'missing_price'>;
   alreadyIssued: boolean;
   payerEmail: string;
   payerName: string;
+  detachedAt?: string | null;
   previewToken: string;
   regeneration?: InvoiceRegeneration;
 };
@@ -76,9 +77,13 @@ export function groupSchoolPayerInvoicePreviews(
   }
   return [...map.values()].map((group) => {
     const students = group.students.sort((a, b) => a.fullName.localeCompare(b.fullName, 'lt'));
+    const currentStudents = students.filter((row) => !row.detachedAt);
+    const contacts = currentStudents.length ? currentStudents : students;
+    const contact = contacts.find((row) => row.payerName.trim()) || contacts[0];
     const sendableStudentIds = students.filter(schoolStudentInvoiceSendable).map((row) => row.studentId);
     return {
       ...group,
+      payerName: contact.payerName.trim() || contact.fullName,
       students,
       sendableStudentIds,
     };

@@ -41,7 +41,7 @@ describe('school invoice attendance review', () => {
     expect(confirm).not.toHaveBeenCalled();
   });
 
-  it.each(['payable', 'outside_contract', 'unconfirmed'])('shows the attendance warning only for the unconfirmed billing reason (%s)', async (reason) => {
+  it.each(['payable', 'outside_contract', 'unconfirmed', 'missing_price'])('shows the attendance warning only for the unconfirmed billing reason (%s)', async (reason) => {
     mount(vi.fn(async () => ({ ok: true, json: async () => ({
       sessions: [{ ...session, statusConfirmedAt: null, reason, included: reason === 'payable' }],
       payerEmail: 'parent@example.com', canEditBilling: false, canEditAttendance: false,

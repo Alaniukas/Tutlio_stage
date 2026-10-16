@@ -70,6 +70,7 @@ export const schoolInvoiceReviewLt: Record<string, string> = {
   'school.invoice.discount.autoTitle': 'Patvirtintos nuolaidos pritaikomos automatiškai',
   'school.invoice.discount.autoHelp': 'Naują nuolaidą suteikite Sutarčių puslapyje — atidarykite sutartį ir pasirinkite „Pasiūlyti nuolaidą“. Ji sąskaitose bus taikoma tik po mokėtojo patvirtinimo el. laiške.',
   'school.invoice.preview.checklistTitle': 'Kas bus rodoma sąskaitoje',
+  'school.invoice.review.reason.missing_price': 'Nenurodyta kaina. Nustatykite ją papildomų užsiėmimų pasiūlyme (Sutartys).',
 };
 
 export const schoolInvoiceReviewEn: Record<string, string> = {
@@ -142,4 +143,5 @@ export const schoolInvoiceReviewEn: Record<string, string> = {
   'school.invoice.discount.autoTitle': 'Approved discounts apply automatically',
   'school.invoice.discount.autoHelp': 'Offer a new discount on the Contracts page — open a contract and choose the discount offer. It applies on invoices only after the payer confirms by email.',
   'school.invoice.preview.checklistTitle': 'What the invoice will show',
+  'school.invoice.review.reason.missing_price': 'Price missing. Set it in the extra session offer on the Contracts page.',
 };

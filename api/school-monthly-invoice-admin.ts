@@ -79,11 +79,13 @@ type DraftContext = {
   previousInvoices: any[];
 };
 
-const SESSION_DETAIL_SELECT = 'id, subject_id, tutor_id, start_time, original_start_time, end_time, status, price, class_group_id, school_billing_kind, student_joined_at, tutor_joined_at, status_confirmed_at, status_confirmed_by, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, class_group:school_class_groups(name), subject:subjects(name, price), tutor:profiles!sessions_tutor_id_fkey!inner(full_name,organization_id)';
+const SESSION_DETAIL_SELECT = 'id, subject_id, tutor_id, start_time, original_start_time, end_time, status, price, class_group_id, school_billing_kind, student_joined_at, tutor_joined_at, status_confirmed_at, status_confirmed_by, cancelled_by, cancelled_at, cancellation_reason_code, is_complimentary, paid, payment_status, lesson_package_id, credit_applied_amount, class_group:school_class_groups(name), subject:subjects(name, price, is_trial), tutor:profiles!sessions_tutor_id_fkey!inner(full_name,organization_id)';
 
 function composePayerDraft(drafts: DraftContext[]): DraftContext {
   const sorted = [...drafts].sort((a, b) => String(a.student.full_name || '').localeCompare(String(b.student.full_name || ''), 'lt'));
-  const primary = sorted.find((row) => String(row.student.payer_email || '').trim()) || sorted[0];
+  const currentDrafts = sorted.filter((row) => !row.student.detached_at);
+  const contacts = currentDrafts.length ? currentDrafts : sorted;
+  const primary = contacts.find((row) => String(row.student.payer_email || '').trim()) || contacts[0];
   const lines = sorted.flatMap((row) => row.lines);
   const sessions = sorted.flatMap((row) => row.sessions);
   const reviewSessionIds = [...new Set(sorted.flatMap((row) => row.reviewSessionIds))];
@@ -134,9 +136,11 @@ function composeDraftContext(input: {
   const studentRecords = studentIds.map((id) => studentsById.get(id)).filter(Boolean);
   if (!studentRecords.length || !org) return null;
   const uniqueSessions = [...new Map(sessions.map((session) => [String(session.id), session])).values()];
-  const student = studentRecords.find((row) => String(row.payer_email || '').trim())
-    || studentRecords.find((row) => uniqueSessions.some((session) => session.student_id === row.id))
-    || studentRecords[0];
+  const currentStudentRecords = studentRecords.filter((row) => !row.detached_at);
+  const contacts = currentStudentRecords.length ? currentStudentRecords : studentRecords;
+  const student = contacts.find((row) => String(row.payer_email || '').trim())
+    || contacts.find((row) => uniqueSessions.some((session) => session.student_id === row.id))
+    || contacts[0];
   const contracts = filterContractsForSchoolInvoiceReview((storedContracts || []).map((contract: any) => ({ ...contract,
     missingIndividualSubject: contract.signing_status === 'signed'
       && contract.order_snapshot?.service_type === 'individual'
@@ -172,7 +176,7 @@ function composeDraftContext(input: {
   const billable = (uniqueSessions || []).flatMap((session: any) => {
     const review = reviewById.get(session.id);
     if (!review?.included) {
-      if (review && ['unconfirmed', 'contract_review'].includes(review.reason)) reviewSessionIds.push(session.id);
+      if (review && ['unconfirmed', 'contract_review', 'missing_price'].includes(review.reason)) reviewSessionIds.push(session.id);
       return [];
     }
     const sessionStudent = studentsById.get(String(session.student_id || '')) || student;
@@ -345,7 +349,7 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
 
   const [studentsRes, discountsRes, discountAgreementsRes, contractsRes, decisionsRes, invoicesRes, overpayments] = await Promise.all([
     supabase.from('students')
-      .select('id, organization_id, full_name, grade, email, phone, payer_name, payer_email, payer_phone')
+      .select('id, organization_id, full_name, grade, email, phone, payer_name, payer_email, payer_phone, detached_at')
       .in('id', studentIds).eq('organization_id', organizationId),
     supabase.from('student_lesson_discounts')
       .select('student_id, subject_id, tutor_id, percent, discount_type, amount_eur, valid_from, valid_until, note, created_at')
@@ -438,7 +442,12 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
     periodStart,
     periodEnd,
     dueDate,
-  })).filter((draft): draft is DraftContext => Boolean(draft));
+  })).filter((draft): draft is DraftContext => Boolean(draft)).filter((draft) => (
+    // Keep historical charges and issued invoices for former students, while
+    // excluding trashed test rows with nothing left to settle.
+    !draft.student.detached_at || draft.lines.length > 0 || draft.reviewSessionIds.length > 0
+      || draft.previousInvoices.length > 0 || draft.sessions.some((session) => session.alreadyInvoiced)
+  ));
 
   return { drafts };
 }
@@ -534,6 +543,9 @@ async function renderDraftPdf(draft: DraftContext, invoiceNumber: string, previe
 
 async function issueAndSendDraft(draft: DraftContext, userId: string, previewToken: string, confirmedInvoiceIds: string[] = []) {
   if (!draft.profile) throw new Error('Pirmiausia užpildykite mokyklos sąskaitų rekvizitus.');
+  if (draft.sessions.some((session) => session.reason === 'missing_price')) {
+    throw new Error('Nenurodyta užsiėmimo kaina. Nustatykite ją papildomų užsiėmimų pasiūlyme (Sutartys) arba neįtraukite užsiėmimo į sąskaitą ir nurodykite priežastį.');
+  }
   if (!draft.lines.length) throw new Error('Pasirinktu laikotarpiu nėra patvirtintų apmokestinamų užsiėmimų. Peržiūrėkite lankomumą.');
   if (draft.reviewSessionIds.length) {
     throw new Error('Prieš išsiunčiant patvirtinkite peržiūros laukiančių užsiėmimų įvykimą arba neįtraukite jų į sąskaitą ir nurodykite priežastį.');
@@ -688,11 +700,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           lessonCount: draft.lines.reduce((sum, line) => sum + line.quantity, 0),
           reviewSessionIds: draft.reviewSessionIds,
           reviewReasons: [...new Set(draft.sessions.flatMap((session) => (
-            session.reason === 'unconfirmed' || session.reason === 'contract_review' ? [session.reason] : []
+            session.reason === 'unconfirmed' || session.reason === 'contract_review' || session.reason === 'missing_price' ? [session.reason] : []
           )))],
           alreadyIssued: issuedForPeriod || alreadyIssued,
           payerEmail: String(draft.student.payer_email || '').trim(),
           payerName: String(draft.student.payer_name || draft.student.full_name || ''),
+          detachedAt: draft.student.detached_at || null,
           previewToken: previewDigest(digestPayload(draft, auth.userId)),
           regeneration: draft.previousInvoices.length ? {
             invoiceIds: draft.previousInvoices.map(invoice => invoice.id),
