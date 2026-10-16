@@ -591,6 +591,14 @@ export default function CalendarPage() {
   /** True once the tutor manually set a duration/end in the create modal — subject/start changes stop overwriting it. */
   const [createDurationTouched, setCreateDurationTouched] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const createErrorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isCreateModalOpen) setCreateError(null);
+  }, [isCreateModalOpen]);
+  useEffect(() => {
+    if (createError) createErrorRef.current?.focus();
+  }, [createError]);
   const [noShowSavingId, setNoShowSavingId] = useState<string | null>(null);
   const [newSessionId, setNewSessionId] = useState<string | null>(null);
   const [newTutorComment, setNewTutorComment] = useState('');
@@ -2048,7 +2056,7 @@ export default function CalendarPage() {
     }
   };
 
-  const handleCreateSession = async () => {
+  const createSession = async (onSaved: (id: string) => void, pendingTemplateIds: string[]) => {
     // Check if we have students selected (either individual or group)
     const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
     const isGroupLesson = selectedSubject?.is_group;
@@ -2056,28 +2064,29 @@ export default function CalendarPage() {
     const hasStudents = isGroupLesson || isSharedIndividual ? selectedStudentIds.length > 0 : !!selectedStudentId;
 
     if (!hasStudents || !startTime || !endTime) {
-      alert(t('cal.selectStudentAndTime'));
+      setCreateError(t('cal.selectStudentAndTime'));
       return;
     }
 
     if (isLaisviVaikai && isGroupLesson && selectedStudentIds.length < 3) {
-      alert('Grupiniam užsiėmimui pasirinkite bent 3 mokinius. Kai mokinių yra 1-2, kurkite individualų užsiėmimą.');
+      setCreateError('Grupiniam užsiėmimui pasirinkite bent 3 mokinius. Kai mokinių yra 1-2, kurkite individualų užsiėmimą.');
       return;
     }
 
     if (licenseFrozen) {
-      setToastMessage({ message: t('cal.licenseFrozenDesc'), type: 'warning' });
+      setCreateError(t('cal.licenseFrozenDesc'));
       return;
     }
 
     if (!isOrgTutor && !stripeConnected) {
-      alert(t('cal.stripeRequired'));
+      setCreateError(t('cal.stripeRequired'));
       return;
     }
-    setSaving(true);
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setSaving(false); return; }
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      setCreateError(t('settings.sessionExpired'));
+      return;
+    }
     const { data: sessionBillingProfile } = await supabase.from('profiles')
       .select('organization_id, enable_per_lesson, enable_monthly_billing')
       .eq('id', user.id).maybeSingle();
@@ -2096,8 +2105,7 @@ export default function CalendarPage() {
     let sessionPrice = price;
     if (createIsTrial) {
       if (isRecurring) {
-        alert(t('compSch.trialLessonDesc'));
-        setSaving(false);
+        setCreateError(t('compSch.trialLessonDesc'));
         return;
       }
       try {
@@ -2106,8 +2114,7 @@ export default function CalendarPage() {
         sessionPrice = trialMeta.price;
       } catch (err) {
         console.error(err);
-        alert(err instanceof Error ? err.message : t('cal.errorCreating'));
-        setSaving(false);
+        setCreateError(t('cal.errorCreating'));
         return;
       }
     }
@@ -2115,6 +2122,10 @@ export default function CalendarPage() {
     const startDate = new Date(startTime);
     const endDate = new Date(endTime);
     const durationMs = endDate.getTime() - startDate.getTime();
+    if (!isValid(startDate) || !isValid(endDate) || durationMs <= 0) {
+      setCreateError(t('avail.invalidTimeRange'));
+      return;
+    }
 
     if (isRecurring) {
       // Get subject data for group lesson logic
@@ -2139,7 +2150,7 @@ export default function CalendarPage() {
         }
 
         for (const studentId of studentIdsToCreate) {
-          const { data: template } = await supabase
+          const { data: template, error: templateError } = await supabase
             .from('recurring_individual_sessions')
             .insert({
               tutor_id: user.id,
@@ -2159,9 +2170,10 @@ export default function CalendarPage() {
             .select('id, student_id')
             .single();
 
-          if (template) {
-            recurringTemplates.push({ ...template, firstOccurrence, dayOfWeek });
-          }
+          if (templateError) throw templateError;
+          if (!template?.id) throw new Error('Recurring template insert returned no row.');
+          pendingTemplateIds.push(template.id);
+          recurringTemplates.push({ ...template, firstOccurrence, dayOfWeek });
         }
       }
 
@@ -2286,28 +2298,24 @@ export default function CalendarPage() {
         const latest = new Date(Math.max(...slotList.map((s) => s.end.getTime())));
         const breakMinutes = Math.max(0, Number(ctxProfile?.break_between_lessons) || 0);
         const breakMs = breakMinutes * 60_000;
-        const { data: existingBusy } = await supabase
+        const { data: existingBusy, error: conflictError } = await supabase
           .from('sessions')
           .select('id, start_time, end_time')
           .eq('tutor_id', user.id)
           .neq('status', 'cancelled')
           .lt('start_time', new Date(latest.getTime() + breakMs).toISOString())
           .gt('end_time', new Date(earliest.getTime() - breakMs).toISOString());
+        if (conflictError) throw conflictError;
         const conflictSlots = slotList.filter((slot) =>
           hasOverlapWithExclusions(slot.start, slot.end, existingBusy ?? [], new Set()),
         );
         if (conflictSlots.length > 0) {
-          const tplIds = recurringTemplates.map((tpl: any) => tpl.id).filter(Boolean);
-          if (tplIds.length > 0) {
-            await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
-          }
-          alert(t('cal.createOverlapDates', {
+          setCreateError(t('cal.createOverlapDates', {
             dates: conflictSlots
               .slice(0, 5)
               .map((slot) => format(slot.start, 'MM-dd HH:mm'))
               .join(', '),
           }));
-          setSaving(false);
           return;
         }
         const breakConflicts = findTutorBreakConflicts(slotList, existingBusy ?? [], breakMinutes);
@@ -2315,21 +2323,13 @@ export default function CalendarPage() {
           breakConflicts.length > 0
           && !window.confirm(tutorBreakOverrideMessage(breakMinutes, breakConflicts.length, locale))
         ) {
-          const tplIds = recurringTemplates.map((tpl: any) => tpl.id).filter(Boolean);
-          if (tplIds.length > 0) {
-            await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
-          }
-          setSaving(false);
           return;
         }
 
         const { data: createdSessions, error } = await supabase.from('sessions').insert(sessions).select();
-        if (error) {
-          console.error('Error creating recurring sessions:', error);
-          alert('Klaida kuriant pamokas: ' + error.message);
-          setSaving(false);
-          return;
-        }
+        if (error) throw error;
+        if (!createdSessions?.length) throw new Error('Recurring session insert returned no rows.');
+        onSaved(createdSessions[0].id);
 
         await consumeAvailabilityForCreatedSessions(supabase, user.id, createdSessions || []);
 
@@ -2590,7 +2590,6 @@ export default function CalendarPage() {
           });
         }
         fetchData();
-        setSaving(false);
         return;
       }
     } else {
@@ -2685,16 +2684,16 @@ export default function CalendarPage() {
       {
         const breakMinutes = Math.max(0, Number(ctxProfile?.break_between_lessons) || 0);
         const breakMs = breakMinutes * 60_000;
-        const { data: existingBusy } = await supabase
+        const { data: existingBusy, error: conflictError } = await supabase
           .from('sessions')
           .select('id, start_time, end_time')
           .eq('tutor_id', user.id)
           .neq('status', 'cancelled')
           .lt('start_time', new Date(endDate.getTime() + breakMs).toISOString())
           .gt('end_time', new Date(startDate.getTime() - breakMs).toISOString());
+        if (conflictError) throw conflictError;
         if (hasOverlapWithExclusions(startDate, endDate, existingBusy ?? [], new Set())) {
-          alert(t('cal.duplicateTime'));
-          setSaving(false);
+          setCreateError(t('cal.duplicateTime'));
           return;
         }
         const breakConflicts = findTutorBreakConflicts(
@@ -2706,12 +2705,14 @@ export default function CalendarPage() {
           breakConflicts.length > 0
           && !window.confirm(tutorBreakOverrideMessage(breakMinutes, breakConflicts.length, locale))
         ) {
-          setSaving(false);
           return;
         }
       }
 
       const { data: created, error } = await supabase.from('sessions').insert(sessionsToInsert).select();
+      if (error) throw error;
+      if (!created?.length) throw new Error('Session insert returned no rows.');
+      onSaved(created[0].id);
       if (!error && created?.length) {
         await consumeAvailabilityForCreatedSessions(supabase, user.id, created);
       }
@@ -2747,16 +2748,7 @@ export default function CalendarPage() {
         }
       }
 
-      if (error) {
-        console.error('Error creating session:', error);
-        alert(t('cal.errorCreating'));
-        setSaving(false);
-        return;
-      } else {
-        // Keep modal open for file upload (use first session ID for group lessons)
-        if (created && created.length > 0) {
-          setNewSessionId(created[0].id);
-        }
+      if (created.length > 0) {
 
         // Fetch tutor info for emails (same for all students)
         const { data: tutorProfile } = await supabase
@@ -2951,14 +2943,43 @@ export default function CalendarPage() {
         }
 
         fetchData();
-        setSaving(false);
         return;
       }
     }
 
-    setIsCreateModalOpen(false);
-    fetchData();
-    setSaving(false);
+    // A series with no materialized dates must not silently close the form.
+    setCreateError(t('cal.errorCreating'));
+  };
+
+  const handleCreateSession = async () => {
+    if (saving) return;
+    setCreateError(null);
+    setSaving(true);
+    let saved = false;
+    const pendingTemplateIds: string[] = [];
+    try {
+      await createSession((id) => {
+        saved = true;
+        setNewSessionId(id);
+        // Show persisted lessons even if availability, billing or notifications fail later.
+        void fetchData();
+      }, pendingTemplateIds);
+    } catch (error) {
+      console.error('Error creating calendar lesson:', error);
+      setCreateError(t(saved ? 'cal.createdFollowUpFailed' : 'cal.errorCreating'));
+    } finally {
+      if (!saved && pendingTemplateIds.length > 0) {
+        try {
+          const { error } = await supabase.from('recurring_individual_sessions')
+            .delete().in('id', pendingTemplateIds);
+          if (error) throw error;
+        } catch (error) {
+          console.error('Error rolling back calendar lesson templates:', error);
+          setCreateError(t('cal.createCleanupFailed'));
+        }
+      }
+      setSaving(false);
+    }
   };
 
   const handleSaveViewComment = async () => {
@@ -5769,6 +5790,11 @@ export default function CalendarPage() {
             )}
           </div>
 
+          {createError && (
+            <div ref={createErrorRef} role="alert" tabIndex={-1} className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              {createError}
+            </div>
+          )}
           {newSessionId ? (
             <div className="space-y-3 pt-2">
               <SessionFiles sessionId={newSessionId} role="tutor" />

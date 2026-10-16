@@ -313,6 +313,8 @@ Kiekvienas `api/foo-bar.ts` → endpoint `/api/foo-bar`.
 4. Route guard'ai tikrina sesiją + DB rolę
 5. Tutor'iams papildomai — aktyvi Stripe prenumerata (`src/lib/subscription.ts`)
 
+**Momentinis atšauktų prisijungimo sesijų blokavimas (paruošta, produkcijoje dar neįjungta):** migracija `20261016151444_enforce_active_auth_sessions.sql` tikrina JWT `session_id` ir `auth.uid()` pagal gyvą `auth.sessions` eilutę. `public.enforce_active_auth_session` yra PostgREST pre-request hook: grąžina 401 `session_not_found` ir prieš `SECURITY DEFINER` RPC. Papildomos restrictive RLS taisyklės saugo esamas `public` lenteles, `storage.objects` / `buckets` ir naują `realtime.messages` autorizaciją. Viešas `anon` ir serverio `service_role` elgesys išlieka. Sesijos paieška indeksuota, policy naudoja `SELECT` InitPlan. Testai: `tests/db/active-auth-session.test.ts`; po autorizuoto produkcinės migracijos pritaikymo paleisti `node scripts/verify-auth-session-revocation.mjs` (tik laikina QA paskyra, automatinis cleanup, ataskaita `output/security/`). Šis pakeitimas neatšaukia anksčiau išduotų signed download URL ir jau atverto Broadcast kanalo autorizacijos cache; chat Broadcast siunčia tik ID, turinys įkeliamas per saugomą DB užklausą. Taikyti tik su leidimu pagal 8 skyriaus release taisykles.
+
 ---
 
 ## 12. Feature flag'ai

@@ -855,6 +855,8 @@ export const en: Record<string, string> = {
   'cal.errorAddingStudentAlert': 'Error adding student',
   'cal.errorCancelling': 'Error cancelling',
   'cal.errorCreating': "Error creating lesson",
+  'cal.createdFollowUpFailed': 'The lesson was saved, but some related actions could not be completed. You can find it in the calendar. Do not create it again. If the problem persists, contact support.',
+  'cal.createCleanupFailed': 'Lesson creation failed and the recurrence settings could not be removed. Contact support before trying again.',
   'cal.errorGeneric': 'An error occurred',
   'cal.errorRemovingStudent': 'Error removing student',
   'cal.errorRemovingStudentAlert': 'Error removing student alert',

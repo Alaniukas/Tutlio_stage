@@ -853,6 +853,8 @@ export const lt: Record<string, string> = {
   'cal.errorAddingStudentAlert': 'Klaida pridedant mokinį',
   'cal.errorCancelling': 'Klaida atšaukiant pamoką',
   'cal.errorCreating': "Klaida kuriant pamoką",
+  'cal.createdFollowUpFailed': 'Pamoka išsaugota, bet nepavyko užbaigti visų susijusių veiksmų. Pamoką rasite kalendoriuje. Nekurkite jos dar kartą. Jei problema kartojasi, kreipkitės į pagalbą.',
+  'cal.createCleanupFailed': 'Nepavyko užbaigti pamokų kūrimo ir pašalinti pasikartojimo nustatymų. Prieš bandydami dar kartą kreipkitės į pagalbą.',
   'cal.errorGeneric': 'Įvyko klaida',
   'cal.errorRemovingStudent': 'Klaida šalinant mokinį: ',
   'cal.errorRemovingStudentAlert': 'Klaida šalinant mokinį',
