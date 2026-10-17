@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   activateSchoolFamilyInvitation, loadSchoolFamilyInvitation, runSchoolFamilyAccountWorkflow,
-  schoolFamilyAccountsPreview, signedSchoolFamilyEvidence, splitSchoolFamilySharedIdentity,
+  schoolFamilyAccountsOverview, schoolFamilyAccountsPreview, schoolFamilyInviteEmailHtml, signedSchoolFamilyEvidence, splitSchoolFamilySharedIdentity,
   verifySchoolFamilyGuardian,
 } from '../../api/_lib/schoolFamilyAccounts';
 import { loadSchoolFamilyGuardianAccess, schoolFamilyGuardianIdentity, schoolFamilyPersonalCodeHash } from '../../api/_lib/schoolFamilyGuardianAccess';
@@ -195,6 +195,10 @@ describe('school family account workflow', () => {
     expect(page.rows).toHaveLength(25); expect(page.nextCursor).toBe('024');
     expect(page.rows.map((row) => row.studentId)).toEqual(active.slice(0, 25).map((row) => row.id));
     expect(page.rows.every((row) => row.blockedReasons.includes('annual_contract_required'))).toBe(true);
+    const overview = await schoolFamilyAccountsOverview(memory.db, org);
+    expect(overview.activeStudents).toBe(28);
+    expect(overview.skipped).toHaveLength(28);
+    expect(overview.invitedParents).toBe(0);
     expect((await schoolFamilyAccountsPreview(memory.db, org, page.nextCursor!)).rows).toHaveLength(3);
     const existing = existingFamily(); existing.tables.school_family_accounts = [{ user_id: parent.id, role: 'parent', organization_id: org.id, invited_at: '2026-09-01T00:00:00Z', activated_at: null, first_login_at: null }];
     const state = (await schoolFamilyAccountsPreview(existing.db, org)).rows[0].parent;
@@ -274,6 +278,22 @@ it('takes guardian proof from primary signed annual data, never current payer or
   expect(signedSchoolFamilyEvidence(org.id, 'one', [c], [signature]).evidence?.guardian_email).toBe('parent@example.test');
   const second = { ...contract('one'), id: 'annual-other' };
   expect(signedSchoolFamilyEvidence(org.id, 'one', [c, second], [signature, { ...signature, id: 'other-signature', contract_id: second.id, signer_personal_code: 'another-person' }]).reason).toBe('guardian_conflict_review');
+});
+
+it('renders invite body HTML instead of escaped strong tags', () => {
+  const html = schoolFamilyInviteEmailHtml({
+    locale: 'lt',
+    brandName: 'Demo Mokykla',
+    color: '#123456',
+    role: 'parent',
+    studentName: 'QA vaikas <script>',
+    login: 'parent@example.test',
+    invitationUrl: 'https://tutlio.lt/account-activate?t=token',
+    isReady: true,
+    signature: 'Demo Mokykla',
+  });
+  expect(html).toContain('<strong>Demo Mokykla</strong> sukūrė jums tėvų paskyrą, susietą su mokiniu <strong>QA vaikas &lt;script&gt;</strong>.');
+  expect(html).not.toContain('&lt;strong&gt;');
 });
 
 it('the shared guardian helper rejects any child identity and rechecks live contracts and school scope', async () => {

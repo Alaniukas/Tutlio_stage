@@ -496,6 +496,8 @@ Tai **nėra** atskira lentelė ir **nėra** sutartis prie kiekvienos pamokos. Ta
 
 ### Tėvų informavimas (portalas vs el. paštas)
 
+**Laisvi vaikai laiškai be paskyros (iki 2026-10-31):** `school_family_email_transition_until = 2026-10-31T21:59:59.999Z`. Šeimos portalas paliktas; be `guardian_user_id` tėvai gauna **įprastus** pamokos priminimus (prisijungimas + namų darbai) pagal mokytojo `reminder_student_hours` (LV = 6 val.), ne 15 min. trumpą „Prisijungimas prie užsiėmimo“. Vaiko eilutėje esantis paštas (dažnai tėvų) nebeatima tėvų kopijos. Po 10-31 lieka tik patvirtintos paskyros. RPC `20261017114247_school_family_transition_full_parent_reminders.sql`; JS `send-reminders` pataisai reikia deploy.
+
 Tėvų paskyra (`/parent/*`, `parent_profiles` + `parent_students`) **nėra** atskiras pranešimų inbox. Neatvykimas / pamokos statusas matomas, kai tėvas pats atidaro dashboard / pamokas / kalendorių.
 
 Dauguma laiškų eina į **`students.payer_email`** (mokėtojas), ne būtinai į prisijungusio tėvo Auth el. paštą.
@@ -1032,4 +1034,4 @@ npm run security:pencheck
 
 ---
 
-*Paskutinis atnaujinimas: 2026-10-16: mokyklų papildoma S.F. tam pačiam mėnesiui (unique indeksas nuimtas, juodraštinė sutartis neblokuoja kainos); Šipaila Benediktas rugsėjo matematika 160 €.*
+*Paskutinis atnaujinimas: 2026-10-17: LV šeimos paskyros masinis tėvų kvietimas (spalio 31), Šeimos paskyrose lieka Pakviesta / Prisijungė, o šeimoms be metinės sutarties eina laiškas adminui.*

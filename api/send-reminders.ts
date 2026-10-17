@@ -251,6 +251,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           legacyFamilyJoinFallback = recipient.legacyFamilyFallback;
         }
         if (familyPortalNotifications && !legacyFamilyJoinFallback) reminderStudentHours = 0.25;
+        const compactJoinOnly = compactSchoolNotifications && !legacyFamilyJoinFallback;
         const homeworkUrl = schoolFlowForSession && student?.id
           ? buildSchoolHomeworkUrl(publicAppOrigin(), String(student.id))
           : undefined;
@@ -279,7 +280,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ...(orgId ? { organizationId: orgId } : {}),
         };
 
-        if ((!compactSchoolNotifications || resolvedMeetingLink) && (!compactSchoolNotifications || compactJoinContact?.kind === 'student') && reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
+        if ((!compactJoinOnly || resolvedMeetingLink) && (!compactJoinOnly || compactJoinContact?.kind === 'student' || legacyFamilyJoinFallback) && reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
           try {
             emailAttempts += 1;
             const reminderDeliveryScope = `student:${session.id}:${startTime.toISOString()}`;
@@ -297,7 +298,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     ? {
                       organizationId: studentOrgId,
                       schoolFlow: true,
-                      ...(compactSchoolNotifications ? { schoolJoinOnly: true } : {}),
+                      ...(compactJoinOnly ? { schoolJoinOnly: true } : {}),
                       homeworkUrl,
                       recordingsUrl,
                     }
@@ -325,7 +326,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Default: only the paying parent (payment_payer==='parent').
         // With flexible_invitations on: remind ALL parent contacts (payer +
         // secondary + registered parents), decoupled from who pays.
-        if ((!compactSchoolNotifications || resolvedMeetingLink) && reminderStudentHours > 0 && !session.reminder_payer_sent && diffHours <= reminderStudentHours && diffHours >= 0) {
+        if ((!compactJoinOnly || resolvedMeetingLink) && reminderStudentHours > 0 && !session.reminder_payer_sent && diffHours <= reminderStudentHours && diffHours >= 0) {
           if (schoolFlowForSession && payerOccurrenceKey) {
             activeSchoolPayerOccurrence = payerOccurrenceKey;
           }
@@ -348,7 +349,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           let compactParentsOptedOut = false;
           let compactParentLookupFailed = false;
 
-          if (compactSchoolNotifications) {
+          if (legacyFamilyJoinFallback) {
+            if (payerEmail) candidates.push({ email: payerEmail, name: payerName });
+            const secEmail = (student as any)?.parent_secondary_email?.trim() || '';
+            if (secEmail) candidates.push({ email: secEmail, name: (student as any)?.parent_secondary_name || null });
+            if (!candidates.length && compactJoinContact?.kind === 'payer') {
+              candidates.push({ email: compactJoinContact.email, name: compactJoinContact.name });
+            }
+          } else if (compactSchoolNotifications) {
             if (compactJoinContact?.kind === 'student') {
               // The child delivery keeps its own retry flag. Parents intentionally
               // receive no copy, including when delivery to the child is retried.
@@ -412,6 +420,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           } else if ((isPayerParent || mvPayerInbox) && payerEmail) {
             candidates.push({ email: payerEmail, name: payerName });
+          }
+
+          if (legacyFamilyJoinFallback && candidates.length === 0) {
+            compactRegisteredParentFallback = true;
+            try {
+              const { data: links, error: linksError } = await supabase
+                .from('parent_students')
+                .select('parent_id')
+                .eq('student_id', student.id);
+              if (linksError) throw linksError;
+              const parentIds = [...new Set((links || []).map((link: any) => link.parent_id).filter(Boolean))];
+              if (parentIds.length > 0) {
+                const { data: profiles, error: profilesError } = await supabase
+                  .from('parent_profiles')
+                  .select('id, email, full_name, disable_lesson_reminders')
+                  .in('id', parentIds)
+                  .order('id', { ascending: true });
+                if (profilesError) throw profilesError;
+                const contacts = (profiles || []).filter((profile: any) => String(profile.email || '').trim());
+                const parent = contacts.find((profile: any) => profile.disable_lesson_reminders === false);
+                if (parent) {
+                  candidates.push({ email: String(parent.email).trim().toLowerCase(), name: parent.full_name || null });
+                } else {
+                  compactParentsOptedOut = contacts.length > 0 && contacts.every((profile: any) => profile.disable_lesson_reminders === true);
+                }
+              }
+            } catch (error) {
+              compactParentLookupFailed = true;
+              console.error('[send-reminders] compact parent lookup failed:', error);
+            }
           }
 
           // Resolve opt-outs for raw payer/secondary emails (registered parents
@@ -487,7 +525,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                       ? {
                         organizationId: studentOrgId,
                         schoolFlow: true,
-                        ...(compactSchoolNotifications ? { schoolJoinOnly: true } : {}),
+                        ...(compactJoinOnly ? { schoolJoinOnly: true } : {}),
                         // Homework / materials page — the only "portal" a parent without an account has.
                         homeworkUrl,
                         recordingsUrl,

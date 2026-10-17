@@ -10,6 +10,11 @@ import { getResendApiKey } from './resendConfig.js';
 import { orgAwareOrigin } from './public-origin.js';
 import { buildMvLoginUrl } from './mvAccountActivationToken.js';
 import { studentLoginNameFromEmail } from '../../src/lib/studentLoginIdentity.js';
+import { isLaisviVaikaiOrg } from './marketMoney.js';
+import {
+  schoolFamilyTransitionInviteHtml,
+  schoolFamilyTransitionInviteSubject,
+} from './schoolFamilyTransitionInviteEmail.js';
 import {
   normalizeSchoolFamilyEmail, normalizeSchoolFamilyName, schoolFamilyGuardianIdentity,
   schoolFamilyPersonalCodeHash,
@@ -46,6 +51,17 @@ export type SchoolFamilyPreviewRow = {
   studentId: string; studentName: string; studentEmail: string | null; guardianName: string | null; guardianEmail: string | null;
   verified: boolean; annualContracts: Array<{ id: string; number: string }>; blockedReasons: string[];
   parent: SchoolFamilyAccountState; student: SchoolFamilyAccountState;
+};
+export type SchoolFamilySkippedInviteRow = {
+  studentId: string; studentName: string; payerName: string | null; payerEmail: string | null; reason: string;
+};
+export type SchoolFamilyAccountsOverview = {
+  activeStudents: number; invitedParents: number; loggedInParents: number; skipped: SchoolFamilySkippedInviteRow[];
+};
+export type SchoolFamilyWorkflowOptions = {
+  sendInvites?: boolean;
+  inviteRoles?: Array<'parent' | 'student'>;
+  parentStudentNames?: string[];
 };
 
 function fail(code: string): never { throw new Error(code); }
@@ -116,6 +132,17 @@ export async function bindSchoolFamilyGuardianForRegisteredParent(
   );
   if (account.error) return { bound: false, reason: 'school_family_setup_required' };
   return { bound: true };
+}
+
+async function allActiveStudents(db: SupabaseClient, orgId: string): Promise<Student[]> {
+  const students: Student[] = [];
+  for (let offset = 0; ; offset += 200) {
+    const result = await db.from('students').select(STUDENT_SELECT).eq('organization_id', orgId)
+      .eq('enrollment_status', 'active').is('detached_at', null).order('id').range(offset, offset + 199);
+    check(result); students.push(...(result.data || []) as Student[]);
+    if ((result.data?.length || 0) < 200) break;
+  }
+  return students;
 }
 
 async function evidenceContext(db: SupabaseClient, orgId: string, studentIds: string[]) {
@@ -214,6 +241,39 @@ export async function schoolFamilyAccountsPreview(db: SupabaseClient, org: Schoo
   return { rows, nextCursor: (result.data?.length || 0) > SCHOOL_FAMILY_PAGE_SIZE ? students.at(-1)!.id : null };
 }
 
+export async function schoolFamilyAccountsOverview(db: SupabaseClient, org: SchoolFamilyOrganization): Promise<SchoolFamilyAccountsOverview> {
+  const students = await allActiveStudents(db, org.id);
+  if (!students.length) return { activeStudents: 0, invitedParents: 0, loggedInParents: 0, skipped: [] };
+  const context = await evidenceContext(db, org.id, students.map((row) => row.id));
+  const skipped: SchoolFamilySkippedInviteRow[] = [];
+  const parentIds = new Set<string>();
+  for (const student of students) {
+    const selected = signedSchoolFamilyEvidence(org.id, student.id, context.contracts, context.signatures,
+      context.guardians.find((row) => row.student_id === student.id));
+    if (selected.reason === 'annual_contract_required' || selected.reason === 'guardian_verification_required') {
+      skipped.push({
+        studentId: student.id, studentName: student.full_name, payerName: student.payer_name,
+        payerEmail: student.payer_email, reason: selected.reason,
+      });
+    }
+    const parentId = selected.evidence?.guardian_user_id || student.parent_user_id;
+    if (parentId) parentIds.add(parentId);
+  }
+  const accounts = parentIds.size
+    ? await db.from('school_family_accounts').select('user_id,invited_at,first_login_at').eq('organization_id', org.id)
+      .eq('role', 'parent').in('user_id', [...parentIds])
+    : { data: [], error: null };
+  check(accounts);
+  const invitedParents = new Set<string>();
+  const loggedInParents = new Set<string>();
+  for (const row of (accounts.data || []) as AccountRow[]) {
+    if (row.invited_at) invitedParents.add(row.user_id);
+    if (row.first_login_at) loggedInParents.add(row.user_id);
+  }
+  skipped.sort((a, b) => a.studentName.localeCompare(b.studentName, 'lt'));
+  return { activeStudents: students.length, invitedParents: invitedParents.size, loggedInParents: loggedInParents.size, skipped };
+}
+
 async function liveStudent(db: SupabaseClient, orgId: string, studentId: string): Promise<Student> {
   const result = await db.from('students').select(STUDENT_SELECT).eq('organization_id', orgId).eq('id', studentId)
     .eq('enrollment_status', 'active').is('detached_at', null).maybeSingle();
@@ -252,8 +312,33 @@ export async function verifySchoolFamilyGuardian(
 }
 
 function escapeHtml(value: string): string { return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!); }
+
+/** Invite copy already includes <strong>; escape names, not the translation HTML. */
+export function schoolFamilyInviteEmailHtml(params: {
+  locale: string;
+  brandName: string;
+  logoUrl?: string | null;
+  color: string;
+  role: 'parent' | 'student';
+  studentName: string;
+  login: string;
+  invitationUrl: string;
+  isReady: boolean;
+  signature: string;
+}): string {
+  const locale = params.locale as Locale;
+  const brand = escapeHtml(params.brandName);
+  const student = escapeHtml(params.studentName);
+  const body = t(locale, params.role === 'parent' ? 'em.mvActivationParentBody' : 'em.mvActivationStudentBody', { org: brand, student });
+  const header = params.logoUrl
+    ? `<img src="${escapeHtml(params.logoUrl)}" alt="${brand}" style="max-width:200px;max-height:56px"/>`
+    : `<h1>${brand}</h1>`;
+  return `<!doctype html><html lang="${escapeHtml(locale)}"><body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif"><div style="max-width:560px;margin:24px auto;background:white;padding:28px"><div style="text-align:center;color:${escapeHtml(params.color)}">${header}</div><p>${body}</p><p>${escapeHtml(t(locale, params.login.includes('@') ? 'em.mvFamilyAccountsEmailLabel' : 'login.studentUsername'))}: <strong>${escapeHtml(params.login)}</strong></p><p><a href="${escapeHtml(params.invitationUrl)}" style="display:inline-block;padding:14px 24px;color:white;background:${escapeHtml(params.color)};border-radius:8px">${escapeHtml(t(locale, params.isReady ? 'mvActivate.goLogin' : 'em.mvActivationBtn'))}</a></p><p>${escapeHtml(params.signature)}</p></div></body></html>`;
+}
+
 async function sendSchoolFamilyInvite(db: SupabaseClient, org: SchoolFamilyOrganization, actorId: string, student: Student,
-  evidence: SchoolFamilyGuardianEvidence, user: User, role: 'parent' | 'student', origin: string) {
+  evidence: SchoolFamilyGuardianEvidence, user: User, role: 'parent' | 'student', origin: string,
+  options?: SchoolFamilyWorkflowOptions) {
   const isReady = Boolean(user.last_sign_in_at || user.user_metadata?.mv_account_activated_at);
   const login = studentLoginNameFromEmail(user.email || '') || user.email || '';
   const recipient = role === 'parent' ? evidence.guardian_email
@@ -277,13 +362,28 @@ async function sendSchoolFamilyInvite(db: SupabaseClient, org: SchoolFamilyOrgan
   const brand = resolveEmailOrgBranding(org.id, org);
   const brandName = brand.publicName || brand.branding?.name || org.name;
   const color = brand.branding?.brand_color || '#4f46e5';
-  const subject = t(locale, role === 'parent' ? 'em.mvActivationParentSub' : 'em.mvActivationStudentSub', { student: student.full_name });
-  const body = t(locale, role === 'parent' ? 'em.mvActivationParentBody' : 'em.mvActivationStudentBody', { org: brandName, student: student.full_name });
+  const studentNames = options?.parentStudentNames?.length ? options.parentStudentNames : [student.full_name];
+  const useTransition = role === 'parent' && isLaisviVaikaiOrg(org.id);
+  const subject = useTransition
+    ? schoolFamilyTransitionInviteSubject(studentNames)
+    : t(locale, role === 'parent' ? 'em.mvActivationParentSub' : 'em.mvActivationStudentSub', { student: student.full_name });
+  const html = useTransition
+    ? schoolFamilyTransitionInviteHtml({
+      orgName: brandName, studentNames, login, invitationUrl, isReady, color,
+      colorSecondary: brand.branding?.brand_color_secondary || color, logoUrl: brand.branding?.logo_url,
+      signature: brand.emailTeamSignature || brandName,
+      contactEmail: brand.branding ? undefined : 'info@laisvivaikai.lt',
+    })
+    : schoolFamilyInviteEmailHtml({
+      locale, brandName, logoUrl: brand.branding?.logo_url, color, role,
+      studentName: student.full_name, login, invitationUrl, isReady,
+      signature: brand.emailTeamSignature || brandName,
+    });
   const replyTo = await resolveOrgEmailReplyTo(db, org.id);
   const response = await new Resend(apiKey).emails.send({
     from: localizedFromEmail(locale, { senderName: brand.emailSenderName }), to: recipient, subject,
     ...(replyTo ? { replyTo } : {}),
-    html: `<!doctype html><html lang="${escapeHtml(locale)}"><body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif"><div style="max-width:560px;margin:24px auto;background:white;padding:28px"><div style="text-align:center;color:${escapeHtml(color)}">${brand.branding?.logo_url ? `<img src="${escapeHtml(brand.branding.logo_url)}" alt="${escapeHtml(brandName)}" style="max-width:200px;max-height:56px"/>` : `<h1>${escapeHtml(brandName)}</h1>`}</div><p>${escapeHtml(body)}</p><p>${escapeHtml(t(locale, login.includes('@') ? 'em.mvFamilyAccountsEmailLabel' : 'login.studentUsername'))}: <strong>${escapeHtml(login)}</strong></p><p><a href="${escapeHtml(invitationUrl)}" style="display:inline-block;padding:14px 24px;color:white;background:${escapeHtml(color)};border-radius:8px">${escapeHtml(t(locale, isReady ? 'mvActivate.goLogin' : 'em.mvActivationBtn'))}</a></p><p>${escapeHtml(brand.emailTeamSignature || brandName)}</p></div></body></html>`,
+    html,
   });
   if (response.error) return { sent: false, code: 'email_send_failed', role };
   const now = new Date().toISOString();
@@ -294,7 +394,8 @@ async function sendSchoolFamilyInvite(db: SupabaseClient, org: SchoolFamilyOrgan
 }
 
 export async function runSchoolFamilyAccountWorkflow(db: SupabaseClient, org: SchoolFamilyOrganization, actorId: string,
-  studentId: string, action: 'provision' | 'resend', origin: string, invitedAccounts?: Set<string>) {
+  studentId: string, action: 'provision' | 'resend', origin: string, invitedAccounts?: Set<string>,
+  options?: SchoolFamilyWorkflowOptions) {
   const ownerId = randomUUID();
   const lock = await db.rpc('school_family_claim_workflow', { p_organization_id: org.id, p_student_id: studentId, p_owner_id: ownerId });
   check(lock); if (!lock.data) fail('workflow_busy');
@@ -343,14 +444,18 @@ export async function runSchoolFamilyAccountWorkflow(db: SupabaseClient, org: Sc
       check(await db.from('school_family_accounts').upsert({ organization_id: org.id, user_id: user.id, role }, { onConflict: 'organization_id,user_id,role', ignoreDuplicates: true }));
     }
     const invitations = [];
-    for (const [role, user] of [['parent', parent], ['student', child]] as const) {
-      const accountKey = `${role}:${user.id}`;
-      if (invitedAccounts?.has(accountKey)) continue;
-      const invitation = await sendSchoolFamilyInvite(db, org, actorId, student, evidence, user, role, origin);
-      invitations.push(invitation);
-      if (invitation.sent || ('suppressed' in invitation && invitation.suppressed)) invitedAccounts?.add(accountKey);
+    if (options?.sendInvites !== false) {
+      const inviteRoles = options?.inviteRoles || ['parent', 'student'];
+      for (const [role, user] of [['parent', parent], ['student', child]] as const) {
+        if (!inviteRoles.includes(role)) continue;
+        const accountKey = `${role}:${user.id}`;
+        if (invitedAccounts?.has(accountKey)) continue;
+        const invitation = await sendSchoolFamilyInvite(db, org, actorId, student, evidence, user, role, origin, options);
+        invitations.push(invitation);
+        if (invitation.sent || ('suppressed' in invitation && invitation.suppressed)) invitedAccounts?.add(accountKey);
+      }
     }
-    return { studentId, success: true, invitations };
+    return { studentId, success: true, parentUserId: parent.id, guardianEmail: evidence.guardian_email, invitations };
   } finally {
     // Lease ownership prevents this request from deleting a replacement lock after expiry.
     await db.from('school_family_workflow_locks').delete().eq('organization_id', org.id).eq('student_id', studentId).eq('owner_id', ownerId);

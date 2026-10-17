@@ -25,6 +25,7 @@ async function database() {
     CREATE TABLE storage.objects(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),bucket_id text,name text,created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now());`);
   await db.exec(readFileSync('supabase/migrations/20260928190300_school_material_publications_digest.sql','utf8'));
   await db.exec(readFileSync('supabase/migrations/20261007114508_school_family_email_transition.sql','utf8'));
+  await db.exec(readFileSync('supabase/migrations/20261017114247_school_family_transition_full_parent_reminders.sql','utf8'));
   return db;
 }
 
@@ -210,11 +211,9 @@ it('preserves disabled reminders, real-child delivery and queue privileges durin
   try {
     await seed(db, 1, { features: transitionFeatures(), hours: 0, guardian: false });
     const child = await seed(db, 2, { features: transitionFeatures(), email: 'child@example.test', hours: 2, minutes: 30, guardian: false });
-    expect(await due(db)).toEqual([]);
-    await db.query("UPDATE sessions SET start_time=now()+interval '10 minutes' WHERE id=$1", [child.session]);
     expect(await due(db)).toEqual([child.session]);
     expect(await reminderRecipient(db, child.child)).toMatchObject({
-      contact: { email: 'child@example.test', kind: 'student' }, legacyFamilyFallback: false,
+      contact: { email: 'child@example.test', kind: 'student' }, legacyFamilyFallback: true,
     });
     const privileges = (await db.query<{ anonymous: boolean; authenticated: boolean; service: boolean }>(`
       SELECT has_function_privilege('anon','get_due_session_reminder_ids(integer)','EXECUTE') AS anonymous,
@@ -246,5 +245,10 @@ it('sets the agreed school cutoff without replacing other settings or an existin
     ]);
     await db.exec(migration);
     expect((await features()).school_family_email_transition_until).toBe('2026-10-14T20:59:59.999Z');
+    await db.exec(readFileSync('supabase/migrations/20261017113313_laisvi_vaikai_email_transition_until_oct31.sql', 'utf8'));
+    expect(await features()).toEqual({
+      school_family_portal: true, contact_email: 'school@example.test',
+      school_family_email_transition_until: '2026-10-31T21:59:59.999Z',
+    });
   } finally { await db.close(); }
 }, 30000);

@@ -314,7 +314,7 @@ describe('session reminder capacity behavior', () => {
     expect(reminders[0]).toMatchObject({ type: 'session_reminder_payer', to: 'payer@example.test', data: { schoolJoinOnly: true } });
   });
 
-  it('sends one join-only legacy reminder during family onboarding at the configured hours', async () => {
+  it('sends full parent lesson emails during family onboarding at the configured hours', async () => {
     const session = futureSession();
     Object.assign(session.student, { email: '', organization_id: 'school-1', payer_email: 'payer@example.test', parent_secondary_email: 'second@example.test' });
     session.tutor.organization_id = 'school-1';
@@ -329,12 +329,47 @@ describe('session reminder capacity behavior', () => {
 
     await handler(mockReq(), mockRes());
 
-    expect(reminderRequestBodies(fetchMock)).toMatchObject([{
-      type: 'session_reminder_payer', to: 'payer@example.test',
-      data: { schoolJoinOnly: true, schoolContractAccessRequired: true },
-    }]);
-    expect(reminderRequestBodies(fetchMock)).toHaveLength(1);
+    expect(reminderRequestBodies(fetchMock)).toEqual([
+      expect.objectContaining({
+        type: 'session_reminder_payer', to: 'payer@example.test',
+        data: expect.objectContaining({
+          schoolContractAccessRequired: true,
+          homeworkUrl: expect.stringContaining('/school-homework'),
+        }),
+      }),
+      expect.objectContaining({
+        type: 'session_reminder_payer', to: 'second@example.test',
+        data: expect.objectContaining({ schoolContractAccessRequired: true }),
+      }),
+    ]);
+    expect(reminderRequestBodies(fetchMock).every(body => body.data.schoolJoinOnly !== true)).toBe(true);
     expect(mocks.updateCalls).toContainEqual({ reminder_payer_sent: true });
+  });
+
+  it('still emails the payer at the configured hours when the child row reuses a real address', async () => {
+    const session = futureSession();
+    Object.assign(session.student, {
+      email: 'parent-copy@example.test',
+      organization_id: 'school-1',
+      payer_email: 'parent-copy@example.test',
+    });
+    session.tutor.organization_id = 'school-1';
+    session.reminder_tutor_sent = true;
+    session.meeting_link = '';
+    mocks.organization = { entity_type: 'school', features: {
+      school_family_portal: true,
+      school_family_email_transition_until: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+    } };
+    mocks.sessions.push(session);
+    const fetchMock = vi.fn(async () => emailResponse(true));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handler(mockReq(), mockRes());
+
+    const reminders = reminderRequestBodies(fetchMock).filter(body => String(body.type || '').startsWith('session_reminder'));
+    expect(reminders.map(body => body.to)).toEqual(['parent-copy@example.test']);
+    expect(reminders[0].data.schoolJoinOnly).not.toBe(true);
+    expect(reminders[0].data.homeworkUrl).toContain('/school-homework');
   });
 
   it('stops legacy delivery for a lesson after the onboarding cutoff', async () => {
@@ -368,7 +403,11 @@ describe('session reminder capacity behavior', () => {
     await handler(mockReq(), mockRes());
 
     expect(reminderRequestBodies(fetchMock)).toHaveLength(1);
-    expect(reminderRequestBodies(fetchMock)[0]).toMatchObject({ to: 'first@example.test', data: { schoolJoinOnly: true } });
+    expect(reminderRequestBodies(fetchMock)[0]).toMatchObject({
+      to: 'first@example.test',
+      data: expect.objectContaining({ homeworkUrl: expect.stringContaining('/school-homework') }),
+    });
+    expect(reminderRequestBodies(fetchMock)[0].data.schoolJoinOnly).not.toBe(true);
   });
 
   it.each(['opt_out', 'delivery_failure', 'guardian_lookup_failure'])('keeps onboarding reminders consistent for %s', async mode => {
