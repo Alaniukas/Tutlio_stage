@@ -2173,6 +2173,8 @@ export const ee: Record<string, string> = {
   'cal.errorAddingStudentAlert': 'Viga õpilase lisamisel',
   'cal.errorCancelling': 'Viga tühistamisel',
   'cal.errorCreating': "Viga tunni loomisel",
+  "cal.createdFollowUpFailed": "Tund salvestati, kuid mõnda seotud toimingut ei õnnestunud lõpetada. Leiate tunni kalendrist. Ärge looge seda uuesti. Kui probleem püsib, võtke ühendust kasutajatoega.",
+  "cal.createCleanupFailed": "Tunni loomine ebaõnnestus ja kordumise seadeid ei õnnestunud eemaldada. Enne uuesti proovimist võtke ühendust kasutajatoega.",
   'cal.errorGeneric': 'Tekkis viga',
   'cal.errorRemovingStudent': 'Viga õpilase eemaldamisel',
   'cal.errorRemovingStudentAlert': 'Viga õpilase eemaldamisel',

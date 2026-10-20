@@ -380,6 +380,8 @@ export const roOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Eroare la adăugarea elevului",
   "cal.errorCancelling": "Eroare la anulare",
   "cal.errorCreating": "Eroare la crearea lecției",
+  "cal.createdFollowUpFailed": "Lecția a fost salvată, dar unele acțiuni asociate nu au putut fi finalizate. O găsiți în calendar. Nu o creați din nou. Dacă problema persistă, contactați asistența.",
+  "cal.createCleanupFailed": "Crearea lecției a eșuat, iar setările de repetare nu au putut fi eliminate. Contactați asistența înainte de a încerca din nou.",
   "cal.errorGeneric": "A apărut o eroare",
   "cal.errorRemovingStudent": "Eroare la eliminarea elevului",
   "cal.errorRemovingStudentAlert": "Nu s-a putut elimina elevul",

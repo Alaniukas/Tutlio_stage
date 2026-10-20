@@ -354,6 +354,8 @@ export const huOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Hiba a diák hozzáadásakor",
   "cal.errorCancelling": "Hiba a lemondáskor",
   "cal.errorCreating": "Hiba az óra létrehozásakor",
+  "cal.createdFollowUpFailed": "Az óra mentése sikerült, de néhány kapcsolódó művelet nem fejeződött be. Az órát megtalálja a naptárban. Ne hozza létre újra. Ha a probléma továbbra is fennáll, forduljon az ügyfélszolgálathoz.",
+  "cal.createCleanupFailed": "Az óra létrehozása nem sikerült, és az ismétlődési beállításokat nem lehetett eltávolítani. Újabb próbálkozás előtt forduljon az ügyfélszolgálathoz.",
   "cal.errorGeneric": "Hiba történt",
   "cal.errorRemovingStudent": "Hiba a diák eltávolításakor",
   "cal.errorRemovingStudentAlert": "Nem sikerült eltávolítani a diákot",

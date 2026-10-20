@@ -1,6 +1,20 @@
 import { schoolInvoiceReviewEn } from './schoolInvoiceReviewTranslations.js';
 import { schoolInvoiceOverpaymentTranslations } from './schoolInvoiceOverpaymentTranslations.js';
 
+const missingPriceCopy: Record<string, string> = {
+  pl: 'Brak ceny. Ustaw ją w ofercie dodatkowych zajęć na stronie Umowy.',
+  lv: 'Nav norādīta cena. Iestatiet to papildu nodarbību piedāvājumā lapā Līgumi.',
+  ee: 'Hind puudub. Määrake see lisatundide pakkumises lehel Lepingud.',
+  fr: 'Prix manquant. Définissez-le dans l’offre de séances supplémentaires sur la page Contrats.',
+  es: 'Falta el precio. Establécelo en la oferta de sesiones adicionales de la página Contratos.',
+  de: 'Der Preis fehlt. Legen Sie ihn im Angebot für zusätzliche Stunden auf der Seite Verträge fest.',
+  se: 'Priset saknas. Ange det i erbjudandet om extra lektioner på sidan Avtal.',
+  dk: 'Prisen mangler. Angiv den i tilbuddet om ekstra lektioner på siden Kontrakter.',
+  fi: 'Hinta puuttuu. Määritä se lisäoppituntien tarjouksessa Sopimukset-sivulla.',
+  no: 'Prisen mangler. Angi den i tilbudet om ekstra timer på siden Avtaler.',
+  nl: 'De prijs ontbreekt. Stel deze in bij het aanbod voor extra lessen op de pagina Overeenkomsten.',
+};
+
 const scheduleCopy: Record<string, [string, string]> = {
   pl: ['Wyłączono: poza harmonogramem ucznia', 'Ten termin jest poza harmonogramem ucznia'],
   lv: ['Nav iekļauts: ārpus skolēna grafika', 'Šis laiks ir ārpus skolēna grafika'],
@@ -21,6 +35,7 @@ function dictionary(locale: string, values: string[]): Record<string, string> {
   const mergedValues = keys.map((key, index) => values[index] ?? schoolInvoiceReviewEn[key] ?? '');
   if (values.length > keys.length) throw new Error('Incomplete school invoice review translation');
   return { ...schoolInvoiceOverpaymentTranslations[locale], ...Object.fromEntries(keys.map((key, index) => [key, mergedValues[index]])),
+    'school.invoice.review.reason.missing_price': missingPriceCopy[locale],
     'school.invoice.review.reason.outside_schedule': scheduleCopy[locale][0],
     'school.invoice.review.scheduleMismatch': scheduleCopy[locale][1],
   };

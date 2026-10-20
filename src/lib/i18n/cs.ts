@@ -622,6 +622,8 @@ export const csOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Chyba při přidávání studenta",
   "cal.errorCancelling": "Chyba při zrušení",
   "cal.errorCreating": "Chyba při vytváření lekce",
+  "cal.createdFollowUpFailed": "Lekce byla uložena, ale některé související akce se nepodařilo dokončit. Najdete ji v kalendáři. Nevytvářejte ji znovu. Pokud problém přetrvává, kontaktujte podporu.",
+  "cal.createCleanupFailed": "Lekci se nepodařilo vytvořit a nastavení opakování se nepodařilo odstranit. Před dalším pokusem kontaktujte podporu.",
   "cal.errorGeneric": "Došlo k chybě",
   "invoice.errorOccurred": "Došlo k chybě",
   "cal.errorRemovingStudent": "Chyba při odebírání studenta",

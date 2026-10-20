@@ -616,6 +616,8 @@ export const ukOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Помилка додавання учня",
   "cal.errorCancelling": "Помилка скасування",
   "cal.errorCreating": "Помилка створення заняття",
+  "cal.createdFollowUpFailed": "Заняття збережено, але деякі пов’язані дії не вдалося завершити. Ви знайдете його в календарі. Не створюйте його повторно. Якщо проблема не зникає, зверніться до служби підтримки.",
+  "cal.createCleanupFailed": "Не вдалося створити заняття та видалити налаштування повторення. Перш ніж спробувати ще раз, зверніться до служби підтримки.",
   "cal.errorGeneric": "Сталася помилка",
   "invoice.errorOccurred": "Сталася помилка",
   "cal.errorRemovingStudent": "Помилка видалення учня",

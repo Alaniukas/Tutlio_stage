@@ -353,6 +353,8 @@ export const esMxOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Error al agregar el alumno",
   "cal.errorCancelling": "Error al cancelar",
   "cal.errorCreating": "Error al crear la clase",
+  "cal.createdFollowUpFailed": "La clase se guardó, pero no se pudieron completar algunas acciones relacionadas. Puedes encontrarla en el calendario. No la vuelvas a crear. Si el problema continúa, contacta a soporte.",
+  "cal.createCleanupFailed": "No se pudo crear la clase ni eliminar la configuración de repetición. Contacta a soporte antes de intentarlo de nuevo.",
   "cal.errorGeneric": "Ha ocurrido un error",
   "cal.errorRemovingStudent": "Error al eliminar el alumno",
   "cal.errorRemovingStudentAlert": "Error al eliminar al alumno",

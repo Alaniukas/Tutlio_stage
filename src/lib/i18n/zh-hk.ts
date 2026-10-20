@@ -617,6 +617,8 @@ export const zhHkOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "新增學生時發生錯誤",
   "cal.errorCancelling": "取消時發生錯誤",
   "cal.errorCreating": "建立課堂時發生錯誤",
+  "cal.createdFollowUpFailed": "課堂已儲存，但部分相關操作未能完成。你可以在日曆中找到課堂。請勿再次建立。如果問題持續，請聯絡支援團隊。",
+  "cal.createCleanupFailed": "未能建立課堂，亦無法移除重複設定。再次嘗試前，請聯絡支援團隊。",
   "cal.errorGeneric": "發生錯誤",
   "invoice.errorOccurred": "發生錯誤",
   "cal.errorRemovingStudent": "移除學生時發生錯誤",

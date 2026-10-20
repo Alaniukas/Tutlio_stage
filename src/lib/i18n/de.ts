@@ -2090,6 +2090,8 @@ export const de: Record<string, string> = {
   'cal.errorAddingStudentAlert': 'Fehler beim Hinzufügen des Schülers',
   'cal.errorCancelling': 'Fehler beim Absagen',
   'cal.errorCreating': "Fehler beim Erstellen der Stunde",
+  "cal.createdFollowUpFailed": "Die Stunde wurde gespeichert, aber einige zugehörige Aktionen konnten nicht abgeschlossen werden. Sie finden die Stunde im Kalender. Erstellen Sie sie nicht erneut. Wenn das Problem weiterhin besteht, wenden Sie sich an den Support.",
+  "cal.createCleanupFailed": "Die Stunde konnte nicht erstellt und die Wiederholungseinstellungen konnten nicht entfernt werden. Wenden Sie sich an den Support, bevor Sie es erneut versuchen.",
   'cal.errorGeneric': 'Ein Fehler ist aufgetreten',
   'cal.errorRemovingStudent': 'Fehler beim Entfernen des Schülers',
   'cal.groupFull': "Gruppe voll: {max}",

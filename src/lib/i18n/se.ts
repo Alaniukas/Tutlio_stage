@@ -1148,6 +1148,8 @@ export const se: Record<string, string> = {
   'cal.errorAddingStudentAlert': 'Fel vid tillägg av elev',
   'cal.errorCancelling': 'Fel vid avbokning',
   'cal.errorCreating': "Fel vid skapande av lektion",
+  "cal.createdFollowUpFailed": "Lektionen sparades, men vissa relaterade åtgärder kunde inte slutföras. Du hittar den i kalendern. Skapa den inte igen. Kontakta supporten om problemet kvarstår.",
+  "cal.createCleanupFailed": "Lektionen kunde inte skapas och inställningarna för upprepning kunde inte tas bort. Kontakta supporten innan du försöker igen.",
   'cal.errorGeneric': 'Ett fel uppstod',
   'cal.errorRemovingStudent': 'Fel vid borttagning av elev',
   'cal.fillBothDates': 'Fyll i båda datum',

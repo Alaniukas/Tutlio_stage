@@ -353,6 +353,8 @@ export const koOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "학생 추가 오류",
   "cal.errorCancelling": "취소 오류",
   "cal.errorCreating": "수업 생성 오류",
+  "cal.createdFollowUpFailed": "수업은 저장되었지만 일부 관련 작업을 완료하지 못했습니다. 캘린더에서 수업을 확인할 수 있습니다. 같은 수업을 다시 만들지 마세요. 문제가 계속되면 고객 지원팀에 문의하세요.",
+  "cal.createCleanupFailed": "수업을 만들지 못했고 반복 설정도 삭제하지 못했습니다. 다시 시도하기 전에 고객 지원팀에 문의하세요.",
   "cal.errorGeneric": "오류가 발생했습니다",
   "cal.errorRemovingStudent": "학생 제외 오류",
   "cal.errorRemovingStudentAlert": "학생을 제외하지 못했습니다",

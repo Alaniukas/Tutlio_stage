@@ -349,6 +349,8 @@ export const ptOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Erro ao adicionar aluno",
   "cal.errorCancelling": "Erro ao cancelar",
   "cal.errorCreating": "Erro ao criar aula",
+  "cal.createdFollowUpFailed": "A aula foi guardada, mas não foi possível concluir algumas ações relacionadas. Pode encontrá-la no calendário. Não a crie novamente. Se o problema persistir, contacte o apoio ao cliente.",
+  "cal.createCleanupFailed": "Não foi possível criar a aula nem remover as definições de repetição. Contacte o apoio ao cliente antes de tentar novamente.",
   "cal.errorGeneric": "Ocorreu um erro",
   "cal.errorRemovingStudent": "Erro ao remover aluno",
   "cal.errorRemovingStudentAlert": "Não foi possível remover o aluno",

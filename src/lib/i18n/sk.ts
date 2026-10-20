@@ -619,6 +619,8 @@ export const skOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Chyba pri pridávaní študenta",
   "cal.errorCancelling": "Chyba pri zrušení",
   "cal.errorCreating": "Chyba pri vytváraní hodiny",
+  "cal.createdFollowUpFailed": "Hodina bola uložená, ale niektoré súvisiace akcie sa nepodarilo dokončiť. Nájdete ju v kalendári. Nevytvárajte ju znova. Ak problém pretrváva, kontaktujte podporu.",
+  "cal.createCleanupFailed": "Hodinu sa nepodarilo vytvoriť a nastavenia opakovania sa nepodarilo odstrániť. Pred ďalším pokusom kontaktujte podporu.",
   "cal.errorGeneric": "Vyskytla sa chyba",
   "invoice.errorOccurred": "Vyskytla sa chyba",
   "cal.errorRemovingStudent": "Chyba pri odoberaní študenta",

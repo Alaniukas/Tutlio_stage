@@ -56,7 +56,8 @@ beforeEach(() => {
     return {
       ok: !(isGeneration && state.generateError),
       json: async () => url.startsWith('/api/invoice-settings') ? { data: {
-        entity_type: 'individual', activity_number: '123', contact_email: 'tutor@example.test',
+        entity_type: 'individual', activity_number: '123', address: 'Testo g. 1, Vilnius',
+        contact_email: 'tutor@example.test',
       } } : isGeneration ? state.generateError ? { error: state.generateError }
         : { count: 1, invoiceIds: ['new-invoice'] } : { canGenerate: true, candidateCount: 3, ...state.precheck },
     };

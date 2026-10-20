@@ -619,6 +619,8 @@ export const bgOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Грешка при добавяне на ученик",
   "cal.errorCancelling": "Грешка при отмяна",
   "cal.errorCreating": "Грешка при създаване на урок",
+  "cal.createdFollowUpFailed": "Урокът е запазен, но някои свързани действия не можаха да бъдат завършени. Ще го намерите в календара. Не го създавайте отново. Ако проблемът продължава, свържете се с поддръжката.",
+  "cal.createCleanupFailed": "Създаването на урока е неуспешно и настройките за повторение не можаха да бъдат премахнати. Свържете се с поддръжката, преди да опитате отново.",
   "cal.errorGeneric": "Възникна грешка",
   "invoice.errorOccurred": "Възникна грешка",
   "cal.errorRemovingStudent": "Грешка при премахване на ученик",

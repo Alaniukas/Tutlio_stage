@@ -620,6 +620,8 @@ export const filOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Error sa pagdagdag ng estudyante",
   "cal.errorCancelling": "Error sa pagkansela",
   "cal.errorCreating": "Error sa paggawa ng sesyon",
+  "cal.createdFollowUpFailed": "Na-save ang sesyon, ngunit hindi nakumpleto ang ilang kaugnay na aksyon. Makikita mo ito sa kalendaryo. Huwag itong gawin muli. Kung magpatuloy ang problema, makipag-ugnayan sa suporta.",
+  "cal.createCleanupFailed": "Hindi nagawa ang sesyon at hindi maalis ang mga setting ng pag-uulit. Makipag-ugnayan sa suporta bago subukang muli.",
   "cal.errorGeneric": "Nagkaroon ng error",
   "invoice.errorOccurred": "Nagkaroon ng error",
   "cal.errorRemovingStudent": "Error sa pag-alis ng estudyante",

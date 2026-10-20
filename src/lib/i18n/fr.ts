@@ -936,6 +936,8 @@ export const fr: Record<string, string> = {
   'cal.errorAddingStudentAlert': 'Erreur lors de l\'ajout de l\'élève',
   'cal.errorCancelling': 'Erreur lors de l\'annulation',
   'cal.errorCreating': "Erreur lors de la création du cours ",
+  "cal.createdFollowUpFailed": "Le cours a été enregistré, mais certaines actions associées n’ont pas pu être terminées. Vous le trouverez dans le calendrier. Ne le créez pas à nouveau. Si le problème persiste, contactez l’assistance.",
+  "cal.createCleanupFailed": "La création du cours a échoué et les paramètres de récurrence n’ont pas pu être supprimés. Contactez l’assistance avant de réessayer.",
   'cal.errorGeneric': 'Une erreur est survenue',
   'cal.errorRemovingStudent': 'Erreur lors du retrait de l\'élève',
   'cal.errorRemovingStudentAlert': 'Erreur lors du retrait de l\'élève',

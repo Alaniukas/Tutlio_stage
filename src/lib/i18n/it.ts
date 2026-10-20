@@ -620,6 +620,8 @@ export const itOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Errore durante l'aggiunta dello studente",
   "cal.errorCancelling": "Errore durante l'annullamento",
   "cal.errorCreating": "Errore durante la creazione della lezione",
+  "cal.createdFollowUpFailed": "La lezione è stata salvata, ma non è stato possibile completare alcune operazioni correlate. La trovi nel calendario. Non crearla di nuovo. Se il problema persiste, contatta l’assistenza.",
+  "cal.createCleanupFailed": "Non è stato possibile creare la lezione né rimuovere le impostazioni di ricorrenza. Contatta l’assistenza prima di riprovare.",
   "cal.errorGeneric": "Si è verificato un errore",
   "invoice.errorOccurred": "Si è verificato un errore",
   "cal.errorRemovingStudent": "Errore durante la rimozione dello studente",

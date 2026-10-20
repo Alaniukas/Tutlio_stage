@@ -99,7 +99,8 @@ beforeEach(() => {
     organizations: [{ id: MANO_KOREPETITORIUS_ORG_ID, entity_type: 'company',
       name: 'Mano Korepetitorius', features: { pvm_education_invoice: true } }],
     invoice_profiles: [
-      { id: 'personal', user_id: 'tutor', entity_type: 'individual', activity_number: '123' },
+      { id: 'personal', user_id: 'tutor', entity_type: 'individual', activity_number: '123',
+        address: 'Testo g. 1, Vilnius', contact_email: 'tutor@example.test' },
       { id: 'organization', organization_id: MANO_KOREPETITORIUS_ORG_ID, entity_type: 'mb',
         business_name: 'MB Mano Korepetitorius', company_code: '456', address: 'Vilnius',
         contact_email: 'info@example.test' },

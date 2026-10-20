@@ -620,6 +620,8 @@ export const hrOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Pogreška pri dodavanju učenika",
   "cal.errorCancelling": "Pogreška pri otkazivanju",
   "cal.errorCreating": "Pogreška pri stvaranju sata",
+  "cal.createdFollowUpFailed": "Sat je spremljen, ali neke povezane radnje nije bilo moguće dovršiti. Pronaći ćete ga u kalendaru. Nemojte ga ponovno stvarati. Ako se problem nastavi, obratite se podršci.",
+  "cal.createCleanupFailed": "Stvaranje sata nije uspjelo i postavke ponavljanja nije bilo moguće ukloniti. Obratite se podršci prije ponovnog pokušaja.",
   "cal.errorGeneric": "Došlo je do pogreške",
   "invoice.errorOccurred": "Došlo je do pogreške",
   "cal.errorRemovingStudent": "Pogreška pri uklanjanju učenika",

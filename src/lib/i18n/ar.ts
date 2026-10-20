@@ -616,6 +616,8 @@ export const arOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "حدث خطأ أثناء إضافة الطالب",
   "cal.errorCancelling": "حدث خطأ أثناء الإلغاء",
   "cal.errorCreating": "حدث خطأ أثناء إنشاء الدرس",
+  "cal.createdFollowUpFailed": "تم حفظ الدرس، لكن تعذر إكمال بعض الإجراءات المرتبطة به. يمكنك العثور عليه في التقويم. لا تنشئه مرة أخرى. إذا استمرت المشكلة، تواصل مع الدعم.",
+  "cal.createCleanupFailed": "فشل إنشاء الدرس وتعذرت إزالة إعدادات التكرار. تواصل مع الدعم قبل المحاولة مرة أخرى.",
   "cal.errorGeneric": "حدث خطأ",
   "invoice.errorOccurred": "حدث خطأ",
   "cal.errorRemovingStudent": "حدث خطأ أثناء إزالة الطالب",

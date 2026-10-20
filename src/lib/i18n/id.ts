@@ -353,6 +353,8 @@ export const idOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Gagal menambahkan siswa",
   "cal.errorCancelling": "Gagal membatalkan",
   "cal.errorCreating": "Gagal membuat sesi les",
+  "cal.createdFollowUpFailed": "Sesi les telah disimpan, tetapi beberapa tindakan terkait tidak dapat diselesaikan. Anda dapat menemukannya di kalender. Jangan membuatnya lagi. Jika masalah berlanjut, hubungi dukungan.",
+  "cal.createCleanupFailed": "Pembuatan sesi les gagal dan pengaturan pengulangan tidak dapat dihapus. Hubungi dukungan sebelum mencoba lagi.",
   "cal.errorGeneric": "Terjadi kesalahan",
   "cal.errorRemovingStudent": "Gagal mengeluarkan siswa",
   "cal.errorRemovingStudentAlert": "Gagal mengeluarkan siswa",

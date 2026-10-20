@@ -616,6 +616,8 @@ export const hiOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "विद्यार्थी जोड़ने में त्रुटि",
   "cal.errorCancelling": "रद्द करने में त्रुटि",
   "cal.errorCreating": "क्लास बनाने में त्रुटि",
+  "cal.createdFollowUpFailed": "क्लास सहेज ली गई है, लेकिन उससे जुड़ी कुछ कार्रवाइयाँ पूरी नहीं हो सकीं। आप इसे कैलेंडर में देख सकते हैं। इसे दोबारा न बनाएँ। समस्या बनी रहने पर सहायता टीम से संपर्क करें।",
+  "cal.createCleanupFailed": "क्लास बनाना विफल रहा और दोहराव की सेटिंग हटाई नहीं जा सकीं। दोबारा कोशिश करने से पहले सहायता टीम से संपर्क करें।",
   "cal.errorGeneric": "एक त्रुटि हुई",
   "invoice.errorOccurred": "एक त्रुटि हुई",
   "cal.errorRemovingStudent": "विद्यार्थी हटाने में त्रुटि",

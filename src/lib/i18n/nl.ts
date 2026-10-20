@@ -1074,6 +1074,8 @@ export const nl: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Fout bij toevoegen leerling",
   "cal.errorCancelling": "Fout bij annuleren",
   "cal.errorCreating": "Fout bij het aanmaken van de les",
+  "cal.createdFollowUpFailed": "De les is opgeslagen, maar sommige bijbehorende acties konden niet worden voltooid. Je vindt de les in de agenda. Maak deze niet opnieuw aan. Neem contact op met de ondersteuning als het probleem aanhoudt.",
+  "cal.createCleanupFailed": "De les kon niet worden aangemaakt en de herhalingsinstellingen konden niet worden verwijderd. Neem contact op met de ondersteuning voordat je het opnieuw probeert.",
   "cal.errorGeneric": "Er is een fout opgetreden",
   "cal.errorRemovingStudent": "Fout bij verwijderen leerling",
   "cal.errorRemovingStudentAlert": "Kon de leerling niet verwijderen.",

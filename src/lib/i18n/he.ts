@@ -1083,6 +1083,8 @@ export const heOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "שגיאה בהוספת תלמיד",
   "cal.errorCancelling": "שגיאה בביטול",
   "cal.errorCreating": "שגיאה ביצירת שיעור",
+  "cal.createdFollowUpFailed": "השיעור נשמר, אך חלק מהפעולות הקשורות אליו לא הושלמו. ניתן למצוא אותו ביומן. אין ליצור אותו שוב. אם הבעיה נמשכת, יש לפנות לתמיכה.",
+  "cal.createCleanupFailed": "יצירת השיעור נכשלה ולא ניתן היה להסיר את הגדרות החזרה. יש לפנות לתמיכה לפני ניסיון נוסף.",
   "cal.errorGeneric": "אירעה שגיאה",
   "invoice.errorOccurred": "אירעה שגיאה",
   "cal.errorRemovingStudent": "שגיאה בהסרת תלמיד",

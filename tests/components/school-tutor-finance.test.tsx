@@ -127,7 +127,8 @@ beforeEach(() => {
       return { ok: !state.attendanceError, json: async () => ({ ok: !state.attendanceError, rows: state.attendanceRows }) };
     }
     if (url.startsWith('/api/invoice-settings')) return { ok: true, json: async () => ({ data: {
-      entity_type: 'individuali_veikla', activity_number: 'TEST', contact_email: 'teacher@example.invalid',
+      entity_type: 'individuali_veikla', activity_number: 'TEST', address: 'Testo g. 1, Vilnius',
+      contact_email: 'teacher@example.invalid',
     } }) };
     if (url === '/api/generate-invoice') {
       const body = JSON.parse(String(init?.body)); state.posts.push(body);

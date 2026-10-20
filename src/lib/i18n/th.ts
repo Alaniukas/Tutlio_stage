@@ -621,6 +621,8 @@ export const thOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "เกิดข้อผิดพลาดในการเพิ่มนักเรียน",
   "cal.errorCancelling": "เกิดข้อผิดพลาดในการยกเลิก",
   "cal.errorCreating": "เกิดข้อผิดพลาดในการสร้างคาบเรียน",
+  "cal.createdFollowUpFailed": "บันทึกคาบเรียนแล้ว แต่ดำเนินการที่เกี่ยวข้องบางอย่างไม่สำเร็จ คุณจะพบคาบเรียนในปฏิทิน อย่าสร้างคาบเรียนนี้ซ้ำ หากปัญหายังคงอยู่ โปรดติดต่อฝ่ายสนับสนุน",
+  "cal.createCleanupFailed": "สร้างคาบเรียนไม่สำเร็จและไม่สามารถลบการตั้งค่าการเรียนซ้ำได้ โปรดติดต่อฝ่ายสนับสนุนก่อนลองอีกครั้ง",
   "cal.errorGeneric": "เกิดข้อผิดพลาด",
   "invoice.errorOccurred": "เกิดข้อผิดพลาด",
   "cal.errorRemovingStudent": "เกิดข้อผิดพลาดในการนำนักเรียนออก",

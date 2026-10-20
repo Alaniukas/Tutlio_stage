@@ -80,7 +80,8 @@ export const qaAdjustments = [
 ];
 export const qaInvoiceProfiles = qaProfiles.map((profile, index) => ({
   id: qaId(500 + index), user_id: profile.id, entity_type: 'individuali_veikla', activity_number: `QA${index + 1}`,
-  business_name: 'Testinė Mokytoja', contact_email: profile.email, invoice_series: index === 0 ? 'PK' : 'MV',
+  business_name: 'Testinė Mokytoja', address: 'Testo g. 1, Vilnius',
+  contact_email: profile.email, invoice_series: index === 0 ? 'PK' : 'MV',
 }));
 export const qaInvoices = qaProfiles.map((profile, index) => ({
   id: qaId(600 + index), invoice_number: index === 0 ? 'PK-ATLYGIS-001' : 'MV-ATLYGIS-001',

@@ -618,6 +618,8 @@ export const slOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Napaka pri dodajanju učenca",
   "cal.errorCancelling": "Napaka pri odpovedi",
   "cal.errorCreating": "Napaka pri ustvarjanju ure",
+  "cal.createdFollowUpFailed": "Ura je bila shranjena, vendar nekaterih povezanih dejanj ni bilo mogoče dokončati. Našli jo boste v koledarju. Ne ustvarite je znova. Če se težava ponavlja, se obrnite na podporo.",
+  "cal.createCleanupFailed": "Ustvarjanje ure ni uspelo in nastavitev ponavljanja ni bilo mogoče odstraniti. Pred ponovnim poskusom se obrnite na podporo.",
   "cal.errorGeneric": "Prišlo je do napake",
   "invoice.errorOccurred": "Prišlo je do napake",
   "cal.errorRemovingStudent": "Napaka pri odstranjevanju učenca",

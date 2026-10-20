@@ -3060,6 +3060,8 @@ export const lv: Record<string, string> = {
   'cal.errorAddingStudentAlert': 'Kļūda, pievienojot skolēnu',
   'cal.errorCancelling': 'Kļūda, atceļot',
   'cal.errorCreating': "Kļūda, veidojot nodarbību",
+  "cal.createdFollowUpFailed": "Nodarbība ir saglabāta, taču dažas saistītās darbības neizdevās pabeigt. Tā ir atrodama kalendārā. Neveidojiet to vēlreiz. Ja problēma atkārtojas, sazinieties ar atbalsta dienestu.",
+  "cal.createCleanupFailed": "Nodarbības izveide neizdevās, un atkārtošanās iestatījumus nevarēja noņemt. Pirms mēģināt vēlreiz, sazinieties ar atbalsta dienestu.",
   'cal.errorGeneric': 'Radās kļūda',
   'cal.errorRemovingStudent': 'Kļūda, noņemot skolēnu',
   'cal.errorRemovingStudentAlert': 'Kļūda, noņemot skolēnu',

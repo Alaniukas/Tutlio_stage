@@ -353,6 +353,8 @@ export const trOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "Öğrenci eklenirken hata oluştu",
   "cal.errorCancelling": "İptal edilirken hata oluştu",
   "cal.errorCreating": "Ders oluşturulurken hata oluştu",
+  "cal.createdFollowUpFailed": "Ders kaydedildi ancak ilgili bazı işlemler tamamlanamadı. Dersi takvimde bulabilirsiniz. Dersi yeniden oluşturmayın. Sorun devam ederse destek ekibiyle iletişime geçin.",
+  "cal.createCleanupFailed": "Ders oluşturulamadı ve tekrar ayarları kaldırılamadı. Yeniden denemeden önce destek ekibiyle iletişime geçin.",
   "cal.errorGeneric": "Bir hata oluştu",
   "cal.errorRemovingStudent": "Öğrenci çıkarılırken hata oluştu",
   "cal.errorRemovingStudentAlert": "Öğrenci çıkarılamadı",

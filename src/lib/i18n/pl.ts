@@ -811,6 +811,8 @@ export const pl: Record<string, string> = {
   'cal.errorAddingStudentAlert': 'Błąd dodawania ucznia',
   'cal.errorCancelling': 'Błąd anulowania',
   'cal.errorCreating': "Błąd tworzenia lekcji",
+  "cal.createdFollowUpFailed": "Lekcja została zapisana, ale nie udało się wykonać niektórych powiązanych czynności. Znajdziesz ją w kalendarzu. Nie twórz jej ponownie. Jeśli problem się powtarza, skontaktuj się z pomocą techniczną.",
+  "cal.createCleanupFailed": "Nie udało się utworzyć lekcji ani usunąć ustawień powtarzania. Przed ponowną próbą skontaktuj się z pomocą techniczną.",
   'cal.errorGeneric': 'Wystąpił błąd',
   'cal.errorRemovingStudent': 'Błąd usuwania ucznia',
   'cal.errorRemovingStudentAlert': 'Błąd usuwania ucznia',

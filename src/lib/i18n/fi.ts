@@ -964,6 +964,8 @@ export const fi: Record<string, string> = {
   'cal.errorAddingStudentAlert': 'Virhe oppilaan lisäämisessä',
   'cal.errorCancelling': 'Virhe peruutuksessa',
   'cal.errorCreating': "Virhe oppitunnin luomisessa",
+  "cal.createdFollowUpFailed": "Oppitunti tallennettiin, mutta joitakin siihen liittyviä toimintoja ei voitu suorittaa loppuun. Löydät sen kalenterista. Älä luo sitä uudelleen. Jos ongelma jatkuu, ota yhteyttä tukeen.",
+  "cal.createCleanupFailed": "Oppitunnin luominen epäonnistui, eikä toistumisasetuksia voitu poistaa. Ota yhteyttä tukeen ennen kuin yrität uudelleen.",
   'cal.errorGeneric': 'Tapahtui virhe',
   'cal.errorRemovingStudent': 'Virhe oppilaan poistamisessa',
   'cal.fillBothDates': 'Täytä molemmat päivämäärät',

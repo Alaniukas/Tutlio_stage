@@ -968,6 +968,8 @@ export const dk: Record<string, string> = {
   'cal.errorAddingStudentAlert': 'Fejl ved tilføjelse af elev',
   'cal.errorCancelling': 'Fejl ved aflysning',
   'cal.errorCreating': "Fejl ved oprettelse af lektion",
+  "cal.createdFollowUpFailed": "Lektionen blev gemt, men nogle tilknyttede handlinger kunne ikke fuldføres. Du finder den i kalenderen. Opret den ikke igen. Kontakt support, hvis problemet fortsætter.",
+  "cal.createCleanupFailed": "Lektionen kunne ikke oprettes, og indstillingerne for gentagelse kunne ikke fjernes. Kontakt support, før du prøver igen.",
   'cal.errorGeneric': 'Der opstod en fejl',
   'cal.errorRemovingStudent': 'Fejl ved fjernelse af elev',
   'cal.fillBothDates': 'Udfyld begge datoer',

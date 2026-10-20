@@ -619,6 +619,8 @@ export const jaOverrides: Record<string, string> = {
   "cal.errorAddingStudentAlert": "受講者の追加中にエラーが発生しました",
   "cal.errorCancelling": "キャンセル中にエラーが発生しました",
   "cal.errorCreating": "レッスンの作成中にエラーが発生しました",
+  "cal.createdFollowUpFailed": "レッスンは保存されましたが、一部の関連処理を完了できませんでした。カレンダーで確認できます。同じレッスンを再作成しないでください。問題が解決しない場合は、サポートにお問い合わせください。",
+  "cal.createCleanupFailed": "レッスンの作成に失敗し、繰り返し設定も削除できませんでした。再試行する前にサポートにお問い合わせください。",
   "cal.errorGeneric": "エラーが発生しました",
   "invoice.errorOccurred": "エラーが発生しました",
   "cal.errorRemovingStudent": "受講者を外す際にエラーが発生しました",

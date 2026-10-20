@@ -2175,6 +2175,8 @@ export const es: Record<string, string> = {
   'cal.errorAddingStudentAlert': 'Error al aÃ±adir el alumno',
   'cal.errorCancelling': 'Error al cancelar',
   'cal.errorCreating': "Error al crear la clase",
+  "cal.createdFollowUpFailed": "La clase se ha guardado, pero no se han podido completar algunas acciones relacionadas. La encontrarás en el calendario. No la crees de nuevo. Si el problema persiste, contacta con soporte.",
+  "cal.createCleanupFailed": "No se ha podido crear la clase ni eliminar su configuración de repetición. Contacta con soporte antes de volver a intentarlo.",
   'cal.errorGeneric': 'Ha ocurrido un error',
   'cal.errorRemovingStudent': 'Error al eliminar el alumno',
   'cal.groupFull': "Grupo completo: {max}",

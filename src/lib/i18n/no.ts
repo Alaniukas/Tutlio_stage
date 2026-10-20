@@ -798,6 +798,8 @@ export const no: Record<string, string> = {
   'cal.errorAddingStudentAlert': 'Feil ved tillegg av elev',
   'cal.errorCancelling': 'Feil ved avlysning',
   'cal.errorCreating': "Feil ved opprettelse av time",
+  "cal.createdFollowUpFailed": "Timen ble lagret, men noen tilknyttede handlinger kunne ikke fullføres. Du finner den i kalenderen. Ikke opprett den på nytt. Kontakt kundestøtte hvis problemet vedvarer.",
+  "cal.createCleanupFailed": "Timen kunne ikke opprettes, og gjentakelsesinnstillingene kunne ikke fjernes. Kontakt kundestøtte før du prøver igjen.",
   'cal.errorGeneric': 'Det oppsto en feil',
   'cal.errorRemovingStudent': 'Feil ved fjerning av elev',
   'cal.fillBothDates': 'Fyll inn begge datoer',
