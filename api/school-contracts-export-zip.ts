@@ -7,6 +7,7 @@ import { SCHOOL_CONTRACTS_BUCKET, extractSchoolContractStoragePath } from './_li
 import { resolveSchoolContractPdfStoragePath } from './_lib/ensureSchoolContractPdfPath.js';
 import { mapWithConcurrency } from './_lib/mapWithConcurrency.js';
 import { currentContractPdfPath } from '../src/lib/schoolContractFilters.js';
+import { archivedContractStoragePath, archivedStudentContractsQuery, canViewContractArchive } from './_lib/schoolContractArchive.js';
 import {
   buildSchoolContractsExportZipBytes,
   schoolContractsZipExportFilename,
@@ -55,18 +56,21 @@ async function fetchContractsByIds(
   ids: string[],
   select: string,
   variant: 'student' | 'teacher' | 'staff',
+  archivedOnly = false,
 ): Promise<ExportContractRow[]> {
   const rows: ExportContractRow[] = [];
   for (let offset = 0; offset < ids.length; offset += 50) {
     const chunk = ids.slice(offset, offset + 50);
-    let query = supabase
+    let query = archivedOnly
+      ? archivedStudentContractsQuery(supabase, orgId, select).in('id', chunk)
+      : supabase
       .from('school_contracts')
       .select(select)
       .eq('organization_id', orgId)
       .is('archived_at', null)
       .in('id', chunk);
     if (variant === 'student') {
-      query = query.is('staff_document_type', null).neq('party_kind', 'teacher');
+      if (!archivedOnly) query = query.is('staff_document_type', null).neq('party_kind', 'teacher');
     } else if (variant === 'teacher') {
       query = query.eq('party_kind', 'teacher').is('staff_document_type', null);
     } else {
@@ -177,14 +181,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const adminAccess = await getOrgAdminAccessByUserId(supabase, auth.userId);
   const orgId = adminAccess?.organizationId;
-  if (!orgId || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.view')) {
+  const archivedOnly = req.body?.archivedOnly === true;
+  if (archivedOnly && (teacherContractIds.length || staffDocumentIds.length)) {
+    return json(res, 403, { error: 'Staff documents are not available in the family contract archive' });
+  }
+  if (!orgId || !(archivedOnly
+    ? canViewContractArchive(adminAccess)
+    : hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.view'))) {
     return json(res, 403, { error: 'Forbidden' });
   }
 
   try {
     const [studentRows, teacherRows, staffRows] = await Promise.all([
       studentContractIds.length
-        ? fetchContractsByIds(supabase, orgId, studentContractIds, STUDENT_EXPORT_SELECT, 'student')
+        ? fetchContractsByIds(supabase, orgId, studentContractIds, STUDENT_EXPORT_SELECT, 'student', archivedOnly)
         : Promise.resolve([]),
       teacherContractIds.length
         ? fetchContractsByIds(supabase, orgId, teacherContractIds, EMPLOYEE_EXPORT_SELECT, 'teacher')
@@ -208,14 +218,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ],
       DOWNLOAD_CONCURRENCY,
       async ({ contract, kind }) => (
-        kind === 'student'
+        archivedOnly
+          ? { id: contract.id, bytes: await downloadStoragePdf(supabase, archivedContractStoragePath(contract as Parameters<typeof archivedContractStoragePath>[0], orgId)) }
+          : kind === 'student'
           ? downloadStudentContractPdf(supabase, orgId, contract)
           : downloadEmployeeContractPdf(supabase, orgId, contract)
       ),
     );
 
     const pdfByContractId = new Map<string, Uint8Array>();
-    const failedIds: string[] = [];
+    const foundIds = new Set([...studentRows, ...teacherRows, ...staffRows].map(row => row.id));
+    const failedIds: string[] = [...studentContractIds, ...teacherContractIds, ...staffDocumentIds]
+      .filter(id => !foundIds.has(id));
     for (const item of downloads) {
       if (item.bytes) pdfByContractId.set(item.id, item.bytes);
       else failedIds.push(item.id);
@@ -236,6 +250,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const filename = schoolContractsZipExportFilename(scope);
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('X-Contract-Zip-Downloaded', String(built.downloaded));
     res.setHeader('X-Contract-Zip-Payers', String(built.payerCount));

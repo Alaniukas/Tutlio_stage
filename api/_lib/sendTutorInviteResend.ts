@@ -3,7 +3,7 @@
  * Not via HTTP to /api/send-email — Vercel serverless terminates fire-and-forget fetch after response.
  * Matches send-email.ts `tutor_invite` (Outlook-safe layout) + org white-label branding.
  */
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import { resolveOrgEmailReplyToWithServiceClient } from './orgEmailReplyTo.js';
 import { localeDirection } from '../../src/lib/i18n/locales.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';

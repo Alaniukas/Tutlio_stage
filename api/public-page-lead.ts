@@ -10,7 +10,7 @@
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-import { Resend } from 'resend';
+import { Resend } from './_lib/resendClient.js';
 import { getFromEmail, getResendApiKey } from './_lib/resendConfig.js';
 import { publicPageTimeZone } from '../src/lib/publicPageTime.js';
 

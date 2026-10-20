@@ -1005,6 +1005,8 @@ export const hrOverrides: Record<string, string> = {
   "platformInvoices.period": "Razdoblje",
   "invoices.filterByMonthLabel": "Razdoblje",
   "invoices.periodFilterLabel": "Razdoblje",
+  "invoices.searchNumber": "Pretraži prema broju računa",
+  "invoices.searchNumberPlaceholder": "Broj ili njegov dio, npr. 839",
   "common.phone": "Telefon",
   "compStu.phoneLabel": "Telefon",
   "compTut.phone": "Telefon",

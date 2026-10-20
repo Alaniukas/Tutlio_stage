@@ -2,7 +2,7 @@
  * Parent invitation email via Resend (in-process).
  * Avoids HTTP to /api/send-email — unreliable on localhost and can be cut off on Vercel.
  */
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { resolveOrgEmailReplyToWithServiceClient } from './orgEmailReplyTo.js';
 import { t, localizedFromEmail, type Locale } from './i18n.js';

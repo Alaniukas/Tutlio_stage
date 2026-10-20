@@ -1006,6 +1006,8 @@ export const thOverrides: Record<string, string> = {
   "platformInvoices.period": "ช่วงเวลา",
   "invoices.filterByMonthLabel": "ช่วงเวลา",
   "invoices.periodFilterLabel": "ช่วงเวลา",
+  "invoices.searchNumber": "ค้นหาด้วยเลขที่ใบแจ้งหนี้",
+  "invoices.searchNumberPlaceholder": "เลขที่หรือบางส่วนของเลขที่ เช่น 839",
   "common.phone": "โทรศัพท์",
   "compStu.phoneLabel": "โทรศัพท์",
   "compTut.phone": "โทรศัพท์",

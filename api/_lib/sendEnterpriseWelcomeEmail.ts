@@ -3,7 +3,7 @@
  * Sent in-process via Resend from the Stripe webhook (same pattern as
  * sendTutorInviteResend / sendParentInviteEmail).
  */
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import { localeDirection } from '../../src/lib/i18n/locales.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { t, isValidLocale, localizedFromEmail, type Locale } from './i18n.js';

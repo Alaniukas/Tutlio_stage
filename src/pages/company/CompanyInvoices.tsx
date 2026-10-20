@@ -38,6 +38,7 @@ import {
   Mail,
   Trash2,
   Pencil,
+  Search,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -49,6 +50,7 @@ import { isInvoiceProfileComplete } from '@/lib/invoiceProfileReady';
 import { downloadInvoicePdfFile, downloadInvoicesAsZip } from '@/lib/downloadInvoicesZip';
 import { confirmInvoiceRegeneration, type InvoiceRegeneration } from '@/lib/invoiceRegeneration';
 import { fetchAllRows } from '@/lib/fetchAllRows';
+import { matchesInvoiceNumber } from '@/lib/invoiceNumberSearch';
 
 interface Invoice {
   id: string;
@@ -120,6 +122,7 @@ export default function CompanyInvoices() {
   const [reserveError, setReserveError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [invoiceSearch, setInvoiceSearch] = useState('');
   /** yyyy-MM or '' = visi mėnesiai */
   const [invoiceMonth, setInvoiceMonth] = useState<string>('');
   const [invoicePeriodMode, setInvoicePeriodMode] = useState<'month' | 'range'>('month');
@@ -265,7 +268,7 @@ export default function CompanyInvoices() {
       .from('invoices')
       .select('*, billing_batches(paid)')
       .eq('organization_id', orgIdVal)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false }).order('id');
 
     if (statusFilter !== 'all') {
       query = query.eq('status', statusFilter);
@@ -281,9 +284,14 @@ export default function CompanyInvoices() {
       query = query.gte('issue_date', start).lte('issue_date', endStr);
     }
 
-    const { data, error: invoicesError } = await query;
-    const invoicesList = (data || []) as Invoice[];
-    let loadFailed = Boolean(invoicesError);
+    let invoicesList: Invoice[] = [];
+    let loadFailed = false;
+    try {
+      invoicesList = await fetchAllRows<Invoice>((from, to) => query.range(from, to));
+    } catch (error) {
+      console.error('[CompanyInvoices] invoices load error:', error);
+      loadFailed = true;
+    }
 
     // School payer invoices have their own billing table; the general table
     // contains tutor remuneration. Keep historical invoices visible even when
@@ -512,6 +520,7 @@ export default function CompanyInvoices() {
 
   const filteredInvoices = useMemo(() => {
     const filtered = invoices.filter((inv) => {
+      if (!matchesInvoiceNumber(inv.invoice_number, invoiceSearch)) return false;
       if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
       const issueDate = String(inv.issue_date || '').slice(0, 10);
       if (invoicePeriodMode === 'month' && invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth)) {
@@ -551,6 +560,7 @@ export default function CompanyInvoices() {
     return filtered;
   }, [
     invoices,
+    invoiceSearch,
     statusFilter,
     buyerKindFilter,
     orgBuyerNames,
@@ -1230,6 +1240,15 @@ export default function CompanyInvoices() {
 
           <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between mb-4 pb-4 border-b border-gray-100">
             <div className="flex flex-col sm:flex-row flex-wrap gap-4">
+              <div className="w-full sm:w-64">
+                <Label htmlFor="invoice-number-search" className="text-xs text-gray-500 block mb-1">{t('invoices.searchNumber')}</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" aria-hidden />
+                  <Input id="invoice-number-search" type="search" className="pl-9" value={invoiceSearch}
+                    placeholder={t('invoices.searchNumberPlaceholder')}
+                    onChange={event => setInvoiceSearch(event.target.value)} />
+                </div>
+              </div>
               <div>
                 <label className="text-xs text-gray-500 block mb-1">{t('invoices.periodFilterLabel')}</label>
                 <div className="flex flex-wrap gap-1 mb-2">

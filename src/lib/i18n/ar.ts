@@ -1001,6 +1001,8 @@ export const arOverrides: Record<string, string> = {
   "platformInvoices.period": "الفترة",
   "invoices.filterByMonthLabel": "الفترة",
   "invoices.periodFilterLabel": "الفترة",
+  "invoices.searchNumber": "البحث برقم الفاتورة",
+  "invoices.searchNumberPlaceholder": "الرقم أو جزء منه، مثل 839",
   "common.phone": "الهاتف",
   "compStu.phoneLabel": "الهاتف",
   "compTut.phone": "الهاتف",

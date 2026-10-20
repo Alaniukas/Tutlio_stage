@@ -1,7 +1,7 @@
 /**
  * Mokslo vaisiai — atskiras aktyvavimo laiškas tėvui arba mokiniui.
  */
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import { resolveOrgEmailReplyToWithServiceClient } from './orgEmailReplyTo.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { t, localizedFromEmail, type Locale } from './i18n.js';

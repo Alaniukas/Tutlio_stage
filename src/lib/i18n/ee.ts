@@ -14,6 +14,15 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const ee: Record<string, string> = {
+  'school.archive.title': "Lepingute arhiiv",
+  'school.archive.description': "Vaadake ja laadige alla arhiveeritud lepinguid.",
+  'school.archive.search': "Otsi lepingu numbri, õpilase või maksja järgi",
+  'school.archive.archivedAt': "Arhiveerimise kuupäev",
+  'school.archive.empty': "Otsingule vastavaid arhiveeritud lepinguid ei leitud.",
+  'school.archive.missingFile': "Faili pole üles laaditud",
+  'school.archive.downloadError': "Kõigi valitud failide allalaadimine ebaõnnestus. Proovige uuesti.",
+  'invoices.searchNumber': "Otsi arve numbri järgi",
+  'invoices.searchNumberPlaceholder': "Number või selle osa, nt 839",
   'stuSess.cancellationDisabledByOrg': 'Tundide tühistamine on keelatud. Võtke ühendust administratsiooniga.',
   'stuSess.rescheduleHelp': 'Kui te ei leia sobivat kuupäeva, võtke administraatoriga ühendust sõnumite kaudu või kirjutage e-posti aadressile:',
   'school.recordings.chatTitle': "Vestluse ajalugu",

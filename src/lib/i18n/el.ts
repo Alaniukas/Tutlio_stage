@@ -3709,6 +3709,8 @@ export const elOverrides: Record<string, string> = {
   "invoices.downloadAllFiltered": "Λήψη όλων των εμφανιζόμενων ({count})",
   "invoices.filterByMonthLabel": "Περίοδος",
   "invoices.periodFilterLabel": "Περίοδος",
+  "invoices.searchNumber": "Αναζήτηση με αριθμό τιμολογίου",
+  "invoices.searchNumberPlaceholder": "Αριθμός ή μέρος του, π.χ. 839",
   "invoices.periodModeMonth": "Μήνας",
   "invoices.periodModeRange": "Από–έως",
   "invoices.clearPeriod": "Καθαρισμός περιόδου",

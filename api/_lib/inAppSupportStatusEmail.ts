@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supportTicketsPageForPath, type InAppSupportCategory, type InAppSupportStatus } from '../../src/lib/inAppSupport.js';
 import { escapeSupportHtml } from './supportContact.js';

@@ -1004,6 +1004,8 @@ export const bgOverrides: Record<string, string> = {
   "platformInvoices.period": "Период",
   "invoices.filterByMonthLabel": "Период",
   "invoices.periodFilterLabel": "Период",
+  "invoices.searchNumber": "Търсене по номер на фактура",
+  "invoices.searchNumberPlaceholder": "Номер или част от него, напр. 839",
   "common.phone": "Телефон",
   "compStu.phoneLabel": "Телефон",
   "compTut.phone": "Телефон",

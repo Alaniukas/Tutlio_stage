@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
-import { Resend } from 'resend';
+import { Resend } from './_lib/resendClient.js';
 import type { VercelRequest, VercelResponse } from './types.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';

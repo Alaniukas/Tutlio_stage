@@ -216,6 +216,8 @@ export const heOverrides: Record<string, string> = {
   "stuSess.filesFilterPeriod": "תקופה",
   "invoices.filterByMonthLabel": "תקופה",
   "invoices.periodFilterLabel": "תקופה",
+  "invoices.searchNumber": "חיפוש לפי מספר חשבונית",
+  "invoices.searchNumberPlaceholder": "מספר או חלק ממנו, למשל 839",
   "platformInvoices.period": "תקופה",
   "common.phone": "טלפון",
   "register.phone": "טלפון",

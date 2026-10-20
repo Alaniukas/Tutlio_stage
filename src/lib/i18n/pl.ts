@@ -12,6 +12,15 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const pl: Record<string, string> = {
+  'school.archive.title': "Archiwum umów",
+  'school.archive.description': "Przeglądaj i pobieraj zarchiwizowane umowy.",
+  'school.archive.search': "Szukaj po numerze umowy, uczniu lub płatniku",
+  'school.archive.archivedAt': "Data archiwizacji",
+  'school.archive.empty': "Nie znaleziono zarchiwizowanych umów pasujących do wyszukiwania.",
+  'school.archive.missingFile': "Nie przesłano pliku",
+  'school.archive.downloadError': "Nie udało się pobrać wszystkich wybranych plików. Spróbuj ponownie.",
+  'invoices.searchNumber': "Szukaj po numerze faktury",
+  'invoices.searchNumberPlaceholder': "Numer lub jego część, np. 839",
   'stuSess.cancellationDisabledByOrg': 'Odwoływanie lekcji jest wyłączone. Skontaktuj się z administracją.',
   'stuSess.rescheduleHelp': 'Jeśli nie możesz znaleźć odpowiedniego terminu, skontaktuj się z administratorem przez wiadomości lub napisz na adres e-mail:',
   'school.recordings.chatTitle': "Historia czatu",

@@ -24,6 +24,15 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const se: Record<string, string> = {
+  'school.archive.title': "Avtalsarkiv",
+  'school.archive.description': "Visa och ladda ner arkiverade avtal.",
+  'school.archive.search': "Sök efter avtalsnummer, elev eller betalare",
+  'school.archive.archivedAt': "Arkiveringsdatum",
+  'school.archive.empty': "Inga arkiverade avtal matchar din sökning.",
+  'school.archive.missingFile': "Ingen fil uppladdad",
+  'school.archive.downloadError': "Det gick inte att ladda ner alla valda filer. Försök igen.",
+  'invoices.searchNumber': "Sök efter fakturanummer",
+  'invoices.searchNumberPlaceholder': "Nummer eller del av det, t.ex. 839",
   'stuSess.cancellationDisabledByOrg': 'Avbokning av lektioner är avstängd. Kontakta administrationen.',
   'stuSess.rescheduleHelp': 'Om du inte hittar ett lämpligt datum, kontakta administratören via meddelandefunktionen eller skriv till e-postadressen:',
   'school.recordings.chatMissing': "Ingen matchande Google Meet-chatt hittades för den här inspelningen. Den kan fortfarande bearbetas eller kanske inte har sparats.",

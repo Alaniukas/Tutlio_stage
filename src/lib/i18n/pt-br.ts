@@ -3706,6 +3706,8 @@ export const ptBrOverrides: Record<string, string> = {
   "invoices.downloadAllFiltered": "Baixar todas as visíveis ({count})",
   "invoices.filterByMonthLabel": "Período",
   "invoices.periodFilterLabel": "Período",
+  "invoices.searchNumber": "Pesquisar por número da fatura",
+  "invoices.searchNumberPlaceholder": "Número ou parte dele, por exemplo, 839",
   "invoices.periodModeMonth": "Mês",
   "invoices.periodModeRange": "De–até",
   "invoices.clearPeriod": "Limpar período",

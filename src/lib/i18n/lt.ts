@@ -9,6 +9,15 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const lt: Record<string, string> = {
+  'school.archive.title': "Sutarčių archyvas",
+  'school.archive.description': "Archyvuotų sutarčių peržiūra ir atsisiuntimas.",
+  'school.archive.search': "Ieškoti pagal sutarties numerį, mokinį ar mokėtoją",
+  'school.archive.archivedAt': "Archyvavimo data",
+  'school.archive.empty': "Pagal paiešką archyvuotų sutarčių nerasta.",
+  'school.archive.missingFile': "Failas neįkeltas",
+  'school.archive.downloadError': "Nepavyko atsisiųsti visų pasirinktų failų. Bandykite dar kartą.",
+  'invoices.searchNumber': "Ieškoti pagal sąskaitos numerį",
+  'invoices.searchNumberPlaceholder': "Numeris arba jo dalis, pvz., 839",
   'stuSess.cancellationDisabledByOrg': 'Pamokų atšaukimas išjungtas. Susisiekite su administracija.',
   'stuSess.rescheduleHelp': 'Jei nerandate tinkamos datos, susiekite su administratoriumi per susirašinėjimo funkciją arba parašykite el. paštu:',
   'school.recordings.chatMissing': "Šiam įrašui nerasta Google Meet pokalbio išklotinė. Ji dar gali būti ruošiama arba pokalbis nebuvo išsaugotas.",

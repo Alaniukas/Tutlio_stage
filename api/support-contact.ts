@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Resend } from 'resend';
+import { Resend } from './_lib/resendClient.js';
 import type { VercelRequest, VercelResponse } from './types.js';
 import { getFromEmail, getResendApiKey, INTERNAL_NOTIFY_EMAILS } from './_lib/resendConfig.js';
 import { escapeSupportHtml, parseSupportContact } from './_lib/supportContact.js';

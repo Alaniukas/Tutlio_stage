@@ -3710,6 +3710,8 @@ export const koOverrides: Record<string, string> = {
   "invoices.downloadAllFiltered": "표시된 항목 모두 다운로드 ({count})",
   "invoices.filterByMonthLabel": "기간",
   "invoices.periodFilterLabel": "기간",
+  "invoices.searchNumber": "청구서 번호로 검색",
+  "invoices.searchNumberPlaceholder": "번호 또는 번호 일부, 예: 839",
   "invoices.periodModeMonth": "월",
   "invoices.periodModeRange": "시작일–종료일",
   "invoices.clearPeriod": "기간 초기화",

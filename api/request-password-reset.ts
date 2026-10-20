@@ -13,6 +13,7 @@ import {
   studentLoginNameFromEmail,
 } from '../src/lib/studentLoginIdentity.js';
 import { sendStudentUsernameRecovery } from './_lib/studentUsernameRecovery.js';
+import { sendRedirectedEmailRecovery } from './_lib/emailDeliveryRecovery.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -71,6 +72,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.error('[request-password-reset] Could not set recovery email locale');
         return res.status(500).json({ error: 'Unable to send reset email. Please try again.' });
       }
+    }
+
+    if (await sendRedirectedEmailRecovery(admin, { email, userId: existing?.id || null, redirectTo, locale })) {
+      return res.status(200).json({ success: true });
     }
 
     const { error } = await publicClient.auth.resetPasswordForEmail(email, { redirectTo });

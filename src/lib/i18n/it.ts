@@ -1005,6 +1005,8 @@ export const itOverrides: Record<string, string> = {
   "platformInvoices.period": "Periodo",
   "invoices.filterByMonthLabel": "Periodo",
   "invoices.periodFilterLabel": "Periodo",
+  "invoices.searchNumber": "Cerca per numero di fattura",
+  "invoices.searchNumberPlaceholder": "Numero o parte di esso, ad es. 839",
   "common.phone": "Telefono",
   "compStu.phoneLabel": "Telefono",
   "compTut.phone": "Telefono",

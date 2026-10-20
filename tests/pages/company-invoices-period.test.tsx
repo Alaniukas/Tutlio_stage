@@ -37,6 +37,7 @@ vi.mock('@/lib/supabase', () => ({
     auth: { getUser: async () => ({ data: { user: { id: 'admin' } } }) },
     from: (table: string) => {
       const filters: Filter[] = [];
+      let offset = 0, end = Infinity;
       const result = () => {
         if (table === 'invoices') state.invoiceQueries.push([...filters]);
         const rows = table === 'invoices' ? state.invoices
@@ -49,7 +50,7 @@ vi.mock('@/lib/supabase', () => ({
             if (operator === 'gte') return row[column] >= value!;
             if (operator === 'lte') return row[column] <= value!;
             return row[column] === value;
-          })),
+          })).slice(offset, end),
           error: null,
         };
       };
@@ -66,6 +67,7 @@ vi.mock('@/lib/supabase', () => ({
               return query;
             };
           }
+          if (method === 'range') return (from: number, to: number) => { offset = from; end = to + 1; return query; };
           return () => query;
         },
       });
@@ -155,6 +157,20 @@ describe('Company invoice period filters', () => {
     await expectInvoiceCount(19);
     fireEvent.click(screen.getAllByRole('button', { name: 'invoices.downloadPdf' })[0]);
     await screen.findByText('common.error');
+  });
+
+  it('searches by number and keeps the period filter and download selection consistent', async () => {
+    render(<CompanyInvoices />);
+    await expectInvoiceCount(19);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'SEP-1' }));
+    fireEvent.change(screen.getByLabelText('invoices.searchNumber'), { target: { value: 'oct 10' } });
+    await expectInvoiceCount(1);
+    expect(screen.getByRole('checkbox', { name: 'OCT-10' })).toBeTruthy();
+    expect(screen.queryByText('invoices.downloadSelected 1')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Invoice month'), { target: { value: '2026-09' } });
+    await waitFor(() => expect(screen.queryAllByRole('checkbox', { name: /^(SEP|OCT)-\d+$/ })).toHaveLength(0));
+    fireEvent.change(screen.getByLabelText('invoices.searchNumber'), { target: { value: '' } });
+    await expectInvoiceCount(9);
   });
 
   it('honors an October-only range while the earlier September month choice remains stored', async () => {

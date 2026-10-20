@@ -1001,6 +1001,8 @@ export const hiOverrides: Record<string, string> = {
   "platformInvoices.period": "अवधि",
   "invoices.filterByMonthLabel": "अवधि",
   "invoices.periodFilterLabel": "अवधि",
+  "invoices.searchNumber": "चालान संख्या से खोजें",
+  "invoices.searchNumberPlaceholder": "संख्या या उसका हिस्सा, जैसे 839",
   "common.phone": "फ़ोन",
   "compStu.phoneLabel": "फ़ोन",
   "compTut.phone": "फ़ोन",

@@ -1007,6 +1007,8 @@ export const csOverrides: Record<string, string> = {
   "platformInvoices.period": "Období",
   "invoices.filterByMonthLabel": "Období",
   "invoices.periodFilterLabel": "Období",
+  "invoices.searchNumber": "Hledat podle čísla faktury",
+  "invoices.searchNumberPlaceholder": "Číslo nebo jeho část, např. 839",
   "common.phone": "Telefon",
   "compStu.phoneLabel": "Telefon",
   "compTut.phone": "Telefon",

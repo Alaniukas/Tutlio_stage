@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types.js';
-import { Resend } from 'resend';
+import { Resend } from './_lib/resendClient.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { getTelemetryServiceClient } from './_lib/orgAdminTelemetry.js';
 import { buildWeeklyDigest, buildWeeklyDigestEmail, fetchFullTelemetryReport } from './_lib/adminUsageWeeklyReport.js';

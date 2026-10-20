@@ -1001,6 +1001,8 @@ export const ukOverrides: Record<string, string> = {
   "platformInvoices.period": "Період",
   "invoices.filterByMonthLabel": "Період",
   "invoices.periodFilterLabel": "Період",
+  "invoices.searchNumber": "Пошук за номером рахунку",
+  "invoices.searchNumberPlaceholder": "Номер або його частина, наприклад 839",
   "common.phone": "Телефон",
   "compStu.phoneLabel": "Телефон",
   "compTut.phone": "Телефон",

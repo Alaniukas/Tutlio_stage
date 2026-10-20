@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import { isRegistrationOverdue, studentRegistrationEnabled, type StudentRegistrationState } from '../../src/lib/studentRegistration.js';
 import { registrationText } from '../../src/lib/studentRegistrationCopy.js';
 import { orgStudentIdentityGroupKey } from '../../src/lib/orgStudentIdentity.js';

@@ -1005,6 +1005,8 @@ export const filOverrides: Record<string, string> = {
   "platformInvoices.period": "Panahon",
   "invoices.filterByMonthLabel": "Panahon",
   "invoices.periodFilterLabel": "Panahon",
+  "invoices.searchNumber": "Maghanap ayon sa numero ng invoice",
+  "invoices.searchNumberPlaceholder": "Numero o bahagi nito, hal. 839",
   "common.phone": "Telepono",
   "compStu.phoneLabel": "Telepono",
   "compTut.phone": "Telepono",

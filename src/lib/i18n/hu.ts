@@ -3711,6 +3711,8 @@ export const huOverrides: Record<string, string> = {
   "invoices.downloadAllFiltered": "Összes látható letöltése ({count})",
   "invoices.filterByMonthLabel": "Időszak",
   "invoices.periodFilterLabel": "Időszak",
+  "invoices.searchNumber": "Keresés számlaszám alapján",
+  "invoices.searchNumberPlaceholder": "Szám vagy annak egy része, pl. 839",
   "invoices.periodModeMonth": "Hónap",
   "invoices.periodModeRange": "Kezdő–záró dátum",
   "invoices.clearPeriod": "Időszak törlése",

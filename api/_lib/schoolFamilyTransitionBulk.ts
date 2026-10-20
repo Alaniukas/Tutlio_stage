@@ -1,4 +1,4 @@
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { localizedFromEmail } from './i18n.js';
 import { resolveEmailOrgBranding } from './emailOrgBranding.js';

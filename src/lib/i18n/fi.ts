@@ -14,6 +14,15 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const fi: Record<string, string> = {
+  'school.archive.title': "Sopimusarkisto",
+  'school.archive.description': "Katsele ja lataa arkistoituja sopimuksia.",
+  'school.archive.search': "Hae sopimusnumerolla, oppilaalla tai maksajalla",
+  'school.archive.archivedAt': "Arkistointipäivä",
+  'school.archive.empty': "Hakua vastaavia arkistoituja sopimuksia ei löytynyt.",
+  'school.archive.missingFile': "Tiedostoa ei ole ladattu",
+  'school.archive.downloadError': "Kaikkia valittuja tiedostoja ei voitu ladata. Yritä uudelleen.",
+  'invoices.searchNumber': "Hae laskun numerolla",
+  'invoices.searchNumberPlaceholder': "Numero tai sen osa, esim. 839",
   'stuSess.cancellationDisabledByOrg': 'Oppituntien peruuttaminen on poistettu käytöstä. Ota yhteyttä hallintoon.',
   'stuSess.rescheduleHelp': 'Jos et löydä sopivaa päivämäärää, ota yhteyttä ylläpitäjään viestitoiminnon kautta tai lähetä sähköpostia osoitteeseen:',
   'school.recordings.chatTitle': "Keskusteluhistoria",

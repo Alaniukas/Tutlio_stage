@@ -16,6 +16,15 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const nl: Record<string, string> = {
+  'school.archive.title': "Contractarchief",
+  'school.archive.description': "Bekijk en download gearchiveerde contracten.",
+  'school.archive.search': "Zoeken op contractnummer, leerling of betaler",
+  'school.archive.archivedAt': "Archiveringsdatum",
+  'school.archive.empty': "Geen gearchiveerde contracten komen overeen met je zoekopdracht.",
+  'school.archive.missingFile': "Geen bestand geüpload",
+  'school.archive.downloadError': "Niet alle geselecteerde bestanden konden worden gedownload. Probeer het opnieuw.",
+  'invoices.searchNumber': "Zoeken op factuurnummer",
+  'invoices.searchNumberPlaceholder': "Nummer of een deel ervan, bijv. 839",
   'stuSess.cancellationDisabledByOrg': 'Het annuleren van lessen is uitgeschakeld. Neem contact op met de administratie.',
   'stuSess.rescheduleHelp': 'Als u geen geschikte datum kunt vinden, neem dan contact op met de beheerder via de berichtenfunctie of stuur een e-mail naar:',
   'school.recordings.chatMissing': "Er is geen bijpassende Google Meet-chat gevonden voor deze opname. Deze wordt mogelijk nog verwerkt of is niet opgeslagen.",

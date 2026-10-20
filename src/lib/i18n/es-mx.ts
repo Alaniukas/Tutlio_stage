@@ -3710,6 +3710,8 @@ export const esMxOverrides: Record<string, string> = {
   "invoices.downloadAllFiltered": "Descargar todas visibles ({count})",
   "invoices.filterByMonthLabel": "Período",
   "invoices.periodFilterLabel": "Período",
+  "invoices.searchNumber": "Buscar por número de factura",
+  "invoices.searchNumberPlaceholder": "Número o parte de él, p. ej. 839",
   "invoices.periodModeMonth": "Mes",
   "invoices.periodModeRange": "Desde–hasta",
   "invoices.clearPeriod": "Borrar período",

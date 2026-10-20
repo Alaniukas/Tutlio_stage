@@ -48,7 +48,7 @@ vi.mock('@/lib/supabase', () => ({ supabase: {
           issued_by_user_id: 'teacher', total_amount: 100, status: 'issued' }]
         : table === 'school_monthly_invoices' ? state.schoolInvoices : [];
       const filtered = rows.filter(row => predicates.every(predicate => predicate(row)));
-      return { data: table === 'school_monthly_invoices' ? filtered.slice(request.from, request.from + 2) : filtered,
+      return { data: table === 'school_monthly_invoices' || table === 'invoices' ? filtered.slice(request.from, request.from + 2) : filtered,
         error: table === 'school_monthly_invoices' && state.schoolError ? { message: 'Unavailable' } : null };
     };
     const query: any = new Proxy({}, { get: (_target, method) => {

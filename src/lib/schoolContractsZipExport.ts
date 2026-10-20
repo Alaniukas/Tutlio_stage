@@ -38,6 +38,7 @@ export type SchoolEmployeeZipGroup = {
 };
 
 export type SchoolContractsZipExportRequest = {
+  archivedOnly?: boolean;
   studentContractIds?: string[];
   teacherContractIds?: string[];
   staffDocumentIds?: string[];
@@ -290,6 +291,7 @@ export async function downloadSchoolContractsZip(
       studentContractIds,
       teacherContractIds,
       staffDocumentIds,
+      ...(payload.archivedOnly ? { archivedOnly: true } : {}),
     }),
   });
 

@@ -201,6 +201,7 @@ Pilnas sąrašas: `.env.example`
 | Stripe | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, price/product ID | EUR + PLN variantai |
 | App | `APP_URL`, `VITE_APP_URL` | Redirect'ams |
 | Email | `RESEND_API_KEY`, `FROM_EMAIL` | Stage: `RESEND_API_KEY_STAGE` kai prod raktas tuščias |
+| Email delivery | `EMAIL_DELIVERY_REDIRECTS` | Server-only JSON: tikslus senas adresas → pristatymo adresas; nekeičia Auth ar pasirašytos tapatybės |
 | AI support | `GEMINI_API_KEY` arba `OPENAI_API_KEY` | **Tik** serveryje (`/api/support-chat`, `/api/in-app-support-assist`). Lokaliai pakanka `GEMINI_API_KEY`. **Niekada** `VITE_OPENAI_*` |
 | Cron | `CRON_SECRET` | **Privaloma** Vercel prod |
 | Admin | `ADMIN_SECRET` | Platformos admin API. **Ne** `VITE_ADMIN_SECRET` fronte — Vite išleistų į browserį. API paliktas tik senas fallback. |
@@ -213,6 +214,8 @@ Pilnas sąrašas: `.env.example`
 **⚠️ Windows lokalus API:** jei OS env turi seną `SUPABASE_URL` (`xklzjhfztjxltrdkplog`), `scripts/dev-api-local.ts` ir `api/_lib/auth.ts` ignoruoja jį — `.env` raktai turi prioritetą. API log'e turi matytis `cuhciqwmqfuajeeqjjbm.supabase.co`.
 
 **⚠️ Niekada necommitink:** `.env`, `.env.local`, `.env.vercel.*`, service role keys.
+
+**Atskiras laiškų pristatymo adresas:** visi `api/` siuntėjai importuoja `Resend` iš `api/_lib/resendClient.ts`. `EMAIL_DELIVERY_REDIRECTS` yra tik operatoriaus patvirtintas tikslių adresų JSON žemėlapis (be wildcard ar grandinių). Prieš įjungiant būtina patikrinti, kad senas adresas priklauso tik numatytai šeimai; nekeisti `auth.users.email`, `parent_profiles.email` ar `school_family_guardians.guardian_email`, kai jie yra atskiros paskyros / metinės sutarties tapatybė. Nukreipimas taikomas prieš pat Resend, taip pat užšaldytiems pakartotiniams siuntimams; kvietimų nuorodos, slaptažodžiai, rolės, push ir idempotency raktai išlieka. `/api/request-password-reset` tokiam adresui generuoja atkūrimą originaliai paskyrai, o pristato į naują paštą (neatkuria paskyros, kuriai priklauso gavėjo adresas). Vercel env pakeitimas įsigalioja tik su nauju leidimu pagal 8 skyriaus taisykles. Testai: `email-delivery-redirects`, `email-delivery-recovery`, `school-family-email-delivery`.
 
 ---
 

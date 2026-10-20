@@ -9,6 +9,15 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const en: Record<string, string> = {
+  'school.archive.title': "Contract archive",
+  'school.archive.description': "View and download archived contracts.",
+  'school.archive.search': "Search by contract number, student or payer",
+  'school.archive.archivedAt': "Archived on",
+  'school.archive.empty': "No archived contracts match your search.",
+  'school.archive.missingFile': "No file uploaded",
+  'school.archive.downloadError': "Could not download all selected files. Try again.",
+  'invoices.searchNumber': "Search by invoice number",
+  'invoices.searchNumberPlaceholder': "Number or part of it, e.g. 839",
   'stuSess.cancellationDisabledByOrg': 'Lesson cancellation is disabled. Contact the administration.',
   'stuSess.rescheduleHelp': 'If you cannot find a suitable date, contact the administrator through messaging or email:',
   'school.recordings.chatMissing': "No matching Google Meet chat was found for this recording. It may still be processing or may not have been saved.",

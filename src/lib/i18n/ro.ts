@@ -3905,6 +3905,8 @@ export const roOverrides: Record<string, string> = {
   "invoices.downloadAllFiltered": "Descarcă toate cele afișate ({count})",
   "invoices.filterByMonthLabel": "Perioadă",
   "invoices.periodFilterLabel": "Perioadă",
+  "invoices.searchNumber": "Caută după numărul facturii",
+  "invoices.searchNumberPlaceholder": "Numărul sau o parte din el, de ex. 839",
   "invoices.periodModeMonth": "Lună",
   "invoices.periodModeRange": "De la–până la",
   "invoices.clearPeriod": "Șterge perioada",

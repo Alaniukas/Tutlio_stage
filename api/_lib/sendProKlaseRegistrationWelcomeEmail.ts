@@ -1,4 +1,4 @@
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import { localizedFromEmail } from './i18n.js';
 import { isProKlaseOrg, PRO_KLASE_ORG_ID } from './marketMoney.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';

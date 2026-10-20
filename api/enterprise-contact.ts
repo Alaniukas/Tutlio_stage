@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
-import { Resend } from 'resend';
+import { Resend } from './_lib/resendClient.js';
 import { createClient } from '@supabase/supabase-js';
 import { getFromEmail, getResendApiKey, INTERNAL_NOTIFY_EMAILS } from './_lib/resendConfig.js';
 const FROM_EMAIL = getFromEmail();

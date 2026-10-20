@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import { findAuthUserByEmail } from './findAuthUserByEmail.js';
 import { getResendApiKey } from './resendConfig.js';
 import { localizedFromEmail } from './i18n.js';

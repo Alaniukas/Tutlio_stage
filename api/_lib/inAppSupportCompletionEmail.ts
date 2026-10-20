@@ -1,4 +1,4 @@
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import type { InAppSupportCategory } from '../../src/lib/inAppSupport.js';
 import { escapeSupportHtml } from './supportContact.js';
 import { getFromEmail, getResendApiKey, INTERNAL_NOTIFY_EMAILS } from './resendConfig.js';

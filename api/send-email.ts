@@ -19,7 +19,7 @@ import {
   schoolInvoiceEmailBranding,
   type EmailBranding,
 } from './_lib/emailOrgBranding.js';
-import { Resend } from 'resend';
+import { Resend } from './_lib/resendClient.js';
 import { htmlLanguageCode, localeDirection, LOCALE_FORMAT_TAGS } from '../src/lib/i18n/locales.js';
 import {
   applySchoolTerminology,

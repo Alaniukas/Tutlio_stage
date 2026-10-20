@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import { findAuthUserByEmail } from './findAuthUserByEmail.js';
 import { provisionMvFamilyAccounts } from './mvProvisionFamilyAccounts.js';
 import { resolveEmailOrgBranding } from './emailOrgBranding.js';

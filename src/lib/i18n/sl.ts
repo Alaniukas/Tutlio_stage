@@ -1003,6 +1003,8 @@ export const slOverrides: Record<string, string> = {
   "platformInvoices.period": "Obdobje",
   "invoices.filterByMonthLabel": "Obdobje",
   "invoices.periodFilterLabel": "Obdobje",
+  "invoices.searchNumber": "Išči po številki računa",
+  "invoices.searchNumberPlaceholder": "Številka ali njen del, npr. 839",
   "common.phone": "Telefon",
   "compStu.phoneLabel": "Telefon",
   "compTut.phone": "Telefon",

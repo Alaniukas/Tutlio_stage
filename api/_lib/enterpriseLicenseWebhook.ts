@@ -9,7 +9,7 @@
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import { getFromEmail, getResendApiKey, INTERNAL_NOTIFY_EMAILS } from './resendConfig.js';
 import { sendEnterpriseWelcomeEmail } from './sendEnterpriseWelcomeEmail.js';
 import { insertInitialOrgOwner } from './orgAdminAccess.js';

@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
-import { Resend } from 'resend';
+import { Resend } from './_lib/resendClient.js';
 import { verifyRequestAuth, isInternalRequest } from './_lib/auth.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { serviceSupabase } from './_lib/extraLessonsContractShared.js';

@@ -1002,6 +1002,8 @@ export const zhHkOverrides: Record<string, string> = {
   "platformInvoices.period": "期間",
   "invoices.filterByMonthLabel": "期間",
   "invoices.periodFilterLabel": "期間",
+  "invoices.searchNumber": "按發票編號搜尋",
+  "invoices.searchNumberPlaceholder": "編號或部分編號，例如 839",
   "common.phone": "電話",
   "compStu.phoneLabel": "電話",
   "compTut.phone": "電話",

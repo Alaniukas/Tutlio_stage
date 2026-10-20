@@ -1004,6 +1004,8 @@ export const skOverrides: Record<string, string> = {
   "platformInvoices.period": "Obdobie",
   "invoices.filterByMonthLabel": "Obdobie",
   "invoices.periodFilterLabel": "Obdobie",
+  "invoices.searchNumber": "Hľadať podľa čísla faktúry",
+  "invoices.searchNumberPlaceholder": "Číslo alebo jeho časť, napr. 839",
   "common.phone": "Telefón",
   "compStu.phoneLabel": "Telefón",
   "compTut.phone": "Telefón",

@@ -2,7 +2,7 @@
  * School contract email via Resend (in-process).
  * Avoids HTTP to /api/send-email — Vercel serverless terminates fire-and-forget fetch after response.
  */
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { resolveOrgEmailReplyToWithServiceClient } from './orgEmailReplyTo.js';
 import { localizedFromEmail, type Locale } from './i18n.js';

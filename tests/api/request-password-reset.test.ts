@@ -6,12 +6,14 @@ const mocks = vi.hoisted(() => ({
   updateUser: vi.fn(),
   reset: vi.fn(),
   usernameRecovery: vi.fn(),
+  redirectedRecovery: vi.fn(),
 }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.createClient }));
 vi.mock('../../api/_lib/findAuthUserByEmail', () => ({ findAuthUserByEmail: mocks.findUser }));
 vi.mock('../../api/_lib/studentUsernameRecovery.js', () => ({
   sendStudentUsernameRecovery: mocks.usernameRecovery,
 }));
+vi.mock('../../api/_lib/emailDeliveryRecovery.js', () => ({ sendRedirectedEmailRecovery: mocks.redirectedRecovery }));
 import handler from '../../api/request-password-reset';
 
 function response() {
@@ -35,10 +37,30 @@ beforeEach(() => {
   mocks.findUser.mockResolvedValue({ id: 'user-id', user_metadata: { full_name: 'Existing name', locale: 'en' } });
   mocks.updateUser.mockResolvedValue({ error: null });
   mocks.reset.mockResolvedValue({ error: null });
+  mocks.redirectedRecovery.mockResolvedValue(false);
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.resetAllMocks(); });
 
 describe('localized password recovery', () => {
+  it('uses redirected recovery without also sending Supabase recovery to the original login address', async () => {
+    mocks.redirectedRecovery.mockResolvedValue(true);
+    const req = request('lt');
+    const res = response();
+    await handler(req, res as any);
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(mocks.redirectedRecovery).toHaveBeenCalledWith(expect.anything(), {
+      email: req.body.email, userId: 'user-id', locale: 'lt', redirectTo: req.body.redirectTo,
+    });
+    expect(mocks.reset).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to the original login inbox when redirected recovery fails', async () => {
+    mocks.redirectedRecovery.mockRejectedValue(new Error('Recovery email delivery was not confirmed'));
+    const res = response();
+    await handler(request('lt'), res as any);
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(mocks.reset).not.toHaveBeenCalled();
+  });
   it.each(['he', 'ar', 'pt-br', 'it'])('sets %s before sending, without discarding other user metadata', async (locale) => {
     const req = request(locale);
     const res = response();

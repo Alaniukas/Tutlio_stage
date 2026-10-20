@@ -14,6 +14,15 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const no: Record<string, string> = {
+  'school.archive.title': "Kontraktsarkiv",
+  'school.archive.description': "Se og last ned arkiverte kontrakter.",
+  'school.archive.search': "Søk etter kontraktsnummer, elev eller betaler",
+  'school.archive.archivedAt': "Arkiveringsdato",
+  'school.archive.empty': "Ingen arkiverte kontrakter samsvarer med søket.",
+  'school.archive.missingFile': "Ingen fil lastet opp",
+  'school.archive.downloadError': "Kunne ikke laste ned alle valgte filer. Prøv igjen.",
+  'invoices.searchNumber': "Søk etter fakturanummer",
+  'invoices.searchNumberPlaceholder': "Nummer eller del av det, f.eks. 839",
   'stuSess.cancellationDisabledByOrg': 'Avbestilling av timer er deaktivert. Kontakt administrasjonen.',
   'stuSess.rescheduleHelp': 'Hvis du ikke finner en passende dato, kontakt administratoren via meldingsfunksjonen eller send e-post til:',
   'school.recordings.chatTitle': "Chatthistorikk",

@@ -14,6 +14,15 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const lv: Record<string, string> = {
+  'school.archive.title': "Līgumu arhīvs",
+  'school.archive.description': "Skatiet un lejupielādējiet arhivētos līgumus.",
+  'school.archive.search': "Meklēt pēc līguma numura, skolēna vai maksātāja",
+  'school.archive.archivedAt': "Arhivēšanas datums",
+  'school.archive.empty': "Meklējumam atbilstoši arhivētie līgumi nav atrasti.",
+  'school.archive.missingFile': "Fails nav augšupielādēts",
+  'school.archive.downloadError': "Neizdevās lejupielādēt visus atlasītos failus. Mēģiniet vēlreiz.",
+  'invoices.searchNumber': "Meklēt pēc rēķina numura",
+  'invoices.searchNumberPlaceholder': "Numurs vai tā daļa, piem., 839",
   'stuSess.cancellationDisabledByOrg': 'Nodarbību atcelšana ir atspējota. Sazinieties ar administrāciju.',
   'stuSess.rescheduleHelp': 'Ja nevarat atrast piemērotu datumu, sazinieties ar administratoru ziņojumos vai rakstiet uz e-pastu:',
   'school.recordings.chatTitle': "Sarunas izraksts",

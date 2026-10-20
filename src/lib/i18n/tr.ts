@@ -3710,6 +3710,8 @@ export const trOverrides: Record<string, string> = {
   "invoices.downloadAllFiltered": "Görünenlerin tümünü indir ({count})",
   "invoices.filterByMonthLabel": "Dönem",
   "invoices.periodFilterLabel": "Dönem",
+  "invoices.searchNumber": "Fatura numarasına göre ara",
+  "invoices.searchNumberPlaceholder": "Numara veya bir kısmı, ör. 839",
   "invoices.periodModeMonth": "Ay",
   "invoices.periodModeRange": "Başlangıç–bitiş",
   "invoices.clearPeriod": "Dönemi temizle",

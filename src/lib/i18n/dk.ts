@@ -129,6 +129,15 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const dk: Record<string, string> = {
+  'school.archive.title': "Kontraktarkiv",
+  'school.archive.description': "Se og download arkiverede kontrakter.",
+  'school.archive.search': "Søg efter kontraktnummer, elev eller betaler",
+  'school.archive.archivedAt': "Arkiveringsdato",
+  'school.archive.empty': "Ingen arkiverede kontrakter matcher din søgning.",
+  'school.archive.missingFile': "Ingen fil uploadet",
+  'school.archive.downloadError': "Alle valgte filer kunne ikke downloades. Prøv igen.",
+  'invoices.searchNumber': "Søg efter fakturanummer",
+  'invoices.searchNumberPlaceholder': "Nummer eller en del af det, f.eks. 839",
   'stuSess.cancellationDisabledByOrg': 'Aflysning af lektioner er deaktiveret. Kontakt administrationen.',
   'stuSess.rescheduleHelp': 'Hvis du ikke kan finde en passende dato, kan du kontakte administratoren via beskedfunktionen eller skrive til e-mailadressen:',
   'school.recordings.chatTitle': "Chathistorik",

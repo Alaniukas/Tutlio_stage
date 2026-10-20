@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { Resend } from 'resend';
+import { Resend } from './resendClient.js';
 import type {
   InAppSupportAttachment,
   InAppSupportSubmission,

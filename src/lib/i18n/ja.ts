@@ -1004,6 +1004,8 @@ export const jaOverrides: Record<string, string> = {
   "platformInvoices.period": "期間",
   "invoices.filterByMonthLabel": "期間",
   "invoices.periodFilterLabel": "期間",
+  "invoices.searchNumber": "請求書番号で検索",
+  "invoices.searchNumberPlaceholder": "番号またはその一部（例：839）",
   "common.phone": "電話番号",
   "compStu.phoneLabel": "電話番号",
   "compTut.phone": "電話番号",

@@ -3710,6 +3710,8 @@ export const idOverrides: Record<string, string> = {
   "invoices.downloadAllFiltered": "Unduh semua yang ditampilkan ({count})",
   "invoices.filterByMonthLabel": "Periode",
   "invoices.periodFilterLabel": "Periode",
+  "invoices.searchNumber": "Cari berdasarkan nomor faktur",
+  "invoices.searchNumberPlaceholder": "Nomor atau sebagian nomornya, mis. 839",
   "invoices.periodModeMonth": "Bulan",
   "invoices.periodModeRange": "Dari–hingga",
   "invoices.clearPeriod": "Hapus periode",
