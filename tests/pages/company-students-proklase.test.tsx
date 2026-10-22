@@ -312,6 +312,25 @@ describe('CompanyStudents Pro Klasė list', () => {
     await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('false'));
   }
 
+  it.each([true, false])('shows the stored pricing mode when manual=%s and an effective frequency exists', (manual) => {
+    const student = testState.cache.students[0] as Record<string, unknown>;
+    const previousFrequency = student.pricing_lessons_per_week;
+    const previousMode = student.pricing_lessons_per_week_is_manual;
+    Object.assign(student, { pricing_lessons_per_week: 2, pricing_lessons_per_week_is_manual: manual });
+    try {
+      render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+      fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
+      expect(screen.getByRole('combobox', { name: 'Pamokų per savaitę (kainodara)' }).textContent)
+        .toBe(manual ? '2 k./sav.' : 'Automatinis – pagal pasikartojantį grafiką');
+      expect(screen.getByText('Sutartinis dažnis: 2 k./sav.')).toBeTruthy();
+    } finally {
+      Object.assign(student, {
+        pricing_lessons_per_week: previousFrequency,
+        pricing_lessons_per_week_is_manual: previousMode,
+      });
+    }
+  });
+
   it('saves the selected pricing frequency on every tutor row before booking lessons', async () => {
     mockStudentSaveQueries();
     testState.dynamicPricingRules.push(
@@ -621,7 +640,8 @@ describe('CompanyStudents Pro Klasė list', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
     fireEvent.change(screen.getByTestId('sibling-child-name'), { target: { value: 'Toma' } });
     fireEvent.change(screen.getByPlaceholderText('jonas@example.com'), { target: { value: 'toma@example.test' } });
-    await chooseOption(screen.getByRole('combobox', { name: 'Pamokų per savaitę (kainodara)' }), '3 k./sav.');
+    await chooseOption(within(screen.getByTestId('existing-family-sibling'))
+      .getByRole('combobox', { name: 'Pamokų per savaitę (kainodara)' }), '3 k./sav.');
     fireEvent.click(screen.getByTestId('save-existing-sibling'));
 
     await waitFor(() => expect(testState.studentInserts).toHaveLength(1));

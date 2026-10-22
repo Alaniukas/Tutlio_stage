@@ -5983,18 +5983,16 @@ export default function CompanyStudents() {
                           <SelectItem value="Kita">{t('onboard.gradeOther')}</SelectItem>
                         </SelectContent>
                       </Select>
-                      <Label className="text-xs text-gray-500">{t('dynamicPricing.frequencyLabel')}</Label>
+                      <Label htmlFor="student-pricing-frequency" className="text-xs text-gray-500">{t('dynamicPricing.frequencyLabel')}</Label>
                       <Select
                         value={
                           selectedStudent.pricing_lessons_per_week_is_manual && selectedStudent.pricing_lessons_per_week
                             ? String(selectedStudent.pricing_lessons_per_week)
-                            : selectedStudent.pricing_lessons_per_week
-                              ? String(selectedStudent.pricing_lessons_per_week)
-                              : 'auto'
+                            : 'auto'
                         }
                         onValueChange={(value) => void handleUpdateStudentFrequency(value)}
                       >
-                        <SelectTrigger className="h-9 rounded-xl bg-white">
+                        <SelectTrigger id="student-pricing-frequency" className="h-9 rounded-xl bg-white">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
