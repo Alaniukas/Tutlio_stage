@@ -3,7 +3,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-const migration = readFileSync('supabase/migrations/20261022144501_proklase_reprice_existing_unpaid_lessons.sql', 'utf8');
+const migration = readFileSync('supabase/migrations/20261022180618_proklase_reprice_existing_unpaid_lessons.sql', 'utf8');
 const previous = readFileSync('supabase/migrations/20261007153000_pricing_frequency_students_edit_identity.sql', 'utf8');
 const identity = readFileSync('supabase/migrations/20260908173000_org_identity_pricing_frequency.sql', 'utf8');
 const sessionGuard = readFileSync('supabase/migrations/20261016151444_enforce_active_auth_sessions.sql', 'utf8');
