@@ -856,6 +856,17 @@ npm run security:pencheck
 
 **Vitest config:** `vitest.config.ts` — jsdom, `@` → `src/`
 
+### Prieigų pakeitimų regresijos patikra
+
+Keičiant RLS, RPC teises, `SECURITY DEFINER` funkcijas, paskyrų ryšius ar archyvavimo / korepetitorių priskyrimo logiką, būtina patikrinti ir teisėtą darbą, ir draudžiamą prieigą. Vien `service_role` užklausos arba testas, kad svetimas vartotojas gauna klaidą, nepatvirtina, kad klientai gali naudotis sistema.
+
+- Prieš pakeitimą įvardyk paveiktus portalus ir veiksmus. Patikrink aktualias roles: org savininką, administratorių su reikiamu leidimu, ribotų teisių administratorių, korepetitorių, mokinį ir tėvą. Teigiami DB testai turi naudoti `authenticated` rolę su atitinkamu vartotoju; prisijungimo sesiją tikrinančioms funkcijoms reikia ir galiojančios sesijos.
+- Padengti turi būti ne tik skaitymas, bet ir pakeistas veiksmas: pvz., korepetitoriaus pridėjimas, vienkartinės / pasikartojančios pamokos sukūrimas, tėvų prieigos išlaikymas po priskyrimo pašalinimo. UI neturi rodyti sėkmės, kai UPDATE nepakeitė nė vienos eilutės arba grąžino klaidą.
+- Neigiami testai: kita organizacija, kitas vaikas su tuo pačiu mokėtojo paštu, konfliktuojančios Auth paskyros, nepakankami leidimai, atšaukta narystė / sesija ir `anon`. Negalima silpninti izoliacijos vien tam, kad praeitų teisėtas srautas.
+- Archyvuota `students` kortelė negali tapti naujo korepetitoriaus priskyrimu ar gauti perkeltų pamokų. Tikrinti ir pasenusį atvertą langą, ir archyvavimą / priskyrimą kitoje sesijoje. Tėvų ryšiams būtina įvertinti abi formas: `students.parent_user_id` ir `parent_students`.
+- Regresijas ir įgaliotą funkcinį QA atlik Demo organizacijoje. Tikrus klientus audituok skaitymo užklausomis; duomenis taisyk tik autorizuoto incidento apimtyje. Prieš ir po pataisos patikrink analogiškus atvejus paveiktoje organizacijoje. Tapatybės nesieti vien pagal mokėtojo el. paštą.
+- Po autorizuoto leidimo patikrink pakeistą vartotojo srautą ir atitinkamas API / DB klaidas. Ataskaitoje aiškiai atskirk lokaliai praėjusius testus, gyvai patikrintus veiksmus ir dar neįdiegtą pataisą; nevadink jos produkcijoje sutvarkyta, kol neatlikta ši patikra. Commit / push / deploy leidimai lieka pagal 8 skyrių.
+
 ---
 
 ## 18. Demo duomenys (QA)

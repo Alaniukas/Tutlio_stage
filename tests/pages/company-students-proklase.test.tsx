@@ -14,6 +14,7 @@ const testState = vi.hoisted(() => ({
   }> | null,
   sendEmailDetailed: vi.fn(),
   createSession: vi.fn(),
+  dynamicPricingRules: [] as Array<Record<string, unknown>>,
   cache: {
     students: [
       {
@@ -160,10 +161,20 @@ vi.mock('@/components/company/PickedAvailabilityTimeEditor', () => ({
 function mockStudentSaveQueries() {
   testState.from.mockImplementation((table: string) => {
     let insertedStudent: Record<string, unknown> | null = null;
+    let selectedId = '';
     const query: any = new Proxy({}, {
       get: (_target, prop) => {
         if (prop === 'then') {
-          return (resolve: (value: unknown) => void) => resolve({ data: [], error: null, count: 0 });
+          return (resolve: (value: unknown) => void) => resolve({
+            data: table === 'organization_dynamic_pricing' ? testState.dynamicPricingRules : [],
+            error: null, count: 0,
+          });
+        }
+        if (prop === 'eq') {
+          return (column: string, value: string) => {
+            if (column === 'id') selectedId = value;
+            return query;
+          };
         }
         if (prop === 'insert') {
           return (payload: Record<string, unknown>) => {
@@ -198,7 +209,9 @@ function mockStudentSaveQueries() {
                   max_students: 1,
                   meeting_link: null,
                 }
-              : table === 'organizations' ? { features: {} } : null,
+              : table === 'organizations' ? { features: {} }
+              : table === 'students' ? testState.studentInserts[Number(selectedId.replace('created-child-', '')) - 1] ?? null
+              : null,
             error: null,
           });
         }
@@ -212,12 +225,16 @@ function mockStudentSaveQueries() {
 describe('CompanyStudents Pro Klasė list', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    HTMLElement.prototype.hasPointerCapture = vi.fn();
+    HTMLElement.prototype.releasePointerCapture = vi.fn();
     // Student creation also checks contact availability before any insert.
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       json: async () => ({ ok: true, packages: [] }),
     })));
     testState.studentInserts.length = 0;
+    testState.dynamicPricingRules.length = 0;
     testState.selectedSlots = null;
     testState.rpc.mockResolvedValue({ data: [], error: null });
     testState.sendEmailDetailed.mockResolvedValue({ ok: true, skipped: false });
@@ -287,6 +304,80 @@ describe('CompanyStudents Pro Klasė list', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  async function chooseOption(trigger: HTMLElement, name: string | RegExp) {
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('option', { name, exact: true }));
+    await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('false'));
+  }
+
+  it('saves the selected pricing frequency on every tutor row before booking lessons', async () => {
+    mockStudentSaveQueries();
+    testState.dynamicPricingRules.push(
+      { grade_min: 1, grade_max: 8, lessons_per_week: 1, price: 31 },
+      { grade_min: 1, grade_max: 8, lessons_per_week: 3, price: 22 },
+    );
+    testState.selectedSlots = ['tutor-first', 'tutor-second'].map((tutorId, index) => ({
+      tutorId, tutorName: tutorId, subjectId: 'math-second-child', subjectName: 'Matematika',
+      start: new Date(`2026-10-0${1 + index}T15:00:00.000Z`),
+      end: new Date(`2026-10-0${1 + index}T16:00:00.000Z`), durationMinutes: 60,
+    }));
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+    fireEvent.change(screen.getByPlaceholderText('Jonas Jonaitis'), { target: { value: 'Naujas Vaikas' } });
+    fireEvent.change(screen.getByPlaceholderText('jonas@example.com'), { target: { value: 'naujas@example.test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Tik mokinį' }));
+    await chooseOption(screen.getByRole('combobox', { name: 'Klasė' }), '6 klasė');
+    await chooseOption(screen.getByRole('combobox', { name: 'Pamokų per savaitę (kainodara)' }), '3 k./sav.');
+    fireEvent.click(screen.getByRole('button', { name: 'Ieškoti pagal laisvą laiką' }));
+    fireEvent.click(screen.getByText('Pasirinkti laisvą laiką'));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti', exact: true }));
+
+    await waitFor(() => expect(testState.createSession).toHaveBeenCalledTimes(2));
+    expect(testState.studentInserts).toHaveLength(2);
+    expect(testState.studentInserts.every((row) => row.pricing_lessons_per_week === 3
+      && row.pricing_lessons_per_week_is_manual === true)).toBe(true);
+    for (const [input] of testState.createSession.mock.calls) {
+      expect(input).toMatchObject({ createIsRecurring: true, createPrice: 22 });
+    }
+  });
+
+  it('keeps pricing frequency separate for children created together and resets the next form', async () => {
+    mockStudentSaveQueries();
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
+    for (const index of [0, 1]) {
+      fireEvent.change(screen.getAllByPlaceholderText('Jonas Jonaitis')[index], { target: { value: `Vaikas ${index}` } });
+      fireEvent.change(screen.getAllByPlaceholderText('jonas@example.com')[index], { target: { value: `vaikas${index}@example.test` } });
+      await chooseOption(screen.getAllByRole('combobox', { name: 'Pamokų per savaitę (kainodara)' })[index], `${index + 2} k./sav.`);
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Tik mokinį' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti', exact: true }));
+    await waitFor(() => expect(testState.sendEmailDetailed).toHaveBeenCalledTimes(2));
+    expect(testState.studentInserts.map((row) => row.pricing_lessons_per_week)).toEqual([2, 3]);
+    expect(testState.studentInserts.every((row) => row.pricing_lessons_per_week_is_manual === true)).toBe(true);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+    expect(screen.getByRole('combobox', { name: 'Pamokų per savaitę (kainodara)' }).textContent)
+      .toBe('Automatinis – pagal pasikartojantį grafiką');
+  });
+
+  it('allows automatic pricing after changing the draft back from a manual frequency', async () => {
+    mockStudentSaveQueries();
+    render(<MemoryRouter><CompanyStudents /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Pridėti klientą/i }));
+    fireEvent.change(screen.getByPlaceholderText('Jonas Jonaitis'), { target: { value: 'Naujas Vaikas' } });
+    fireEvent.change(screen.getByPlaceholderText('jonas@example.com'), { target: { value: 'auto@example.test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Tik mokinį' }));
+    const frequency = screen.getByRole('combobox', { name: 'Pamokų per savaitę (kainodara)' });
+    await chooseOption(frequency, '2 k./sav.');
+    await chooseOption(frequency, /Automatinis/);
+    fireEvent.click(screen.getByRole('button', { name: 'Pridėti', exact: true }));
+    await waitFor(() => expect(testState.sendEmailDetailed).toHaveBeenCalledOnce());
+    expect(testState.studentInserts[0]).not.toHaveProperty('pricing_lessons_per_week');
+    expect(testState.studentInserts[0]).not.toHaveProperty('pricing_lessons_per_week_is_manual');
   });
 
   it('stops duplicate email creation before inserting a student or sending an invitation', async () => {
@@ -530,6 +621,7 @@ describe('CompanyStudents Pro Klasė list', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pridėti dar vieną vaiką' }));
     fireEvent.change(screen.getByTestId('sibling-child-name'), { target: { value: 'Toma' } });
     fireEvent.change(screen.getByPlaceholderText('jonas@example.com'), { target: { value: 'toma@example.test' } });
+    await chooseOption(screen.getByRole('combobox', { name: 'Pamokų per savaitę (kainodara)' }), '3 k./sav.');
     fireEvent.click(screen.getByTestId('save-existing-sibling'));
 
     await waitFor(() => expect(testState.studentInserts).toHaveLength(1));
@@ -539,6 +631,8 @@ describe('CompanyStudents Pro Klasė list', () => {
       payer_name: 'Renata',
       payer_email: 'renata@example.test',
       payment_payer: 'parent',
+      pricing_lessons_per_week: 3,
+      pricing_lessons_per_week_is_manual: true,
     });
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const provisionCall = fetchMock.mock.calls.find(([url]) => url === '/api/mv-provision-family-accounts');

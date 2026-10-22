@@ -56,6 +56,12 @@ describe('organization dynamic pricing', () => {
     expect(contractedLessonsPerWeek(false, [], null)).toBeNull();
   });
 
+  it('keeps the manual pricing frequency when adding a smaller recurring series', () => {
+    expect(contractedLessonsPerWeek(true, [4], 3, true)).toBe(3);
+    expect(contractedLessonsPerWeek(true, [4], 3, false)).toBe(1);
+    expect(contractedLessonsPerWeek(true, [4], null, true)).toBe(1);
+  });
+
   it('keeps individual pricing above the organization rule', () => {
     expect(
       resolveOrganizationLessonPrice({

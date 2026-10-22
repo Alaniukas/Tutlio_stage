@@ -10,6 +10,7 @@ export interface OrganizationDynamicPricingRule {
 export interface DynamicPricingStudent {
   grade?: string | null;
   pricing_lessons_per_week?: number | null;
+  pricing_lessons_per_week_is_manual?: boolean | null;
 }
 
 interface PostgrestLikeError {
@@ -40,7 +41,11 @@ export function contractedLessonsPerWeek(
   isRecurring: boolean,
   recurringWeekdays: number[],
   storedFrequency: number | null | undefined,
+  isManual = false,
 ): number | null {
+  const stored = Number(storedFrequency);
+  if (isManual && Number.isInteger(stored) && stored >= 1) return stored;
+
   if (isRecurring) {
     const uniqueDays = new Set(
       recurringWeekdays.filter((day) => Number.isInteger(day) && day >= 0 && day <= 6),
@@ -48,7 +53,6 @@ export function contractedLessonsPerWeek(
     return uniqueDays.size > 0 ? uniqueDays.size : 1;
   }
 
-  const stored = Number(storedFrequency);
   return Number.isInteger(stored) && stored >= 1 ? stored : null;
 }
 

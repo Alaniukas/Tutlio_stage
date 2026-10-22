@@ -16,6 +16,7 @@ type StudentPairingRow = {
   linked_user_id: string | null;
   parent_user_id: string | null;
   organization_id: string | null;
+  detached_at: string | null;
   full_name: string | null;
   email: string | null;
   phone: string | null;
@@ -31,7 +32,7 @@ type StudentPairingRow = {
 };
 
 const PAIRING_SELECT =
-  'id, tutor_id, linked_user_id, parent_user_id, organization_id, full_name, email, phone, grade, payer_name, payer_email, payer_phone, child_birth_date, payment_model, preferred_availability, admin_comment, admin_comment_visible_to_tutor';
+  'id, tutor_id, linked_user_id, parent_user_id, organization_id, detached_at, full_name, email, phone, grade, payer_name, payer_email, payer_phone, child_birth_date, payment_model, preferred_availability, admin_comment, admin_comment_visible_to_tutor';
 
 function mergePairingRows(primary: StudentPairingRow, rows: StudentPairingRow[]): StudentPairingRow[] {
   const byId = new Map<string, StudentPairingRow>();
@@ -65,6 +66,7 @@ async function loadOrgStudentIdentitySiblings(
       .from('students')
       .select(PAIRING_SELECT)
       .eq('organization_id', orgId)
+      .is('detached_at', null)
       .eq('payer_email', payerEmail);
     if (error) throw new Error(error.message || 'Failed to load student tutor pairings.');
     addRows((data || []) as StudentPairingRow[]);
@@ -76,6 +78,7 @@ async function loadOrgStudentIdentitySiblings(
       .from('students')
       .select(PAIRING_SELECT)
       .eq('organization_id', orgId)
+      .is('detached_at', null)
       .ilike('email', studentEmail);
     if (error) throw new Error(error.message || 'Failed to load student tutor pairings.');
     addRows((data || []) as StudentPairingRow[]);
@@ -98,6 +101,7 @@ async function findExistingTutorPairingByContact(
     .from('students')
     .select(PAIRING_SELECT)
     .eq('organization_id', orgId)
+    .is('detached_at', null)
     .eq('tutor_id', tutorId)
     .ilike('email', studentEmail);
   if (error) throw new Error(error.message || 'Failed to load student tutor pairings.');
@@ -125,6 +129,7 @@ function pickPayerFieldsFromSiblings(
  * students page. Mirrors the manual "add tutor" flow in CompanyStudents:
  * reuse an existing sibling pairing, claim a tutorless row, or insert a
  * duplicate row copying the identity fields with a fresh invite code.
+ * Archived assignments are historical records, never candidates for reuse.
  *
  * Returns the students.id to use as session.student_id for (identity, tutor).
  */
@@ -138,7 +143,8 @@ export async function ensureStudentPairedWithTutor(
     .select(PAIRING_SELECT)
     .eq('id', studentRowId)
     .maybeSingle();
-  if (error || !row) return studentRowId;
+  if (error) throw new Error(error.message || 'Failed to load student tutor pairings.');
+  if (!row || row.detached_at) throw new Error('Student assignment changed; try again');
   const student = row as StudentPairingRow;
 
   // parent_students is server-written. Copy both forms of the family link in
@@ -159,6 +165,7 @@ export async function ensureStudentPairedWithTutor(
     const { data: siblingRows, error: siblingsError } = await supabase
       .from('students')
       .select(PAIRING_SELECT)
+      .is('detached_at', null)
       .eq('linked_user_id', student.linked_user_id);
     if (siblingsError) throw new Error(siblingsError.message || 'Failed to load student tutor pairings.');
     const sameChild = (siblingRows || []).filter((row) =>
@@ -226,17 +233,21 @@ export async function ensureStudentPairedWithTutor(
     // rather than returning a new assignment with missing tutor instructions.
     await copyNotes(tutorlessRow);
     await copyParentLinks(tutorlessRow.id);
-    const { error: claimErr } = await supabase
+    const { data: claimed, error: claimErr } = await supabase
       .from('students')
       .update({ tutor_id: tutorId })
-      .eq('id', tutorlessRow.id);
-    if (!claimErr) {
-      await reassignOpenLessonsToTutor(supabase, tutorlessRow.id, {
-        studentId: tutorlessRow.id,
-        tutorId,
-      });
-      return tutorlessRow.id;
-    }
+      .eq('id', tutorlessRow.id)
+      .is('detached_at', null)
+      .is('tutor_id', null)
+      .select('id')
+      .maybeSingle();
+    if (claimErr) throw new Error(claimErr.message || 'Failed to pair the student with the tutor.');
+    if (!claimed) throw new Error('Student assignment changed; try again');
+    await reassignOpenLessonsToTutor(supabase, tutorlessRow.id, {
+      studentId: tutorlessRow.id,
+      tutorId,
+    });
+    return tutorlessRow.id;
   }
 
   const payerFields = pickPayerFieldsFromSiblings(siblings, student);

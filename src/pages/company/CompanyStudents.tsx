@@ -279,6 +279,7 @@ type MvAdditionalChildDraft = {
   email: string;
   phone: string;
   grade: string;
+  pricingFrequency: string;
   tutor_ids: string[];
   admin_comment: string;
   last_contacted_at: string;
@@ -303,6 +304,7 @@ function createMvAdditionalChildDraft(tutorIds: string[] = []): MvAdditionalChil
     email: '',
     phone: '',
     grade: '',
+    pricingFrequency: 'auto',
     tutor_ids: [...tutorIds],
     admin_comment: '',
     last_contacted_at: '',
@@ -466,6 +468,32 @@ function joinStudentAddressLine(address?: string | null, city?: string | null): 
   return [address, city].map((x) => String(x || '').trim()).filter(Boolean).join(', ');
 }
 
+function StudentPricingFrequencyField({ id, value, onValueChange }: {
+  id: string;
+  value: string;
+  onValueChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{t('dynamicPricing.frequencyLabel')}</Label>
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger id={id} className="rounded-xl bg-white">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="auto">{t('dynamicPricing.frequencyAuto')}</SelectItem>
+          {Array.from({ length: 7 }, (_, index) => (
+            <SelectItem key={index + 1} value={String(index + 1)}>
+              {t('dynamicPricing.frequencyOption', { n: index + 1 })}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 export default function CompanyStudents() {
   /** Pagal DB `organizations.entity_type`, ne pagal URL — kitaip `/company/students` mokyklai slepiami tėvų laukai (sutartys). */
   const orgEntityType = useOrgEntityType();
@@ -529,6 +557,7 @@ export default function CompanyStudents() {
     email: '',
     phone: '',
     grade: '',
+    pricingFrequency: 'auto',
     school_year: suggestSchoolYear(),
     enrollment_status: 'active' as EnrollmentStatus,
     municipality: '',
@@ -2271,6 +2300,12 @@ export default function CompanyStudents() {
           email: newStudent.email?.trim() || null,
           phone: newStudent.phone?.trim() || null,
           grade: (normalizeStudentGrade1to12(newStudent.grade) ?? newStudent.grade) || null,
+          ...(proKlaseAdminUi && newStudent.pricingFrequency !== 'auto'
+            ? {
+                pricing_lessons_per_week: Number(newStudent.pricingFrequency),
+                pricing_lessons_per_week_is_manual: true,
+              }
+            : {}),
           school_year: isSchoolView ? (newStudent.school_year || null) : null,
           enrollment_status: isSchoolView ? newStudent.enrollment_status : 'active',
           municipality: isSchoolView ? (newStudent.municipality || null) : null,
@@ -2334,6 +2369,12 @@ export default function CompanyStudents() {
               email: child.email.trim() || null,
               phone: child.phone.trim() || null,
               grade: (normalizeStudentGrade1to12(child.grade) ?? child.grade) || null,
+              ...(proKlaseAdminUi && child.pricingFrequency !== 'auto'
+                ? {
+                    pricing_lessons_per_week: Number(child.pricingFrequency),
+                    pricing_lessons_per_week_is_manual: true,
+                  }
+                : {}),
               school_year: null,
               enrollment_status: 'active',
               municipality: null,
@@ -2465,6 +2506,7 @@ export default function CompanyStudents() {
               createRecurring,
               [new Date(item.lessonStartIso).getDay()],
               student?.pricing_lessons_per_week,
+              student?.pricing_lessons_per_week_is_manual === true,
             ),
             isGroupSubject: Boolean((subj as { is_group?: boolean | null }).is_group),
           });
@@ -2770,6 +2812,7 @@ export default function CompanyStudents() {
       email: '',
       phone: '',
       grade: '',
+      pricingFrequency: 'auto',
       school_year: suggestSchoolYear(),
       enrollment_status: 'active',
       municipality: '',
@@ -2897,6 +2940,12 @@ export default function CompanyStudents() {
           email: studentEmail || null,
           phone: siblingDraft.phone.trim() || null,
           grade: (normalizeStudentGrade1to12(siblingDraft.grade) ?? siblingDraft.grade) || null,
+          ...(proKlaseAdminUi && siblingDraft.pricingFrequency !== 'auto'
+            ? {
+                pricing_lessons_per_week: Number(siblingDraft.pricingFrequency),
+                pricing_lessons_per_week_is_manual: true,
+              }
+            : {}),
           enrollment_status: 'active',
           payer_name: parentName || null,
           payer_email: parentEmail || null,
@@ -3006,6 +3055,7 @@ export default function CompanyStudents() {
               createRecurring,
               [new Date(item.lessonStartIso).getDay()],
               student?.pricing_lessons_per_week,
+              student?.pricing_lessons_per_week_is_manual === true,
             ),
             isGroupSubject: Boolean((subj as { is_group?: boolean | null }).is_group),
           });
@@ -4069,13 +4119,13 @@ export default function CompanyStudents() {
                       className="rounded-xl"
                     />
                   </div>
-                  <div className="space-y-2 sm:col-span-2">
-                    <Label>{t('studentSettings.grade')}</Label>
+                  <div className={cn('space-y-2', !proKlaseAdminUi && 'sm:col-span-2')}>
+                    <Label htmlFor="new-student-grade">{t('studentSettings.grade')}</Label>
                     <Select
                       value={proKlaseGradeSelectValue(newStudent.grade)}
                       onValueChange={(value) => setNewStudent({ ...newStudent, grade: value === 'unset' ? '' : value })}
                     >
-                      <SelectTrigger className="rounded-xl">
+                      <SelectTrigger id="new-student-grade" className="rounded-xl">
                         <SelectValue placeholder={t('dynamicPricing.gradeUnset')} />
                       </SelectTrigger>
                       <SelectContent>
@@ -4094,6 +4144,13 @@ export default function CompanyStudents() {
                       </SelectContent>
                     </Select>
                   </div>
+                  {proKlaseAdminUi && (
+                    <StudentPricingFrequencyField
+                      id="new-student-pricing-frequency"
+                      value={newStudent.pricingFrequency}
+                      onValueChange={(value) => setNewStudent((current) => ({ ...current, pricingFrequency: value }))}
+                    />
+                  )}
                   {proKlaseAdminUi && (
                     <div className="sm:col-span-2">
                       <StudentNotesFields value={newStudent} onChange={(notes) => setNewStudent((current) => ({ ...current, ...notes }))} />
@@ -4288,6 +4345,15 @@ export default function CompanyStudents() {
                                 </SelectContent>
                               </Select>
                             </div>
+                            {proKlaseAdminUi && (
+                              <StudentPricingFrequencyField
+                                id={`${child.id}-pricing-frequency`}
+                                value={child.pricingFrequency}
+                                onValueChange={(value) => setMvAdditionalChildren((current) => current.map((item) =>
+                                  item.id === child.id ? { ...item, pricingFrequency: value } : item,
+                                ))}
+                              />
+                            )}
                             <div className="space-y-2">
                               <Label>{t('compStu.additionalChildTutors')}</Label>
                               <div className={cn('rounded-xl border border-gray-200 p-2 space-y-1', ORG_TUTOR_FILTER_SCROLL_CLASS)}>
@@ -6355,6 +6421,13 @@ export default function CompanyStudents() {
                               </SelectContent>
                             </Select>
                           </div>
+                          {proKlaseAdminUi && (
+                            <StudentPricingFrequencyField
+                              id="sibling-pricing-frequency"
+                              value={siblingDraft.pricingFrequency}
+                              onValueChange={(value) => setSiblingDraft((current) => current ? { ...current, pricingFrequency: value } : current)}
+                            />
+                          )}
                           <div className="space-y-2">
                             <Label>{t('compStu.additionalChildTutors')}</Label>
                             <div className={cn('rounded-xl border border-gray-200 bg-white p-2 space-y-1', ORG_TUTOR_FILTER_SCROLL_CLASS)}>

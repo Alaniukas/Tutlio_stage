@@ -91,4 +91,17 @@ describe('student lesson pricing', () => {
       }),
     ).toBe(10);
   });
+
+  it('uses the manual weekly tier for a series on one weekday', () => {
+    const input = {
+      isTrial: false, isRecurring: true, firstLessonIsTrial: true,
+      trialPrice: 10, individualPrice: null, subjectPrice: 31,
+      dynamicPricingRules: rules,
+      student: { grade: '6 klasė', pricing_lessons_per_week: 2, pricing_lessons_per_week_is_manual: true },
+      recurringWeekdays: [4],
+    };
+    expect(resolveLessonCreatePrice(input)).toBe(25);
+    expect(resolveLessonCreatePrice({ ...input, individualPrice: 19 })).toBe(19);
+    expect(resolveLessonCreatePrice({ ...input, isRecurring: false, isTrial: true })).toBe(10);
+  });
 });

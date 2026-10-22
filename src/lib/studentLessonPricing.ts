@@ -49,7 +49,7 @@ export async function loadStudentForPricing(
 ): Promise<DynamicPricingStudent | null> {
   const { data, error } = await supabase
     .from('students')
-    .select('grade, pricing_lessons_per_week')
+    .select('grade, pricing_lessons_per_week, pricing_lessons_per_week_is_manual')
     .eq('id', studentId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -172,6 +172,7 @@ export function resolveLessonCreatePrice(args: {
       args.isRecurring && !args.isTrial,
       args.recurringWeekdays,
       args.student?.pricing_lessons_per_week,
+      args.student?.pricing_lessons_per_week_is_manual === true,
     ),
   });
 

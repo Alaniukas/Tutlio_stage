@@ -16,7 +16,13 @@ vi.mock('@/lib/apiHelpers', () => ({
 
 type InsertedRow = Record<string, unknown>;
 
-function mockSupabaseForRecurringTrial(options: { breakMinutes?: number; busyRows?: InsertedRow[] } = {}) {
+function mockSupabaseForRecurringTrial(options: {
+  breakMinutes?: number;
+  busyRows?: InsertedRow[];
+  pricingFrequency?: number;
+  manualPricing?: boolean;
+  studentReadError?: boolean;
+} = {}) {
   const templates: InsertedRow[] = [];
   const sessions: InsertedRow[] = [];
 
@@ -27,7 +33,13 @@ function mockSupabaseForRecurringTrial(options: { breakMinutes?: number; busyRow
 
     const result = () => {
       if (table === 'students') {
-        return { data: [{ id: 'student-1', payment_model: null, full_name: 'Student' }], error: null };
+        return options.studentReadError
+          ? { data: null, error: { message: 'Student pricing unavailable' } }
+          : { data: [{
+              id: 'student-1', payment_model: null, full_name: 'Student', grade: '6 klasė',
+              pricing_lessons_per_week: options.pricingFrequency ?? null,
+              pricing_lessons_per_week_is_manual: options.manualPricing ?? false,
+            }], error: null };
       }
       if (table === 'profiles') {
         if (selectedColumns === 'organization_id') {
@@ -160,6 +172,55 @@ describe('Pro Klasė recurring series beginning with a trial lesson', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it.each([true, false])('honors manual pricing=%s without pinning automatic mode to one series', async (manualPricing) => {
+    const { supabase, sessions } = mockSupabaseForRecurringTrial({ pricingFrequency: 3, manualPricing });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+    try {
+      await runOrgAdminCreateSession({
+        supabase, createTutorId: 'tutor-1', createSubjectId: 'math-subject',
+        createStudentId: 'student-1', createStudentIds: [],
+        createStartTime: '2026-10-08T14:00:00', createEndTime: '2026-10-08T14:45:00',
+        createTopic: 'Matematika', createMeetingLink: '', createIsRecurring: true,
+        createRecurringEndDate: '2026-10-16', createRecurringFrequency: 'weekly',
+        createRecurringWeekdays: [4], createIsPaid: true, createPrice: 40,
+        createFirstLessonIsTrial: true, createTutorComment: '', createShowCommentToStudent: false,
+        subjects: [{ id: 'math-subject', name: 'Matematika', price: 40, duration_minutes: 60 }],
+        individualPricing: [],
+        dynamicPricingRules: [
+          { grade_min: 1, grade_max: 8, lessons_per_week: 1, price: 31 },
+          { grade_min: 1, grade_max: 8, lessons_per_week: 3, price: 22 },
+        ],
+        suppressSuccessAlert: true, suppressClientBookingEmails: true,
+      });
+      expect(sessions.map((row) => row.price)).toEqual([10, manualPricing ? 22 : 31]);
+      if (manualPricing) {
+        expect(supabase.rpc).not.toHaveBeenCalledWith('set_student_pricing_frequency', expect.anything());
+      } else {
+        expect(supabase.rpc).toHaveBeenCalledWith('set_student_pricing_frequency', {
+          p_student_id: 'student-1', p_lessons_per_week: null,
+        });
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('stops before writing lessons if the pricing contract cannot be read', async () => {
+    const { supabase, sessions, templates } = mockSupabaseForRecurringTrial({ studentReadError: true });
+    await expect(runOrgAdminCreateSession({
+      supabase, createTutorId: 'tutor-1', createSubjectId: 'math-subject',
+      createStudentId: 'student-1', createStudentIds: [],
+      createStartTime: '2026-10-08T14:00:00', createEndTime: '2026-10-08T15:00:00',
+      createTopic: '', createMeetingLink: '', createIsRecurring: true,
+      createRecurringEndDate: '2026-10-16', createRecurringWeekdays: [4],
+      createIsPaid: true, createPrice: 40, createTutorComment: '', createShowCommentToStudent: false,
+      subjects: [{ id: 'math-subject', name: 'Matematika', price: 40, duration_minutes: 60 }],
+      individualPricing: [], suppressSuccessAlert: true, suppressClientBookingEmails: true,
+    })).rejects.toThrow('Student pricing unavailable');
+    expect(sessions).toEqual([]);
+    expect(templates).toEqual([]);
   });
 });
 

@@ -115,6 +115,7 @@ describe('CompanyStudents Mokslo Vaisiai pre-activation scheduling', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pridėti mokinį' }));
 
     expect(screen.queryByRole('button', { name: 'Ieškoti pagal laisvą laiką' })).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Pamokų per savaitę (kainodara)' })).toBeNull();
   });
 
   it('lets an admin add siblings to the same parent account', () => {

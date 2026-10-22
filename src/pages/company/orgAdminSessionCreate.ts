@@ -205,9 +205,9 @@ export async function resolveOrCreateTrialSubject(
 async function persistRecurringPlanFrequency(
   supabase: SupabaseClient,
   studentIds: string[],
-  lessonsPerWeek: number,
+  lessonsPerWeek: number | null,
 ): Promise<void> {
-  if (!lessonsPerWeek || lessonsPerWeek < 1 || studentIds.length === 0) return;
+  if ((lessonsPerWeek !== null && lessonsPerWeek < 1) || studentIds.length === 0) return;
   const { error } = await supabase.rpc('set_student_pricing_frequency', {
     p_student_id: studentIds[0],
     p_lessons_per_week: lessonsPerWeek,
@@ -846,10 +846,11 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
   }
   const durationMs = regularEndDate.getTime() - startDate.getTime();
 
-  const { data: studentPaymentRows } = await supabase
+  const { data: studentPaymentRows, error: studentPricingError } = await supabase
     .from('students')
-    .select('id, payment_model, grade, pricing_lessons_per_week')
+    .select('id, payment_model, grade, pricing_lessons_per_week, pricing_lessons_per_week_is_manual')
     .in('id', studentIdsToCreate);
+  if (studentPricingError) throw new Error(studentPricingError.message);
   const paymentModelByStudentId = new Map(
     (studentPaymentRows ?? []).map((row: { id: string; payment_model?: string | null }) => [
       row.id,
@@ -873,6 +874,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       id: string;
       grade?: string | null;
       pricing_lessons_per_week?: number | null;
+      pricing_lessons_per_week_is_manual?: boolean | null;
     }) => [row.id, row]),
   );
   const planFrequency = contractedLessonsPerWeek(
@@ -892,7 +894,12 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
         resolveOrganizationLessonPrice({
           rules: pricingRulesForSubject,
           student,
-          lessonsPerWeek: createIsRecurring ? planFrequency : student?.pricing_lessons_per_week,
+          lessonsPerWeek: contractedLessonsPerWeek(
+            createIsRecurring,
+            createRecurringWeekdays,
+            student?.pricing_lessons_per_week,
+            student?.pricing_lessons_per_week_is_manual === true,
+          ),
           individualPrice,
           fallbackPrice: createPrice,
         }),
@@ -1225,7 +1232,14 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
 
     syncGoogle((inserted || []).map((row) => (row as { id: string }).id));
 
-    await persistRecurringPlanFrequency(supabase, [...new Set(recurringTemplates.map((t) => t.student_id))], planFrequency);
+    // A manual pricing contract covers the child across tutors and subjects.
+    // Pro Klasė's automatic mode recomputes that whole schedule, not this series alone.
+    await persistRecurringPlanFrequency(
+      supabase,
+      [...new Set(recurringTemplates.map((t) => t.student_id))]
+        .filter((id) => !pricingStudentById.get(id)?.pricing_lessons_per_week_is_manual),
+      isProKlaseOrg(sessionBillingTutor?.organization_id) ? null : planFrequency,
+    );
 
     if (!p.suppressSuccessAlert) alert(`Created ${sessionsRows.length} recurring lessons.`);
     return { createdSessionIds: allCreated.map((row) => row.id) };
@@ -1600,6 +1614,14 @@ export async function convertOrgAdminSessionToRecurring(
     throw new Error('Bandomosios pamokos negalima paversti pasikartojančiu grafiku.');
   }
 
+  const { data: studentRow, error: studentPricingError } = await supabase
+    .from('students')
+    .select('payment_model, pricing_lessons_per_week_is_manual')
+    .eq('id', studentId)
+    .maybeSingle();
+  if (studentPricingError) throw new Error(studentPricingError.message);
+  const studentPaymentModel = (studentRow as { payment_model?: string | null } | null)?.payment_model ?? null;
+
   const durationMs = newEnd.getTime() - newStart.getTime();
   const timeStr = format(newStart, 'HH:mm:ss');
   const endTimeStr = format(newEnd, 'HH:mm:ss');
@@ -1688,13 +1710,6 @@ export async function convertOrgAdminSessionToRecurring(
     recurring_session_id: anchorTemplate.id,
     created_by_role: 'org_admin',
   };
-
-  const { data: studentRow } = await supabase
-    .from('students')
-    .select('payment_model')
-    .eq('id', studentId)
-    .maybeSingle();
-  const studentPaymentModel = (studentRow as { payment_model?: string | null } | null)?.payment_model ?? null;
 
   type PackageForRecurring = {
     id: string;
@@ -1962,11 +1977,9 @@ export async function convertOrgAdminSessionToRecurring(
     );
   }
 
-  await persistRecurringPlanFrequency(
-    supabase,
-    [studentId],
-    contractedLessonsPerWeek(true, weekdays, null),
-  );
+  if (!studentRow?.pricing_lessons_per_week_is_manual) {
+    await persistRecurringPlanFrequency(supabase, [studentId], null);
+  }
 
   return {
     recurringSessionId: anchorTemplate.id,

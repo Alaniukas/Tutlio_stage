@@ -12,6 +12,10 @@ import {
 } from '@/pages/company/orgAdminSessionCreate';
 import { PRO_KLASE_QA_ORG_ID } from '@/lib/marketMoney';
 
+vi.mock('@/lib/email', () => ({ sendEmail: vi.fn(async () => true) }));
+vi.mock('@/lib/apiHelpers', () => ({ authHeaders: vi.fn(async () => ({})) }));
+vi.mock('@/lib/consumeSessionAvailability', () => ({ consumeAvailabilityForCreatedSessions: vi.fn(async () => undefined) }));
+
 describe('first trial lesson in an org recurring series', () => {
   const start = new Date('2026-10-08T14:00:00');
   const trialEnd = new Date('2026-10-08T14:45:00');
@@ -289,6 +293,7 @@ describe('regularTopicForRecurringSeries', () => {
 function mockSupabaseForConversionInsertFailure(
   busyRows: Array<{ id: string; start_time: string; end_time: string }> = [],
   isTrial = false,
+  pricing: { manual?: boolean; readError?: boolean } = {},
 ) {
   const deletedSessionIds: string[][] = [];
   const deletedTemplateIds: string[][] = [];
@@ -394,7 +399,9 @@ function mockSupabaseForConversionInsertFailure(
       return {
         select: vi.fn(() => ({
           eq: vi.fn(() => ({
-            maybeSingle: vi.fn(async () => ({ data: { payment_model: null }, error: null })),
+            maybeSingle: vi.fn(async () => pricing.readError
+              ? { data: null, error: { message: 'Student pricing unavailable' } }
+              : { data: { payment_model: null, pricing_lessons_per_week_is_manual: pricing.manual ?? false }, error: null }),
           })),
         })),
       };
@@ -403,7 +410,7 @@ function mockSupabaseForConversionInsertFailure(
   });
 
   return {
-    supabase: { from } as unknown as import('@supabase/supabase-js').SupabaseClient,
+    supabase: { from, rpc: vi.fn(async () => ({ data: null, error: null })) } as unknown as import('@supabase/supabase-js').SupabaseClient,
     deletedSessionIds,
     deletedTemplateIds,
     anchorUpdates: () => anchorUpdates,
@@ -461,6 +468,31 @@ describe('convertOrgAdminSessionToRecurring', () => {
     })).rejects.toThrow(/Bandomosios pamokos/);
     expect(mock.anchorUpdates()).toBe(0);
     expect(mock.deletedTemplateIds).toHaveLength(0);
+  });
+
+  it.each([true, false])('preserves manual pricing=%s when converting a lesson to a series', async (manual) => {
+    const mock = mockSupabaseForConversionInsertFailure([], false, { manual });
+    await convertOrgAdminSessionToRecurring({
+      ...baseInput, supabase: mock.supabase, paid: true, paymentStatus: 'paid',
+      weekdays: [4], recurringEndDate: '2026-09-24', suppressClientBookingEmails: true,
+    });
+    expect(mock.anchorUpdates()).toBe(1);
+    if (manual) {
+      expect(mock.supabase.rpc).not.toHaveBeenCalled();
+    } else {
+      expect(mock.supabase.rpc).toHaveBeenCalledWith('set_student_pricing_frequency', {
+        p_student_id: 'student-1', p_lessons_per_week: null,
+      });
+    }
+  });
+
+  it('does not start converting a lesson when its pricing contract cannot be read', async () => {
+    const mock = mockSupabaseForConversionInsertFailure([], false, { readError: true });
+    await expect(convertOrgAdminSessionToRecurring({ ...baseInput, supabase: mock.supabase }))
+      .rejects.toThrow('Student pricing unavailable');
+    expect(mock.anchorUpdates()).toBe(0);
+    expect(mock.supabase.from.mock.calls.some(([table]) => table === 'recurring_individual_sessions')).toBe(false);
+    expect(mock.supabase.rpc).not.toHaveBeenCalled();
   });
 
   it('removes partially inserted future rows without mutating the anchor when a later chunk fails', async () => {
