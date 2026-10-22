@@ -13,8 +13,8 @@ export type ExitReasonFilter = 'all' | ExitReason;
 
 export const SCHOOL_YEAR_OPTIONS = ['2026/2027', '2027/2028'] as const;
 
-/** Grades 0–10 stored like existing school UI (`"5 klasė"`). */
-export const GRADE_OPTIONS: string[] = Array.from({ length: 11 }, (_, n) => `${n} klasė`);
+/** Grades 0–12 stored like existing school UI (`"5 klasė"`). */
+export const GRADE_OPTIONS: string[] = Array.from({ length: 13 }, (_, n) => `${n} klasė`);
 
 export const ENROLLMENT_STATUSES: EnrollmentStatus[] = ['active', 'future', 'left', 'graduated'];
 

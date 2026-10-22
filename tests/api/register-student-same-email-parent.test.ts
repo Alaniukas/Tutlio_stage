@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   provision: vi.fn(),
   updateStudent: vi.fn(),
+  updateFilter: vi.fn(),
+  rowEmail: 'family@example.test' as string | null,
+  savedRows: [{ id: 'student-1' }] as Array<{ id: string }>,
 }));
 
 vi.mock('../../api/_lib/mvProvisionFamilyAccounts.js', () => ({
@@ -21,7 +24,7 @@ vi.mock('@supabase/supabase-js', () => ({
           data: {
             id: 'student-1',
             tutor_id: 'tutor-1',
-            email: 'family@example.test',
+            email: mocks.rowEmail,
             linked_user_id: null,
             organization_id: null,
             detached_at: null,
@@ -31,11 +34,13 @@ vi.mock('@supabase/supabase-js', () => ({
         }),
         update: (value: unknown) => {
           mocks.updateStudent(value);
-          return {
-            eq: () => ({
-              is: async () => ({ error: null }),
-            }),
+          const query: any = {
+            eq: () => query, is: () => query,
+            or: (filter: string) => { mocks.updateFilter(filter); return query; },
+            select: async () => ({ data: mocks.savedRows, error: null }),
+            then: (resolve: any) => resolve({ error: null }),
           };
+          return query;
         },
       };
       return read;
@@ -54,6 +59,8 @@ function response() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.rowEmail = 'family@example.test';
+  mocks.savedRows = [{ id: 'student-1' }];
   vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co');
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'test-service-key');
   mocks.provision.mockResolvedValue({
@@ -78,6 +85,28 @@ beforeEach(() => {
 });
 
 describe('same-email parent registration', () => {
+  it.each([true, false])('completes a shared login from an initially blank student email (save succeeds: %s)', async (saved) => {
+    mocks.rowEmail = null;
+    mocks.savedRows = saved ? [{ id: 'student-1' }] : [];
+    mocks.provision.mockResolvedValue({ ok: true, parent: {
+      email: 'family@example.test', userId: 'parent-user', created: true,
+      emailSent: false, activationUrl: '', notifyEmail: 'family@example.test',
+    } });
+    const res = response();
+    await handler({ method: 'POST', headers: { host: 'tutlio.lt' }, body: {
+      studentId: 'student-1', email: 'family@example.test', password: 'chosen-password',
+      fullName: 'Child', payerType: 'parent', payerName: 'Parent', payerEmail: 'family@example.test',
+      sameEmailParentMode: true, createStudentUsernameAccount: false,
+    } } as any, res);
+    expect(mocks.updateStudent).toHaveBeenCalledWith(expect.objectContaining({
+      email: 'family@example.test', linked_user_id: 'parent-user',
+    }));
+    expect(mocks.updateFilter).toHaveBeenCalledWith('linked_user_id.is.null,linked_user_id.eq.parent-user');
+    expect(res.status).toHaveBeenCalledWith(saved ? 200 : 500);
+    if (saved) expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ accountPortal: 'parent' }));
+    else expect(res.json).not.toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+  });
+
   it('creates the parent as the primary account and can request a generated child login', async () => {
     const res = response();
     await handler({

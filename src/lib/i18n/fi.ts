@@ -1,5 +1,3 @@
-import { tutorPairingTranslations } from './tutorPairingTranslations.js';
-import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
@@ -15,9 +13,18 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
+import { schoolServiceTranslations } from './schoolServiceTranslations.js';
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 export const fi: Record<string, string> = {
+  ...schoolServiceTranslations.fi,
   ...tutorPairingTranslations.fi,
   ...studentLoadingTranslations.fi,
+  'invoices.cancelInvoice': "Mitätöi lasku",
+  'invoices.cancelInvoiceHint': "Laskua ei enää tarvitse maksaa, ja sen maksulinkki poistuu käytöstä. Numero ja asiakirja säilyvät historiassa. Anna syy (vähintään 3 merkkiä).",
+  'invoices.cancelReason': "Mitätöinnin syy",
+  'invoices.cancelSuccess': "Lasku on mitätöity.",
+  'invoices.cancelFailed': "Laskun mitätöinti epäonnistui. Yritä uudelleen.",
   'school.archive.title': "Sopimusarkisto",
   'school.archive.description': "Katsele ja lataa arkistoituja sopimuksia.",
   'school.archive.search': "Hae sopimusnumerolla, oppilaalla tai maksajalla",

@@ -49,7 +49,7 @@ describe('session reminder delivery keys', () => {
       success: true,
       skipped: true,
       reason: 'school_contract_not_active',
-    })).toBe('retry');
+    })).toBe('deferred');
     expect(sessionReminderDeliveryOutcome(false, { error: 'failed' })).toBe('retry');
   });
 
@@ -85,6 +85,7 @@ describe('session reminder delivery keys', () => {
   it('marks reminder flags only after provider delivery or an intentional skip', () => {
     expect(shouldMarkSessionReminderSent('sent', null)).toBe(true);
     expect(shouldMarkSessionReminderSent('retry', 'school_contract_not_active')).toBe(false);
+    expect(shouldMarkSessionReminderSent('deferred', 'school_contract_not_active')).toBe(false);
     expect(shouldMarkSessionReminderSent('permanent_skip', 'parent_notification_preference')).toBe(true);
     expect(shouldMarkSessionReminderSent('permanent_skip', 'user_notification_preference')).toBe(true);
     expect(shouldMarkSessionReminderSent('permanent_skip', 'already_sent_with_modified_payload')).toBe(true);

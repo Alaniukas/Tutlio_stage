@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ contracts: [] as any[], sessions: [] as any[], discounts: [] as any[], billingDecisions: [] as any[],
-  issuedInvoices: [] as any[], existingInvoice: null as any, inserts: [] as any[], filters: [] as any[], sessionError: null as any, billingReviewError: null as any, emails: 0 }));
+  issuedInvoices: [] as any[], serviceOrgs: [] as any[], serviceResult: null as any, existingInvoice: null as any, inserts: [] as any[], filters: [] as any[], sessionError: null as any, billingReviewError: null as any, emails: 0 }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
   from(table: string) {
     let insert: any;
@@ -26,6 +26,7 @@ vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({
       single: async () => ({ data: { id: 'invoice', ...insert }, error: null }),
       then: (resolve: any) => {
         const rows = afterId ? []
+          : table === 'organizations' ? state.serviceOrgs
           : table === 'school_contracts' ? state.contracts
           : table === 'school_discount_agreements' ? state.discounts
           : table === 'school_session_billing_decisions' ? state.billingDecisions
@@ -42,8 +43,10 @@ vi.mock('../../api/_lib/cronAuth.js', () => ({ requireCronAuth: () => true }));
 vi.mock('../../api/_lib/extraLessonsContractShared.js', () => ({ snapshotFromRow: (row: any) => row.order_snapshot }));
 vi.mock('../../api/_lib/schoolMonthlyInvoiceEmail.js', () => ({ sendSchoolMonthlyInvoiceEmail: async () => { state.emails++; return { sent: true }; } }));
 vi.mock('../../api/_lib/publicLinkToken.js', () => ({ publicAppOrigin: () => 'https://example.com' }));
+vi.mock('../../api/school-monthly-invoice-admin.js', () => ({ billPendingSchoolServicePayers: vi.fn(async () => state.serviceResult) }));
 
 import handler from '../../api/bill-school-extra-lessons';
+import { billPendingSchoolServicePayers } from '../../api/school-monthly-invoice-admin.js';
 import { EXTRA_LESSONS_LEGAL_BODY } from '../../src/lib/extraLessonsLegalBody';
 
 function contract(id: string, service_type: string, group_id: string | null, subject_id: string, base = 8) {
@@ -59,10 +62,30 @@ beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-01T04:00:00Z'));
   state.contracts = []; state.sessions = []; state.discounts = []; state.billingDecisions = []; state.issuedInvoices = []; state.existingInvoice = null;
   state.inserts = []; state.filters = []; state.sessionError = null; state.billingReviewError = null; state.emails = 0;
+  state.serviceOrgs = []; state.serviceResult = null; vi.mocked(billPendingSchoolServicePayers).mockClear();
 });
 afterEach(() => vi.useRealTimers());
 
 describe('monthly school billing allocation', () => {
+  it('bills services without contracts and skips separate contract invoices for the combined payer', async () => {
+    state.serviceOrgs = [{ id: 'org', features: { school_service_charges: true } }];
+    state.serviceResult = { handledStudentIds: ['student'], created: 1, emailed: 1, held: 0, failed: 0, review: [], planned: [] };
+    state.contracts = [contract('first', 'individual', null, 'math')];
+    expect((await run()).json).toHaveBeenCalledWith(expect.objectContaining({ created: 1, emailed: 1, skipped: 1 }));
+    expect(billPendingSchoolServicePayers).toHaveBeenCalledWith('org', '2026-08-01', '2026-08-31', false, expect.any(Number));
+    expect(state.inserts).toEqual([]);
+    state.contracts = []; vi.mocked(billPendingSchoolServicePayers).mockClear();
+    expect((await run()).json).toHaveBeenCalledWith(expect.objectContaining({ created: 1, emailed: 1 }));
+    expect(billPendingSchoolServicePayers).toHaveBeenCalledOnce();
+  });
+  it('does not fall back to separate contract charges when combined billing fails', async () => {
+    state.serviceOrgs = [{ id: 'org', features: { school_service_charges: true } }];
+    state.contracts = [contract('first', 'individual', null, 'math')];
+    vi.mocked(billPendingSchoolServicePayers).mockRejectedValueOnce(new Error('Unavailable'));
+    const result = await run();
+    expect(result.status).toHaveBeenCalledWith(503);
+    expect(state.inserts).toEqual([]);
+  });
   it('limits a reduced group agreement to its own weekly slot before reviewing issued sessions', async () => {
     const canonical = { ...contract('first', 'group', 'g1', 'math'),
       organization_id: '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17', filled_body: EXTRA_LESSONS_LEGAL_BODY };

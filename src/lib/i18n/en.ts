@@ -1,3 +1,4 @@
+import { schoolServiceTranslations } from './schoolServiceTranslations.js';
 import { tutorPairingTranslations } from './tutorPairingTranslations.js';
 import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
@@ -11,8 +12,14 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const en: Record<string, string> = {
+  ...schoolServiceTranslations.en,
   ...tutorPairingTranslations.en,
   ...studentLoadingTranslations.en,
+  'invoices.cancelInvoice': "Void invoice",
+  'invoices.cancelInvoiceHint': "The invoice will no longer be payable and its payment link will stop working. The number and document will remain in the history. Enter a reason (at least 3 characters).",
+  'invoices.cancelReason': "Reason for voiding",
+  'invoices.cancelSuccess': "Invoice voided.",
+  'invoices.cancelFailed': "Could not void the invoice. Please try again.",
   'school.archive.title': "Contract archive",
   'school.archive.description': "View and download archived contracts.",
   'school.archive.search': "Search by contract number, student or payer",

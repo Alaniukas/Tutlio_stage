@@ -1,5 +1,3 @@
-import { tutorPairingTranslations } from './tutorPairingTranslations.js';
-import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations, schoolGroupActivationTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { companyPaymentReportTranslations } from './companyPaymentReportTranslations.js';
@@ -17,9 +15,18 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
+import { schoolServiceTranslations } from './schoolServiceTranslations.js';
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 export const nl: Record<string, string> = {
+  ...schoolServiceTranslations.nl,
   ...tutorPairingTranslations.nl,
   ...studentLoadingTranslations.nl,
+  'invoices.cancelInvoice': "Factuur annuleren",
+  'invoices.cancelInvoiceHint': "De factuur hoeft niet meer te worden betaald en de betaallink wordt uitgeschakeld. Het nummer en het document blijven in de geschiedenis staan. Geef een reden op (minimaal 3 tekens).",
+  'invoices.cancelReason': "Reden voor annulering",
+  'invoices.cancelSuccess': "Factuur geannuleerd.",
+  'invoices.cancelFailed': "De factuur kon niet worden geannuleerd. Probeer het opnieuw.",
   'school.archive.title': "Contractarchief",
   'school.archive.description': "Bekijk en download gearchiveerde contracten.",
   'school.archive.search': "Zoeken op contractnummer, leerling of betaler",

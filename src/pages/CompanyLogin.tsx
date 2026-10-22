@@ -106,7 +106,7 @@ export default function CompanyLogin() {
       const primaryAdmin = await withLoginTimeout(
         supabase
           .from('organization_admins')
-          .select('id, status')
+          .select('id, role, permissions, status, organization_id')
           .eq('user_id', data.user.id)
           .maybeSingle(),
         'organization_admins',
@@ -119,7 +119,7 @@ export default function CompanyLogin() {
       const legacyAdmin = statusColumnsMissing
         ? await supabase
           .from('organization_admins')
-          .select('id')
+          .select('id, organization_id')
           .eq('user_id', data.user.id)
           .maybeSingle()
         : null;
@@ -136,7 +136,7 @@ export default function CompanyLogin() {
         return;
       }
 
-      const path = await getOrgAdminDashboardPath(supabase, data.user.id);
+      const path = await getOrgAdminDashboardPath(supabase, data.user.id, adminRow);
       navigate(path);
     } catch (err) {
       console.warn('[CompanyLogin] login failed:', err);

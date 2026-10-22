@@ -209,47 +209,12 @@ async function linkParentToStudents(
 
   const parentProfileId = profileRow.id as string;
 
-  const { error: psErr } = await supabase.from('parent_students').upsert(
-    studentIds.length === 1
-      ? { parent_id: parentProfileId, student_id: studentIds[0] }
-      : studentIds.map((studentId) => ({ parent_id: parentProfileId, student_id: studentId })),
-    { onConflict: 'parent_id,student_id' },
-  );
-  if (psErr) throw psErr;
-
-  const studentUpdate = supabase.from('students').update({ parent_user_id: parentUserId });
-  const { error: studentErr } = studentIds.length === 1
-    ? await studentUpdate.eq('id', studentIds[0])
-    : await studentUpdate.in('id', studentIds);
-  if (studentErr) throw studentErr;
-
-  const parentEmailKey = parentEmail.trim().toLowerCase();
-  const studentRowsQuery = supabase
-    .from('students')
-    .select('id, email, linked_user_id');
-  const { data: studentRows, error: studentRowsErr } = studentIds.length === 1
-    ? await studentRowsQuery.eq('id', studentIds[0])
-    : await studentRowsQuery.in('id', studentIds);
-  if (studentRowsErr) throw studentRowsErr;
-
-  const sharedLoginStudentIds = (studentRows || [])
-    .filter((row: { id?: string; email?: string | null; linked_user_id?: string | null }) => {
-      if (row.linked_user_id) return false;
-      const studentEmail = String(row.email || '').trim().toLowerCase();
-      return Boolean(studentEmail && studentEmail === parentEmailKey);
-    })
-    .map((row: { id?: string }) => row.id)
-    .filter(Boolean) as string[];
-  if (allowSharedLogin && sharedLoginStudentIds.length > 0) {
-    const sharedLoginUpdate = supabase
-      .from('students')
-      .update({ linked_user_id: parentUserId })
-      .is('linked_user_id', null);
-    const { error: sharedLoginErr } = sharedLoginStudentIds.length === 1
-      ? await sharedLoginUpdate.eq('id', sharedLoginStudentIds[0])
-      : await sharedLoginUpdate.in('id', sharedLoginStudentIds);
-    if (sharedLoginErr) throw sharedLoginErr;
-  }
+  const { error: linkError } = await supabase.rpc('link_managed_parent_students', {
+    p_parent_profile_id: parentProfileId,
+    p_student_ids: studentIds,
+    p_allow_shared_login: allowSharedLogin,
+  });
+  if (linkError) throw linkError;
 
   const studentSelect = supabase.from('students').select('linked_user_id');
   const { data: students } = studentIds.length === 1
@@ -279,6 +244,24 @@ async function linkParentToStudents(
       );
     }
   }
+}
+
+/** Retry only a parent identity already linked to this child, never an email lookup. */
+async function repairKnownParentLinks(
+  supabase: SupabaseClient, userId: string, parentEmail: string, studentIds: string[],
+): Promise<MvProvisionAccountResult | null> {
+  const [profileResult, authResult] = await Promise.all([
+    supabase.from('parent_profiles').select('user_id,full_name,email').eq('user_id', userId).maybeSingle(),
+    supabase.auth.admin.getUserById(userId),
+  ]);
+  if (profileResult.error || authResult.error) throw new Error('Existing parent account lookup failed');
+  const profile = profileResult.data;
+  if (!profile || !authResult.data.user
+    || normalizeIdentityText(profile.email) !== normalizeIdentityText(parentEmail)
+    || normalizeIdentityText(authResult.data.user.email) !== normalizeIdentityText(parentEmail)) return null;
+  await linkParentToStudents(supabase, userId, profile.full_name || '', profile.email, studentIds);
+  return { userId, email: profile.email, created: false, reused: true,
+    emailSent: false, activationUrl: '', notifyEmail: profile.email };
 }
 
 async function reusableParentUserId(
@@ -489,7 +472,20 @@ export async function provisionMvFamilyAccounts(
     doStudent = needsStudent;
   }
 
+  const sharedLogin = !strictSchoolFamily && validEmail(studentEmail) && studentEmail === parentEmail;
+  // One parent login also represents the child; a second Auth user would collide.
+  if (sharedLogin && doParent && doStudent) doStudent = false;
+
   if (!doParent && !doStudent) {
+    const knownParentId = linkedParentIds[0] || (sharedLogin ? linkedStudentIds[0] : null);
+    if (!strictSchoolFamily && knownParentId && validEmail(parentEmail)) {
+      try {
+        const parent = await repairKnownParentLinks(supabase, knownParentId, parentEmail, studentIds);
+        if (parent) return { ok: true, parent, ...(sharedLogin ? { student: { ...parent } } : {}) };
+      } catch (error) {
+        return { ok: false, status: 500, error: error instanceof Error ? error.message : String(error), code: 'link_parent_failed' };
+      }
+    }
     return { ok: false, status: 409, error: 'Accounts are already linked', code: 'nothing_to_provision' };
   }
 
@@ -624,6 +620,15 @@ export async function provisionMvFamilyAccounts(
   }
 
   if (doStudent) {
+    if (sharedLogin && parentUserId) {
+      try {
+        const shared = await repairKnownParentLinks(supabase, parentUserId, parentEmail, studentIds);
+        if (!shared) return { ok: false, status: 409, error: 'Shared parent identity changed', code: 'related_account_conflict' };
+        return { ok: true, ...result, student: shared };
+      } catch (error) {
+        return { ok: false, status: 500, error: error instanceof Error ? error.message : String(error), code: 'link_parent_failed' };
+      }
+    }
     const studentPassword = generateTempPassword();
     let studentLoginName = validEmail(studentEmail)
       ? null

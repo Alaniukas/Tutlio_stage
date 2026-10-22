@@ -27,9 +27,10 @@ export type SchoolMonthlyInvoiceStudentOption = {
 
 export type SchoolMonthlyInvoicePreviewLine = {
   studentName?: string;
+  source?: string;
   description: string;
-  subjectId: string;
-  tutorId: string;
+  subjectId?: string;
+  tutorId?: string;
   quantity: number;
   unitPriceEur: number;
   originalAmountEur: number;
@@ -59,9 +60,10 @@ export type SchoolMonthlyInvoicePreview = {
   canEditAttendance?: boolean;
   canEditBilling?: boolean;
   regeneration?: InvoiceRegeneration;
+  serviceLines?: SchoolMonthlyInvoicePreviewLine[];
 };
 
-type InvoiceReview = Pick<SchoolMonthlyInvoicePreview, 'sessions' | 'payerEmail' | 'organizationName' | 'canEditAttendance' | 'canEditBilling'>;
+type InvoiceReview = Pick<SchoolMonthlyInvoicePreview, 'sessions' | 'payerEmail' | 'organizationName' | 'canEditAttendance' | 'canEditBilling' | 'serviceLines'>;
 
 type Props = {
   open: boolean;
@@ -72,6 +74,8 @@ type Props = {
   previewFixture?: SchoolMonthlyInvoicePreview;
   /** School invoices tab: group by payer and send one family or everyone. */
   batch?: boolean;
+  initialMonth?: string;
+  includePayerFamily?: boolean;
 };
 
 function monthRange(month: string): { start: string; end: string } {
@@ -108,8 +112,8 @@ export function SchoolMonthlyInvoicePreviewCard({ preview }: { preview: SchoolMo
           <thead>
             <tr className="border-b border-slate-200 bg-white text-[11px] uppercase tracking-wide text-slate-500">
               <th className="px-4 py-3 font-semibold">{t('school.invoice.preview.student')}</th>
-              <th className="px-4 py-3 font-semibold">{t('school.invoice.preview.session')}</th>
-              <th className="px-3 py-3 text-center font-semibold">{t('school.invoice.preview.quantity')}</th>
+              <th className="px-4 py-3 font-semibold">{t('school.services.service')}</th>
+              <th className="px-3 py-3 text-center font-semibold">{t('school.services.quantity')}</th>
               <th className="px-3 py-3 text-right font-semibold">{t('school.invoice.preview.unitPrice')}</th>
               <th className="px-3 py-3 text-right font-semibold">{t('school.invoice.preview.amount')}</th>
               <th className="px-3 py-3 text-right font-semibold">{t('school.invoice.preview.discount')}</th>
@@ -164,9 +168,11 @@ export default function SchoolMonthlyInvoiceDialog({
   onSent,
   previewFixture,
   batch = false,
+  initialMonth,
+  includePayerFamily = false,
 }: Props) {
   const { t, locale } = useTranslation();
-  const defaultMonth = format(subMonths(new Date(), 1), 'yyyy-MM');
+  const defaultMonth = initialMonth || format(subMonths(new Date(), 1), 'yyyy-MM');
   const defaultStudent = students[0]?.id || '';
   const [studentId, setStudentId] = useState(defaultStudent);
   const [month, setMonth] = useState(defaultMonth);
@@ -196,7 +202,7 @@ export default function SchoolMonthlyInvoiceDialog({
       if (payerStatusFilter === 'blocked') return row.reviewSessionIds.length > 0;
       if (payerStatusFilter === 'issued') return row.alreadyIssued || Boolean(row.issuedInvoiceNumbers?.length);
       if (payerStatusFilter === 'empty') {
-        return row.lessonCount === 0 && !row.alreadyIssued && row.reviewSessionIds.length === 0;
+        return row.lessonCount === 0 && !row.serviceCount && !row.alreadyIssued && row.reviewSessionIds.length === 0;
       }
       return true;
     };
@@ -239,6 +245,7 @@ export default function SchoolMonthlyInvoiceDialog({
       periodStart: range.start,
       periodEnd: range.end,
       dueDate,
+      includePayerFamily,
       previewToken: preview?.previewToken,
       regenerateInvoiceIds: action === 'send' ? preview?.regeneration?.invoiceIds : undefined,
     };
@@ -568,6 +575,12 @@ export default function SchoolMonthlyInvoiceDialog({
               </table>
               {!review.sessions.length && <p className="p-4 text-sm text-slate-500">{t('school.invoice.review.empty')}</p>}
             </div>
+            {!!review.serviceLines?.length && <div className="space-y-2 rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+              <h4 className="text-sm font-semibold text-emerald-950">{t('school.services.title')}</h4>
+              {review.serviceLines.map((line, index) => <div key={index} className="flex items-start justify-between gap-3 text-sm">
+                <span className="min-w-0 break-words">{line.description} · {line.quantity} × {money(line.unitPriceEur)}</span><span className="shrink-0 tabular-nums">{money(line.amountEur)}</span>
+              </div>)}
+            </div>}
             {decisionEditor && (
               <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <Label htmlFor="invoice-billing-reason">{t('school.invoice.review.reasonLabel')}</Label>
@@ -697,11 +710,12 @@ export default function SchoolMonthlyInvoiceDialog({
                       {group.students.map((child) => (
                         <li key={child.studentId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
                           <span className="min-w-0 break-words [overflow-wrap:anywhere]">
-                            {t('school.invoice.batch.childLine', {
+                            {child.serviceCount && !child.lessonCount ? `${child.fullName} · ${t('school.services.invoiceCount', { count: String(child.serviceCount) })} · ${money(child.amountDueEur ?? child.totalEur)}` : t('school.invoice.batch.childLine', {
                               name: child.fullName,
                               count: String(child.lessonCount),
                               amount: money(child.amountDueEur ?? child.totalEur),
                             })}
+                            {!!child.serviceCount && child.lessonCount > 0 && <span className="ml-2 text-emerald-800">{t('school.services.invoiceCount', { count: String(child.serviceCount) })}</span>}
                             {child.reviewSessionIds.length ? <span className="ml-2 text-amber-700">{child.reviewReasons?.length
                               ? child.reviewReasons.map((reason) => t(`school.invoice.review.reason.${reason}`)).join(' · ')
                               : t('school.invoice.batch.blocked')}</span> : null}
@@ -711,7 +725,7 @@ export default function SchoolMonthlyInvoiceDialog({
                                 amount: money(child.issuedTotalEur || 0),
                               })}</span>
                               : child.alreadyIssued ? <span className="ml-2 text-slate-500">{t('school.invoice.review.reason.already_invoiced')}</span>
-                              : !child.lessonCount && !child.reviewSessionIds.length ? <span className="ml-2 text-slate-500">{t('school.invoice.batch.empty')}</span> : null}
+                              : !child.lessonCount && !child.serviceCount && !child.reviewSessionIds.length ? <span className="ml-2 text-slate-500">{t('school.invoice.batch.empty')}</span> : null}
                             {child.regeneration && <span className="ml-2 text-amber-700">{t('invoices.regenerate')}: {child.regeneration.invoiceNumbers.join(', ')}</span>}
                           </span>
                           <Button type="button" size="sm" variant="outline" disabled={loading || !!sendingKey} onClick={() => {

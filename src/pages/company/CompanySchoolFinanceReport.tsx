@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { FileSpreadsheet, Printer, Search } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Archive, FileSpreadsheet, Printer, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -34,7 +35,7 @@ const defaultFilters: SchoolFinanceFilters = {
 
 export default function CompanySchoolFinanceReport() {
   const { t } = useTranslation();
-  const { orgName, contracts, installments, loading } = useSchoolPaymentsData();
+  const { orgName, contracts, installments, loading, error, reload } = useSchoolPaymentsData({ includePaidHistory: true });
   const [filters, setFilters] = useState<SchoolFinanceFilters>(defaultFilters);
   const [exporting, setExporting] = useState(false);
 
@@ -65,6 +66,15 @@ export default function CompanySchoolFinanceReport() {
     );
   }
 
+  if (error) {
+    return (
+      <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700 space-y-3">
+        <p>{t('companyPaymentReport.loadError')}</p>
+        <Button variant="outline" onClick={reload}>{t('companyPaymentReport.retry')}</Button>
+      </div>
+    );
+  }
+
   return (
     <>
       <style>{`
@@ -83,6 +93,9 @@ export default function CompanySchoolFinanceReport() {
             <p className="text-sm text-gray-500 mt-1">{t('school.financeExportSubtitle')}</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <Button asChild size="sm" variant="outline">
+              <Link to="?tab=contract-archive"><Archive className="w-4 h-4 mr-1.5" aria-hidden />{t('school.archive.title')}</Link>
+            </Button>
             <Button size="sm" variant="outline" onClick={() => void exportXlsx()} disabled={exportRows.length === 0 || exporting}>
               <FileSpreadsheet className="w-4 h-4 mr-1.5" /> {exporting ? '...' : t('school.financeExportXlsx')}
             </Button>
@@ -188,7 +201,14 @@ export default function CompanySchoolFinanceReport() {
                   <tr key={`${row.contractId}-${row.installmentNumber ?? 'none'}-${idx}`} className="hover:bg-gray-50/50">
                     <td className="px-3 py-2 font-medium text-gray-900">{row.studentName || '—'}</td>
                     <td className="px-3 py-2 text-gray-700">{row.parentName || '—'}</td>
-                    <td className="px-3 py-2 text-gray-600">{row.contractNumber || '—'}</td>
+                    <td className="px-3 py-2 text-gray-600">
+                      {row.contractNumber || '—'}
+                      {row.contractArchivedAt && (
+                        <span className="mt-1 block text-xs text-gray-500">
+                          {t('school.archive.archivedAt')}: {formatDate(row.contractArchivedAt)}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-3 py-2">{row.installmentNumber == null ? '—' : `#${row.installmentNumber}`}</td>
                     <td className="px-3 py-2">{row.installmentAmount == null ? '—' : `€${row.installmentAmount.toFixed(2)}`}</td>
                     <td className="px-3 py-2">{formatDate(row.dueDate)}</td>
@@ -235,7 +255,12 @@ export default function CompanySchoolFinanceReport() {
               <tr key={`print-${row.contractId}-${row.installmentNumber ?? 'none'}-${idx}`} className="border-b border-gray-100">
                 <td className="py-1 pr-2">{row.studentName}</td>
                 <td className="py-1 pr-2">{row.parentName}</td>
-                <td className="py-1 pr-2">{row.contractNumber}</td>
+                <td className="py-1 pr-2">
+                  {row.contractNumber}
+                  {row.contractArchivedAt && (
+                    <span className="block text-xs">{t('school.archive.archivedAt')}: {formatDate(row.contractArchivedAt)}</span>
+                  )}
+                </td>
                 <td className="py-1 pr-2">{signingStatusLabel(row.contractSigningStatus, t)}</td>
                 <td className="py-1 pr-2 text-right">{row.annualFee.toFixed(2)}</td>
                 <td className="py-1 pr-2 text-right">{row.installmentNumber ?? '—'}</td>

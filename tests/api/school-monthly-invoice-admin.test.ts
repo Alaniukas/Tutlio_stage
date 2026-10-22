@@ -91,7 +91,7 @@ function query(table: string) {
   return builder;
 }
 
-import handler from '../../api/school-monthly-invoice-admin';
+import handler, { billPendingSchoolServicePayers } from '../../api/school-monthly-invoice-admin';
 import { allocateInvoiceNumber } from '../../api/_lib/invoiceNumber.js';
 import { sendSchoolMonthlyInvoiceEmail } from '../../api/_lib/schoolMonthlyInvoiceEmail.js';
 import { generateSchoolMonthlyInvoicePdf } from '../../api/_lib/schoolMonthlyInvoicePdf.js';
@@ -135,6 +135,77 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('school monthly invoice review API', () => {
+  function addService(extra: Record<string, unknown> = {}) {
+    state.tables.organizations[0].features.school_service_charges = true;
+    state.tables.school_student_service_charges ||= [];
+    state.tables.school_student_service_charges.push({ id: 'license', organization_id: 'org1', student_id: 'child1',
+      description: 'Platform license', unit_price_eur: 8, quantity: 1, invoice_month: '2026-09-01',
+      service_date: '2026-09-12', version: 1, internal_note: 'Private', ...extra });
+  }
+
+  it('combines services and lessons without inheriting the lesson discount or leaking notes', async () => {
+    addService();
+    state.tables.student_lesson_discounts.push({ student_id: 'child1', subject_id: 'math', organization_id: 'org1',
+      percent: 100, discount_type: 'percent', valid_from: '2026-09-01', valid_until: '2026-09-30' });
+    const preview = await request({ action: 'preview' });
+    expect(preview.status).toBe(200);
+    expect(preview.body.lines.find((line: any) => line.source === 'service')).toMatchObject({ amountEur: 8,
+      discountAmountEur: 0, sessionIds: [], serviceChargeId: 'license' });
+    expect(JSON.stringify(preview.body)).not.toContain('Private');
+    const sent = await request({ action: 'send', previewToken: preview.body.previewToken });
+    expect(sent.status).toBe(200);
+    expect(state.replacements[0].p_lines.find((line: any) => line.source === 'service')).toMatchObject({
+      service_charge_id: 'license', service_charge_version: 1, service_date: '2026-09-12', amount_eur: 8,
+    });
+    expect(state.writes.filter(row => row.table === 'school_monthly_invoices')).toEqual([]);
+  });
+  it('finds a service-only child and issues it through the atomic writer with zero lessons', async () => {
+    addService(); state.tables.sessions = [];
+    const preview = await request({ action: 'batch-preview' });
+    expect(preview.body.payers[0]).toMatchObject({ sendableStudentIds: ['child1'], students: [{ lessonCount: 0, serviceCount: 1, totalEur: 8 }] });
+    const sent = await request({ action: 'send-batch', ...batchTokens(preview) });
+    expect(sent.status).toBe(200);
+    expect(state.replacements[0].p_invoice).toMatchObject({ total_eur: 8, contract_id: null, billed_session_ids: [] });
+    expect(sendSchoolMonthlyInvoiceEmail).toHaveBeenCalledOnce();
+  });
+  it('rejects service changes after preview and excludes claimed, cancelled and other-month services', async () => {
+    addService(); addService({ id: 'claimed', invoice_id: 'old' }); addService({ id: 'cancelled', cancelled_at: 'now' });
+    addService({ id: 'later', invoice_month: '2026-10-01' });
+    const preview = await request({ action: 'preview' });
+    expect(preview.body.lines.filter((line: any) => line.source === 'service')).toHaveLength(1);
+    state.tables.school_student_service_charges[0].version++;
+    expect((await request({ action: 'send', previewToken: preview.body.previewToken })).status).toBe(409);
+    expect(state.replacements).toEqual([]);
+  });
+  it('combines siblings for the student-card invoice without mixing another payer', async () => {
+    addService();
+    state.tables.students.push({ ...state.tables.students[0], id: 'sibling', full_name: 'Other Child' },
+      { ...state.tables.students[0], id: 'foreign', full_name: 'Foreign Child', payer_email: 'other@example.com' });
+    addService({ id: 'sibling-fee', student_id: 'sibling' });
+    addService({ id: 'foreign-fee', student_id: 'foreign' });
+    const preview = await request({ action: 'preview', includePayerFamily: true });
+    expect(preview.body.totalEur).toBe(28);
+    expect(preview.body.lines.map((line: any) => line.studentId)).toEqual(['child1', 'child1', 'sibling']);
+    const sent = await request({ action: 'send', includePayerFamily: true, previewToken: preview.body.previewToken });
+    expect(sent.status).toBe(200);
+    expect(state.replacements[0].p_invoice.payer_student_ids.sort()).toEqual(['child1', 'sibling']);
+    expect(state.replacements[0].p_lines.find((line: any) => line.service_charge_id === 'sibling-fee').description).toContain('Other Child');
+  });
+  it('uses the same service-only composition for monthly cron and holds unconfirmed attendance', async () => {
+    addService(); state.tables.sessions = [];
+    const preview = await billPendingSchoolServicePayers('org1', '2026-09-01', '2026-09-30', true);
+    expect(preview).toMatchObject({ created: 0, planned: [{ total_eur: 8, service_charge_ids: ['license'] }] });
+    expect(state.replacements).toEqual([]);
+    expect(await billPendingSchoolServicePayers('org1', '2026-09-01', '2026-09-30', false, Date.now() - 1))
+      .toMatchObject({ created: 0, continuationRequired: true });
+    const result = await billPendingSchoolServicePayers('org1', '2026-09-01', '2026-09-30', false);
+    expect(result).toMatchObject({ handledStudentIds: ['child1'], created: 1, emailed: 1, held: 0 });
+    state.tables.sessions = [{ id: 'uncertain', student_id: 'child1', tutor_id: 'teacher1', subject_id: 'math',
+      start_time: '2026-09-14T13:00:00Z', end_time: '2026-09-14T14:00:00Z', status: 'active', price: 12,
+      tutor: { full_name: 'Teacher', organization_id: 'org1' }, subject: { name: 'Math' } }];
+    expect(await billPendingSchoolServicePayers('org1', '2026-09-01', '2026-09-30', false))
+      .toMatchObject({ created: 0, held: 1, handledStudentIds: ['child1'] });
+  });
   it.each([0, 6])('recognizes the stored trial flag and keeps a %s EUR trial out of payer invoices without a missing-price warning', async (price) => {
     state.tables.sessions.push({ ...state.tables.sessions[0], id: 'trial', class_group_id: null,
       subject_id: 'trial-subject', subject: { name: 'Bandomasis užsiėmimas', price: 6, is_trial: true }, price });

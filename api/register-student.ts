@@ -185,6 +185,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const detailsUpdate = supabase.from('students').update({
         ...preservedDetails,
         email: createStudentUsernameAccount === true ? null : submittedEmail,
+        // The row may have had no email when parent provisioning ran. Complete
+        // the explicitly requested shared login together with the final details.
+        ...(createStudentUsernameAccount === true ? {} : { linked_user_id: provision.parent.userId }),
         phone: phone || null,
         age: (() => {
           const n = Number(age);
@@ -199,10 +202,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         accepted_privacy_policy_at: acceptedAt || null,
         accepted_terms_at: acceptedAt || null,
       });
-      const { error: detailsErr } = relatedStudentIds.length === 1
-        ? await detailsUpdate.eq('id', studentId).is('detached_at', null)
-        : await detailsUpdate.in('id', relatedStudentIds).is('detached_at', null);
-      if (detailsErr) {
+      const detailsScope = relatedStudentIds.length === 1
+        ? detailsUpdate.eq('id', studentId).is('detached_at', null)
+        : detailsUpdate.in('id', relatedStudentIds).is('detached_at', null);
+      const sharedDetails = createStudentUsernameAccount !== true;
+      const detailsResult = sharedDetails
+        ? await detailsScope.eq('parent_user_id', provision.parent.userId)
+          .or(`linked_user_id.is.null,linked_user_id.eq.${provision.parent.userId}`).select('id')
+        : await detailsScope;
+      const detailsErr = detailsResult.error;
+      if (detailsErr || (sharedDetails && detailsResult.data?.length !== relatedStudentIds.length)) {
         console.error('[register-student] same-email details update failed:', detailsErr);
         return res.status(500).json({ error: 'Failed to update student details', code: 'update_student_failed' });
       }

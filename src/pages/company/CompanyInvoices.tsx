@@ -13,6 +13,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
 import InvoiceSettingsForm from '@/components/InvoiceSettingsForm';
@@ -72,6 +73,7 @@ interface Invoice {
   period_start?: string | null;
   studentNames?: string;
   issuerNote?: string | null;
+  cancellationReason?: string | null;
 }
 
 interface SchoolInvoiceBuyer {
@@ -93,6 +95,7 @@ interface SchoolMonthlyInvoice {
   payer_student_ids?: string[] | null;
   student: SchoolInvoiceBuyer | SchoolInvoiceBuyer[] | null;
   issuer_note?: string | null;
+  cancellation_reason?: string | null;
 }
 
 export default function CompanyInvoices() {
@@ -162,6 +165,10 @@ export default function CompanyInvoices() {
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [remindingId, setRemindingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Invoice | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [orgInvoiceProfileReady, setOrgInvoiceProfileReady] = useState<boolean | null>(null);
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
   const [numberTarget, setNumberTarget] = useState<Invoice | null>(null);
@@ -300,7 +307,7 @@ export default function CompanyInvoices() {
       try {
         const schoolInvoices = await fetchAllRows<SchoolMonthlyInvoice>((from, to) => supabase
           .from('school_monthly_invoices')
-          .select('id, organization_id, invoice_number, created_at, period_start, total_eur, payment_status, pdf_path, student_id, payer_student_ids, issuer_note, student:students(full_name, payer_name, payer_email)')
+          .select('id, organization_id, invoice_number, created_at, period_start, total_eur, payment_status, pdf_path, student_id, payer_student_ids, issuer_note, cancellation_reason, student:students(full_name, payer_name, payer_email)')
           .eq('organization_id', orgIdVal)
           .not('invoice_number', 'is', null)
           .order('created_at', { ascending: false })
@@ -335,6 +342,7 @@ export default function CompanyInvoices() {
             issued_by_user_id: '',
             source: 'school_monthly',
             issuerNote: row.issuer_note || null,
+            cancellationReason: row.cancellation_reason || null,
             // The API also finds existing PDFs at their canonical path when the
             // historical invoice row is missing its pdf_path metadata.
             pdf_available: true,
@@ -572,8 +580,9 @@ export default function CompanyInvoices() {
   ]);
 
   const downloadableFilteredInvoices = useMemo(
-    () => filteredInvoices.filter((inv) => inv.origin !== 'external' && inv.pdf_available !== false),
-    [filteredInvoices],
+    () => filteredInvoices.filter((inv) => inv.origin !== 'external' && inv.pdf_available !== false
+      && (inv.status !== 'cancelled' || statusFilter === 'cancelled')),
+    [filteredInvoices, statusFilter],
   );
 
   const selectedDownloadableInvoices = useMemo(
@@ -586,12 +595,12 @@ export default function CompanyInvoices() {
     && downloadableFilteredInvoices.every((inv) => selectedInvoiceIds.has(inv.id));
 
   useEffect(() => {
-    const visibleIds = new Set(filteredInvoices.map((inv) => inv.id));
+    const visibleIds = new Set(downloadableFilteredInvoices.map((inv) => inv.id));
     setSelectedInvoiceIds((prev) => {
       const next = new Set([...prev].filter((id) => visibleIds.has(id)));
       return next.size === prev.size ? prev : next;
     });
-  }, [filteredInvoices]);
+  }, [downloadableFilteredInvoices]);
 
   const toggleInvoiceSelection = (invoiceId: string, checked: boolean) => {
     setSelectedInvoiceIds((prev) => {
@@ -756,6 +765,37 @@ export default function CompanyInvoices() {
       window.alert(t('invoices.deleteFailed'));
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleCancelSchoolInvoice = async () => {
+    if (!canEditFinance || !cancelTarget || cancelling || cancelReason.trim().length < 3) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      const response = await fetch('/api/cancel-school-monthly-invoice', {
+        method: 'POST', headers: await authHeaders(),
+        body: JSON.stringify({ invoiceId: cancelTarget.id, reason: cancelReason.trim() }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        setCancelError(result.error || t('invoices.cancelFailed'));
+        return;
+      }
+      setInvoices(previous => previous.map(invoice => invoice.id === cancelTarget.id
+        ? { ...invoice, status: 'cancelled', cancellationReason: result.cancellationReason ?? null } : invoice));
+      setSelectedInvoiceIds(previous => {
+        const next = new Set(previous); next.delete(cancelTarget.id); return next;
+      });
+      for (const key of ['company_invoices', 'company_payments', 'company_students', 'school_dashboard', 'company_stats']) {
+        invalidateCache(key);
+      }
+      setCancelTarget(null);
+      setInvoiceToast({ message: t('invoices.cancelSuccess'), type: 'success' });
+    } catch {
+      setCancelError(t('invoices.cancelFailed'));
+    } finally {
+      setCancelling(false);
     }
   };
 
@@ -1446,6 +1486,7 @@ export default function CompanyInvoices() {
                         <input
                           type="checkbox"
                           checked={selectedInvoiceIds.has(inv.id)}
+                          disabled={inv.status === 'cancelled' && statusFilter !== 'cancelled'}
                           onChange={(e) => toggleInvoiceSelection(inv.id, e.target.checked)}
                           className="rounded border-gray-300 shrink-0"
                           aria-label={inv.invoice_number}
@@ -1490,6 +1531,7 @@ export default function CompanyInvoices() {
                             : `€${Number(inv.total_amount).toFixed(2)}`}
                         </p>
                         {inv.issuerNote ? <p className="text-xs text-amber-800 mt-1 break-words">{inv.issuerNote}</p> : null}
+                        {inv.cancellationReason ? <p className="text-xs text-gray-500 mt-1 break-words">{t('invoices.cancelReason')}: {inv.cancellationReason}</p> : null}
                         {inv.status === 'issued' && inv.billing_batch_id && inv.billing_batches && !inv.billing_batches.paid && (
                           <p className="text-xs text-amber-700 mt-0.5">{t('invoices.checkoutPendingSubtitle')}</p>
                         )}
@@ -1513,6 +1555,14 @@ export default function CompanyInvoices() {
                           <Download className="w-4 h-4" />
                         )}
                       </Button>
+                      )}
+                      {inv.source === 'school_monthly' && inv.status === 'issued' && canEditFinance && (
+                        <Button variant="ghost" size="sm"
+                          onClick={() => { setCancelTarget(inv); setCancelReason(''); setCancelError(null); }}
+                          title={t('invoices.cancelInvoice')} aria-label={`${t('invoices.cancelInvoice')} ${inv.invoice_number}`}
+                          className="rounded-lg text-red-600 hover:text-red-700 hover:bg-red-50">
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
                       )}
                       {(inv.status === 'issued' || inv.status === 'paid') && inv.origin !== 'external' && inv.source !== 'school_monthly' && (
                         <>
@@ -1632,6 +1682,30 @@ export default function CompanyInvoices() {
         billingTutorId={tutorInvoiceTarget?.id}
         orgTutors={tutors}
       />
+
+      <Dialog open={Boolean(cancelTarget)} onOpenChange={open => { if (!open && !cancelling) setCancelTarget(null); }}>
+        <DialogContent className="rounded-2xl max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('invoices.cancelInvoice')} {cancelTarget?.invoice_number}</DialogTitle>
+          </DialogHeader>
+          <DialogDescription className="text-sm text-gray-600">{t('invoices.cancelInvoiceHint')}</DialogDescription>
+          <div className="space-y-2">
+            <Label htmlFor="invoice-cancel-reason">{t('invoices.cancelReason')}</Label>
+            <Input id="invoice-cancel-reason" value={cancelReason} maxLength={1000} disabled={cancelling}
+              onChange={event => setCancelReason(event.target.value)} className="rounded-xl" />
+            {cancelError && <p role="alert" className="text-sm text-red-600">{cancelError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={cancelling} onClick={() => setCancelTarget(null)} className="rounded-xl">
+              {t('common.cancel')}
+            </Button>
+            <Button variant="destructive" disabled={cancelling || cancelReason.trim().length < 3}
+              onClick={() => void handleCancelSchoolInvoice()} className="rounded-xl gap-2">
+              {cancelling && <Loader2 className="w-4 h-4 animate-spin" />}{t('invoices.cancelInvoice')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={reserveOpen} onOpenChange={setReserveOpen}>
         <DialogContent className="rounded-2xl max-w-md">

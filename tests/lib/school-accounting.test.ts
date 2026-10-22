@@ -43,6 +43,7 @@ describe('school accounting across group and individual lessons', () => {
       receipt, receipt,
       { ...receipt, id: 'b', amount: '6.20' },
       { ...receipt, id: 'c', payment_status: 'pending' },
+      { ...receipt, id: 'cancelled-test', amount: '18.00', payment_status: 'cancelled' },
       { ...receipt, id: 'd', paid_at: null },
       { ...receipt, id: 'e', paid_at: '2026-08-31T10:00:00Z' },
     ], '2026-09-01T00:00:00Z', '2026-09-30T23:59:59Z')).toBe(30.30);

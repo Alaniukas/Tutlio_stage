@@ -91,6 +91,30 @@ describe('automatic registration reminders', () => {
     expect(mocks.send.mock.calls[0][0].html).toContain('/book/code');
     expect(mocks.send.mock.calls[0][0].to).toEqual(['payer@example.test']);
   });
+  it('skips missing registration contacts without claiming delivery, then sends after correction', async () => {
+    const f = fixture();
+    f.student.parent_user_id = null as any;
+    f.student.payer_email = '';
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(await runStudentRegistrationReminders(f.db, 'https://tutlio.lt')).toEqual({ sent: 0, failed: 0, skipped: 1 });
+      expect(f.tables.student_registration_reminders).toHaveLength(0);
+      expect(mocks.send).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+      f.student.payer_email = 'corrected@example.test';
+      expect((await runStudentRegistrationReminders(f.db, 'https://tutlio.lt')).sent).toBe(1);
+      expect(mocks.send.mock.calls[0][0].to).toEqual(['corrected@example.test']);
+    } finally { log.mockRestore(); }
+  });
+  it('skips a missing invite code and missing managed-account contact without stamping either delivery', async () => {
+    const withoutCode = fixture(); withoutCode.student.parent_user_id = null as any; withoutCode.student.invite_code = '';
+    expect((await runStudentRegistrationReminders(withoutCode.db, 'https://tutlio.lt')).skipped).toBe(1);
+    const managed = fixture(); managed.users.parent.email = '';
+    expect((await runStudentRegistrationReminders(managed.db, 'https://tutlio.lt')).skipped).toBe(1);
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(withoutCode.tables.student_registration_reminders).toHaveLength(0);
+    expect(managed.tables.student_registration_reminders).toHaveLength(0);
+  });
   it('keeps other organizations disabled and respects explicit rollback', async () => {
     for (const disabled of [{ id: 'other', features: {} }, { id: PRO_KLASE_ORG_ID, features: { pending_registration_lessons: false } }]) {
       const f = fixture(); Object.assign(f.org, disabled); await runStudentRegistrationReminders(f.db, 'https://tutlio.lt');

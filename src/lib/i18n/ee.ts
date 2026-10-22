@@ -1,5 +1,3 @@
-import { tutorPairingTranslations } from './tutorPairingTranslations.js';
-import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
@@ -15,9 +13,18 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
+import { schoolServiceTranslations } from './schoolServiceTranslations.js';
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 export const ee: Record<string, string> = {
+  ...schoolServiceTranslations.ee,
   ...tutorPairingTranslations.ee,
   ...studentLoadingTranslations.ee,
+  'invoices.cancelInvoice': "Tühista arve",
+  'invoices.cancelInvoiceHint': "Arve ei kuulu enam tasumisele ja makselink lakkab töötamast. Number ja dokument jäävad ajalukku. Sisestage põhjus (vähemalt 3 märki).",
+  'invoices.cancelReason': "Tühistamise põhjus",
+  'invoices.cancelSuccess': "Arve on tühistatud.",
+  'invoices.cancelFailed': "Arve tühistamine ebaõnnestus. Proovige uuesti.",
   'school.archive.title': "Lepingute arhiiv",
   'school.archive.description': "Vaadake ja laadige alla arhiveeritud lepinguid.",
   'school.archive.search': "Otsi lepingu numbri, õpilase või maksja järgi",

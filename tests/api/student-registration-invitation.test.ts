@@ -102,7 +102,7 @@ describe('organization registration invitation', () => {
   it('does not report a missing contact as an already registered account', async () => {
     student.linked_user_id = null; student.email = null;
     const res = response(); await handler(request(), res);
-    expect(res.code).toBe(503); expect(res.body.skipped).toBeUndefined();
+    expect(res.code).toBe(422); expect(res.body.code).toBe('recipient_unavailable'); expect(res.body.skipped).toBeUndefined();
     expect(mocks.send).not.toHaveBeenCalled();
   });
   it('keeps schools on their verified family invitation workflow', async () => {

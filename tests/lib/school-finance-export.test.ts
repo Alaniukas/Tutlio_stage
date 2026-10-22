@@ -8,6 +8,7 @@ import {
   schoolFinanceTableData,
   summarizeSchoolFinanceRows,
 } from '@/lib/schoolFinanceExport';
+import { buildSchoolFinanceWorkbook } from '@/lib/schoolFinanceXlsxExport';
 
 const t = (key: string) => key;
 
@@ -37,6 +38,7 @@ describe('schoolFinanceExport', () => {
       due_date: '2026-09-01',
       payment_status: 'paid' as const,
       stripe_checkout_session_id: 'cs_123',
+      stripe_payment_intent_id: 'pi_123',
       paid_at: '2026-08-20T10:00:00.000Z',
       contract: contracts[0],
     },
@@ -106,10 +108,45 @@ describe('schoolFinanceExport', () => {
     expect(summary.contractsWithoutSchedule).toBe(1);
   });
 
-  it('infers payment method from stripe session id', () => {
-    expect(inferPaymentMethod('paid', 'cs_1')).toBe('stripe');
+  it('requires a confirmed payment intent to classify a receipt as Stripe', () => {
+    expect(inferPaymentMethod('paid', 'pi_1')).toBe('stripe');
     expect(inferPaymentMethod('paid', null)).toBe('manual');
-    expect(inferPaymentMethod('pending', 'cs_1')).toBe('none');
+    expect(inferPaymentMethod('pending', 'pi_1')).toBe('none');
+    const manual = buildSchoolFinanceRows([], [{ ...installments[0], stripe_payment_intent_id: null }]);
+    expect(manual[0].stripeCheckoutSessionId).toBe('cs_123');
+    expect(manual[0].paymentMethod).toBe('manual');
+    const stripe = buildSchoolFinanceRows([], [{ ...installments[0], stripe_checkout_session_id: null }]);
+    expect(stripe[0].paymentMethod).toBe('stripe');
+  });
+
+  it('retains the 300 + 50 + 50 historical receipts without adding archived debt', async () => {
+    const archivedAt = '2026-09-04T11:54:33Z';
+    const archived = [300, 50, 50].map((amount, index) => ({
+      ...contracts[0], id: `archive-${index}`, annual_fee: 1000,
+      signing_status: index === 0 ? 'signed' : 'sent', archived_at: archivedAt,
+    }));
+    const historical = archived.map((contract, index) => ({
+      ...installments[0], contract_id: contract.id, contract, amount: [300, 50, 50][index],
+    }));
+    const rows = buildSchoolFinanceRows([...contracts, ...archived, {
+      ...contracts[0], id: 'archived-without-schedule', archived_at: archivedAt,
+    }], [...installments, ...historical, {
+      ...historical[0], installment_number: 2, amount: 666, payment_status: 'overdue',
+    }]);
+    const summary = summarizeSchoolFinanceRows(rows);
+    expect(summary.totalPaid).toBe(550);
+    expect(summary.totalOutstanding).toBe(500);
+    expect(summary.contractsWithoutSchedule).toBe(1);
+    expect(rows.filter(row => row.contractArchivedAt)).toHaveLength(3);
+    const { headers, body } = schoolFinanceTableData(rows, t);
+    expect(headers.at(-1)).toBe('school.archive.archivedAt');
+    expect(body.filter(row => row.at(-1) === '2026-09-04')).toHaveLength(3);
+    expect(schoolFinanceCsv(rows, t)).toContain('2026-09-04');
+    const workbook = await buildSchoolFinanceWorkbook(rows, t, summary);
+    const payments = workbook.getWorksheet('Mokėjimai')!;
+    expect(payments.getRow(1).getCell(13).value).toBe('school.archive.archivedAt');
+    const archiveRow = rows.findIndex(row => row.contractId === 'archive-1') + 2;
+    expect(payments.getRow(archiveRow).getCell(13).value).toBe('2026-09-04');
   });
 
   it('builds table data for export', () => {

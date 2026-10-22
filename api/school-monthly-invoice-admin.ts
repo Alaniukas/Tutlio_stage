@@ -31,6 +31,7 @@ import { orgStudentIdentityGroupKey } from '../src/lib/orgStudentIdentity.js';
 import { groupSchoolPayerInvoicePreviews, schoolPayerKey, schoolStudentInvoiceSendable } from '../src/lib/schoolPayerInvoiceGroups.js';
 import { sessionYmdVilnius } from '../src/lib/schoolExtraLessonsBilling.js';
 import { replaceSchoolInvoices } from './_lib/schoolInvoiceRegeneration.js';
+import { buildSchoolServiceInvoiceLines, schoolServiceChargesEnabled, type SchoolServiceCharge, type SchoolServiceInvoiceLine } from '../src/lib/schoolServiceCharges.js';
 import {
   mapAcceptedDiscountAgreement,
   mapSavedLessonDiscount,
@@ -59,14 +60,18 @@ type RequestBody = {
   sessionId?: string;
   excluded?: boolean;
   reason?: string;
+  includePayerFamily?: boolean;
 };
+
+type StudentInvoiceLine = SchoolLessonInvoiceLine | SchoolServiceInvoiceLine;
 
 type DraftContext = {
   organizationId: string;
   student: any;
   org: any;
   profile: any;
-  lines: SchoolLessonInvoiceLine[];
+  lines: StudentInvoiceLine[];
+  servicesEnabled: boolean;
   subtotalEur: number;
   discountAmountEur: number;
   totalEur: number;
@@ -134,6 +139,7 @@ function composeDraftContext(input: {
   periodStart: string;
   periodEnd: string;
   dueDate: string;
+  serviceCharges: SchoolServiceCharge[];
 }): DraftContext | null {
   const {
     organizationId, studentIds, studentsById, org, profile, sessions, savedDiscounts,
@@ -226,8 +232,11 @@ function composeDraftContext(input: {
       contractsById.get(String(row.contract_id || '')),
     )),
   );
-  const lines = buildSchoolLessonInvoiceLines(billable, persistent);
-  if (!reviewSessions.length) return null;
+  const lines: StudentInvoiceLine[] = [
+    ...buildSchoolLessonInvoiceLines(billable, persistent),
+    ...buildSchoolServiceInvoiceLines(input.serviceCharges, studentsById, previousIds),
+  ];
+  if (!reviewSessions.length && !input.serviceCharges.length) return null;
   const credits = availableSchoolInvoiceOverpayments(input.overpayments.filter((credit) => studentIds.includes(credit.student_id)), periodStart, String(student.payer_email || ''));
   const credit = schoolInvoiceCreditPreview(credits, invoiceLinesTotal(lines));
   return {
@@ -236,6 +245,7 @@ function composeDraftContext(input: {
     org,
     profile,
     lines,
+    servicesEnabled: schoolServiceChargesEnabled(org.features),
     subtotalEur: invoiceLinesSubtotal(lines),
     discountAmountEur: invoiceLinesDiscountTotal(lines),
     totalEur: invoiceLinesTotal(lines),
@@ -266,7 +276,7 @@ function safeTokenEqual(a: string, b: string): boolean {
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-function pdfLine(line: SchoolLessonInvoiceLine, studentName: string) {
+function pdfLine(line: StudentInvoiceLine, studentName: string) {
   const label = line.discountType === 'percent'
     ? `${Number(line.discountValue || 0).toLocaleString('lt-LT')} %`
     : line.discountType === 'amount'
@@ -290,7 +300,7 @@ function periodLabel(start: string): string {
   return Number.isFinite(year) && months[month - 1] ? `${months[month - 1]} ${year}` : start;
 }
 
-function discountNotesForInvoice(lines: SchoolLessonInvoiceLine[]): string | null {
+function discountNotesForInvoice(lines: StudentInvoiceLine[]): string | null {
   const notes = [...new Set(lines.map((line) => line.discountNote).filter(Boolean))];
   return String(notes.join('; ') || '').trim() || null;
 }
@@ -312,6 +322,10 @@ async function loadDraft(body: RequestBody): Promise<DraftContext> {
     id === row.student.id || (row.payerStudentIds || []).includes(id)
   )));
   if (!draft) throw new Error('Mokinys arba mokykla nerasta.');
+  if (body.includePayerFamily && String(draft.student.payer_email || '').trim()) {
+    const payer = schoolPayerKey(draft.student.payer_email, draft.student.id);
+    return composePayerDraft(drafts.filter(row => schoolPayerKey(row.student.payer_email, row.student.id) === payer));
+  }
   const coveredIds = new Set(draft.previousInvoices.flatMap((invoice: any) => (
     Array.isArray(invoice.payer_student_ids) && invoice.payer_student_ids.length
       ? invoice.payer_student_ids.map(String)
@@ -367,15 +381,24 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
     ? String(body.dueDate).slice(0, 10)
     : schoolInvoiceDueDate(new Date(), 5, parseSchoolOrgCalendar(org.features));
 
+  const servicesEnabled = schoolServiceChargesEnabled(org.features);
+  const serviceCharges = servicesEnabled ? await fetchAllRows<SchoolServiceCharge>((from, to) => {
+    let query = supabase.from('school_student_service_charges').select('id, student_id, description, unit_price_eur, quantity, service_date, invoice_month, cancelled_at, invoice_id, version')
+      .eq('organization_id', organizationId).is('cancelled_at', null).gte('invoice_month', periodStart).lte('invoice_month', periodEnd);
+    if (onlyStudentIds?.length) query = query.in('student_id', onlyStudentIds);
+    return query.order('id').range(from, to);
+  }) : [];
+
   const studentIds = onlyStudentIds?.length
     ? onlyStudentIds
-    : [...new Set((allSessions || []).map((row) => String(row.student_id || '')).filter(Boolean))];
+    : [...new Set([...allSessions.map(row => String(row.student_id || '')), ...serviceCharges.map(row => row.student_id)].filter(Boolean))];
   if (!studentIds.length) return { drafts: [] };
 
   const [studentsRes, discountsRes, discountAgreementsRes, contractsRes, decisionsRes, invoicesRes, overpayments] = await Promise.all([
-    supabase.from('students')
+    fetchAllRows<any>((from, to) => supabase.from('students')
       .select('id, organization_id, full_name, grade, email, phone, payer_name, payer_email, payer_phone, detached_at')
-      .in('id', studentIds).eq('organization_id', organizationId),
+      .in('id', studentIds).eq('organization_id', organizationId).order('id').range(from, to))
+      .then(data => ({ data, error: null })),
     supabase.from('student_lesson_discounts')
       .select('student_id, subject_id, tutor_id, percent, discount_type, amount_eur, valid_from, valid_until, note, created_at')
       .in('student_id', studentIds).eq('organization_id', organizationId)
@@ -467,6 +490,7 @@ async function loadBatchDrafts(body: RequestBody, onlyStudentIds?: string[]): Pr
     periodStart,
     periodEnd,
     dueDate,
+    serviceCharges: serviceCharges.filter(row => ids.includes(row.student_id)),
   })).filter((draft): draft is DraftContext => Boolean(draft)).filter((draft) => (
     // Keep historical charges and issued invoices for former students, while
     // excluding trashed test rows with nothing left to settle.
@@ -514,6 +538,8 @@ function digestPayload(draft: DraftContext, userId: string) {
       statusConfirmedAt: session.statusConfirmedAt, reason: session.reason, decisionId: session.decisionId })),
     lines: draft.lines.map((line) => ({
       studentId: line.studentId,
+      source: line.source,
+      ...(line.source === 'service' ? { serviceChargeId: line.serviceChargeId, serviceChargeVersion: line.serviceChargeVersion, serviceDate: line.serviceDate } : {}),
       subjectId: line.subjectId,
       description: line.description,
       tutorId: line.tutorId,
@@ -559,7 +585,7 @@ async function renderDraftPdf(draft: DraftContext, invoiceNumber: string, previe
     creditAppliedEur: draft.creditAppliedEur,
     creditSources: allocateSchoolInvoiceCredits(draft.credits, draft.totalEur),
     discountNote: discountNotesForInvoice(draft.lines),
-    issuerNote: schoolMonthlySupplementalInvoiceNote(draft.issuedInvoices),
+    issuerNote: schoolMonthlySupplementalInvoiceNote(draft.issuedInvoices, draft.lines.some(line => line.source === 'service')),
     issuedByName: typeof features.school_invoice_issued_by_name === 'string'
       ? features.school_invoice_issued_by_name
       : `${draft.org.name} administracija`,
@@ -572,7 +598,7 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
   if (draft.sessions.some((session) => session.reason === 'missing_price')) {
     throw new Error('Nenurodyta užsiėmimo kaina. Nustatykite ją papildomų užsiėmimų pasiūlyme (Sutartys) arba neįtraukite užsiėmimo į sąskaitą ir nurodykite priežastį.');
   }
-  if (!draft.lines.length) throw new Error('Pasirinktu laikotarpiu nėra patvirtintų apmokestinamų užsiėmimų. Peržiūrėkite lankomumą.');
+  if (!draft.lines.length) throw new Error('Pasirinktu laikotarpiu nėra apmokestinamų užsiėmimų ar kitų paslaugų.');
   if (draft.reviewSessionIds.length) {
     throw new Error('Prieš išsiunčiant patvirtinkite peržiūros laukiančių užsiėmimų įvykimą arba neįtraukite jų į sąskaitą ir nurodykite priežastį.');
   }
@@ -635,11 +661,12 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
     payment_status: 'pending',
     due_date: draft.dueDate,
     invoice_number: invoiceNumber,
-    issuer_note: schoolMonthlySupplementalInvoiceNote(draft.issuedInvoices),
+    issuer_note: schoolMonthlySupplementalInvoiceNote(draft.issuedInvoices, draft.lines.some(line => line.source === 'service')),
   };
   const lineRows = draft.lines.map((line, index) => ({
     sort_order: index,
-    description: line.description,
+    description: line.source === 'service' && draft.payerChildNames && draft.payerChildNames.length > 1
+      ? `${line.studentName} · ${line.description}` : line.description,
     unit_price_eur: line.unitPriceEur,
     quantity: line.quantity,
     original_amount_eur: line.originalAmountEur,
@@ -652,14 +679,29 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
     consultation_id: null,
     session_id: line.sessionIds[0] || null,
     session_ids: line.sessionIds,
+    ...(line.source === 'service' ? {
+      service_charge_id: line.serviceChargeId,
+      service_charge_version: line.serviceChargeVersion,
+      service_date: line.serviceDate,
+    } : {}),
   }));
-  const { data: invoice, error: invoiceError } = previousIds.length
+  const atomicServices = draft.servicesEnabled || draft.lines.some(line => line.source === 'service');
+  const serviceWrite = atomicServices ? await supabase.rpc('issue_school_service_invoice', {
+    p_organization_id: draft.organizationId, p_previous: draft.previousInvoices, p_invoice: invoiceInsert, p_lines: lineRows,
+  }) : null;
+  const { data: invoice, error: invoiceError } = serviceWrite || (previousIds.length
     ? { data: await replaceSchoolInvoices(supabase, 'payer', draft.organizationId, null,
         draft.previousInvoices, invoiceInsert, lineRows), error: null }
-    : await supabase.from('school_monthly_invoices').insert(invoiceInsert).select('*').single();
-  if (invoiceError || !invoice) throw new Error(invoiceError?.message || 'Nepavyko sukurti sąskaitos.');
+    : await supabase.from('school_monthly_invoices').insert(invoiceInsert).select('*').single());
+  if (invoiceError || !invoice) {
+    if (atomicServices && /already invoiced|Service changed|Invoice changed|cannot be regenerated/i.test(invoiceError?.message || '')) {
+      throw new Error('Sąskaitos duomenys pasikeitė. Peržiūrėkite ją dar kartą.');
+    }
+    if (atomicServices && invoiceError?.code === 'PGRST202') throw new Error('Pirmiausia reikia pritaikyti vienkartinių paslaugų duomenų bazės migraciją.');
+    throw new Error(invoiceError?.message || 'Nepavyko sukurti sąskaitos.');
+  }
   const storedLines = lineRows.map((line) => ({ ...line, invoice_id: invoice.id }));
-  const { error: lineError } = previousIds.length
+  const { error: lineError } = previousIds.length || atomicServices
     ? { error: null } : await supabase.from('school_monthly_invoice_lines').insert(storedLines);
   if (lineError) throw new Error(lineError.message);
   const storagePath = `school-monthly/${draft.organizationId}/${invoice.id}.pdf`;
@@ -687,6 +729,41 @@ async function issueAndSendDraft(draft: DraftContext, userId: string, previewTok
     emailSent: Boolean(delivery.sent || delivery.alreadySent),
     deliveryReason: delivery.reason,
   };
+}
+
+/** Existing monthly cron uses the same reviewed payer composition for one-off
+ * services, including children without contracts. Never silently replaces drafts. */
+export async function billPendingSchoolServicePayers(organizationId: string, periodStart: string, periodEnd: string, dryRun: boolean, deadlineAt = Date.now() + 240_000) {
+  const { drafts } = await loadBatchDrafts({ organizationId, periodStart, periodEnd });
+  const pendingPayers = new Set(drafts.filter(draft => draft.servicesEnabled && draft.lines.some(line => line.source === 'service'))
+    .map(draft => schoolPayerKey(draft.student.payer_email, draft.student.id)));
+  const handledStudentIds = drafts.filter(draft => pendingPayers.has(schoolPayerKey(draft.student.payer_email, draft.student.id)))
+    .flatMap(draft => draft.payerStudentIds || [draft.student.id]);
+  const result = { handledStudentIds, created: 0, emailed: 0, held: 0, failed: 0, continuationRequired: false,
+    review: [] as Array<{ organization_id: string; reason: string }>, planned: [] as Array<Record<string, unknown>> };
+  for (const payer of pendingPayers) {
+    if (Date.now() >= deadlineAt) { result.continuationRequired = true; break; }
+    const family = drafts.filter(draft => schoolPayerKey(draft.student.payer_email, draft.student.id) === payer);
+    if (family.some(draft => draft.reviewSessionIds.length || draft.previousInvoices.length)
+      || !family[0]?.profile || !String(family[0]?.student.payer_email || '').trim()) {
+      result.held++; result.review.push({ organization_id: organizationId, reason: 'one_off_services_require_invoice_review' }); continue;
+    }
+    const draft = composePayerDraft(family.filter(child => child.lines.length));
+    if (dryRun) {
+      result.planned.push({ organization_id: organizationId, student_ids: draft.payerStudentIds,
+        total_eur: draft.totalEur, service_charge_ids: draft.lines.flatMap(line => line.source === 'service' ? [line.serviceChargeId] : []) });
+      continue;
+    }
+    try {
+      const sent = await issueAndSendDraft(draft, 'monthly-cron', previewDigest(digestPayload(draft, 'monthly-cron')));
+      result.created++;
+      if (sent.emailSent) result.emailed++; else result.failed++;
+    } catch (error) {
+      result.failed++;
+      console.error('[school-service-invoice-cron]', organizationId, error instanceof Error ? error.message : error);
+    }
+  }
+  return result;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -729,7 +806,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           totalEur: draft.totalEur,
           creditAppliedEur: draft.creditAppliedEur,
           amountDueEur: draft.amountDueEur,
-          lessonCount: draft.lines.reduce((sum, line) => sum + line.quantity, 0),
+          lessonCount: draft.lines.filter(line => line.source === 'lesson').reduce((sum, line) => sum + line.quantity, 0),
+          serviceCount: draft.lines.filter(line => line.source === 'service').reduce((sum, line) => sum + line.quantity, 0),
           reviewSessionIds: draft.reviewSessionIds,
           reviewReasons: [...new Set(draft.sessions.flatMap((session) => (
             session.reason === 'unconfirmed' || session.reason === 'contract_review' || session.reason === 'missing_price' ? [session.reason] : []
@@ -871,6 +949,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       canEditAttendance,
       canEditBilling,
       reviewSessionIds: current.reviewSessionIds,
+      serviceLines: current.lines.filter(line => line.source === 'service'),
     });
     if (body.action === 'billing-decision') {
       const reason = String(body.reason || '').trim();
@@ -911,7 +990,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ...reviewData(draft), activities });
     }
     if (!draft.profile) throw new Error('Pirmiausia užpildykite mokyklos sąskaitų rekvizitus.');
-    if (!draft.lines.length) throw new Error('Pasirinktu laikotarpiu nėra patvirtintų apmokestinamų užsiėmimų. Peržiūrėkite lankomumą.');
+    if (!draft.lines.length) throw new Error('Pasirinktu laikotarpiu nėra apmokestinamų užsiėmimų ar kitų paslaugų.');
     if (body.action === 'preview') {
       const pdf = await renderDraftPdf(draft, previewInvoiceNumber(draft.profile) || 'PERŽIŪRA', true);
       return res.status(200).json({

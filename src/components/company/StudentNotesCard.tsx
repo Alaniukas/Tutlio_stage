@@ -3,6 +3,7 @@ import { Loader2, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/lib/i18n';
 import { loadStudentAdminNotes, saveStudentNotes, type StudentNotesDraft } from '@/lib/studentNotes';
+import { withRequestDeadline } from '@/lib/requestDeadline';
 import StudentNotesFields from './StudentNotesFields';
 
 type Props = {
@@ -24,19 +25,22 @@ export default function StudentNotesCard({ studentId, studentIds, tutorComment, 
   const studentIdsKey = [...new Set(studentIds)].sort().join(',');
 
   useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false;
     setNotes(null);
     setDraft(null);
     setEditing(false);
     setError('');
-    void loadStudentAdminNotes(studentId, studentIdsKey.split(',')).then((data) => {
+    void withRequestDeadline((signal) => loadStudentAdminNotes(
+      studentId, studentIdsKey.split(','), AbortSignal.any([controller.signal, signal]),
+    )).then((data) => {
       if (!cancelled) {
         setNotes({ admin_comment: data?.admin_comment || '', last_contacted_at: data?.last_contacted_at || '', tutor_comment: tutorComment });
       }
     }).catch(() => {
       if (!cancelled) setError('load');
     });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
   }, [studentId, studentIdsKey, tutorComment, retry]);
 
   const save = async () => {

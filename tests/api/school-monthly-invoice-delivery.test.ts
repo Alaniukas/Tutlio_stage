@@ -29,6 +29,13 @@ function db(initial: any = null, opts: { stampError?: boolean; missingSchema?: b
 function run(client: any, send: any, override: any = {}) { return deliverSchoolMonthlyInvoiceOnce({ supabase: client, invoiceId: 'inv', organizationId: 'org', payload, send, now, ...override }); }
 
 describe('durable invoice delivery', () => {
+  it('does not retry an unsent email after the invoice is cancelled', async () => {
+    const database = db({ id: 'inv', organization_id: 'org', payload, attempted_at: now.toISOString() });
+    database.state.invoice.payment_status = 'cancelled';
+    const send = vi.fn();
+    expect(await run(database.client, send)).toMatchObject({ sent: false });
+    expect(send).not.toHaveBeenCalled();
+  });
   it('delivers an invoice fully paid with a carried over balance', async () => {
     const database=db(); Object.assign(database.state.invoice,{ total_eur:10,credit_applied_eur:10,payment_status:'paid',paid_via:'credit' });
     const send=vi.fn().mockResolvedValue({id:'credit-email'});

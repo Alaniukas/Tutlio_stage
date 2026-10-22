@@ -8,6 +8,7 @@ export type SchoolFinanceExportRow = {
   parentEmail: string;
   contractNumber: string;
   contractSigningStatus: string;
+  contractArchivedAt: string | null;
   annualFee: number;
   installmentNumber: number | null;
   installmentAmount: number | null;
@@ -133,10 +134,10 @@ export const PAYMENT_STATUS_BADGE_CLASS: Record<ReturnType<typeof paymentStatusT
 
 export function inferPaymentMethod(
   paymentStatus: string,
-  stripeCheckoutSessionId: string | null | undefined,
+  stripePaymentIntentId: string | null | undefined,
 ): SchoolFinanceExportRow['paymentMethod'] {
   if (paymentStatus !== 'paid') return 'none';
-  return stripeCheckoutSessionId ? 'stripe' : 'manual';
+  return stripePaymentIntentId ? 'stripe' : 'manual';
 }
 
 type ContractLike = {
@@ -144,6 +145,7 @@ type ContractLike = {
   contract_number?: string | null;
   annual_fee?: number | null;
   signing_status?: string | null;
+  archived_at?: string | null;
   student?: {
     full_name?: string | null;
     payer_name?: string | null;
@@ -159,6 +161,7 @@ type InstallmentLike = {
   due_date: string;
   payment_status: 'pending' | 'paid' | 'overdue' | 'failed';
   stripe_checkout_session_id?: string | null;
+  stripe_payment_intent_id?: string | null;
   paid_at?: string | null;
   contract?: ContractLike | null;
 };
@@ -167,31 +170,35 @@ export function buildSchoolFinanceRows(
   contracts: ContractLike[],
   installments: InstallmentLike[],
 ): SchoolFinanceExportRow[] {
-  const rows: SchoolFinanceExportRow[] = installments.map((inst) => {
-    const contract = inst.contract;
-    const student = contract?.student;
-    return {
-      contractId: inst.contract_id,
-      studentName: student?.full_name || '',
-      parentName: student?.payer_name || student?.full_name || '',
-      parentEmail: student?.payer_email || student?.email || '',
-      contractNumber: contract?.contract_number || '',
-      contractSigningStatus: contract?.signing_status || '',
-      annualFee: Number(contract?.annual_fee || 0),
-      installmentNumber: inst.installment_number,
-      installmentAmount: Number(inst.amount),
-      dueDate: inst.due_date,
-      paymentStatus: inst.payment_status,
-      paidAt: inst.paid_at || null,
-      paymentMethod: inferPaymentMethod(inst.payment_status, inst.stripe_checkout_session_id),
-      stripeCheckoutSessionId: inst.stripe_checkout_session_id || null,
-    };
-  });
+  const rows: SchoolFinanceExportRow[] = installments
+    .filter((inst) => !inst.contract?.archived_at || inst.payment_status === 'paid')
+    .map((inst) => {
+      const contract = inst.contract;
+      const student = contract?.student;
+      return {
+        contractId: inst.contract_id,
+        studentName: student?.full_name || '',
+        parentName: student?.payer_name || student?.full_name || '',
+        parentEmail: student?.payer_email || student?.email || '',
+        contractNumber: contract?.contract_number || '',
+        contractSigningStatus: contract?.signing_status || '',
+        contractArchivedAt: contract?.archived_at || null,
+        annualFee: Number(contract?.annual_fee || 0),
+        installmentNumber: inst.installment_number,
+        installmentAmount: Number(inst.amount),
+        dueDate: inst.due_date,
+        paymentStatus: inst.payment_status,
+        paidAt: inst.paid_at || null,
+        paymentMethod: inferPaymentMethod(inst.payment_status, inst.stripe_payment_intent_id),
+        stripeCheckoutSessionId: inst.stripe_checkout_session_id || null,
+      };
+    });
 
   const contractIdsWithInstallments = new Set(installments.map((i) => i.contract_id));
   for (const contract of contracts) {
     if (contractIdsWithInstallments.has(contract.id)) continue;
     if (contract.signing_status !== 'signed') continue;
+    if (contract.archived_at) continue;
     const student = contract.student;
     rows.push({
       contractId: contract.id,
@@ -200,6 +207,7 @@ export function buildSchoolFinanceRows(
       parentEmail: student?.payer_email || student?.email || '',
       contractNumber: contract.contract_number || '',
       contractSigningStatus: contract.signing_status || '',
+      contractArchivedAt: null,
       annualFee: Number(contract.annual_fee || 0),
       installmentNumber: null,
       installmentAmount: null,
@@ -299,6 +307,7 @@ export function schoolFinanceTableData(
     t('school.financeColStatus'),
     t('school.financeColPaidAt'),
     t('school.financeColMethod'),
+    t('school.archive.archivedAt'),
   ];
 
   const body = rows.map((row) => [
@@ -314,6 +323,7 @@ export function schoolFinanceTableData(
     paymentStatusLabel(row.paymentStatus, t),
     schoolFinanceDateKey(row.paidAt) || '',
     paymentMethodLabel(row.paymentMethod, t),
+    schoolFinanceDateKey(row.contractArchivedAt) || '',
   ]);
 
   return { headers, body };

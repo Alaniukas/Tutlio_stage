@@ -45,6 +45,7 @@ vi.mock('@/components/ui/month-input', () => ({ MonthInput: (props: InputHTMLAtt
 
 import OrgTutorFinanceSummary from '@/components/OrgTutorFinanceSummary';
 import CreateInvoiceModal from '@/components/CreateInvoiceModal';
+import { schoolTutorSeptemberRows } from '../fixtures/school-tutor-september';
 
 function query(table: string) {
   const request = { table, select: '', filters: [] as Array<[string, string, unknown]>, range: undefined as [number, number] | undefined };
@@ -257,15 +258,27 @@ describe('school teacher Finance', () => {
   it.each([
     { name: 'Laisvi vaikai', organizationId: '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17', feature: false },
     { name: 'a school using the confirmation feature', organizationId: 'school', feature: true },
-  ])('counts stored completed $name meetings even without a confirmation stamp', async ({ organizationId, feature }) => {
+  ])('waits for confirmation before counting completed $name meetings', async ({ organizationId, feature }) => {
     state.organizationId = organizationId;
     state.manualConfirmation = feature;
     state.rate = 45;
     state.rows.forEach((row) => { row.status_confirmed_at = null; row.tutor_pay_eur_snapshot = 45; });
     render(<OrgTutorFinanceSummary />);
     const label = await screen.findByText(/^orgFinance.schoolFinalizedLessons/);
-    expect(label.nextElementSibling?.textContent).toBe('1');
-    expect(screen.getByText('€45.00')).toBeTruthy();
+    expect(label.nextElementSibling?.textContent).toBe('0');
+    expect(screen.getByText('€0.00')).toBeTruthy();
+    expect(screen.queryByText('€45.00')).toBeNull();
+  });
+  it.each([false, true])('shows six September meetings and €270 with first-week cancellation=%s', async firstWeekCancelled => {
+    state.organizationId = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
+    state.rate = 45;
+    state.rows = schoolTutorSeptemberRows(state.organizationId, firstWeekCancelled);
+    render(<OrgTutorFinanceSummary />);
+    fireEvent.change(document.querySelector<HTMLInputElement>('input[type=month]')!, { target: { value: '2026-09' } });
+    const label = await screen.findByText(/^orgFinance.schoolFinalizedLessons/);
+    await waitFor(() => expect(label.nextElementSibling?.textContent).toBe('6'));
+    expect(screen.getByText('€270.00')).toBeTruthy();
+    expect(screen.queryByText('€360.00')).toBeNull();
   });
   it('matches the reported 28 meetings and €1260 instead of 126 attended children and €5670', async () => {
     state.rate = 45;
@@ -428,16 +441,27 @@ describe('school teacher invoice preview', () => {
     expect(state.posts.find(row => !row.precheckOnly).sessionIds).toEqual(current.map(row => row.id));
   });
 
-  it('invoices stored completed meetings without a confirmation stamp', async () => {
+  it('blocks a completed meeting without confirmation from the invoice preview', async () => {
     state.manualConfirmation = true;
     state.rate = 45;
     state.rows.forEach((row) => { row.status_confirmed_at = null; row.tutor_pay_eur_snapshot = 45; });
     await preview();
-    expect(await screen.findByText(/invoiceCreate.sessionsCount:1 \| common.total: €45.00/)).toBeTruthy();
-    expect(screen.queryByText('€90.00')).toBeNull();
+    expect(await screen.findByText('invoiceCreate.noSessions')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'invoiceCreate.generate' })).toBeNull();
+    expect(state.posts.filter(row => !row.precheckOnly)).toHaveLength(0);
+  });
+
+  it.each([false, true])('previews and submits only six confirmed September meetings with first-week cancellation=%s', async firstWeekCancelled => {
+    state.organizationId = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
+    state.rate = 45;
+    state.rows = schoolTutorSeptemberRows(state.organizationId, firstWeekCancelled);
+    await preview();
+    expect(await screen.findByText(/invoiceCreate.sessionsCount:6 \| common.total: €270.00/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'invoiceCreate.generate' }));
     await waitFor(() => expect(state.posts.filter(row => !row.precheckOnly)).toHaveLength(1));
-    expect(state.posts.find(row => !row.precheckOnly).sessionIds).toEqual(state.rows.map(row => row.id));
+    const submitted = state.posts.find(row => !row.precheckOnly);
+    expect(submitted.sessionIds).toEqual(state.rows.filter(row => row.status === 'completed' && row.status_confirmed_at).map(row => row.id));
+    expect(submitted.sessionIds).toHaveLength(12);
   });
 
   it('matches the same September amount and retains all 141 attendance rows when issuing', async () => {

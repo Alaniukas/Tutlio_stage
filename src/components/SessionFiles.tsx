@@ -6,6 +6,7 @@ import { Paperclip, Upload, Trash2, Download, Loader2 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { homeworkSubmissionDisplayName, isHomeworkSubmissionFile } from '@/lib/sessionFileVisibility';
 import { orderSessionFileFolders, sessionFilesListOptions, studentFilesPollIntervalMs } from '@/lib/sessionStorageList';
+import { withRequestDeadline } from '@/lib/requestDeadline';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -28,10 +29,14 @@ interface SessionFilesProps {
 
 export default function SessionFiles({ sessionId, role, groupSessionIds }: SessionFilesProps) {
   const { t } = useTranslation();
-  const [files, setFiles] = useState<StorageFile[]>([]);
+  const scope = `${role}:${sessionId}`;
+  const [filesScope, setFilesScope] = useState('');
+  const [loadedFiles, setFiles] = useState<StorageFile[]>([]);
+  const files = filesScope === scope ? loadedFiles : [];
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [resolvedGroupIds, setResolvedGroupIds] = useState<string[]>([]);
   const [studentNameBySessionId, setStudentNameBySessionId] = useState<Record<string, string>>({});
@@ -97,20 +102,21 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
   async function fetchFiles(silent = false) {
     const gen = ++fetchGenRef.current;
     if (!silent) setLoading(true);
+    setLoadFailed(false);
     try {
       if (role === 'student') {
         lastStudentPollAtRef.current = Date.now();
-        const resp = await fetch('/api/student-session-files', {
-          method: 'POST',
-          headers: await authHeaders(),
-          body: JSON.stringify({ action: 'list', sessionId }),
+        const { resp, json } = await withRequestDeadline(async (signal) => {
+          const resp = await fetch('/api/student-session-files', {
+            method: 'POST', headers: await authHeaders(), signal,
+            body: JSON.stringify({ action: 'list', sessionId }),
+          });
+          const json = await resp.json();
+          return { resp, json };
         });
-        const json = await resp.json().catch(() => ({}));
         if (gen !== fetchGenRef.current) return;
         if (!resp.ok) {
-          setError(typeof json.error === 'string' ? json.error : t('files.downloadFailed'));
-          setFiles([]);
-          return;
+          throw new Error('session_files_load_failed');
         }
         const rows = Array.isArray(json.files) ? json.files : [];
         setFiles(
@@ -130,6 +136,7 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
             ownSubmission: !!f.own,
           })),
         );
+        setFilesScope(scope);
         return;
       }
 
@@ -141,9 +148,9 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
       const merged: StorageFile[] = [];
       for (const folderId of allIds) {
         if (gen !== fetchGenRef.current) return;
-        const { data } = await supabase.storage
-          .from('session-files')
-          .list(folderId, sessionFilesListOptions());
+        const { data, error: readError } = await withRequestDeadline(async () => supabase.storage
+          .from('session-files').list(folderId, sessionFilesListOptions()));
+        if (readError) throw readError;
         for (const f of data ?? []) {
           if (!f.name || f.name.startsWith('.')) continue;
           if (seen.has(`${folderId}/${f.name}`)) continue;
@@ -157,6 +164,9 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
       }
       if (gen !== fetchGenRef.current) return;
       setFiles(merged);
+      setFilesScope(scope);
+    } catch {
+      if (gen === fetchGenRef.current) setLoadFailed(true);
     } finally {
       if (gen === fetchGenRef.current && !silent) setLoading(false);
     }
@@ -383,7 +393,7 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
         <div className="flex items-center gap-2 text-xs text-gray-400 py-1">
           <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('common.loading')}
         </div>
-      ) : files.length === 0 ? (
+      ) : files.length === 0 && !loadFailed ? (
         <p className="text-xs text-gray-400 py-1">
           {role === 'tutor' ? t('files.noFiles') : t('files.noFilesTutor')}
         </p>
@@ -436,6 +446,12 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
         </ul>
       )}
 
+      {loadFailed && <div role="alert" className="text-xs text-red-500 mt-1.5">
+        <p>{t('files.loadFailed')}</p>
+        <Button size="sm" variant="outline" className="mt-1" onClick={() => void fetchFiles()} disabled={loading}>
+          {t('files.retry')}
+        </Button>
+      </div>}
       {error && <p className="text-xs text-red-500 mt-1.5">{error}</p>}
     </div>
   );

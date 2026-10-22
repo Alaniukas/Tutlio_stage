@@ -1,5 +1,3 @@
-import { tutorPairingTranslations } from './tutorPairingTranslations.js';
-import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
@@ -130,9 +128,18 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
+import { schoolServiceTranslations } from './schoolServiceTranslations.js';
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 export const dk: Record<string, string> = {
+  ...schoolServiceTranslations.dk,
   ...tutorPairingTranslations.dk,
   ...studentLoadingTranslations.dk,
+  'invoices.cancelInvoice': "Annuller faktura",
+  'invoices.cancelInvoiceHint': "Fakturaen skal ikke længere betales, og betalingslinket holder op med at virke. Nummeret og dokumentet bevares i historikken. Angiv en årsag (mindst 3 tegn).",
+  'invoices.cancelReason': "Årsag til annullering",
+  'invoices.cancelSuccess': "Fakturaen er annulleret.",
+  'invoices.cancelFailed': "Fakturaen kunne ikke annulleres. Prøv igen.",
   'school.archive.title': "Kontraktarkiv",
   'school.archive.description': "Se og download arkiverede kontrakter.",
   'school.archive.search': "Søg efter kontraktnummer, elev eller betaler",

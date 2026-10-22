@@ -6,6 +6,12 @@ import {
 } from '@/lib/managedFamilyContact';
 
 describe('managedFamilyContact', () => {
+  it('allows the explicitly shared parent/student email while retaining a separate-identity opt-out', () => {
+    const input = { studentEmail: ' Family@example.test ', parentEmail: 'family@example.test', parentName: 'Parent' };
+    expect(validateManagedFamilyContact(input)).toBeNull();
+    expect(validateManagedFamilyContact({ ...input, allowSharedLogin: false })).toBe('emails_must_differ');
+  });
+
   it('allows student email without parent email', () => {
     expect(validateManagedFamilyContact({
       studentEmail: 'mokinys@example.test',

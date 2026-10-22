@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const migration = readFileSync('supabase/migrations/20261007092500_whiteboard_storage_session_lookup.sql', 'utf8');
 const parentMigration = readFileSync('supabase/migrations/20261015080856_whiteboard_parent_read_access.sql', 'utf8');
+const filesMigration = readFileSync('supabase/migrations/20261022122815_lesson_storage_authorization_performance.sql', 'utf8');
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const scene = `${id(31)}/scene.json`;
 let db: PGlite;
@@ -27,6 +28,9 @@ beforeAll(async () => {
           WHERE ps.student_id=p_student_id AND pp.user_id=auth.uid());
     $$;
     CREATE TABLE sessions(id uuid PRIMARY KEY, tutor_id uuid, student_id uuid);
+    CREATE FUNCTION public.write_blocked_by_org_suspension() RETURNS boolean LANGUAGE sql STABLE AS $$
+      SELECT current_setting('test.suspended',true) = 'true';
+    $$;
     CREATE TABLE storage.objects(bucket_id text, name text, metadata text, PRIMARY KEY(bucket_id,name));
     CREATE SEQUENCE private.scope_checks;
     CREATE FUNCTION private.check_session_scope(uuid) RETURNS boolean LANGUAGE sql STABLE AS $$
@@ -72,9 +76,10 @@ beforeAll(async () => {
   `);
   await db.exec(migration);
   await db.exec(parentMigration);
+  await db.exec(filesMigration);
 }, 30_000);
 beforeEach(async () => {
-  await db.exec(`RESET ROLE; SELECT set_config('test.deny_scope','false',false);
+  await db.exec(`RESET ROLE; SELECT set_config('test.deny_scope','false',false); SELECT set_config('test.suspended','false',false);
     DELETE FROM storage.objects; ALTER SEQUENCE private.scope_checks RESTART WITH 1;
     INSERT INTO storage.objects VALUES('whiteboard-data','${scene}','original'),('whiteboard-data','${id(32)}/scene.json','other org');`);
 });
@@ -161,5 +166,38 @@ describe('whiteboard Storage session lookups', () => {
     expect(Number(checks)).toBeLessThan(10);
     const plan = await asUser(id(11), `EXPLAIN SELECT id FROM sessions WHERE id=private.whiteboard_object_session_id('${scene}') AND tutor_id=auth.uid()`);
     expect(JSON.stringify(plan)).toContain('sessions_pkey');
+  });
+
+  it('keeps lesson files scoped to the assigned tutor and student, with tutor-only writes', async () => {
+    const file = `${id(31)}/lesson.pdf`;
+    await db.exec(`INSERT INTO storage.objects VALUES('session-files','${file}','lesson'),('session-files','${id(32)}/other.pdf','other');`);
+    const read = `SELECT metadata FROM storage.objects WHERE bucket_id='session-files' AND name='${file}'`;
+    for (const caller of [id(11), id(51)]) expect(await asUser(caller, read)).toEqual([{ metadata: 'lesson' }]);
+    for (const caller of [id(12), id(52), id(61), id(62), id(21), null]) expect(await asUser(caller, read)).toEqual([]);
+    expect(await asUser(null, read, 'anon')).toEqual([]);
+    expect(await asUser(id(11), `UPDATE storage.objects SET metadata='updated' WHERE bucket_id='session-files' AND name='${file}' RETURNING metadata`))
+      .toEqual([{ metadata: 'updated' }]);
+    expect(await asUser(id(51), `UPDATE storage.objects SET metadata='bad' WHERE bucket_id='session-files' AND name='${file}' RETURNING metadata`)).toEqual([]);
+    const checks = Number((await db.query<{ last_value: number }>('SELECT last_value FROM private.scope_checks')).rows[0].last_value);
+    expect(checks).toBeLessThan(100);
+  });
+
+  it('preserves session restrictions and suspension checks for lesson-file reads and writes', async () => {
+    const file = `${id(31)}/lesson.pdf`;
+    await db.exec(`INSERT INTO storage.objects VALUES('session-files','${file}','lesson'); SELECT set_config('test.deny_scope','true',false);`);
+    expect(await asUser(id(11), `SELECT name FROM storage.objects WHERE bucket_id='session-files' AND name='${file}'`)).toEqual([]);
+    await expect(asUser(id(11), `INSERT INTO storage.objects VALUES('session-files','${id(31)}/new.pdf','bad')`)).rejects.toThrow(/row-level security/);
+    await db.exec("SELECT set_config('test.deny_scope','false',false); SELECT set_config('test.suspended','true',false)");
+    await expect(asUser(id(11), `INSERT INTO storage.objects VALUES('session-files','${id(31)}/new.pdf','bad')`)).rejects.toThrow(/row-level security/);
+    expect(await asUser(id(11), `DELETE FROM storage.objects WHERE bucket_id='session-files' AND name='${file}' RETURNING name`)).toEqual([]);
+  });
+
+  it('uses invoker rights and rejects anonymous execution, malformed and unknown session paths', async () => {
+    const properties = await db.query<{ elevated: boolean; anonymous: boolean }>(`SELECT prosecdef AS elevated,
+      has_function_privilege('anon',oid,'execute') AS anonymous FROM pg_proc WHERE oid='private.lesson_storage_access(uuid,text)'::regprocedure`);
+    expect(properties.rows).toEqual([{ elevated: false, anonymous: false }]);
+    for (const path of ['invalid/file.pdf', `${id(31)}.json/file.pdf`, `${id(9999)}/file.pdf`]) {
+      await expect(asUser(id(11), `INSERT INTO storage.objects VALUES('session-files','${path}','bad')`)).rejects.toThrow(/row-level security/);
+    }
   });
 });

@@ -116,20 +116,24 @@ describe('buildSchoolMonthlyInvoiceEmailData', () => {
   });
 });
 
-function fakeSupabase(state: { status: string }) {
+function fakeSupabase(state: { status: string; beforeUpdateStatus?: string }) {
   const updates: Array<Record<string, unknown>> = [];
   const builder = () => {
     let patch: Record<string, unknown> | null = null;
+    let requiredStatus: string | undefined;
+    const result = () => {
+      if (patch && state.beforeUpdateStatus) state.status = state.beforeUpdateStatus;
+      if (requiredStatus && state.status !== requiredStatus) return { data: null, error: null };
+      if (patch) { updates.push(patch); if (patch.payment_status === 'paid') state.status = 'paid'; }
+      return { data: { id: 'inv-1', payment_status: state.status }, error: null };
+    };
     const api: any = {
       select: () => api,
-      eq: () => api,
+      eq: (key: string, value: string) => { if (key === 'payment_status') requiredStatus = value; return api; },
       neq: () => api,
       update: (p: Record<string, unknown>) => { patch = p; return api; },
-      maybeSingle: async () => ({ data: { id: 'inv-1', payment_status: state.status }, error: null }),
-      then: (resolve: (v: any) => unknown) => {
-        if (patch) { updates.push(patch); if (patch.payment_status === 'paid') state.status = 'paid'; }
-        return resolve({ error: null });
-      },
+      maybeSingle: async () => result(),
+      then: (resolve: (v: any) => unknown) => resolve(result()),
     };
     return api;
   };
@@ -171,6 +175,24 @@ describe('sendSchoolMonthlyInvoiceEmail', () => {
 });
 
 describe('markSchoolMonthlyInvoicePaid', () => {
+  it('rejects a delayed payment callback for a cancelled invoice without rewriting it', async () => {
+    const db = fakeSupabase({ status: 'cancelled' });
+    expect(await markSchoolMonthlyInvoicePaid(db.client, 'inv-1', { paidVia: 'stripe' }))
+      .toEqual({ ok: false, error: 'Invoice is cancelled' });
+    expect(db.updates).toEqual([]);
+  });
+  it('does not revive an invoice cancelled between the read and payment update', async () => {
+    const db = fakeSupabase({ status: 'pending', beforeUpdateStatus: 'cancelled' });
+    expect(await markSchoolMonthlyInvoicePaid(db.client, 'inv-1', { paidVia: 'stripe' }))
+      .toEqual({ ok: false, error: 'Invoice is no longer pending' });
+    expect(db.updates).toEqual([]);
+  });
+  it('recognizes a concurrent payment confirmation without changing its bookkeeping', async () => {
+    const db = fakeSupabase({ status: 'pending', beforeUpdateStatus: 'paid' });
+    expect(await markSchoolMonthlyInvoicePaid(db.client, 'inv-1', { paidVia: 'stripe' }))
+      .toEqual({ ok: true, alreadyPaid: true });
+    expect(db.updates).toEqual([]);
+  });
   it('marks a pending invoice paid once and reports repeats as already paid', async () => {
     const db = fakeSupabase({ status: 'pending' });
     expect(await markSchoolMonthlyInvoicePaid(db.client, 'inv-1', { paidVia: 'stripe', stripePaymentIntentId: 'pi_1' })).toEqual({ ok: true, alreadyPaid: false });

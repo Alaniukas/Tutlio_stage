@@ -65,6 +65,7 @@ export function schoolMonthlyInvoicesIssuedForStudents(
 /** Payer-facing note when a later S.F. covers sessions missed by an already emailed invoice. */
 export function schoolMonthlySupplementalInvoiceNote(
   issued: Array<{ invoice_number?: string | null; total_eur?: number | string | null }>,
+  includesServices = false,
 ): string | null {
   const billed = issued
     .map((invoice) => {
@@ -77,5 +78,6 @@ export function schoolMonthlySupplementalInvoiceNote(
     })
     .filter(Boolean);
   if (!billed.length) return null;
+  if (includesServices) return `Ankstesnėje sąskaitoje ${billed.join(', ')} šios paslaugos nebuvo įtrauktos. Siunčiame papildomą sąskaitą tik už likusias paslaugas. Ankstesnės sąskaitos kartoti nereikia.`;
   return `Atsiprašome – ankstesnėje sąskaitoje ${billed.join(', ')} šie užsiėmimai nebuvo įtraukti. Siunčiame papildomą sąskaitą tik už likusius užsiėmimus. Ankstesnės sąskaitos kartoti nereikia.`;
 }

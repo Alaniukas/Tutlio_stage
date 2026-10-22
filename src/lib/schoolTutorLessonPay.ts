@@ -51,7 +51,9 @@ function snapshotAmount(child: SchoolTutorPayRow): number | null {
 export function schoolTutorPayOccurrences<T extends SchoolTutorPayRow>(
   rows: T[], defaultRate: number | null | undefined, now: Date = new Date(), options: SchoolTutorPayOptions = {},
 ): SchoolTutorPayOccurrence<T>[] {
-  const payOptions: SchoolTutorPayOptions = { ...options, countStoredCompleted: true };
+  // Financial totals must honor the organization's confirmation policy. A
+  // stored completed status alone can come from the old automatic completion.
+  const payOptions: SchoolTutorPayOptions = { ...options, countStoredCompleted: false };
   return schoolMeetingOccurrences(rows, payOptions).flatMap(({ key, rows: children }) => {
     const sessions = children.filter(child => child.source_kind !== 'attendance');
     const authoritativeRealStudentIds = new Set(sessions.filter(child =>
@@ -78,11 +80,8 @@ export function schoolTutorPayOccurrences<T extends SchoolTutorPayRow>(
       if (child.source_kind !== 'attendance' && attendedStudentIds.has(child.student_id)
         && !child.status_confirmed_at) continue;
       if (isUnconfirmedAutomaticNoShow(child)) continue;
-      if (child.status === 'completed') {
-        /* Stored completed is a conducted meeting even without a stamp. */
-      } else if (child.status === 'no_show') {
-        if (options.requireConfirmation && !child.status_confirmed_at) continue;
-      } else continue;
+      if (options.requireConfirmation && !child.status_confirmed_at) continue;
+      if (!['completed', 'no_show'].includes(child.status || '')) continue;
       const amount = snapshotAmount(child);
       if (amount == null) continue;
       if (child.status_confirmed_at) stamped.push(amount);

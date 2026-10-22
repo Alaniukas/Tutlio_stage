@@ -35,9 +35,10 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 export async function getOrgAdminDashboardPath(
   sb: SupabaseClient,
   userId: string,
+  knownSeat?: Record<string, unknown>,
 ): Promise<OrgAdminDashboardPath> {
   try {
-    return await withTimeout(resolveOrgAdminDashboardPath(sb, userId), LOOKUP_TIMEOUT_MS);
+    return await withTimeout(resolveOrgAdminDashboardPath(sb, userId, knownSeat), LOOKUP_TIMEOUT_MS);
   } catch (err) {
     console.warn('[getOrgAdminDashboardPath]', err instanceof Error ? err.message : err);
     return '/company';
@@ -47,8 +48,9 @@ export async function getOrgAdminDashboardPath(
 async function resolveOrgAdminDashboardPath(
   sb: SupabaseClient,
   userId: string,
+  knownSeat?: Record<string, unknown>,
 ): Promise<OrgAdminDashboardPath> {
-  const primary = await sb
+  const primary = knownSeat ? { data: knownSeat, error: null } : await sb
     .from('organization_admins')
     .select('role, permissions, status, organization_id')
     .eq('user_id', userId)

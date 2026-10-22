@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   profileUpsert: vi.fn(),
   studentUpdates: [] as Record<string, unknown>[],
-  parentStudentUpsert: vi.fn(),
+  parentLinksRpc: vi.fn(),
 }));
 
 vi.mock('../../api/_lib/findAuthUserByEmail.js', () => ({
@@ -29,6 +29,7 @@ function database(scenario: Scenario) {
   let parentProfileQueryCount = 0;
 
   return {
+    rpc: mocks.parentLinksRpc,
     auth: {
       admin: {
         createUser: mocks.createUser,
@@ -125,7 +126,6 @@ function database(scenario: Scenario) {
       if (table === 'parent_students') {
         return {
           upsert: vi.fn((value) => {
-            mocks.parentStudentUpsert(value);
             return Promise.resolve({ error: null });
           }),
         };
@@ -156,6 +156,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv('JOIN_LINK_SECRET', 'test-secret');
   mocks.studentUpdates.length = 0;
+  mocks.parentLinksRpc.mockResolvedValue({ error: null });
   mocks.createUser.mockResolvedValue({
     data: { user: null },
     error: { code: 'email_exists', message: 'User already registered' },
@@ -187,9 +188,8 @@ describe('Mokslo Vaisiai existing account linking', () => {
         emailSent: false,
       },
     });
-    expect(mocks.parentStudentUpsert).toHaveBeenCalledWith({
-      parent_id: 'parent-profile',
-      student_id: 'student-1',
+    expect(mocks.parentLinksRpc).toHaveBeenCalledWith('link_managed_parent_students', {
+      p_parent_profile_id: 'parent-profile', p_student_ids: ['student-1'], p_allow_shared_login: true,
     });
     expect(mocks.send).not.toHaveBeenCalled();
   });
@@ -214,7 +214,9 @@ describe('Mokslo Vaisiai existing account linking', () => {
     });
 
     expect(result).toMatchObject({ ok: true });
-    expect(mocks.studentUpdates).toContainEqual({ linked_user_id: 'existing-parent' });
+    expect(mocks.parentLinksRpc).toHaveBeenCalledWith('link_managed_parent_students', {
+      p_parent_profile_id: 'parent-profile', p_student_ids: ['student-1'], p_allow_shared_login: true,
+    });
   });
 
   it('links the student row to its already-registered student auth account', async () => {

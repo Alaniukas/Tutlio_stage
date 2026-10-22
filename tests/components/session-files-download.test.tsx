@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 const state = vi.hoisted(() => ({ signed: vi.fn(), storageList: vi.fn(), fetch: vi.fn(), object: vi.fn(), revoke: vi.fn() }));
 vi.mock('../../src/lib/supabase', () => ({ supabase: {
   from: () => { const query: any = { select: () => query, eq: () => query, in: () => query,
@@ -29,6 +29,58 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('session file downloads', () => {
+  it('shows a retryable tutor listing failure instead of reporting that no files exist', async () => {
+    state.storageList.mockResolvedValueOnce({ data: null, error: { message: 'statement timeout' } });
+    render(<SessionFiles sessionId="lesson" role="tutor" groupSessionIds={groupIds} />);
+    await screen.findByRole('alert');
+    expect(screen.queryByText('files.noFiles')).toBeNull();
+    fireEvent.click(screen.getByText('files.retry'));
+    await screen.findByText('teacher.pdf');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('retains the previous list when a group refresh fails', async () => {
+    const view = render(<SessionFiles sessionId="lesson" role="tutor" groupSessionIds={groupIds} />);
+    await screen.findByText('teacher.pdf');
+    state.storageList.mockResolvedValue({ data: null, error: { message: 'temporary failure' } });
+    view.rerender(<SessionFiles sessionId="lesson" role="tutor" groupSessionIds={['lesson', 'sibling']} />);
+    await screen.findByRole('alert');
+    expect(screen.getByText('teacher.pdf')).toBeTruthy();
+  });
+
+  it('does not retain another lesson list when the next lesson fails to load', async () => {
+    const view = render(<SessionFiles sessionId="lesson" role="tutor" groupSessionIds={groupIds} />);
+    await screen.findByText('teacher.pdf');
+    state.storageList.mockResolvedValue({ data: null, error: { message: 'temporary failure' } });
+    view.rerender(<SessionFiles sessionId="other" role="tutor" groupSessionIds={['other']} />);
+    await screen.findByRole('alert');
+    expect(screen.queryByText('teacher.pdf')).toBeNull();
+  });
+
+  it('bounds a stalled Storage list and ignores a late success after the deadline', async () => {
+    vi.useFakeTimers();
+    let resolveList!: (value: unknown) => void;
+    state.storageList.mockImplementation(() => new Promise(resolve => { resolveList = resolve; }));
+    try {
+      render(<SessionFiles sessionId="lesson" role="tutor" groupSessionIds={groupIds} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_001); });
+      expect(screen.getByRole('alert')).toBeTruthy();
+      await act(async () => { resolveList({ data: [{ name: 'late.pdf' }], error: null }); });
+      expect(screen.queryByText('late.pdf')).toBeNull();
+      expect(screen.queryByText('files.noFiles')).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('shows a retryable student API failure without treating it as an empty list', async () => {
+    state.fetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'Unavailable' }) });
+    render(<SessionFiles sessionId="lesson" role="student" groupSessionIds={groupIds} />);
+    await screen.findByRole('alert');
+    expect(screen.queryByText('files.noFilesTutor')).toBeNull();
+    listing({ signedUrl: null, downloadUrl: proxyUrl });
+    fireEvent.click(screen.getByText('files.retry'));
+    await screen.findByText('teacher.pdf');
+  });
+
   it('fetches a family download with current authorization before offering only a local blob URL', async () => {
     listing({ signedUrl: null, downloadUrl: proxyUrl });
     render(<SessionFiles sessionId="lesson" role="student" groupSessionIds={groupIds} />);

@@ -22,6 +22,7 @@ import {
 } from '@/lib/proKlaseAdminFinance';
 import { dedupeParentChildren } from '@/lib/parentChildIdentity';
 import { allowsPerLessonPaymentForStudent } from '@/lib/studentPaymentModel';
+import type { OrgAdminOrganization } from '@/lib/orgLookup';
 
 /** Columns the tutor Dashboard needs (avoid `*` + share one deduped round-trip with Layout preload). */
 const TUTOR_DASH_SESSIONS_SELECT =
@@ -322,7 +323,11 @@ let parentPreloadRunning = false;
 /** Shared with CompanyTutors; v2 excludes org student profiles from tutor preload cache */
 export const COMPANY_TUTORS_CACHE_KEY = 'company_tutors_v2';
 
-export async function preloadOrgAdminData() {
+export async function preloadOrgAdminData(knownAdmin?: {
+  user_id: string;
+  organization_id: string;
+  organizations: OrgAdminOrganization;
+}) {
   if (orgPreloadRunning) return;
   if (getCached(COMPANY_TUTORS_CACHE_KEY) && getCached('company_students') && getCached('company_sessions')) return;
   orgPreloadRunning = true;
@@ -331,7 +336,9 @@ export async function preloadOrgAdminData() {
     const user = await getAuthUser();
     if (!user) return;
 
-    const adminRow = await orgAdminRowByUserDeduped(user.id);
+    const adminRow = knownAdmin?.user_id === user.id
+      ? knownAdmin
+      : await orgAdminRowByUserDeduped(user.id);
     if (!adminRow) return;
 
     const org = adminRow.organizations as any;
@@ -505,7 +512,10 @@ async function preloadDashboard(
     );
 
     const licensedApprox = (tutorProfiles || []).filter((p: any) => p.has_active_license !== false).length;
+    // The complete page may have finished while this preload was in flight.
+    if (getCached<any>('company_dashboard')?.complete === true) return;
     setCache('company_dashboard', {
+      complete: false,
       organizationId: orgId,
       orgName: org?.name || '', entityType: org?.entity_type || 'company',
       tutorLicenseCap: Number(org?.tutor_license_count) || 0,
@@ -513,8 +523,6 @@ async function preloadDashboard(
       activeTutors: tutorIds.length, pendingInvites: pendingCount || 0,
       sessionsThisMonth: monthMetrics.occurredCount, upcomingSessions: monthMetrics.plannedCount,
       earningsThisMonth: monthMetrics.paidRevenueEur,
-      earningsTotal: 0,
-      upcomingList: [], attentionList: [], cancelledList: [], recentPayments: [],
     });
   } catch {
     // Non-critical, pages will load their own data

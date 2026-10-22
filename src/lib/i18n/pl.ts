@@ -1,5 +1,3 @@
-import { tutorPairingTranslations } from './tutorPairingTranslations.js';
-import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
@@ -13,9 +11,18 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
+import { schoolServiceTranslations } from './schoolServiceTranslations.js';
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 export const pl: Record<string, string> = {
+  ...schoolServiceTranslations.pl,
   ...tutorPairingTranslations.pl,
   ...studentLoadingTranslations.pl,
+  'invoices.cancelInvoice': "Anuluj fakturę",
+  'invoices.cancelInvoiceHint': "Faktura nie będzie już wymagać zapłaty, a link do płatności przestanie działać. Numer i dokument pozostaną w historii. Podaj powód (co najmniej 3 znaki).",
+  'invoices.cancelReason': "Powód anulowania",
+  'invoices.cancelSuccess': "Faktura została anulowana.",
+  'invoices.cancelFailed': "Nie udało się anulować faktury. Spróbuj ponownie.",
   'school.archive.title': "Archiwum umów",
   'school.archive.description': "Przeglądaj i pobieraj zarchiwizowane umowy.",
   'school.archive.search': "Szukaj po numerze umowy, uczniu lub płatniku",

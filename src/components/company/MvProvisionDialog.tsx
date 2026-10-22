@@ -127,9 +127,6 @@ export default function MvProvisionDialog({
         && (!studentEmail.trim() || studentEmail.trim().includes('@'))
         && previewTargets.studentTo.includes('@')
       : true) &&
-    (createParent && createStudent
-      ? parentEmail.trim().toLowerCase() !== studentEmail.trim().toLowerCase()
-      : true) &&
     (createParent || createStudent);
 
   return (

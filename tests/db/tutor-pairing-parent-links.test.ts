@@ -127,6 +127,17 @@ describe('parent links across tutor assignments', () => {
     expect(await pending()).toBe(false);
   });
 
+  it('preserves an explicitly shared parent/student account when the old tutor card is removed', async () => {
+    await db.exec(`UPDATE students SET linked_user_id='${id(32)}',email='parent@example.test'
+      WHERE id IN ('${id(11)}','${id(12)}')`);
+    await copy();
+    await db.exec(`DELETE FROM students WHERE id='${id(11)}'`);
+    expect(await family()).toEqual({ parent_user_id:id(32),parents:[id(41)] });
+    const student = await db.query('SELECT linked_user_id FROM students WHERE id=$1',[id(12)]);
+    expect(student.rows[0].linked_user_id).toBe(id(32));
+    expect(await pending()).toBe(false);
+  });
+
   it('is idempotent when an existing tutor assignment is reused', async () => {
     await copy();
     await copy();

@@ -1,5 +1,3 @@
-import { tutorPairingTranslations } from './tutorPairingTranslations.js';
-import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations, schoolGroupActivationTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { companyPaymentReportTranslations } from './companyPaymentReportTranslations.js';
@@ -25,9 +23,18 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
+import { schoolServiceTranslations } from './schoolServiceTranslations.js';
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 export const se: Record<string, string> = {
+  ...schoolServiceTranslations.se,
   ...tutorPairingTranslations.se,
   ...studentLoadingTranslations.se,
+  'invoices.cancelInvoice': "Makulera faktura",
+  'invoices.cancelInvoiceHint': "Fakturan ska inte längre betalas och betalningslänken slutar fungera. Numret och dokumentet finns kvar i historiken. Ange en orsak (minst 3 tecken).",
+  'invoices.cancelReason': "Orsak till makulering",
+  'invoices.cancelSuccess': "Fakturan har makulerats.",
+  'invoices.cancelFailed': "Det gick inte att makulera fakturan. Försök igen.",
   'school.archive.title': "Avtalsarkiv",
   'school.archive.description': "Visa och ladda ner arkiverade avtal.",
   'school.archive.search': "Sök efter avtalsnummer, elev eller betalare",

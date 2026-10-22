@@ -35,6 +35,8 @@ import { useTranslation } from '@/lib/i18n';
 import { getCached, setCache, companyTvarkarastisCacheKey, dedupeAsync } from '@/lib/dataCache';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { loadAvailabilityForTutorIds } from '@/lib/availabilityData';
+import { withRequestDeadline } from '@/lib/requestDeadline';
+import { loadOrgScheduleMetadata } from '@/lib/orgScheduleData';
 import { supabase } from '@/lib/supabase';
 import { sendEmail } from '@/lib/email';
 import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
@@ -142,7 +144,6 @@ import { sessionPaymentDisplayKind } from '@/lib/sessionPaymentDisplay';
 import {
   formatOrgStudentPickerLabel,
   matchesOrgStudentPickerSearch,
-  ORG_STUDENT_PICKER_SELECT,
   pickStudentsForOrgTutorPicker,
 } from '@/lib/orgStudentIdentity';
 import { displayStudentGrade } from '@/lib/studentGrade';
@@ -170,7 +171,6 @@ import TimeSpinner, { DateTimeSpinner } from '@/components/TimeSpinner';
 import { cn } from '@/lib/utils';
 import AssignStudentFreeSlotDialog from '@/components/AssignStudentFreeSlotDialog';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
-import { getOrgVisibleTutorsDeduped } from '@/lib/orgVisibleTutors';
 import {
   ChevronLeft,
   ChevronRight,
@@ -513,7 +513,7 @@ export default function CompanyTvarkarastis() {
 
   const scheduleCacheKey = organizationId ? companyTvarkarastisCacheKey(organizationId) : null;
 
-  const tc = scheduleCacheKey ? getCached<{
+  const cachedSchedule = scheduleCacheKey ? getCached<{
     orgTutors: OrgTutor[];
     availability: Availability[];
     subjects: Subject[];
@@ -521,12 +521,26 @@ export default function CompanyTvarkarastis() {
     individualPricing: Array<{ student_id: string; subject_id: string; price: number }>;
     dynamicPricingRules?: OrganizationDynamicPricingRule[];
     orgUsesLicenses?: boolean;
+    metaComplete?: boolean;
+    tutorSubjectPrices?: Array<{ tutor_id: string; org_subject_template_id: string; price: number; duration_minutes: number }>;
+    orgSubjectTemplates?: Array<{ id: string; name: string }>;
   }>(scheduleCacheKey) : null;
+  const tc = cachedSchedule?.metaComplete ? cachedSchedule : null;
 
   // Data state
   const [loading, setLoading] = useState(!tc);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [metaLoaded, setMetaLoaded] = useState(Boolean(tc));
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const [metaLoadFailed, setMetaLoadFailed] = useState(false);
+  const [sessionsLoadFailed, setSessionsLoadFailed] = useState(false);
+  const [availabilityLoadFailed, setAvailabilityLoadFailed] = useState(false);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const sessionsRequestRef = useRef(0);
+  const sessionsWindowRef = useRef('');
+  const sessionsAbortRef = useRef<AbortController | null>(null);
+  const metaRequestRef = useRef(0);
+  const availabilityRequestRef = useRef(0);
   const [orgUsesLicenses, setOrgUsesLicenses] = useState(tc?.orgUsesLicenses ?? false);
   const [orgTutors, setOrgTutors] = useState<OrgTutor[]>(tc?.orgTutors ?? []);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -695,8 +709,8 @@ export default function CompanyTvarkarastis() {
   const [individualPricing, setIndividualPricing] = useState<
     Array<{ student_id: string; subject_id: string; price: number }>
   >(tc?.individualPricing ?? []);
-  const [tutorSubjectPrices, setTutorSubjectPrices] = useState<Array<{ tutor_id: string; org_subject_template_id: string; price: number; duration_minutes: number }>>([]);
-  const [orgSubjectTemplates, setOrgSubjectTemplates] = useState<Array<{ id: string; name: string }>>([]);
+  const [tutorSubjectPrices, setTutorSubjectPrices] = useState<Array<{ tutor_id: string; org_subject_template_id: string; price: number; duration_minutes: number }>>(tc?.tutorSubjectPrices ?? []);
+  const [orgSubjectTemplates, setOrgSubjectTemplates] = useState<Array<{ id: string; name: string }>>(tc?.orgSubjectTemplates ?? []);
   const [saving, setSaving] = useState(false);
   const [scheduleToast, setScheduleToast] = useState<{
     message: string;
@@ -841,22 +855,34 @@ export default function CompanyTvarkarastis() {
     tutorRows: Array<{ id: string; full_name?: string | null }>,
   ) => {
     if (!organizationId || tutorIds.length === 0) return [];
-    const tutorNameById = new Map(tutorRows.map((t) => [t.id, t.full_name || '']));
-    const availabilityData = await dedupeAsync(`org_availability:${organizationId}:${tutorIds.join(',')}`, () =>
-      loadAvailabilityForTutorIds(supabase, tutorIds),
-    );
-    const mappedAvailability = (availabilityData || []).map((row: any) => ({
-      ...row,
-      tutor: { full_name: tutorNameById.get(row.tutor_id) || '' },
-    }));
-    setAvailability(mappedAvailability);
-    if (scheduleCacheKey) {
-      const prevCache = getCached<any>(scheduleCacheKey);
-      if (prevCache) {
-        setCache(scheduleCacheKey, { ...prevCache, availability: mappedAvailability });
+    const requestId = ++availabilityRequestRef.current;
+    setAvailabilityLoading(true);
+    try {
+      const tutorNameById = new Map(tutorRows.map((t) => [t.id, t.full_name || '']));
+      const availabilityData = await dedupeAsync(`org_availability:${ctxUser?.id}:${organizationId}:${tutorIds.join(',')}`, () =>
+        withRequestDeadline(signal => loadAvailabilityForTutorIds(supabase, tutorIds, signal)),
+      );
+      const mappedAvailability = availabilityData.map(row => ({
+        ...row,
+        tutor: { full_name: tutorNameById.get(row.tutor_id) || '' },
+      }));
+      if (requestId !== availabilityRequestRef.current) return mappedAvailability;
+      setAvailability(mappedAvailability);
+      setAvailabilityLoadFailed(false);
+      if (scheduleCacheKey) {
+        const prevCache = getCached<any>(scheduleCacheKey);
+        if (prevCache?.metaComplete) setCache(scheduleCacheKey, { ...prevCache, availability: mappedAvailability });
       }
+      return mappedAvailability;
+    } catch (error) {
+      if (requestId === availabilityRequestRef.current) {
+        console.error('[CompanyTvarkarastis] availability load failed:', error);
+        setAvailabilityLoadFailed(true);
+      }
+      return null;
+    } finally {
+      if (requestId === availabilityRequestRef.current) setAvailabilityLoading(false);
     }
-    return mappedAvailability;
   };
 
   const loadSessionsForWindow = useCallback(async (opts?: { background?: boolean }) => {
@@ -864,12 +890,20 @@ export default function CompanyTvarkarastis() {
     const tutorIds = orgTutors.map((tutor) => tutor.id);
     const weekStartsOn = locale === 'he' ? 0 : 1;
     const { start, end } = scheduleFetchWindow(currentDate, currentView, { weekStartsOn });
+    const windowKey = `${organizationId}:${start.toISOString()}:${end.toISOString()}`;
+    if (sessionsWindowRef.current !== windowKey) {
+      setSessions([]);
+      setSessionsLoaded(false);
+    }
     const requestId = ++sessionsRequestRef.current;
+    sessionsAbortRef.current?.abort();
+    const controller = new AbortController();
+    sessionsAbortRef.current = controller;
     if (!opts?.background) setSessionsLoading(true);
 
     try {
       const sessionsData = tutorIds.length > 0
-        ? await fetchAllRows<any>((from, to) => supabase
+        ? await withRequestDeadline(signal => fetchAllRows<any>((from, to) => supabase
             .from('sessions')
             .select(TVARKARASTIS_CALENDAR_SESSION_SELECT)
             .in('tutor_id', tutorIds)
@@ -878,7 +912,8 @@ export default function CompanyTvarkarastis() {
             .lte('start_time', end.toISOString())
             .order('start_time', { ascending: true })
             .order('id', { ascending: true })
-            .range(from, to))
+            .range(from, to)
+            .abortSignal(AbortSignal.any([signal, controller.signal]))))
         : [];
       if (requestId !== sessionsRequestRef.current) return;
 
@@ -888,9 +923,13 @@ export default function CompanyTvarkarastis() {
       const studentsById = new Map(students.map((s) => [s.id, s]));
       const subjectsById = new Map(subjects.map((s) => [s.id, s]));
       setSessions(enrichParsedSessions(sessionsData, tutorLinksById, studentsById, subjectsById));
+      sessionsWindowRef.current = windowKey;
+      setSessionsLoaded(true);
+      setSessionsLoadFailed(false);
     } catch (error) {
       if (requestId !== sessionsRequestRef.current) return;
       console.error('[CompanyTvarkarastis] loadSessionsForWindow failed:', error);
+      setSessionsLoadFailed(true);
     } finally {
       if (requestId === sessionsRequestRef.current) setSessionsLoading(false);
     }
@@ -898,39 +937,38 @@ export default function CompanyTvarkarastis() {
 
   const fetchScheduleMeta = async () => {
     if (!organizationId || !scheduleCacheKey) return;
+    const requestId = ++metaRequestRef.current;
     const cached = getCached<any>(scheduleCacheKey);
-    if (cached?.orgTutors?.length) {
+    if (cached?.metaComplete) {
       const cachedTutors = cached.orgTutors as OrgTutor[];
       setOrgTutors(cachedTutors);
+      if (cachedTutors.length === 0) { setSessions([]); setSessionsLoaded(true); }
       setAvailability(cached.availability || []);
       setSubjects(cached.subjects || []);
       setStudents(cached.students || []);
       setIndividualPricing(cached.individualPricing || []);
+      setTutorSubjectPrices(cached.tutorSubjectPrices || []);
+      setOrgSubjectTemplates(cached.orgSubjectTemplates || []);
       setDynamicPricingRules(cached.dynamicPricingRules || []);
       setOrgUsesLicenses(Boolean(cached.orgUsesLicenses));
+      setMetaLoaded(true);
+      setMetaLoadFailed(false);
       setLoading(false);
-      // Meta cache can hold stale/empty availability after a failed narrow select — always refresh.
-      if (!isSchoolOrgView && cachedTutors.length > 0) {
-        void loadAvailabilityForTutors(
-          cachedTutors.map((tutor) => tutor.id),
-          cachedTutors,
-        );
-      }
       return;
     }
     setLoading(true);
-
     try {
-      await dedupeAsync(`schedule-meta:${organizationId}`, async () => {
-      const filteredTutors = await getOrgVisibleTutorsDeduped(
-        supabase as any,
-        organizationId,
-        'id, full_name, email, has_active_license, personal_meeting_link, break_between_lessons, teaching_notes',
+      // Only share data, never component state updates, across duplicate reads.
+      // A separate availability load cannot block this consistent metadata snapshot.
+      const metadata = await dedupeAsync(`schedule-meta:${ctxUser?.id}:${organizationId}:${proKlaseAdminUi}`, () =>
+        loadOrgScheduleMetadata<Subject, Student>(supabase, organizationId, proKlaseAdminUi),
       );
-      const tutorIds = filteredTutors.map((t: any) => t.id);
-      setOrgTutors(filteredTutors as OrgTutor[]);
-
-      setSelectedTutorIds((previous) => {
+      if (requestId !== metaRequestRef.current) return;
+      const filteredTutors = metadata.orgTutors as OrgTutor[];
+      const tutorIds = filteredTutors.map(tutor => tutor.id);
+      setOrgTutors(filteredTutors);
+      if (filteredTutors.length === 0) { setSessions([]); setSessionsLoaded(true); }
+      setSelectedTutorIds(previous => {
         const saved = readCalendarTutorFilter(ctxUser?.id, organizationId);
         if (saved) {
           const restored = reconcileCalendarTutorFilter(saved, tutorIds);
@@ -940,127 +978,32 @@ export default function CompanyTvarkarastis() {
           });
           return restored;
         }
-        const previousTutorIds = orgTutors.map((tutor) => tutor.id);
-        const hadAllPreviousTutors = previousTutorIds.length === 0
-          || previousTutorIds.every((id) => previous.includes(id));
+        const previousTutorIds = orgTutors.map(tutor => tutor.id);
+        const hadAllPreviousTutors = previousTutorIds.length === 0 || previousTutorIds.every(id => previous.includes(id));
         if (hadAllPreviousTutors) return tutorIds;
         const currentTutorIds = new Set(tutorIds);
-        return previous.filter((id) => currentTutorIds.has(id));
+        return previous.filter(id => currentTutorIds.has(id));
       });
-
-      let mappedAvailability: any[] = [];
-      if (!isSchoolOrgView && tutorIds.length > 0) {
-        mappedAvailability = await loadAvailabilityForTutors(tutorIds, filteredTutors as OrgTutor[]);
-      } else {
-        setAvailability([]);
-      }
-
-      const { data: subjectsData } = await supabase
-        .from('subjects')
-        .select('*')
-        .in('tutor_id', tutorIds);
-
-      setSubjects(subjectsData || []);
-
-      const studentSelect =
-        `${ORG_STUDENT_PICKER_SELECT}, payment_model, personal_meeting_link, pricing_lessons_per_week`;
-      let studentsData: Student[] = [];
-      if (organizationId && tutorIds.length > 0) {
-        const [byTutorRes, byOrgRes] = await Promise.all([
-          supabase
-            .from('students')
-            .select(studentSelect)
-            .in('tutor_id', tutorIds)
-            .is('detached_at', null),
-          supabase
-            .from('students')
-            .select(studentSelect)
-            .eq('organization_id', organizationId)
-            .is('detached_at', null),
-        ]);
-        const merged = [...(byTutorRes.data || []), ...(byOrgRes.data || [])] as Student[];
-        const seen = new Set<string>();
-        studentsData = merged.filter((s) => {
-          if (seen.has(s.id)) return false;
-          seen.add(s.id);
-          return true;
-        });
-      } else if (organizationId) {
-        const { data } = await supabase
-          .from('students')
-          .select(studentSelect)
-          .eq('organization_id', organizationId)
-          .is('detached_at', null);
-        studentsData = (data || []) as Student[];
-      } else {
-        const { data } = await supabase
-          .from('students')
-          .select(studentSelect)
-          .in('tutor_id', tutorIds)
-          .is('detached_at', null);
-        studentsData = (data || []) as Student[];
-      }
-
-      setStudents(studentsData);
-
-      const { data: pricingData } = await supabase
-        .from('student_individual_pricing')
-        .select('student_id, subject_id, price')
-        .in('tutor_id', tutorIds);
-      setIndividualPricing(pricingData || []);
-
-      const { data: tspData } = await supabase
-        .from('tutor_subject_prices')
-        .select('tutor_id, org_subject_template_id, price, duration_minutes')
-        .in('tutor_id', tutorIds);
-      setTutorSubjectPrices(tspData || []);
-
-      let nextOrgUsesLicenses = false;
-      let nextDynamicPricingRules: OrganizationDynamicPricingRule[] = [];
-      if (organizationId) {
-        const { data: orgRow } = await supabase
-          .from('organizations')
-          .select('org_subject_templates, tutor_license_count')
-          .eq('id', organizationId)
-          .maybeSingle();
-        const cap = Number((orgRow as any)?.tutor_license_count) || 0;
-        nextOrgUsesLicenses = cap > 0;
-        setOrgUsesLicenses(nextOrgUsesLicenses);
-        const tpl = (orgRow as any)?.org_subject_templates;
-        if (Array.isArray(tpl)) {
-          setOrgSubjectTemplates(tpl.filter((t: any) => t?.id && t?.name).map((t: any) => ({ id: t.id, name: String(t.name).trim() })));
-        }
-
-        const { data: dynamicRows } = proKlaseAdminUi
-          ? await supabase
-              .from('organization_dynamic_pricing')
-              .select('id, organization_id, grade_min, grade_max, lessons_per_week, price')
-              .eq('organization_id', organizationId)
-          : { data: [] as OrganizationDynamicPricingRule[] };
-        nextDynamicPricingRules = (dynamicRows ?? []).map((row) => ({
-          ...row,
-          grade_min: Number(row.grade_min),
-          grade_max: Number(row.grade_max),
-          lessons_per_week: Number(row.lessons_per_week),
-          price: Number(row.price),
-        }));
-        setDynamicPricingRules(nextDynamicPricingRules);
-      }
-
+      setSubjects(metadata.subjects);
+      setStudents(metadata.students);
+      setIndividualPricing(metadata.individualPricing);
+      setTutorSubjectPrices(metadata.tutorSubjectPrices);
+      setOrgSubjectTemplates(metadata.orgSubjectTemplates);
+      setDynamicPricingRules(metadata.dynamicPricingRules);
+      setOrgUsesLicenses(metadata.orgUsesLicenses);
+      setMetaLoaded(true);
+      setMetaLoadFailed(false);
       setCache(scheduleCacheKey, {
-        orgTutors: filteredTutors,
-        availability: mappedAvailability,
-        subjects: subjectsData || [],
-        students: studentsData || [],
-        individualPricing: pricingData || [],
-        dynamicPricingRules: nextDynamicPricingRules,
-        orgUsesLicenses: nextOrgUsesLicenses,
-      });
+        ...metadata,
+        availability: cached?.metaComplete ? cached.availability || [] : [],
+        metaComplete: true,
       });
     } catch (error) {
+      if (requestId !== metaRequestRef.current) return;
       console.error('Error fetching schedule metadata:', error);
+      setMetaLoadFailed(true);
     } finally {
-      setLoading(false);
+      if (requestId === metaRequestRef.current) setLoading(false);
     }
   };
 
@@ -1079,6 +1022,26 @@ export default function CompanyTvarkarastis() {
     await loadSessionsForWindow({ background: true });
   }, [loadSessionsForWindow]);
 
+  const retryScheduleLoad = async () => {
+    if (metaLoadFailed) {
+      await fetchScheduleMeta();
+      return;
+    }
+    await Promise.all([
+      loadSessionsForWindow(),
+      !(isSchoolOrgView && showOnlySessions)
+        ? loadAvailabilityForTutors(orgTutors.map(tutor => tutor.id), orgTutors)
+        : Promise.resolve(),
+    ]);
+  };
+
+  useEffect(() => () => {
+    ++sessionsRequestRef.current;
+    ++metaRequestRef.current;
+    ++availabilityRequestRef.current;
+    sessionsAbortRef.current?.abort();
+  }, [organizationId, ctxUser?.id]);
+
   useEffect(() => {
     if (featuresLoading) return;
     if (!organizationId) {
@@ -1096,13 +1059,12 @@ export default function CompanyTvarkarastis() {
   useEffect(() => {
     if (featuresLoading || !organizationId || orgTutors.length === 0) return;
     if (isSchoolOrgView && showOnlySessions) return;
-    if (availability.length > 0) return;
     void loadAvailabilityForTutors(
       orgTutors.map((tutor) => tutor.id),
       orgTutors,
     );
   }, [
-    availability.length,
+    ctxUser?.id,
     featuresLoading,
     isSchoolOrgView,
     organizationId,
@@ -3604,21 +3566,31 @@ export default function CompanyTvarkarastis() {
               <Label className="text-sm mb-2 block">{t('compSch.statistics')}</Label>
               <div className="grid grid-cols-3 gap-2">
                 <div className="bg-gray-50 rounded p-2 text-center">
-                  <div className="text-2xl font-bold text-gray-900">{orgTutors.length}</div>
+                  <div className="text-2xl font-bold text-gray-900">{metaLoaded ? orgTutors.length : '—'}</div>
                   <div className="text-xs text-gray-600">{t('compSch.tutors')}</div>
                 </div>
                 <div className="bg-blue-50 rounded p-2 text-center">
-                  <div className="text-2xl font-bold text-blue-900">{filteredSessions.length}</div>
+                  <div className="text-2xl font-bold text-blue-900">{sessionsLoaded ? filteredSessions.length : '—'}</div>
                   <div className="text-xs text-blue-600">{t('compSch.lessons')}</div>
                 </div>
                 <div className="bg-green-50 rounded p-2 text-center">
-                  <div className="text-2xl font-bold text-green-900">{students.length}</div>
+                  <div className="text-2xl font-bold text-green-900">{metaLoaded ? students.length : '—'}</div>
                   <div className="text-xs text-green-600">{t('compSch.students')}</div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+
+        {(metaLoadFailed || sessionsLoadFailed || availabilityLoadFailed) && (
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            <p>{t('compSch.loadFailed')}</p>
+            <Button type="button" variant="outline" size="sm" disabled={loading || sessionsLoading || availabilityLoading}
+              onClick={() => void retryScheduleLoad()}>
+              {t('stuSess.retry')}
+            </Button>
+          </div>
+        )}
 
         {/* Calendar */}
         <div className="bg-white rounded-lg border p-3 sm:p-4 min-w-0 max-w-full overflow-x-hidden relative">

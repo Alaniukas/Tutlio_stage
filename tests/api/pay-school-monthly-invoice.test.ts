@@ -85,6 +85,16 @@ beforeEach(() => {
 });
 
 describe('GET /api/pay-school-monthly-invoice', () => {
+  it('blocks the emailed payment link after the invoice is cancelled', async () => {
+    db.invoice!.payment_status = 'cancelled';
+    const response = mockRes();
+    await handler(req({ invoice: INVOICE_ID, t: buildPublicLinkToken('monthly-invoice', INVOICE_ID) }), response as any);
+    expect(response.getResult().statusCode).toBe(200);
+    expect(response.getResult().body).toContain('Sąskaita atšaukta');
+    expect(response.getResult().redirect).toBeNull();
+    expect(stripeMocks.create).not.toHaveBeenCalled();
+    expect(db.updates).toEqual([]);
+  });
   it('expires a checkout if regeneration cancels the invoice during checkout creation', async () => {
     stripeMocks.create.mockImplementationOnce(async () => {
       db.invoice!.payment_status = 'cancelled';

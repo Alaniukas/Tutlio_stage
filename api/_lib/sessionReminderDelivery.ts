@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 const SESSION_REMINDER_TYPES = new Set(['session_reminder', 'session_reminder_payer']);
 
-export type SessionReminderDeliveryOutcome = 'sent' | 'permanent_skip' | 'retry';
+export type SessionReminderDeliveryOutcome = 'sent' | 'permanent_skip' | 'deferred' | 'retry';
 
 /** Resend reserves an idempotency key only after the original email was sent. */
 export function reminderWasAlreadySent(error: unknown): boolean {
@@ -82,8 +82,11 @@ export function sessionReminderDeliveryOutcome(
     return 'permanent_skip';
   }
 
-  // A contract can be accepted before the lesson, so contract-gated reminders
-  // remain pending and are retried on the next cron run.
+  // Contract acceptance is an expected dependency, not a delivery failure.
+  // Keep its flags pending so a later cron run can send after acceptance.
+  if (responseOk && payload?.success === true && payload.skipped === true
+    && payload.reason === 'school_contract_not_active') return 'deferred';
+
   return 'retry';
 }
 

@@ -51,6 +51,8 @@ import {
 import { resolveDefaultTutorPayForSave } from '@/lib/orgTutorDefaultPay';
 import { parseTrialLessonPricing, trialPricingCopy, type TrialLessonPriceMode } from '@/lib/trialLessonPricing';
 import SchoolHolidayCalendarSettings from '@/components/school/SchoolHolidayCalendarSettings';
+import SchoolOtherServices from '@/components/school/SchoolOtherServices';
+import { useOptionalOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import {
   DEFAULT_SCHOOL_ORG_CALENDAR,
   parseSchoolOrgCalendar,
@@ -110,6 +112,7 @@ export default function CompanySettings() {
   const { t, locale } = useTranslation();
   const orgEntityType = useOrgEntityType();
   const isSchoolOrgView = isSchoolOrg(orgEntityType);
+  const adminAccess = useOptionalOrgAdminAccess();
   const sc = getCached<any>('company_settings');
   const [loading, setLoading] = useState(!sc);
   const [saving, setSaving] = useState(false);
@@ -995,6 +998,9 @@ export default function CompanySettings() {
 
         <div className="space-y-4">
           <NotificationPreferencesSettings portal="org_admin" />
+          {isSchoolOrgView && orgId && orgFeaturesSnapshot.school_service_charges === true && adminAccess?.can('finance.view') && (
+            <SchoolOtherServices key={`service-catalog:${orgId}`} organizationId={orgId} />
+          )}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center flex-shrink-0">

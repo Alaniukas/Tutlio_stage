@@ -8,6 +8,7 @@ export type SchoolPayerInvoiceStudentPreview = {
   creditAppliedEur?: number;
   amountDueEur?: number;
   lessonCount: number;
+  serviceCount?: number;
   reviewSessionIds: string[];
   reviewReasons?: Array<'unconfirmed' | 'contract_review' | 'missing_price'>;
   alreadyIssued: boolean;
@@ -40,9 +41,9 @@ export function schoolPayerKey(payerEmail?: string | null, studentId?: string | 
 
 export function schoolStudentInvoiceSendable(row: Pick<
   SchoolPayerInvoiceStudentPreview,
-  'lessonCount' | 'reviewSessionIds' | 'alreadyIssued' | 'payerEmail'
+  'lessonCount' | 'serviceCount' | 'reviewSessionIds' | 'alreadyIssued' | 'payerEmail'
 >): boolean {
-  return row.lessonCount > 0
+  return (row.lessonCount > 0 || (row.serviceCount || 0) > 0)
     && !row.alreadyIssued
     && row.reviewSessionIds.length === 0
     && Boolean(String(row.payerEmail || '').trim());

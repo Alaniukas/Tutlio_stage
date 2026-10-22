@@ -63,7 +63,7 @@ export async function assertSchoolMonthlyInvoiceEnabled(
   if (!org) return { ok: false, status: 404, error: 'Organizacija nerasta.' };
   const features = (org.features || {}) as Record<string, unknown>;
   if (org.entity_type === 'school'
-    && (schoolExtraLessonsDiscountEnabled(org.id, features) || schoolExtraLessonsDiscountEnabled(org.slug, features))) {
+    && (features.school_service_charges === true || schoolExtraLessonsDiscountEnabled(org.id, features) || schoolExtraLessonsDiscountEnabled(org.slug, features))) {
     return { ok: true };
   }
   return consultations;

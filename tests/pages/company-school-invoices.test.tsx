@@ -5,13 +5,15 @@ import CompanyInvoices from '@/pages/company/CompanyInvoices';
 const state = vi.hoisted(() => ({
   entityType: 'school',
   schoolError: false,
+  canEdit: true,
   queries: [] as Array<{ table: string; filters: Array<[string, unknown]>; from: number }>,
   schoolInvoices: [] as any[],
   singleDownload: vi.fn(async () => true),
   zipDownload: vi.fn(async () => ({ downloaded: 4, failedIds: [] as string[] })),
 }));
 
-vi.mock('@/lib/dataCache', () => ({ getCached: () => null, setCache: vi.fn() }));
+vi.mock('@/lib/dataCache', () => ({ getCached: () => null, setCache: vi.fn(), invalidateCache: vi.fn() }));
+vi.mock('@/contexts/OrgAdminAccessContext', () => ({ useOptionalOrgAdminAccess: () => ({ can: () => state.canEdit }) }));
 vi.mock('@/lib/orgVisibleTutors', () => ({ getOrgVisibleTutors: async () => [] }));
 vi.mock('@/lib/apiHelpers', () => ({ authHeaders: async () => ({ Authorization: 'Bearer admin' }) }));
 vi.mock('@/lib/i18n', () => ({ useTranslation: () => ({
@@ -70,7 +72,7 @@ vi.mock('@/lib/supabase', () => ({ supabase: {
 } }));
 
 beforeEach(() => {
-  state.entityType = 'school'; state.schoolError = false; state.queries = [];
+  state.entityType = 'school'; state.schoolError = false; state.queries = []; state.canEdit = true;
   state.singleDownload.mockClear(); state.zipDownload.mockClear();
   state.schoolInvoices = [
     { id: 'payer-pending', invoice_number: 'PAM-1', payment_status: 'pending', created_at: '2026-10-04T09:00:00Z', pdf_path: 'school-monthly/org/1.pdf' },
@@ -82,7 +84,7 @@ beforeEach(() => {
     student: { full_name: 'Student', payer_name: 'School', payer_email: 'parent@example.test' } }));
   state.schoolInvoices.push({ ...state.schoolInvoices[0], id: 'foreign', invoice_number: 'FOREIGN-1', organization_id: 'other' });
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('school payer invoices in the organization invoice list', () => {
   it('loads every numbered payer invoice alongside tutor invoices, including when new billing is disabled', async () => {
@@ -123,6 +125,58 @@ describe('school payer invoices in the organization invoice list', () => {
     expect(screen.queryByText('PAM-4')).toBeNull();
   });
 
+  it('requires a reason and explicit confirmation, then retains the cancelled document in history', async () => {
+    const request = vi.fn(async (_url: string, options: RequestInit) => {
+      const body = JSON.parse(options.body as string);
+      Object.assign(state.schoolInvoices.find(invoice => invoice.id === body.invoiceId), {
+        payment_status: 'cancelled', cancellation_reason: body.reason,
+      });
+      return { ok: true, json: async () => ({ success: true, cancellationReason: body.reason }) };
+    });
+    vi.stubGlobal('fetch', request);
+    render(<CompanyInvoices />);
+    await screen.findByText('PAM-1');
+    fireEvent.click(screen.getByRole('button', { name: 'invoices.statusIssued' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'invoices.cancelInvoice PAM-1' }));
+    const dialog = screen.getByRole('dialog');
+    const submit = within(dialog).getByRole('button', { name: 'invoices.cancelInvoice' }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(request).not.toHaveBeenCalled();
+    fireEvent.change(within(dialog).getByLabelText('invoices.cancelReason'), { target: { value: 'Testinė sąskaita' } });
+    fireEvent.click(submit);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(request).toHaveBeenCalledWith('/api/cancel-school-monthly-invoice', {
+      method: 'POST', headers: { Authorization: 'Bearer admin' },
+      body: JSON.stringify({ invoiceId: 'payer-pending', reason: 'Testinė sąskaita' }),
+    });
+    expect(screen.queryByText('PAM-1')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'invoices.statusCancelled' }));
+    await screen.findByText('PAM-1');
+    expect(screen.getByText('invoices.cancelReason: Testinė sąskaita')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'invoices.cancelInvoice PAM-1' })).toBeNull();
+  });
+
+  it('keeps the reason and invoice unchanged after a rejected cancellation', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({ error: 'Mokėjimas pasikeitė' }) }));
+    render(<CompanyInvoices />);
+    fireEvent.click(await screen.findByRole('button', { name: 'invoices.cancelInvoice PAM-1' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('invoices.cancelReason'), { target: { value: 'Testinė' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'invoices.cancelInvoice' }));
+    expect((await within(dialog).findByRole('alert')).textContent).toBe('Mokėjimas pasikeitė');
+    expect((within(dialog).getByLabelText('invoices.cancelReason') as HTMLInputElement).value).toBe('Testinė');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'common.cancel' }));
+    expect(screen.getByRole('button', { name: 'invoices.cancelInvoice PAM-1' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'invoices.cancelInvoice PAM-2' })).toBeNull(); // paid
+  });
+
+  it('hides cancellation from administrators without finance.edit', async () => {
+    state.canEdit = false;
+    render(<CompanyInvoices />);
+    await screen.findByText('PAM-1');
+    expect(screen.queryByTitle('invoices.cancelInvoice')).toBeNull();
+  });
+
   it('uses the issue date for filters and allows stored canonical PDFs without file path metadata', async () => {
     const { container } = render(<CompanyInvoices />);
     await screen.findByText('PAM-4');
@@ -147,9 +201,17 @@ describe('school payer invoices in the organization invoice list', () => {
       id: 'no-pdf', source: 'school_monthly',
     }), { Authorization: 'Bearer admin' }));
     fireEvent.click(screen.getByLabelText('invoices.selectAll'));
-    fireEvent.click(screen.getByRole('button', { name: 'invoices.downloadSelected 4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'invoices.downloadSelected 3' }));
     await waitFor(() => expect(state.zipDownload).toHaveBeenCalledOnce());
-    expect(state.zipDownload.mock.calls[0][0].map((invoice: any) => invoice.id)).toEqual(['payer-cancelled', 'payer-pending', 'payer-paid', 'no-pdf']);
+    expect(state.zipDownload.mock.calls[0][0].map((invoice: any) => invoice.id)).toEqual(['payer-pending', 'payer-paid', 'no-pdf']);
+    const cancelled = screen.getByText('PAM-3').closest('.rounded-xl') as HTMLElement;
+    expect((within(cancelled).getByRole('checkbox') as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'invoices.statusCancelled' }));
+    await screen.findByText('PAM-3');
+    fireEvent.click(screen.getByLabelText('invoices.selectAll'));
+    fireEvent.click(screen.getByRole('button', { name: 'invoices.downloadSelected 1' }));
+    await waitFor(() => expect(state.zipDownload).toHaveBeenCalledTimes(2));
+    expect(state.zipDownload.mock.calls[1][0].map((invoice: any) => invoice.id)).toEqual(['payer-cancelled']);
   });
 
   it('shows a load error instead of silently hiding payer invoices', async () => {

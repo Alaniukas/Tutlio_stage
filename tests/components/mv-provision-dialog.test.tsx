@@ -21,6 +21,19 @@ function renderDialog(
 }
 
 describe('MvProvisionDialog', () => {
+  it('allows one shared parent and student login address', async () => {
+    const onSubmit = renderDialog({
+      id: 'shared-student', full_name: 'Child', email: 'family@example.test',
+      payer_name: 'Parent', payer_email: 'family@example.test', linked_user_id: null, parent_user_id: null,
+    });
+    const submit = screen.getByRole('button', { name: 'Sukurti paskyras' }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      scope: 'both', parentEmail: 'family@example.test', studentEmail: 'family@example.test',
+    })));
+  });
+
   it('allows a student account without an email when the parent account already exists', async () => {
     const onSubmit = renderDialog({
       id: 'student-row-1',

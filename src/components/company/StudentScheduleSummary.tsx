@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarRange } from 'lucide-react';
+import { CalendarRange, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from '@/lib/i18n';
 import { countStudentSessionStats, type StudentSessionCounters } from '@/lib/session-stats';
+import { withRequestDeadline } from '@/lib/requestDeadline';
+import { Button } from '@/components/ui/button';
 
 interface StudentScheduleSummaryProps {
   /** All students.id rows of the selected identity group. */
@@ -21,6 +23,17 @@ type ScheduleTemplate = {
   tutor: { full_name: string | null } | null;
 };
 
+type ScheduleTemplateRow = Omit<ScheduleTemplate, 'subject' | 'tutor'> & {
+  subject: ScheduleTemplate['subject'] | NonNullable<ScheduleTemplate['subject']>[];
+  tutor: ScheduleTemplate['tutor'] | NonNullable<ScheduleTemplate['tutor']>[];
+};
+
+type ScheduleSnapshot = {
+  idsKey: string;
+  templates: ScheduleTemplate[];
+  counters: StudentSessionCounters;
+};
+
 const hhmm = (value: string | null | undefined) => String(value || '').slice(0, 5);
 
 /**
@@ -30,57 +43,73 @@ const hhmm = (value: string | null | undefined) => String(value || '').slice(0, 
  */
 export default function StudentScheduleSummary({ studentRowIds, refreshKey }: StudentScheduleSummaryProps) {
   const { t } = useTranslation();
-  const [templates, setTemplates] = useState<ScheduleTemplate[]>([]);
-  const [counters, setCounters] = useState<StudentSessionCounters | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const idsKey = studentRowIds.join(',');
+  const [snapshot, setSnapshot] = useState<ScheduleSnapshot | null>(null);
+  const [loadState, setLoadState] = useState({ idsKey: '', loading: false, failed: false });
+  const [retry, setRetry] = useState(0);
+  const idsKey = [...new Set(studentRowIds)].sort().join(',');
+  // Keep the last successful refresh for this child, never another child's data.
+  const currentSnapshot = snapshot?.idsKey === idsKey ? snapshot : null;
+  const loading = loadState.idsKey !== idsKey || loadState.loading;
+  const failed = loadState.idsKey === idsKey && loadState.failed;
+  const templates = currentSnapshot?.templates;
+  const counters = currentSnapshot?.counters;
 
   useEffect(() => {
-    if (studentRowIds.length === 0) {
-      setTemplates([]);
-      setCounters(null);
-      return;
-    }
+    if (!idsKey) return;
+    const studentIds = idsKey.split(',');
+    const controller = new AbortController();
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      setLoadState({ idsKey, loading: true, failed: false });
       try {
-        const [{ data: templateRows }, { data: sessionRows }] = await Promise.all([
-          supabase
-            .from('recurring_individual_sessions')
-            .select('id, day_of_week, start_time, end_time, frequency, subject:subjects(name, color), tutor:profiles!recurring_individual_sessions_tutor_id_fkey(full_name)')
-            .in('student_id', studentRowIds)
-            .eq('active', true),
-          supabase
-            .from('sessions')
-            .select('id, status, exclude_from_lesson_count, cancelled_by, rescheduled_at, reschedule_reason, reschedule_requested_by')
-            .in('student_id', studentRowIds),
-        ]);
+        const { templateRows, sessionRows } = await withRequestDeadline(async (deadlineSignal) => {
+          const signal = AbortSignal.any([controller.signal, deadlineSignal]);
+          const readTemplates = async () => {
+            const { data, error } = await supabase
+              .from('recurring_individual_sessions')
+              .select('id, day_of_week, start_time, end_time, frequency, subject:subjects(name, color), tutor:profiles!recurring_individual_sessions_tutor_id_fkey(full_name)')
+              .in('student_id', studentIds)
+              .eq('active', true)
+              .abortSignal(signal);
+            if (error) throw error;
+            return (data || []) as ScheduleTemplateRow[];
+          };
+          const readSessions = async () => {
+            const { data, error } = await supabase
+              .from('sessions')
+              .select('id, status, exclude_from_lesson_count, cancelled_by, rescheduled_at, reschedule_reason, reschedule_requested_by')
+              .in('student_id', studentIds)
+              .abortSignal(signal);
+            if (error) throw error;
+            return data || [];
+          };
+          const [templateRows, sessionRows] = await Promise.all([readTemplates(), readSessions()]);
+          return { templateRows, sessionRows };
+        });
         if (cancelled) return;
-        const normalized = ((templateRows || []) as any[]).map((row) => ({
+        const normalized: ScheduleTemplate[] = templateRows.map((row) => ({
           ...row,
           subject: Array.isArray(row.subject) ? row.subject[0] ?? null : row.subject ?? null,
           tutor: Array.isArray(row.tutor) ? row.tutor[0] ?? null : row.tutor ?? null,
-        })) as ScheduleTemplate[];
+        }));
         normalized.sort(
           (a, b) =>
             ((a.day_of_week + 6) % 7) - ((b.day_of_week + 6) % 7) ||
             String(a.start_time).localeCompare(String(b.start_time)),
         );
-        setTemplates(normalized);
-        setCounters(countStudentSessionStats((sessionRows || []) as any[]));
+        setSnapshot({ idsKey, templates: normalized, counters: countStudentSessionStats(sessionRows) });
+        setLoadState({ idsKey, loading: false, failed: false });
       } catch (err) {
+        if (cancelled) return;
         console.error('[StudentScheduleSummary] load failed:', err);
-      } finally {
-        if (!cancelled) setLoading(false);
+        setLoadState({ idsKey, loading: false, failed: true });
       }
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idsKey, refreshKey]);
+  }, [idsKey, refreshKey, retry]);
 
   const weekdayLabels = useMemo(() => [
     t('compSch.wdSun'),
@@ -94,7 +123,7 @@ export default function StudentScheduleSummary({ studentRowIds, refreshKey }: St
 
   const effectivePerWeek = useMemo(() => {
     let total = 0;
-    for (const template of templates) {
+    for (const template of templates || []) {
       if (template.frequency === 'biweekly') total += 0.5;
       else if (template.frequency === 'monthly') total += 0.25;
       else total += 1;
@@ -102,8 +131,7 @@ export default function StudentScheduleSummary({ studentRowIds, refreshKey }: St
     return Math.round(total * 10) / 10;
   }, [templates]);
 
-  if (loading && templates.length === 0 && !counters) return null;
-  if (templates.length === 0 && !counters) return null;
+  if (!idsKey) return null;
 
   return (
     <div>
@@ -112,7 +140,17 @@ export default function StudentScheduleSummary({ studentRowIds, refreshKey }: St
         {t('compStu.scheduleTitle')}
       </h4>
 
-      {templates.length > 0 ? (
+      {loading && <Loader2 aria-label={t('common.loading')} className="mb-2 h-4 w-4 animate-spin" />}
+      {failed && (
+        <div role="alert" className="mb-2 text-sm text-red-600">
+          {t('compStu.scheduleLoadFailed')}
+          <Button type="button" size="sm" variant="ghost" onClick={() => setRetry((value) => value + 1)}>
+            {t('stuSess.retry')}
+          </Button>
+        </div>
+      )}
+
+      {templates && templates.length > 0 ? (
         <div className="space-y-1.5 mb-2">
           {templates.map((template) => (
             <div key={template.id} className="flex items-center gap-2 text-sm text-gray-700 min-w-0">
@@ -140,9 +178,9 @@ export default function StudentScheduleSummary({ studentRowIds, refreshKey }: St
             {t('compStu.effectivePerWeek', { count: String(effectivePerWeek) })}
           </p>
         </div>
-      ) : (
+      ) : currentSnapshot ? (
         <p className="text-xs text-gray-400 mb-2">{t('compStu.scheduleEmpty')}</p>
-      )}
+      ) : null}
 
       {counters && (
         <div className="grid grid-cols-2 gap-1.5 text-xs">

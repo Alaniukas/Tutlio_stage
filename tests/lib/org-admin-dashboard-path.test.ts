@@ -31,6 +31,15 @@ function fakeClient(opts: {
 }
 
 describe('getOrgAdminDashboardPath', () => {
+  it('reuses the seat already verified during login without another membership read', async () => {
+    const sb = fakeClient({ entityType: 'school' });
+    const path = await getOrgAdminDashboardPath(sb as any, 'user-1', {
+      id: 'seat', role: 'owner', status: 'active', permissions: {}, organization_id: 'org-1',
+    });
+    expect(path).toBe('/school');
+    expect(sb.selects).toEqual(['organizations:entity_type']);
+  });
+
   it('does not embed organizations() on the admin seat lookup', async () => {
     const sb = fakeClient({
       seat: { role: 'owner', permissions: {}, status: 'active', organization_id: 'org-1' },

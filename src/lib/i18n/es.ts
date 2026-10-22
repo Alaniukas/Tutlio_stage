@@ -1,5 +1,3 @@
-import { tutorPairingTranslations } from './tutorPairingTranslations.js';
-import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
@@ -15,9 +13,18 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
+import { schoolServiceTranslations } from './schoolServiceTranslations.js';
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 export const es: Record<string, string> = {
+  ...schoolServiceTranslations.es,
   ...tutorPairingTranslations.es,
   ...studentLoadingTranslations.es,
+  'invoices.cancelInvoice': "Anular factura",
+  'invoices.cancelInvoiceHint': "La factura dejará de estar pendiente de pago y su enlace de pago dejará de funcionar. El número y el documento permanecerán en el historial. Indica el motivo (al menos 3 caracteres).",
+  'invoices.cancelReason': "Motivo de la anulación",
+  'invoices.cancelSuccess': "Factura anulada.",
+  'invoices.cancelFailed': "No se pudo anular la factura. Inténtalo de nuevo.",
   'school.archive.title': "Archivo de contratos",
   'school.archive.description': "Consulta y descarga los contratos archivados.",
   'school.archive.search': "Buscar por número de contrato, alumno o pagador",

@@ -1,5 +1,3 @@
-import { tutorPairingTranslations } from './tutorPairingTranslations.js';
-import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
@@ -15,9 +13,18 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
+import { schoolServiceTranslations } from './schoolServiceTranslations.js';
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 export const de: Record<string, string> = {
+  ...schoolServiceTranslations.de,
   ...tutorPairingTranslations.de,
   ...studentLoadingTranslations.de,
+  'invoices.cancelInvoice': "Rechnung stornieren",
+  'invoices.cancelInvoiceHint': "Die Rechnung ist nicht mehr zu bezahlen und ihr Zahlungslink wird deaktiviert. Nummer und Dokument bleiben im Verlauf erhalten. Geben Sie einen Grund an (mindestens 3 Zeichen).",
+  'invoices.cancelReason': "Stornierungsgrund",
+  'invoices.cancelSuccess': "Rechnung storniert.",
+  'invoices.cancelFailed': "Die Rechnung konnte nicht storniert werden. Bitte versuchen Sie es erneut.",
   'school.archive.title': "Vertragsarchiv",
   'school.archive.description': "Archivierte Verträge ansehen und herunterladen.",
   'school.archive.search': "Nach Vertragsnummer, Schüler oder Zahler suchen",

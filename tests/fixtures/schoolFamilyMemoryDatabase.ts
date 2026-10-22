@@ -21,6 +21,24 @@ export function schoolFamilyMemoryDatabase(initial: Record<string, Array<Record<
     auth: { admin: { createUser, getUserById, updateUserById, deleteUser, listUsers } },
     rpc: vi.fn(async (name: string, args: any) => {
       if (name === 'get_auth_user_id_by_email') return { data: [...users.values()].find((user) => user.email.toLowerCase() === args.p_email)?.id || null, error: null };
+      if (name === 'link_managed_parent_students') {
+        const parent = (tables.parent_profiles || []).find((row) => row.id === args.p_parent_profile_id);
+        const students = (tables.students || []).filter((row) => args.p_student_ids.includes(row.id));
+        if (!parent || students.length !== new Set(args.p_student_ids).size
+          || students.some((row) => row.detached_at || (row.parent_user_id && row.parent_user_id !== parent.user_id))) {
+          return { error: { message: 'Managed family student selection changed' } };
+        }
+        const links = tables.parent_students ||= [];
+        for (const row of students) {
+          if (!links.some((link) => link.parent_id === parent.id && link.student_id === row.id)) {
+            links.push({ id: `row-${++sequence}`, parent_id: parent.id, student_id: row.id });
+          }
+          row.parent_user_id = parent.user_id;
+          if (args.p_allow_shared_login && !row.linked_user_id
+            && row.email?.trim().toLowerCase() === parent.email?.trim().toLowerCase()) row.linked_user_id = parent.user_id;
+        }
+        return { data: null, error: null };
+      }
       if (name === 'school_family_claim_workflow') {
         const rows = tables.school_family_workflow_locks ||= [];
         if (rows.some((row) => row.organization_id === args.p_organization_id && row.student_id === args.p_student_id)) return { data: false, error: null };

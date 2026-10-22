@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { schoolTutorPayOccurrences, sumSchoolTutorPayEur } from '@/lib/schoolTutorLessonPay';
+import { schoolTutorSeptemberRows } from '../fixtures/school-tutor-september';
 
 const now = new Date('2026-09-30T12:00:00Z');
 const row = { id: 'child-1', tutor_id: 'teacher', class_group_id: 'group', subject_id: 'math',
@@ -72,15 +73,25 @@ describe('school teacher pay by meeting', () => {
       .toMatchObject({ payEur: null, payIssue: 'conflicting_snapshot', sessionIds: ['child-1'], attendanceIds: ['attendance-1'] });
   });
 
-  it('pays a stored completed meeting without a confirmation stamp and still waits for no-show confirmation', () => {
+  it('requires confirmation for completed and no-show pay when the organization requires it', () => {
     const options = { requireConfirmation: true };
-    expect(schoolTutorPayOccurrences([row], 45, now, options)[0].payEur).toBe(45);
-    expect(schoolTutorPayOccurrences([{ ...row, status: 'no_show', status_confirmed_at: null }], 45, now, options)).toEqual([]);
-    for (const status_confirmed_by of ['teacher', 'administrator']) {
-      const confirmed = { ...row, status: 'no_show', status_confirmed_at: now.toISOString(), status_confirmed_by };
-      expect(schoolTutorPayOccurrences([confirmed], 45, now, options)[0].payEur).toBe(45);
+    for (const status of ['completed', 'no_show']) {
+      const pending = { ...row, status, status_confirmed_at: null };
+      expect(schoolTutorPayOccurrences([pending], 45, now, options)).toEqual([]);
+      expect(schoolTutorPayOccurrences([pending], 45, now, { ...options, countStoredCompleted: true })).toEqual([]);
+      for (const status_confirmed_by of ['teacher', 'administrator']) {
+        const confirmed = { ...pending, status_confirmed_at: now.toISOString(), status_confirmed_by };
+        expect(schoolTutorPayOccurrences([confirmed], 45, now, options)[0].payEur).toBe(45);
+      }
     }
     expect(schoolTutorPayOccurrences([row], 45, now)).toHaveLength(1);
+  });
+  it.each([false, true])('keeps six September meetings and €270 with first-week cancellation=%s', firstWeekCancelled => {
+    const rows = schoolTutorSeptemberRows('school', firstWeekCancelled);
+    const options = { requireConfirmation: true };
+    const occurrences = schoolTutorPayOccurrences(rows, 45, now, options);
+    expect(occurrences.map(item => new Date(item.row.start_time!).getUTCDate())).toEqual([14, 16, 21, 23, 28, 30]);
+    expect(sumSchoolTutorPayEur(rows, 45, now, options)).toEqual({ payEur: 270, meetingCount: 6, unresolvedCount: 0 });
   });
   it('ignores unconfirmed sibling snapshots while paying a confirmed group once', () => {
     const confirmed = { ...row, status_confirmed_at: now.toISOString() };

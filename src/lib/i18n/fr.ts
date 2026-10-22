@@ -1,5 +1,3 @@
-import { tutorPairingTranslations } from './tutorPairingTranslations.js';
-import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
@@ -15,9 +13,18 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
+import { schoolServiceTranslations } from './schoolServiceTranslations.js';
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 export const fr: Record<string, string> = {
+  ...schoolServiceTranslations.fr,
   ...tutorPairingTranslations.fr,
   ...studentLoadingTranslations.fr,
+  'invoices.cancelInvoice': "Annuler la facture",
+  'invoices.cancelInvoiceHint': "La facture ne sera plus à payer et son lien de paiement sera désactivé. Le numéro et le document resteront dans l’historique. Indiquez un motif (au moins 3 caractères).",
+  'invoices.cancelReason': "Motif d’annulation",
+  'invoices.cancelSuccess': "Facture annulée.",
+  'invoices.cancelFailed': "Impossible d’annuler la facture. Veuillez réessayer.",
   'school.archive.title': "Archives des contrats",
   'school.archive.description': "Consultez et téléchargez les contrats archivés.",
   'school.archive.search': "Rechercher par numéro de contrat, élève ou payeur",

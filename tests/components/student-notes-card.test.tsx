@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import StudentNotesCard from '@/components/company/StudentNotesCard';
 
 const state = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }));
@@ -16,6 +16,7 @@ const props = {
 };
 
 describe('Administration and tutor notes', () => {
+  afterEach(() => { cleanup(); vi.useRealTimers(); });
   beforeEach(() => {
     vi.clearAllMocks();
     state.load.mockResolvedValue({ student_id: 'child-a', admin_comment: 'Parent called', last_contacted_at: '2026-09-25' });
@@ -89,5 +90,30 @@ describe('Administration and tutor notes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Bandyti dar kartą' }));
     expect(await screen.findByText('Parent called')).toBeTruthy();
     expect(state.load).toHaveBeenCalledTimes(2);
+  });
+
+  it('times out a hung notes read, aborts it and keeps editing unavailable', async () => {
+    vi.useFakeTimers();
+    state.load.mockReturnValue(new Promise(() => {}));
+    render(<StudentNotesCard {...props} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Redaguoti' })).toBeNull();
+    expect(state.load.mock.calls[0][2].aborted).toBe(true);
+    expect(state.save).not.toHaveBeenCalled();
+  });
+
+  it('aborts an unmounted card read and ignores it after another child opens', async () => {
+    let resolvePrevious!: (value: unknown) => void;
+    state.load.mockReturnValueOnce(new Promise(resolve => { resolvePrevious = resolve; }));
+    const view = render(<StudentNotesCard {...props} />);
+    const previousSignal = state.load.mock.calls[0][2] as AbortSignal;
+    view.unmount();
+    expect(previousSignal.aborted).toBe(true);
+    render(<StudentNotesCard {...props} studentId="child-b" studentIds={['child-b']} />);
+    expect(await screen.findByText('Parent called')).toBeTruthy();
+    await act(async () => { resolvePrevious({ admin_comment: 'Other child private notes' }); });
+    expect(screen.queryByText('Other child private notes')).toBeNull();
+    expect(screen.getByText('Parent called')).toBeTruthy();
   });
 });

@@ -6,7 +6,7 @@ import { verifyRequestAuth } from './_lib/auth.js';
 import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { managedFamilyAccountsEnabled } from '../src/lib/managedFamilyAccounts.js';
-import { studentRegistrationInvitationTarget, buildStudentRegistrationReminderEmail } from './_lib/studentRegistrationReminders.js';
+import { studentRegistrationInvitationTarget, buildStudentRegistrationReminderEmail, RegistrationRecipientUnavailableError } from './_lib/studentRegistrationReminders.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { resolveOrgEmailReplyToWithServiceClient } from './_lib/orgEmailReplyTo.js';
 import { getResendApiKey } from './_lib/resendConfig.js';
@@ -63,6 +63,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (sent.error || !sent.data?.id) return res.status(502).json({ error: 'Email delivery not confirmed' });
     return res.status(200).json({ ok: true });
   } catch (error) {
+    if (error instanceof RegistrationRecipientUnavailableError) {
+      return res.status(422).json({ error: 'Registration recipient unavailable', code: 'recipient_unavailable' });
+    }
     console.error('[student-registration-invitation] Request failed', error instanceof Error ? error.message : 'Database error');
     return res.status(503).json({ error: 'Registration invitation unavailable' });
   }

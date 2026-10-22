@@ -12,11 +12,17 @@ export type StudentAdminNotes = {
   last_contacted_at: string | null;
 };
 
-export async function loadStudentAdminNotes(studentId: string, studentIds: string[] = [studentId]): Promise<StudentAdminNotes | null> {
-  const { data, error } = await supabase
+export async function loadStudentAdminNotes(
+  studentId: string,
+  studentIds: string[] = [studentId],
+  signal?: AbortSignal,
+): Promise<StudentAdminNotes | null> {
+  let query = supabase
     .from('student_admin_notes')
     .select('student_id, admin_comment, last_contacted_at')
     .in('student_id', [...new Set(studentIds)]);
+  if (signal) query = query.abortSignal(signal);
+  const { data, error } = await query;
   if (error) throw error;
   const rows = (data || []) as StudentAdminNotes[];
   if (rows.length === 0) return null;

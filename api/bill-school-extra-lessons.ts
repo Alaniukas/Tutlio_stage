@@ -114,7 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let emailed = 0;
   let held = 0;
   let failed = 0;
-  const review: Array<{ contract_id: string; reason: string; session_ids?: string[] }> = [];
+  const review: Array<{ contract_id?: string; organization_id?: string; reason: string; session_ids?: string[] }> = [];
   const sessionCache = new Map<string, { data: any[]; error: { message: string } | null }>();
   const planned: Array<Record<string, unknown>> = [];
   // Schema step 5: the invoice goes to the payer by email with a "pay now" link (no account).
@@ -137,7 +137,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   };
 
+  // One-off charges must be combined with the payer's lessons, rather than
+  // attached to whichever contract happens to be processed first. This also
+  // finds schools/children with services but no extra-lessons contract at all.
+  const serviceOrgs = await readAllSchoolBillingRows((afterId) => {
+    let query = supabase.from('organizations').select('id, features').eq('entity_type', 'school')
+      .eq('features->>school_service_charges', 'true').order('id', { ascending: true }).limit(500);
+    if (requestedOrg) query = query.eq('id', requestedOrg);
+    if (afterId) query = query.gt('id', afterId);
+    return query;
+  });
+  if (serviceOrgs.error) return res.status(503).json({ error: serviceOrgs.error.message });
+  const serviceHandled = new Set<string>();
+  for (const org of (serviceOrgs.data || []).filter((row: any) => row.features?.school_service_charges === true)) {
+    if (Date.now() - runStartedAt > 240_000) return res.status(503).json({ success: false, error: 'billing_run_deadline', created, emailed, skipped, held, failed, review });
+    try {
+      const { billPendingSchoolServicePayers } = await import('./school-monthly-invoice-admin.js');
+      const result = await billPendingSchoolServicePayers(org.id, start, end, dryRun, runStartedAt + 240_000);
+      for (const studentId of result.handledStudentIds) serviceHandled.add(`${org.id}:${studentId}`);
+      created += result.created; emailed += result.emailed; held += result.held; failed += result.failed;
+      review.push(...result.review); planned.push(...result.planned);
+      if (result.continuationRequired) return res.status(503).json({ success: false, error: 'billing_run_deadline',
+        created, emailed, skipped, held, failed, review, continuation_required: true, period: { start, end }, ...(dryRun ? { planned } : {}) });
+    } catch (error) {
+      // Do not fall back to separate contract invoices after a failed combined review.
+      console.error('[bill-school-services]', org.id, error instanceof Error ? error.message : error);
+      return res.status(503).json({ success: false, error: 'one_off_service_billing_failed', created, emailed, skipped, held, failed, review });
+    }
+  }
+
   for (const contract of rows) {
+    if (serviceHandled.has(`${contract.organization_id}:${contract.student_id}`)) { skipped++; continue; }
     if (Date.now() - runStartedAt > 240_000) {
       return res.status(503).json({ success: false, error: 'billing_run_deadline', created, emailed, skipped, held, failed, review, continuation_required: true, period: { start, end } });
     }

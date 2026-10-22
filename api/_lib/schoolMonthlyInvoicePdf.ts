@@ -306,7 +306,7 @@ export async function generateSchoolMonthlyInvoicePdf(data: SchoolMonthlyInvoice
   });
   y -= detailsH + 14;
 
-  const headers = ['Mokinys', 'Užsiėmimas', 'Pamokų sk.', 'Kaina', 'Suma', 'Nuolaida', 'Mokėti'];
+  const headers = ['Mokinys', 'Paslauga', 'Kiekis', 'Kaina', 'Suma', 'Nuolaida', 'Mokėti'];
   let x = MARGIN;
   const headerH = 30;
   const continuationPage = () => {

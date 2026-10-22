@@ -587,6 +587,7 @@ describe('session reminder capacity behavior', () => {
   });
 
   it('keeps a school parent reminder pending when contract access skips the email', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const session = futureSession();
     Object.assign(session.student as any, {
       email: '',
@@ -617,6 +618,14 @@ describe('session reminder capacity behavior', () => {
     expect(reminderCalls).toHaveLength(2);
     expect(mocks.updateCalls).not.toContainEqual({ reminder_payer_sent: true });
     expect(response.getResult()).toMatchObject({ statusCode: 200, body: { sent: 0, emailAttempts: 2 } });
+    expect(warning).not.toHaveBeenCalled();
+    // Acceptance before the lesson makes the same pending recipients eligible.
+    fetchMock.mockImplementation(async () => emailResponse(true));
+    const accepted = mockRes();
+    await handler(mockReq(), accepted);
+    expect(mocks.updateCalls).toContainEqual({ reminder_payer_sent: true });
+    expect(accepted.getResult()).toMatchObject({ statusCode: 200, body: { sent: 2 } });
+    warning.mockRestore();
   });
 
   it('marks the parent reminder only after every intended recipient is confirmed', async () => {

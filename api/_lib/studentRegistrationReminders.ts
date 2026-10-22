@@ -20,6 +20,11 @@ type ReminderStudent = {
 type ReminderOrg = OrgRowForEmailBranding & { id: string; preferred_locale?: string | null; features: Record<string, unknown> };
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 
+/** Missing contact/invitation data can be corrected without a provider retry. */
+export class RegistrationRecipientUnavailableError extends Error {
+  constructor() { super('Registration recipient unavailable'); this.name = 'RegistrationRecipientUnavailableError'; }
+}
+
 export function buildStudentRegistrationReminderEmail(org: ReminderOrg, studentName: string, url: string) {
   const locale = org.preferred_locale || 'lt';
   const resolved = resolveEmailOrgBranding(org.id, org);
@@ -55,12 +60,12 @@ export async function studentRegistrationInvitationTarget(db: SupabaseClient, or
     const identifier = String(user.app_metadata?.student_login_name || user.email || '');
     const to = role === 'parent' ? user.email : user.app_metadata?.student_login_name
       ? user.app_metadata?.student_contact_email || student.email || student.payer_email : user.email;
-    if (!identifier || !to || !String(to).includes('@')) throw new Error('Registration recipient unavailable');
+    if (!identifier || !to || !String(to).trim().includes('@')) throw new RegistrationRecipientUnavailableError();
     const token = buildMvAccountActivationToken({ studentId: student.id, role, email: identifier, issuedAt: options.activationIssuedAt });
     return { to: String(to).trim().toLowerCase(), url: buildMvAccountActivationUrl(appOrigin, token), identity: userId };
   }
   const to = student.payer_email || student.email;
-  if (!to || !student.invite_code) throw new Error('Registration recipient unavailable');
+  if (!to?.trim() || !to.includes('@') || !student.invite_code?.trim()) throw new RegistrationRecipientUnavailableError();
   return { to: to.trim().toLowerCase(), url: `${appOrigin}/book/${encodeURIComponent(student.invite_code)}`,
     identity: orgStudentIdentityGroupKey(student) };
 }
@@ -113,7 +118,13 @@ export async function runStudentRegistrationReminders(db: SupabaseClient, origin
           }, { onConflict: 'delivery_key', ignoreDuplicates: true });
           if (saveError) throw saveError;
           result.sent++;
-        } catch (error) { console.error('[registration-reminders]', error); result.failed++; }
+        } catch (error) {
+          if (error instanceof RegistrationRecipientUnavailableError) {
+            // Do not stamp delivery. Adding the missing contact or invite code
+            // must make the next run eligible automatically.
+            result.skipped++;
+          } else { console.error('[registration-reminders]', error); result.failed++; }
+        }
       }
     }
     if (!orgs || orgs.length < 1000) return result;

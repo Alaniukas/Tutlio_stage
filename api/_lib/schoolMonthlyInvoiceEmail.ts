@@ -219,19 +219,29 @@ export async function markSchoolMonthlyInvoicePaid(
   if (loadErr) return { ok: false, error: loadErr.message };
   if (!existing) return { ok: false, error: 'Invoice not found' };
   if (existing.payment_status === 'paid') return { ok: true, alreadyPaid: true };
+  if (existing.payment_status === 'cancelled') return { ok: false, error: 'Invoice is cancelled' };
 
-  const { error } = await supabase
+  const { data: saved, error } = await supabase
     .from('school_monthly_invoices')
     .update({ payment_status: 'paid', paid_at: new Date().toISOString() })
     .eq('id', invoiceId)
-    .neq('payment_status', 'paid');
+    .eq('payment_status', 'pending')
+    .select('id')
+    .maybeSingle();
   if (error) return { ok: false, error: error.message };
+  if (!saved) {
+    const { data: current, error: currentError } = await supabase.from('school_monthly_invoices')
+      .select('payment_status').eq('id', invoiceId).maybeSingle();
+    if (!currentError && current?.payment_status === 'paid') return { ok: true, alreadyPaid: true };
+    return { ok: false, error: currentError?.message || 'Invoice is no longer pending' };
+  }
 
   // Optional bookkeeping columns (migration 20260905120000); ignore if not there yet.
   await supabase
     .from('school_monthly_invoices')
     .update({ paid_via: opts.paidVia, stripe_payment_intent_id: opts.stripePaymentIntentId || null })
     .eq('id', invoiceId)
+    .eq('payment_status', 'paid')
     .then(({ error: e }) => {
       if (e) console.warn('[school-monthly-invoice] bookkeeping columns not written', e.message);
     });

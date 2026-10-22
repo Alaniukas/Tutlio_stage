@@ -1,3 +1,4 @@
+import { schoolServiceTranslations } from './schoolServiceTranslations.js';
 import { tutorPairingTranslations } from './tutorPairingTranslations.js';
 import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
@@ -11,8 +12,14 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const lt: Record<string, string> = {
+  ...schoolServiceTranslations.lt,
   ...tutorPairingTranslations.lt,
   ...studentLoadingTranslations.lt,
+  'invoices.cancelInvoice': "Panaikinti sąskaitą",
+  'invoices.cancelInvoiceHint': "Sąskaita nebebus mokėtina, o jos mokėjimo nuoroda nebegalios. Numeris ir dokumentas liks istorijoje. Nurodykite priežastį (bent 3 simboliai).",
+  'invoices.cancelReason': "Panaikinimo priežastis",
+  'invoices.cancelSuccess': "Sąskaita panaikinta.",
+  'invoices.cancelFailed': "Nepavyko panaikinti sąskaitos. Bandykite dar kartą.",
   'school.archive.title': "Sutarčių archyvas",
   'school.archive.description': "Archyvuotų sutarčių peržiūra ir atsisiuntimas.",
   'school.archive.search': "Ieškoti pagal sutarties numerį, mokinį ar mokėtoją",

@@ -1,3 +1,5 @@
+import { recentReleaseTranslations } from './recentReleaseTranslations.js';
+
 const keys = [
   'compStats.pageSubtitleForward', 'compStats.pageSubtitleSpanning', 'compStats.lessonsPlanned',
   'compStats.projectedRevenue', 'compStats.projectedRevenueHint', 'compStats.plannedSectionTitle',
@@ -234,6 +236,7 @@ const rescheduleHelpCopy: Record<string, [string, string]> = {
 export const organizationReleaseTranslations: Record<string, Record<string, string>> = Object.fromEntries(
   Object.entries(copy).map(([locale, values]) => [locale, {
     ...Object.fromEntries(keys.map((key, index) => [key, values[index]])),
+    ...recentReleaseTranslations[locale],
     ...(rescheduleHelpCopy[locale] ? {
       'stuSess.cancellationDisabledByOrg': rescheduleHelpCopy[locale][0],
       'stuSess.rescheduleHelp': rescheduleHelpCopy[locale][1],

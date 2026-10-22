@@ -563,6 +563,17 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'enterprise',
   },
 
+  school_service_charges: {
+    id: 'school_service_charges',
+    name: 'Vienkartinės kitos paslaugos sąskaitose',
+    nameEn: 'One-off services on school invoices',
+    description: 'Administratoriaus priskirtos licencijos, olimpiados ir kiti vienkartiniai mokesčiai mokinio kortelėje ir bendroje sąskaitoje.',
+    descriptionEn: 'Admin-assigned licenses, olympiads and other one-off services on the student card and combined invoice.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'enterprise',
+  },
+
   school_class_groups: {
     id: 'school_class_groups',
     name: 'Klasės grupės visiems mokslo metams',

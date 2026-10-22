@@ -1,5 +1,3 @@
-import { tutorPairingTranslations } from './tutorPairingTranslations.js';
-import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
@@ -15,9 +13,18 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
+import { schoolServiceTranslations } from './schoolServiceTranslations.js';
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 export const lv: Record<string, string> = {
+  ...schoolServiceTranslations.lv,
   ...tutorPairingTranslations.lv,
   ...studentLoadingTranslations.lv,
+  'invoices.cancelInvoice': "Anulēt rēķinu",
+  'invoices.cancelInvoiceHint': "Rēķins vairs nebūs jāapmaksā, un maksājuma saite vairs nedarbosies. Numurs un dokuments paliks vēsturē. Norādiet iemeslu (vismaz 3 rakstzīmes).",
+  'invoices.cancelReason': "Anulēšanas iemesls",
+  'invoices.cancelSuccess': "Rēķins anulēts.",
+  'invoices.cancelFailed': "Neizdevās anulēt rēķinu. Mēģiniet vēlreiz.",
   'school.archive.title': "Līgumu arhīvs",
   'school.archive.description': "Skatiet un lejupielādējiet arhivētos līgumus.",
   'school.archive.search': "Meklēt pēc līguma numura, skolēna vai maksātāja",

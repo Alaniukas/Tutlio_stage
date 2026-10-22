@@ -48,4 +48,16 @@ describe('Student note storage contract', () => {
       student_id: 'child-1', admin_comment: 'Parent called\n\nBilling follow-up', last_contacted_at: '2026-09-30',
     });
   });
+
+  it('passes cancellation to the private notes query', async () => {
+    const controller = new AbortController();
+    const result = { data: [], error: null };
+    const query: any = {
+      select: vi.fn(() => query), in: vi.fn(() => query),
+      abortSignal: vi.fn(() => Promise.resolve(result)),
+    };
+    state.from.mockReturnValue(query);
+    await expect(loadStudentAdminNotes('child-1', ['child-1'], controller.signal)).resolves.toBeNull();
+    expect(query.abortSignal).toHaveBeenCalledWith(controller.signal);
+  });
 });

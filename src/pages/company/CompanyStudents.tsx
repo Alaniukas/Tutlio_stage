@@ -89,6 +89,7 @@ import StudentAvailabilityEditor from '@/components/company/StudentAvailabilityE
 import StudentScheduleSummary from '@/components/company/StudentScheduleSummary';
 import StudentNotesFields from '@/components/company/StudentNotesFields';
 import StudentNotesCard from '@/components/company/StudentNotesCard';
+import SchoolOtherServices from '@/components/school/SchoolOtherServices';
 import { saveStudentNotes, type StudentNotesDraft } from '@/lib/studentNotes';
 import {
   pickGroupPreferredAvailability,
@@ -6707,6 +6708,11 @@ export default function CompanyStudents() {
                       invalidateCache('company_students');
                       void fetchData();
                     }} />
+                )}
+
+                {isSchoolView && hasFeature('school_service_charges') && can('finance.view') && orgId && selectedStudent && (
+                  <SchoolOtherServices key={`services:${selectedStudent.id}`} organizationId={orgId}
+                    student={{ id: selectedStudent.id, fullName: selectedStudent.full_name, payerEmail: selectedStudent.payer_email }} />
                 )}
 
                 {/* Student meeting link */}

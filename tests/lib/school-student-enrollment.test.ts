@@ -30,10 +30,12 @@ describe('schoolStudentEnrollment', () => {
     expect(SCHOOL_YEAR_OPTIONS).toEqual(['2026/2027', '2027/2028']);
   });
 
-  it('exposes grades 0–10 in klasė format', () => {
+  it('exposes grades 0–12 in klasė format', () => {
     expect(GRADE_OPTIONS[0]).toBe('0 klasė');
     expect(GRADE_OPTIONS[5]).toBe('5 klasė');
-    expect(GRADE_OPTIONS).toHaveLength(11);
+    expect(GRADE_OPTIONS).toContain('11 klasė');
+    expect(GRADE_OPTIONS).toContain('12 klasė');
+    expect(GRADE_OPTIONS).toHaveLength(13);
   });
 
   it('detects debt from manual flag or unpaid counts', () => {

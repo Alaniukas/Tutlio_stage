@@ -9,6 +9,7 @@ vi.mock('../../api/_lib/invoiceNumber.js', () => ({ allocateInvoiceNumber: async
 vi.mock('../../api/_lib/invoicePdf.js', () => ({ generateInvoicePdf: async () => new Uint8Array([1]) }));
 vi.mock('../../api/_lib/invoiceBranding.js', () => ({ resolveInvoiceBranding: async () => null }));
 import handler from '../../api/generate-invoice';
+import { schoolTutorSeptemberRows } from '../fixtures/school-tutor-september';
 
 function fakeDb(): any {
   return { storage: { from: () => ({ upload: async () => ({ error: null }) }) },
@@ -227,19 +228,36 @@ describe('school teacher invoices by meeting', () => {
     expect((await request({ attendanceIds: [attendanceId] })).code).toBe(409);
     expect(state.allocations).toBe(0);
   });
-  it('pays stored completed meetings without a confirmation stamp', async () => {
+  it('requires confirmation before school completed meetings can be invoiced', async () => {
     state.tables.organizations[0].features = { tutor_lesson_status_confirmation: true };
-    expect((await request({ precheckOnly: true })).body).toMatchObject({ canGenerate: true, candidateCount: 1 });
+    expect((await request({ precheckOnly: true })).body).toMatchObject({ canGenerate: false, reason: 'no_sessions' });
+    expect((await request({ sessionIds: ['child-0'] })).code).toBe(409);
     expect(state.allocations).toBe(0);
+    expect(state.writes).toHaveLength(0);
   });
-  it('pays stored completed Laisvi vaikai meetings without a confirmation stamp', async () => {
+  it('requires Laisvi vaikai confirmation even when the organization flag is absent', async () => {
     const organizationId = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
     state.tables.profiles[0].organization_id = organizationId;
     state.tables.organizations[0].id = organizationId;
     state.tables.invoice_profiles[1].organization_id = organizationId;
     state.tables.sessions.forEach(row => { row.students = { ...row.students, organization_id: organizationId }; });
-    expect((await request({ precheckOnly: true })).body).toMatchObject({ canGenerate: true, candidateCount: 1 });
-    expect((await request({ sessionIds: ['child-0'] })).code).toBe(200);
+    expect((await request({ precheckOnly: true })).body).toMatchObject({ canGenerate: false, reason: 'no_sessions' });
+    expect((await request({ sessionIds: ['child-0'] })).code).toBe(409);
+    expect(state.allocations).toBe(0);
+    expect(state.writes).toHaveLength(0);
+  });
+  it.each([false, true])('issues six September meetings for €270 with first-week cancellation=%s', async firstWeekCancelled => {
+    state.tables.organizations[0].features = { tutor_lesson_status_confirmation: true };
+    state.tables.sessions = schoolTutorSeptemberRows('school', firstWeekCancelled);
+    expect((await request({ precheckOnly: true })).body).toMatchObject({ canGenerate: true, candidateCount: 6 });
+    expect((await request()).code).toBe(200);
+    const invoice = state.writes.find(write => write.table === 'invoices' && write.value.total_amount)?.value;
+    expect(invoice.total_amount).toBe(270);
+    const lines = state.writes.find(write => write.table === 'invoice_line_items')!.value;
+    expect(lines.reduce((sum: number, line: any) => sum + line.quantity, 0)).toBe(6);
+    const includedIds = lines.flatMap((line: any) => line.session_ids);
+    expect(includedIds).toHaveLength(12);
+    expect(includedIds.every((id: string) => !id.startsWith('september-7-') && !id.startsWith('september-9-'))).toBe(true);
   });
   it.each(['single', 'per_payment'])('issues one €45 meeting for six children with %s grouping and all source ids', async groupingType => {
     const result = await request({ groupingType, onlyPaid: true });

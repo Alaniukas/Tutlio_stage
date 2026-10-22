@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { startOrgAdminTelemetry } from '@/lib/orgAdminTelemetry';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
+import { ORG_ADMIN_ORGANIZATION_SELECT, type OrgAdminOrganization } from '@/lib/orgLookup';
 import {
   hasOrgAdminPermission,
   type OrgAdminPermission,
@@ -20,6 +21,7 @@ export interface OrgAdminMembership {
   acceptedAt: string | null;
   organizationName: string;
   entityType: 'school' | 'company';
+  organization?: OrgAdminOrganization | null;
 }
 
 interface OrgAdminAccessContextValue {
@@ -118,17 +120,19 @@ export function OrgAdminAccessProvider({ children }: { children: ReactNode }) {
       }
       let organizationName = '';
       let entityType: 'school' | 'company' = 'company';
+      let organization: OrgAdminOrganization | null = null;
       if (organizationId) {
         try {
           const org = await withAbort(async (signal) => (
             await supabase
               .from('organizations')
-              .select('name, entity_type')
+              .select(ORG_ADMIN_ORGANIZATION_SELECT)
               .eq('id', organizationId)
               .abortSignal(signal)
               .maybeSingle()
           ), 4000);
           if (!org.error && org.data) {
+            organization = org.data as OrgAdminOrganization;
             organizationName = String(org.data.name || '');
             entityType = org.data.entity_type === 'school' ? 'school' : 'company';
           }
@@ -147,6 +151,7 @@ export function OrgAdminAccessProvider({ children }: { children: ReactNode }) {
         acceptedAt: typeof row.accepted_at === 'string' ? row.accepted_at : null,
         organizationName,
         entityType,
+        organization,
       };
       if (!mounted.current || latestUserId.current !== user.id) return;
       setMembership(next.status === 'active' ? next : null);

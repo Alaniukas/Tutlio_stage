@@ -50,5 +50,6 @@ export function schoolMonthlyInvoicesEnabled(
   if (entityType && entityType !== 'school') return false;
   return schoolConsultationsEnabled(orgIdOrSlug, features)
     || schoolExtraLessonsDiscountEnabled(orgIdOrSlug, features)
+    || features?.school_service_charges === true
     || Boolean(features?.school_family_portal);
 }

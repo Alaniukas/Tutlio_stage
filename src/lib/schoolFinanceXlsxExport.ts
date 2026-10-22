@@ -171,6 +171,7 @@ function addPaymentsSheet(
     { width: 16 },
     { width: 14 },
     { width: 22 },
+    { width: 18 },
   ];
 
   const headerRow = ws.addRow(headers);

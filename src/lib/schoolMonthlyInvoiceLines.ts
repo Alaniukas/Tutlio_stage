@@ -6,6 +6,7 @@ export type InvoiceLineSource =
   | 'lesson'
   | 'consultation_free'
   | 'consultation_paid'
+  | 'service'
   | 'discount';
 
 export type MonthlyInvoiceLineInput = {

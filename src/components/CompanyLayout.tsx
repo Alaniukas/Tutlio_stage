@@ -213,15 +213,22 @@ export default function CompanyLayout() {
       if (!orgName && membership.organizationName) setOrgName(membership.organizationName);
       setEntityType(membership.entityType);
     }
+    // Prioritize the visible overview. Warming every other page here competes
+    // with its first reads and can publish a partial dashboard during login.
+    if (location.pathname === '/company' || location.pathname === '/school') return;
     let cancelled = false;
-    preloadOrgAdminData().then(() => {
+    preloadOrgAdminData(membership?.organization ? {
+      user_id: membership.userId,
+      organization_id: membership.organizationId,
+      organizations: membership.organization,
+    } : undefined).then(() => {
       if (cancelled) return;
       const dc = getCached<any>('company_dashboard');
       if (dc?.orgName && !orgName) setOrgName(dc.orgName);
       if (dc?.entityType) setEntityType(dc.entityType);
     });
     return () => { cancelled = true; };
-  }, [ctxUser?.id, membership?.organizationId]);
+  }, [ctxUser?.id, membership?.organizationId, location.pathname]);
 
   const handleLogout = async () => {
     sessionStorage.removeItem(ENTITY_KEY);

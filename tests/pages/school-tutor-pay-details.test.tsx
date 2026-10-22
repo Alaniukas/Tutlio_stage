@@ -202,14 +202,15 @@ describe('school administrator teacher-pay details', () => {
     if (error) expect(screen.getByRole('alert')).toBeTruthy();
   });
 
-  it('pays stored completed meetings without a confirmation stamp', async () => {
+  it('does not pay completed meetings that still await required confirmation', async () => {
     state.manualConfirmation = true;
     state.tutor.company_commission_percent = 45;
     state.sessions = [child('first', 'group-a', 45), child('second', 'group-a', 45)]
       .map(row => ({ ...row, status_confirmed_at: null }));
     const dialog = await openDetails();
-    expect(dialog.getByText('1')).toBeTruthy();
-    expect(dialog.getByText('€45.00')).toBeTruthy();
+    expect(dialog.getByText('0')).toBeTruthy();
+    expect(dialog.getByText('€0.00')).toBeTruthy();
+    expect(dialog.queryByText('€45.00')).toBeNull();
     expect(dialog.queryByRole('alert')).toBeNull();
     expect(dialog.getByText('Individual lesson pay')).toBeTruthy();
   });
