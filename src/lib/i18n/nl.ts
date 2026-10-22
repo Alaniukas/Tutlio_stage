@@ -1,3 +1,5 @@
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations, schoolGroupActivationTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { companyPaymentReportTranslations } from './companyPaymentReportTranslations.js';
@@ -16,6 +18,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const nl: Record<string, string> = {
+  ...tutorPairingTranslations.nl,
+  ...studentLoadingTranslations.nl,
   'school.archive.title': "Contractarchief",
   'school.archive.description': "Bekijk en download gearchiveerde contracten.",
   'school.archive.search': "Zoeken op contractnummer, leerling of betaler",

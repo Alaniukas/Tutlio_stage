@@ -1,0 +1,15 @@
+export const studentLoadingTranslations = {
+  lt: { 'compStu.loadError': 'Nepavyko įkelti mokinių. Patikrinkite ryšį ir bandykite dar kartą.' },
+  en: { 'compStu.loadError': 'Could not load students. Check your connection and try again.' },
+  pl: { 'compStu.loadError': 'Nie udało się wczytać uczniów. Sprawdź połączenie i spróbuj ponownie.' },
+  lv: { 'compStu.loadError': 'Neizdevās ielādēt skolēnus. Pārbaudiet savienojumu un mēģiniet vēlreiz.' },
+  ee: { 'compStu.loadError': 'Õpilasi ei saanud laadida. Kontrollige ühendust ja proovige uuesti.' },
+  fr: { 'compStu.loadError': 'Impossible de charger les élèves. Vérifiez votre connexion et réessayez.' },
+  es: { 'compStu.loadError': 'No se pudieron cargar los alumnos. Comprueba tu conexión e inténtalo de nuevo.' },
+  de: { 'compStu.loadError': 'Die Schüler konnten nicht geladen werden. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.' },
+  se: { 'compStu.loadError': 'Det gick inte att ladda eleverna. Kontrollera anslutningen och försök igen.' },
+  dk: { 'compStu.loadError': 'Eleverne kunne ikke indlæses. Kontrollér forbindelsen, og prøv igen.' },
+  fi: { 'compStu.loadError': 'Oppilaiden lataaminen epäonnistui. Tarkista yhteys ja yritä uudelleen.' },
+  no: { 'compStu.loadError': 'Kunne ikke laste inn elevene. Sjekk tilkoblingen og prøv igjen.' },
+  nl: { 'compStu.loadError': 'De leerlingen konden niet worden geladen. Controleer je verbinding en probeer het opnieuw.' },
+};

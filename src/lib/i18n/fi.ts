@@ -1,3 +1,5 @@
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
@@ -14,6 +16,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const fi: Record<string, string> = {
+  ...tutorPairingTranslations.fi,
+  ...studentLoadingTranslations.fi,
   'school.archive.title': "Sopimusarkisto",
   'school.archive.description': "Katsele ja lataa arkistoituja sopimuksia.",
   'school.archive.search': "Hae sopimusnumerolla, oppilaalla tai maksajalla",

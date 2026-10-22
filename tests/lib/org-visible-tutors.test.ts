@@ -8,6 +8,9 @@ function clientFor(options: {
   linkedStudents?: Array<{ tutor_id: string | null }>;
   inviteTutors?: Array<{ used_by_profile_id: string | null; used?: boolean; invitee_email?: string | null }>;
   classGroups?: Array<{ tutor_id: string | null }>;
+  errors?: Record<string, { message: string }>;
+  rpcError?: { message: string };
+  rpcStatus?: number;
   profiles: Array<{ id: string; full_name: string; email?: string | null }>;
 }) {
   const rows: Record<string, unknown[]> = {
@@ -20,19 +23,40 @@ function clientFor(options: {
   return {
     from: vi.fn((table: string) => ({
       select: vi.fn(() => ({
-        eq: vi.fn().mockResolvedValue({ data: rows[table] || [], error: null }),
+        eq: vi.fn().mockResolvedValue({ data: rows[table] || [], error: options.errors?.[table] || null }),
       })),
     })),
     rpc: vi.fn((name: string) => Promise.resolve({
       data: name === 'get_my_org_admin_user_ids'
         ? options.teammateAdmins || []
         : options.rpcTutors || [],
-      error: null,
+      error: options.rpcError || null,
+      status: options.rpcStatus,
     })),
   };
 }
 
 describe('getOrgVisibleTutors', () => {
+  it('rejects a failed profile read instead of returning a successful empty roster in strict mode', async () => {
+    const client = clientFor({ profiles: [], errors: { profiles: { message: 'HTTP 522' } } });
+    await expect(getOrgVisibleTutors(client as any, 'org-1', 'id', { strict: true })).rejects.toThrow('HTTP 522');
+  });
+
+  it('keeps the relationship fallback for unavailable legacy RPCs in strict mode', async () => {
+    const client = clientFor({
+      rpcError: { message: 'function not found' }, rpcStatus: 404,
+      linkedStudents: [{ tutor_id: 'tutor-1' }],
+      profiles: [{ id: 'tutor-1', full_name: 'Tutor' }],
+    });
+    await expect(getOrgVisibleTutors(client as any, 'org-1', 'id', { strict: true }))
+      .resolves.toEqual([{ id: 'tutor-1', full_name: 'Tutor' }]);
+  });
+
+  it('does not hide transport failures behind an optional RPC fallback', async () => {
+    const client = clientFor({ profiles: [], rpcError: { message: 'HTTP 522' }, rpcStatus: 522 });
+    await expect(getOrgVisibleTutors(client as any, 'org-1', 'id', { strict: true })).rejects.toThrow('HTTP 522');
+  });
+
   it('uses the narrow tutor-id RPC for an organization admin', async () => {
     const client = clientFor({
       adminUsers: [{ user_id: 'admin-1' }],

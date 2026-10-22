@@ -1,43 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  canHardDeleteStudentPairing,
-  reassignOpenLessonsToTutor,
-  removeOrgStudentTutorPairing,
-  targetPairingForRemovedRow,
-} from '@/lib/reassignStudentTutorLessons';
-
-describe('targetPairingForRemovedRow', () => {
-  it('moves lessons when exactly one other tutor pairing remains', () => {
-    expect(
-      targetPairingForRemovedRow([{ id: 'rimantas-row', tutor_id: 'rimantas' }]),
-    ).toEqual({ id: 'rimantas-row', tutorId: 'rimantas' });
-  });
-
-  it('does not guess when several tutors remain or none have a tutor', () => {
-    expect(targetPairingForRemovedRow([])).toBeNull();
-    expect(targetPairingForRemovedRow([{ id: 'a', tutor_id: null }])).toBeNull();
-    expect(
-      targetPairingForRemovedRow([
-        { id: 'a', tutor_id: 't1' },
-        { id: 'b', tutor_id: 't2' },
-      ]),
-    ).toBeNull();
-  });
-});
-
-describe('canHardDeleteStudentPairing', () => {
-  it('never deletes the last pairing row', () => {
-    expect(canHardDeleteStudentPairing(0, 0)).toBe(false);
-  });
-
-  it('does not delete a row that still has sessions or packages', () => {
-    expect(canHardDeleteStudentPairing(1, 2)).toBe(false);
-  });
-
-  it('deletes an empty extra pairing', () => {
-    expect(canHardDeleteStudentPairing(1, 0)).toBe(true);
-  });
-});
+import { reassignOpenLessonsToTutor, removeOrgStudentTutorPairing, tutorPairingRemovalErrorKey } from '@/lib/reassignStudentTutorLessons';
 
 function mockSb(handlers: Record<string, any>) {
   return {
@@ -182,165 +144,50 @@ describe('reassignOpenLessonsToTutor', () => {
 });
 
 describe('removeOrgStudentTutorPairing', () => {
-  it('moves open lessons then deletes the empty Ieva pairing', async () => {
-    const deleted: string[] = [];
-    let sessionsSelectCalls = 0;
-    const from = (table: string) => {
-      if (table === 'sessions') {
-        return {
-          select(cols: string) {
-            sessionsSelectCalls += 1;
-            if (cols.includes('lesson_package_id')) {
-              return {
-                eq() {
-                  return {
-                    in: async () => ({ data: [{ id: 's1', lesson_package_id: null }], error: null }),
-                  };
-                },
-              };
-            }
-            return {
-              eq() {
-                return { limit: async () => ({ data: [], error: null }) };
-              },
-            };
-          },
-          update() {
-            return { in: async () => ({ error: null }) };
-          },
-        };
-      }
-      if (table === 'lesson_packages') {
-        return {
-          select(cols: string) {
-            if (cols === 'id') {
-              return {
-                eq() {
-                  return {
-                    is() {
-                      return { or: async () => ({ data: [], error: null }) };
-                    },
-                    limit: async () => ({ data: [], error: null }),
-                  };
-                },
-              };
-            }
-            return {
-              eq() {
-                return { limit: async () => ({ data: [], error: null }) };
-              },
-            };
-          },
-          update() {
-            return { in: async () => ({ error: null }) };
-          },
-        };
-      }
-      if (table === 'recurring_individual_sessions') {
-        return {
-          update() {
-            return { eq() { return { eq: async () => ({ error: null }) }; } };
-          },
-        };
-      }
-      if (table === 'students') {
-        return {
-          delete() {
-            return {
-              eq: async (_c: string, id: string) => {
-                deleted.push(id);
-                return { error: null };
-              },
-            };
-          },
-        };
-      }
-      throw new Error(table);
-    };
-
-    const rpc = vi.fn(async () => ({ error: null }));
-    const result = await removeOrgStudentTutorPairing({ from, rpc } as any, {
-      rowId: 'ieva-row',
-      remainingGroup: [{ id: 'rimantas-row', tutor_id: 'rimantas' }],
+  it('uses one atomic stop operation even when exactly one other tutor remains', async () => {
+    const rpc = vi.fn(async () => ({ data: { mode: 'detached', cancelledSessions: 34 }, error: null }));
+    const from = vi.fn();
+    await expect(removeOrgStudentTutorPairing({ rpc, from } as any, {
+      rowId: 'lithuanian-card', expectedTutorId: 'lithuanian-tutor',
+      remainingGroup: [{ id: 'math-card', tutor_id: 'math-tutor' }],
+    })).resolves.toEqual({ mode: 'detached' });
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('remove_org_student_tutor_pairing', {
+      p_student_id: 'lithuanian-card', p_expected_tutor_id: 'lithuanian-tutor',
+      p_remaining_student_ids: ['math-card'],
     });
-    expect(result.mode).toBe('deleted');
-    expect(deleted).toEqual(['ieva-row']);
-    expect(sessionsSelectCalls).toBeGreaterThanOrEqual(2);
-    expect(rpc).toHaveBeenCalledWith('copy_student_parent_links_for_tutor_pairing', {
-      p_source_student_id: 'ieva-row', p_target_student_id: 'rimantas-row',
-    });
+    expect(from).not.toHaveBeenCalled();
   });
 
-  it('detaches instead of deleting when past lessons remain on the old row', async () => {
-    const detached: string[] = [];
-    const from = (table: string) => {
-      if (table === 'sessions') {
-        return {
-          select(cols: string) {
-            if (cols.includes('lesson_package_id')) {
-              return {
-                eq() {
-                  return { in: async () => ({ data: [], error: null }) };
-                },
-              };
-            }
-            return {
-              eq() {
-                return { limit: async () => ({ data: [{ id: 'old-completed' }], error: null }) };
-              },
-            };
-          },
-          update() {
-            return { in: async () => ({ error: null }) };
-          },
-        };
-      }
-      if (table === 'lesson_packages') {
-        return {
-          select() {
-            return {
-              eq() {
-                return {
-                  is() {
-                    return { or: async () => ({ data: [], error: null }) };
-                  },
-                  limit: async () => ({ data: [], error: null }),
-                };
-              },
-            };
-          },
-          update() {
-            return { in: async () => ({ error: null }) };
-          },
-        };
-      }
-      if (table === 'recurring_individual_sessions') {
-        return {
-          update() {
-            return { eq() { return { eq: async () => ({ error: null }) }; } };
-          },
-        };
-      }
-      if (table === 'students') {
-        return {
-          update() {
-            return {
-              eq: async (_c: string, id: string) => {
-                detached.push(id);
-                return { error: null };
-              },
-            };
-          },
-        };
-      }
-      throw new Error(table);
-    };
-
-    const result = await removeOrgStudentTutorPairing({ from, rpc: async () => ({ error: null }) } as any, {
-      rowId: 'ieva-row',
-      remainingGroup: [{ id: 'rimantas-row', tutor_id: 'rimantas' }],
+  it('passes every remaining family card, including an unassigned card', async () => {
+    const rpc = vi.fn(async () => ({ data: { mode: 'detached' }, error: null }));
+    await removeOrgStudentTutorPairing({ rpc } as any, {
+      rowId: 'old', expectedTutorId: 'old-tutor', remainingGroup: [
+        { id: 'first', tutor_id: 'one' }, { id: 'second', tutor_id: 'two' },
+        { id: 'unassigned', tutor_id: null }, { id: 'first', tutor_id: 'one' },
+      ],
     });
-    expect(result.mode).toBe('detached');
-    expect(detached).toEqual(['ieva-row']);
+    expect(rpc.mock.calls[0][1].p_remaining_student_ids).toEqual(['first', 'second', 'unassigned']);
+  });
+
+  it('propagates transaction failures without falling back to individual writes', async () => {
+    const error = { message: 'canceling statement due to statement timeout', code: '57014' };
+    const rpc = vi.fn(async () => ({ error, data: null }));
+    const from = vi.fn();
+    await expect(removeOrgStudentTutorPairing({ rpc, from } as any, {
+      rowId: 'old', expectedTutorId: 'tutor', remainingGroup: [],
+    })).rejects.toEqual(error);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('does not report success for an empty or malformed RPC response', async () => {
+    await expect(removeOrgStudentTutorPairing({ rpc: async () => ({ data: null, error: null }) } as any, {
+      rowId: 'old', expectedTutorId: 'tutor', remainingGroup: [],
+    })).rejects.toThrow('Invalid tutor removal response');
+  });
+
+  it('explains billing review and stale assignments without exposing database messages', () => {
+    expect(tutorPairingRemovalErrorKey({ message: 'tutor_pairing_billing_review_required' })).toBe('compStu.tutorRemovalBilling');
+    expect(tutorPairingRemovalErrorKey({ message: 'tutor_pairing_changed' })).toBe('compStu.tutorRemovalChanged');
+    expect(tutorPairingRemovalErrorKey({ message: 'sensitive database detail' })).toBe('compStu.tutorRemoveFailed');
   });
 });

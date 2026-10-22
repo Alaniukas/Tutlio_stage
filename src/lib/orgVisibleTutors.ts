@@ -76,7 +76,20 @@ export async function getOrgVisibleTutors(
   supabase: SupabaseClient,
   orgId: string,
   select: string,
+  options: { signal?: AbortSignal; strict?: boolean } = {},
 ): Promise<OrgTutorRow[]> {
+  const read = async <T extends { error?: { message?: string } | null; status?: number }>(
+    query: PromiseLike<T> & { abortSignal?: (signal: AbortSignal) => PromiseLike<T> },
+    required = true,
+  ): Promise<T> => {
+    const result = await (options.signal && query.abortSignal ? query.abortSignal(options.signal) : query);
+    // Legacy ID-only RPCs can be unavailable; transport errors must never turn
+    // an admin's roster into a successful, empty result.
+    if (options.strict && result.error && (required || !result.status || result.status >= 500)) {
+      throw new Error(result.error.message || 'org_tutors_load_failed');
+    }
+    return result;
+  };
   const [
     { data: adminUsers },
     { data: teammateAdmins },
@@ -86,13 +99,13 @@ export async function getOrgVisibleTutors(
     { data: classGroups },
     { data: profileRows },
   ] = await Promise.all([
-    supabase.from('organization_admins').select('user_id').eq('organization_id', orgId),
-    supabase.rpc('get_my_org_admin_user_ids'),
-    supabase.rpc('get_my_org_visible_tutor_ids'),
-    supabase.from('students').select('linked_user_id, email, tutor_id').eq('organization_id', orgId),
-    supabase.from('tutor_invites').select('used_by_profile_id, used, invitee_email').eq('organization_id', orgId),
-    supabase.from('school_class_groups').select('tutor_id').eq('organization_id', orgId),
-    supabase.from('profiles').select(select).eq('organization_id', orgId),
+    read(supabase.from('organization_admins').select('user_id').eq('organization_id', orgId)),
+    read(supabase.rpc('get_my_org_admin_user_ids'), false),
+    read(supabase.rpc('get_my_org_visible_tutor_ids'), false),
+    read(supabase.from('students').select('linked_user_id, email, tutor_id').eq('organization_id', orgId)),
+    read(supabase.from('tutor_invites').select('used_by_profile_id, used, invitee_email').eq('organization_id', orgId)),
+    read(supabase.from('school_class_groups').select('tutor_id').eq('organization_id', orgId)),
+    read(supabase.from('profiles').select(select).eq('organization_id', orgId)),
   ]);
 
   const adminIds = new Set(
@@ -127,6 +140,8 @@ export function getOrgVisibleTutorsDeduped(
   supabase: SupabaseClient,
   orgId: string,
   select: string,
+  options: { strict?: boolean } = {},
 ): Promise<OrgTutorRow[]> {
-  return dedupeAsync(`org_visible_tutors:${orgId}:${select}`, () => getOrgVisibleTutors(supabase, orgId, select));
+  return dedupeAsync(`org_visible_tutors:${orgId}:${select}${options.strict ? ':strict' : ''}`,
+    () => getOrgVisibleTutors(supabase, orgId, select, options));
 }

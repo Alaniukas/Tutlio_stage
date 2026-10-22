@@ -354,6 +354,7 @@ export async function preloadOrgAdminData() {
       supabase,
       orgId,
       'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, personal_meeting_link, teaching_notes, has_active_license',
+      { strict: true },
     );
     const tutorIds = visibleTutors.map((t: any) => t.id);
 
@@ -370,17 +371,18 @@ export async function preloadOrgAdminData() {
     }
 
     const tutorList = visibleTutors.map((t: any) => ({ id: t.id, full_name: t.full_name }));
+    const tutorNames = new Map(tutorList.map((tutor) => [tutor.id, tutor.full_name]));
 
     if (tutorIds.length === 0) {
       // Still fetch unassigned org students even when no tutors exist
       if (!getCached('company_students')) {
-        const { data: unassignedStudents } = await supabase
+        const { data: unassignedStudents, error } = await supabase
           .from('students')
           .select('*, linked_user_id')
           .is('tutor_id', null)
           .eq('organization_id', orgId)
           .order('created_at', { ascending: false });
-        setCache('company_students', { students: unassignedStudents || [], tutors: tutorList });
+        if (!error) setCache('company_students', { students: unassignedStudents || [], tutors: tutorList });
       }
       return;
     }
@@ -391,7 +393,7 @@ export async function preloadOrgAdminData() {
     const [studentsRes, unassignedStudentsRes, sessionsRes] = await Promise.all([
       supabase
         .from('students')
-        .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+        .select('*, linked_user_id')
         .in('tutor_id', tutorIds)
         .order('created_at', { ascending: false }),
       supabase
@@ -409,8 +411,11 @@ export async function preloadOrgAdminData() {
         .limit(2000),
     ]);
 
-    if (!getCached('company_students')) {
+    if (!getCached('company_students') && !studentsRes.error && !unassignedStudentsRes.error) {
       const allStudents = [...(studentsRes.data || []), ...(unassignedStudentsRes.data || [])]
+        .map((student) => ({ ...student,
+          tutor: student.tutor_id ? { full_name: tutorNames.get(student.tutor_id) || '–' } : null,
+        }))
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       setCache('company_students', { students: allStudents, tutors: tutorList });
     }
@@ -444,6 +449,8 @@ export async function preloadOrgAdminData() {
     if (orgId && org?.entity_type !== 'school' && !getCached(companyStatsCacheKey(orgId))) {
       preloadStats(visibleTutors, tutorIds, orgId);
     }
+  } catch (error) {
+    console.warn('[preload] Could not load organization admin data:', error);
   } finally {
     orgPreloadRunning = false;
   }

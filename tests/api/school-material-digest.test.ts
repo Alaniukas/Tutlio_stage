@@ -182,6 +182,58 @@ it('keeps an uncertain audience pair retryable while fanout for another child ca
   expect((await db.pg.query<any>('SELECT student_id::text,state FROM school_material_digest_entries')).rows).toEqual([{ student_id: childB, state: 'pending' }]);
 });
 
+it.each([false, true])('checks real email denials for a recipient without an Auth account (denied=%s)', async denied => {
+  const { deniedRecordingOrganizations } = await vi.importActual<typeof import('../../api/_lib/schoolRecordingAccessDenials')>(
+    '../../api/_lib/schoolRecordingAccessDenials.js',
+  );
+  state.denied.mockImplementation(deniedRecordingOrganizations);
+  const db = await database({
+    school_material_publications: [{ ...pub(), source: 'drive', target_id: `subject:${uid(502)}` }],
+    school_material_digest_entries: [],
+    school_recording_access_denials: denied ? [{ organization_id: org, email: 'child@school.test' }] : [],
+  });
+  const pending = vi.spyOn(db.client, 'rpc').mockImplementation(() => Promise.resolve({
+    data: [{ publication_id: publicationA, student_id: childA }], error: null,
+  }) as any);
+
+  expect(await queueSchoolMaterialAudience(db.client)).toBe(1);
+  pending.mockRestore();
+  expect((await db.pg.query<{ state: string }>('SELECT state FROM school_material_digest_entries')).rows)
+    .toEqual([{ state: denied ? 'skipped' : 'pending' }]);
+  const denialQueries = db.calls.filter(call => call.table === 'school_recording_access_denials');
+  expect(denialQueries).toHaveLength(1);
+  expect(denialQueries[0].query.has('user_id')).toBe(false);
+  expect(denialQueries[0].query.get('email')).toContain('child@school.test');
+
+  const ids = await prepare(db);
+  if (denied) {
+    expect(ids).toEqual([]);
+  } else {
+    expect(ids).toHaveLength(1);
+    const send = vi.fn(async () => ({ id: 'synthetic-provider-confirmation' }));
+    expect(await deliverSchoolMaterialDigest(db.client, ids[0], send)).toBe('sent');
+    expect(send).toHaveBeenCalledTimes(1);
+  }
+});
+
+it('leaves email-only recording eligibility pending when the real denial lookup fails', async () => {
+  const { deniedRecordingOrganizations } = await vi.importActual<typeof import('../../api/_lib/schoolRecordingAccessDenials')>(
+    '../../api/_lib/schoolRecordingAccessDenials.js',
+  );
+  state.denied.mockImplementation(deniedRecordingOrganizations);
+  const db = await database({
+    school_material_publications: [{ ...pub(), source: 'drive', target_id: `subject:${uid(502)}` }],
+    school_material_digest_entries: [],
+  });
+  vi.spyOn(db.client, 'rpc').mockImplementation(() => Promise.resolve({
+    data: [{ publication_id: publicationA, student_id: childA }], error: null,
+  }) as any);
+  db.failOnce('school_recording_access_denials', 'GET');
+
+  expect(await queueSchoolMaterialAudience(db.client)).toBe(0);
+  expect((await db.pg.query('SELECT state FROM school_material_digest_entries')).rows).toEqual([]);
+});
+
 it('holds every expired provider attempt for review so old jobs cannot occupy the due queue', async () => {
   const db = await database(); const [id] = await prepare(db);
   await db.pg.query("UPDATE school_material_digest_deliveries SET state='sending',attempted_at=now()-interval '24 hours' WHERE id=$1", [id]);

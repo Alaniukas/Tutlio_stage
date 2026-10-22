@@ -6,21 +6,6 @@ export const OPEN_LESSON_SESSION_STATUSES = ['active'] as const;
 
 export type PairingRef = { id: string; tutor_id: string | null };
 
-/**
- * When removing one pairing from a multi-tutor student, move open lessons only if
- * exactly one remaining pairing has a tutor (typical "switch Ieva → Rimantas").
- */
-export function targetPairingForRemovedRow(remainingGroup: PairingRef[]): { id: string; tutorId: string } | null {
-  const withTutor = remainingGroup.filter((r): r is PairingRef & { tutor_id: string } => Boolean(r.tutor_id));
-  if (withTutor.length !== 1) return null;
-  return { id: withTutor[0].id, tutorId: withTutor[0].tutor_id };
-}
-
-/** Hard-delete a pairing row only when another pairing remains and nothing is left on this row. */
-export function canHardDeleteStudentPairing(remainingGroupSize: number, leftoverLessonRows: number): boolean {
-  return remainingGroupSize >= 1 && leftoverLessonRows === 0;
-}
-
 export async function reassignOpenLessonsToTutor(
   supabase: SupabaseClient,
   fromStudentId: string,
@@ -86,42 +71,31 @@ export async function reassignOpenLessonsToTutor(
   return { movedSessions: sessionIds.length, movedPackages: allPkgIds.length };
 }
 
-async function leftoverLessonCount(supabase: SupabaseClient, studentId: string): Promise<number> {
-  const [{ data: sessRows, error: sErr }, { data: pkgRows, error: pErr }] = await Promise.all([
-    supabase.from('sessions').select('id').eq('student_id', studentId).limit(1),
-    supabase.from('lesson_packages').select('id').eq('student_id', studentId).limit(1),
-  ]);
-  if (sErr) throw new Error(sErr.message);
-  if (pErr) throw new Error(pErr.message);
-  return (sessRows?.length ?? 0) + (pkgRows?.length ?? 0);
-}
-
 export type RemoveTutorPairingMode = 'detached' | 'deleted';
 
 /**
- * Remove a tutor from an org student group without CASCADE-deleting paid/scheduled lessons.
- * If the student was switched onto exactly one other tutor, open lessons move there first.
+ * Stop this tutor's future individual lessons and remove the assignment in one
+ * transaction. Remaining tutors are family-link recipients, never transfer targets.
  */
 export async function removeOrgStudentTutorPairing(
   supabase: SupabaseClient,
-  args: { rowId: string; remainingGroup: PairingRef[] },
+  args: { rowId: string; expectedTutorId: string | null; remainingGroup: PairingRef[] },
 ): Promise<{ mode: RemoveTutorPairingMode }> {
-  const target = targetPairingForRemovedRow(args.remainingGroup);
-  if (target) {
-    await reassignOpenLessonsToTutor(supabase, args.rowId, {
-      studentId: target.id,
-      tutorId: target.tutorId,
-    });
+  const { data, error } = await supabase.rpc('remove_org_student_tutor_pairing', {
+    p_student_id: args.rowId,
+    p_expected_tutor_id: args.expectedTutorId,
+    p_remaining_student_ids: [...new Set(args.remainingGroup.map((row) => row.id))],
+  });
+  if (error) throw error;
+  if (data?.mode !== 'detached' && data?.mode !== 'deleted') {
+    throw new Error('Invalid tutor removal response');
   }
+  return { mode: data.mode };
+}
 
-  const leftover = await leftoverLessonCount(supabase, args.rowId);
-  if (canHardDeleteStudentPairing(args.remainingGroup.length, leftover)) {
-    const { error } = await supabase.from('students').delete().eq('id', args.rowId);
-    if (error) throw new Error(error.message);
-    return { mode: 'deleted' };
-  }
-
-  const { error } = await supabase.from('students').update({ tutor_id: null }).eq('id', args.rowId);
-  if (error) throw new Error(error.message);
-  return { mode: 'detached' };
+export function tutorPairingRemovalErrorKey(error: unknown): string {
+  const message = error && typeof error === 'object' && 'message' in error ? String(error.message) : '';
+  if (message.includes('tutor_pairing_billing_review_required')) return 'compStu.tutorRemovalBilling';
+  if (message.includes('tutor_pairing_changed')) return 'compStu.tutorRemovalChanged';
+  return 'compStu.tutorRemoveFailed';
 }

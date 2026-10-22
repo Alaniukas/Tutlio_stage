@@ -12,6 +12,7 @@ export async function schoolMaterialDigestDatabase(seed: Record<string, Record<s
     CREATE TABLE profiles(id uuid PRIMARY KEY,email text);
     CREATE TABLE parent_profiles(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),user_id uuid,email text,email_notification_opt_out jsonb,disable_lesson_reminders boolean);
     CREATE TABLE user_notification_preferences(user_id uuid,category text,enabled boolean,PRIMARY KEY(user_id,category));
+    CREATE TABLE school_recording_access_denials(organization_id uuid,user_id uuid,email text);
   `);
   const migration = readFileSync('supabase/migrations/20260928190300_school_material_publications_digest.sql', 'utf8');
   await pg.exec(migration.slice(0, migration.indexOf('ALTER TABLE public.school_material_publications ENABLE ROW')));

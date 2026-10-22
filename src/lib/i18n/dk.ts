@@ -1,3 +1,5 @@
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
@@ -129,6 +131,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const dk: Record<string, string> = {
+  ...tutorPairingTranslations.dk,
+  ...studentLoadingTranslations.dk,
   'school.archive.title': "Kontraktarkiv",
   'school.archive.description': "Se og download arkiverede kontrakter.",
   'school.archive.search': "Søg efter kontraktnummer, elev eller betaler",

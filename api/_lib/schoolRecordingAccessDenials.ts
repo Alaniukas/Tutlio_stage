@@ -19,16 +19,21 @@ export function recordingAccessDenialsSetupMissing(error: { code?: string; messa
 export async function deniedRecordingOrganizations(
   supabase: SupabaseClient,
   organizationIds: string[],
-  userId: string,
+  userId: string | null,
   emails: string[],
 ): Promise<Set<string>> {
   if (!organizationIds.length) return new Set();
+  const normalizedUserId = userId?.trim();
   const normalizedEmails = [...new Set(emails.map(normalizeRecordingViewerEmail).filter(Boolean))];
   // Filter identity before PostgREST's row limit, so a school with many revoked
   // viewers cannot push this person's denial out of the first result page.
   const results = await Promise.all([
-    supabase.from(SCHOOL_RECORDING_ACCESS_DENIALS_TABLE).select('organization_id')
-      .in('organization_id', organizationIds).eq('user_id', userId),
+    // Email-only recipients have no Auth UUID. Keep checking their email denial
+    // without sending an empty string to the database's uuid column.
+    ...(normalizedUserId ? [
+      supabase.from(SCHOOL_RECORDING_ACCESS_DENIALS_TABLE).select('organization_id')
+        .in('organization_id', organizationIds).eq('user_id', normalizedUserId),
+    ] : []),
     ...(normalizedEmails.length ? [
       supabase.from(SCHOOL_RECORDING_ACCESS_DENIALS_TABLE).select('organization_id')
         .in('organization_id', organizationIds).in('email', normalizedEmails),

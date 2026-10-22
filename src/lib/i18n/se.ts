@@ -1,3 +1,5 @@
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations, schoolGroupActivationTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { companyPaymentReportTranslations } from './companyPaymentReportTranslations.js';
@@ -24,6 +26,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const se: Record<string, string> = {
+  ...tutorPairingTranslations.se,
+  ...studentLoadingTranslations.se,
   'school.archive.title': "Avtalsarkiv",
   'school.archive.description': "Visa och ladda ner arkiverade avtal.",
   'school.archive.search': "Sök efter avtalsnummer, elev eller betalare",

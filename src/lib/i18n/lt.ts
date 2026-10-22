@@ -1,3 +1,5 @@
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
 import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
@@ -9,6 +11,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const lt: Record<string, string> = {
+  ...tutorPairingTranslations.lt,
+  ...studentLoadingTranslations.lt,
   'school.archive.title': "Sutarčių archyvas",
   'school.archive.description': "Archyvuotų sutarčių peržiūra ir atsisiuntimas.",
   'school.archive.search': "Ieškoti pagal sutarties numerį, mokinį ar mokėtoją",

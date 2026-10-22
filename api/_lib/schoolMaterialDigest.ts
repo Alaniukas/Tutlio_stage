@@ -62,7 +62,7 @@ async function skipPendingEntries(db: SupabaseClient, entries: Entry[]) {
 async function recordingDeniedForRecipient(db: SupabaseClient, organizationId: string, student: Student,
   recipient: { email: string; userId?: string | null }): Promise<boolean> {
   const viewerIds = [...new Set([student.linked_user_id, recipient.userId].filter((id): id is string => Boolean(id)))];
-  const decisions = await Promise.all((viewerIds.length ? viewerIds : ['']).map(userId =>
+  const decisions = await Promise.all((viewerIds.length ? viewerIds : [null]).map(userId =>
     deniedRecordingOrganizations(db, [organizationId], userId, [recipient.email])));
   return decisions.some(denied => denied.has(organizationId));
 }

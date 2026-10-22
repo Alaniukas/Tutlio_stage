@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { extractStoragePath, openContractFileInNewTab } from '@/lib/contractStorage';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { finishGuardedLoad } from '@/lib/authSession';
+import { withRequestDeadline } from '@/lib/requestDeadline';
 import { authHeaders } from '@/lib/apiHelpers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -135,7 +136,7 @@ import {
 import { findOrgTutorEmailConflict } from '@/lib/orgStudentTutorGuards';
 import { studentEmailConflictI18nKey } from '@/lib/orgStudentContactConflict';
 import { checkOrgStudentEmailAvailable } from '@/lib/orgStudentContactCheckApi';
-import { removeOrgStudentTutorPairing } from '@/lib/reassignStudentTutorLessons';
+import { removeOrgStudentTutorPairing, tutorPairingRemovalErrorKey } from '@/lib/reassignStudentTutorLessons';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { useUser } from '@/contexts/UserContext';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
@@ -509,6 +510,8 @@ export default function CompanyStudents() {
   // Req 8 (trial_followup_alert): student IDs with a completed trial but no real package sent yet.
   const [trialNoPackageStudentIds, setTrialNoPackageStudentIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(!stc);
+  const [loadError, setLoadError] = useState(false);
+  const studentLoadVersion = useRef(0);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [addStudentFindTutorOpen, setAddStudentFindTutorOpen] = useState(false);
   const [addStudentFindTutorChildId, setAddStudentFindTutorChildId] = useState<string | null>(null);
@@ -1082,6 +1085,7 @@ export default function CompanyStudents() {
     setBaseUrl(window.location.origin);
     return () => {
       cancelled = true;
+      studentLoadVersion.current += 1;
     };
   }, [authUser?.id, membership?.organizationId]); // fetchData closes over these ids
 
@@ -1125,16 +1129,16 @@ export default function CompanyStudents() {
       setLoadingPackages(true);
       const [packages, subjRes, pricingRes, dynamicPricingRes] = await Promise.all([
         loadVisibleStudentPackages(selectedStudent.id),
-        supabase
+        selectedStudent.tutor_id ? supabase
           .from('subjects')
           .select('id, name, color, price, duration_minutes')
           .eq('tutor_id', selectedStudent.tutor_id)
-          .order('name'),
-        supabase
+          .order('name') : Promise.resolve({ data: [] }),
+        selectedStudent.tutor_id ? supabase
           .from('student_individual_pricing')
           .select('subject_id, price')
           .eq('student_id', selectedStudent.id)
-          .eq('tutor_id', selectedStudent.tutor_id),
+          .eq('tutor_id', selectedStudent.tutor_id) : Promise.resolve({ data: [] }),
         orgId
           ? supabase
             .from('organization_dynamic_pricing')
@@ -1359,63 +1363,44 @@ export default function CompanyStudents() {
   }, [selectedStudent?.id, selectedStudentGroupIds, isStudentModalOpen, modalSessionsRefreshKey]);
 
   const fetchData = async (isCancelled?: () => boolean) => {
-    const cancelled = () => Boolean(isCancelled?.());
+    const version = ++studentLoadVersion.current;
+    const cancelled = () => Boolean(isCancelled?.()) || version !== studentLoadVersion.current;
+    setLoadError(false);
     if (!getCached('company_students')) setLoading(true);
     await finishGuardedLoad({
       isCancelled: cancelled,
       setLoading,
-      run: async () => {
+      run: () => withRequestDeadline(async (signal) => {
     const userId = authUser?.id;
     if (!userId) return;
 
     let organizationId = membership?.organizationId ?? null;
     if (!organizationId) {
-      const { data: adminRow } = await supabase
+      const { data: adminRow, error: adminError } = await supabase
         .from('organization_admins')
         .select('organization_id')
         .eq('user_id', userId)
+        .abortSignal(signal)
         .maybeSingle();
 
+      if (adminError) throw adminError;
       if (!adminRow) {
-        console.log('🔴 User is NOT an org admin!');
-        return;
+        throw new Error('organization_membership_not_found');
       }
       organizationId = adminRow.organization_id;
     }
-    if (cancelled()) return;
+    if (cancelled() || signal.aborted) return;
     setOrgId(organizationId);
 
     const tutorsList = await getOrgVisibleTutors(
       supabase as any,
       organizationId,
       'id, full_name, email',
+      { signal, strict: true },
     );
 
     const tutorIds = tutorsList.map((t) => t.id);
-    let tutorsWithSubjects: Tutor[] = tutorsList;
-    if (tutorIds.length > 0) {
-      const { data: subjectRows } = await supabase
-        .from('subjects')
-        .select('tutor_id, name')
-        .in('tutor_id', tutorIds)
-        .order('name');
-      const subjectsByTutor = new Map<string, string[]>();
-      for (const row of subjectRows || []) {
-        const tid = row.tutor_id as string;
-        const name = String(row.name || '').trim();
-        if (!tid || !name) continue;
-        const list = subjectsByTutor.get(tid) || [];
-        if (!list.includes(name)) list.push(name);
-        subjectsByTutor.set(tid, list);
-      }
-      tutorsWithSubjects = tutorsList.map((tu) => ({
-        ...tu,
-        subject_names: subjectsByTutor.get(tu.id) || [],
-      }));
-    }
-
-    if (cancelled()) return;
-    setTutors(tutorsWithSubjects);
+    if (cancelled() || signal.aborted) return;
     let fetchedStudents: Student[] = [];
     let studentsErr: { message: string } | null = null;
 
@@ -1425,15 +1410,17 @@ export default function CompanyStudents() {
       const [byTutorRes, unassignedRes] = await Promise.all([
         supabase
           .from('students')
-          .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+          .select('*, linked_user_id')
           .in('tutor_id', tutorIds)
-          .order('created_at', { ascending: false }),
+          .order('created_at', { ascending: false })
+          .abortSignal(signal),
         supabase
           .from('students')
-          .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+          .select('*, linked_user_id')
           .is('tutor_id', null)
           .eq('organization_id', organizationId)
-          .order('created_at', { ascending: false }),
+          .order('created_at', { ascending: false })
+          .abortSignal(signal),
       ]);
       studentsErr = byTutorRes.error || unassignedRes.error;
       const merged = [...(byTutorRes.data || []), ...(unassignedRes.data || [])] as Student[];
@@ -1449,32 +1436,39 @@ export default function CompanyStudents() {
     } else {
       const { data, error } = await supabase
         .from('students')
-        .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+        .select('*, linked_user_id')
         .is('tutor_id', null)
         .eq('organization_id', organizationId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .abortSignal(signal);
       studentsErr = error;
       fetchedStudents = (data || []) as Student[];
     }
 
-    if (cancelled()) return;
-    if (studentsErr) {
-      console.error('Error fetching students:', studentsErr);
-      setStudents([]);
-    } else {
-      setStudents(fetchedStudents);
-    }
+    if (cancelled() || signal.aborted) return;
+    if (studentsErr) throw new Error(studentsErr.message);
+    // Tutor names are already authorized and loaded; avoid repeating profile
+    // RLS for every student through a PostgREST embed.
+    const tutorNames = new Map(tutorsList.map((tutor) => [tutor.id, tutor.full_name]));
+    fetchedStudents = fetchedStudents.map((student) => ({
+      ...student,
+      tutor: student.tutor_id && tutorNames.has(student.tutor_id)
+        ? { full_name: tutorNames.get(student.tutor_id)! }
+        : null,
+    }));
 
     // School-only: latest contract per student for the status badge + download link (#5).
     let contractMap: Record<string, StudentContractInfo> = {};
     const debtMap: Record<string, boolean> = {};
     if (isSchoolView) {
-      const { data: contractRows } = await supabase
+      const { data: contractRows, error: contractsError } = await supabase
         .from('school_contracts')
         .select('id, student_id, signing_status, pdf_url, signed_contract_url, created_at')
         .eq('organization_id', organizationId)
         .is('archived_at', null)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .abortSignal(signal);
+      if (contractsError) throw contractsError;
       const contractIdToStudent = new Map<string, string>();
       for (const row of contractRows || []) {
         const sid = String((row as any).student_id || '');
@@ -1500,7 +1494,8 @@ export default function CompanyStudents() {
               .select('contract_id, payment_status')
               .in('contract_id', contractIds)
               .neq('payment_status', 'paid')
-          : Promise.resolve({ data: [] as any[] }),
+              .abortSignal(signal)
+          : Promise.resolve({ data: [] as any[], error: null }),
         studentIds.length > 0
           ? supabase
               .from('school_monthly_invoices')
@@ -1509,8 +1504,10 @@ export default function CompanyStudents() {
               .in('student_id', studentIds)
               .neq('payment_status', 'paid')
               .neq('payment_status', 'cancelled')
-          : Promise.resolve({ data: [] as any[] }),
+              .abortSignal(signal)
+          : Promise.resolve({ data: [] as any[], error: null }),
       ]);
+      if (instRes.error || monthlyRes.error) throw instRes.error || monthlyRes.error;
 
       for (const row of instRes.data || []) {
         const sid = contractIdToStudent.get(String((row as any).contract_id || ''));
@@ -1531,50 +1528,74 @@ export default function CompanyStudents() {
         });
       }
     }
-    if (cancelled()) return;
+    if (cancelled() || signal.aborted) return;
+    setStudents(fetchedStudents);
+    setTutors(tutorsList);
     setContractsByStudent(contractMap);
     setStudentDebtById(debtMap);
+    setCache('company_students', { students: fetchedStudents, tutors: tutorsList, contractsByStudent: contractMap });
 
-    // Req 8 (trial_followup_alert, flag-gated): flag students whose trial lesson is
-    // completed but no real (non-trial) package has been sent yet. Queried inline off
-    // the org's features to avoid useOrgFeatures() load-timing races inside this effect.
-    const trialNoPackageIds = new Set<string>();
-    {
-      const { data: orgRow } = await supabase
-        .from('organizations')
-        .select('features')
-        .eq('id', organizationId)
-        .maybeSingle();
-      const feats = orgRow?.features && typeof orgRow.features === 'object' && !Array.isArray(orgRow.features)
-        ? (orgRow.features as Record<string, unknown>)
-        : {};
-      if (
-        !isSchoolView &&
-        isProKlaseOrg(organizationId) &&
-        feats.trial_followup_alert === true &&
-        fetchedStudents.length > 0
-      ) {
-        try {
+    // Labels and follow-up badges enrich an already usable roster. Give each
+    // background read its own deadline and never replace newer roster state.
+    if (tutorIds.length > 0) void withRequestDeadline(async (extraSignal) => {
+      const { data: subjectRows, error } = await supabase.from('subjects')
+        .select('tutor_id, name').in('tutor_id', tutorIds).order('name').abortSignal(extraSignal);
+      if (error) throw error;
+      if (cancelled() || extraSignal.aborted) return;
+      const subjectsByTutor = new Map<string, Set<string>>();
+      for (const row of subjectRows || []) {
+        const name = String(row.name || '').trim();
+        if (!row.tutor_id || !name) continue;
+        const names = subjectsByTutor.get(row.tutor_id) || new Set<string>();
+        names.add(name);
+        subjectsByTutor.set(row.tutor_id, names);
+      }
+      const tutorsWithSubjects = tutorsList.map((tutor) => ({
+        ...tutor, subject_names: [...(subjectsByTutor.get(tutor.id) || [])],
+      }));
+      setTutors(tutorsWithSubjects);
+      const cached = getCached<any>('company_students');
+      if (cached) setCache('company_students', { ...cached, tutors: tutorsWithSubjects });
+    }).catch((error) => {
+      if (!cancelled()) console.error('Error fetching tutor subject labels:', error);
+    });
+
+    setTrialNoPackageStudentIds(new Set());
+    if (!isSchoolView && isProKlaseOrg(organizationId) && fetchedStudents.length > 0) {
+      void withRequestDeadline(async (extraSignal) => {
+        const { data: orgRow } = await supabase
+          .from('organizations')
+          .select('features')
+          .eq('id', organizationId)
+          .abortSignal(extraSignal)
+          .maybeSingle();
+        const feats = orgRow?.features && typeof orgRow.features === 'object' && !Array.isArray(orgRow.features)
+          ? (orgRow.features as Record<string, unknown>)
+          : {};
+        if (cancelled() || extraSignal.aborted) return;
+        if (feats.trial_followup_alert === true) {
           const response = await fetch('/api/proklase-student-packages?summary=trial-followup', {
             headers: await authHeaders(),
+            signal: extraSignal,
           });
           const body = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error((body as any).error || String(response.status));
+          if (cancelled() || extraSignal.aborted) return;
+          const trialNoPackageIds = new Set<string>();
           for (const studentId of Array.isArray((body as any).studentIds) ? (body as any).studentIds : []) {
             trialNoPackageIds.add(String(studentId));
           }
-        } catch (error) {
-          console.error('Error fetching Pro Klasė package follow-up status:', error);
+          setTrialNoPackageStudentIds(trialNoPackageIds);
         }
-      }
+      }).catch((error) => {
+        if (!cancelled()) console.error('Error fetching Pro Klasė package follow-up status:', error);
+      });
     }
-    if (cancelled()) return;
-    setTrialNoPackageStudentIds(trialNoPackageIds);
-
-    setCache('company_students', { students: fetchedStudents, tutors: tutorsWithSubjects, contractsByStudent: contractMap });
-      },
+      }),
     }).catch((err) => {
+      if (cancelled()) return;
       console.error('Error fetching students:', err);
+      setLoadError(true);
     });
   };
 
@@ -3722,6 +3743,15 @@ export default function CompanyStudents() {
     }
   };
 
+  const loadErrorNotice = loadError ? (
+    <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+      <p>{t('compStu.loadError')}</p>
+      <Button type="button" variant="outline" className="mt-3" onClick={() => void fetchData()}>
+        {t('stuSess.retryLoad')}
+      </Button>
+    </div>
+  ) : null;
+
   if (loading) {
     return (
       <>
@@ -3734,6 +3764,10 @@ export default function CompanyStudents() {
     );
   }
 
+  if (loadError && students.length === 0) {
+    return <div className="max-w-6xl mx-auto">{loadErrorNotice}</div>;
+  }
+
   return (
     <>
       {toastMessage && (
@@ -3744,6 +3778,7 @@ export default function CompanyStudents() {
         />
       )}
       <div className="max-w-6xl mx-auto">
+        {loadErrorNotice}
         <div className="mb-6 space-y-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
@@ -6496,16 +6531,22 @@ export default function CompanyStudents() {
                             <button
                               type="button"
                               className="text-xs px-2 py-1 rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
-                              disabled={tutorsSaving}
+                              disabled={tutorsSaving || !row.tutor_id || !can('students.edit') || !can('sessions.edit')}
                               onClick={async () => {
-                                if (!confirm(t('compStu.confirmRemoveTutor'))) return;
+                                if (!confirm(t('compStu.confirmStopTutor'))) return;
                                 setTutorsSaving(true);
                                 try {
                                   const remainingGroup = selectedStudentGroup.filter((r) => r.id !== row.id);
                                   const { mode } = await removeOrgStudentTutorPairing(supabase, {
                                     rowId: row.id,
+                                    expectedTutorId: row.tutor_id,
                                     remainingGroup,
                                   });
+                                  for (const prefix of ['company_students', 'company_tvarkarastis', 'company_sessions', 'company_dashboard', 'company_stats']) {
+                                    invalidateCache(prefix);
+                                  }
+                                  setModalSessionsRefreshKey((value) => value + 1);
+                                  setPackagesRefreshKey((value) => value + 1);
                                   setToastMessage({ message: t('compStu.tutorRemoved'), type: 'success' });
                                   const nextGroup =
                                     mode === 'deleted'
@@ -6520,13 +6561,14 @@ export default function CompanyStudents() {
                                     setSelectedStudent(null);
                                     setIsStudentModalOpen(false);
                                   } else if (selectedStudent?.id === row.id) {
-                                    const fallback = nextGroup[0];
+                                    const fallback = nextGroup.find((candidate) => candidate.tutor_id) ?? nextGroup[0];
                                     setSelectedStudent(fallback);
                                     setTrialTutorId(fallback.tutor_id);
                                   }
                                   fetchData();
-                                } catch {
-                                  setToastMessage({ message: t('compStu.tutorRemoveFailed'), type: 'error' });
+                                } catch (error) {
+                                  console.error('[CompanyStudents] Tutor removal failed:', error);
+                                  setToastMessage({ message: t(tutorPairingRemovalErrorKey(error)), type: 'error' });
                                 }
                                 setTutorsSaving(false);
                               }}

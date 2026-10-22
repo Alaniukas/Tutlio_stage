@@ -1,3 +1,5 @@
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
@@ -14,6 +16,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const fr: Record<string, string> = {
+  ...tutorPairingTranslations.fr,
+  ...studentLoadingTranslations.fr,
   'school.archive.title': "Archives des contrats",
   'school.archive.description': "Consultez et téléchargez les contrats archivés.",
   'school.archive.search': "Rechercher par numéro de contrat, élève ou payeur",

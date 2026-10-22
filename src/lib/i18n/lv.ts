@@ -1,3 +1,5 @@
+import { tutorPairingTranslations } from './tutorPairingTranslations.js';
+import { studentLoadingTranslations } from './studentLoadingTranslations.js';
 import { organizationReleaseTranslations } from './organizationReleaseTranslations.js';
 import { studentNotesTranslations } from './studentNotesTranslations.js';
 import { schoolFamilyMaterialTranslations } from './schoolFamilyMaterialTranslations.js';
@@ -14,6 +16,8 @@ import { tutorEnvironmentTranslations } from './tutorEnvironmentTranslations.js'
 import { schoolStaffPreviewTranslations } from './schoolStaffPreviewTranslations.js';
 
 export const lv: Record<string, string> = {
+  ...tutorPairingTranslations.lv,
+  ...studentLoadingTranslations.lv,
   'school.archive.title': "Līgumu arhīvs",
   'school.archive.description': "Skatiet un lejupielādējiet arhivētos līgumus.",
   'school.archive.search': "Meklēt pēc līguma numura, skolēna vai maksātāja",
