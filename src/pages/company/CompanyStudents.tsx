@@ -3460,7 +3460,7 @@ export default function CompanyStudents() {
   };
 
   // 'auto' recomputes from the recurring schedule; a number pins it manually.
-  // The existing RPC also re-prices upcoming unpaid lessons to the matching tier.
+  // The RPC also re-prices eligible unpaid lessons, including past Pro Klase lessons.
   const handleUpdateStudentFrequency = async (value: string) => {
     if (!selectedStudent) return;
     const ids = selectedStudentGroup.length > 0
