@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 const migration = readFileSync('supabase/migrations/20261007092500_whiteboard_storage_session_lookup.sql', 'utf8');
 const parentMigration = readFileSync('supabase/migrations/20261015080856_whiteboard_parent_read_access.sql', 'utf8');
 const filesMigration = readFileSync('supabase/migrations/20261022122815_lesson_storage_authorization_performance.sql', 'utf8');
+const scopedMigration = readFileSync('supabase/migrations/20261022130540_lesson_storage_scoped_policy_lookup.sql', 'utf8');
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const scene = `${id(31)}/scene.json`;
 let db: PGlite;
@@ -42,6 +43,14 @@ beforeAll(async () => {
         OR EXISTS(SELECT 1 FROM public.organization_admins WHERE user_id=auth.uid() AND status='active'
           AND CASE WHEN p_write THEN can_edit ELSE can_view OR can_edit END);
     $$;
+    CREATE FUNCTION private.org_admin_permission_gate(text[]) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+      SET search_path='' AS $$ SELECT private.org_admin_permission_gate(false) $$;
+    CREATE FUNCTION private.has_active_auth_session() RETURNS boolean LANGUAGE sql STABLE AS $$
+      SELECT current_setting('test.session_revoked',true) IS DISTINCT FROM 'true';
+    $$;
+    CREATE FUNCTION public.school_family_student_scope_allowed(uuid) RETURNS boolean LANGUAGE sql STABLE AS $$
+      SELECT private.check_session_scope($1);
+    $$;
     ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
     CREATE POLICY session_roles ON sessions FOR SELECT TO authenticated USING(
       tutor_id=auth.uid() OR student_id IN(SELECT id FROM students WHERE linked_user_id=auth.uid())
@@ -77,9 +86,10 @@ beforeAll(async () => {
   await db.exec(migration);
   await db.exec(parentMigration);
   await db.exec(filesMigration);
+  await db.exec(scopedMigration);
 }, 30_000);
 beforeEach(async () => {
-  await db.exec(`RESET ROLE; SELECT set_config('test.deny_scope','false',false); SELECT set_config('test.suspended','false',false);
+  await db.exec(`RESET ROLE; SELECT set_config('test.deny_scope','false',false); SELECT set_config('test.suspended','false',false); SELECT set_config('test.session_revoked','false',false);
     DELETE FROM storage.objects; ALTER SEQUENCE private.scope_checks RESTART WITH 1;
     INSERT INTO storage.objects VALUES('whiteboard-data','${scene}','original'),('whiteboard-data','${id(32)}/scene.json','other org');`);
 });
@@ -192,12 +202,30 @@ describe('whiteboard Storage session lookups', () => {
     expect(await asUser(id(11), `DELETE FROM storage.objects WHERE bucket_id='session-files' AND name='${file}' RETURNING name`)).toEqual([]);
   });
 
-  it('uses invoker rights and rejects anonymous execution, malformed and unknown session paths', async () => {
+  it('uses a private caller-scoped lookup and rejects anonymous execution, malformed and unknown session paths', async () => {
     const properties = await db.query<{ elevated: boolean; anonymous: boolean }>(`SELECT prosecdef AS elevated,
       has_function_privilege('anon',oid,'execute') AS anonymous FROM pg_proc WHERE oid='private.lesson_storage_access(uuid,text)'::regprocedure`);
-    expect(properties.rows).toEqual([{ elevated: false, anonymous: false }]);
+    expect(properties.rows).toEqual([{ elevated: true, anonymous: false }]);
     for (const path of ['invalid/file.pdf', `${id(31)}.json/file.pdf`, `${id(9999)}/file.pdf`]) {
       await expect(asUser(id(11), `INSERT INTO storage.objects VALUES('session-files','${path}','bad')`)).rejects.toThrow(/row-level security/);
     }
+  });
+
+  it('does not run school-family checks for unrelated files in a bucket listing', async () => {
+    await db.exec(`INSERT INTO storage.objects VALUES('session-files','${id(31)}/lesson.pdf','own');
+      INSERT INTO storage.objects SELECT 'session-files','${id(32)}/file-'||n||'.pdf','other'
+      FROM generate_series(1,2500) n;`);
+    expect(await asUser(id(11), `SELECT metadata FROM storage.objects WHERE bucket_id='session-files' AND name ILIKE '${id(31)}/%'`))
+      .toEqual([{ metadata: 'own' }]);
+    const checks = Number((await db.query<{ last_value: number }>('SELECT last_value FROM private.scope_checks')).rows[0].last_value);
+    expect(checks).toBeLessThan(20);
+  });
+
+  it('denies a revoked login even when the caller owns the referenced lesson', async () => {
+    await db.exec("SELECT set_config('test.session_revoked','true',false)");
+    expect(await asUser(id(11), readScene)).toEqual([]);
+    await expect(asUser(id(11), writeScene())).rejects.toThrow(/row-level security/);
+    expect(await asUser(id(11), `SELECT private.lesson_storage_access('${id(31)}','tutor') AS allowed`))
+      .toEqual([{ allowed: false }]);
   });
 });
