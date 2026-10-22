@@ -7,7 +7,8 @@ import {
   wallClockToUtc,
   type RecurringFrequency,
 } from './_lib/recurringOccurrences.js';
-import { findActivePackageForBooking } from '../src/lib/lessonPackageBooking.js';
+import { applyPackageBookingUsage, findActivePackageForBooking } from '../src/lib/lessonPackageBooking.js';
+import { packageCoversLessonDate } from '../src/lib/pooledPackageBookingWindow.js';
 import { defaultSessionPaymentStatusForStudent } from '../src/lib/studentPaymentModel.js';
 import {
   loadClassGroupsForOrg,
@@ -178,19 +179,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       subjectId: row.subject_id as string | null,
     }));
 
-    const packageMatch = template.subject_id
-      ? await findActivePackageForBooking(supabase, {
-        studentId: template.student_id,
-        subjectId: template.subject_id,
-      })
-      : null;
-    let packageUsed = 0;
-    const packageCapacity = packageMatch
-      ? Math.max(0, Math.floor(Math.min(
-        packageMatch.pkg.available_lessons,
-        packageMatch.item.available_lessons,
-      )))
-      : 0;
+    type PackageMatch = Awaited<ReturnType<typeof findActivePackageForBooking>>;
+    const packagesByMonth = new Map<string, PackageMatch>();
+    const packageUsage = new Map<string, { match: NonNullable<PackageMatch>; used: number }>();
 
     const rows: Array<Record<string, unknown>> = [];
     for (const start of occurrenceStarts) {
@@ -213,8 +204,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         continue;
       }
 
-      const usesPackage = packageUsed < packageCapacity;
-      if (usesPackage) packageUsed += 1;
+      // The rolling window spans several billing months. Only look up a
+      // package for missing, bookable occurrences and use that month's pool.
+      // Keep one shared usage count when a legacy package spans months.
+      let packageMatch: PackageMatch = null;
+      if (template.subject_id) {
+        const month = ymdInVilnius(start).slice(0, 7);
+        if (!packagesByMonth.has(month)) {
+          packagesByMonth.set(month, await findActivePackageForBooking(supabase, {
+            studentId: template.student_id,
+            subjectId: template.subject_id,
+            startIso,
+          }));
+        }
+        packageMatch = packagesByMonth.get(month) ?? null;
+      }
+      const packageUsed = packageMatch ? packageUsage.get(packageMatch.pkg.id)?.used ?? 0 : 0;
+      const packageCapacity = packageMatch
+        ? Math.max(0, Math.floor(Math.min(packageMatch.pkg.available_lessons, packageMatch.item.available_lessons)))
+        : 0;
+      const usesPackage = packageMatch !== null && packageUsed < packageCapacity
+        && packageCoversLessonDate(packageMatch.pkg, start);
+      if (usesPackage) packageUsage.set(packageMatch!.pkg.id, { match: packageMatch!, used: packageUsed + 1 });
       rows.push({
         tutor_id: template.tutor_id,
         student_id: template.student_id,
@@ -250,25 +261,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     created += rows.length;
 
-    if (packageMatch && packageUsed > 0) {
-      const { error: itemError } = await supabase
-        .from('lesson_package_items')
-        .update({
-          available_lessons: packageMatch.item.available_lessons - packageUsed,
-          reserved_lessons: packageMatch.item.reserved_lessons + packageUsed,
-        })
-        .eq('id', packageMatch.item.id);
-      if (!itemError) {
-        await supabase
-          .from('lesson_packages')
-          .update({
-            available_lessons: packageMatch.pkg.available_lessons - packageUsed,
-            reserved_lessons: packageMatch.pkg.reserved_lessons + packageUsed,
-          })
-          .eq('id', packageMatch.pkg.id);
-      } else {
-        console.error('[materialize-recurring-sessions] package item update failed', itemError.message);
-      }
+    for (const { match, used } of packageUsage.values()) {
+      // Pooled counters are reserved atomically by the session trigger. The
+      // shared helper updates only legacy package/item counters, exactly once.
+      const result = await applyPackageBookingUsage(supabase, {
+        pkg: match.pkg,
+        usageBySubject: new Map([[template.subject_id!, used]]),
+      });
+      if (!result.ok) console.error('[materialize-recurring-sessions] package usage update failed', result.error);
     }
   }
 
